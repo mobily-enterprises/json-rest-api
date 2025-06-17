@@ -1,0 +1,25 @@
+{
+  "name": "jsonrestapi",
+  "version": "1.0.0",
+  "description": "A simple, extensible RESTful JSON API library with schema validation and positioning",
+  "main": "index.js",
+  "type": "module",
+  "keywords": ["rest", "json-api", "mysql", "schema", "validation"],
+  "author": "Tony Mobily",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mobily-enterprises/jsonrestapi.git"
+  },
+  "dependencies": {
+    "circular-json-es6": "^2.0.2",
+    "express": "^4.21.1",
+    "mysql2": "^3.13.1",
+    "thenby": "^1.3.4",
+    "semver": "^7.5.4"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
