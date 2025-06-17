@@ -3,6 +3,11 @@ import { NotFoundError, BadRequestError, formatErrorResponse, normalizeError } f
 
 /**
  * HTTP plugin for JSON REST API with JSON:API compliance
+ * 
+ * Features:
+ * - JSON:API compliant request/response handling
+ * - Automatic handling of affected/related records in responses
+ * - Support for compound documents with 'included' section
  */
 export const HTTPPlugin = {
   install(api, options = {}) {
@@ -34,7 +39,6 @@ export const HTTPPlugin = {
     // Helper to format JSON:API errors
     const formatErrors = (error) => {
       return formatErrorResponse(error);
-    };
     };
 
     // Parse query parameters
@@ -123,6 +127,53 @@ export const HTTPPlugin = {
         next();
       });
     }
+
+    /**
+     * Hook to handle affected records and build compound documents
+     * 
+     * After insert/update/delete operations, this hook checks for:
+     * 1. context.affectedRecords - Direct list of records to include
+     * 2. context.refetchRelated - Field names with refs to auto-fetch
+     * 3. context.calculateAffected - Function to determine affected records
+     * 
+     * Example usage in your resource hooks:
+     * 
+     * api.hook('afterInsert', async (context) => {
+     *   if (context.options.type === 'reviews') {
+     *     // Option 1: Specify exact records
+     *     context.affectedRecords = [
+     *       { type: 'users', id: context.data.userId },
+     *       { type: 'products', id: context.data.productId }
+     *     ];
+     *     
+     *     // Option 2: Use schema refs (if userId has refs: { resource: 'users' })
+     *     context.refetchRelated = ['userId', 'productId'];
+     *     
+     *     // Option 3: Calculate dynamically after DB write
+     *     context.calculateAffected = async (review) => {
+     *       const stats = await db.query('SELECT ...', [review.userId]);
+     *       return [{ type: 'users', id: review.userId }];
+     *     };
+     *   }
+     * });
+     */
+    api.hook('beforeSend', async (context) => {
+      // Only process for HTTP responses with results
+      if (!context.isHttp || !context.result) return;
+      
+      // Resolve all affected records
+      const affectedRecords = await api.resolveAffectedRecords(context);
+      
+      if (affectedRecords.length > 0) {
+        // Fetch all related records
+        const includedRecords = await api.fetchRelatedRecords(affectedRecords);
+        
+        if (includedRecords.length > 0) {
+          // Add to response as 'included' per JSON:API spec
+          context.result.included = includedRecords;
+        }
+      }
+    }, 80); // High priority to run before response is sent
     
     // Routes
     
@@ -152,6 +203,7 @@ export const HTTPPlugin = {
       try {
         const result = await api.get(req.params.id, {
           type: req.params.type,
+          isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -172,6 +224,7 @@ export const HTTPPlugin = {
         const data = parseJsonApiBody(req.body);
         const result = await api.insert(data, {
           type: req.params.type,
+          isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -191,6 +244,7 @@ export const HTTPPlugin = {
         const result = await api.update(req.params.id, data, {
           type: req.params.type,
           fullRecord: true,  // Validate as complete record for PUT
+          isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -211,6 +265,7 @@ export const HTTPPlugin = {
         const data = parseJsonApiBody(req.body);
         const result = await api.update(req.params.id, data, {
           type: req.params.type,
+          isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -230,6 +285,7 @@ export const HTTPPlugin = {
       try {
         await api.delete(req.params.id, {
           type: req.params.type,
+          isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
 

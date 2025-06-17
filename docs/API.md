@@ -357,6 +357,66 @@ const resourceName = getUserResourceName();
 const data = await api.resource(resourceName).get(123);
 ```
 
+#### `getFieldRelationship(type, field)`
+Get relationship information for a specific field.
+
+**Parameters:**
+- `type` (string): Resource type
+- `field` (string): Field name
+
+**Returns:** Object with refs definition or null
+
+**Example:**
+```javascript
+const refs = api.getFieldRelationship('reviews', 'userId');
+// { resource: 'users' }
+```
+
+#### `getRelationshipFields(type)`
+Get all fields with relationships for a resource.
+
+**Parameters:**
+- `type` (string): Resource type
+
+**Returns:** Object mapping field names to refs definitions
+
+**Example:**
+```javascript
+const relationships = api.getRelationshipFields('reviews');
+// { userId: { resource: 'users' }, productId: { resource: 'products' } }
+```
+
+#### `resolveAffectedRecords(context)`
+Resolve which records are affected by an operation.
+
+**Parameters:**
+- `context` (Object): Operation context
+
+**Returns:** Promise<Array> of { type, id } objects
+
+**Example:**
+```javascript
+// In a hook
+const affected = await api.resolveAffectedRecords(context);
+// [{ type: 'users', id: '123' }, { type: 'products', id: '456' }]
+```
+
+#### `fetchRelatedRecords(records)`
+Fetch multiple related records.
+
+**Parameters:**
+- `records` (Array): Array of { type, id } objects
+
+**Returns:** Promise<Array> of resources in JSON:API format
+
+**Example:**
+```javascript
+const related = await api.fetchRelatedRecords([
+  { type: 'users', id: '123' },
+  { type: 'products', id: '456' }
+]);
+```
+
 ### Resource Proxy Methods
 
 Each resource accessible via `api.resources.{name}` has the following methods:
@@ -600,7 +660,13 @@ new Schema(structure, options)
   // Special
   silent: false,      // Hide from responses
   searchable: false,  // Include in search
-  unique: false       // Must be unique (custom)
+  unique: false,      // Must be unique (custom)
+  
+  // Relationships
+  refs: {             // Foreign key reference
+    resource: 'users' // References the 'users' resource
+    // Future: join, cascade, eager, etc.
+  }
 }
 ```
 
@@ -924,6 +990,48 @@ PATCH /api/users/123
 | `page[number]` | `page[number]=2` | Page number |
 | `fields[type]` | `fields[users]=id,name` | Sparse fields |
 | `include` | `include=posts,comments` | Include relations |
+
+### Affected Records / Compound Documents
+
+The HTTP plugin automatically handles affected records when you specify them in hooks:
+
+```javascript
+// Define relationships in schema
+const reviewSchema = new Schema({
+  userId: { type: 'id', refs: { resource: 'users' } },
+  productId: { type: 'id', refs: { resource: 'products' } }
+});
+
+// In your hooks, specify affected records
+api.hook('afterInsert', async (context) => {
+  if (context.options.type === 'reviews') {
+    // Simple: just list field names with refs
+    context.refetchRelated = ['userId', 'productId'];
+  }
+});
+
+// Response includes affected records
+// POST /api/reviews
+{
+  "data": {
+    "type": "reviews",
+    "id": "123",
+    "attributes": { "rating": 5 }
+  },
+  "included": [
+    {
+      "type": "users",
+      "id": "456",
+      "attributes": { "name": "John", "averageRating": 4.2 }
+    },
+    {
+      "type": "products",
+      "id": "789",
+      "attributes": { "name": "Widget", "averageRating": 4.5 }
+    }
+  ]
+}
+```
 
 ### Request/Response Format
 

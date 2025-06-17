@@ -675,4 +675,126 @@ export class Api {
     }
     return resourceProxy;
   }
+
+  /**
+   * Get relationship information from a schema field
+   * 
+   * Schemas can define relationships using the 'refs' property:
+   * {
+   *   userId: { type: 'id', refs: { resource: 'users' } },
+   *   projectId: { type: 'id', refs: { resource: 'projects' } }
+   * }
+   * 
+   * @param {string} type - The resource type
+   * @param {string} field - The field name
+   * @returns {Object|null} The refs definition or null
+   */
+  getFieldRelationship(type, field) {
+    const schema = this.schemas?.get(type);
+    if (!schema) return null;
+    
+    const fieldDef = schema.structure[field];
+    return fieldDef?.refs || null;
+  }
+
+  /**
+   * Get all fields with relationships for a resource type
+   * 
+   * @param {string} type - The resource type
+   * @returns {Object} Map of field names to their refs definitions
+   */
+  getRelationshipFields(type) {
+    const schema = this.schemas?.get(type);
+    if (!schema) return {};
+    
+    const relationships = {};
+    for (const [field, definition] of Object.entries(schema.structure)) {
+      if (definition.refs) {
+        relationships[field] = definition.refs;
+      }
+    }
+    
+    return relationships;
+  }
+
+  /**
+   * Resolve affected records based on context
+   * 
+   * This method handles various ways of declaring affected records:
+   * 1. context.affectedRecords - Direct list of {type, id} objects
+   * 2. context.refetchRelated - Field names that have refs in schema
+   * 3. context.calculateAffected - Function to compute affected records
+   * 
+   * @param {Object} context - The operation context
+   * @returns {Array} Array of {type, id} objects to fetch
+   */
+  async resolveAffectedRecords(context) {
+    const affected = [];
+    
+    // 1. Direct affected records
+    if (context.affectedRecords) {
+      affected.push(...context.affectedRecords);
+    }
+    
+    // 2. Refetch related fields based on schema refs
+    if (context.refetchRelated && context.result) {
+      const relationships = this.getRelationshipFields(context.options.type);
+      
+      for (const fieldName of context.refetchRelated) {
+        const refs = relationships[fieldName];
+        if (refs && context.result[fieldName]) {
+          affected.push({
+            type: refs.resource,
+            id: context.result[fieldName]
+          });
+        }
+      }
+    }
+    
+    // 3. Calculate affected records dynamically
+    if (context.calculateAffected && typeof context.calculateAffected === 'function') {
+      const calculated = await context.calculateAffected(context.result);
+      if (Array.isArray(calculated)) {
+        affected.push(...calculated);
+      }
+    }
+    
+    // Remove duplicates
+    const seen = new Set();
+    return affected.filter(record => {
+      const key = `${record.type}:${record.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  /**
+   * Fetch multiple related records
+   * 
+   * @param {Array} records - Array of {type, id} objects
+   * @returns {Array} Array of fetched resources in JSON:API format
+   */
+  async fetchRelatedRecords(records) {
+    const fetched = [];
+    
+    for (const { type, id } of records) {
+      try {
+        const resource = this._resourceProxies?.get(type);
+        if (resource) {
+          const result = await resource.get(id, { allowNotFound: true });
+          if (result?.data) {
+            fetched.push(result.data);
+          }
+        }
+      } catch (error) {
+        // Log but don't fail the whole operation
+        if (this.options.debug) {
+          console.warn(`Failed to fetch related ${type}:${id}`, error);
+        }
+      }
+    }
+    
+    return fetched;
+  }
 }

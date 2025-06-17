@@ -1,14 +1,4 @@
 TODO
-
-
-  5. Error Handling
-
-  - Missing structured error classes:
-    - BadRequest, NotFound, Conflict classes
-    - Error code standardization
-    - Multi-field validation errors
-    - Error context preservation
-
   6. Hook System Gaps
 
   - Missing hooks from original:
@@ -35,8 +25,6 @@ TODO
     - Limit/offset with total count
     - Deep object filtering
 
-
-
   11. JSON:API Compliance Gaps
 
   - Current HTTP plugin missing:
@@ -54,11 +42,18 @@ TODO
     - Batch operations
     - Transaction support across operations
 
-
-
     **************************************************************************
     DONE
     **************************************************************************
+
+
+  5. Error Handling
+
+  - Missing structured error classes:
+    - BadRequest, NotFound, Conflict classes
+    - Error code standardization
+    - Multi-field validation errors
+    - Error context preservation
 
     10. Utility Features
 

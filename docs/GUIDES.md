@@ -860,6 +860,127 @@ const resourceName = 'users';
 const data = await api.resource(resourceName).get(123);
 ```
 
+## Relationships and Affected Records
+
+One of the most powerful features is automatic handling of related records when data changes.
+
+### Defining Relationships in Schemas
+
+Use the `refs` property to define foreign key relationships:
+
+```javascript
+const reviewSchema = new Schema({
+  id: { type: 'id' },
+  rating: { type: 'number', required: true, min: 1, max: 5 },
+  comment: { type: 'string' },
+  userId: { 
+    type: 'id', 
+    required: true,
+    refs: { resource: 'users' }  // This field references the users resource
+  },
+  productId: { 
+    type: 'id', 
+    required: true,
+    refs: { resource: 'products' }  // This field references the products resource
+  }
+});
+
+api.addResource('reviews', reviewSchema);
+```
+
+### Automatic Compound Documents
+
+When you create/update a review, you can automatically include affected records in the response:
+
+```javascript
+// In your hooks
+api.hook('afterInsert', async (context) => {
+  if (context.options.type === 'reviews') {
+    // Option 1: Simple - just list the field names
+    context.refetchRelated = ['userId', 'productId'];
+    
+    // The system will:
+    // 1. Look up these fields in the schema
+    // 2. Find they have refs: { resource: 'users' } etc
+    // 3. Get the IDs from context.result
+    // 4. Fetch and include those records
+  }
+});
+
+// The HTTP response will include related records:
+// POST /api/reviews
+{
+  "data": {
+    "type": "reviews",
+    "id": "456",
+    "attributes": {
+      "rating": 2,
+      "comment": "Not great"
+    }
+  },
+  "included": [
+    {
+      "type": "users",
+      "id": "123",
+      "attributes": {
+        "name": "John Doe",
+        "averageRating": 3.2  // Recalculated!
+      }
+    },
+    {
+      "type": "products", 
+      "id": "789",
+      "attributes": {
+        "name": "Widget",
+        "averageRating": 4.1  // Also updated!
+      }
+    }
+  ]
+}
+```
+
+### Advanced Affected Records Patterns
+
+```javascript
+api.hook('afterUpdate', async (context) => {
+  if (context.options.type === 'reviews') {
+    // Option 1: Direct specification
+    context.affectedRecords = [
+      { type: 'users', id: context.data.userId },
+      { type: 'products', id: context.data.productId }
+    ];
+    
+    // Option 2: Dynamic calculation after DB write
+    context.calculateAffected = async (updatedReview) => {
+      // Query to find all affected records
+      const relatedProducts = await db.query(
+        'SELECT DISTINCT productId FROM reviews WHERE userId = ?',
+        [updatedReview.userId]
+      );
+      
+      return [
+        { type: 'users', id: updatedReview.userId },
+        ...relatedProducts.map(p => ({ type: 'products', id: p.productId }))
+      ];
+    };
+  }
+});
+```
+
+### Use Cases
+
+This is perfect for:
+- **Aggregated data** - When reviews affect user/product ratings
+- **Counters** - When adding a comment updates the comment count
+- **Hierarchical data** - When updating a category affects parent categories
+- **Real-time updates** - Clients get all affected data in one response
+
+The client benefits by:
+1. Getting all updated data in a single response
+2. Keeping their local cache in sync
+3. Avoiding additional API calls
+4. Having a consistent view of related data
+
 ## MySQLPlugin Tutorial
 
 ### Step 1: Basic Setup
