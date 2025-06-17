@@ -521,11 +521,11 @@ export class Api {
       query: (params = {}, options = {}) => api.query(params, { ...options, type }),
       
       // Create a new resource
-      post: (data, options = {}) => api.post(data, { ...options, type }),
-      create: (data, options = {}) => api.post(data, { ...options, type }), // Alias
+      post: (data, options = {}) => api.insert(data, { ...options, type }),
+      create: (data, options = {}) => api.insert(data, { ...options, type }), // Alias
       
       // Update a resource
-      put: (id, data, options = {}) => api.put(id, data, { ...options, type }),
+      put: (id, data, options = {}) => api.update(id, data, { ...options, type }),
       update: (id, data, options = {}) => api.update(id, data, { ...options, type }), // Alias
       
       // Delete a resource
