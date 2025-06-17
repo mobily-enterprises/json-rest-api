@@ -78,14 +78,16 @@ export class Schema {
     const errors = [];
     const validatedObject = { ...object };
 
-    // Check for unknown fields
-    for (const fieldName in object) {
-      if (!this.structure[fieldName]) {
-        errors.push({
-          field: fieldName,
-          message: 'Field not allowed',
-          code: 'FIELD_NOT_ALLOWED'
-        });
+    // Check for unknown fields unless we're only validating object values
+    if (!options.onlyObjectValues) {
+      for (const fieldName in object) {
+        if (!this.structure[fieldName]) {
+          errors.push({
+            field: fieldName,
+            message: 'Field not allowed',
+            code: 'FIELD_NOT_ALLOWED'
+          });
+        }
       }
     }
 
@@ -106,9 +108,12 @@ export class Schema {
       // Handle required fields
       if (definition.required && object[fieldName] === undefined) {
         if (!this._skipParam('required', options.skipParams, fieldName)) {
+          const errorMessage = definition.requiredErrorMessage || 
+                             definition.errorMessage || 
+                             'Field required';
           errors.push({
             field: fieldName,
-            message: 'Field required',
+            message: errorMessage,
             code: 'FIELD_REQUIRED'
           });
           skipParams = true;
@@ -129,9 +134,12 @@ export class Schema {
       // Handle null values
       if (object[fieldName] === null) {
         if (!canBeNull) {
+          const errorMessage = definition.nullErrorMessage || 
+                             definition.errorMessage || 
+                             'Field cannot be null';
           errors.push({
             field: fieldName,
-            message: 'Field cannot be null',
+            message: errorMessage,
             code: 'FIELD_CANNOT_BE_NULL'
           });
         }
@@ -156,9 +164,13 @@ export class Schema {
             validatedObject[fieldName] = result;
           }
         } catch (error) {
+          const errorMessage = definition.errorMessage || 
+                             definition.castErrorMessage || 
+                             error.message || 
+                             'Type casting failed';
           errors.push({
             field: fieldName,
-            message: error.message || 'Type casting failed',
+            message: errorMessage,
             code: 'TYPE_ERROR'
           });
         }
@@ -191,9 +203,15 @@ export class Schema {
                 validatedObject[fieldName] = result;
               }
             } catch (error) {
+              // Support parameter-specific error messages
+              const paramErrorKey = `${paramName}ErrorMessage`;
+              const errorMessage = definition[paramErrorKey] || 
+                                 definition.errorMessage || 
+                                 error.message || 
+                                 'Parameter validation failed';
               errors.push({
                 field: fieldName,
-                message: error.message || 'Parameter validation failed',
+                message: errorMessage,
                 code: 'PARAM_ERROR'
               });
             }
@@ -216,6 +234,14 @@ export class Schema {
       }
     }
     return cleanedObject;
+  }
+
+  /**
+   * Helper method to validate with onlyObjectValues option
+   * Useful for partial updates
+   */
+  async validatePartial(object, options = {}) {
+    return this.validate(object, { ...options, onlyObjectValues: true });
   }
 
   // Built-in type handlers
@@ -313,31 +339,73 @@ export class Schema {
   _minParam({ value, parameterValue, definition, fieldName }) {
     if (value === undefined) return;
     if (definition.type === 'number' && value < parameterValue) {
-      throw new Error(`${fieldName} is too low`);
+      const errorMessage = definition.minErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} is too low`;
+      throw new Error(errorMessage);
     }
     if (definition.type === 'string' && value.length < parameterValue) {
-      throw new Error(`${fieldName} is too short`);
+      const errorMessage = definition.minErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} is too short`;
+      throw new Error(errorMessage);
+    }
+    if (definition.type === 'array' && value.length < parameterValue) {
+      const errorMessage = definition.minErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} must have at least ${parameterValue} items`;
+      throw new Error(errorMessage);
     }
   }
 
   _maxParam({ value, parameterValue, definition, fieldName }) {
     if (value === undefined) return;
     if (definition.type === 'number' && value > parameterValue) {
-      throw new Error(`${fieldName} is too high`);
+      const errorMessage = definition.maxErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} is too high`;
+      throw new Error(errorMessage);
     }
     if (definition.type === 'string' && value.length > parameterValue) {
-      throw new Error(`${fieldName} is too long`);
+      const errorMessage = definition.maxErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} is too long`;
+      throw new Error(errorMessage);
+    }
+    if (definition.type === 'array' && value.length > parameterValue) {
+      const errorMessage = definition.maxErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} must have at most ${parameterValue} items`;
+      throw new Error(errorMessage);
     }
   }
 
-  _validatorParam({ parameterValue, value, object, fieldName }) {
+  _validatorParam({ parameterValue, value, object, fieldName, definition }) {
     if (typeof parameterValue !== 'function') {
       throw new Error('Validator must be a function');
     }
-    const result = parameterValue(value, object, { schema: this, fieldName });
-    if (typeof result === 'string') {
-      throw new Error(result);
+    
+    // Support custom validator with custom error message
+    const validatorResult = parameterValue(value, object, { 
+      schema: this, 
+      fieldName,
+      definition 
+    });
+    
+    // Handle different return types
+    if (validatorResult === false) {
+      // Use custom error message if provided
+      const errorMessage = definition.validatorMessage || 
+                          definition.errorMessage || 
+                          `Validation failed for ${fieldName}`;
+      throw new Error(errorMessage);
+    } else if (typeof validatorResult === 'string') {
+      // Validator returned a custom error message
+      throw new Error(validatorResult);
+    } else if (validatorResult instanceof Error) {
+      throw validatorResult;
     }
+    // If result is true or undefined, validation passed
   }
 
   _uppercaseParam({ value, definition }) {
@@ -366,16 +434,28 @@ export class Schema {
     return this._trimParam(params);
   }
 
-  _defaultParam({ valueBeforeCast, parameterValue }) {
+  _defaultParam({ valueBeforeCast, parameterValue, object, fieldName, definition }) {
     if (valueBeforeCast === undefined) {
-      return typeof parameterValue === 'function' ? parameterValue() : parameterValue;
+      if (typeof parameterValue === 'function') {
+        // Pass context to default function for conditional defaults
+        return parameterValue({
+          object,
+          fieldName,
+          definition,
+          schema: this
+        });
+      }
+      return parameterValue;
     }
   }
 
-  _notEmptyParam({ valueBeforeCast, parameterValue, fieldName }) {
+  _notEmptyParam({ valueBeforeCast, parameterValue, fieldName, definition }) {
     const str = valueBeforeCast?.toString ? valueBeforeCast.toString() : '';
     if (parameterValue && valueBeforeCast !== undefined && str === '') {
-      throw new Error(`${fieldName} cannot be empty`);
+      const errorMessage = definition.notEmptyErrorMessage || 
+                         definition.errorMessage || 
+                         `${fieldName} cannot be empty`;
+      throw new Error(errorMessage);
     }
   }
 
