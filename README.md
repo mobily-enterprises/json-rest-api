@@ -21,13 +21,13 @@ A modern, plugin-based JSON REST API library with JSON:API compliance, schema va
 ## Installation
 
 ```bash
-npm install jsonrestapi
+npm install json-rest-api
 ```
 
 ## Quick Start
 
 ```javascript
-import { createApi, Schema } from 'jsonrestapi';
+import { createApi, Schema } from 'json-rest-api';
 import express from 'express';
 
 // Create an API with automatic versioning
@@ -390,7 +390,7 @@ ordersApi.hook('afterInsert', async (context) => {
 Enable comprehensive security features:
 
 ```javascript
-import { SecurityPlugin, LoggingPlugin } from 'jsonrestapi';
+import { SecurityPlugin, LoggingPlugin } from 'json-rest-api';
 
 api
   .use(SecurityPlugin, {

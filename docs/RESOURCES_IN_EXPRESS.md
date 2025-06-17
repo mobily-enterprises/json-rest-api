@@ -1,4 +1,4 @@
-# Organizing Resources in Express with jsonrestapi
+# Organizing Resources in Express with json-rest-api
 
 This guide shows you how to organize your API resources in a scalable, maintainable way with minimal server setup.
 
@@ -27,7 +27,7 @@ Each resource file is self-contained and handles its own setup.
 ### Example: api/1.0.0/users.js
 
 ```javascript
-import { Api, Schema, MySQLPlugin, ValidationPlugin, HTTPPlugin } from 'jsonrestapi';
+import { Api, Schema, MySQLPlugin, ValidationPlugin, HTTPPlugin } from 'json-rest-api';
 import { dbConfig } from '../../config/database.js';
 
 // Get or create the API instance for this version
@@ -147,7 +147,7 @@ Then use the helper in your resources:
 
 ```javascript
 // api/1.0.0/users.js
-import { Schema, defineResource } from 'jsonrestapi/resource-helper.js';
+import { Schema, defineResource } from 'json-rest-api/resource-helper.js';
 import { apiConfig } from '../config.js';
 
 export default defineResource('1.0.0', 'users', {
@@ -303,7 +303,7 @@ Resources that share an API instance can interact with each other using the new 
 
 ```javascript
 // api/1.0.0/orders.js
-import { Api, Schema } from 'jsonrestapi';
+import { Api, Schema } from 'json-rest-api';
 
 const api = Api.get('myapp', '1.0.0');
 
@@ -366,7 +366,7 @@ You can add middleware to your resources:
 
 ```javascript
 // api/1.0.0/secure-resource.js
-import { Schema } from 'jsonrestapi';
+import { Schema } from 'json-rest-api';
 import { createResource } from '../resource-helper.js';
 
 const api = createResource('1.0.0', 'secrets', {
@@ -437,7 +437,7 @@ The `defineResource()` helper gives us the best of both worlds:
 1. Create your resource file:
 ```javascript
 // api/1.0.0/my-resource.js
-import { Schema } from 'jsonrestapi';
+import { Schema } from 'json-rest-api';
 import { createResource } from '../resource-helper.js';
 
 export default createResource('1.0.0', 'my-resource', {

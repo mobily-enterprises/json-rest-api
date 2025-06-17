@@ -1,4 +1,4 @@
-# Fixes Applied to jsonrestapi
+# Fixes Applied to json-rest-api
 
 ## Critical Fixes
 

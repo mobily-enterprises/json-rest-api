@@ -2,7 +2,7 @@
 
 import { createApi, Schema } from './index.js';
 
-console.log('Testing basic jsonrestapi functionality...\n');
+console.log('Testing basic json-rest-api functionality...\n');
 
 // Test 1: Create simple API with memory storage
 console.log('1. Creating API with memory storage...');

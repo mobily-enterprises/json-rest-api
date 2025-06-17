@@ -4,7 +4,7 @@
 
   Basic Setup
 
-  import { createApi, Schema } from './jsonrestapi/index.js';
+  import { createApi, Schema } from './json-rest-api/index.js';
 
   // Create API instance
   const api = createApi({
@@ -139,7 +139,7 @@
   With MySQL Storage
 
   import { Api, MySQLPlugin, ValidationPlugin } from
-  './jsonrestapi/index.js';
+  './json-rest-api/index.js';
 
   const api = new Api()
     .use(ValidationPlugin)
@@ -303,7 +303,7 @@
   Complete Example: Task Manager
 
   import { createApi, Schema, PositioningPlugin } from
-  './jsonrestapi/index.js';
+  './json-rest-api/index.js';
 
   // Create API
   const api = createApi({ storage: 'memory' })

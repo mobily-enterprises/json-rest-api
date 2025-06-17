@@ -1285,7 +1285,7 @@ interface QueryResponse {
 ## VERSION
 Current library version.
 ```javascript
-import { VERSION } from 'jsonrestapi';
+import { VERSION } from 'json-rest-api';
 console.log(VERSION); // '1.0.0'
 ```
 

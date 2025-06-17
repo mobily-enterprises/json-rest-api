@@ -1,5 +1,5 @@
 {
-  "name": "jsonrestapi",
+  "name": "json-rest-api",
   "version": "1.0.0",
   "description": "A simple, extensible RESTful JSON API library with schema validation and positioning",
   "main": "index.js",
@@ -9,7 +9,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mobily-enterprises/jsonrestapi.git"
+    "url": "https://github.com/mobily-enterprises/json-rest-api.git"
   },
   "dependencies": {
     "circular-json-es6": "^2.0.2",

@@ -1,5 +1,14 @@
 TODO
 
+10. Utility Features
+
+  - Missing from original:
+    - artificial delay for testing <-- ADD!!!
+    - Request decoration pattern <-- I DON'T KNOW WHAT THIS IS, BUT IF IT'S BEST PRACTICE/INDUSTRU STANDARD, TELL ME ABOUT IT
+    - Store inheritance/extension <--- THIS, I NEVER WANTED, NEVER USED IN 10 YEARS IN PRODUCTION
+    - Automatic timestamp fields <-- WOULD BE NICE
+    - Soft delete support <-- WOULD BE NICE BUT I DON'T THINK THE ORIGINAL HAD IT. I WILL IMPLEMENT IT IN THE FUTURE
+
 
   5. Error Handling
 
@@ -36,14 +45,6 @@ TODO
     - Deep object filtering
 
 
-  10. Utility Features
-
-  - Missing from original:
-    - artificial delay for testing <-- ADD!!!
-    - Request decoration pattern <-- I DON'T KNOW WHAT THIS IS, BUT IF IT'S BEST PRACTICE/INDUSTRU STANDARD, TELL ME ABOUT IT
-    - Store inheritance/extension <--- THIS, I NEVER WANTED, NEVER USED IN 10 YEARS IN PRODUCTION
-    - Automatic timestamp fields <-- WOULD BE NICE
-    - Soft delete support <-- WOULD BE NICE BUT I DON'T THINK THE ORIGINAL HAD IT. I WILL IMPLEMENT IT IN THE FUTURE
 
   11. JSON:API Compliance Gaps
 
@@ -64,7 +65,10 @@ TODO
 
 
 
+    **************************************************************************
     DONE
+    **************************************************************************
+    
       2. MySQL Schema Synchronization
 
   - Current MySQL plugin is basic, missing:

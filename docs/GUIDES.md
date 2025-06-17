@@ -20,7 +20,7 @@ Let's build a simple task management API in 10 minutes!
 ```bash
 npm init -y
 npm install express mysql2
-npm install jsonrestapi
+npm install json-rest-api
 ```
 
 ## Step 2: Create Your First API
@@ -29,7 +29,7 @@ Create a file called `server.js`:
 
 ```javascript
 import express from 'express';
-import { createApi, Schema } from 'jsonrestapi';
+import { createApi, Schema } from 'json-rest-api';
 
 // Create Express app
 const app = express();
@@ -77,7 +77,7 @@ import {
   ValidationPlugin, 
   MemoryPlugin, 
   HTTPPlugin 
-} from 'jsonrestapi';
+} from 'json-rest-api';
 
 const app = express();
 
@@ -140,7 +140,7 @@ curl -X DELETE http://localhost:3000/api/1.0.0/tasks/1
 Let's make it persistent! Update your `server.js`:
 
 ```javascript
-import { createApi, Schema, MySQLPlugin } from 'jsonrestapi';
+import { createApi, Schema, MySQLPlugin } from 'json-rest-api';
 
 // Create API with MySQL
 const api = createApi({
@@ -549,7 +549,7 @@ Resources in the same version should SHARE one API instance:
 
 ```javascript
 // ✅ DO THIS - api/1.0.0/users.js
-import { Api, Schema } from 'jsonrestapi';
+import { Api, Schema } from 'json-rest-api';
 
 // Get existing or create shared instance for v1.0.0
 const api = Api.get('myapp', '1.0.0') || new Api({ 
@@ -593,7 +593,7 @@ export const apiConfig = {
 };
 
 // api/1.0.0/users.js - Clean resource file
-import { Schema, defineResource } from 'jsonrestapi/resource-helper.js';
+import { Schema, defineResource } from 'json-rest-api/resource-helper.js';
 import { apiConfig } from '../config.js';
 
 export default defineResource('1.0.0', 'users', {
@@ -754,7 +754,7 @@ const data = await api.resource(resourceName).get(123);
 ### Step 1: Basic Setup
 
 ```javascript
-import { Api, MySQLPlugin, Schema } from 'jsonrestapi';
+import { Api, MySQLPlugin, Schema } from 'json-rest-api';
 
 const api = new Api();
 api.use(MySQLPlugin, {
@@ -983,7 +983,7 @@ Perfect for drag-and-drop interfaces!
 ### Step 1: Enable Positioning
 
 ```javascript
-import { PositioningPlugin } from 'jsonrestapi';
+import { PositioningPlugin } from 'json-rest-api';
 
 const api = createApi({ storage: 'memory' });
 api.use(PositioningPlugin);
@@ -1149,7 +1149,7 @@ async function createPost(data) {
 ### Part 3: Resource Versioning
 
 ```javascript
-import { VersioningPlugin } from 'jsonrestapi';
+import { VersioningPlugin } from 'json-rest-api';
 
 const api = createApi({ storage: 'mysql' });
 api.use(VersioningPlugin, {
@@ -1227,7 +1227,7 @@ try {
 ### Step 1: Basic Security
 
 ```javascript
-import { SecurityPlugin } from 'jsonrestapi';
+import { SecurityPlugin } from 'json-rest-api';
 
 api.use(SecurityPlugin, {
   // Rate limiting
@@ -1344,7 +1344,7 @@ The SecurityPlugin automatically adds:
 ### Step 1: Basic Logging
 
 ```javascript
-import { LoggingPlugin } from 'jsonrestapi';
+import { LoggingPlugin } from 'json-rest-api';
 
 api.use(LoggingPlugin, {
   level: 'info',  // error, warn, info, debug
@@ -1423,7 +1423,7 @@ api.log.debug('Cache hit', {
 ### Step 1: Generate Documentation
 
 ```javascript
-import { OpenAPIPlugin } from 'jsonrestapi';
+import { OpenAPIPlugin } from 'json-rest-api';
 
 api.use(OpenAPIPlugin, {
   title: 'My Awesome API',
@@ -1722,7 +1722,7 @@ async function getProductWithFallback(id) {
 ## Testing Your API
 
 ```javascript
-import { createApi, Schema } from 'jsonrestapi';
+import { createApi, Schema } from 'json-rest-api';
 import { describe, it, expect, beforeEach } from 'vitest';
 
 describe('User API', () => {
