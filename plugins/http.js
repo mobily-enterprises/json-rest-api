@@ -125,7 +125,11 @@ export const HTTPPlugin = {
     };
 
     // Version-aware routing
+    let routePrefix = '';
     if (api.options.name && api.options.version) {
+      // Add version to route prefix
+      routePrefix = `/${api.options.version}`;
+      
       // Add version info to all responses
       router.use((req, res, next) => {
         res.set('API-Version', api.options.version);
@@ -136,7 +140,7 @@ export const HTTPPlugin = {
     // Routes
     
     // GET collection
-    router.get('/:type', async (req, res) => {
+    router.get(`${routePrefix}/:type`, async (req, res) => {
       try {
         const params = parseQueryParams(req);
         const result = await api.query(params, {
@@ -157,7 +161,7 @@ export const HTTPPlugin = {
     });
 
     // GET single resource
-    router.get('/:type/:id', async (req, res) => {
+    router.get(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         const result = await api.get(req.params.id, {
           type: req.params.type,
@@ -180,7 +184,7 @@ export const HTTPPlugin = {
     });
 
     // POST new resource
-    router.post('/:type', async (req, res) => {
+    router.post(`${routePrefix}/:type`, async (req, res) => {
       try {
         const data = parseJsonApiBody(req.body);
         const result = await api.insert(data, {
@@ -189,7 +193,7 @@ export const HTTPPlugin = {
         });
 
         res.status(201)
-           .location(`${basePath}/${req.params.type}/${result.data.id}`)
+           .location(`${basePath}${routePrefix}/${req.params.type}/${result.data.id}`)
            .json(result);
       } catch (error) {
         const status = error.status || 400;
@@ -197,8 +201,33 @@ export const HTTPPlugin = {
       }
     });
 
-    // PATCH update resource
-    router.patch('/:type/:id', async (req, res) => {
+    // PUT full replacement
+    router.put(`${routePrefix}/:type/:id`, async (req, res) => {
+      try {
+        const data = parseJsonApiBody(req.body);
+        const result = await api.update(req.params.id, data, {
+          type: req.params.type,
+          fullRecord: true,  // Validate as complete record for PUT
+          ...options.typeOptions?.[req.params.type]
+        });
+
+        if (!result.data) {
+          res.status(404).json(formatErrors({
+            message: 'Resource not found',
+            code: 'NOT_FOUND'
+          }, 404));
+          return;
+        }
+
+        res.json(result);
+      } catch (error) {
+        const status = error.status || 400;
+        res.status(status).json(formatErrors(error.errors || error, status));
+      }
+    });
+
+    // PATCH partial update
+    router.patch(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         const data = parseJsonApiBody(req.body);
         const result = await api.update(req.params.id, data, {
@@ -222,7 +251,7 @@ export const HTTPPlugin = {
     });
 
     // DELETE resource
-    router.delete('/:type/:id', async (req, res) => {
+    router.delete(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         await api.delete(req.params.id, {
           type: req.params.type,
@@ -238,7 +267,7 @@ export const HTTPPlugin = {
 
     // OPTIONS for CORS
     router.options('*', (req, res) => {
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       res.status(204).end();
     });

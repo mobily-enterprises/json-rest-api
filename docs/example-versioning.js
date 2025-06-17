@@ -57,16 +57,22 @@ userApiV2_1.addResource('users', userSchemaV2_1);
 // USAGE - The library handles version selection automatically!
 
 // 1. Get specific version
-const api1 = Api.get('users', '1.0.0');
+const api1 = Api.find('users', '1.0.0');
 console.log('Got v1.0.0:', api1.options.version);
 
 // 2. Get latest version
-const apiLatest = Api.get('users', 'latest');
+const apiLatest = Api.find('users', 'latest');
 console.log('Got latest:', apiLatest.options.version); // 2.1.0
 
 // 3. Get minimum version (2.0.0 or higher)
-const api2Plus = Api.get('users', '2.0.0');
+const api2Plus = Api.find('users', '2.0.0');
 console.log('Got 2.0.0+:', api2Plus.options.version); // 2.1.0 (highest compatible)
+
+// 4. Use the registry API
+if (Api.registry.has('users', '2.0.0')) {
+  const versions = Api.registry.versions('users');
+  console.log('Available versions:', versions); // ['2.1.0', '2.0.0', '1.0.0']
+}
 
 // 4. From within an API, access other APIs automatically
 const ordersApi = createApi({
@@ -75,14 +81,14 @@ const ordersApi = createApi({
   storage: 'memory'
 });
 
-// The orders API can access the users API automatically
+// The orders API can access the users API from the registry
 ordersApi.hook('afterInsert', async (context) => {
   if (context.options.type === 'orders') {
-    // This automatically gets a compatible users API!
-    const usersApi = ordersApi.apis.users;
+    // Get a compatible users API from the registry
+    const usersApi = Api.find('users', '>=1.0.0');
     
     if (usersApi) {
-      const user = await usersApi.get(context.data.userId, { type: 'users' });
+      const user = await usersApi.resources.users.get(context.data.userId);
       console.log('Order created for user:', user);
     }
   }
@@ -105,7 +111,7 @@ app.use('/api/users/*', (req, res, next) => {
     'latest';
   
   // Library finds the right version automatically
-  const api = Api.get('users', requestedVersion);
+  const api = Api.find('users', requestedVersion);
   
   if (!api) {
     return res.status(404).json({
@@ -124,13 +130,14 @@ app.use('/api/users/*', (req, res, next) => {
 // 6. Programmatic usage with automatic version selection
 async function createUser(data, minVersion = '1.0.0') {
   // Get a compatible API automatically
-  const api = Api.get('users', minVersion);
+  const api = Api.find('users', minVersion);
   
   if (!api) {
     throw new Error(`No users API version >= ${minVersion}`);
   }
   
-  return api.insert(data, { type: 'users' });
+  // Use the resource proxy for cleaner syntax
+  return api.resources.users.create(data);
 }
 
 // This works with v1.0.0 data
@@ -162,7 +169,11 @@ fetch('/api/users?v=1.0.0');  // Get exactly v1.0.0
 fetch('/api/2.1.0/users');  // Get exactly v2.1.0
 
 // Show all registered APIs
-console.log('Registered APIs:', Api.getRegistry());
+console.log('Registered APIs:', Api.registry.list());
 // Output: { users: ['2.1.0', '2.0.0', '1.0.0'] }
+
+// Check specific versions
+console.log('Has users v2.0.0?', Api.registry.has('users', '2.0.0')); // true
+console.log('Users versions:', Api.registry.versions('users')); // ['2.1.0', '2.0.0', '1.0.0']
 
 export { userApiV1, userApiV2, userApiV2_1 };

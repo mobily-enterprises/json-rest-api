@@ -27,12 +27,12 @@ api.addResource('products', productSchema);
 
 // Modular API (multiple files) - SHARE instance
 // api/1.0.0/users.js
-const api = Api.get('myapp', '1.0.0') || new Api({ name: 'myapp', version: '1.0.0' });
+const api = Api.find('myapp', '1.0.0') || new Api({ name: 'myapp', version: '1.0.0' });
 api.addResource('users', userSchema);
 export default api;
 
 // api/1.0.0/products.js  
-const api = Api.get('myapp', '1.0.0');  // Gets SAME instance!
+const api = Api.find('myapp', '1.0.0');  // Gets SAME instance!
 api.addResource('products', productSchema);
 export default api;
 ```
@@ -75,6 +75,7 @@ new Api(options)
 | `idProperty` | string | `'id'` | The field name used as the primary identifier |
 | `name` | string | `null` | API name for versioning registry |
 | `version` | string | `null` | API version (e.g., '1.0.0') |
+| `artificialDelay` | number | `0` | Milliseconds to delay operations (for testing) |
 
 **Example:**
 ```javascript
@@ -167,9 +168,15 @@ Fetch a single resource by ID.
 
 **Returns:** Promise<{ data: Resource }>
 
+**Note:** Direct use of this method is discouraged. Use `api.resources.{type}.get()` instead.
+
 **Example:**
 ```javascript
+// Not recommended
 const result = await api.get('123', { type: 'users' });
+
+// Recommended
+const result = await api.resources.users.get('123');
 // { data: { id: '123', type: 'users', attributes: {...} } }
 ```
 
@@ -192,13 +199,21 @@ Query multiple resources.
 
 **Returns:** Promise<{ data: Resource[], meta: Object, links: Object }>
 
+**Note:** Direct use of this method is discouraged. Use `api.resources.{type}.query()` instead.
+
 **Example:**
 ```javascript
+// Not recommended
 const result = await api.query({
+  filter: { active: true }
+}, { type: 'users' });
+
+// Recommended
+const result = await api.resources.users.query({
   filter: { active: true },
   sort: '-createdAt',
   page: { size: 10, number: 1 }
-}, { type: 'users' });
+});
 ```
 
 #### `insert(data, options)`
@@ -213,16 +228,25 @@ Create a new resource.
 |--------|------|-------------|
 | `positioning` | Object | Positioning options |
 | `skipValidation` | boolean | Skip validation |
-| `fullRecord` | boolean | Validate all fields |
+| `fullRecord` | boolean | Validate as complete record (require all required fields) |
+| `validateFullRecord` | boolean | Fetch and merge with existing record before validation |
 
 **Returns:** Promise<{ data: Resource }>
 
+**Note:** Direct use of this method is discouraged. Use `api.resources.{type}.create()` instead.
+
 **Example:**
 ```javascript
+// Not recommended
 const result = await api.insert({
+  name: 'John Doe'
+}, { type: 'users' });
+
+// Recommended
+const result = await api.resources.users.create({
   name: 'John Doe',
   email: 'john@example.com'
-}, { type: 'users' });
+});
 ```
 
 #### `update(id, data, options)`
@@ -233,13 +257,32 @@ Update an existing resource.
 - `data` (Object): Update data
 - `options` (Object): Operation options
 
+**Update-specific Options:**
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `fullRecord` | boolean | false | Validate as complete record (PUT behavior) |
+| `validateFullRecord` | boolean | false | Merge with existing data before validation |
+
 **Returns:** Promise<{ data: Resource }>
+
+**Validation Behavior:**
+- Default (PATCH): Only validates provided fields
+- `fullRecord: true` (PUT): Validates as complete record, requires all required fields
+- `validateFullRecord: true`: Fetches existing record and merges before validation
+
+**Note:** Direct use of this method is discouraged. Use `api.resources.{type}.update()` instead.
 
 **Example:**
 ```javascript
+// Not recommended
 const result = await api.update('123', {
   name: 'Jane Doe'
 }, { type: 'users' });
+
+// Recommended  
+const result = await api.resources.users.update('123', {
+  name: 'Jane Doe'
+});
 ```
 
 #### `delete(id, options)`
@@ -251,9 +294,15 @@ Delete a resource.
 
 **Returns:** Promise<{ data: null }>
 
+**Note:** Direct use of this method is discouraged. Use `api.resources.{type}.delete()` instead.
+
 **Example:**
 ```javascript
+// Not recommended
 await api.delete('123', { type: 'users' });
+
+// Recommended
+await api.resources.users.delete('123');
 ```
 
 #### `addResource(type, schema, hooks?)`
@@ -437,8 +486,8 @@ api.mount(app, '/api/v1');
 
 ### Static Methods
 
-#### `Api.get(name, version)`
-Get a registered API by name and version.
+#### `Api.get(name, version)` / `Api.find(name, version)`
+Get a registered API by name and version. Both methods are identical.
 
 **Parameters:**
 - `name` (string): API name
@@ -448,9 +497,13 @@ Get a registered API by name and version.
 
 **Example:**
 ```javascript
+// Using Api.get
 const api = Api.get('myapp', 'latest');
 const apiV1 = Api.get('myapp', '1.0.0');
-const apiV2Plus = Api.get('myapp', '>=2.0.0');
+
+// Using Api.find (preferred for clarity)
+const api = Api.find('myapp', 'latest');
+const apiV2Plus = Api.find('myapp', '>=2.0.0');
 ```
 
 #### `Api.getRegistry()`
@@ -464,14 +517,32 @@ const registry = Api.getRegistry();
 // { myapp: ['2.1.0', '2.0.0', '1.0.0'], otherapp: ['1.0.0'] }
 ```
 
-### Properties
+### Static Properties
 
-#### `apis`
-Proxy object for accessing other registered APIs.
+#### `Api.registry`
+Enhanced registry access with helper methods.
+
+**Methods:**
+- `Api.registry.get(name, version)` - Same as Api.get()
+- `Api.registry.find(name, version)` - Same as Api.find()
+- `Api.registry.list()` - Get all registered APIs
+- `Api.registry.has(name, version?)` - Check if API exists
+- `Api.registry.versions(name)` - Get all versions of an API
 
 **Example:**
 ```javascript
-const usersApi = api.apis.users;  // Gets compatible users API
+// Check if API exists
+if (Api.registry.has('users', '2.0.0')) {
+  const api = Api.registry.get('users', '2.0.0');
+}
+
+// Get all versions
+const versions = Api.registry.versions('users');
+// ['2.1.0', '2.0.0', '1.0.0']
+
+// List all APIs
+const allApis = Api.registry.list();
+// { users: ['2.0.0', '1.0.0'], products: ['1.0.0'] }
 ```
 
 ---
@@ -807,9 +878,41 @@ api.use(HTTPPlugin, {
 | GET | `/{type}` | List resources |
 | GET | `/{type}/{id}` | Get single resource |
 | POST | `/{type}` | Create resource |
-| PATCH | `/{type}/{id}` | Update resource |
+| PUT | `/{type}/{id}` | Replace entire resource (full update) |
+| PATCH | `/{type}/{id}` | Update specific fields (partial update) |
 | DELETE | `/{type}/{id}` | Delete resource |
 | OPTIONS | `*` | CORS preflight |
+
+### PUT vs PATCH Behavior
+
+- **PUT**: Full replacement - requires all required fields, validates as complete record
+- **PATCH**: Partial update - only updates provided fields, validates only provided fields
+
+```javascript
+// PUT - Full replacement (all required fields must be present)
+PUT /api/users/123
+{
+  "data": {
+    "type": "users",
+    "attributes": {
+      "name": "John Doe",      // Required
+      "email": "john@new.com", // Required
+      "role": "admin"          // Optional
+    }
+  }
+}
+
+// PATCH - Partial update (only update what's provided)
+PATCH /api/users/123
+{
+  "data": {
+    "type": "users",
+    "attributes": {
+      "email": "john@new.com"  // Only updating email
+    }
+  }
+}
+```
 
 ### Query Parameters
 
@@ -893,11 +996,10 @@ api.use(PositioningPlugin, {
 
 **Insert with position:**
 ```javascript
-await api.insert({
+await api.resources.tasks.create({
   title: 'Task',
   beforeId: '123'  // Insert before this ID
 }, {
-  type: 'tasks',
   positioning: { enabled: true }
 });
 
@@ -1155,6 +1257,93 @@ const schema = new Schema({
     pattern: '^[^@]+@[^@]+$'
   }
 });
+```
+
+---
+
+## TimestampsPlugin
+
+Automatically manages createdAt and updatedAt timestamp fields.
+
+### Installation
+```javascript
+api.use(TimestampsPlugin, {
+  createdAtField: 'createdAt',    // Field name for creation time
+  updatedAtField: 'updatedAt',    // Field name for update time
+  touchOnGet: false,              // Update timestamp on read
+  format: 'timestamp'             // 'timestamp', 'date', 'dateTime'
+});
+
+// Or with createApi
+const api = createApi({
+  storage: 'memory',
+  timestamps: true  // Uses defaults
+});
+
+// With options
+const api = createApi({
+  storage: 'memory',
+  timestamps: {
+    format: 'dateTime',
+    touchOnGet: true
+  }
+});
+```
+
+### Features
+- Automatically sets `createdAt` on insert
+- Automatically updates `updatedAt` on update
+- Prevents accidental updates to `createdAt`
+- Optional touch-on-read functionality
+- Configurable field names and formats
+
+### Format Options
+- `'timestamp'` (default): Unix timestamp in milliseconds
+- `'date'`: ISO date string (YYYY-MM-DD)
+- `'dateTime'`: ISO datetime string
+
+### Methods Added
+
+#### `api.touchRecord(type, id, options)`
+Update only the timestamp of a record.
+
+```javascript
+await api.touchRecord('users', 123);
+```
+
+#### `api.getTimestampFields()`
+Get the configured timestamp field names.
+
+```javascript
+const fields = api.getTimestampFields();
+// { createdAt: 'createdAt', updatedAt: 'updatedAt' }
+```
+
+### Usage Example
+```javascript
+// Schema includes timestamp fields
+const userSchema = new Schema({
+  id: { type: 'id' },
+  name: { type: 'string', required: true },
+  email: { type: 'string', required: true },
+  createdAt: { type: 'timestamp' },  // Will be auto-set
+  updatedAt: { type: 'timestamp' }   // Will be auto-updated
+});
+
+// Create a user - timestamps are set automatically
+const user = await api.resources.users.create({
+  name: 'John Doe',
+  email: 'john@example.com'
+});
+// user.data.attributes.createdAt = 1638360000000
+// user.data.attributes.updatedAt = 1638360000000
+
+// Update the user - updatedAt is updated automatically
+const updated = await api.resources.users.update(user.data.id, {
+  email: 'newemail@example.com'
+});
+// user.data.attributes.updatedAt = 1638361000000 (newer)
+// user.data.attributes.createdAt = 1638360000000 (unchanged)
 ```
 
 ---

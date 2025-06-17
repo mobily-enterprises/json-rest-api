@@ -118,10 +118,22 @@ advancedApi.hook('transformResult', async (context) => {
   }
 });
 
-// Example 3: Using the API programmatically
+// Example: Using batch operations
+async function batchExample() {
+  // Create multiple products at once
+  const products = await advancedApi.resources.products.batch.create([
+    { name: 'Widget A', price: 10.00, category: 'widgets' },
+    { name: 'Widget B', price: 20.00, category: 'widgets' },
+    { name: 'Widget C', price: 30.00, category: 'widgets' }
+  ]);
+  
+  console.log('Created products:', products);
+}
+
+// Example 3: Using the API programmatically with the new resource proxy
 async function exampleUsage() {
-  // Insert a product
-  const newProduct = await advancedApi.insert({
+  // Insert a product using the resource proxy
+  const newProduct = await advancedApi.resources.products.create({
     name: 'Premium Widget',
     description: 'A high-quality widget for professionals',
     price: 1299.99,
@@ -130,7 +142,6 @@ async function exampleUsage() {
     tags: ['premium', 'professional'],
     beforeId: null // Will be placed at the end
   }, {
-    type: 'products',
     table: 'products',
     positioning: { enabled: true }
   });
@@ -138,23 +149,21 @@ async function exampleUsage() {
   console.log('Created product:', newProduct);
 
   // Query products
-  const products = await advancedApi.query({
+  const products = await advancedApi.resources.products.query({
     filter: { category: 'widgets', active: true },
     sort: '-price,name',
     page: { size: 10, number: 1 }
   }, {
-    type: 'products',
     table: 'products'
   });
 
   console.log('Found products:', products);
 
   // Update with optimistic locking
-  const updated = await advancedApi.update(newProduct.data.id, {
+  const updated = await advancedApi.resources.products.update(newProduct.data.id, {
     stock: 45,
     version: newProduct.data.attributes.version // For optimistic locking
   }, {
-    type: 'products',
     table: 'products'
   });
 
@@ -163,6 +172,9 @@ async function exampleUsage() {
   // Get version history
   const history = await advancedApi.getVersionHistory('products', newProduct.data.id);
   console.log('Version history:', history);
+  
+  // Delete example
+  // await advancedApi.resources.products.delete(newProduct.data.id);
 }
 
 // Example 4: Express app setup

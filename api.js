@@ -14,6 +14,7 @@ export class Api {
       idProperty: 'id',
       name: null,
       version: null,
+      artificialDelay: 0,  // Milliseconds to delay operations (for testing)
       ...options
     };
     
@@ -96,6 +97,41 @@ export class Api {
   }
   
   /**
+   * Alias for get() with a more explicit name
+   */
+  static find(name, version = 'latest') {
+    return this.get(name, version);
+  }
+  
+  /**
+   * Enhanced registry access
+   */
+  static registry = {
+    get(name, version = 'latest') {
+      return Api.get(name, version);
+    },
+    
+    find(name, version = 'latest') {
+      return Api.get(name, version);
+    },
+    
+    list() {
+      return Api.getRegistry();
+    },
+    
+    has(name, version) {
+      if (!name) return false;
+      const versions = globalRegistry.get(name);
+      if (!versions) return false;
+      return version ? versions.has(version) : versions.size > 0;
+    },
+    
+    versions(name) {
+      return Api.getVersions(name);
+    }
+  }
+  
+  /**
    * Get all registered APIs
    */
   static getRegistry() {
@@ -106,18 +142,6 @@ export class Api {
     return registry;
   }
   
-  /**
-   * Access other APIs by name
-   */
-  get apis() {
-    const self = this;
-    return new Proxy({}, {
-      get(target, prop) {
-        // Get a compatible API based on current version
-        return Api.get(prop, self.options.version);
-      }
-    });
-  }
 
   /**
    * Add a plugin to the API
@@ -161,6 +185,16 @@ export class Api {
     }
     return context;
   }
+  
+  /**
+   * Apply artificial delay if configured
+   */
+  async _applyDelay(options = {}) {
+    const delay = options.artificialDelay ?? this.options.artificialDelay;
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
 
   /**
    * Register an implementation for a method
@@ -198,6 +232,9 @@ export class Api {
    * Get a single resource
    */
   async get(id, options = {}) {
+    // Apply artificial delay for testing
+    await this._applyDelay(options);
+    
     const context = {
       api: this,
       method: 'get',
@@ -232,6 +269,9 @@ export class Api {
    * Query multiple resources
    */
   async query(params = {}, options = {}) {
+    // Apply artificial delay for testing
+    await this._applyDelay(options);
+    
     const context = {
       api: this,
       method: 'query',
@@ -273,6 +313,9 @@ export class Api {
    * Insert a new resource
    */
   async insert(data, options = {}) {
+    // Apply artificial delay for testing
+    await this._applyDelay(options);
+    
     const context = {
       api: this,
       method: 'insert',
@@ -315,6 +358,9 @@ export class Api {
    * Update an existing resource
    */
   async update(id, data, options = {}) {
+    // Apply artificial delay for testing
+    await this._applyDelay(options);
+    
     const context = {
       api: this,
       method: 'update',
@@ -358,6 +404,9 @@ export class Api {
    * Delete a resource
    */
   async delete(id, options = {}) {
+    // Apply artificial delay for testing
+    await this._applyDelay(options);
+    
     const context = {
       api: this,
       method: 'delete',

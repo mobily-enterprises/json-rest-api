@@ -13,6 +13,7 @@ export { SecurityPlugin } from './plugins/security.js';
 export { LoggingPlugin } from './plugins/logging.js';
 export { OpenAPIPlugin } from './plugins/openapi.js';
 export { ApiRegistryPlugin } from './plugins/api-registry.js';
+export { TimestampsPlugin } from './plugins/timestamps.js';
 
 // Import for internal use
 import { Api } from './api.js';
@@ -22,6 +23,7 @@ import { HTTPPlugin } from './plugins/http.js';
 import { ValidationPlugin } from './plugins/validation.js';
 import { PositioningPlugin } from './plugins/positioning.js';
 import { VersioningPlugin } from './plugins/versioning.js';
+import { TimestampsPlugin } from './plugins/timestamps.js';
 
 // Convenience function to create a fully configured API
 export function createApi(options = {}) {
@@ -49,6 +51,10 @@ export function createApi(options = {}) {
   
   if (options.versioning) {
     api.use(VersioningPlugin, options.versioning);
+  }
+  
+  if (options.timestamps) {
+    api.use(TimestampsPlugin, options.timestamps);
   }
   
   return api;

@@ -18,19 +18,19 @@
   2. Using APIs Programmatically
 
   // Get latest version automatically
-  const api = Api.get('users', 'latest');
+  const api = Api.find('users', 'latest');
 
   // Get specific version
-  const apiV1 = Api.get('users', '1.0.0');
+  const apiV1 = Api.find('users', '1.0.0');
 
   // Get minimum version (2.0.0 or higher)
-  const apiV2Plus = Api.get('users', '2.0.0');
+  const apiV2Plus = Api.find('users', '2.0.0');
 
-  // Use it
-  const user = await api.insert({
+  // Use it with the resource proxy
+  const user = await api.resources.users.create({
     name: 'John',
     email: 'john@example.com'
-  }, { type: 'users' });
+  });
 
   3. Cross-API Communication
 
@@ -41,12 +41,14 @@
     version: '1.0.0'
   });
 
-  // Inside orders API, access users API automatically
+  // Inside orders API, access users API from registry
   ordersApi.hook('afterInsert', async (context) => {
-    // This gets a compatible users API automatically!
-    const usersApi = ordersApi.apis.users;
-    const user = await usersApi.get(context.data.userId, { type: 'users'
-  });
+    // Get a compatible users API from the registry
+    const usersApi = Api.find('users', '>=1.0.0');
+    if (usersApi) {
+      const user = await usersApi.resources.users.get(context.data.userId);
+      // Use the user data...
+    }
   });
 
   4. HTTP Version Negotiation
@@ -114,8 +116,8 @@
     const hasCategory = 'category' in data;
     const minVersion = hasCategory ? '2.0.0' : '1.0.0';
 
-    const api = Api.get('products', minVersion);
-    return api.insert(data, { type: 'products' });
+    const api = Api.find('products', minVersion);
+    return api.resources.products.create(data);
   }
 
   // Works with v1
@@ -133,3 +135,20 @@
 
   The library handles all the complexity - you just specify name and
   version when creating APIs, and the library does the rest!
+  
+  7. Registry Access
+  
+  The Api class provides a rich registry API:
+  
+  // Check if an API exists
+  if (Api.registry.has('products', '2.0.0')) {
+    const api = Api.registry.get('products', '2.0.0');
+  }
+  
+  // Get all versions of an API
+  const versions = Api.registry.versions('products');
+  // ['2.0.0', '1.0.0']
+  
+  // List all registered APIs
+  const allApis = Api.registry.list();
+  // { products: ['2.0.0', '1.0.0'], users: ['1.0.0'] }

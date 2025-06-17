@@ -39,7 +39,8 @@ const api = createApi({
   name: 'taskmanager',
   version: '1.0.0',
   storage: 'memory',  // We'll use memory for now
-  http: { basePath: '/api' }  // This automatically adds HTTPPlugin!
+  http: { basePath: '/api' },  // This automatically adds HTTPPlugin!
+  timestamps: true  // Automatic timestamp management!
 });
 
 // Define a schema for tasks
@@ -49,7 +50,8 @@ const taskSchema = new Schema({
   description: { type: 'string', max: 1000 },
   completed: { type: 'boolean', default: false },
   priority: { type: 'string', default: 'medium' },
-  createdAt: { type: 'timestamp', default: () => Date.now() }
+  createdAt: { type: 'timestamp' },  // Auto-managed by TimestampsPlugin
+  updatedAt: { type: 'timestamp' }   // Auto-managed by TimestampsPlugin
 });
 
 // Register the schema
@@ -126,10 +128,15 @@ curl http://localhost:3000/api/1.0.0/tasks
 # Get a specific task
 curl http://localhost:3000/api/1.0.0/tasks/1
 
-# Update a task
+# Update a task (partial update)
 curl -X PATCH http://localhost:3000/api/1.0.0/tasks/1 \
   -H "Content-Type: application/json" \
   -d '{"data": {"attributes": {"completed": true}}}'
+
+# Replace a task (full update - all required fields needed)
+curl -X PUT http://localhost:3000/api/1.0.0/tasks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"attributes": {"title": "Updated Task", "completed": true}}}'
 
 # Delete a task
 curl -X DELETE http://localhost:3000/api/1.0.0/tasks/1
@@ -310,13 +317,7 @@ api
 // Register schemas
 api.addResource('products', productSchema);
 
-// Use programmatically - OLD WAY (still works)
-const product = await api.insert({
-  name: 'Awesome Widget',
-  price: 29.99
-}, { type: 'products' });
-
-// NEW WAY - Much more intuitive!
+// Use programmatically
 const product = await api.resources.products.create({
   name: 'Awesome Widget',
   price: 29.99
@@ -403,10 +404,10 @@ api.addResource('users', userSchema);
 
 // This will fail validation
 try {
-  await api.insert({
+  await api.resources.users.create({
     username: 'a',  // Too short!
     age: 200        // Too old!
-  }, { type: 'users' });
+  });
 } catch (error) {
   console.log(error.errors);
   // [
@@ -485,9 +486,9 @@ const userHooks = {
     
     // Check email uniqueness
     if (method === 'insert' || method === 'update') {
-      const existing = await context.api.query({
+      const existing = await context.api.resources.users.query({
         filter: { email: data.email }
-      }, { type: 'users' });
+      });
       
       if (existing.meta.total > 0) {
         errors.push({
@@ -552,7 +553,7 @@ Resources in the same version should SHARE one API instance:
 import { Api, Schema } from 'json-rest-api';
 
 // Get existing or create shared instance for v1.0.0
-const api = Api.get('myapp', '1.0.0') || new Api({ 
+const api = Api.find('myapp', '1.0.0') || new Api({ 
   name: 'myapp', 
   version: '1.0.0' 
 });
@@ -637,10 +638,10 @@ app.listen(3000);
 ### Key Concepts to Remember
 
 1. **createApi()** = Creates a NEW api instance (use for simple, single-file APIs)
-2. **Api.get() || new Api()** = Gets or creates a SHARED instance (use in resource files)
+2. **Api.find() || new Api()** = Gets or creates a SHARED instance (use in resource files)
 3. **defineResource()** = Helper that does the sharing for you (recommended)
 4. **One API instance per version** = All resources in v1.0.0 share the same API
-5. **api.resources.{name}** = NEW intuitive way to access resources!
+5. **api.resources.{name}** = The intuitive way to access resources!
 
 This way your server stays clean (one line per resource), resources are modular, and everything shares the same database connections and configuration!
 
@@ -697,6 +698,67 @@ await api.resources.users.batch.update([
 
 // Delete multiple users
 await api.resources.users.batch.delete([1, 2, 3]);
+```
+
+### PUT vs PATCH: Understanding Update Behavior
+
+The API supports both PUT (full replacement) and PATCH (partial update) semantics:
+
+```javascript
+// Schema for reference
+const userSchema = new Schema({
+  id: { type: 'id' },
+  name: { type: 'string', required: true },
+  email: { type: 'string', required: true },
+  bio: { type: 'string' },
+  active: { type: 'boolean', default: true }
+});
+
+// PATCH behavior (default) - Partial update
+// Only updates the fields you provide
+await api.resources.users.update(123, {
+  email: 'newemail@example.com'  // Only updating email
+});
+// Other fields (name, bio, active) remain unchanged
+
+// PUT behavior - Full replacement
+// Must provide ALL required fields
+await api.resources.users.update(123, {
+  name: 'John Doe',       // Required
+  email: 'john@new.com',  // Required
+  bio: 'New bio'          // Optional
+}, {
+  fullRecord: true  // This makes it behave like PUT
+});
+
+// validateFullRecord option - Merge then validate
+// Useful when you want PUT validation but don't have all data
+await api.resources.users.update(123, {
+  email: 'john@newer.com'  // Only have email
+}, {
+  validateFullRecord: true  // Fetches existing record, merges, then validates
+});
+// This fetches the existing record, merges your changes, then validates the complete record
+```
+
+#### When to use each option:
+
+- **Default (PATCH)**: When updating specific fields
+- **`fullRecord: true` (PUT)**: When replacing the entire resource
+- **`validateFullRecord: true`**: When you want to ensure the final record is valid but only have partial data
+
+#### HTTP Methods map to these behaviors:
+
+```bash
+# PATCH - Partial update (default behavior)
+curl -X PATCH http://localhost:3000/api/users/123 \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"attributes": {"email": "new@example.com"}}}'
+
+# PUT - Full replacement (fullRecord: true)
+curl -X PUT http://localhost:3000/api/users/123 \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"attributes": {"name": "John", "email": "john@example.com"}}}'
 ```
 
 ### Accessing Different Versions
@@ -806,13 +868,7 @@ api.use(MySQLPlugin, {
   ]
 });
 
-// Use specific connection - OLD WAY
-const data = await api.query({}, {
-  type: 'posts',
-  connection: 'replica'  // Read from replica
-});
-
-// NEW WAY - Much cleaner!
+// Use specific connection
 const data = await api.resources.posts.query({}, {
   connection: 'replica'  // Read from replica
 });
@@ -835,21 +891,19 @@ try {
   await connection.beginTransaction();
   
   // Create author
-  const author = await api.insert({
+  const author = await api.resources.authors.create({
     name: 'John Doe',
     email: 'john@example.com'
   }, {
-    type: 'authors',
     connection  // Use transaction connection
   });
   
   // Create post
-  const post = await api.insert({
+  const post = await api.resources.posts.create({
     authorId: author.data.id,
     title: 'My First Post',
     content: 'Hello World!'
   }, {
-    type: 'posts',
     connection
   });
   
@@ -1001,30 +1055,27 @@ api.addResource('todos', todoSchema);
 
 ```javascript
 // Insert at the end (default)
-const todo1 = await api.insert({
+const todo1 = await api.resources.todos.create({
   title: 'First task'
 }, { 
-  type: 'todos',
   positioning: { enabled: true }
 });
 // position: 1
 
 // Insert at the end explicitly
-const todo2 = await api.insert({
+const todo2 = await api.resources.todos.create({
   title: 'Second task',
   beforeId: null  // null = end
 }, { 
-  type: 'todos',
   positioning: { enabled: true }
 });
 // position: 2
 
 // Insert before another item
-const todo3 = await api.insert({
+const todo3 = await api.resources.todos.create({
   title: 'Urgent task',
   beforeId: todo1.data.id  // Insert before first task
 }, { 
-  type: 'todos',
   positioning: { enabled: true }
 });
 // position: 1 (others shift up)
@@ -1040,11 +1091,10 @@ await api.reposition('todos', todoId, null);
 await api.reposition('todos', todoId, beforeTodoId);
 
 // Update with positioning
-await api.update(todoId, {
+await api.resources.todos.update(todoId, {
   title: 'Updated title',
   beforeId: anotherId  // Also reposition
 }, {
-  type: 'todos',
   positioning: { enabled: true }
 });
 ```
@@ -1059,13 +1109,12 @@ api.use(PositioningPlugin, {
 });
 
 // Now positions are scoped
-await api.insert({
+await api.resources.todos.create({
   title: 'Project A Task',
   projectId: 1,
   status: 'active',
   beforeId: null
 }, { 
-  type: 'todos',
   positioning: { enabled: true }
 });
 // This gets position 1 within project=1, status=active
@@ -1142,7 +1191,7 @@ async function createPost(data) {
   const hasAuthor = 'author' in data;
   const api = Api.get('blog', hasAuthor ? '2.0.0' : '1.0.0');
   
-  return api.insert(data, { type: 'posts' });
+  return api.resources.posts.create(data);
 }
 ```
 
@@ -1161,20 +1210,18 @@ api.use(VersioningPlugin, {
 });
 
 // Automatic version tracking
-const post = await api.insert({
+const post = await api.resources.posts.create({
   title: 'Original Title',
   content: 'Original content'
 }, { 
-  type: 'posts',
   userId: 'user123'
 });
 // version: 1, modifiedBy: 'user123'
 
 // Update increments version
-const updated = await api.update(post.data.id, {
+const updated = await api.resources.posts.update(post.data.id, {
   title: 'Updated Title'
 }, { 
-  type: 'posts',
   userId: 'user456'
 });
 // version: 2, modifiedBy: 'user456'
@@ -1207,13 +1254,13 @@ console.log(diff);
 
 ```javascript
 // Prevent concurrent updates
-const post = await api.get(postId, { type: 'posts' });
+const post = await api.resources.posts.get(postId);
 
 try {
-  await api.update(postId, {
+  await api.resources.posts.update(postId, {
     title: 'New Title',
     version: post.data.attributes.version  // Include current version
-  }, { type: 'posts' });
+  });
 } catch (error) {
   if (error.code === 'VERSION_CONFLICT') {
     console.log('Someone else updated this post!');
@@ -1495,20 +1542,21 @@ const ordersApi = createApi({
 // Orders can access users!
 ordersApi.hook('afterInsert', async (context) => {
   if (context.result) {
-    // Automatically gets compatible users API
-    const usersApi = ordersApi.apis.users;
+    // Get compatible users API from registry
+    const usersApi = Api.find('users', '>=1.0.0');
     
-    // Get user details
-    const user = await usersApi.get(
-      context.result.userId, 
-      { type: 'users' }
-    );
-    
-    // Send confirmation email
-    await sendEmail(user.data.attributes.email, {
-      subject: 'Order Confirmed',
-      orderId: context.result.id
-    });
+    if (usersApi) {
+      // Get user details
+      const user = await usersApi.resources.users.get(
+        context.result.userId
+      );
+      
+      // Send confirmation email
+      await sendEmail(user.data.attributes.email, {
+        subject: 'Order Confirmed',
+        orderId: context.result.id
+      });
+    }
   }
 });
 ```
@@ -1594,9 +1642,9 @@ api.hook('afterValidate', async (context) => {
   
   // SKU must be unique
   if ((method === 'insert' || method === 'update') && data.sku) {
-    const existing = await api.query({
+    const existing = await api.resources.products.query({
       filter: { sku: data.sku }
-    }, { type: 'products' });
+    });
     
     const isDuplicate = method === 'insert' 
       ? existing.data.length > 0
@@ -1634,7 +1682,7 @@ async function importProducts(products) {
     // Process batch in parallel
     const batchResults = await Promise.all(
       batch.map(product => 
-        api.insert(product, { type: 'products' })
+        api.resources.products.create(product)
           .catch(error => ({ error, product }))
       )
     );
@@ -1649,12 +1697,11 @@ async function importProducts(products) {
 }
 
 // Optimized queries
-const results = await api.query({
+const results = await api.resources.products.query({
   filter: { category: 'electronics', active: true },
   sort: '-price',
   page: { size: 50 }  // Don't fetch everything!
 }, {
-  type: 'products',
   fields: ['id', 'name', 'price']  // Only needed fields
 });
 ```
@@ -1663,12 +1710,12 @@ const results = await api.query({
 
 ```javascript
 // Retry logic
-async function reliableInsert(data, options, maxRetries = 3) {
+async function reliableInsert(resourceType, data, options = {}, maxRetries = 3) {
   let lastError;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await api.insert(data, options);
+      return await api.resources[resourceType].create(data, options);
     } catch (error) {
       lastError = error;
       
@@ -1690,8 +1737,7 @@ async function reliableInsert(data, options, maxRetries = 3) {
 async function getProductWithFallback(id) {
   try {
     // Try primary database
-    return await api.get(id, { 
-      type: 'products',
+    return await api.resources.products.get(id, { 
       connection: 'primary'
     });
   } catch (error) {
@@ -1699,7 +1745,7 @@ async function getProductWithFallback(id) {
     
     try {
       // Try cache
-      return await cacheApi.get(id, { type: 'products' });
+      return await cacheApi.resources.products.get(id);
     } catch (cacheError) {
       console.error('Cache also failed, returning degraded response');
       
@@ -1733,7 +1779,8 @@ describe('User API', () => {
     api = createApi({
       name: 'test',
       version: '1.0.0',
-      storage: 'memory'
+      storage: 'memory',
+      artificialDelay: 100  // Add 100ms delay to all operations for testing
     });
     
     const userSchema = new Schema({
@@ -1746,10 +1793,10 @@ describe('User API', () => {
   });
   
   it('should create a user', async () => {
-    const user = await api.insert({
+    const user = await api.resources.users.create({
       email: 'test@example.com',
       name: 'Test User'
-    }, { type: 'users' });
+    });
     
     expect(user.data.attributes.email).toBe('test@example.com');
     expect(user.data.id).toBeDefined();
@@ -1757,19 +1804,19 @@ describe('User API', () => {
   
   it('should validate required fields', async () => {
     await expect(
-      api.insert({ email: 'test@example.com' }, { type: 'users' })
+      api.resources.users.create({ email: 'test@example.com' })
     ).rejects.toThrow();
   });
   
   it('should update users', async () => {
-    const user = await api.insert({
+    const user = await api.resources.users.create({
       email: 'test@example.com',
       name: 'Original Name'
-    }, { type: 'users' });
+    });
     
-    const updated = await api.update(user.data.id, {
+    const updated = await api.resources.users.update(user.data.id, {
       name: 'Updated Name'
-    }, { type: 'users' });
+    });
     
     expect(updated.data.attributes.name).toBe('Updated Name');
   });
@@ -1777,6 +1824,46 @@ describe('User API', () => {
 ```
 
 ---
+
+## Testing Loading States with Artificial Delay
+
+The API supports artificial delays for testing loading states and race conditions:
+
+```javascript
+// Global delay for all operations
+const api = createApi({
+  storage: 'memory',
+  artificialDelay: 500  // 500ms delay for all operations
+});
+
+// Per-operation delay
+await api.resources.users.get(123, {
+  artificialDelay: 1000  // 1 second delay just for this request
+});
+
+// Useful for testing loading UI
+async function testLoadingState() {
+  setLoading(true);
+  
+  try {
+    // This will take at least 500ms
+    const users = await api.resources.users.query();
+    setUsers(users.data);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// Testing race conditions
+async function testRaceCondition() {
+  // Start two operations with different delays
+  const promise1 = api.resources.users.get(1, { artificialDelay: 1000 });
+  const promise2 = api.resources.users.get(2, { artificialDelay: 500 });
+  
+  // promise2 will complete first despite being started second
+  const results = await Promise.race([promise1, promise2]);
+}
+```
 
 Congratulations! You've mastered the JSON REST API library! 🎉
 
@@ -1788,5 +1875,6 @@ Remember:
 - The library handles versioning automatically
 - Always validate your data
 - Security first!
+- Use artificial delays to test loading states
 
 Happy coding! 🚀
