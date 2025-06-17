@@ -310,11 +310,23 @@ api
 // Register schemas
 api.addResource('products', productSchema);
 
-// Use programmatically
+// Use programmatically - OLD WAY (still works)
 const product = await api.insert({
   name: 'Awesome Widget',
   price: 29.99
 }, { type: 'products' });
+
+// NEW WAY - Much more intuitive!
+const product = await api.resources.products.create({
+  name: 'Awesome Widget',
+  price: 29.99
+});
+
+// All operations available
+const found = await api.resources.products.get(123);
+const updated = await api.resources.products.update(123, { price: 39.99 });
+const results = await api.resources.products.query({ filter: { active: true } });
+await api.resources.products.delete(123);
 ```
 
 ## Understanding Hooks
@@ -628,8 +640,114 @@ app.listen(3000);
 2. **Api.get() || new Api()** = Gets or creates a SHARED instance (use in resource files)
 3. **defineResource()** = Helper that does the sharing for you (recommended)
 4. **One API instance per version** = All resources in v1.0.0 share the same API
+5. **api.resources.{name}** = NEW intuitive way to access resources!
 
 This way your server stays clean (one line per resource), resources are modular, and everything shares the same database connections and configuration!
+
+## Programmatic API Usage
+
+The new programmatic API makes working with resources intuitive and chainable:
+
+### Basic CRUD Operations
+
+```javascript
+// After registering a resource
+api.addResource('users', userSchema);
+
+// Create
+const user = await api.resources.users.create({
+  username: 'johndoe',
+  email: 'john@example.com'
+});
+
+// Read
+const found = await api.resources.users.get(user.data.id);
+
+// Update
+const updated = await api.resources.users.update(user.data.id, {
+  email: 'newemail@example.com'
+});
+
+// Delete
+await api.resources.users.delete(user.data.id);
+
+// Query
+const results = await api.resources.users.query({
+  filter: { active: true },
+  sort: '-createdAt',
+  page: { size: 10, number: 1 }
+});
+```
+
+### Batch Operations
+
+```javascript
+// Create multiple users at once
+const users = await api.resources.users.batch.create([
+  { username: 'user1', email: 'user1@example.com' },
+  { username: 'user2', email: 'user2@example.com' },
+  { username: 'user3', email: 'user3@example.com' }
+]);
+
+// Update multiple users
+await api.resources.users.batch.update([
+  { id: 1, data: { active: false } },
+  { id: 2, data: { active: false } }
+]);
+
+// Delete multiple users
+await api.resources.users.batch.delete([1, 2, 3]);
+```
+
+### Accessing Different Versions
+
+```javascript
+// Default: uses the current API version
+const user = await api.resources.users.get(123);
+
+// Access a specific version
+const userV1 = await api.resources.users.version('1.0.0').get(123);
+const userV2 = await api.resources.users.version('2.0.0').get(123);
+
+// This is especially useful when migrating between versions
+const oldData = await api.resources.users.version('1.0.0').query();
+for (const item of oldData.data) {
+  await api.resources.users.version('2.0.0').create(migrateData(item));
+}
+```
+
+### Direct Access to Schema and Hooks
+
+```javascript
+// Get the schema for a resource
+const schema = api.resources.users.schema;
+
+// Get the hooks for a resource
+const hooks = api.resources.users.hooks;
+
+// Check if a resource exists
+if ('users' in api.resources) {
+  console.log('Users resource is available');
+}
+
+// List all resources
+const allResources = Object.keys(api.resources);
+console.log('Available resources:', allResources);
+```
+
+### Alternative Syntax
+
+If you prefer function calls over property access:
+
+```javascript
+// Using resource() method
+const user = await api.resource('users').get(123);
+const posts = await api.resource('posts').query();
+
+// This is useful when resource names are dynamic
+const resourceName = 'users';
+const data = await api.resource(resourceName).get(123);
+```
 
 ## MySQLPlugin Tutorial
 
@@ -688,9 +806,14 @@ api.use(MySQLPlugin, {
   ]
 });
 
-// Use specific connection
+// Use specific connection - OLD WAY
 const data = await api.query({}, {
   type: 'posts',
+  connection: 'replica'  // Read from replica
+});
+
+// NEW WAY - Much cleaner!
+const data = await api.resources.posts.query({}, {
   connection: 'replica'  // Read from replica
 });
 

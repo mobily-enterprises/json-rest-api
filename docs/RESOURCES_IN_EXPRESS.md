@@ -297,6 +297,69 @@ app.listen(3000, () => {
 });
 ```
 
+## Programmatic Access Between Resources
+
+Resources that share an API instance can interact with each other using the new intuitive API:
+
+```javascript
+// api/1.0.0/orders.js
+import { Api, Schema } from 'jsonrestapi';
+
+const api = Api.get('myapp', '1.0.0');
+
+// Define orders schema
+const orderSchema = new Schema({
+  id: { type: 'id' },
+  userId: { type: 'id', required: true },
+  productId: { type: 'id', required: true },
+  quantity: { type: 'number', min: 1 },
+  status: { type: 'string', default: 'pending' }
+});
+
+const orderHooks = {
+  async afterInsert(context) {
+    const { result } = context;
+    const order = result.data;
+    
+    // Access other resources using the intuitive API
+    const user = await api.resources.users.get(order.attributes.userId);
+    const product = await api.resources.products.get(order.attributes.productId);
+    
+    // Send email notification
+    await sendOrderConfirmation(user.data.attributes.email, {
+      order,
+      product: product.data.attributes
+    });
+  },
+  
+  async transformResult(context) {
+    const { result } = context;
+    
+    if (result?.data) {
+      // Enrich order with user and product data
+      const [user, product] = await Promise.all([
+        api.resources.users.get(result.data.attributes.userId),
+        api.resources.products.get(result.data.attributes.productId)
+      ]);
+      
+      result.data.relationships = {
+        user: { data: { type: 'users', id: user.data.id } },
+        product: { data: { type: 'products', id: product.data.id } }
+      };
+      
+      result.included = [
+        user.data,
+        product.data
+      ];
+    }
+  }
+};
+
+api.addResource('orders', orderSchema, orderHooks);
+
+export default api;
+```
+
 ## Adding Authentication/Permissions
 
 You can add middleware to your resources:

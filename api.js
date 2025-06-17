@@ -479,6 +479,10 @@ export class Api {
       this.resourceHooks = new Map();
     }
     
+    if (!this._resourceProxies) {
+      this._resourceProxies = new Map();
+    }
+    
     this.schemas.set(type, schema);
     
     // Register hooks for this resource type
@@ -496,6 +500,129 @@ export class Api {
       this.resourceHooks.set(type, hooks);
     }
     
+    // Create resource proxy for intuitive access
+    const resourceProxy = this._createResourceProxy(type);
+    this._resourceProxies.set(type, resourceProxy);
+    
     return this;
+  }
+
+  /**
+   * Create a resource proxy for intuitive API access
+   */
+  _createResourceProxy(type) {
+    const api = this;
+    
+    return {
+      // Get a single resource
+      get: (id, options = {}) => api.get(id, { ...options, type }),
+      
+      // Query resources
+      query: (params = {}, options = {}) => api.query(params, { ...options, type }),
+      
+      // Create a new resource
+      post: (data, options = {}) => api.post(data, { ...options, type }),
+      create: (data, options = {}) => api.post(data, { ...options, type }), // Alias
+      
+      // Update a resource
+      put: (id, data, options = {}) => api.put(id, data, { ...options, type }),
+      update: (id, data, options = {}) => api.update(id, data, { ...options, type }), // Alias
+      
+      // Delete a resource
+      delete: (id, options = {}) => api.delete(id, { ...options, type }),
+      remove: (id, options = {}) => api.delete(id, { ...options, type }), // Alias
+      
+      // Access schema
+      get schema() {
+        return api.schemas.get(type);
+      },
+      
+      // Access hooks
+      get hooks() {
+        return api.resourceHooks.get(type);
+      },
+      
+      // Versioned access
+      version: (ver) => {
+        // Get or create versioned API
+        const versionedApi = Api.get(api.options.name, ver);
+        if (!versionedApi) {
+          throw new Error(`No API version ${ver} found for ${api.options.name}`);
+        }
+        
+        // Return the resource proxy from the versioned API
+        const versionedResource = versionedApi._resourceProxies?.get(type);
+        if (!versionedResource) {
+          throw new Error(`Resource ${type} not found in API version ${ver}`);
+        }
+        
+        return versionedResource;
+      },
+      
+      // Batch operations
+      batch: {
+        create: (items, options = {}) => 
+          Promise.all(items.map(item => api.post(item, { ...options, type }))),
+        
+        update: (updates, options = {}) => 
+          Promise.all(updates.map(({ id, data }) => 
+            api.update(id, data, { ...options, type })
+          )),
+        
+        delete: (ids, options = {}) => 
+          Promise.all(ids.map(id => api.delete(id, { ...options, type })))
+      }
+    };
+  }
+
+  /**
+   * Get resources accessor
+   */
+  get resources() {
+    const self = this;
+    
+    if (!this._resourcesProxy) {
+      this._resourcesProxy = new Proxy({}, {
+        get(target, prop) {
+          // Check if resource exists
+          const resourceProxy = self._resourceProxies?.get(prop);
+          if (!resourceProxy) {
+            throw new Error(`Resource '${prop}' not found. Did you forget to call addResource('${prop}', schema)?`);
+          }
+          return resourceProxy;
+        },
+        
+        has(target, prop) {
+          return self._resourceProxies?.has(prop) || false;
+        },
+        
+        ownKeys(target) {
+          return Array.from(self._resourceProxies?.keys() || []);
+        },
+        
+        getOwnPropertyDescriptor(target, prop) {
+          if (self._resourceProxies?.has(prop)) {
+            return {
+              enumerable: true,
+              configurable: true,
+              value: self._resourceProxies.get(prop)
+            };
+          }
+        }
+      });
+    }
+    
+    return this._resourcesProxy;
+  }
+
+  /**
+   * Alternative syntax - direct property access
+   */
+  resource(type) {
+    const resourceProxy = this._resourceProxies?.get(type);
+    if (!resourceProxy) {
+      throw new Error(`Resource '${type}' not found. Did you forget to call addResource('${type}', schema)?`);
+    }
+    return resourceProxy;
   }
 }

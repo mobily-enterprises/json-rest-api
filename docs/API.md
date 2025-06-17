@@ -293,6 +293,128 @@ api.addResource('users', userSchema, userHooks);
 - `afterDelete` - After deleting
 - `transformResult` - Transform results before sending
 
+#### `resource(type)`
+Alternative method to access a resource.
+
+**Parameters:**
+- `type` (string): Resource type name
+
+**Returns:** Resource proxy object
+
+**Example:**
+```javascript
+// Useful when resource name is dynamic
+const resourceName = getUserResourceName();
+const data = await api.resource(resourceName).get(123);
+```
+
+### Resource Proxy Methods
+
+Each resource accessible via `api.resources.{name}` has the following methods:
+
+#### Resource CRUD Methods
+
+##### `get(id, options)`
+Fetch a single resource.
+
+```javascript
+const user = await api.resources.users.get(123);
+```
+
+##### `query(params, options)`
+Query multiple resources.
+
+```javascript
+const users = await api.resources.users.query({
+  filter: { active: true },
+  sort: '-createdAt'
+});
+```
+
+##### `create(data, options)` / `post(data, options)`
+Create a new resource.
+
+```javascript
+const user = await api.resources.users.create({
+  name: 'John Doe',
+  email: 'john@example.com'
+});
+```
+
+##### `update(id, data, options)` / `put(id, data, options)`
+Update an existing resource.
+
+```javascript
+const updated = await api.resources.users.update(123, {
+  email: 'newemail@example.com'
+});
+```
+
+##### `delete(id, options)` / `remove(id, options)`
+Delete a resource.
+
+```javascript
+await api.resources.users.delete(123);
+```
+
+#### Resource Versioning
+
+##### `version(versionSpec)`
+Access a specific version of the resource.
+
+```javascript
+// Access version 1.0.0 of users
+const userV1 = await api.resources.users.version('1.0.0').get(123);
+
+// Access latest 2.x version
+const userV2 = await api.resources.users.version('^2.0.0').get(123);
+```
+
+#### Batch Operations
+
+##### `batch.create(items, options)`
+Create multiple resources.
+
+```javascript
+const users = await api.resources.users.batch.create([
+  { name: 'User 1' },
+  { name: 'User 2' }
+]);
+```
+
+##### `batch.update(updates, options)`
+Update multiple resources.
+
+```javascript
+await api.resources.users.batch.update([
+  { id: 1, data: { active: false } },
+  { id: 2, data: { active: false } }
+]);
+```
+
+##### `batch.delete(ids, options)`
+Delete multiple resources.
+
+```javascript
+await api.resources.users.batch.delete([1, 2, 3]);
+```
+
+#### Resource Properties
+
+##### `schema`
+Access the resource's schema.
+
+```javascript
+const userSchema = api.resources.users.schema;
+```
+
+##### `hooks`
+Access the resource's hooks.
+
+```javascript
+const userHooks = api.resources.users.hooks;
+```
+
 #### `getSchema(type)`
 Get the schema for a resource type.
 
