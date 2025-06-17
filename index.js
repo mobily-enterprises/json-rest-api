@@ -29,7 +29,6 @@ export { VersioningPlugin } from './plugins/versioning.js';
 export { SecurityPlugin } from './plugins/security.js';
 export { LoggingPlugin } from './plugins/logging.js';
 export { OpenAPIPlugin } from './plugins/openapi.js';
-export { ApiRegistryPlugin } from './plugins/api-registry.js';
 export { TimestampsPlugin } from './plugins/timestamps.js';
 
 // Import for internal use
