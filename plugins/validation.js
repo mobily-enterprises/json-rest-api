@@ -1,3 +1,5 @@
+import { ValidationError, BadRequestError, ErrorCodes } from '../errors.js';
+
 /**
  * Validation plugin for JSON REST API
  */
@@ -59,7 +61,35 @@ export const ValidationPlugin = {
 
       // Update context with validated data and errors
       context.data = validatedObject;
-      context.errors.push(...errors);
+      
+      // Map schema errors to structured errors with proper codes
+      const mappedErrors = errors.map(err => {
+        let code = ErrorCodes.INVALID_VALUE;
+        
+        // Map error types to specific codes
+        if (err.message.includes('required')) {
+          code = ErrorCodes.REQUIRED_FIELD;
+        } else if (err.message.includes('too long')) {
+          code = ErrorCodes.FIELD_TOO_LONG;
+        } else if (err.message.includes('too short')) {
+          code = ErrorCodes.FIELD_TOO_SHORT;
+        } else if (err.message.includes('type')) {
+          code = ErrorCodes.INVALID_TYPE;
+        } else if (err.message.includes('format')) {
+          code = ErrorCodes.INVALID_FORMAT;
+        } else if (err.message.includes('enum')) {
+          code = ErrorCodes.INVALID_ENUM_VALUE;
+        }
+        
+        return {
+          field: err.field,
+          message: err.message,
+          code,
+          value: context.data[err.field]
+        };
+      });
+      
+      context.errors.push(...mappedErrors);
     });
 
     // Add permission checking hook
@@ -76,7 +106,7 @@ export const ValidationPlugin = {
           context.errors.push({
             field: null,
             message: message || 'Permission denied',
-            code: 'PERMISSION_DENIED'
+            code: ErrorCodes.FORBIDDEN
           });
         }
       }
@@ -117,7 +147,14 @@ export const ValidationPlugin = {
       );
 
       if (errors.length > 0) {
-        context.errors.push(...errors);
+        // Map search validation errors
+        const mappedErrors = errors.map(err => ({
+          field: `filter.${err.field}`,
+          message: err.message,
+          code: ErrorCodes.INVALID_PARAMETER,
+          value: searchData[err.field]
+        }));
+        context.errors.push(...mappedErrors);
       } else {
         // Update filter with validated values
         if (params.filter) {

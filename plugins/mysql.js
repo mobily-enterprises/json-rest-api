@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import { NotFoundError, InternalError, ConflictError, ErrorCodes } from '../errors.js';
 
 /**
  * MySQL storage plugin for JSON REST API with full feature parity
@@ -28,7 +29,8 @@ export const MySQLPlugin = {
     api.getConnection = (connectionName = 'default') => {
       const conn = api.mysqlPools.get(connectionName);
       if (!conn) {
-        throw new Error(`Connection '${connectionName}' not found`);
+        throw new InternalError(`Database connection '${connectionName}' not found`)
+          .withContext({ connectionName });
       }
       return conn;
     };
@@ -71,12 +73,25 @@ export const MySQLPlugin = {
       const table = options.table || options.type;
       const idProperty = options.idProperty || api.options.idProperty;
 
-      const [rows] = await pool.query(
-        `SELECT * FROM ?? WHERE ?? = ?`,
-        [table, idProperty, id]
-      );
+      try {
+        const [rows] = await pool.query(
+          `SELECT * FROM ?? WHERE ?? = ?`,
+          [table, idProperty, id]
+        );
 
-      return rows[0] || null;
+        if (!rows[0] && !options.allowNotFound) {
+          throw new NotFoundError(options.type || table, id);
+        }
+        
+        return rows[0] || null;
+      } catch (error) {
+        if (error instanceof NotFoundError) throw error;
+        throw new InternalError('Database query failed')
+          .withContext({ 
+            code: ErrorCodes.DATABASE_ERROR,
+            originalError: error.message 
+          });
+      }
     });
 
     api.implement('query', async (context) => {

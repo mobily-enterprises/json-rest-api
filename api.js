@@ -1,4 +1,5 @@
 import semver from 'semver';
+import { ValidationError, InternalError, BadRequestError } from './errors.js';
 
 // Global registry for all APIs
 const globalRegistry = new Map();
@@ -42,6 +43,10 @@ export class Api {
     
     if (!name || !version) {
       throw new Error('API name and version required for registration');
+    }
+    
+    if (!semver.valid(version)) {
+      throw new BadRequestError(`Invalid version format: ${version}`);
     }
     
     if (!globalRegistry.has(name)) {
@@ -250,7 +255,7 @@ export class Api {
     // Get the implementation
     const impl = this.implementers.get('get');
     if (!impl) {
-      throw new Error('No implementation for get method');
+      throw new InternalError('No storage plugin installed').withContext({ method: 'get' });
     }
 
     // Execute the implementation
@@ -288,7 +293,7 @@ export class Api {
     // Get the implementation
     const impl = this.implementers.get('query');
     if (!impl) {
-      throw new Error('No implementation for query method');
+      throw new InternalError('No storage plugin installed').withContext({ method: 'query' });
     }
 
     // Execute the implementation
@@ -339,7 +344,7 @@ export class Api {
     // Get the implementation
     const impl = this.implementers.get('insert');
     if (!impl) {
-      throw new Error('No implementation for insert method');
+      throw new InternalError('No storage plugin installed').withContext({ method: 'insert' });
     }
 
     // Execute the implementation
@@ -385,7 +390,7 @@ export class Api {
     // Get the implementation
     const impl = this.implementers.get('update');
     if (!impl) {
-      throw new Error('No implementation for update method');
+      throw new InternalError('No storage plugin installed').withContext({ method: 'update' });
     }
 
     // Execute the implementation
@@ -422,7 +427,7 @@ export class Api {
     // Get the implementation
     const impl = this.implementers.get('delete');
     if (!impl) {
-      throw new Error('No implementation for delete method');
+      throw new InternalError('No storage plugin installed').withContext({ method: 'delete' });
     }
 
     // Execute the implementation
@@ -479,15 +484,11 @@ export class Api {
    * Create a validation error
    */
   _createValidationError(errors) {
-    const error = new Error('Validation failed');
-    error.status = 422;
-    error.errors = errors.map(err => ({
-      status: '422',
-      title: 'Validation Error',
-      detail: err.message,
-      source: { pointer: `/data/attributes/${err.field}` }
-    }));
-    return error;
+    const validationError = new ValidationError();
+    errors.forEach(err => {
+      validationError.addFieldError(err.field, err.message, err.code);
+    });
+    return validationError;
   }
   
   /**

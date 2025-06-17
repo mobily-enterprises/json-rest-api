@@ -1444,6 +1444,85 @@ interface Error {
 }
 ```
 
+## Error Classes
+
+The library provides structured error classes for consistent error handling:
+
+### Base Error Class
+```javascript
+import { ApiError } from 'json-rest-api';
+
+// Base class for all API errors
+const error = new ApiError(message, status, code);
+error.withContext({ userId: 123 }); // Add context
+```
+
+### Client Errors
+```javascript
+import { 
+  BadRequestError,      // 400
+  UnauthorizedError,    // 401
+  ForbiddenError,       // 403
+  NotFoundError,        // 404
+  ConflictError,        // 409
+  ValidationError,      // 422
+  RateLimitError        // 429
+} from 'json-rest-api';
+
+// Examples
+throw new BadRequestError('Invalid request format');
+throw new NotFoundError('User', userId);
+throw new ConflictError('Resource already exists');
+
+// Validation errors support multiple fields
+const validationError = new ValidationError();
+validationError
+  .addFieldError('email', 'Invalid email format')
+  .addFieldError('age', 'Must be 18 or older');
+throw validationError;
+```
+
+### Server Errors
+```javascript
+import { 
+  InternalError,              // 500
+  ServiceUnavailableError     // 503
+} from 'json-rest-api';
+
+throw new InternalError('Database connection failed');
+throw new ServiceUnavailableError('Service under maintenance', 300); // retry after 300s
+```
+
+### Error Codes
+```javascript
+import { ErrorCodes } from 'json-rest-api';
+
+// Standardized error codes
+ErrorCodes.BAD_REQUEST
+ErrorCodes.INVALID_FORMAT
+ErrorCodes.MISSING_PARAMETER
+ErrorCodes.UNAUTHORIZED
+ErrorCodes.NOT_FOUND
+ErrorCodes.DUPLICATE_RESOURCE
+ErrorCodes.VALIDATION_ERROR
+ErrorCodes.REQUIRED_FIELD
+ErrorCodes.FIELD_TOO_LONG
+ErrorCodes.DATABASE_ERROR
+// ... and many more
+```
+
+### Error Helpers
+```javascript
+import { normalizeError, formatErrorResponse } from 'json-rest-api';
+
+// Convert any error to ApiError
+const apiError = normalizeError(unknownError);
+
+// Format for JSON:API response
+const response = formatErrorResponse(error);
+// Returns: { errors: [...] }
+```
+
 ## Query Response Format
 
 ```typescript

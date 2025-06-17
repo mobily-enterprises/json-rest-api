@@ -2,6 +2,23 @@
 export { Api } from './api.js';
 export { Schema } from './schema.js';
 
+// Error exports
+export { 
+  ApiError,
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  ValidationError,
+  RateLimitError,
+  InternalError,
+  ServiceUnavailableError,
+  ErrorCodes,
+  normalizeError,
+  formatErrorResponse
+} from './errors.js';
+
 // Plugin exports
 export { MemoryPlugin } from './plugins/memory.js';
 export { MySQLPlugin } from './plugins/mysql.js';

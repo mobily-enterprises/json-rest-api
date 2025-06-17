@@ -1,4 +1,5 @@
 import firstBy from 'thenby';
+import { NotFoundError, ConflictError, ErrorCodes } from '../errors.js';
 
 /**
  * Memory storage plugin for JSON REST API
@@ -17,6 +18,10 @@ export const MemoryPlugin = {
       const record = api.memoryData.find(item => 
         String(item[idProperty]) === String(id)
       );
+      
+      if (!record && !options.allowNotFound) {
+        throw new NotFoundError(options.type || 'Resource', id);
+      }
       
       return record || null;
     });
@@ -94,6 +99,20 @@ export const MemoryPlugin = {
         data[idProperty] = api.memoryIdCounter++;
       }
       
+      // Check for duplicate ID
+      const existing = api.memoryData.find(item => 
+        String(item[idProperty]) === String(data[idProperty])
+      );
+      
+      if (existing) {
+        throw new ConflictError(`Resource with ${idProperty} '${data[idProperty]}' already exists`)
+          .withContext({ 
+            field: idProperty, 
+            value: data[idProperty],
+            code: ErrorCodes.DUPLICATE_RESOURCE 
+          });
+      }
+      
       // Handle positioning if enabled
       if (options.positionField && data[options.beforeIdField] !== undefined) {
         await handlePositioning(api, data, options);
@@ -114,7 +133,7 @@ export const MemoryPlugin = {
       );
       
       if (index === -1) {
-        throw new Error('Resource not found');
+        throw new NotFoundError(options.type || 'Resource', id);
       }
       
       // Handle positioning
@@ -137,7 +156,7 @@ export const MemoryPlugin = {
       );
       
       if (index === -1) {
-        throw new Error('Resource not found');
+        throw new NotFoundError(options.type || 'Resource', id);
       }
       
       api.memoryData.splice(index, 1);

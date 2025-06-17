@@ -680,6 +680,55 @@ const results = await api.resources.users.query({
 });
 ```
 
+### Error Handling
+
+The library provides structured error classes for consistent error handling:
+
+```javascript
+import { 
+  NotFoundError, 
+  ValidationError, 
+  ConflictError,
+  BadRequestError 
+} from 'json-rest-api';
+
+// Handling errors in your code
+try {
+  const user = await api.resources.users.get(999);
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    console.log(`User ${error.resourceId} not found`);
+  }
+}
+
+// Custom validation with proper errors
+api.hook('afterValidate', async (context) => {
+  if (context.data.age < 18 && context.data.premiumAccount) {
+    const error = new ValidationError();
+    error.addFieldError('age', 'Must be 18+ for premium accounts', 'AGE_RESTRICTION');
+    throw error;
+  }
+});
+
+// In HTTP handlers
+router.post('/api/users', async (req, res) => {
+  try {
+    const user = await api.resources.users.create(req.body);
+    res.status(201).json(user);
+  } catch (error) {
+    // Errors automatically have proper status codes
+    res.status(error.status || 500).json(formatErrorResponse(error));
+  }
+});
+
+// Multi-field validation errors
+const validationError = new ValidationError();
+validationError
+  .addFieldError('email', 'Email already exists')
+  .addFieldError('username', 'Username is taken');
+throw validationError;
+```
+
 ### Batch Operations
 
 ```javascript

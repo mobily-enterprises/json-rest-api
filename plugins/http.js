@@ -1,4 +1,5 @@
 import express from 'express';
+import { NotFoundError, BadRequestError, formatErrorResponse, normalizeError } from '../errors.js';
 
 /**
  * HTTP plugin for JSON REST API with JSON:API compliance
@@ -31,23 +32,9 @@ export const HTTPPlugin = {
     };
 
     // Helper to format JSON:API errors
-    const formatErrors = (errors, status = 400) => {
-      if (!Array.isArray(errors)) {
-        errors = [errors];
-      }
-
-      return {
-        errors: errors.map(err => {
-          if (err.status) return err; // Already formatted
-          
-          return {
-            status: String(status),
-            title: err.code || 'Error',
-            detail: err.message || String(err),
-            source: err.field ? { pointer: `/data/attributes/${err.field}` } : undefined
-          };
-        })
-      };
+    const formatErrors = (error) => {
+      return formatErrorResponse(error);
+    };
     };
 
     // Parse query parameters
@@ -155,8 +142,8 @@ export const HTTPPlugin = {
 
         res.json(result);
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
@@ -169,17 +156,13 @@ export const HTTPPlugin = {
         });
 
         if (!result.data) {
-          res.status(404).json(formatErrors({
-            message: 'Resource not found',
-            code: 'NOT_FOUND'
-          }, 404));
-          return;
+          throw new NotFoundError(req.params.type, req.params.id);
         }
 
         res.json(result);
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
@@ -196,8 +179,8 @@ export const HTTPPlugin = {
            .location(`${basePath}${routePrefix}/${req.params.type}/${result.data.id}`)
            .json(result);
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
@@ -212,17 +195,13 @@ export const HTTPPlugin = {
         });
 
         if (!result.data) {
-          res.status(404).json(formatErrors({
-            message: 'Resource not found',
-            code: 'NOT_FOUND'
-          }, 404));
-          return;
+          throw new NotFoundError(req.params.type, req.params.id);
         }
 
         res.json(result);
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
@@ -236,17 +215,13 @@ export const HTTPPlugin = {
         });
 
         if (!result.data) {
-          res.status(404).json(formatErrors({
-            message: 'Resource not found',
-            code: 'NOT_FOUND'
-          }, 404));
-          return;
+          throw new NotFoundError(req.params.type, req.params.id);
         }
 
         res.json(result);
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
@@ -260,8 +235,8 @@ export const HTTPPlugin = {
 
         res.status(204).end();
       } catch (error) {
-        const status = error.status || 400;
-        res.status(status).json(formatErrors(error.errors || error, status));
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(apiError));
       }
     });
 
