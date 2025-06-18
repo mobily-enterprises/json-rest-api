@@ -118,8 +118,43 @@ export default {
 }
 ```
 
+### Advanced Refs (Automatic Joins)
+The library supports automatic joins through the `refs.join` configuration in schemas:
+
+```javascript
+fieldName: {
+  type: 'id',
+  refs: {
+    resource: 'relatedResource',
+    join: {
+      eager: true,              // Auto-join on all operations
+      fields: ['id', 'name'],   // Fields to select
+      resourceField: 'author',  // Optional: separate field for data
+      preserveId: true,         // Keep both ID and object
+      runHooks: true            // Run afterGet hooks on joined data
+    }
+  }
+}
+```
+
+Key implementation details:
+- Joins are processed in `initializeQuery` hook (MySQL plugin)
+- Join data uses `__fieldName__` prefix for field grouping
+- `_processJoinedData` in api.js handles result transformation
+- Hooks can detect join context via `context.options.isJoinResult`
+- HTTP plugin converts to JSON:API relationships/included
+
+### Query Builder Architecture
+The QueryBuilder (`query-builder.js`) provides:
+- Fluent API for SQL construction
+- Smart joins using schema refs
+- `includeRelated()` for easy field selection
+- Support for complex queries with proper escaping
+- Schema-aware field selection (respects `silent` fields)
+
 ### Testing Approach
-- Use `test-basic.js` as a template for testing
+- Use `test-basic.js` for basic functionality
+- Use `test-advanced-refs.js` for join testing  
 - Tests use the in-memory plugin for isolation
 - No specific test framework - uses Node.js assert
 - Focus on testing plugin interactions and hook ordering

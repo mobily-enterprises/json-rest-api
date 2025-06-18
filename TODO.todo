@@ -1,13 +1,6 @@
 TODO
-  6. Hook System Gaps
 
-  - Missing hooks from original:
-    - beforeId, afterId
-    - beforeRetrieve, afterRetrieve
-    - beforeInsert, afterInsert (full lifecycle)
-    - queryFieldsAndJoins
-    - updateConditionsAndArgs
-    - deleteConditionsAndArgs
+You made this comment on the missing features of:
 
   7. Store Templates
 
@@ -105,4 +98,15 @@ TODO
     - Store registry with semver matching
     - Version-specific schema transformations
     - Backward compatibility helpers
+
+  6. Hook System Gaps
+
+  - Missing hooks from original:
+    - beforeId, afterId
+    - beforeRetrieve, afterRetrieve
+    - beforeInsert, afterInsert (full lifecycle)
+    - queryFieldsAndJoins
+    - updateConditionsAndArgs
+    - deleteConditionsAndArgs
+
 

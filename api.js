@@ -29,6 +29,9 @@ export class Api {
     // Initialize hook points
     this._initializeHooks();
     
+    // Register core hooks for join processing
+    this._registerJoinProcessingHooks();
+    
     // Auto-register if name and version provided
     if (this.options.name && this.options.version) {
       this.register();
@@ -192,6 +195,13 @@ export class Api {
   }
   
   /**
+   * Alias for executeHook for backward compatibility
+   */
+  async runHooks(name, context) {
+    return this.executeHook(name, context);
+  }
+  
+  /**
    * Apply artificial delay if configured
    */
   async _applyDelay(options = {}) {
@@ -227,10 +237,105 @@ export class Api {
       'beforeDelete',
       'afterDelete',
       'beforeSend',
-      'transformResult'
+      'transformResult',
+      'initializeQuery',
+      'modifyQuery',
+      'finalizeQuery'
     ];
     
     hookNames.forEach(name => this.hooks.set(name, []));
+  }
+  
+  /**
+   * Register core hooks for processing joined data
+   */
+  _registerJoinProcessingHooks() {
+    // Process joined fields after get operations
+    this.hook('afterGet', async (context) => {
+      if (!context.joinFields || Object.keys(context.joinFields).length === 0) {
+        return;
+      }
+      
+      await this._processJoinedData(context, context.result);
+    }, 90); // High priority to run after other afterGet hooks
+    
+    // Process joined fields after query operations
+    this.hook('afterQuery', async (context) => {
+      if (!context.joinFields || Object.keys(context.joinFields).length === 0) {
+        return;
+      }
+      
+      // Process each result
+      for (const record of context.results) {
+        await this._processJoinedData(context, record);
+      }
+    }, 90); // High priority to run after other afterQuery hooks
+  }
+  
+  /**
+   * Process joined data for a single record
+   */
+  async _processJoinedData(context, record) {
+    if (!record) return;
+    
+    for (const [fieldName, joinMeta] of Object.entries(context.joinFields)) {
+      // Extract joined data from prefixed fields
+      const joinedData = {};
+      let hasData = false;
+      
+      const prefix = `__${fieldName}__`;
+      const keysToDelete = [];
+      
+      for (const key in record) {
+        if (key.startsWith(prefix)) {
+          const actualField = key.substring(prefix.length);
+          joinedData[actualField] = record[key];
+          keysToDelete.push(key);
+          if (record[key] !== null) hasData = true;
+        }
+      }
+      
+      // Remove prefixed fields
+      keysToDelete.forEach(key => delete record[key]);
+      
+      if (hasData) {
+        // Run hooks if configured
+        let processedData = joinedData;
+        if (joinMeta.runHooks) {
+          const hookContext = {
+            api: this,
+            method: 'get',
+            id: joinedData.id,
+            options: {
+              type: joinMeta.resource,
+              isJoinResult: true,
+              joinContext: joinMeta.hookContext,
+              parentType: context.options.type,
+              parentId: record[this.options.idProperty],
+              parentField: fieldName
+            },
+            result: joinedData
+          };
+          
+          // Run afterGet hooks for the joined resource
+          await this.executeHook('afterGet', hookContext);
+          processedData = hookContext.result;
+        }
+        
+        // Place the data based on configuration
+        if (joinMeta.resourceField) {
+          // Put in separate field (e.g., categoryId stays as ID, category has the object)
+          record[joinMeta.resourceField] = processedData;
+        } else if (!joinMeta.preserveId) {
+          // Replace the ID field with the object
+          record[fieldName] = processedData;
+        } else {
+          // Both: keep ID and add separate field
+          const resourceField = fieldName.replace(/Id$/, '');
+          record[resourceField] = processedData;
+        }
+      }
+    }
   }
 
   /**

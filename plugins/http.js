@@ -65,9 +65,19 @@ export const HTTPPlugin = {
           number: req.query['page[number]'] || req.query.page
         },
         include: req.query.include,
-        fields: {}
+        fields: {},
+        joins: req.query.joins,
+        excludeJoins: req.query.excludeJoins
       };
 
+      // Parse joins parameters
+      if (params.joins && typeof params.joins === 'string') {
+        params.joins = params.joins === 'false' ? false : params.joins.split(',');
+      }
+      if (params.excludeJoins && typeof params.excludeJoins === 'string') {
+        params.excludeJoins = params.excludeJoins.split(',');
+      }
+      
       // Parse filters
       for (const [key, value] of Object.entries(req.query)) {
         if (key.startsWith('filter[') && key.endsWith(']')) {
@@ -175,6 +185,11 @@ export const HTTPPlugin = {
       // Only process for HTTP responses with results
       if (!context.isHttp || !context.result) return;
       
+      // Handle joined data for JSON:API relationships
+      if (context.joinFields && Object.keys(context.joinFields).length > 0) {
+        await processJoinedDataForJsonApi(context);
+      }
+      
       // Resolve all affected records
       const affectedRecords = await api.resolveAffectedRecords(context);
       
@@ -184,7 +199,8 @@ export const HTTPPlugin = {
         
         if (includedRecords.length > 0) {
           // Add to response as 'included' per JSON:API spec
-          context.result.included = includedRecords;
+          context.result.included = context.result.included || [];
+          context.result.included.push(...includedRecords);
         }
       }
     }, 80); // High priority to run before response is sent
@@ -215,8 +231,11 @@ export const HTTPPlugin = {
     // GET single resource
     router.get(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        const params = parseQueryParams(req);
         const result = await api.get(req.params.id, {
           type: req.params.type,
+          joins: params.joins,
+          excludeJoins: params.excludeJoins,
           isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
@@ -343,5 +362,109 @@ export const HTTPPlugin = {
       api._routeMiddlewares.push({ method, path, middlewares });
       return api;
     };
+    
+    /**
+     * Process joined data for JSON:API compliance
+     * Moves joined objects to relationships and included sections
+     */
+    async function processJoinedDataForJsonApi(context) {
+      const schema = api.schemas?.get(context.options.type);
+      if (!schema) return;
+      
+      const records = context.method === 'query' ? context.results : [context.result];
+      const included = [];
+      const seen = new Set();
+      
+      for (const record of records) {
+        if (!record) continue;
+        
+        record.relationships = record.relationships || {};
+        
+        for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+          if (!fieldDef.refs?.join) continue;
+          
+          const joinMeta = context.joinFields[fieldName];
+          if (!joinMeta) continue;
+          
+          const resourceField = joinMeta.resourceField;
+          const preserveId = joinMeta.preserveId;
+          
+          // Determine where the joined data is stored
+          let joinedData = null;
+          let relationshipName = null;
+          
+          if (resourceField && record[resourceField]) {
+            // Data is in separate field
+            joinedData = record[resourceField];
+            relationshipName = resourceField;
+            delete record[resourceField]; // Remove from attributes
+          } else if (!preserveId && typeof record[fieldName] === 'object' && record[fieldName]) {
+            // Data replaced the ID field
+            joinedData = record[fieldName];
+            relationshipName = fieldName.replace(/Id$/, '');
+            // Replace with just the ID in attributes
+            record[fieldName] = joinedData.id || joinedData[api.options.idProperty];
+          } else if (preserveId) {
+            // Data is in derived field (fieldName without 'Id')
+            const derivedField = fieldName.replace(/Id$/, '');
+            if (record[derivedField]) {
+              joinedData = record[derivedField];
+              relationshipName = derivedField;
+              delete record[derivedField]; // Remove from attributes
+            }
+          }
+          
+          if (joinedData && relationshipName) {
+            // Add to relationships
+            record.relationships[relationshipName] = {
+              data: {
+                type: fieldDef.refs.resource,
+                id: String(joinedData.id || joinedData[api.options.idProperty])
+              }
+            };
+            
+            // Add to included (avoid duplicates)
+            const resourceId = joinedData.id || joinedData[api.options.idProperty];
+            const key = `${fieldDef.refs.resource}:${resourceId}`;
+            
+            if (!seen.has(key)) {
+              seen.add(key);
+              
+              // Format for JSON:API
+              const includedResource = {
+                type: fieldDef.refs.resource,
+                id: String(resourceId),
+                attributes: {}
+              };
+              
+              // Copy all fields except id to attributes
+              for (const [key, value] of Object.entries(joinedData)) {
+                if (key !== 'id' && key !== api.options.idProperty) {
+                  includedResource.attributes[key] = value;
+                }
+              }
+              
+              included.push(includedResource);
+            }
+          }
+        }
+        
+        // Remove empty relationships object
+        if (Object.keys(record.relationships).length === 0) {
+          delete record.relationships;
+        }
+      }
+      
+      // Add included resources to response
+      if (included.length > 0) {
+        if (context.method === 'query') {
+          context.result.included = context.result.included || [];
+          context.result.included.push(...included);
+        } else {
+          context.result.included = context.result.included || [];
+          context.result.included.push(...included);
+        }
+      }
+    }
   }
 };

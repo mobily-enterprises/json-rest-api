@@ -43,7 +43,9 @@ export const MySQLPlugin = {
      * This runs FIRST and sets up the basic query
      */
     api.hook('initializeQuery', async (context) => {
-      if (context.method !== 'query') return;
+      // Run for both query and get operations when joins are needed
+      if (context.method !== 'query' && context.method !== 'get') return;
+      if (context.method === 'get' && !context.query) return; // Skip if get isn't using query builder
       
       const table = context.options.table || context.options.type;
       const schema = api.schemas.get(context.options.type);
@@ -55,6 +57,57 @@ export const MySQLPlugin = {
       if (schema) {
         const fields = schemaFields(schema, table);
         query.select(...fields);
+        
+        // Handle advanced refs with join configuration
+        const requestedJoins = determineRequestedJoins(schema, context.params || context.options);
+        
+        if (requestedJoins.size > 0) {
+          // Store join metadata for later processing
+          context.joinFields = {};
+          
+          for (const fieldName of requestedJoins) {
+            const fieldDef = schema.structure[fieldName];
+            if (!fieldDef?.refs?.join) continue;
+            
+            const refs = fieldDef.refs;
+            const joinConfig = refs.join;
+            
+            // Add the join
+            const joinType = joinConfig.type || 'left';
+            query[joinType + 'Join'](fieldName);
+            
+            // Determine which fields to select
+            const relatedSchema = api.schemas.get(refs.resource);
+            let fields;
+            
+            if (joinConfig.fields) {
+              fields = joinConfig.fields;
+            } else if (joinConfig.excludeFields) {
+              fields = Object.keys(relatedSchema.structure)
+                .filter(f => !joinConfig.excludeFields.includes(f))
+                .filter(f => joinConfig.includeSilent || !relatedSchema.structure[f].silent);
+            } else {
+              // Default: all non-silent fields
+              fields = Object.keys(relatedSchema.structure)
+                .filter(f => !relatedSchema.structure[f].silent);
+            }
+            
+            // Store metadata for result processing
+            context.joinFields[fieldName] = {
+              resource: refs.resource,
+              fields: fields,
+              runHooks: joinConfig.runHooks !== false,
+              hookContext: joinConfig.hookContext || 'join',
+              resourceField: joinConfig.resourceField,
+              preserveId: joinConfig.preserveId
+            };
+            
+            // Select fields with special prefix for grouping
+            fields.forEach(field => {
+              query.select(`${refs.resource}.${field} as __${fieldName}__${field}`);
+            });
+          }
+        }
       } else {
         query.select(`${table}.*`);
       }
@@ -115,17 +168,52 @@ export const MySQLPlugin = {
       const idProperty = options.idProperty || api.options.idProperty;
 
       try {
-        // Simple get - we don't use the query builder for single fetches
-        const [rows] = await pool.query(
-          `SELECT * FROM ?? WHERE ?? = ?`,
-          [table, idProperty, id]
-        );
-
-        if (!rows[0] && !options.allowNotFound) {
-          throw new NotFoundError(options.type || table, id);
-        }
+        // Check if we need to use query builder for joins
+        const schema = api.schemas?.get(options.type);
+        const needsJoins = schema && options.joins !== false && hasEagerJoins(schema, options);
         
-        return rows[0] || null;
+        if (needsJoins) {
+          // Use query builder for complex get with joins
+          const query = new QueryBuilder(table, api);
+          
+          // Set up base query
+          query.where(`${table}.${idProperty} = ?`, id);
+          
+          // Create a context for hooks
+          const queryContext = {
+            ...context,
+            query,
+            params: options
+          };
+          
+          // Run query hooks
+          await api.runHooks('initializeQuery', queryContext);
+          await api.runHooks('modifyQuery', queryContext);
+          await api.runHooks('finalizeQuery', queryContext);
+          
+          // Execute query
+          const sql = queryContext.query.toSQL();
+          const args = queryContext.query.getArgs();
+          const [rows] = await pool.query(sql, args);
+          
+          if (!rows[0] && !options.allowNotFound) {
+            throw new NotFoundError(options.type || table, id);
+          }
+          
+          return rows[0] || null;
+        } else {
+          // Simple get without joins
+          const [rows] = await pool.query(
+            `SELECT * FROM ?? WHERE ?? = ?`,
+            [table, idProperty, id]
+          );
+
+          if (!rows[0] && !options.allowNotFound) {
+            throw new NotFoundError(options.type || table, id);
+          }
+          
+          return rows[0] || null;
+        }
       } catch (error) {
         if (error instanceof NotFoundError) throw error;
         throw new InternalError('Database query failed')
@@ -372,4 +460,66 @@ function applyOperator(query, table, field, operator, value) {
     default:
       throw new BadRequestError(`Unknown operator: ${operator}`);
   }
+}
+
+/**
+ * Check if a schema has eager joins that should be loaded
+ */
+function hasEagerJoins(schema, options) {
+  // If joins are explicitly disabled, return false
+  if (options.joins === false) return false;
+  
+  // Check for eager joins in schema
+  for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+    if (fieldDef.refs?.join?.eager) {
+      // Check if this join is excluded
+      if (options.excludeJoins?.includes(fieldName)) continue;
+      
+      // If we have explicit joins list, only include if specified
+      if (Array.isArray(options.joins) && !options.joins.includes(fieldName)) continue;
+      
+      return true;
+    }
+  }
+  
+  // Also check if there are explicit joins requested
+  if (Array.isArray(options.joins) && options.joins.length > 0) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Determine which joins should be performed based on schema and options
+ */
+function determineRequestedJoins(schema, options) {
+  const requestedJoins = new Set();
+  
+  // If joins are explicitly disabled, return empty set
+  if (options.joins === false) return requestedJoins;
+  
+  // Process each field in the schema
+  for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+    if (!fieldDef.refs?.join) continue;
+    
+    const joinConfig = fieldDef.refs.join;
+    
+    // Check if this join should be included
+    let shouldInclude = false;
+    
+    if (Array.isArray(options.joins)) {
+      // Explicit join list takes precedence
+      shouldInclude = options.joins.includes(fieldName);
+    } else if (joinConfig.eager) {
+      // Check eager joins (unless excluded)
+      shouldInclude = !options.excludeJoins?.includes(fieldName);
+    }
+    
+    if (shouldInclude) {
+      requestedJoins.add(fieldName);
+    }
+  }
+  
+  return requestedJoins;
 }
