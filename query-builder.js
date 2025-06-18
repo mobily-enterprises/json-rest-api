@@ -290,19 +290,72 @@ export class QueryBuilder {
   }
   
   /**
+   * Select fields from a specific table with automatic aliasing
+   * @param {string} table - Table name to select from
+   * @param {Array<string>|Object} fieldsOrAliases - Fields or field:alias mapping
+   * @returns {QueryBuilder} this for chaining
+   * 
+   * @example
+   * // Auto-prefix with relationship field name
+   * query.selectFrom('users', ['name', 'email'])
+   * 
+   * // Custom aliases
+   * query.selectFrom('users', {
+   *   name: 'authorName',
+   *   email: 'authorEmail',
+   *   id: true  // Auto-prefix
+   * })
+   */
+  selectFrom(table, fieldsOrAliases) {
+    // Try to find which relationship this table belongs to
+    const join = this.parts.joins.find(j => j.table === table);
+    const defaultPrefix = join?.field || table;
+    
+    if (Array.isArray(fieldsOrAliases)) {
+      // Array format: auto-prefix with relationship field name
+      fieldsOrAliases.forEach(field => {
+        this.select(`${table}.${field} as ${defaultPrefix}_${field}`);
+      });
+    } else if (typeof fieldsOrAliases === 'object') {
+      // Object format: custom aliases
+      Object.entries(fieldsOrAliases).forEach(([field, alias]) => {
+        if (alias === true) {
+          // true = use auto-prefix
+          this.select(`${table}.${field} as ${defaultPrefix}_${field}`);
+        } else if (alias === false) {
+          // false = no alias
+          this.select(`${table}.${field}`);
+        } else if (typeof alias === 'string') {
+          // string = custom alias
+          this.select(`${table}.${field} as ${alias}`);
+        }
+      });
+    }
+    
+    return this;
+  }
+  
+  /**
    * Include related resource fields using refs
    * @param {string} fieldName - Field with refs definition
-   * @param {Array<string>} fields - Specific fields to include (optional)
+   * @param {Array<string>|Object} fieldsOrOptions - Fields to include or object with aliases
    * @returns {QueryBuilder} this for chaining
    * 
    * @example
    * // Include all user fields
    * query.includeRelated('userId')
    * 
-   * // Include specific fields only
-   * query.includeRelated('userId', ['name', 'email', 'avatar'])
+   * // Include specific fields with auto-prefixing
+   * query.includeRelated('userId', ['name', 'email'])
+   * 
+   * // Include with custom aliases
+   * query.includeRelated('userId', {
+   *   name: 'userName',     // Custom alias
+   *   email: true,          // Auto-prefix: userId_email
+   *   avatar: 'userAvatar'  // Custom alias
+   * })
    */
-  includeRelated(fieldName, fields = null) {
+  includeRelated(fieldName, fieldsOrOptions = null) {
     if (!this.api) return this;
     
     const schema = this.api.schemas?.get(this.resourceType);
@@ -322,14 +375,28 @@ export class QueryBuilder {
         this.leftJoin(fieldName);
       }
       
-      // Then add the fields
-      if (fields) {
-        // Include only specified fields
-        fields.forEach(field => {
+      // Handle different input formats
+      if (Array.isArray(fieldsOrOptions)) {
+        // Array format: auto-prefix all fields
+        fieldsOrOptions.forEach(field => {
           this.select(`${relatedResource}.${field} as ${fieldName}_${field}`);
         });
+      } else if (typeof fieldsOrOptions === 'object' && fieldsOrOptions !== null) {
+        // Object format: support custom aliases
+        Object.entries(fieldsOrOptions).forEach(([field, alias]) => {
+          if (alias === true) {
+            // true means use auto-prefix
+            this.select(`${relatedResource}.${field} as ${fieldName}_${field}`);
+          } else if (alias === false) {
+            // false means no alias (use field name as-is)
+            this.select(`${relatedResource}.${field}`);
+          } else if (typeof alias === 'string') {
+            // Custom alias provided
+            this.select(`${relatedResource}.${field} as ${alias}`);
+          }
+        });
       } else if (relatedSchema) {
-        // Include all non-silent fields
+        // No fields specified: include all non-silent fields
         Object.entries(relatedSchema.structure).forEach(([field, def]) => {
           if (!def.silent) {
             this.select(`${relatedResource}.${field} as ${fieldName}_${field}`);
