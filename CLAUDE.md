@@ -66,6 +66,11 @@ new Schema({
 
 Types: `string`, `number`, `boolean`, `object`, `array`, `id`, `timestamp`, `json`
 
+Field options:
+- `required`: Field must be present
+- `min`/`max`: Length/value constraints
+- `silent`: Exclude from default SELECT queries (useful for passwords, large fields, internal data)
+
 ### Resource Proxy API (NEW)
 The library now provides an intuitive proxy API:
 - Old: `api.get(123, { type: 'users' })`

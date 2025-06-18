@@ -192,7 +192,25 @@ export class QueryBuilder {
     if (this.parts.select.length > 0) {
       sql.push(`SELECT ${this.parts.select.join(', ')}`);
     } else {
-      sql.push('SELECT *');
+      // Default: select all non-silent fields from the main table
+      if (this.api) {
+        const schema = this.api.schemas?.get(this.resourceType);
+        if (schema) {
+          const fields = schemaFields(schema, this.resourceType);
+          if (fields.length > 0) {
+            sql.push(`SELECT ${fields.join(', ')}`);
+          } else {
+            // No non-silent fields defined, fall back to *
+            sql.push(`SELECT ${this.resourceType}.*`);
+          }
+        } else {
+          // No schema found, use table.*
+          sql.push(`SELECT ${this.resourceType}.*`);
+        }
+      } else {
+        // No API reference, fall back to *
+        sql.push('SELECT *');
+      }
     }
     
     // FROM clause
