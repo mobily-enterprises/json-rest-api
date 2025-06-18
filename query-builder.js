@@ -15,8 +15,9 @@
  */
 
 export class QueryBuilder {
-  constructor(resourceType) {
+  constructor(resourceType, api = null) {
     this.resourceType = resourceType;
+    this.api = api;  // Reference to API for schema lookups
     
     // Parts of the query stored separately for easy modification
     this.parts = {
@@ -60,22 +61,47 @@ export class QueryBuilder {
   /**
    * Add a JOIN clause
    * @param {string} type - JOIN type (INNER, LEFT, RIGHT)
-   * @param {string} table - Table to join
-   * @param {string} on - JOIN condition
+   * @param {string} tableOrField - Table name OR field name with refs
+   * @param {string} on - JOIN condition (optional if using field with refs)
    * @returns {QueryBuilder} this for chaining
    * 
    * @example
+   * // Traditional way
    * query.leftJoin('posts', 'posts.userId = users.id')
+   * 
+   * // Smart way using refs
+   * query.leftJoin('userId')  // Automatically uses refs: { resource: 'users' }
    */
-  join(type, table, on) {
-    this.parts.joins.push({ type: type.toUpperCase(), table, on });
+  join(type, tableOrField, on) {
+    // If no ON condition provided, try to build it from schema refs
+    if (!on && this.api) {
+      const schema = this.api.schemas?.get(this.resourceType);
+      const fieldDef = schema?.structure?.[tableOrField];
+      
+      if (fieldDef?.refs?.resource) {
+        // We have refs! Build the join automatically
+        const joinTable = fieldDef.refs.resource;
+        const joinCondition = `${joinTable}.id = ${this.resourceType}.${tableOrField}`;
+        
+        this.parts.joins.push({ 
+          type: type.toUpperCase(), 
+          table: joinTable, 
+          on: joinCondition,
+          field: tableOrField  // Store the field for reference
+        });
+        return this;
+      }
+    }
+    
+    // Traditional join with explicit table and condition
+    this.parts.joins.push({ type: type.toUpperCase(), table: tableOrField, on });
     return this;
   }
   
   // Convenience methods for common joins
-  innerJoin(table, on) { return this.join('INNER', table, on); }
-  leftJoin(table, on) { return this.join('LEFT', table, on); }
-  rightJoin(table, on) { return this.join('RIGHT', table, on); }
+  innerJoin(tableOrField, on) { return this.join('INNER', tableOrField, on); }
+  leftJoin(tableOrField, on) { return this.join('LEFT', tableOrField, on); }
+  rightJoin(tableOrField, on) { return this.join('RIGHT', tableOrField, on); }
   
   /**
    * Add a WHERE condition
@@ -264,11 +290,66 @@ export class QueryBuilder {
   }
   
   /**
+   * Include related resource fields using refs
+   * @param {string} fieldName - Field with refs definition
+   * @param {Array<string>} fields - Specific fields to include (optional)
+   * @returns {QueryBuilder} this for chaining
+   * 
+   * @example
+   * // Include all user fields
+   * query.includeRelated('userId')
+   * 
+   * // Include specific fields only
+   * query.includeRelated('userId', ['name', 'email', 'avatar'])
+   */
+  includeRelated(fieldName, fields = null) {
+    if (!this.api) return this;
+    
+    const schema = this.api.schemas?.get(this.resourceType);
+    const fieldDef = schema?.structure?.[fieldName];
+    
+    if (fieldDef?.refs?.resource) {
+      const relatedResource = fieldDef.refs.resource;
+      const relatedSchema = this.api.schemas?.get(relatedResource);
+      
+      // First, add the join if not already added
+      const joinExists = this.parts.joins.some(j => 
+        j.field === fieldName || 
+        (j.table === relatedResource && j.on?.includes(fieldName))
+      );
+      
+      if (!joinExists) {
+        this.leftJoin(fieldName);
+      }
+      
+      // Then add the fields
+      if (fields) {
+        // Include only specified fields
+        fields.forEach(field => {
+          this.select(`${relatedResource}.${field} as ${fieldName}_${field}`);
+        });
+      } else if (relatedSchema) {
+        // Include all non-silent fields
+        Object.entries(relatedSchema.structure).forEach(([field, def]) => {
+          if (!def.silent) {
+            this.select(`${relatedResource}.${field} as ${fieldName}_${field}`);
+          }
+        });
+      } else {
+        // Fallback: include all fields
+        this.select(`${relatedResource}.*`);
+      }
+    }
+    
+    return this;
+  }
+  
+  /**
    * Clone this query builder
    * @returns {QueryBuilder} A deep copy of this builder
    */
   clone() {
-    const cloned = new QueryBuilder(this.resourceType);
+    const cloned = new QueryBuilder(this.resourceType, this.api);
     
     // Deep copy all parts
     cloned.parts = {

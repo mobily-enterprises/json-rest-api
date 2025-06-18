@@ -48,8 +48,8 @@ export const MySQLPlugin = {
       const table = context.options.table || context.options.type;
       const schema = api.schemas.get(context.options.type);
       
-      // Create query builder with default fields
-      const query = new QueryBuilder(table);
+      // Create query builder with default fields and API reference
+      const query = new QueryBuilder(table, api);
       
       // Add schema fields by default (excluding silent ones)
       if (schema) {
@@ -243,7 +243,7 @@ export const MySQLPlugin = {
 
       try {
         // Build update query
-        const query = new QueryBuilder(table);
+        const query = new QueryBuilder(table, api);
         query.where(`${idProperty} = ?`, id);
         
         // Allow hooks to modify update conditions
@@ -293,7 +293,7 @@ export const MySQLPlugin = {
 
       try {
         // Build delete query
-        const query = new QueryBuilder(table);
+        const query = new QueryBuilder(table, api);
         query.where(`${idProperty} = ?`, id);
         
         // Allow hooks to modify delete conditions
