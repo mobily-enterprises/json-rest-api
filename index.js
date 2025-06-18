@@ -1,6 +1,7 @@
 // Core exports
 export { Api } from './api.js';
 export { Schema } from './schema.js';
+export { QueryBuilder } from './query-builder.js';
 
 // Error exports
 export { 

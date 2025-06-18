@@ -981,6 +981,134 @@ The client benefits by:
 3. Avoiding additional API calls
 4. Having a consistent view of related data
 
+## Query Builder Tutorial
+
+The MySQL plugin includes a powerful query builder that lets you modify queries through hooks.
+
+### Basic Query Modification
+
+```javascript
+// Add a join to all product queries
+api.hook('modifyQuery', async (context) => {
+  if (context.options.type === 'products') {
+    context.query
+      .select('categories.name as categoryName')
+      .leftJoin('categories', 'categories.id = products.categoryId');
+  }
+});
+
+// Now all product queries include category name:
+// GET /api/products
+// Returns: { 
+//   data: { 
+//     id: "1", 
+//     attributes: { name: "Widget", categoryName: "Electronics" }
+//   }
+// }
+```
+
+### Conditional Modifications
+
+```javascript
+// Only join when requested via include parameter
+api.hook('modifyQuery', async (context) => {
+  if (context.options.type === 'reviews') {
+    const { include } = context.params;
+    
+    if (include?.includes('user')) {
+      context.query
+        .select('users.name as userName', 'users.avatar')
+        .leftJoin('users', 'users.id = reviews.userId');
+    }
+    
+    if (include?.includes('product')) {
+      context.query
+        .select('products.name as productName')
+        .leftJoin('products', 'products.id = reviews.productId');
+    }
+  }
+});
+
+// Usage: GET /api/reviews?include=user,product
+```
+
+### Complex Aggregations
+
+```javascript
+// Add statistics to queries
+api.hook('modifyQuery', async (context) => {
+  if (context.options.type === 'products') {
+    context.query
+      .select(
+        'COALESCE(AVG(reviews.rating), 0) as avgRating',
+        'COUNT(DISTINCT reviews.id) as reviewCount'
+      )
+      .leftJoin('reviews', 'reviews.productId = products.id')
+      .groupBy('products.id');
+  }
+});
+```
+
+### Search Across Multiple Tables
+
+```javascript
+api.hook('modifyQuery', async (context) => {
+  if (context.params.search) {
+    const search = `%${context.params.search}%`;
+    
+    context.query
+      .leftJoin('categories', 'categories.id = products.categoryId')
+      .leftJoin('brands', 'brands.id = products.brandId')
+      .where(
+        `(products.name LIKE ? OR 
+          products.description LIKE ? OR 
+          categories.name LIKE ? OR 
+          brands.name LIKE ?)`,
+        search, search, search, search
+      );
+  }
+});
+```
+
+### The Three Hook Stages
+
+1. **`initializeQuery`** - Runs first, sets up defaults
+   - Adds schema fields
+   - Applies filters from params
+   - Sets up sorting and pagination
+
+2. **`modifyQuery`** - Your main modification point
+   - Add joins and calculated fields
+   - Apply business logic
+   - Add custom conditions
+
+3. **`finalizeQuery`** - Runs last
+   - Apply security filters
+   - Add performance hints
+   - Log slow queries
+
+```javascript
+// Example using all three stages
+api.hook('initializeQuery', async (context) => {
+  // This already ran - query has default fields, filters, sorting
+  console.log('Fields:', context.query.parts.select);
+}, 20);
+
+api.hook('modifyQuery', async (context) => {
+  // Add your custom modifications
+  if (context.options.type === 'orders') {
+    context.query.select('SUM(orderItems.total) as orderTotal');
+  }
+});
+
+api.hook('finalizeQuery', async (context) => {
+  // Apply final security filter
+  if (!context.options.user?.isAdmin) {
+    context.query.where('orders.status != ?', 'internal');
+  }
+}, 95);
+```
+
 ## MySQLPlugin Tutorial
 
 ### Step 1: Basic Setup

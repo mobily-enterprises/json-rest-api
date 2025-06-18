@@ -1508,6 +1508,101 @@ const api = createApi({
 
 ---
 
+## QueryBuilder Class
+
+The QueryBuilder provides a chainable API for constructing SQL queries incrementally.
+
+### Constructor
+
+```javascript
+new QueryBuilder(resourceType)
+```
+
+**Parameters:**
+- `resourceType` (string): The table/resource name
+
+### Methods
+
+#### `select(...fields)`
+Add fields to SELECT clause.
+```javascript
+query.select('users.*', 'COUNT(posts.id) as postCount')
+```
+
+#### `clearSelect()`
+Remove all SELECT fields (useful for custom queries).
+
+#### `join(type, table, on)` / `innerJoin()` / `leftJoin()` / `rightJoin()`
+Add JOIN clauses.
+```javascript
+query.leftJoin('posts', 'posts.userId = users.id')
+```
+
+#### `where(sql, ...args)`
+Add WHERE conditions with parameterized values.
+```javascript
+query.where('users.age > ?', 18)
+query.where('users.status IN (?, ?)', 'active', 'pending')
+```
+
+#### `groupBy(...fields)`
+Add GROUP BY fields.
+```javascript
+query.groupBy('users.id', 'users.name')
+```
+
+#### `having(sql, ...args)`
+Add HAVING conditions (for use with GROUP BY).
+```javascript
+query.having('COUNT(posts.id) > ?', 5)
+```
+
+#### `orderBy(field, direction = 'ASC')`
+Add ORDER BY clauses.
+```javascript
+query.orderBy('createdAt', 'DESC')
+```
+
+#### `limit(limit, offset = null)`
+Set LIMIT and optional OFFSET.
+```javascript
+query.limit(10)        // First 10 records
+query.limit(10, 20)    // Skip 20, take 10
+```
+
+#### `toSQL()` / `toCountSQL()`
+Build the final SQL query or count query.
+
+#### `getArgs()`
+Get all parameterized arguments in order.
+
+#### `clone()`
+Create a deep copy of the query builder.
+
+#### `inspect()`
+Get debug information about the query.
+
+### Query Modification Hooks
+
+The MySQL plugin provides three hooks for modifying queries:
+
+1. **`initializeQuery`** (priority 10) - Sets up default query
+2. **`modifyQuery`** (priority 50) - Main modification point  
+3. **`finalizeQuery`** (priority 90) - Last-chance modifications
+
+Example:
+```javascript
+api.hook('modifyQuery', async (context) => {
+  if (context.options.type === 'products') {
+    context.query
+      .select('categories.name as categoryName')
+      .leftJoin('categories', 'categories.id = products.categoryId');
+  }
+});
+```
+
+---
+
 # Type Definitions
 
 ## Resource Format

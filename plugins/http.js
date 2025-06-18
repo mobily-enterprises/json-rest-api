@@ -40,12 +40,26 @@ export const HTTPPlugin = {
     const formatErrors = (error) => {
       return formatErrorResponse(error);
     };
+    
+    // Parse sort parameter from string to array
+    // "-createdAt,name" => [{field: 'createdAt', direction: 'DESC'}, {field: 'name', direction: 'ASC'}]
+    const parseSortParam = (sortString) => {
+      if (!sortString) return [];
+      
+      return sortString.split(',').map(field => {
+        field = field.trim();
+        if (field.startsWith('-')) {
+          return { field: field.slice(1), direction: 'DESC' };
+        }
+        return { field, direction: 'ASC' };
+      });
+    };
 
     // Parse query parameters
     const parseQueryParams = (req) => {
       const params = {
         filter: {},
-        sort: req.query.sort,
+        sort: parseSortParam(req.query.sort),
         page: {
           size: req.query['page[size]'] || req.query.pageSize,
           number: req.query['page[number]'] || req.query.page
