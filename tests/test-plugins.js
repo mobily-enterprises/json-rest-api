@@ -507,6 +507,300 @@ describe('Complex Plugin Scenarios', () => {
 
 // MySQL-specific plugin tests
 if (process.env.MYSQL_USER && process.env.MYSQL_PASSWORD) {
+  describe('MySQL + PositioningPlugin Tests', () => {
+    const MYSQL_CONFIG = {
+      host: process.env.MYSQL_HOST || 'localhost',
+      user: process.env.MYSQL_USER,
+      password: process.env.MYSQL_PASSWORD,
+      database: 'jsonrestapi_test_plugins_positioning'
+    };
+    
+    let connection;
+    let api;
+    
+    before(async () => {
+      connection = await mysql.createConnection({
+        host: MYSQL_CONFIG.host,
+        user: MYSQL_CONFIG.user,
+        password: MYSQL_CONFIG.password
+      });
+      await connection.query(`CREATE DATABASE IF NOT EXISTS ${MYSQL_CONFIG.database}`);
+    });
+    
+    after(async () => {
+      if (api) await robustTeardown({ api });
+      if (connection) await robustTeardown({ connection });
+    });
+    
+    beforeEach(async () => {
+      // Fresh API instance for each test
+      api = new Api();
+      api.use(MySQLPlugin, { connection: MYSQL_CONFIG });
+      api.use(PositioningPlugin);
+      
+      api.addResource('tasks', new Schema({
+        id: { type: 'id' },
+        title: { type: 'string', required: true },
+        position: { type: 'number' },
+        categoryId: { type: 'string' },
+        projectId: { type: 'number' }
+      }));
+      
+      await api.syncDatabase();
+      
+      // Clear any existing data
+      await connection.query(`TRUNCATE TABLE ${MYSQL_CONFIG.database}.tasks`);
+    });
+    
+    it('should handle beforeId positioning with MySQL', async () => {
+      // Create initial tasks
+      const task1 = await api.resources.tasks.create({ title: 'Task 1', position: 1 });
+      const task2 = await api.resources.tasks.create({ title: 'Task 2', position: 2 });
+      const task3 = await api.resources.tasks.create({ title: 'Task 3', position: 3 });
+      
+      // Insert new task before task2
+      const newTask = await api.resources.tasks.create({
+        title: 'New Task',
+        beforeId: task2.data.id
+      }, { positioning: { enabled: true } });
+      
+      // Verify positions were adjusted
+      const allTasks = await api.resources.tasks.query({ 
+        sort: [{ field: 'position', direction: 'ASC' }] 
+      });
+      
+      assert.equal(allTasks.data.length, 4);
+      const titles = allTasks.data.map(t => t.attributes.title);
+      assert.deepEqual(titles, ['Task 1', 'New Task', 'Task 2', 'Task 3']);
+      
+      // Verify positions in database
+      const positions = allTasks.data.map(t => t.attributes.position);
+      assert.deepEqual(positions, [1, 2, 3, 4]);
+    });
+    
+    it('should handle concurrent positioning operations with MySQL', async () => {
+      // Create base tasks
+      await api.resources.tasks.create({ title: 'Task 1', position: 1 });
+      const task2 = await api.resources.tasks.create({ title: 'Task 2', position: 2 });
+      await api.resources.tasks.create({ title: 'Task 3', position: 3 });
+      
+      // Try to insert multiple tasks at the same position concurrently
+      const promises = [];
+      for (let i = 0; i < 5; i++) {
+        promises.push(
+          api.resources.tasks.create({
+            title: `Concurrent ${i}`,
+            beforeId: task2.data.id
+          }, { positioning: { enabled: true } })
+        );
+      }
+      
+      await Promise.all(promises);
+      
+      // Verify all tasks were created
+      const allTasks = await api.resources.tasks.query({ 
+        sort: [{ field: 'position', direction: 'ASC' }],
+        page: { size: 20 }
+      });
+      
+      assert.equal(allTasks.data.length, 8); // 3 original + 5 new
+      
+      // Check that task titles are as expected
+      const concurrentTasks = allTasks.data.filter(t => 
+        t.attributes.title.startsWith('Concurrent')
+      );
+      assert.equal(concurrentTasks.length, 5);
+    });
+    
+    it('should support scoped positioning by category with MySQL', async () => {
+      // Create items in different categories
+      const catA1 = await api.resources.tasks.create({ 
+        title: 'A1', 
+        categoryId: 'A' 
+      }, { 
+        positioning: { 
+          enabled: true, 
+          positionFilters: ['categoryId'] 
+        } 
+      });
+      
+      const catA2 = await api.resources.tasks.create({ 
+        title: 'A2', 
+        categoryId: 'A' 
+      }, { 
+        positioning: { 
+          enabled: true, 
+          positionFilters: ['categoryId'] 
+        } 
+      });
+      
+      const catB1 = await api.resources.tasks.create({ 
+        title: 'B1', 
+        categoryId: 'B' 
+      }, { 
+        positioning: { 
+          enabled: true, 
+          positionFilters: ['categoryId'] 
+        } 
+      });
+      
+      const catB2 = await api.resources.tasks.create({ 
+        title: 'B2', 
+        categoryId: 'B' 
+      }, { 
+        positioning: { 
+          enabled: true, 
+          positionFilters: ['categoryId'] 
+        } 
+      });
+      
+      // Positions should be scoped by category
+      assert.equal(catA1.data.attributes.position, 1);
+      assert.equal(catA2.data.attributes.position, 2);
+      assert.equal(catB1.data.attributes.position, 1); // Restarts at 1 for category B
+      assert.equal(catB2.data.attributes.position, 2);
+      
+      // Verify in database
+      const catARecords = await api.resources.tasks.query({ 
+        filter: { categoryId: 'A' },
+        sort: [{ field: 'position', direction: 'ASC' }]
+      });
+      assert.equal(catARecords.data.length, 2);
+      
+      const catBRecords = await api.resources.tasks.query({ 
+        filter: { categoryId: 'B' },
+        sort: [{ field: 'position', direction: 'ASC' }]
+      });
+      assert.equal(catBRecords.data.length, 2);
+    });
+    
+    it('should maintain positions during updates with MySQL', async () => {
+      const task1 = await api.resources.tasks.create({ title: 'Task 1', position: 1 });
+      const task2 = await api.resources.tasks.create({ title: 'Task 2', position: 2 });
+      const task3 = await api.resources.tasks.create({ title: 'Task 3', position: 3 });
+      
+      // Update task2 to move before task1
+      await api.resources.tasks.update(task2.data.id, {
+        beforeId: task1.data.id
+      }, { positioning: { enabled: true } });
+      
+      // Check new order
+      const tasks = await api.resources.tasks.query({ 
+        sort: [{ field: 'position', direction: 'ASC' }] 
+      });
+      const titles = tasks.data.map(t => t.attributes.title);
+      assert.deepEqual(titles, ['Task 2', 'Task 1', 'Task 3']);
+      
+      // Verify positions are sequential
+      const positions = tasks.data.map(t => t.attributes.position);
+      assert.deepEqual(positions, [1, 2, 3]);
+    });
+    
+    it('should handle moving to end with beforeId: null in MySQL', async () => {
+      const task1 = await api.resources.tasks.create({ title: 'Task 1', position: 1 });
+      const task2 = await api.resources.tasks.create({ title: 'Task 2', position: 2 });
+      const task3 = await api.resources.tasks.create({ title: 'Task 3', position: 3 });
+      
+      // Move task1 to end
+      await api.resources.tasks.update(task1.data.id, {
+        beforeId: null
+      }, { positioning: { enabled: true } });
+      
+      // Check new order
+      const tasks = await api.resources.tasks.query({ 
+        sort: [{ field: 'position', direction: 'ASC' }] 
+      });
+      const titles = tasks.data.map(t => t.attributes.title);
+      assert.deepEqual(titles, ['Task 2', 'Task 3', 'Task 1']);
+      
+      // Verify positions
+      const positions = tasks.data.map(t => t.attributes.position);
+      assert.deepEqual(positions, [1, 2, 3]);
+    });
+    
+    it('should handle position normalization with MySQL', async () => {
+      // Create tasks with gaps in positions
+      await api.resources.tasks.create({ title: 'Task 1', position: 10 });
+      await api.resources.tasks.create({ title: 'Task 2', position: 20 });
+      await api.resources.tasks.create({ title: 'Task 3', position: 30 });
+      await api.resources.tasks.create({ title: 'Task 4', position: 100 });
+      
+      // Normalize positions
+      await api.normalizePositions('tasks');
+      
+      // Check positions are now sequential
+      const tasks = await api.resources.tasks.query({ 
+        sort: [{ field: 'position', direction: 'ASC' }] 
+      });
+      const positions = tasks.data.map(t => t.attributes.position);
+      assert.deepEqual(positions, [1, 2, 3, 4]);
+    });
+    
+    it('should handle auto position assignment with MySQL', async () => {
+      // Create tasks without specifying position
+      const task1 = await api.resources.tasks.create({ 
+        title: 'Auto 1' 
+      }, { 
+        positioning: { enabled: true } 
+      });
+      
+      const task2 = await api.resources.tasks.create({ 
+        title: 'Auto 2' 
+      }, { 
+        positioning: { enabled: true } 
+      });
+      
+      const task3 = await api.resources.tasks.create({ 
+        title: 'Auto 3' 
+      }, { 
+        positioning: { enabled: true } 
+      });
+      
+      // Should get sequential positions
+      assert.equal(task1.data.attributes.position, 1);
+      assert.equal(task2.data.attributes.position, 2);
+      assert.equal(task3.data.attributes.position, 3);
+    });
+    
+    it('should handle complex positioning scenarios with MySQL transactions', async () => {
+      // Create initial set
+      for (let i = 1; i <= 5; i++) {
+        await api.resources.tasks.create({ 
+          title: `Task ${i}`, 
+          position: i,
+          projectId: 1 
+        });
+      }
+      
+      // Move task 5 to position 2
+      const task5 = await api.resources.tasks.query({ 
+        filter: { title: 'Task 5', projectId: 1 } 
+      });
+      
+      await api.resources.tasks.update(task5.data[0].id, {
+        position: 2
+      });
+      
+      // Then immediately move task 1 to position 4
+      const task1 = await api.resources.tasks.query({ 
+        filter: { title: 'Task 1', projectId: 1 } 
+      });
+      
+      await api.resources.tasks.update(task1.data[0].id, {
+        position: 4
+      });
+      
+      // Verify final order
+      const finalTasks = await api.resources.tasks.query({ 
+        filter: { projectId: 1 },
+        sort: [{ field: 'position', direction: 'ASC' }] 
+      });
+      
+      // Just verify we have all 5 tasks
+      assert.equal(finalTasks.data.length, 5);
+    });
+  });
+  
   describe('MySQL Plugin Advanced Features', () => {
     const MYSQL_CONFIG = {
       host: process.env.MYSQL_HOST || 'localhost',
