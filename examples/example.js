@@ -8,7 +8,7 @@ import {
   ValidationPlugin,
   PositioningPlugin,
   VersioningPlugin
-} from './index.js';
+} from '../index.js';
 
 // Example 1: Simple API with memory storage
 const simpleApi = createApi({

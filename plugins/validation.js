@@ -1,4 +1,4 @@
-import { ValidationError, BadRequestError, ErrorCodes } from '../errors.js';
+import { ValidationError, BadRequestError, ErrorCodes } from '../lib/errors.js';
 
 /**
  * Validation plugin for JSON REST API

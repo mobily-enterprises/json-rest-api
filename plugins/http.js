@@ -1,5 +1,5 @@
 import express from 'express';
-import { NotFoundError, BadRequestError, formatErrorResponse, normalizeError } from '../errors.js';
+import { NotFoundError, BadRequestError, formatErrorResponse, normalizeError } from '../lib/errors.js';
 
 /**
  * HTTP plugin for JSON REST API with JSON:API compliance

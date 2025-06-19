@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
-import { NotFoundError, InternalError, ConflictError, ErrorCodes } from '../errors.js';
-import { QueryBuilder, schemaFields } from '../query-builder.js';
+import { NotFoundError, InternalError, ConflictError, BadRequestError, ErrorCodes } from '../lib/errors.js';
+import { QueryBuilder, schemaFields } from '../lib/query-builder.js';
 
 /**
  * MySQL storage plugin with query builder pattern
@@ -61,10 +61,33 @@ export const MySQLPlugin = {
         // Handle advanced refs with join configuration
         const requestedJoins = determineRequestedJoins(schema, context.params || context.options);
         
-        if (requestedJoins.size > 0) {
-          // Store join metadata for later processing
+        // Check for nested joins in the original join list
+        let nestedJoinPaths = [];
+        if (Array.isArray(context.params?.joins || context.options?.joins)) {
+          nestedJoinPaths = (context.params?.joins || context.options?.joins)
+            .filter(path => path.includes('.'));
+        }
+        
+        // Parse and validate nested join paths if any
+        let joinsByResource = new Map();
+        if (nestedJoinPaths.length > 0) {
+          try {
+            joinsByResource = parseNestedJoinPaths(api, context.options.type, nestedJoinPaths);
+          } catch (error) {
+            // Re-throw with context
+            throw error.withContext({ 
+              type: context.options.type,
+              requestedJoins: nestedJoinPaths 
+            });
+          }
+        }
+        
+        if (requestedJoins.size > 0 || joinsByResource.size > 0) {
+          // Initialize join metadata storage
           context.joinFields = {};
+          context.nestedJoins = joinsByResource; // Store for nested processing
           
+          // Process first-level joins
           for (const fieldName of requestedJoins) {
             const fieldDef = schema.structure[fieldName];
             if (!fieldDef?.refs?.join) continue;
@@ -99,13 +122,71 @@ export const MySQLPlugin = {
               runHooks: joinConfig.runHooks !== false,
               hookContext: joinConfig.hookContext || 'join',
               resourceField: joinConfig.resourceField,
-              preserveId: joinConfig.preserveId
+              preserveId: joinConfig.preserveId,
+              nestedJoins: {} // Will be populated for nested joins
             };
             
             // Select fields with special prefix for grouping
             fields.forEach(field => {
               query.select(`${refs.resource}.${field} as __${fieldName}__${field}`);
             });
+            
+            // Process nested joins for this resource if any
+            if (joinsByResource.has(refs.resource)) {
+              const nestedFields = joinsByResource.get(refs.resource);
+              
+              for (const nestedFieldName of nestedFields) {
+                const nestedSchema = api.schemas.get(refs.resource);
+                const nestedFieldDef = nestedSchema.structure[nestedFieldName];
+                
+                if (!nestedFieldDef?.refs?.join) continue;
+                
+                const nestedRefs = nestedFieldDef.refs;
+                const nestedJoinConfig = nestedFieldDef.refs.join;
+                
+                // Add the nested join with table alias to avoid conflicts
+                const nestedJoinType = nestedJoinConfig.type || 'left';
+                const tableAlias = `${fieldName}_${nestedFieldName}`;
+                
+                query[nestedJoinType + 'Join'](
+                  `${nestedRefs.resource} as ${tableAlias}`,
+                  `${tableAlias}.id = ${refs.resource}.${nestedFieldName}`
+                );
+                
+                // Determine fields for nested join
+                const nestedRelatedSchema = api.schemas.get(nestedRefs.resource);
+                let nestedFields;
+                
+                if (nestedJoinConfig.fields) {
+                  nestedFields = nestedJoinConfig.fields;
+                } else if (nestedJoinConfig.excludeFields) {
+                  nestedFields = Object.keys(nestedRelatedSchema.structure)
+                    .filter(f => !nestedJoinConfig.excludeFields.includes(f))
+                    .filter(f => nestedJoinConfig.includeSilent || !nestedRelatedSchema.structure[f].silent);
+                } else {
+                  nestedFields = Object.keys(nestedRelatedSchema.structure)
+                    .filter(f => !nestedRelatedSchema.structure[f].silent);
+                }
+                
+                // Store nested join metadata
+                context.joinFields[fieldName].nestedJoins[nestedFieldName] = {
+                  resource: nestedRefs.resource,
+                  fields: nestedFields,
+                  runHooks: nestedJoinConfig.runHooks !== false,
+                  hookContext: nestedJoinConfig.hookContext || 'join',
+                  resourceField: nestedJoinConfig.resourceField,
+                  preserveId: nestedJoinConfig.preserveId,
+                  tableAlias: tableAlias
+                };
+                
+                // Select nested fields with double prefix
+                nestedFields.forEach(field => {
+                  query.select(
+                    `${tableAlias}.${field} as __${fieldName}__${nestedFieldName}__${field}`
+                  );
+                });
+              }
+            }
           }
         }
       } else {
@@ -301,12 +382,13 @@ export const MySQLPlugin = {
           [table, cleanData]
         );
 
-        // Return the inserted record
+        // Return the inserted record with the generated ID
+        const insertedData = { ...cleanData };
         if (result.insertId) {
-          data[idProperty] = result.insertId;
+          insertedData[idProperty] = result.insertId;
         }
 
-        return data;
+        return insertedData;
       } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') {
           throw new ConflictError('Duplicate entry')
@@ -411,6 +493,57 @@ export const MySQLPlugin = {
           });
       }
     });
+
+    // Add schema sync functionality
+    api.syncDatabase = async () => {
+      console.log('Starting database synchronization...');
+      
+      // Get all resources from the schemas map
+      if (!api.schemas || api.schemas.size === 0) {
+        console.log('No resources to sync');
+        return;
+      }
+      
+      for (const [resourceName, schema] of api.schemas) {
+        const table = resourceName; // Table name defaults to resource name
+        const connectionName = 'default';
+        const { pool } = api.getConnection(connectionName);
+        
+        console.log(`Syncing table '${table}' for resource '${resourceName}'...`);
+        
+        try {
+          await syncMySQLSchema(pool, schema, table, {
+            idProperty: api.options.idProperty || 'id',
+            positionField: api.options.positionField,
+            dbExtraIndexes: api.options.dbExtraIndexes || [],
+            stores: api._resourceProxies, // Use the internal map
+            ...api.options
+          });
+          console.log(`✓ Table '${table}' synced successfully`);
+        } catch (error) {
+          console.error(`✗ Failed to sync table '${table}':`, error.message);
+          throw error;
+        }
+      }
+      
+      console.log('Database synchronization complete!');
+    };
+
+    // Add single schema sync method
+    api.syncSchema = async (schema, table, options = {}) => {
+      const connectionName = options.connection || 'default';
+      const { pool } = api.getConnection(connectionName);
+      
+      const syncOptions = {
+        idProperty: options.idProperty || api.options.idProperty || 'id',
+        positionField: options.positionField || api.options.positionField,
+        dbExtraIndexes: options.dbExtraIndexes || api.options.dbExtraIndexes || [],
+        stores: api.resources,
+        ...options
+      };
+      
+      await syncMySQLSchema(pool, schema, table, syncOptions);
+    };
   }
 };
 
@@ -492,6 +625,7 @@ function hasEagerJoins(schema, options) {
 
 /**
  * Determine which joins should be performed based on schema and options
+ * Now supports nested paths like 'authorId.countryId'
  */
 function determineRequestedJoins(schema, options) {
   const requestedJoins = new Set();
@@ -499,27 +633,502 @@ function determineRequestedJoins(schema, options) {
   // If joins are explicitly disabled, return empty set
   if (options.joins === false) return requestedJoins;
   
-  // Process each field in the schema
-  for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
-    if (!fieldDef.refs?.join) continue;
-    
-    const joinConfig = fieldDef.refs.join;
-    
-    // Check if this join should be included
-    let shouldInclude = false;
-    
-    if (Array.isArray(options.joins)) {
-      // Explicit join list takes precedence
-      shouldInclude = options.joins.includes(fieldName);
-    } else if (joinConfig.eager) {
-      // Check eager joins (unless excluded)
-      shouldInclude = !options.excludeJoins?.includes(fieldName);
+  // First, handle explicit joins (may include nested paths)
+  if (Array.isArray(options.joins)) {
+    for (const joinPath of options.joins) {
+      if (joinPath.includes('.')) {
+        // Nested path - add the first level only
+        const firstLevel = joinPath.split('.')[0];
+        requestedJoins.add(firstLevel);
+      } else {
+        // Simple join
+        requestedJoins.add(joinPath);
+      }
     }
-    
-    if (shouldInclude) {
-      requestedJoins.add(fieldName);
+  }
+  
+  // Then, process eager joins from schema (only first level)
+  if (!Array.isArray(options.joins)) {
+    for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+      if (!fieldDef.refs?.join) continue;
+      
+      const joinConfig = fieldDef.refs.join;
+      
+      if (joinConfig.eager && !options.excludeJoins?.includes(fieldName)) {
+        requestedJoins.add(fieldName);
+      }
     }
   }
   
   return requestedJoins;
+}
+
+/**
+ * Parse nested join paths and validate them
+ * Returns a map of resource type to fields that need joining at each level
+ */
+function parseNestedJoinPaths(api, baseType, joinPaths) {
+  // Map of resourceType -> Set of fields to join
+  const joinsByResource = new Map();
+  joinsByResource.set(baseType, new Set());
+  
+  for (const path of joinPaths) {
+    if (!path.includes('.')) {
+      // Simple join - add to base resource
+      joinsByResource.get(baseType).add(path);
+      continue;
+    }
+    
+    // Parse nested path like 'authorId.countryId.continentId'
+    const segments = path.split('.');
+    let currentResource = baseType;
+    let fullPath = '';
+    
+    for (let i = 0; i < segments.length; i++) {
+      const fieldName = segments[i];
+      fullPath = fullPath ? `${fullPath}.${fieldName}` : fieldName;
+      
+      // Get schema for current resource
+      const schema = api.schemas.get(currentResource);
+      if (!schema) {
+        throw new BadRequestError(
+          `Cannot join '${path}' - resource '${currentResource}' not found`
+        );
+      }
+      
+      // Get field definition
+      const fieldDef = schema.structure[fieldName];
+      if (!fieldDef) {
+        throw new BadRequestError(
+          `Cannot join '${path}' - field '${fieldName}' not found in resource '${currentResource}'`
+        );
+      }
+      
+      // Validate it has refs and join config
+      if (!fieldDef.refs?.join) {
+        throw new BadRequestError(
+          `Cannot join '${path}' - field '${fieldName}' in resource '${currentResource}' does not have join configuration`
+        );
+      }
+      
+      // Add this field to joins for current resource
+      if (!joinsByResource.has(currentResource)) {
+        joinsByResource.set(currentResource, new Set());
+      }
+      joinsByResource.get(currentResource).add(fieldName);
+      
+      // Move to next resource
+      currentResource = fieldDef.refs.resource;
+    }
+  }
+  
+  return joinsByResource;
+}
+
+/**
+ * Schema Synchronization
+ * =====================
+ * 
+ * Port of the comprehensive schema sync functionality from mysql-old.js
+ * This handles creating and updating database tables based on Schema definitions
+ */
+
+/**
+ * Sync MySQL schema with comprehensive features
+ */
+async function syncMySQLSchema(pool, schema, table, options = {}) {
+  const idProperty = options.idProperty || 'id';
+  const positionField = options.positionField;
+  const dbExtraIndexes = options.dbExtraIndexes || [];
+
+  // Check if table exists
+  const [tables] = await pool.query(
+    `SHOW TABLES LIKE ?`,
+    [table]
+  );
+
+  const tableAlreadyExists = tables.length > 0;
+  
+  // Create table with dummy column if it doesn't exist
+  if (!tableAlreadyExists) {
+    await pool.query(`CREATE TABLE \`${table}\` (__dummy__ INT(1))`);
+  }
+
+  // Get comprehensive table information
+  const [columns] = await pool.query(
+    `SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [table]
+  );
+  
+  const [indexes] = await pool.query(`SHOW INDEX FROM \`${table}\``);
+  
+  const [constraints] = await pool.query(
+    `SELECT * FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [table]
+  );
+
+  // Create columns hash for easy lookup
+  const columnsHash = columns.reduce((map, column) => {
+    map[column.COLUMN_NAME] = column;
+    return map;
+  }, {});
+
+  const primaryKeyColumn = columns.find(el => el.COLUMN_KEY === 'PRI');
+
+  // Convert schema to array format for easier processing
+  const schemaFieldsAsArray = Object.keys(schema.structure).map(k => ({ 
+    ...schema.structure[k], 
+    name: k 
+  }));
+
+  // Determine auto-increment field
+  let autoIncrementField = schemaFieldsAsArray.find(el => el.autoIncrement);
+  if (!autoIncrementField) {
+    autoIncrementField = schemaFieldsAsArray.find(el => el.name === idProperty);
+  }
+  const autoIncrementFieldName = autoIncrementField ? autoIncrementField.name : idProperty;
+
+  // Handle primary key changes if needed
+  if (primaryKeyColumn) {
+    await maybeChangePrimaryKey(pool, table, primaryKeyColumn, idProperty, schemaFieldsAsArray);
+  }
+
+  // Process columns
+  const dbIndexes = [];
+  const foreignEndpoints = [];
+  
+  for (let i = 0; i < schemaFieldsAsArray.length; i++) {
+    const field = schemaFieldsAsArray[i];
+    const creatingNewColumn = !columnsHash[field.name];
+    
+    await processColumn(
+      pool, table, field, i, schemaFieldsAsArray, 
+      creatingNewColumn, idProperty, autoIncrementFieldName,
+      columnsHash, dbIndexes, foreignEndpoints, positionField, options
+    );
+  }
+
+  // Add extra indexes
+  if (dbExtraIndexes.length > 0) {
+    for (const ei of dbExtraIndexes) {
+      dbIndexes.push({
+        column: ei.column,
+        unique: ei.unique,
+        name: ei.name
+      });
+    }
+  }
+
+  // Remove dummy column if it exists
+  if (columnsHash.__dummy__) {
+    await pool.query(`ALTER TABLE \`${table}\` DROP COLUMN \`__dummy__\``);
+  }
+
+  // Create indexes
+  await createIndexes(pool, table, dbIndexes, indexes);
+
+  // Create foreign key constraints
+  await createForeignKeyConstraints(pool, table, foreignEndpoints, constraints, options);
+}
+
+/**
+ * Get MySQL column definition from schema field
+ */
+function getMySQLColumnDefinition(fieldName, definition, options = {}) {
+  let sqlType;
+  let length = 256;
+  
+  // Allow custom DB type override
+  if (definition.dbType) {
+    sqlType = definition.dbType;
+  } else {
+    switch (definition.type) {
+      case 'id':
+        sqlType = 'INT';
+        break;
+      case 'number':
+        if (definition.float) sqlType = 'FLOAT';
+        else if (definition.currency) sqlType = 'NUMERIC(10,2)';
+        else if (definition.longInt) sqlType = 'BIGINT';
+        else sqlType = 'INT';
+        break;
+      case 'string':
+        if (definition.length) length = definition.length;
+        if (definition.max) length = definition.max;
+        if (definition.asText || definition.text) sqlType = 'TEXT';
+        else sqlType = `VARCHAR(${length})`;
+        break;
+      case 'boolean':
+        sqlType = 'TINYINT';
+        break;
+      case 'timestamp':
+        sqlType = 'BIGINT';
+        break;
+      case 'date':
+        sqlType = 'DATE';
+        break;
+      case 'dateTime':
+        sqlType = 'DATETIME';
+        break;
+      case 'blob':
+        if (definition.length) length = definition.length;
+        sqlType = `BLOB`;
+        break;
+      case 'object':
+      case 'array':
+      case 'serialize':
+        sqlType = 'JSON';
+        break;
+      default:
+        if (definition.type) {
+          throw new Error(`${definition.type} not converted automatically. Use dbType instead`);
+        }
+        sqlType = 'VARCHAR(255)';
+    }
+  }
+
+  // NULL clause - support both 'required' and 'canBeNull'
+  const nullable = definition.required || !definition.canBeNull ? 'NOT NULL' : 'NULL';
+  
+  // Default value, giving priority to dbDefault
+  let defaultValue = '';
+  if (typeof definition.dbDefault !== 'undefined') {
+    // MySQL escape for default values
+    if (definition.dbDefault === null) {
+      defaultValue = ' DEFAULT NULL';
+    } else if (typeof definition.dbDefault === 'string') {
+      defaultValue = ` DEFAULT '${definition.dbDefault.replace(/'/g, "''")}'`;
+    } else {
+      defaultValue = ` DEFAULT ${definition.dbDefault}`;
+    }
+  } else if (typeof definition.default !== 'undefined') {
+    if (definition.default === null) {
+      defaultValue = ' DEFAULT NULL';
+    } else if (typeof definition.default === 'string') {
+      defaultValue = ` DEFAULT '${definition.default.replace(/'/g, "''")}'`;
+    } else {
+      defaultValue = ` DEFAULT ${definition.default}`;
+    }
+  }
+
+  // AUTO_INCREMENT clause
+  const autoIncrement = (definition.autoIncrement || fieldName === options.idProperty) && !options.skipAutoIncrement ? 'AUTO_INCREMENT' : '';
+
+  return `\`${fieldName}\` ${sqlType} ${nullable}${defaultValue} ${autoIncrement}`.trim();
+}
+
+/**
+ * Process a single column during schema sync
+ */
+async function processColumn(
+  pool, table, field, index, schemaFieldsAsArray,
+  creatingNewColumn, idProperty, autoIncrementFieldName,
+  columnsHash, dbIndexes, foreignEndpoints, positionField, options = {}
+) {
+  const changeOrAddStatement = creatingNewColumn ? 'ADD COLUMN' : `CHANGE \`${field.name}\``;
+  
+  const def = getMySQLColumnDefinition(field.name, field, { 
+    idProperty,
+    skipAutoIncrement: autoIncrementFieldName !== field.name 
+  });
+  
+  // Handle primary key for new columns
+  const maybePrimaryKey = (creatingNewColumn && field.name === idProperty) ? 'PRIMARY KEY' : '';
+  
+  // Handle column ordering
+  const maybeAfter = index > 0 ? `AFTER \`${schemaFieldsAsArray[index - 1].name}\`` : '';
+
+  const sqlQuery = `ALTER TABLE \`${table}\` ${changeOrAddStatement} ${def} ${maybePrimaryKey} ${maybeAfter}`;
+  await pool.query(sqlQuery);
+
+  // Collect index information
+  if (field.dbIndex || field.searchable || field.name === positionField) {
+    if (columnsHash[field.name] || creatingNewColumn) {
+      if (field.name !== idProperty) {
+        dbIndexes.push({
+          column: field.name,
+          unique: field.dbUnique,
+          name: field.dbIndexName || `jrs_${field.name}`
+        });
+      }
+    }
+  }
+
+  // Collect foreign key information from refs
+  if (field.refs && options.stores) {
+    const targetResource = field.refs.resource;
+    
+    // Check if the target resource exists
+    if (options.stores.has(targetResource)) {
+      foreignEndpoints.push({
+        sourceField: field.name,
+        endpointName: targetResource,
+        foreignTable: targetResource, // Table name defaults to resource name
+        foreignField: options.idProperty || 'id', // Use same idProperty default
+        constraintName: field.refs.constraintName || `jra_${field.name}_to_${targetResource}`
+      });
+    }
+  }
+  
+  // Also support legacy foreignEndpoint syntax
+  if (field.foreignEndpoint) {
+    foreignEndpoints.push({
+      sourceField: field.name,
+      ...field.foreignEndpoint
+    });
+  }
+}
+
+/**
+ * Handle primary key changes during schema sync
+ */
+async function maybeChangePrimaryKey(pool, table, primaryKeyColumn, idProperty, schemaFieldsAsArray) {
+  // If primary key hasn't changed, don't do anything
+  if (primaryKeyColumn && primaryKeyColumn.COLUMN_NAME === idProperty) {
+    return;
+  }
+
+  const oldPrimaryKeyColumnName = primaryKeyColumn.COLUMN_NAME;
+
+  // Remove AUTO_INCREMENT from old primary key if present
+  if (primaryKeyColumn.EXTRA === 'auto_increment') {
+    await pool.query('SET foreign_key_checks = 0');
+    const pkc = primaryKeyColumn;
+    let defaultClause = '';
+    if (pkc.COLUMN_DEFAULT !== null) {
+      if (typeof pkc.COLUMN_DEFAULT === 'string') {
+        defaultClause = ` DEFAULT '${pkc.COLUMN_DEFAULT.replace(/'/g, "''")}'`;
+      } else {
+        defaultClause = ` DEFAULT ${pkc.COLUMN_DEFAULT}`;
+      }
+    }
+    const defWithoutAutoIncrement = `\`${pkc.COLUMN_NAME}\` ${pkc.COLUMN_TYPE} ${pkc.IS_NULLABLE === 'YES' ? 'NULL' : 'NOT NULL'}${defaultClause}`;
+    await pool.query(`ALTER TABLE \`${table}\` CHANGE \`${oldPrimaryKeyColumnName}\` ${defWithoutAutoIncrement}`);
+    await pool.query('SET foreign_key_checks = 1');
+  }
+
+  // Ensure old primary key has an index
+  const [indexIsThere] = await pool.query(
+    `SHOW INDEX FROM \`${table}\` WHERE Key_name <> 'PRIMARY' AND Seq_in_index = 1 AND Column_name = ?`,
+    [oldPrimaryKeyColumnName]
+  );
+  
+  if (indexIsThere.length === 0) {
+    const field = schemaFieldsAsArray.find(def => def.name === oldPrimaryKeyColumnName);
+    const dbIndex = field?.dbIndex || `jrs_${oldPrimaryKeyColumnName}`;
+    await pool.query(`ALTER TABLE \`${table}\` ADD INDEX \`${dbIndex}\`(\`${oldPrimaryKeyColumnName}\`)`);
+  }
+
+  // Drop old primary key and add new one
+  await pool.query(`ALTER TABLE \`${table}\` DROP PRIMARY KEY, ADD PRIMARY KEY (\`${idProperty}\`)`);
+  return true;
+}
+
+/**
+ * Create indexes during schema sync
+ */
+async function createIndexes(pool, table, dbIndexes, existingIndexes) {
+  for (const dbi of dbIndexes) {
+    // Handle multiple columns
+    let columns;
+    if (!Array.isArray(dbi.column)) {
+      columns = `\`${dbi.column}\``;
+    } else {
+      columns = dbi.column.map(c => `\`${c}\``).join(',');
+    }
+
+    // Generate index name if not provided
+    let indexName = dbi.name;
+    if (!indexName) {
+      if (!Array.isArray(dbi.column)) {
+        indexName = `jrs_${dbi.column}`;
+      } else {
+        indexName = 'jrs_' + dbi.column.join('_');
+      }
+    }
+
+    // Skip if index already exists
+    if (existingIndexes.find(i => i.Key_name === indexName)) {
+      continue;
+    }
+
+    const sqlQuery = `ALTER TABLE \`${table}\` ADD ${dbi.unique ? 'UNIQUE' : ''} INDEX \`${indexName}\` (${columns})`;
+    await pool.query(sqlQuery);
+  }
+}
+
+/**
+ * Create foreign key constraints during schema sync
+ */
+async function createForeignKeyConstraints(pool, table, foreignEndpoints, existingConstraints, options) {
+  const stores = options.stores || new Map();
+  
+  for (const fe of foreignEndpoints) {
+    let foreignTable;
+    let foreignField;
+    let constraintName;
+
+    // Determine foreign table
+    if (fe.foreignTable) {
+      foreignTable = fe.foreignTable;
+    } else if (fe.endpointName && stores.has && stores.has(fe.endpointName)) {
+      // If stores is a Map with has method
+      foreignTable = fe.endpointName; // Table name defaults to resource name
+    } else if (fe.endpointName) {
+      // Fallback: assume table name is same as endpoint name
+      foreignTable = fe.endpointName;
+    } else {
+      throw new Error('Cannot find the foreign table for field: ' + fe.sourceField);
+    }
+
+    // Determine foreign field
+    if (fe.foreignField) {
+      foreignField = fe.foreignField;
+    } else {
+      foreignField = options.idProperty || 'id';
+    }
+
+    // Generate constraint name
+    if (fe.constraintName) {
+      constraintName = fe.constraintName;
+    } else {
+      constraintName = `jra_${fe.sourceField}_to_${foreignTable}_${foreignField}`;
+    }
+
+    // Skip if constraint already exists
+    if (existingConstraints.find(c => c.CONSTRAINT_NAME === constraintName)) {
+      continue;
+    }
+
+    // Check if the referenced table exists
+    try {
+      const [tables] = await pool.query(
+        `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES 
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+        [foreignTable]
+      );
+      
+      if (tables.length === 0) {
+        console.log(`⚠️  Skipping foreign key ${constraintName}: table ${foreignTable} does not exist yet`);
+        continue;
+      }
+    } catch (error) {
+      console.log(`⚠️  Error checking table ${foreignTable}:`, error.message);
+      continue;
+    }
+
+    const sqlQuery = `
+      ALTER TABLE \`${table}\`
+      ADD CONSTRAINT \`${constraintName}\`
+      FOREIGN KEY (\`${fe.sourceField}\`)
+      REFERENCES \`${foreignTable}\` (\`${foreignField}\`)
+      ON DELETE NO ACTION
+      ON UPDATE NO ACTION`;
+    
+    try {
+      await pool.query(sqlQuery);
+    } catch (error) {
+      console.log(`⚠️  Failed to create foreign key ${constraintName}:`, error.message);
+    }
+  }
 }

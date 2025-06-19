@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { NotFoundError, InternalError, ConflictError, ErrorCodes } from '../errors.js';
+import { NotFoundError, InternalError, ConflictError, ErrorCodes } from '../lib/errors.js';
 
 /**
  * MySQL storage plugin for JSON REST API with full feature parity

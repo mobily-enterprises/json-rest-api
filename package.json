@@ -11,6 +11,13 @@
     "type": "git",
     "url": "https://github.com/mobily-enterprises/json-rest-api.git"
   },
+  "scripts": {
+    "test": "node tests/test-suite.js",
+    "test:verbose": "node tests/test-suite.js --test-reporter spec",
+    "test:tap": "node tests/test-suite.js --test-reporter tap",
+    "test:mysql": "node tests/test-suite-mysql.js",
+    "test:all": "npm test && npm run test:mysql"
+  },
   "dependencies": {
     "circular-json-es6": "^2.0.2",
     "express": "^4.21.1",

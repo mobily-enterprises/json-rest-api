@@ -1,7 +1,7 @@
 // Core exports
-export { Api } from './api.js';
-export { Schema } from './schema.js';
-export { QueryBuilder } from './query-builder.js';
+export { Api } from './lib/api.js';
+export { Schema } from './lib/schema.js';
+export { QueryBuilder } from './lib/query-builder.js';
 
 // Error exports
 export { 
@@ -18,7 +18,7 @@ export {
   ErrorCodes,
   normalizeError,
   formatErrorResponse
-} from './errors.js';
+} from './lib/errors.js';
 
 // Plugin exports
 export { MemoryPlugin } from './plugins/memory.js';
@@ -33,7 +33,7 @@ export { OpenAPIPlugin } from './plugins/openapi.js';
 export { TimestampsPlugin } from './plugins/timestamps.js';
 
 // Import for internal use
-import { Api } from './api.js';
+import { Api } from './lib/api.js';
 import { MemoryPlugin } from './plugins/memory.js';
 import { MySQLPlugin } from './plugins/mysql.js';
 import { HTTPPlugin } from './plugins/http.js';

@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**IMPORTANT NOTE**: This CLAUDE.md file is intentionally longer than typical context files. The project owner specifically wants comprehensive context preserved here to maintain development continuity across sessions. This extended context is by design and should not be shortened.
+
 ## Development Commands
 
 ### Running Tests
@@ -137,11 +139,19 @@ fieldName: {
 }
 ```
 
+#### Nested Joins
+Multi-level joins are supported using dot notation:
+- `joins: ['authorId.countryId']` - Join author and author's country
+- Parent joins are automatically included
+- Each level must have `refs.join` configuration
+- Validation happens in `parseNestedJoinPaths()` function
+
 Key implementation details:
 - Joins are processed in `initializeQuery` hook (MySQL plugin)
-- Join data uses `__fieldName__` prefix for field grouping
-- `_processJoinedData` in api.js handles result transformation
-- Hooks can detect join context via `context.options.isJoinResult`
+- Single-level: `__fieldName__field` prefix
+- Nested: `__parentField__nestedField__field` prefix
+- `_processJoinedData` processes from innermost level outward
+- Hooks execute in correct order (innermost first)
 - HTTP plugin converts to JSON:API relationships/included
 
 ### Query Builder Architecture
@@ -153,8 +163,46 @@ The QueryBuilder (`query-builder.js`) provides:
 - Schema-aware field selection (respects `silent` fields)
 
 ### Testing Approach
-- Use `test-basic.js` for basic functionality
-- Use `test-advanced-refs.js` for join testing  
-- Tests use the in-memory plugin for isolation
-- No specific test framework - uses Node.js assert
+- Main test suite: `npm test` (runs tests/test-suite.js)
+- MySQL tests: `npm run test:mysql` (requires MySQL server)
+- Tests use Node.js built-in test runner (node:test)
 - Focus on testing plugin interactions and hook ordering
+- All tests use the in-memory plugin for isolation (except MySQL-specific tests)
+
+## Project Organization
+
+- Core files are in `lib/` directory (api.js, errors.js, schema.js, query-builder.js, resource-helper.js)
+- Test files are in `tests/` directory
+- Documentation files are in `docs/` directory (API.md, GUIDE.md)
+- Plugins are in `plugins/` directory
+
+## Key Features
+
+1. **Structured Error Handling System** (`lib/errors.js`)
+   - Comprehensive error class hierarchy with ApiError base class
+   - Specific error types for different scenarios
+   - JSON:API compliant error formatting
+
+2. **Automatic Timestamps Plugin** (`plugins/timestamps.js`)
+   - Manages `createdAt` and `updatedAt` fields automatically
+   - Configurable field names and formats
+
+3. **Relationship System with `refs`**
+   - Define foreign key relationships in schemas
+   - Supports automatic joins with advanced configuration
+
+4. **Affected Records System**
+   - Three ways to specify affected records in hooks
+   - HTTP plugin automatically fetches and includes affected records
+
+5. **Advanced Refs (Automatic Joins)**
+   - Configure automatic joins through `refs.join`
+   - Support for nested joins using dot notation
+   - Eager/lazy loading, field selection, and hook execution
+
+## Code Style Guidelines
+
+- NO comments in code unless specifically requested
+- Consistency is paramount
+- Prefer intuitive APIs (e.g., `api.resources.users`)
+- Practical features over theoretical purity

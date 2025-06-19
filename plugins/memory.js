@@ -1,5 +1,5 @@
 import firstBy from 'thenby';
-import { NotFoundError, ConflictError, ErrorCodes } from '../errors.js';
+import { NotFoundError, ConflictError, ErrorCodes } from '../lib/errors.js';
 
 /**
  * Memory storage plugin for JSON REST API
@@ -23,7 +23,7 @@ export const MemoryPlugin = {
         throw new NotFoundError(options.type || 'Resource', id);
       }
       
-      return record || null;
+      return record ? { ...record } : null;
     });
 
     api.implement('query', async (context) => {
@@ -56,17 +56,30 @@ export const MemoryPlugin = {
 
       // Apply sorting
       if (params.sort) {
-        const sorts = params.sort.split(',');
         let sortChain = firstBy(() => 0);
         
-        for (const sortField of sorts) {
-          const descending = sortField.startsWith('-');
-          const field = sortField.replace(/^-/, '');
-          
-          sortChain = sortChain.thenBy(
-            item => item[field],
-            { direction: descending ? -1 : 1, ignoreCase: true }
-          );
+        // Handle both array format and string format
+        if (Array.isArray(params.sort)) {
+          // Array format: [{ field: 'name', direction: 'ASC' }]
+          for (const sortItem of params.sort) {
+            const descending = sortItem.direction === 'DESC';
+            sortChain = sortChain.thenBy(
+              item => item[sortItem.field],
+              { direction: descending ? -1 : 1, ignoreCase: true }
+            );
+          }
+        } else {
+          // String format: "name,-age"
+          const sorts = params.sort.split(',');
+          for (const sortField of sorts) {
+            const descending = sortField.startsWith('-');
+            const field = sortField.replace(/^-/, '');
+            
+            sortChain = sortChain.thenBy(
+              item => item[field],
+              { direction: descending ? -1 : 1, ignoreCase: true }
+            );
+          }
         }
         
         data.sort(sortChain);
@@ -80,7 +93,7 @@ export const MemoryPlugin = {
       data = data.slice(skip, skip + pageSize);
 
       return {
-        results: data,
+        results: data.map(item => ({ ...item })),
         meta: {
           total,
           pageSize,
@@ -144,7 +157,7 @@ export const MemoryPlugin = {
       // Update record
       api.memoryData[index] = { ...api.memoryData[index], ...data };
       
-      return api.memoryData[index];
+      return { ...api.memoryData[index] };
     });
 
     api.implement('delete', async (context) => {

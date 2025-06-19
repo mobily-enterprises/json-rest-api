@@ -1,5 +1,5 @@
 import express from 'express';
-import { Api, Schema, createApi } from './index.js';
+import { Api, Schema, createApi } from '../index.js';
 
 // Example: Automatic API Versioning
 // The library handles all version negotiation automatically!
