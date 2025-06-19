@@ -224,28 +224,52 @@ export const MySQLPlugin = {
           console.log('Applying filters:', context.params.filter);
         }
         
-        // Get searchable fields from options if provided
-        const searchableFields = context.options.searchableFields || [];
+        // Build set of allowed searchable fields
+        const allowedFields = new Set();
+        const fieldMappings = {};
+        
+        // 1. Add fields marked as searchable in schema
+        const schema = api.schemas.get(context.options.type);
+        if (schema) {
+          for (const [field, def] of Object.entries(schema.structure)) {
+            if (def.searchable === true) {
+              allowedFields.add(field);
+            }
+          }
+        }
+        
+        // 2. Add mapped searchable fields from resource options or context options
+        const resourceOptions = api.resourceOptions?.get(context.options.type) || {};
+        const searchableFieldMappings = context.options.searchableFields || resourceOptions.searchableFields || {};
+        for (const [friendlyName, path] of Object.entries(searchableFieldMappings)) {
+          allowedFields.add(friendlyName);
+          fieldMappings[friendlyName] = path;
+        }
+        
+        if (api.options.debug) {
+          console.log('Allowed searchable fields:', Array.from(allowedFields));
+          console.log('Field mappings:', fieldMappings);
+        }
         
         for (const [field, value] of Object.entries(context.params.filter)) {
-          // Check if field contains dot notation (e.g., 'puppyId.name')
-          if (field.includes('.')) {
-            // Validate against searchableFields if provided
-            if (searchableFields.length > 0 && !searchableFields.includes(field)) {
-              if (api.options.debug) {
-                console.log(`Skipping non-searchable field: ${field}`);
-              }
-              continue;
-            }
-            
-            const [joinField, targetField] = field.split('.');
+          // Check if field is searchable
+          if (!allowedFields.has(field)) {
+            throw new ValidationError()
+              .addFieldError('filter', `Field '${field}' is not searchable`);
+          }
+          
+          // Get the actual field path (use mapping if exists)
+          const actualPath = fieldMappings[field] || field;
+          // Check if actualPath contains dot notation (e.g., 'puppyId.name')
+          if (actualPath.includes('.')) {
+            const [joinField, targetField] = actualPath.split('.');
             const schema = api.schemas.get(context.options.type);
             const fieldDef = schema?.structure?.[joinField];
             
             // Validate that this is a valid ref field
             if (!fieldDef?.refs?.resource) {
               throw new ValidationError()
-                .addFieldError('filter', `Invalid filter field: ${field} - ${joinField} is not a reference field`);
+                .addFieldError('filter', `Invalid filter field: ${field} maps to ${actualPath} - ${joinField} is not a reference field`);
             }
             
             // Check if join already exists
@@ -267,21 +291,14 @@ export const MySQLPlugin = {
               query.where(`${joinedTable}.${targetField} = ?`, value);
             }
           } else {
-            // Regular field on main table
-            if (searchableFields.length > 0 && !searchableFields.includes(field)) {
-              if (api.options.debug) {
-                console.log(`Skipping non-searchable field: ${field}`);
-              }
-              continue;
-            }
-            
+            // Regular field on main table (actualPath is just the field name)
             if (value === null) {
-              query.where(`${table}.${field} IS NULL`);
+              query.where(`${table}.${actualPath} IS NULL`);
             } else if (typeof value === 'object' && value.operator) {
               // Support for operators: { operator: '$like', value: '%john%' }
-              applyOperator(query, table, field, value.operator, value.value);
+              applyOperator(query, table, actualPath, value.operator, value.value);
             } else {
-              query.where(`${table}.${field} = ?`, value);
+              query.where(`${table}.${actualPath} = ?`, value);
             }
           }
         }
