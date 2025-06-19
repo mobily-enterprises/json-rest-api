@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { NotFoundError, InternalError, ConflictError, BadRequestError, ErrorCodes } from '../lib/errors.js';
+import { NotFoundError, InternalError, ConflictError, BadRequestError, ValidationError, ErrorCodes } from '../lib/errors.js';
 import { QueryBuilder, schemaFields } from '../lib/query-builder.js';
 
 // Helper to parse JSON fields in a row
@@ -223,14 +223,66 @@ export const MySQLPlugin = {
         if (api.options.debug) {
           console.log('Applying filters:', context.params.filter);
         }
+        
+        // Get searchable fields from options if provided
+        const searchableFields = context.options.searchableFields || [];
+        
         for (const [field, value] of Object.entries(context.params.filter)) {
-          if (value === null) {
-            query.where(`${table}.${field} IS NULL`);
-          } else if (typeof value === 'object' && value.operator) {
-            // Support for operators: { operator: '$like', value: '%john%' }
-            applyOperator(query, table, field, value.operator, value.value);
+          // Check if field contains dot notation (e.g., 'puppyId.name')
+          if (field.includes('.')) {
+            // Validate against searchableFields if provided
+            if (searchableFields.length > 0 && !searchableFields.includes(field)) {
+              if (api.options.debug) {
+                console.log(`Skipping non-searchable field: ${field}`);
+              }
+              continue;
+            }
+            
+            const [joinField, targetField] = field.split('.');
+            const schema = api.schemas.get(context.options.type);
+            const fieldDef = schema?.structure?.[joinField];
+            
+            // Validate that this is a valid ref field
+            if (!fieldDef?.refs?.resource) {
+              throw new ValidationError()
+                .addFieldError('filter', `Invalid filter field: ${field} - ${joinField} is not a reference field`);
+            }
+            
+            // Check if join already exists
+            const existingJoin = query.parts.joins.find(j => j.field === joinField);
+            if (!existingJoin) {
+              // Add the join if it doesn't exist
+              query.leftJoin(joinField);
+            }
+            
+            // Get the joined table name (handle aliases)
+            const joinedTable = existingJoin?.alias || fieldDef.refs.resource;
+            
+            // Apply the filter on the joined table
+            if (value === null) {
+              query.where(`${joinedTable}.${targetField} IS NULL`);
+            } else if (typeof value === 'object' && value.operator) {
+              applyOperator(query, joinedTable, targetField, value.operator, value.value);
+            } else {
+              query.where(`${joinedTable}.${targetField} = ?`, value);
+            }
           } else {
-            query.where(`${table}.${field} = ?`, value);
+            // Regular field on main table
+            if (searchableFields.length > 0 && !searchableFields.includes(field)) {
+              if (api.options.debug) {
+                console.log(`Skipping non-searchable field: ${field}`);
+              }
+              continue;
+            }
+            
+            if (value === null) {
+              query.where(`${table}.${field} IS NULL`);
+            } else if (typeof value === 'object' && value.operator) {
+              // Support for operators: { operator: '$like', value: '%john%' }
+              applyOperator(query, table, field, value.operator, value.value);
+            } else {
+              query.where(`${table}.${field} = ?`, value);
+            }
           }
         }
       }
