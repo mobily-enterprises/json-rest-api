@@ -16,9 +16,31 @@ export const PositioningPlugin = {
     // Hook into insert operations
     api.hook('beforeInsert', async (context) => {
       const { data, options } = context;
-      const posOptions = { ...defaultOptions, ...options.positioning };
       
-      if (!posOptions.enabled) return;
+      // Get resource-specific positioning config
+      const resourceOptions = api.resourceOptions?.get(options.type) || {};
+      const resourcePosConfig = resourceOptions.positioning || {};
+      
+      // Merge configs: defaults -> resource config -> operation options
+      const posOptions = { 
+        ...defaultOptions, 
+        ...resourcePosConfig,
+        ...(options.positioning || {})
+      };
+      
+      // Check if positioning is configured for this resource
+      if (!posOptions.field) return;
+      
+      // Build position filters based on groupBy
+      const positionFilters = [];
+      if (posOptions.groupBy) {
+        const groupByFields = Array.isArray(posOptions.groupBy) ? posOptions.groupBy : [posOptions.groupBy];
+        positionFilters.push(...groupByFields);
+      }
+      posOptions.positionFilters = positionFilters;
+      
+      // Use the configured field name
+      posOptions.positionField = posOptions.field || posOptions.positionField;
 
       // Handle beforeId positioning
       if (data[posOptions.beforeIdField] !== undefined) {

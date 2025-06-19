@@ -18,14 +18,15 @@
     "url": "https://github.com/mobily-enterprises/json-rest-api.git"
   },
   "scripts": {
-    "test": "node tests/test-suite.js",
-    "test:verbose": "node tests/test-suite.js --test-reporter spec",
-    "test:tap": "node tests/test-suite.js --test-reporter tap",
-    "test:mysql": "node tests/test-suite-mysql.js",
-    "test:mysql:comprehensive": "node tests/test-mysql-comprehensive.js",
-    "test:all": "npm test && npm run test:mysql"
+    "test": "node tests/test-all.js",
+    "test:verbose": "node tests/test-all.js --test-reporter spec",
+    "test:tap": "node tests/test-all.js --test-reporter tap",
+    "test:mysql": "DB_TYPE=mysql node tests/test-all.js",
+    "test:all-db": "npm test && npm run test:mysql",
+    "test:ci": "npm run test:all-db"
   },
   "dependencies": {
+    "alasql": "^4.6.6",
     "circular-json-es6": "^2.0.2",
     "express": "^4.21.1",
     "mysql2": "^3.13.1",

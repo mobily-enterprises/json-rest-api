@@ -185,13 +185,12 @@ curl "http://localhost:3000/api/tasks?filter[done]=false&filter[priority][$gte]=
 
 Now that you've seen how easy it is, dive deeper:
 
-- **[GUIDES.md](./GUIDES.md)** - Learn every feature with practical examples
+- **[GUIDE.md](./GUIDE.md)** - Learn every feature with practical examples
 - **[API.md](./API.md)** - Complete API reference
-- **[Architecture Docs](./architecture/)** - Understand how it all works
 
 ## Need Help?
 
-- 📖 Read the [comprehensive guide](./GUIDES.md)
+- 📖 Read the [comprehensive guide](./GUIDE.md)
 - 🏗️ Check the [examples](../examples/) directory
 - 🐛 Report issues on GitHub
 

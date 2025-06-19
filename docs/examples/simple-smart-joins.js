@@ -5,7 +5,7 @@
  */
 
 import express from 'express';
-import { createApi, Schema } from '../index.js';
+import { createApi, Schema } from '../../index.js';
 
 const app = express();
 

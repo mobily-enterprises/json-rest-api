@@ -11,9 +11,9 @@ Transform your schemas into fully-featured REST APIs with one line of code. No b
 const api = createApi({ storage: 'memory' });
 
 api.addResource('users', new Schema({
-  name: { type: 'string', required: true },
-  email: { type: 'string', unique: true },
-  role: { type: 'string', enum: ['user', 'admin'] }
+  name: { type: 'string', required: true, searchable: true },
+  email: { type: 'string', unique: true, searchable: true },
+  role: { type: 'string', enum: ['user', 'admin'], searchable: true }
 }));
 
 api.mount(app); // Done! Full REST API ready at /api/users
@@ -30,7 +30,7 @@ With just a schema definition, you get:
 - ✅ **Versioning** - API and resource versioning built-in
 - ✅ **JSON:API compliant** - Industry standard responses
 - ✅ **Extensible** - Hooks, plugins, custom types
-- ✅ **Multiple backends** - Memory, MySQL, or build your own
+- ✅ **Multiple backends** - Memory (AlaSQL), MySQL, or build your own
 
 ## 🚀 See It In Action
 
@@ -42,15 +42,17 @@ npm install json-rest-api
 import { createApi, Schema } from 'json-rest-api';
 import express from 'express';
 
-// Create your API
+// Create your API - choose your storage
 const api = createApi({
-  storage: 'mysql',
-  connection: { host: 'localhost', database: 'myapp' }
+  storage: 'memory' // Perfect for development/testing
+  // OR use MySQL for production:
+  // storage: 'mysql',
+  // connection: { host: 'localhost', database: 'myapp' }
 });
 
 // Define a resource with relationships
 api.addResource('posts', new Schema({
-  title: { type: 'string', required: true, min: 5 },
+  title: { type: 'string', required: true, min: 5, searchable: true },
   content: { type: 'string', required: true },
   authorId: { 
     type: 'id', 
@@ -59,12 +61,13 @@ api.addResource('posts', new Schema({
       join: { eager: true, fields: ['name', 'avatar'] }
     }
   },
-  published: { type: 'boolean', default: false },
+  published: { type: 'boolean', default: false, searchable: true },
   tags: { type: 'array' }
 }));
 
 // That's it! You now have:
-// GET    /api/posts?filter[published]=true&include=author
+// GET    /api/posts?filter[published]=true&filter[title]=hello&include=author
+// GET    /api/posts?sort=-createdAt&page[size]=10
 // POST   /api/posts
 // PATCH  /api/posts/123
 // DELETE /api/posts/123

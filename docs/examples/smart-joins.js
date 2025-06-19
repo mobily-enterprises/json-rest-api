@@ -4,7 +4,15 @@
  * The query builder can automatically build joins from your schema definitions!
  */
 
-import { Api, Schema, MySQLPlugin } from '../index.js';
+import { Api, Schema, MySQLPlugin } from '../../index.js';
+
+// Note: This example requires MySQL configuration
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'myapp'
+};
 
 const api = new Api();
 api.use(MySQLPlugin, { connection: dbConfig });

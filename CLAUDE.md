@@ -20,13 +20,19 @@ node examples/example-versioning.js
 ### Plugin-Based Design
 ```javascript
 const api = new Api()
-api.use(MySQLPlugin, options)      // Storage plugin first
+api.use(MemoryPlugin)              // In-memory storage (AlaSQL) - default
+// OR
+api.use(MySQLPlugin, options)      // MySQL storage
 api.use(ValidationPlugin)          // Auto-validates
 api.use(HTTPPlugin, { app })       // HTTP last
 
 api.addResource('users', schema)
 await api.resources.users.get(123) // New proxy API
 ```
+
+**Storage Plugins**:
+- **MemoryPlugin**: In-memory SQL database using AlaSQL, perfect for development/testing
+- **MySQLPlugin**: Production-ready MySQL/MariaDB storage with connection pooling
 
 ### Key Concepts
 
@@ -38,12 +44,18 @@ await api.resources.users.get(123) // New proxy API
 **Schema**: Runtime type validation
 ```javascript
 new Schema({
-  name: { type: 'string', required: true, min: 2 },
+  name: { type: 'string', required: true, min: 2, searchable: true },
   password: { type: 'string', silent: true }, // Excluded from SELECT
   tags: { type: 'array' },
-  metadata: { type: 'object' }
+  metadata: { type: 'object' },
+  status: { type: 'string', searchable: true } // Can filter by this field
 })
 ```
+
+**Searchable Fields**: Enable filtering via query parameters
+- Mark fields with `searchable: true` in schema
+- Query with `?filter[fieldName]=value`
+- Can also define mapped searchable fields in resource options
 
 **Refs & Joins**: Automatic relationship handling
 ```javascript
@@ -98,7 +110,10 @@ examples/    # Example code
 
 ## Testing
 
-Always run `robustTeardown({ api, connection })` to avoid zombie sockets.
+- Always run `robustTeardown({ api, connection })` to avoid zombie sockets
+- Tests support both Memory (AlaSQL) and MySQL backends
+- Use `DB_TYPE=mysql MYSQL_USER=root MYSQL_PASSWORD=pass npm test` for MySQL
+- Default tests use Memory plugin (no setup required)
 
 ## Code Style
 
@@ -106,3 +121,10 @@ Always run `robustTeardown({ api, connection })` to avoid zombie sockets.
 - Consistency over cleverness
 - Intuitive APIs (e.g., `api.resources.users.get()`)
 - Fix root causes, not symptoms
+
+## Important Guidelines
+
+- **ALWAYS update documentation after adding features**: When implementing new functionality, update relevant .md files (README, API, GUIDE, etc.)
+- **Document search/filter capabilities**: Any new searchable fields or filter options must be documented
+- **Keep examples current**: Update example files when APIs change
+- **Test with both backends**: Ensure features work with both Memory and MySQL plugins

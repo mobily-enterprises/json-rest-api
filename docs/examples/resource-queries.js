@@ -5,7 +5,15 @@
  * for clean, reusable code
  */
 
-import { Api, Schema, MySQLPlugin, createApi } from '../index.js';
+import { Api, Schema, MySQLPlugin, createApi } from '../../index.js';
+
+// Note: This example requires MySQL configuration
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'myapp'
+};
 
 // ============================================================
 // APPROACH 1: Resource-Level Hooks
@@ -17,6 +25,17 @@ const api = createApi({
   version: '1.0.0',
   storage: 'mysql',
   mysql: { connection: dbConfig }
+});
+
+// Define product schema
+const productSchema = new Schema({
+  id: { type: 'id' },
+  name: { type: 'string', required: true, searchable: true },
+  description: { type: 'string' },
+  price: { type: 'number', required: true },
+  categoryId: { type: 'id', refs: { resource: 'categories' } },
+  inventory: { type: 'number', default: 0 },
+  active: { type: 'boolean', default: true, searchable: true }
 });
 
 // Products with automatic category and review data

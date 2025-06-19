@@ -10,14 +10,6 @@ You made this comment on the missing features of:
     - Session management
     - Request/response transformation
 
-  8. Memory Store Features
-
-  - Current memory plugin lacks:
-    - Query operators ($like, $in, $gt, etc.)
-    - Sorting by multiple fields
-    - Limit/offset with total count
-    - Deep object filtering
-
   11. JSON:API Compliance Gaps
 
   - Current HTTP plugin missing:

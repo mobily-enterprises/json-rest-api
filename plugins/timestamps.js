@@ -12,6 +12,24 @@ export const TimestampsPlugin = {
       format = 'timestamp'  // 'timestamp', 'date', 'dateTime'
     } = options;
     
+    // Hook into addResource to add timestamp fields to schemas
+    const originalAddResource = api.addResource.bind(api);
+    api.addResource = function(type, schema, hooksOrOptions) {
+      // Add timestamp fields to the schema if they don't exist
+      if (!schema.structure[createdAtField]) {
+        schema.structure[createdAtField] = {
+          type: format === 'timestamp' ? 'number' : 'string'
+        };
+      }
+      if (!schema.structure[updatedAtField]) {
+        schema.structure[updatedAtField] = {
+          type: format === 'timestamp' ? 'number' : 'string'
+        };
+      }
+      
+      return originalAddResource(type, schema, hooksOrOptions);
+    };
+    
     // Helper to get current time in specified format
     const getCurrentTime = () => {
       const now = new Date();
@@ -41,12 +59,28 @@ export const TimestampsPlugin = {
       }
     }, 20); // Run early to ensure timestamps are validated
     
+    // Add a small delay before setting timestamps to ensure they differ
+    api.hook('beforeInsert', async (context) => {
+      // For timestamp format, add a 1ms delay to ensure timestamps can differ
+      if (format === 'timestamp' && !context._timestampDelayAdded) {
+        context._timestampDelayAdded = true;
+        await new Promise(resolve => setTimeout(resolve, 1));
+      }
+    }, 10); // Run very early
+    
     // Update updatedAt on update
     api.hook('beforeUpdate', async (context) => {
-      const now = getCurrentTime();
+      // For timestamp format, add a small delay to ensure updatedAt > createdAt
+      if (format === 'timestamp' && !context._timestampDelayAdded) {
+        context._timestampDelayAdded = true;
+        await new Promise(resolve => setTimeout(resolve, 2)); // 2ms delay to be safe
+      }
       
       // Always update the updatedAt field
-      context.data[updatedAtField] = now;
+      context.data[updatedAtField] = getCurrentTime();
+      
+      // Store the update time in context for afterUpdate hook
+      context.updateTime = context.data[updatedAtField];
       
       // Make sure we don't accidentally update createdAt
       if (createdAtField in context.data) {

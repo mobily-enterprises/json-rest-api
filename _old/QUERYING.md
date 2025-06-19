@@ -55,6 +55,55 @@ GET /api/posts?
 
 ## Filtering
 
+### Searchable Fields
+
+**Important:** Only fields marked as `searchable: true` in the schema can be filtered:
+
+```javascript
+const postSchema = new Schema({
+  title: { type: 'string', required: true, searchable: true },
+  content: { type: 'string', required: true }, // NOT searchable
+  published: { type: 'boolean', searchable: true },
+  authorId: { type: 'id', searchable: true },
+  category: { type: 'string', searchable: true },
+  tags: { type: 'array', searchable: true }
+});
+
+// These filters will work:
+await api.resources.posts.query({
+  filter: {
+    published: true,
+    category: 'tech',
+    tags: 'javascript'
+  }
+});
+
+// This will throw an error (content is not searchable):
+await api.resources.posts.query({
+  filter: { content: 'some text' } // ERROR!
+});
+```
+
+### Mapped Search Fields
+
+You can also define searchable field mappings for filtering by joined fields:
+
+```javascript
+api.addResource('posts', postSchema, {
+  searchableFields: {
+    author: 'authorId.name',      // Filter by author name
+    authorEmail: 'authorId.email', // Filter by author email
+    category: 'categoryId.title'   // Filter by category title
+  }
+});
+
+// Now you can filter by author name:
+await api.resources.posts.query({
+  filter: { author: 'John Doe' }
+});
+// This translates to a JOIN and filters by users.name
+```
+
 ### Basic Filters
 
 Simple equality filters:
@@ -390,7 +439,7 @@ filter: {
 ### Basic Search
 
 ```javascript
-// Simple search across fields
+// Simple search across searchable fields
 const results = await api.resources.posts.query({
   search: 'javascript tutorial'
 });
@@ -401,6 +450,9 @@ const postSchema = new Schema({
   content: { type: 'string', searchable: true },
   tags: { type: 'array', searchable: true }
 });
+
+// Note: The search parameter searches across all fields marked 
+// as searchable: true using LIKE queries
 ```
 
 ### Advanced Search
@@ -450,14 +502,17 @@ await api.resources.posts.query({
 
 ### 1. Use Indexes
 
-Ensure filtered fields are indexed:
+Ensure searchable fields are indexed:
 
 ```javascript
 const schema = new Schema({
-  email: { type: 'string', index: true },
-  status: { type: 'string', index: true },
-  createdAt: { type: 'timestamp', index: true }
+  email: { type: 'string', searchable: true, index: true },
+  status: { type: 'string', searchable: true, index: true },
+  createdAt: { type: 'timestamp', searchable: true, index: true }
 });
+
+// Note: Making a field searchable allows filtering,
+// adding index improves query performance
 
 // Composite indexes for common queries
 await api.syncSchema(schema, 'users', {

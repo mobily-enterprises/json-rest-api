@@ -4,7 +4,15 @@
  * Shows how to use the 'silent' option to exclude fields from default selection
  */
 
-import { createApi, Schema } from '../index.js';
+import { createApi, Schema } from '../../index.js';
+
+// Note: This example requires MySQL configuration
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'myapp'
+};
 
 // Setup
 const api = createApi({

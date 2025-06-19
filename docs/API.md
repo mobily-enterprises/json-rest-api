@@ -65,13 +65,27 @@ Add a plugin to the API.
 api.use(MySQLPlugin, { connection: dbConfig });
 ```
 
-#### `addResource(type, schema, hooks?)`
+#### `addResource(type, schema, hooksOrOptions?)`
 Register a resource type.
 
 ```javascript
+// Basic usage
 api.addResource('users', userSchema, {
   afterInsert: async (context) => {
     // Resource-specific hook
+  }
+});
+
+// With searchable field mappings
+api.addResource('posts', postSchema, {
+  searchableFields: {
+    author: 'authorId.name',     // Filter by author name via join
+    category: 'categoryId.title' // Filter by category title
+  },
+  hooks: {
+    afterInsert: async (context) => {
+      // Resource-specific hook
+    }
   }
 });
 ```
@@ -152,6 +166,7 @@ new Schema(structure: SchemaStructure)
     max: 100,                 // Optional
     unique: true,             // Optional
     silent: true,             // Optional - exclude from default SELECT
+    searchable: true,         // Optional - allow filtering by this field
     refs: {                   // Optional - foreign key reference
       resource: 'users',
       join: {                 // Optional - automatic join config
@@ -172,6 +187,7 @@ new Schema(structure: SchemaStructure)
 | `'number'` | Numeric field | DOUBLE |
 | `'boolean'` | True/false | BOOLEAN |
 | `'timestamp'` | Unix timestamp | BIGINT |
+| `'date'` | Date (YYYY-MM-DD) | DATE |
 | `'json'` | JSON data | TEXT |
 | `'array'` | Array (stored as JSON) | TEXT |
 | `'object'` | Object (stored as JSON) | TEXT |
@@ -314,12 +330,22 @@ const userWithJoins = await api.resources.users.get(123, {
 Query multiple resources.
 ```javascript
 const users = await api.resources.users.query({
-  filter: { active: true },
+  filter: { 
+    active: true,
+    role: 'admin',
+    // Only searchable fields can be filtered
+  },
   sort: [{ field: 'name', direction: 'ASC' }],
   page: { size: 20, number: 1 },
   joins: ['departmentId']
 });
 ```
+
+**Query Parameters:**
+- `filter`: Object with field/value pairs (fields must be marked `searchable: true`)
+- `sort`: Array of sort objects or string (e.g., '-createdAt,name')
+- `page`: Object with `size` and `number` for pagination
+- `joins`: Array of field names to join (overrides eager joins)
 
 #### `create(data, options?)` / `post(data, options?)`
 Create a new resource.

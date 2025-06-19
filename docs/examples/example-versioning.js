@@ -1,5 +1,5 @@
 import express from 'express';
-import { Api, Schema, createApi } from '../index.js';
+import { Api, Schema, createApi } from '../../index.js';
 
 // Example: Automatic API Versioning
 // The library handles all version negotiation automatically!
@@ -13,8 +13,8 @@ const userApiV1 = createApi({
 
 const userSchemaV1 = new Schema({
   id: { type: 'id' },
-  name: { type: 'string', required: true },
-  email: { type: 'string', required: true }
+  name: { type: 'string', required: true, searchable: true },
+  email: { type: 'string', required: true, searchable: true }
 });
 
 userApiV1.addResource('users', userSchemaV1);
@@ -28,10 +28,10 @@ const userApiV2 = createApi({
 
 const userSchemaV2 = new Schema({
   id: { type: 'id' },
-  name: { type: 'string', required: true },
-  email: { type: 'string', required: true },
-  phone: { type: 'string' },  // New field!
-  active: { type: 'boolean', default: true }  // New field!
+  name: { type: 'string', required: true, searchable: true },
+  email: { type: 'string', required: true, searchable: true },
+  phone: { type: 'string', searchable: true },  // New field!
+  active: { type: 'boolean', default: true, searchable: true }  // New field!
 });
 
 userApiV2.addResource('users', userSchemaV2);
@@ -45,10 +45,10 @@ const userApiV2_1 = createApi({
 
 const userSchemaV2_1 = new Schema({
   id: { type: 'id' },
-  name: { type: 'string', required: true },
-  email: { type: 'string', required: true },
-  phone: { type: 'string' },
-  active: { type: 'boolean', default: true },
+  name: { type: 'string', required: true, searchable: true },
+  email: { type: 'string', required: true, searchable: true },
+  phone: { type: 'string', searchable: true },
+  active: { type: 'boolean', default: true, searchable: true },
   address: { type: 'object' }  // New field!
 });
 

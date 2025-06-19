@@ -4,7 +4,15 @@
  * Examples showing the cleaner, JavaScript-friendly syntax
  */
 
-import { createApi, Schema } from '../index.js';
+import { createApi, Schema } from '../../index.js';
+
+// Note: This example requires MySQL configuration
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'myapp'
+};
 
 // Setup (same as before)
 const api = createApi({

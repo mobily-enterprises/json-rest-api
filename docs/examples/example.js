@@ -8,7 +8,7 @@ import {
   ValidationPlugin,
   PositioningPlugin,
   VersioningPlugin
-} from '../index.js';
+} from '../../index.js';
 
 // Example 1: Simple API with memory storage
 const simpleApi = createApi({
@@ -26,10 +26,10 @@ const simpleApi = createApi({
 // Define a schema
 const userSchema = new Schema({
   id: { type: 'id' },
-  name: { type: 'string', required: true, min: 2, max: 100 },
-  email: { type: 'string', required: true, lowercase: true },
+  name: { type: 'string', required: true, min: 2, max: 100, searchable: true },
+  email: { type: 'string', required: true, lowercase: true, searchable: true },
   age: { type: 'number', min: 0, max: 150 },
-  active: { type: 'boolean', default: true },
+  active: { type: 'boolean', default: true, searchable: true },
   createdAt: { type: 'timestamp', default: () => Date.now() }
 });
 
@@ -69,14 +69,14 @@ advancedApi
 // Define schemas
 const productSchema = new Schema({
   id: { type: 'id' },
-  name: { type: 'string', required: true, min: 1, max: 200 },
+  name: { type: 'string', required: true, min: 1, max: 200, searchable: true },
   description: { type: 'string', max: 1000 },
-  price: { type: 'number', required: true, min: 0, currency: true },
+  price: { type: 'number', required: true, min: 0 },
   stock: { type: 'number', default: 0, min: 0 },
-  category: { type: 'string', required: true },
+  category: { type: 'string', required: true, searchable: true },
   tags: { type: 'array', default: [] },
   metadata: { type: 'object' },
-  active: { type: 'boolean', default: true },
+  active: { type: 'boolean', default: true, searchable: true },
   position: { type: 'number', default: 0 },
   version: { type: 'number', default: 1 },
   createdAt: { type: 'timestamp', default: () => Date.now() },
@@ -141,9 +141,6 @@ async function exampleUsage() {
     category: 'widgets',
     tags: ['premium', 'professional'],
     beforeId: null // Will be placed at the end
-  }, {
-    table: 'products',
-    positioning: { enabled: true }
   });
 
   console.log('Created product:', newProduct);
@@ -153,8 +150,6 @@ async function exampleUsage() {
     filter: { category: 'widgets', active: true },
     sort: '-price,name',
     page: { size: 10, number: 1 }
-  }, {
-    table: 'products'
   });
 
   console.log('Found products:', products);
@@ -163,8 +158,6 @@ async function exampleUsage() {
   const updated = await advancedApi.resources.products.update(newProduct.data.id, {
     stock: 45,
     version: newProduct.data.attributes.version // For optimistic locking
-  }, {
-    table: 'products'
   });
 
   console.log('Updated product:', updated);

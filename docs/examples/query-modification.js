@@ -5,7 +5,15 @@
  * of complexity, from simple joins to complex aggregations.
  */
 
-import { Api, Schema, MySQLPlugin } from '../index.js';
+import { Api, Schema, MySQLPlugin } from '../../index.js';
+
+// Note: This example requires MySQL configuration
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'password',
+  database: 'myapp'
+};
 
 // Setup
 const api = new Api();
