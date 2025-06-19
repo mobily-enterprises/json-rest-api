@@ -223,26 +223,42 @@ async function shiftPositions(api, context, fromPosition, filter, excludeId = nu
   const { positionField } = context.positioningData;
   const type = options.type;
   
-  // Get all records (we'll filter manually for MemoryPlugin compatibility)
-  const result = await api.query({
-    filter: filter,
-    sort: [{ field: positionField, direction: 'DESC' }], // Sort descending to avoid conflicts
-    page: { size: 10000 }
-  }, options);
-  
-  // Filter and shift records
-  for (const record of result.data) {
-    // Skip the record being updated
-    if (excludeId && record.id === excludeId) continue;
+  // Use bulk shift operation if available
+  try {
+    const result = await api.shiftPositions(type, {
+      field: positionField,
+      from: fromPosition,
+      delta: 1,
+      filter: filter,
+      excludeIds: excludeId ? [excludeId] : []
+    });
     
-    const currentPos = record.attributes[positionField];
-    if (currentPos >= fromPosition) {
-      await api.update(record.id, {
-        [positionField]: currentPos + 1
-      }, { 
-        type,
-        positioning: { enabled: false } // Disable positioning to avoid recursion
-      });
+    return result;
+  } catch (error) {
+    // Fallback to individual updates if bulk shift is not implemented
+    // Silently fall back to individual updates
+    
+    // Get all records (we'll filter manually for MemoryPlugin compatibility)
+    const result = await api.query({
+      filter: filter,
+      sort: [{ field: positionField, direction: 'DESC' }], // Sort descending to avoid conflicts
+      page: { size: 10000 }
+    }, options);
+    
+    // Filter and shift records
+    for (const record of result.data) {
+      // Skip the record being updated
+      if (excludeId && record.id === excludeId) continue;
+      
+      const currentPos = record.attributes[positionField];
+      if (currentPos >= fromPosition) {
+        await api.update(record.id, {
+          [positionField]: currentPos + 1
+        }, { 
+          type,
+          positioning: { enabled: false } // Disable positioning to avoid recursion
+        });
+      }
     }
   }
 }
@@ -281,23 +297,39 @@ async function updatePosition(api, context, position) {
  * Shift positions before inserting a new record
  */
 async function shiftPositionsBeforeInsert(api, type, fromPosition, positionField, filter) {
-  // Get all records (we'll filter manually for MemoryPlugin compatibility)
-  const result = await api.query({
-    filter: filter,
-    sort: [{ field: positionField, direction: 'DESC' }], // Sort descending to avoid conflicts
-    page: { size: 10000 }
-  }, { type });
-  
-  // Filter records that need shifting and shift them
-  for (const record of result.data) {
-    const currentPos = record.attributes[positionField];
-    if (currentPos >= fromPosition) {
-      await api.update(record.id, {
-        [positionField]: currentPos + 1
-      }, { 
-        type,
-        positioning: { enabled: false } // Disable positioning to avoid recursion
-      });
+  // Use bulk shift operation if available
+  try {
+    const result = await api.shiftPositions(type, {
+      field: positionField,
+      from: fromPosition,
+      delta: 1,
+      filter: filter,
+      excludeIds: []
+    });
+    
+    return result;
+  } catch (error) {
+    // Fallback to individual updates if bulk shift is not implemented
+    // Silently fall back to individual updates
+    
+    // Get all records (we'll filter manually for MemoryPlugin compatibility)
+    const result = await api.query({
+      filter: filter,
+      sort: [{ field: positionField, direction: 'DESC' }], // Sort descending to avoid conflicts
+      page: { size: 10000 }
+    }, { type });
+    
+    // Filter records that need shifting and shift them
+    for (const record of result.data) {
+      const currentPos = record.attributes[positionField];
+      if (currentPos >= fromPosition) {
+        await api.update(record.id, {
+          [positionField]: currentPos + 1
+        }, { 
+          type,
+          positioning: { enabled: false } // Disable positioning to avoid recursion
+        });
+      }
     }
   }
 }

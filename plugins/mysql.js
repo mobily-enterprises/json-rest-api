@@ -579,6 +579,50 @@ export const MySQLPlugin = {
       }
     });
 
+    // Implement bulk position shifting
+    api.implement('shiftPositions', async (context) => {
+      const { type, field, from, delta, filter, excludeIds } = context.options;
+      const table = type;
+      const { pool } = api.getConnection('default');
+      
+      try {
+        // Build WHERE clause
+        const whereParts = [`\`${field}\` >= ?`];
+        const whereValues = [from];
+        
+        // Add filter conditions
+        if (filter && Object.keys(filter).length > 0) {
+          for (const [key, value] of Object.entries(filter)) {
+            whereParts.push(`\`${key}\` = ?`);
+            whereValues.push(value);
+          }
+        }
+        
+        // Add exclusion for specific IDs
+        if (excludeIds && excludeIds.length > 0) {
+          const placeholders = excludeIds.map(() => '?').join(', ');
+          whereParts.push(`id NOT IN (${placeholders})`);
+          whereValues.push(...excludeIds);
+        }
+        
+        const whereClause = whereParts.join(' AND ');
+        
+        // Execute bulk update
+        const [result] = await pool.query(
+          `UPDATE \`${table}\` SET \`${field}\` = \`${field}\` + ? WHERE ${whereClause}`,
+          [delta, ...whereValues]
+        );
+        
+        return { shiftedCount: result.affectedRows };
+      } catch (error) {
+        throw new InternalError('Bulk position shift failed')
+          .withContext({
+            code: ErrorCodes.DATABASE_ERROR,
+            originalError: error.message
+          });
+      }
+    });
+
     // Add schema sync functionality
     api.syncDatabase = async () => {
       console.log('Starting database synchronization...');

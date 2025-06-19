@@ -174,6 +174,35 @@ export const MemoryPlugin = {
       
       api.memoryData.splice(index, 1);
     });
+
+    // Implement bulk position shifting
+    api.implement('shiftPositions', async (context) => {
+      const { type, field, from, delta, filter, excludeIds } = context.options;
+      const idProperty = api.options.idProperty;
+      let shiftedCount = 0;
+      
+      // Update all matching records in memory
+      api.memoryData.forEach(record => {
+        // Check if record matches the filter
+        if (filter) {
+          for (const [key, value] of Object.entries(filter)) {
+            if (record[key] !== value) return;
+          }
+        }
+        
+        // Skip excluded IDs
+        if (excludeIds.includes(String(record[idProperty]))) return;
+        
+        // Check if position needs shifting
+        const currentPosition = record[field];
+        if (currentPosition !== undefined && currentPosition >= from) {
+          record[field] = currentPosition + delta;
+          shiftedCount++;
+        }
+      });
+      
+      return { shiftedCount };
+    });
   }
 };
 
