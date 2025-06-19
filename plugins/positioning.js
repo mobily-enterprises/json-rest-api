@@ -22,14 +22,49 @@ export const PositioningPlugin = {
 
       // Handle beforeId positioning
       if (data[posOptions.beforeIdField] !== undefined) {
-        context.positioningData = {
-          beforeId: data[posOptions.beforeIdField],
-          positionField: posOptions.positionField,
-          filters: posOptions.positionFilters
-        };
+        const beforeId = data[posOptions.beforeIdField];
+        delete data[posOptions.beforeIdField]; // Remove virtual field
         
-        // Remove virtual field from data
-        delete data[posOptions.beforeIdField];
+        if (beforeId === null) {
+          // Place at end
+          const filters = {};
+          for (const field of posOptions.positionFilters) {
+            if (data[field] !== undefined) {
+              filters[field] = data[field];
+            }
+          }
+          const maxPos = await api.getNextPosition(options.type, filters, posOptions) - 1;
+          data[posOptions.positionField] = maxPos + 1;
+        } else {
+          // Place before specific record
+          const beforeRecord = await api.get(beforeId, options);
+          if (beforeRecord?.data) {
+            const targetPosition = beforeRecord.data.attributes[posOptions.positionField] || 1;
+            
+            // Build filter for position queries
+            const positionFilter = {};
+            for (const field of posOptions.positionFilters) {
+              if (data[field] !== undefined) {
+                positionFilter[field] = data[field];
+              }
+            }
+            
+            // Shift positions before inserting
+            await shiftPositionsBeforeInsert(api, options, targetPosition, posOptions.positionField, positionFilter);
+            
+            // Set position for new record
+            data[posOptions.positionField] = targetPosition;
+          }
+        }
+      } else if (!data[posOptions.positionField]) {
+        // Auto-assign position if not provided
+        const filters = {};
+        for (const field of posOptions.positionFilters) {
+          if (data[field] !== undefined) {
+            filters[field] = data[field];
+          }
+        }
+        data[posOptions.positionField] = await api.getNextPosition(options.type, filters, posOptions);
       }
     });
 
@@ -53,12 +88,7 @@ export const PositioningPlugin = {
       }
     });
 
-    // Calculate and apply positioning after insert
-    api.hook('afterInsert', async (context) => {
-      if (!context.positioningData) return;
-
-      await applyPositioning(api, context, 'insert');
-    });
+    // Note: afterInsert hook removed - positioning now handled entirely in beforeInsert
 
     // Calculate and apply positioning after update
     api.hook('afterUpdate', async (context) => {
@@ -159,8 +189,11 @@ async function applyPositioning(api, context, operation) {
     if (beforeRecord.data) {
       const targetPosition = beforeRecord.data.attributes[positionField] || 1;
       
+      // Get the record ID (for updates, exclude the current record from shifting)
+      const recordId = context.result?.data?.id || context.result?.id || context.id;
+      
       // Shift positions of records at or after target position
-      await shiftPositions(api, context, targetPosition, positionFilter);
+      await shiftPositions(api, context, targetPosition, positionFilter, recordId);
       
       // Update the record with target position
       await updatePosition(api, context, targetPosition);
@@ -172,29 +205,31 @@ async function applyPositioning(api, context, operation) {
 /**
  * Shift positions to make room
  */
-async function shiftPositions(api, context, fromPosition, filter) {
+async function shiftPositions(api, context, fromPosition, filter, excludeId = null) {
   const { options } = context;
   const { positionField } = context.positioningData;
   
-  // Get all records that need shifting
+  // Get all records (we'll filter manually for MemoryPlugin compatibility)
   const result = await api.query({
-    filter: {
-      ...filter,
-      [`${positionField}[gte]`]: fromPosition
-    },
+    filter: filter,
     sort: `-${positionField}`, // Sort descending to avoid conflicts
     page: { size: 10000 }
   }, options);
   
-  // Shift each record
+  // Filter and shift records
   for (const record of result.data) {
+    // Skip the record being updated
+    if (excludeId && record.id === excludeId) continue;
+    
     const currentPos = record.attributes[positionField];
-    await api.update(record.id, {
-      [positionField]: currentPos + 1
-    }, { 
-      ...options,
-      positioning: { enabled: false } // Disable positioning to avoid recursion
-    });
+    if (currentPos >= fromPosition) {
+      await api.update(record.id, {
+        [positionField]: currentPos + 1
+      }, { 
+        ...options,
+        positioning: { enabled: false } // Disable positioning to avoid recursion
+      });
+    }
   }
 }
 
@@ -205,16 +240,50 @@ async function updatePosition(api, context, position) {
   const { result, options } = context;
   const { positionField } = context.positioningData;
   
+  // Get the ID from the result
+  const recordId = result?.data?.id || result?.id;
+  if (!recordId) {
+    throw new Error('Cannot update position: record ID not found');
+  }
+  
   // Update the record with new position
-  const updateResult = await api.update(result.data.id, {
+  const updateResult = await api.update(recordId, {
     [positionField]: position
   }, {
     ...options,
     positioning: { enabled: false } // Disable positioning to avoid recursion
   });
   
-  // Update the result in context
-  if (updateResult.data) {
-    context.result = updateResult;
+  // Update the result in context, preserving any existing data
+  if (updateResult.data && context.result) {
+    // Merge the position update result with the original result
+    if (context.result.data && context.result.data.attributes) {
+      context.result.data.attributes[positionField] = position;
+    }
+  }
+}
+
+/**
+ * Shift positions before inserting a new record
+ */
+async function shiftPositionsBeforeInsert(api, options, fromPosition, positionField, filter) {
+  // Get all records (we'll filter manually for MemoryPlugin compatibility)
+  const result = await api.query({
+    filter: filter,
+    sort: `-${positionField}`, // Sort descending to avoid conflicts
+    page: { size: 10000 }
+  }, options);
+  
+  // Filter records that need shifting and shift them
+  for (const record of result.data) {
+    const currentPos = record.attributes[positionField];
+    if (currentPos >= fromPosition) {
+      await api.update(record.id, {
+        [positionField]: currentPos + 1
+      }, { 
+        ...options,
+        positioning: { enabled: false } // Disable positioning to avoid recursion
+      });
+    }
   }
 }

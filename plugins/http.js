@@ -69,6 +69,10 @@ export const HTTPPlugin = {
         joins: req.query.joins,
         excludeJoins: req.query.excludeJoins
       };
+      
+      if (api.options.debug) {
+        console.log('Raw query:', req.query);
+      }
 
       // Parse joins parameters
       if (params.joins && typeof params.joins === 'string') {
@@ -79,10 +83,39 @@ export const HTTPPlugin = {
       }
       
       // Parse filters
+      // Express already parses filter[field]=value into { filter: { field: value } }
+      if (req.query.filter && typeof req.query.filter === 'object') {
+        for (const [key, value] of Object.entries(req.query.filter)) {
+          // Convert string booleans to actual booleans
+          if (value === 'true') {
+            params.filter[key] = true;
+          } else if (value === 'false') {
+            params.filter[key] = false;
+          } else {
+            params.filter[key] = value;
+          }
+        }
+      }
+      
+      // Parse fields
+      if (req.query.fields && typeof req.query.fields === 'object') {
+        for (const [type, fields] of Object.entries(req.query.fields)) {
+          params.fields[type] = typeof fields === 'string' ? fields.split(',') : fields;
+        }
+      }
+      
+      // Legacy support for filter[field] syntax if Express doesn't parse it
       for (const [key, value] of Object.entries(req.query)) {
         if (key.startsWith('filter[') && key.endsWith(']')) {
           const filterKey = key.slice(7, -1);
-          params.filter[filterKey] = value;
+          // Convert string booleans to actual booleans
+          if (value === 'true') {
+            params.filter[filterKey] = true;
+          } else if (value === 'false') {
+            params.filter[filterKey] = false;
+          } else {
+            params.filter[filterKey] = value;
+          }
         } else if (key.startsWith('fields[') && key.endsWith(']')) {
           const fieldType = key.slice(7, -1);
           params.fields[fieldType] = value.split(',');
@@ -100,6 +133,10 @@ export const HTTPPlugin = {
         }
       }
 
+      if (api.options.debug) {
+        console.log('Parsed params:', JSON.stringify(params, null, 2));
+      }
+      
       return params;
     };
 

@@ -2,6 +2,27 @@ import mysql from 'mysql2/promise';
 import { NotFoundError, InternalError, ConflictError, BadRequestError, ErrorCodes } from '../lib/errors.js';
 import { QueryBuilder, schemaFields } from '../lib/query-builder.js';
 
+// Helper to parse JSON fields in a row
+function parseJsonFields(row, schema) {
+  if (!row || !schema) return row;
+  
+  const result = { ...row };
+  for (const [field, def] of Object.entries(schema.structure || schema.fields || {})) {
+    if (result[field] !== null && result[field] !== undefined && 
+        (def.type === 'object' || def.type === 'array')) {
+      try {
+        // MySQL returns JSON fields as strings
+        if (typeof result[field] === 'string') {
+          result[field] = JSON.parse(result[field]);
+        }
+      } catch (e) {
+        // If parsing fails, leave as is
+      }
+    }
+  }
+  return result;
+}
+
 /**
  * MySQL storage plugin with query builder pattern
  * 
@@ -99,6 +120,10 @@ export const MySQLPlugin = {
             const joinType = joinConfig.type || 'left';
             query[joinType + 'Join'](fieldName);
             
+            // Get the join info to see if we used an alias
+            const lastJoin = query.parts.joins[query.parts.joins.length - 1];
+            const tableRef = lastJoin.alias || refs.resource;
+            
             // Determine which fields to select
             const relatedSchema = api.schemas.get(refs.resource);
             let fields;
@@ -128,7 +153,7 @@ export const MySQLPlugin = {
             
             // Select fields with special prefix for grouping
             fields.forEach(field => {
-              query.select(`${refs.resource}.${field} as __${fieldName}__${field}`);
+              query.select(`${tableRef}.${field} as __${fieldName}__${field}`);
             });
             
             // Process nested joins for this resource if any
@@ -149,8 +174,8 @@ export const MySQLPlugin = {
                 const tableAlias = `${fieldName}_${nestedFieldName}`;
                 
                 query[nestedJoinType + 'Join'](
-                  `${nestedRefs.resource} as ${tableAlias}`,
-                  `${tableAlias}.id = ${refs.resource}.${nestedFieldName}`
+                  `${nestedRefs.resource} AS ${tableAlias}`,
+                  `${tableAlias}.id = ${tableRef}.${nestedFieldName}`
                 );
                 
                 // Determine fields for nested join
@@ -195,6 +220,9 @@ export const MySQLPlugin = {
       
       // Apply filters from params
       if (context.params.filter) {
+        if (api.options.debug) {
+          console.log('Applying filters:', context.params.filter);
+        }
         for (const [field, value] of Object.entries(context.params.filter)) {
           if (value === null) {
             query.where(`${table}.${field} IS NULL`);
@@ -272,16 +300,31 @@ export const MySQLPlugin = {
           await api.runHooks('modifyQuery', queryContext);
           await api.runHooks('finalizeQuery', queryContext);
           
+          // Copy joinFields back to original context for processing
+          if (queryContext.joinFields) {
+            context.joinFields = queryContext.joinFields;
+          }
+          if (queryContext.nestedJoins) {
+            context.nestedJoins = queryContext.nestedJoins;
+          }
+          
           // Execute query
           const sql = queryContext.query.toSQL();
           const args = queryContext.query.getArgs();
+          
+          if (api.options.debug) {
+            console.log('Query SQL:', sql);
+            console.log('Query Args:', args);
+          }
+          
           const [rows] = await pool.query(sql, args);
           
           if (!rows[0] && !options.allowNotFound) {
             throw new NotFoundError(options.type || table, id);
           }
           
-          return rows[0] || null;
+          const schema = api.schemas?.get(options.type);
+          return rows[0] ? parseJsonFields(rows[0], schema) : null;
         } else {
           // Simple get without joins
           const [rows] = await pool.query(
@@ -293,7 +336,8 @@ export const MySQLPlugin = {
             throw new NotFoundError(options.type || table, id);
           }
           
-          return rows[0] || null;
+          const schema = api.schemas?.get(options.type);
+          return rows[0] ? parseJsonFields(rows[0], schema) : null;
         }
       } catch (error) {
         if (error instanceof NotFoundError) throw error;
@@ -343,8 +387,12 @@ export const MySQLPlugin = {
         const pageSize = context.query.parts.limit || 10;
         const pageNumber = Math.floor((context.query.parts.offset || 0) / pageSize) + 1;
         
+        // Parse JSON fields in results
+        const schema = api.schemas?.get(options.type);
+        const parsedRows = rows.map(row => parseJsonFields(row, schema));
+        
         return {
-          results: rows,
+          results: parsedRows,
           meta: {
             total,
             pageSize,
@@ -369,21 +417,43 @@ export const MySQLPlugin = {
       const idProperty = options.idProperty || api.options.idProperty;
 
       try {
-        // Remove undefined values
+        // Remove undefined values and handle JSON types
         const cleanData = {};
+        const schema = api.schemas?.get(options.type);
+        
         for (const [key, value] of Object.entries(data)) {
           if (value !== undefined) {
-            cleanData[key] = value;
+            // Check if this field is a JSON type in the schema
+            const fieldDef = schema?.structure?.[key] || schema?.fields?.[key];
+            if (fieldDef && (fieldDef.type === 'object' || fieldDef.type === 'array')) {
+              // Stringify JSON fields
+              cleanData[key] = JSON.stringify(value);
+            } else {
+              cleanData[key] = value;
+            }
           }
         }
 
+        // Build INSERT query manually to handle JSON fields properly
+        const fields = Object.keys(cleanData);
+        const values = Object.values(cleanData);
+        const placeholders = fields.map(() => '?').join(', ');
+        const fieldList = fields.map(f => `\`${f}\``).join(', ');
+        
+        if (api.options.debug) {
+          console.log('INSERT SQL:', `INSERT INTO \`${table}\` (${fieldList}) VALUES (${placeholders})`);
+          console.log('INSERT Values:', values);
+          console.log('CleanData:', cleanData);
+          console.log('Schema:', schema);
+        }
+        
         const [result] = await pool.query(
-          `INSERT INTO ?? SET ?`,
-          [table, cleanData]
+          `INSERT INTO \`${table}\` (${fieldList}) VALUES (${placeholders})`,
+          values
         );
 
         // Return the inserted record with the generated ID
-        const insertedData = { ...cleanData };
+        const insertedData = { ...data }; // Use original data, not stringified
         if (result.insertId) {
           insertedData[idProperty] = result.insertId;
         }
@@ -420,14 +490,29 @@ export const MySQLPlugin = {
         context.updateQuery = query;
         await api.executeHook('modifyUpdateQuery', context);
         
-        // Remove undefined values and id from update data
+        // Remove undefined values and id from update data, handle JSON types
         const updateData = {};
+        const schema = api.schemas?.get(options.type);
+        
         for (const [key, value] of Object.entries(data)) {
           if (value !== undefined && key !== idProperty) {
-            updateData[key] = value;
+            // Check if this field is a JSON type in the schema
+            const fieldDef = schema?.structure?.[key] || schema?.fields?.[key];
+            if (fieldDef && (fieldDef.type === 'object' || fieldDef.type === 'array')) {
+              // Stringify JSON fields
+              updateData[key] = JSON.stringify(value);
+            } else {
+              updateData[key] = value;
+            }
           }
         }
 
+        // Build UPDATE query manually to handle JSON fields properly
+        const setClause = Object.keys(updateData)
+          .map(field => `\`${field}\` = ?`)
+          .join(', ');
+        const values = Object.values(updateData);
+        
         // Build WHERE clause from query builder
         const whereConditions = context.updateQuery.parts.where
           .map(w => w.sql)
@@ -435,16 +520,16 @@ export const MySQLPlugin = {
         const whereArgs = context.updateQuery.getArgs();
 
         const [result] = await pool.query(
-          `UPDATE ?? SET ? WHERE ${whereConditions}`,
-          [table, updateData, ...whereArgs]
+          `UPDATE \`${table}\` SET ${setClause} WHERE ${whereConditions}`,
+          [...values, ...whereArgs]
         );
 
         if (result.affectedRows === 0) {
           throw new NotFoundError(options.type || table, id);
         }
 
-        // Return updated data (id + updated fields)
-        return { [idProperty]: id, ...updateData };
+        // Return updated data (id + original data, not stringified)
+        return { [idProperty]: id, ...data };
       } catch (error) {
         if (error instanceof NotFoundError) throw error;
         throw new InternalError('Database update failed')
@@ -647,16 +732,15 @@ function determineRequestedJoins(schema, options) {
     }
   }
   
-  // Then, process eager joins from schema (only first level)
-  if (!Array.isArray(options.joins)) {
-    for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
-      if (!fieldDef.refs?.join) continue;
-      
-      const joinConfig = fieldDef.refs.join;
-      
-      if (joinConfig.eager && !options.excludeJoins?.includes(fieldName)) {
-        requestedJoins.add(fieldName);
-      }
+  // Always process eager joins from schema (only first level)
+  // unless they are explicitly excluded
+  for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+    if (!fieldDef.refs?.join) continue;
+    
+    const joinConfig = fieldDef.refs.join;
+    
+    if (joinConfig.eager && !options.excludeJoins?.includes(fieldName)) {
+      requestedJoins.add(fieldName);
     }
   }
   
@@ -887,8 +971,8 @@ function getMySQLColumnDefinition(fieldName, definition, options = {}) {
     }
   }
 
-  // NULL clause - support both 'required' and 'canBeNull'
-  const nullable = definition.required || !definition.canBeNull ? 'NOT NULL' : 'NULL';
+  // NULL clause - if required then NOT NULL, otherwise NULL
+  const nullable = definition.required ? 'NOT NULL' : 'NULL';
   
   // Default value, giving priority to dbDefault
   let defaultValue = '';
@@ -942,7 +1026,7 @@ async function processColumn(
   await pool.query(sqlQuery);
 
   // Collect index information
-  if (field.dbIndex || field.searchable || field.name === positionField) {
+  if (field.dbIndex || field.searchable || field.name === positionField || field.refs) {
     if (columnsHash[field.name] || creatingNewColumn) {
       if (field.name !== idProperty) {
         dbIndexes.push({
@@ -965,7 +1049,7 @@ async function processColumn(
         endpointName: targetResource,
         foreignTable: targetResource, // Table name defaults to resource name
         foreignField: options.idProperty || 'id', // Use same idProperty default
-        constraintName: field.refs.constraintName || `jra_${field.name}_to_${targetResource}`
+        constraintName: field.refs.constraintName || `jra_${table}_${field.name}_to_${targetResource}`
       });
     }
   }
@@ -1092,7 +1176,8 @@ async function createForeignKeyConstraints(pool, table, foreignEndpoints, existi
     if (fe.constraintName) {
       constraintName = fe.constraintName;
     } else {
-      constraintName = `jra_${fe.sourceField}_to_${foreignTable}_${foreignField}`;
+      // Include source table name to avoid conflicts
+      constraintName = `jra_${table}_${fe.sourceField}_to_${foreignTable}`;
     }
 
     // Skip if constraint already exists

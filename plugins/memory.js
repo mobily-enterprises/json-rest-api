@@ -87,7 +87,7 @@ export const MemoryPlugin = {
 
       // Apply pagination
       const pageSize = Number(params.page?.size) || 10;
-      const pageNumber = Number(params.page?.number) || 1;
+      const pageNumber = Math.max(1, Number(params.page?.number) || 1); // Ensure minimum page 1
       const skip = (pageNumber - 1) * pageSize;
       
       data = data.slice(skip, skip + pageSize);

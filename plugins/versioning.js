@@ -65,7 +65,7 @@ export const VersioningPlugin = {
       // Initialize version on insert
       api.hook('beforeInsert', async (context) => {
         const { data, options } = context;
-        if (options.versioning === false) return;
+        if (options.versioning === false || (options.versioning && options.versioning.enabled === false)) return;
 
         // Set initial version
         if (data[defaultOptions.versionField] === undefined) {
@@ -86,7 +86,7 @@ export const VersioningPlugin = {
       // Increment version on update
       api.hook('beforeUpdate', async (context) => {
         const { data, options, id } = context;
-        if (options.versioning === false) return;
+        if (options.versioning === false || (options.versioning && options.versioning.enabled === false)) return;
 
         // Check for optimistic locking
         if (defaultOptions.optimisticLocking && data[defaultOptions.versionField]) {

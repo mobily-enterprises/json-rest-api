@@ -4,7 +4,13 @@
   "description": "A simple, extensible RESTful JSON API library with schema validation and positioning",
   "main": "index.js",
   "type": "module",
-  "keywords": ["rest", "json-api", "mysql", "schema", "validation"],
+  "keywords": [
+    "rest",
+    "json-api",
+    "mysql",
+    "schema",
+    "validation"
+  ],
   "author": "Tony Mobily",
   "license": "MIT",
   "repository": {
@@ -16,16 +22,17 @@
     "test:verbose": "node tests/test-suite.js --test-reporter spec",
     "test:tap": "node tests/test-suite.js --test-reporter tap",
     "test:mysql": "node tests/test-suite-mysql.js",
+    "test:mysql:comprehensive": "node tests/test-mysql-comprehensive.js",
     "test:all": "npm test && npm run test:mysql"
   },
   "dependencies": {
     "circular-json-es6": "^2.0.2",
     "express": "^4.21.1",
     "mysql2": "^3.13.1",
+    "semver": "^7.5.4",
     "thenby": "^1.3.4",
-    "semver": "^7.5.4"
+    "why-is-node-running": "^3.2.2"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=18"
   }
