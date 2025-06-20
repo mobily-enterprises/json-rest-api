@@ -472,6 +472,211 @@ Context includes:
 }
 ```
 
+## Built-in Plugins
+
+### AuthorizationPlugin
+
+Role-based access control (RBAC) with ownership permissions.
+
+#### Basic Usage
+
+```javascript
+import { AuthorizationPlugin } from 'json-rest-api/plugins';
+
+api.use(AuthorizationPlugin, {
+  // Define roles and their permissions
+  roles: {
+    admin: {
+      permissions: '*',  // All permissions
+      description: 'Full system access'
+    },
+    editor: {
+      permissions: ['posts.*', 'media.*', 'users.read'],
+      description: 'Content management'
+    },
+    user: {
+      permissions: [
+        'posts.create',
+        'posts.read', 
+        'posts.update.own',
+        'posts.delete.own'
+      ]
+    }
+  },
+  
+  // How to enhance users with roles/permissions
+  enhanceUser: async (user, context) => {
+    // Load from database, JWT, session, etc.
+    const roles = await loadUserRoles(user.id);
+    return { ...user, roles };
+  }
+});
+```
+
+#### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enhanceUser` | function | - | Async function to load user roles/permissions |
+| `roles` | object | `{}` | Role definitions with permissions |
+| `resources` | object | `{}` | Resource-specific auth rules |
+| `defaultRole` | string | `'user'` | Role for users with no roles |
+| `superAdminRole` | string | `'admin'` | Role that bypasses all checks |
+| `publicRole` | string | `'public'` | Role for unauthenticated access |
+| `ownerField` | string | `'userId'` | Default field for ownership |
+| `requireAuth` | boolean | `true` | Require authentication by default |
+
+#### Permission Syntax
+
+```javascript
+// Exact permission
+'posts.create'
+
+// Wildcard - all actions on resource
+'posts.*'
+
+// Ownership suffix
+'posts.update.own'  // Can only update own posts
+
+// Super wildcard - all permissions
+'*'
+```
+
+#### Resource Configuration
+
+```javascript
+api.use(AuthorizationPlugin, {
+  resources: {
+    posts: {
+      ownerField: 'authorId',     // Which field identifies owner
+      public: ['read'],            // No auth required
+      authenticated: ['create'],   // Any logged-in user
+      owner: ['update', 'delete'], // Only owner (checks .own permission)
+      permissions: {               // Custom permissions
+        publish: 'posts.publish',
+        feature: 'posts.feature'
+      }
+    }
+  }
+});
+```
+
+#### Enhanced User Object
+
+After enhancement, users have these methods:
+
+```javascript
+// Check single permission
+if (user.can('posts.create')) { }
+
+// Check role
+if (user.hasRole('editor')) { }
+
+// Check multiple roles
+if (user.hasAnyRole('editor', 'admin')) { }
+if (user.hasAllRoles('editor', 'reviewer')) { }
+```
+
+#### Integration Examples
+
+##### With Express/HTTP
+
+```javascript
+// Your auth middleware
+app.use(async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (token) {
+    const payload = jwt.verify(token, SECRET);
+    req.user = { id: payload.sub, email: payload.email };
+  }
+  next();
+});
+
+// Tell HTTPPlugin where to find user
+api.use(HTTPPlugin, {
+  getUserFromRequest: (req) => req.user
+});
+```
+
+##### With Direct API Usage
+
+```javascript
+// Pass user in options
+await api.resources.posts.update(123, 
+  { title: 'New' },
+  { user: { id: 1, email: 'user@example.com' } }
+);
+```
+
+##### Database Integration
+
+```javascript
+api.use(AuthorizationPlugin, {
+  enhanceUser: async (user) => {
+    // Load from your database
+    const result = await db.query(
+      'SELECT r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ?',
+      [user.id]
+    );
+    return {
+      ...user,
+      roles: result.map(r => r.name)
+    };
+  }
+});
+```
+
+##### JWT Integration
+
+```javascript
+api.use(AuthorizationPlugin, {
+  enhanceUser: async (user) => {
+    // Roles already in JWT payload
+    return user; // { id: 1, roles: ['editor'], permissions: ['posts.feature'] }
+  }
+});
+```
+
+#### Field-Level Permissions
+
+Control access to specific fields:
+
+```javascript
+const schema = new Schema({
+  title: { type: 'string' },
+  content: { type: 'string' },
+  internalNotes: { 
+    type: 'string',
+    permission: 'posts.sensitive'  // Only users with this permission
+  }
+});
+```
+
+#### Authorization Hooks
+
+The plugin adds these hooks (priority 10):
+- `beforeInsert` - Checks create permission
+- `beforeGet` - Checks read permission
+- `beforeQuery` - Checks read permission
+- `beforeUpdate` - Checks update permission
+- `beforeDelete` - Checks delete permission
+- `afterGet` - Ownership verification
+- `transformResult` - Field-level permission filtering
+
+#### Error Handling
+
+```javascript
+try {
+  await api.resources.posts.delete(123, { user });
+} catch (error) {
+  if (error.code === 'UNAUTHORIZED') {
+    // User not authenticated
+  } else if (error.code === 'FORBIDDEN') {
+    // User lacks permission
+  }
+}
+```
+
 ## Hook Reference
 
 ### Lifecycle Hooks

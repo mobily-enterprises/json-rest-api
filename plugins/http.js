@@ -21,6 +21,9 @@ export const HTTPPlugin = {
 
     // Base path for all routes
     const basePath = options.basePath || '/api';
+    
+    // User extraction function
+    const getUserFromRequest = options.getUserFromRequest || ((req) => req.user);
 
     // Helper to parse JSON:API request body
     const parseJsonApiBody = (body) => {
@@ -248,8 +251,10 @@ export const HTTPPlugin = {
     router.get(`${routePrefix}/:type`, async (req, res) => {
       try {
         const params = parseQueryParams(req);
+        const user = getUserFromRequest(req);
         const result = await api.query(params, {
           type: req.params.type,
+          user,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -269,8 +274,10 @@ export const HTTPPlugin = {
     router.get(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         const params = parseQueryParams(req);
+        const user = getUserFromRequest(req);
         const result = await api.get(req.params.id, {
           type: req.params.type,
+          user,
           joins: params.joins,
           excludeJoins: params.excludeJoins,
           isHttp: true,
@@ -292,8 +299,10 @@ export const HTTPPlugin = {
     router.post(`${routePrefix}/:type`, async (req, res) => {
       try {
         const data = parseJsonApiBody(req.body);
+        const user = getUserFromRequest(req);
         const result = await api.insert(data, {
           type: req.params.type,
+          user,
           isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
@@ -311,8 +320,10 @@ export const HTTPPlugin = {
     router.put(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         const data = parseJsonApiBody(req.body);
+        const user = getUserFromRequest(req);
         const result = await api.update(req.params.id, data, {
           type: req.params.type,
+          user,
           fullRecord: true,  // Validate as complete record for PUT
           isHttp: true,
           ...options.typeOptions?.[req.params.type]
@@ -333,8 +344,10 @@ export const HTTPPlugin = {
     router.patch(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
         const data = parseJsonApiBody(req.body);
+        const user = getUserFromRequest(req);
         const result = await api.update(req.params.id, data, {
           type: req.params.type,
+          user,
           isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });
@@ -353,8 +366,10 @@ export const HTTPPlugin = {
     // DELETE resource
     router.delete(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        const user = getUserFromRequest(req);
         await api.delete(req.params.id, {
           type: req.params.type,
+          user,
           isHttp: true,
           ...options.typeOptions?.[req.params.type]
         });

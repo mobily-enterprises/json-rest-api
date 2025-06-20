@@ -6,12 +6,13 @@ This section provides working examples demonstrating various features of the JSO
 
 1. [Basic Example - Getting Started](#basic-example---getting-started)
 2. [API Versioning Example](#api-versioning-example)
-3. [Advanced Queries Example](#advanced-queries-example)
-4. [Advanced References Demo](#advanced-references-demo)
-5. [Silent Fields Example](#silent-fields-example)
-6. [Smart Joins Example](#smart-joins-example)
-7. [Query Builder Example](#query-builder-example)
-8. [No SQL Strings Example](#no-sql-strings-example)
+3. [Authorization Example](#authorization-example)
+4. [Advanced Queries Example](#advanced-queries-example)
+5. [Advanced References Demo](#advanced-references-demo)
+6. [Silent Fields Example](#silent-fields-example)
+7. [Smart Joins Example](#smart-joins-example)
+8. [Query Builder Example](#query-builder-example)
+9. [No SQL Strings Example](#no-sql-strings-example)
 
 ## Basic Example - Getting Started
 
@@ -78,6 +79,78 @@ const api2 = Api.find('users', '>=2.0.0');
 apiV1.mount(app);  // Available at /api/1.0.0/users
 apiV2.mount(app);  // Available at /api/2.0.0/users
 ```
+
+## Authorization Example
+
+**File**: [`example-authorization.js`](./examples/example-authorization.js)
+
+This comprehensive example demonstrates:
+- Role-based access control (RBAC)
+- Permission-based authorization
+- Ownership-based permissions (.own suffix)
+- Field-level permissions
+- Resource-specific rules
+- Integration with authentication systems
+
+### Key Concepts Shown
+
+```javascript
+// Define roles and permissions
+api.use(AuthorizationPlugin, {
+  roles: {
+    admin: { permissions: '*' },
+    editor: { permissions: ['posts.*', 'media.*'] },
+    user: { permissions: ['posts.read', 'posts.update.own'] }
+  },
+  
+  // Bridge to your auth system
+  enhanceUser: async (user) => {
+    const roles = await loadUserRoles(user.id);
+    return { ...user, roles };
+  },
+  
+  // Resource-specific rules
+  resources: {
+    posts: {
+      ownerField: 'authorId',
+      public: ['read'],
+      authenticated: ['create'],
+      owner: ['update', 'delete']
+    }
+  }
+});
+
+// Field-level permissions
+const schema = new Schema({
+  title: { type: 'string' },
+  internalNotes: { 
+    type: 'string',
+    permission: 'posts.moderate'
+  }
+});
+
+// Check permissions in code
+if (user.can('posts.publish')) {
+  // Publish the post
+}
+
+if (user.hasRole('admin')) {
+  // Admin-only action
+}
+```
+
+### Running the Example
+
+```bash
+node docs/examples/example-authorization.js
+```
+
+The example demonstrates:
+1. Creating users with different roles
+2. Role-based permission checks
+3. Ownership-based access control
+4. Field-level permission filtering
+5. Custom permission logic in hooks
 
 ## Advanced Queries Example
 

@@ -944,6 +944,229 @@ export const ValidationPlugin = {
 // Throws ValidationError with details
 ```
 
+### Authorization Plugin (`plugins/authorization.js`)
+
+Provides role-based access control (RBAC) and permission management:
+
+```javascript
+export const AuthorizationPlugin = {
+  install(api, options = {}) {
+    // Initialize storage for roles and permissions
+    api._auth = {
+      roles: new Map(),
+      resources: new Map(),
+      options: {
+        defaultRole: 'user',
+        superAdminRole: 'admin',
+        ownerField: 'userId',
+        requireAuth: true,
+        ...options
+      }
+    };
+```
+
+**Key concepts:**
+
+1. **Roles and Permissions:**
+   ```javascript
+   api.use(AuthorizationPlugin, {
+     roles: {
+       admin: {
+         permissions: '*',  // All permissions
+         description: 'Full system access'
+       },
+       editor: {
+         permissions: ['posts.*', 'media.*', 'users.read'],
+         description: 'Content management'
+       },
+       user: {
+         permissions: [
+           'posts.read',
+           'posts.create',
+           'posts.update.own',  // Can only update own posts
+           'posts.delete.own'   // Can only delete own posts
+         ]
+       }
+     }
+   });
+   ```
+
+2. **User Enhancement Bridge:**
+   ```javascript
+   api.use(AuthorizationPlugin, {
+     // This function connects to YOUR auth system
+     enhanceUser: async (user, context) => {
+       // Example 1: Load from database
+       const roles = await db.query(
+         'SELECT role FROM user_roles WHERE user_id = ?',
+         [user.id]
+       );
+       return { ...user, roles: roles.map(r => r.role) };
+       
+       // Example 2: Roles already in JWT
+       return user; // { id: 1, roles: ['editor'] }
+       
+       // Example 3: Load from Redis cache
+       const cached = await redis.get(`user:${user.id}:roles`);
+       return { ...user, roles: JSON.parse(cached) };
+     }
+   });
+   ```
+
+3. **Resource-Specific Rules:**
+   ```javascript
+   api.use(AuthorizationPlugin, {
+     resources: {
+       posts: {
+         ownerField: 'authorId',     // Which field identifies owner
+         public: ['read'],            // No auth required
+         authenticated: ['create'],   // Any logged-in user
+         owner: ['update', 'delete'], // Only owner (checks .own permission)
+         permissions: {               // Custom permission mapping
+           publish: 'posts.moderate',
+           feature: 'posts.admin'
+         }
+       }
+     }
+   });
+   ```
+
+**Authorization Flow:**
+
+1. **HTTP Request arrives:**
+   ```javascript
+   // HTTPPlugin extracts user from request
+   api.use(HTTPPlugin, {
+     getUserFromRequest: (req) => req.user // From your auth middleware
+   });
+   ```
+
+2. **User Enhancement:**
+   ```javascript
+   // Original user from auth middleware
+   { id: 1, email: 'john@example.com' }
+   
+   // After enhancement
+   {
+     id: 1,
+     email: 'john@example.com',
+     roles: ['editor'],
+     permissions: ['posts.feature'],
+     // Helper methods added
+     can: (permission) => boolean,
+     hasRole: (role) => boolean,
+     hasAnyRole: (...roles) => boolean,
+     hasAllRoles: (...roles) => boolean
+   }
+   ```
+
+3. **Permission Checking in Hooks:**
+   ```javascript
+   // The plugin adds these hooks automatically (priority 10)
+   beforeInsert → checks 'create' permission
+   beforeGet    → checks 'read' permission
+   beforeQuery  → checks 'read' permission
+   beforeUpdate → checks 'update' permission
+   beforeDelete → checks 'delete' permission
+   ```
+
+4. **Ownership Checking:**
+   ```javascript
+   // User tries to update post 123
+   await api.resources.posts.update(123, { title: 'New' }, { user });
+   
+   // AuthorizationPlugin flow:
+   // 1. Check if user has 'posts.update' → No
+   // 2. Check if resource allows owner updates → Yes
+   // 3. Check if user has 'posts.update.own' → Yes
+   // 4. Fetch post 123 to check ownership
+   // 5. Compare post.authorId === user.id
+   // 6. Allow or deny based on ownership
+   ```
+
+5. **Field-Level Permissions:**
+   ```javascript
+   const schema = new Schema({
+     title: { type: 'string' },
+     content: { type: 'string' },
+     internalNotes: {
+       type: 'string',
+       permission: 'posts.moderate'  // Only visible to moderators
+     }
+   });
+   
+   // In transformResult hook:
+   // If user lacks 'posts.moderate' permission
+   // Remove internalNotes from response
+   ```
+
+**Permission Syntax:**
+```javascript
+// Exact match
+'posts.create'         // Can create posts
+
+// Wildcard - all actions
+'posts.*'              // All post permissions
+
+// Ownership suffix
+'posts.update.own'     // Can update own posts only
+
+// Super wildcard
+'*'                    // All permissions (admin)
+```
+
+**Integration Example:**
+```javascript
+// 1. Express authentication middleware
+app.use(async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (token) {
+    const payload = jwt.verify(token, SECRET);
+    req.user = { id: payload.sub, email: payload.email };
+  }
+  next();
+});
+
+// 2. Authorization plugin enhances the user
+api.use(AuthorizationPlugin, {
+  enhanceUser: async (user) => {
+    const roles = await getUserRoles(user.id);
+    return { ...user, roles };
+  }
+});
+
+// 3. HTTP plugin passes user to API
+api.use(HTTPPlugin, {
+  getUserFromRequest: (req) => req.user
+});
+
+// 4. API operations check permissions automatically
+// This will throw ForbiddenError if user can't update
+await api.resources.posts.update(123, { title: 'New' });
+```
+
+**Custom Permission Checks:**
+```javascript
+api.hook('beforeUpdate', async (context) => {
+  if (context.options.type !== 'posts') return;
+  
+  const user = context.options.user;
+  const { status } = context.data;
+  
+  // Only editors can publish
+  if (status === 'published' && !user.can('posts.publish')) {
+    throw new ForbiddenError('Cannot publish posts');
+  }
+});
+```
+
+**Why this design?**
+- **Flexible**: Works with any auth system (JWT, session, OAuth)
+- **Declarative**: Define permissions, not imperative checks
+- **Performant**: User enhanced once per request
+- **Extensible**: Add custom permission logic via hooks
+- **Secure**: Fail-closed design, explicit permissions required
+
 ### Timestamps Plugin (`plugins/timestamps.js`)
 
 Automatically adds created/updated timestamps:
@@ -2549,6 +2772,123 @@ api.hook('modifyQuery', async (context) => {
   if (context.joins?.includes('tags')) {
     context.query.distinct();  // Add DISTINCT
   }
+});
+```
+
+### Authorization Plugin Gotchas
+
+**1. Recursive Permission Checks:**
+
+```javascript
+// DANGER - Infinite recursion!
+api.hook('beforeUpdate', async (context) => {
+  // This triggers another permission check!
+  const existing = await api.get(context.id, { type: context.type });
+  // Stack overflow!
+});
+
+// CORRECT - Use _skipAuth flag
+const existing = await api.get(context.id, { 
+  type: context.type, 
+  _skipAuth: true  // Internal bypass
+});
+```
+
+**2. User Enhancement Timing:**
+
+```javascript
+// WRONG - User not enhanced in early hooks
+api.hook('beforeValidate', async (context) => {
+  // This runs at priority 5, before authorization
+  if (context.options.user.can('admin')) {  // ERROR! .can() doesn't exist yet
+    // Skip validation for admins
+  }
+}, 5);
+
+// CORRECT - Enhance user manually if needed early
+api.hook('beforeValidate', async (context) => {
+  if (context.options.user) {
+    const user = await api.enhanceUserForAuth(context.options.user);
+    if (user.can('admin')) {
+      // Skip validation for admins
+    }
+  }
+}, 5);
+```
+
+**3. Field Permissions Don't Prevent Writing:**
+
+```javascript
+// Schema with permission-protected field
+const schema = new Schema({
+  title: { type: 'string' },
+  internalNotes: { 
+    type: 'string',
+    permission: 'posts.moderate'  // Only controls READING
+  }
+});
+
+// DANGER - Users can still WRITE to the field!
+await api.resources.posts.create({
+  title: 'Post',
+  internalNotes: 'Secret!'  // This gets saved!
+}, { user: regularUser });
+
+// SOLUTION - Check in hooks
+api.hook('beforeInsert', async (context) => {
+  if (context.data.internalNotes && !context.options.user?.can('posts.moderate')) {
+    delete context.data.internalNotes;
+  }
+});
+```
+
+**4. Ownership Checks on Non-Existent Records:**
+
+```javascript
+// User tries to update deleted record
+await api.resources.posts.update(999, { title: 'New' }, { user });
+
+// Authorization flow:
+// 1. Check permissions
+// 2. Fetch record to check ownership
+// 3. Record doesn't exist
+// 4. Throws NotFoundError (not ForbiddenError!)
+
+// This can leak information about what IDs exist!
+```
+
+**5. Permission Inheritance Confusion:**
+
+```javascript
+// Wildcards don't work backwards!
+user.permissions = ['posts.update.own'];
+
+user.can('posts.update.own');  // ✅ true
+user.can('posts.update');       // ❌ false - More specific doesn't grant general
+user.can('posts.*');            // ❌ false - No wildcard permission
+
+// But wildcards work forward:
+user.permissions = ['posts.*'];
+user.can('posts.create');       // ✅ true
+user.can('posts.update');       // ✅ true
+user.can('posts.update.own');   // ✅ true - Wildcard includes everything
+```
+
+**6. Public Operations Still Create Context:**
+
+```javascript
+// Resource allows public read
+resources: {
+  posts: {
+    public: ['read']
+  }
+}
+
+// But hooks still run with no user!
+api.hook('afterGet', async (context) => {
+  // context.options.user is undefined for public access
+  const userName = context.options.user?.name || 'Anonymous';
+  await logAccess(userName, context.id);
 });
 ```
 

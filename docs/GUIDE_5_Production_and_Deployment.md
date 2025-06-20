@@ -164,40 +164,150 @@ const orderHooks = {
 
 ## Authentication & Security
 
-### Adding Authentication Middleware
+### Using the AuthorizationPlugin
+
+The AuthorizationPlugin provides role-based access control (RBAC) with ownership permissions.
 
 ```javascript
-// api/1.0.0/secure-resource.js
-import { Schema } from 'json-rest-api';
+import { Api, Schema } from 'json-rest-api';
+import { MySQLPlugin, AuthorizationPlugin, HTTPPlugin } from 'json-rest-api/plugins';
 
-const api = Api.get('myapp', '1.0.0');
+const api = new Api({ name: 'myapp', version: '1.0.0' });
 
-// Add authentication middleware
-api.useMiddleware((req, res, next) => {
-  if (!req.session?.userId) {
-    return res.status(401).json({ 
-      error: 'Authentication required' 
-    });
+// Storage first
+api.use(MySQLPlugin, { connection });
+
+// Authorization with roles and permissions
+api.use(AuthorizationPlugin, {
+  roles: {
+    admin: {
+      permissions: '*',
+      description: 'Full system access'
+    },
+    editor: {
+      permissions: ['posts.*', 'media.*', 'users.read'],
+      description: 'Can manage content'
+    },
+    user: {
+      permissions: [
+        'posts.create',
+        'posts.read',
+        'posts.update.own',  // Can only update own posts
+        'posts.delete.own'   // Can only delete own posts
+      ]
+    }
+  },
+  
+  // Bridge to your auth system
+  enhanceUser: async (user) => {
+    // Load roles from your database/session/JWT
+    const roles = await getUserRoles(user.id);
+    return { ...user, roles };
+  },
+  
+  // Resource-specific rules
+  resources: {
+    posts: {
+      ownerField: 'authorId',
+      public: ['read'],           // Anyone can read
+      authenticated: ['create'],  // Logged-in users can create
+      owner: ['update', 'delete'] // Only owner can update/delete
+    }
   }
-  next();
 });
 
-// Or use hooks for fine-grained control
-api.hook('beforeOperation', async (context) => {
-  if (context.options.type !== 'secrets') return;
+// HTTP with user extraction
+api.use(HTTPPlugin, {
+  app,
+  getUserFromRequest: (req) => req.user // From your auth middleware
+});
+```
+
+### Simple Authentication Example
+
+```javascript
+// Your authentication middleware
+app.use(async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
   
-  const { method, request } = context;
-  
-  if (!request.session?.userId) {
-    throw Object.assign(new Error('Authentication required'), { 
-      status: 401 
-    });
+  if (token) {
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      // This user object will be enhanced by AuthorizationPlugin
+      req.user = {
+        id: payload.sub,
+        email: payload.email
+        // roles can be in JWT or loaded by enhanceUser
+      };
+    } catch (err) {
+      // Invalid token
+    }
   }
   
-  if (method === 'delete' && request.session.role !== 'admin') {
-    throw Object.assign(new Error('Admin access required'), { 
-      status: 403 
-    });
+  next();
+});
+```
+
+### Resource Definition with Permissions
+
+```javascript
+const postSchema = new Schema({
+  title: { type: 'string', required: true },
+  content: { type: 'string' },
+  authorId: { type: 'integer' },
+  status: { type: 'string', enum: ['draft', 'published'] },
+  
+  // Field-level permissions
+  internalNotes: { 
+    type: 'string',
+    permission: 'posts.sensitive' // Only users with this permission see it
+  }
+});
+
+api.addResource('posts', postSchema);
+```
+
+### Authorization in Action
+
+```javascript
+// User with 'user' role tries to update someone else's post
+// This will throw ForbiddenError
+await api.resources.posts.update(123, 
+  { title: 'Hacked!' },
+  { user: { id: 2, roles: ['user'] } }
+);
+
+// But they can update their own post
+await api.resources.posts.update(456,
+  { title: 'My Updated Post' },
+  { user: { id: 2, roles: ['user'] } }
+);
+
+// Admin can update any post
+await api.resources.posts.update(123,
+  { title: 'Admin Edit' },
+  { user: { id: 1, roles: ['admin'] } }
+);
+```
+
+### Custom Permission Checks in Hooks
+
+```javascript
+api.hook('beforeUpdate', async (context) => {
+  if (context.options.type !== 'posts') return;
+  
+  const user = context.options.user;
+  const { status } = context.data;
+  
+  // Only editors can publish posts
+  if (status === 'published' && !user.can('posts.publish')) {
+    throw new ForbiddenError('You cannot publish posts');
+  }
+  
+  // Add reviewer info
+  if (user.hasRole('editor') && status === 'published') {
+    context.data.reviewedBy = user.id;
+    context.data.reviewedAt = new Date();
   }
 });
 ```
