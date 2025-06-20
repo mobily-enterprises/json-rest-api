@@ -18,7 +18,87 @@ const api = new Api();
 api.use(MySQLPlugin, { connection: dbConfig });
 
 // ============================================================
-// PATTERN 1: Multi-Tenant Filtering
+// PATTERN 1: Virtual Search Fields 
+// Flexible search fields that don't map to database columns
+// ============================================================
+
+// Define a resource with virtual search field
+api.addResource('messages', messageSchema, {
+  searchableFields: {
+    from: 'from',              // Regular field
+    subject: 'subject',        // Regular field  
+    folder: 'folder',          // Regular field
+    search: '*',               // Virtual field - multi-field search
+    smart: '*'                 // Virtual field - advanced syntax
+  }
+});
+
+// Handle the virtual search field
+api.hook('modifyQuery', async (context) => {
+  if (context.options.type !== 'messages') return;
+  
+  const { filter } = context.params;
+  
+  // Handle 'search' - simple multi-field search
+  if (filter?.search) {
+    const value = filter.search;
+    
+    context.query.where(
+      '(messages.subject LIKE ? OR messages.body LIKE ? OR messages.from LIKE ?)',
+      `%${value}%`, `%${value}%`, `%${value}%`
+    );
+    
+    delete filter.search; // Remove so it doesn't hit the DB
+  }
+  
+  // Handle 'smart' - advanced search syntax like "in:inbox tony"
+  if (filter?.smart) {
+    const value = filter.smart;
+    const match = value.match(/^(\w+):(\w+)\s+(.+)$/);
+    
+    if (match) {
+      const [_, operator, param, term] = match;
+      
+      switch (operator) {
+        case 'in':
+          context.query
+            .where('messages.folder = ?', param)
+            .where('(messages.subject LIKE ? OR messages.body LIKE ?)', 
+              `%${term}%`, `%${term}%`);
+          break;
+          
+        case 'from':
+          context.query.where('messages.from LIKE ?', `%${param}%`);
+          if (term) {
+            context.query.where('messages.subject LIKE ?', `%${term}%`);
+          }
+          break;
+          
+        case 'has':
+          if (param === 'attachment') {
+            context.query.where('messages.hasAttachment = ?', true);
+          }
+          break;
+      }
+    } else {
+      // Fallback to simple search
+      context.query.where(
+        '(messages.subject LIKE ? OR messages.body LIKE ?)',
+        `%${value}%`, `%${value}%`
+      );
+    }
+    
+    delete filter.smart;
+  }
+}, 15); // Run after filter validation but before standard filters
+
+// Now you can use:
+// GET /api/messages?filter[search]=meeting
+// GET /api/messages?filter[smart]=in:inbox%20urgent
+// GET /api/messages?filter[smart]=from:john%20project
+
+// ============================================================
+// PATTERN 2: Multi-Tenant Filtering
 // Automatically filter all queries by tenant
 // ============================================================
 

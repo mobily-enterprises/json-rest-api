@@ -80,12 +80,29 @@ api.addResource('users', userSchema, {
 api.addResource('posts', postSchema, {
   searchableFields: {
     author: 'authorId.name',     // Filter by author name via join
-    category: 'categoryId.title' // Filter by category title
+    category: 'categoryId.title', // Filter by category title
+    search: '*'                  // Virtual field - requires custom handler
   },
   hooks: {
     afterInsert: async (context) => {
       // Resource-specific hook
     }
+  }
+});
+
+// Virtual search fields (marked with '*') require a handler
+api.hook('modifyQuery', async (context) => {
+  if (context.params.filter?.search && context.options.type === 'posts') {
+    const value = context.params.filter.search;
+    
+    // Custom search logic
+    context.query.where(
+      '(posts.title LIKE ? OR posts.content LIKE ? OR posts.tags LIKE ?)',
+      `%${value}%`, `%${value}%`, `%${value}%`
+    );
+    
+    // Remove from filter to prevent column lookup
+    delete context.params.filter.search;
   }
 });
 ```

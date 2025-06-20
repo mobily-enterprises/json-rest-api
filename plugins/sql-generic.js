@@ -234,6 +234,14 @@ export const SQLPlugin = {
           
           // Get the actual field path (use mapping if exists)
           const actualPath = fieldMappings[field] || field;
+          
+          // Check if this is a virtual field (marked with '*')
+          if (actualPath === '*') {
+            // Virtual field - skip automatic query building
+            // It will be handled by modifyQuery hooks
+            continue;
+          }
+          
           // Check if actualPath contains dot notation (e.g., 'puppyId.name')
           if (actualPath.includes('.')) {
             const [joinField, targetField] = actualPath.split('.');

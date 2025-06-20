@@ -1621,6 +1621,80 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       assert(queryTime < 1000, 'Query should complete within 1 second');
     });
   });
+  
+  // 14. Virtual Search Fields Tests
+  
+  describe('14. Virtual Search Fields', () => {
+    let api;
+    
+    before(async () => {
+      api = await setupTestApi();
+      await api.connect();
+    });
+    
+    after(async () => {
+      await robustTeardown({ api });
+    });
+    
+    it('should allow virtual fields marked with * in searchableFields', async () => {
+      const schema = new Schema({
+        id: { type: 'id' },
+        title: { type: 'string', searchable: true },
+        content: { type: 'string' }
+      });
+      
+      // Add resource with virtual search field
+      api.addResource('articles', schema, {
+        searchableFields: {
+          title: 'title',
+          search: '*',  // Virtual field
+          q: '*'        // Another virtual field
+        }
+      });
+      
+      // Virtual fields should be validated
+      let queryProcessed = false;
+      api.hook('modifyQuery', async (context) => {
+        if (context.params.filter?.search) {
+          queryProcessed = true;
+          delete context.params.filter.search;
+        }
+      });
+      
+      // This should not throw validation error
+      await api.resources.articles.query({
+        filter: { search: 'test' }
+      });
+      
+      assert.ok(queryProcessed, 'Virtual field should be processed');
+    });
+    
+    it('should reject non-searchable virtual fields', async () => {
+      const schema = new Schema({
+        id: { type: 'id' },
+        title: { type: 'string', searchable: true }
+      });
+      
+      api.addResource('items', schema, {
+        searchableFields: {
+          title: 'title'
+          // Note: 'search' is NOT defined
+        }
+      });
+      
+      // Should throw error for undefined virtual field
+      await assert.rejects(
+        api.resources.items.query({
+          filter: { search: 'test' }
+        }),
+        (err) => {
+          assert.ok(err.message.includes('not searchable') || err.validationErrors?.[0]?.message?.includes('not searchable'));
+          return true;
+        }
+      );
+    });
+    
+  });
 });
 
 // Run the tests

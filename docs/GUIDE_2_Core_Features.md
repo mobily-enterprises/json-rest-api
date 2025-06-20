@@ -262,7 +262,8 @@ api.addResource('posts', postSchema, {
   searchableFields: {
     author: 'authorId.name',      // Filter by author name
     authorEmail: 'authorId.email', // Filter by author email
-    category: 'categoryId.title'   // Filter by category title
+    category: 'categoryId.title',  // Filter by category title
+    search: '*'                   // Virtual field - requires handler
   }
 });
 
@@ -271,6 +272,26 @@ await api.resources.posts.query({
   filter: { author: 'John Doe' }
 });
 // This translates to a JOIN and filters by users.name
+
+// Virtual search fields (marked with '*') require a custom handler:
+api.hook('modifyQuery', async (context) => {
+  if (context.params.filter?.search && context.options.type === 'posts') {
+    const value = context.params.filter.search;
+    
+    // Multi-field search
+    context.query.where(
+      '(posts.title LIKE ? OR posts.content LIKE ? OR posts.tags LIKE ?)',
+      `%${value}%`, `%${value}%`, `%${value}%`
+    );
+    
+    delete context.params.filter.search; // Remove to prevent column lookup
+  }
+});
+
+// Now you can do powerful searches:
+await api.resources.posts.query({
+  filter: { search: 'javascript' } // Searches title, content, and tags
+});
 ```
 
 ### Filter Operators

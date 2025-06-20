@@ -252,6 +252,56 @@ const query = new QueryBuilder('users')
   .toSQL();
 ```
 
+## Virtual Search Fields Example
+
+**File**: [`virtual-search-fields.js`](./examples/virtual-search-fields.js)
+
+This example demonstrates:
+- Creating virtual searchable fields that don't map to database columns
+- Multi-field search across multiple columns
+- Advanced search syntax (Gmail-style: `in:inbox`, `from:user`)
+- Custom search handlers for specialized logic
+- Barcode/SKU exact matching
+- Complex search patterns with operators
+
+### Key Concepts Shown
+
+```javascript
+// Define virtual search fields with '*'
+api.addResource('messages', messageSchema, {
+  searchableFields: {
+    from: 'from',        // Regular field
+    folder: 'folder',    // Regular field
+    search: '*',         // Virtual: multi-field search
+    smart: '*'           // Virtual: advanced syntax
+  }
+});
+
+// Handle virtual fields in hooks
+api.hook('modifyQuery', async (context) => {
+  if (context.params.filter?.search) {
+    const value = context.params.filter.search;
+    
+    // Multi-field search with safe parameterization
+    context.query.where(
+      '(messages.subject LIKE ? OR messages.body LIKE ?)',
+      `%${value}%`, `%${value}%`
+    );
+    
+    delete context.params.filter.search;
+  }
+});
+
+// Usage examples:
+await api.resources.messages.query({
+  filter: { search: 'meeting' }  // Searches multiple fields
+});
+
+await api.resources.messages.query({
+  filter: { smart: 'in:inbox urgent' }  // Advanced syntax
+});
+```
+
 ## Running the Examples
 
 1. **Install dependencies**:
