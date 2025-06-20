@@ -23,12 +23,15 @@
     "test:tap": "node tests/test-all.js --test-reporter tap",
     "test:mysql": "DB_TYPE=mysql node tests/test-all.js",
     "test:all-db": "npm test && npm run test:mysql",
-    "test:ci": "npm run test:all-db"
+    "test:ci": "npm run test:all-db",
+    "sync-docs": "node scripts/sync-docs-website.js",
+    "docs:dev": "cd docs-website && npx http-server -p 8080"
   },
   "dependencies": {
     "alasql": "^4.6.6",
     "circular-json-es6": "^2.0.2",
     "express": "^4.21.1",
+    "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.13.1",
     "semver": "^7.5.4",
     "thenby": "^1.3.4",

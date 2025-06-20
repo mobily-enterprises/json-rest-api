@@ -9,13 +9,7 @@ export const SecurityPlugin = {
         max: 100, // limit each IP to 100 requests per windowMs
         message: 'Too many requests from this IP'
       },
-      cors: {
-        origin: '*',
-        credentials: true,
-        methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-        exposedHeaders: ['X-Total-Count', 'Link']
-      },
+      // CORS configuration moved to CorsPlugin
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
@@ -42,15 +36,8 @@ export const SecurityPlugin = {
 
     // Add security headers
     if (api.router) {
-      // CORS
+      // Security headers only (CORS moved to CorsPlugin)
       api.router.use((req, res, next) => {
-        const cors = defaultOptions.cors;
-        res.header('Access-Control-Allow-Origin', cors.origin);
-        res.header('Access-Control-Allow-Methods', cors.methods.join(', '));
-        res.header('Access-Control-Allow-Headers', cors.allowedHeaders.join(', '));
-        res.header('Access-Control-Expose-Headers', cors.exposedHeaders.join(', '));
-        res.header('Access-Control-Allow-Credentials', cors.credentials);
-        
         // Security headers
         res.header('X-Content-Type-Options', 'nosniff');
         res.header('X-Frame-Options', 'DENY');
@@ -191,26 +178,7 @@ export const SecurityPlugin = {
       }
     });
 
-    // Add security methods
-    api.generateToken = (payload, expiresIn = '24h') => {
-      // This would use JWT in production
-      return Buffer.from(JSON.stringify({
-        ...payload,
-        exp: Date.now() + parseDuration(expiresIn)
-      })).toString('base64');
-    };
-
-    api.verifyToken = (token) => {
-      try {
-        const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-        if (decoded.exp && decoded.exp < Date.now()) {
-          throw new Error('Token expired');
-        }
-        return decoded;
-      } catch (error) {
-        throw new Error('Invalid token');
-      }
-    };
+    // Token methods removed - use JwtPlugin for JWT tokens
   }
 };
 
@@ -246,16 +214,4 @@ function sanitizeObject(obj) {
   return sanitized;
 }
 
-function parseDuration(duration) {
-  const units = {
-    s: 1000,
-    m: 60 * 1000,
-    h: 60 * 60 * 1000,
-    d: 24 * 60 * 60 * 1000
-  };
-  
-  const match = duration.match(/^(\d+)([smhd])$/);
-  if (!match) return 24 * 60 * 60 * 1000; // Default 24h
-  
-  return parseInt(match[1]) * units[match[2]];
-}
+// Duration parsing moved to JwtPlugin

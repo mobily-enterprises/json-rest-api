@@ -1,4 +1,4 @@
-import { NotFoundError, InternalError, ConflictError, ValidationError, ErrorCodes } from '../lib/errors.js';
+import { NotFoundError, InternalError, ConflictError, ValidationError, BadRequestError, ErrorCodes } from '../lib/errors.js';
 import { QueryBuilder, schemaFields } from '../lib/query-builder.js';
 
 // Helper to parse JSON fields in a row
