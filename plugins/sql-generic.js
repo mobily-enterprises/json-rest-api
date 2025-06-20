@@ -245,10 +245,18 @@ export const SQLPlugin = {
           // Check if actualPath contains dot notation (e.g., 'puppyId.name')
           if (actualPath.includes('.')) {
             const [joinField, targetField] = actualPath.split('.');
-            const joinAlias = joinField;
-            query.where(`${joinAlias}.${targetField} = ?`, value);
+            
+            // Escape identifiers
+            const escapedAlias = await api.execute('db.formatIdentifier', { identifier: joinField });
+            const escapedTarget = await api.execute('db.formatIdentifier', { identifier: targetField });
+            
+            query.where(`${escapedAlias}.${escapedTarget} = ?`, value);
           } else {
-            query.where(`${table}.${actualPath} = ?`, value);
+            // Escape identifiers
+            const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
+            const escapedField = await api.execute('db.formatIdentifier', { identifier: actualPath });
+            
+            query.where(`${escapedTable}.${escapedField} = ?`, value);
           }
         }
       }
@@ -269,8 +277,23 @@ export const SQLPlugin = {
       // Apply sorting
       if (context.params.sort) {
         const sorts = parseSort(context.params.sort);
+        
+        // Get the schema to validate sort fields
+        const schema = api.getSchema?.(context.options.type);
+        const allowedFields = schema ? Object.keys(schema.structure) : [];
+        
         for (const { field, direction } of sorts) {
-          context.query.orderBy(`${table}.${field}`, direction);
+          // Validate field against schema if available
+          if (schema && !allowedFields.includes(field) && !context.options.searchableFields?.[field]) {
+            throw new BadRequestError(`Invalid sort field: ${field}`);
+          }
+          
+          // Get proper identifier escaping from adapter
+          const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
+          const escapedField = await api.execute('db.formatIdentifier', { identifier: field });
+          
+          // Use escaped identifiers
+          context.query.orderBy(`${escapedTable}.${escapedField}`, direction);
         }
       }
       

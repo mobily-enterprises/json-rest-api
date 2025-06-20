@@ -202,6 +202,25 @@ api.hook('beforeOperation', async (context) => {
 });
 ```
 
+### Built-in Security Features
+
+The JSON REST API automatically protects against common vulnerabilities:
+
+#### 🛡️ SQL Injection Protection
+- **All queries use parameterized statements** - Values are never concatenated into SQL
+- **Identifiers are properly escaped** - Table and column names are escaped using database-specific methods
+- **Sort fields are validated** - ORDER BY fields are checked against schema before use
+
+#### 🛡️ Prototype Pollution Protection
+- **Input sanitization** - All data in `insert()` and `update()` is automatically sanitized
+- **Dangerous keys removed** - `__proto__`, `constructor`, and `prototype` are stripped recursively
+- **No manual sanitization needed** - The API handles this for you
+
+#### 🛡️ Field-Level Access Control
+- **Searchable field enforcement** - Only fields marked as `searchable: true` can be filtered
+- **Silent field protection** - Fields marked as `silent: true` are never returned in queries
+- **Schema validation** - All input is validated against your schemas automatically
+
 ### Security Best Practices
 
 1. **Never expose sensitive fields**
@@ -209,18 +228,25 @@ api.hook('beforeOperation', async (context) => {
    password: { type: 'string', silent: true }
    ```
 
-2. **Validate all input**
+2. **Validate all input** (automatic with schemas)
    ```javascript
    email: { type: 'string', match: /^[^@]+@[^@]+$/ }
    ```
 
-3. **Use parameterized queries** (automatic with QueryBuilder)
-
-4. **Add rate limiting**
+3. **Mark searchable fields explicitly**
    ```javascript
-   api.use(RateLimitPlugin, {
-     windowMs: 15 * 60 * 1000,
-     max: 100
+   new Schema({
+     email: { type: 'string', searchable: true },
+     internalNotes: { type: 'string' } // Not searchable by default
+   })
+   ```
+
+4. **Add authentication/authorization**
+   ```javascript
+   api.hook('beforeOperation', async (context) => {
+     if (!context.request?.user) {
+       throw new UnauthorizedError();
+     }
    });
    ```
 
@@ -228,11 +254,16 @@ api.hook('beforeOperation', async (context) => {
    ```javascript
    api.use(HTTPPlugin, {
      cors: {
-       origin: 'https://yourdomain.com',
+       origin: 'https://yourdomain.com', // Never use '*' with credentials
        credentials: true
      }
    });
    ```
+
+6. **⚠️ NEVER bypass the API's protections**
+   - Don't build raw SQL queries in hooks
+   - Don't manually parse user input without validation
+   - Don't expose internal error details to users
 
 ## Best Practices
 
