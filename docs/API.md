@@ -380,6 +380,7 @@ api.hook('afterGet', async (context) => {
 | `'json'` | JSON data | TEXT |
 | `'array'` | Array (stored as JSON) | TEXT |
 | `'object'` | Object (stored as JSON) | TEXT |
+| `'list'` | To-many relationship (virtual) | Not stored |
 
 ### Methods
 
@@ -396,6 +397,97 @@ if (errors.length > 0) {
 Options:
 - `partial`: boolean - Allow partial data (for updates)
 - `skipRequired`: boolean - Skip required field validation
+
+## Relationships
+
+The API supports both to-one and to-many relationships between resources.
+
+### To-One Relationships (refs)
+
+Define foreign key relationships using the `refs` property:
+
+```javascript
+api.addResource('posts', new Schema({
+  title: { type: 'string', required: true },
+  authorId: {
+    type: 'id',
+    refs: {
+      resource: 'users',
+      join: {
+        eager: true,           // Auto-include when fetching
+        fields: ['id', 'name'], // Select specific fields
+        preserveId: true       // Keep both ID and joined data
+      }
+    }
+  }
+}));
+```
+
+### To-Many Relationships
+
+Define inverse relationships using the `list` type:
+
+```javascript
+api.addResource('users', new Schema({
+  name: { type: 'string', required: true },
+  posts: {
+    type: 'list',
+    virtual: true,              // Not stored in database
+    foreignResource: 'posts',   // Related resource type
+    foreignKey: 'authorId',     // Field in related resource
+    // Optional configuration:
+    defaultFilter: { published: true },  // Auto-filter
+    defaultSort: '-createdAt',          // Auto-sort
+    limit: 100,                         // Max results
+    permissions: { include: 'authenticated' } // Include permission
+  }
+}));
+
+// The foreign key must be searchable
+api.addResource('posts', new Schema({
+  title: { type: 'string' },
+  authorId: { 
+    type: 'id', 
+    refs: { resource: 'users' },
+    searchable: true  // Required for to-many queries
+  },
+  published: { type: 'boolean', searchable: true },
+  createdAt: { type: 'timestamp', searchable: true }
+}));
+```
+
+### Including Relationships
+
+Use the `include` parameter to load related resources:
+
+```javascript
+// Include single relationship
+GET /users/1?include=profile
+
+// Include multiple relationships
+GET /users/1?include=profile,posts
+
+// Include nested relationships (to-one only)
+GET /posts/1?include=author.country
+
+// Include to-many relationships
+GET /users/1?include=posts  // Returns user with all their posts
+```
+
+### Relationship Permissions
+
+Control who can include relationships:
+
+```javascript
+countryId: {
+  type: 'id',
+  refs: { resource: 'countries' },
+  permissions: {
+    read: true,              // Anyone can see the ID
+    include: 'authenticated' // Must be logged in to include full data
+  }
+}
+```
 
 ## Query Parameters
 

@@ -946,6 +946,11 @@ async function determineRequestedJoins(api, schema, params, user) {
     if (includeResult.nestedJoins.size > 0) {
       params._nestedJoins = includeResult.nestedJoins;
     }
+    
+    // Store to-many joins for later processing
+    if (includeResult.toManyJoins && includeResult.toManyJoins.length > 0) {
+      params._toManyJoins = includeResult.toManyJoins;
+    }
   }
   
   return joins;

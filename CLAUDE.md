@@ -96,6 +96,22 @@ authorId: {
 - Permission checks at each level
 - Supports dot notation for deep nesting
 
+**To-Many Relationships**: Define with `type: 'list'`
+```javascript
+posts: {
+  type: 'list',
+  virtual: true,
+  foreignResource: 'posts',
+  foreignKey: 'authorId',
+  defaultFilter: { published: true },
+  defaultSort: '-createdAt'
+}
+```
+- Foreign key must be `searchable: true`
+- Uses QueryBuilder with child schema
+- Respects hooks and permissions
+- Max depth limit prevents infinite recursion
+
 ### Implementation Notes
 
 - JSON:API compliant responses
