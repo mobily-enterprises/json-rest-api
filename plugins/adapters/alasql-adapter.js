@@ -106,7 +106,17 @@ export const AlaSQLAdapter = {
     api.implement('db.getInsertId', (context) => {
       const { table, data, idProperty } = context;
       // Return the ID that was inserted
-      return data[idProperty] || idCounters.get(table) - 1;
+      if (data[idProperty] !== undefined && data[idProperty] !== null) {
+        return data[idProperty];
+      }
+      // Fallback to counter - 1 if available
+      const counter = idCounters.get(table);
+      if (counter !== undefined) {
+        return counter - 1;
+      }
+      // This shouldn't happen if generateId was called properly
+      console.warn(`Warning: Unable to determine insert ID for table ${table}`);
+      return null;
     });
     
     api.implement('db.getAffectedRows', (context) => {
