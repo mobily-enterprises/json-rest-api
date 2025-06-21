@@ -50,9 +50,11 @@ To preview the site locally with Jekyll:
 # Install Jekyll (one time)
 gem install bundler jekyll
 
-# Run local server
 cd docs
-jekyll serve
+bundle config set --local path 'vendor/bundle'
+bundle install
+bundle exec jekyll serve
+
 
 # Open http://localhost:4000
 ```

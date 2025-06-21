@@ -28,6 +28,7 @@ include:
 exclude:
   - _old/
   - examples/
+  - vendor/
 
 highlighter: rouge
 
