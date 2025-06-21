@@ -1,28 +1,7 @@
 
-
-    
+* Apply all fixes form Security Audit 2
 * Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
 
-DOING:
-* Check that all tests still pass, and add MORE tests, make them pass by FIXING code
-
-
-* Resolve last little bits of TODO and in the second security audit
-
-  11. JSON:API Compliance Gaps
-
-  - Current HTTP plugin missing:
-    - Proper relationship handling
-    - Compound documents
-    - Sparse fieldsets
-    - Include parameter processing
-    - Meta information structure
-
-  12. Performance Features
-
-  - Not implemented:
-    - Connection pooling configuration
-    - Query result caching
-    - Batch operations
-    - Transaction support across operations
-
+JSON:API
+* Make pagination use the proper JSON:API format
+* Defice if we want to just embrace the JSON:API format, and then provide a layer to convert it to a more traditional one
