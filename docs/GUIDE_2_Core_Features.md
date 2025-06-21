@@ -368,6 +368,30 @@ GET /api/posts?filter[name][startsWith]=John
 GET /api/posts?filter[title][contains]=javascript
 ```
 
+#### Complete Operator Reference
+
+| Operator | Description | Example | SQL Equivalent |
+|----------|-------------|---------|----------------|
+| (none) | Equals | `{ status: 'active' }` | `WHERE status = 'active'` |
+| `eq` | Equals | `{ age: { eq: 25 } }` | `WHERE age = 25` |
+| `ne` | Not equals | `{ status: { ne: 'deleted' } }` | `WHERE status != 'deleted'` |
+| `gt` | Greater than | `{ price: { gt: 100 } }` | `WHERE price > 100` |
+| `gte` | Greater than or equal | `{ age: { gte: 18 } }` | `WHERE age >= 18` |
+| `lt` | Less than | `{ stock: { lt: 10 } }` | `WHERE stock < 10` |
+| `lte` | Less than or equal | `{ price: { lte: 99.99 } }` | `WHERE price <= 99.99` |
+| `in` | In array | `{ status: { in: ['active', 'pending'] } }` | `WHERE status IN ('active', 'pending')` |
+| `nin` | Not in array | `{ role: { nin: ['admin', 'root'] } }` | `WHERE role NOT IN ('admin', 'root')` |
+| `like` | SQL LIKE | `{ name: { like: '%john%' } }` | `WHERE name LIKE '%john%'` |
+| `ilike` | Case-insensitive LIKE | `{ email: { ilike: '%@GMAIL.COM' } }` | `WHERE LOWER(email) LIKE LOWER('%@GMAIL.COM')` |
+| `contains` | Contains substring | `{ bio: { contains: 'developer' } }` | `WHERE bio LIKE '%developer%'` |
+| `startsWith` | Starts with | `{ name: { startsWith: 'Dr.' } }` | `WHERE name LIKE 'Dr.%'` |
+| `endsWith` | Ends with | `{ email: { endsWith: '@company.com' } }` | `WHERE email LIKE '%@company.com'` |
+
+**Notes:**
+- The `ilike` operator uses `LOWER()` function for case-insensitive comparison in databases that don't support native `ILIKE`
+- For array fields, `in` and `nin` operators check if the array contains any of the specified values
+- All string operators properly escape special SQL characters to prevent injection
+
 
 ### Sorting
 

@@ -67,6 +67,7 @@ This guide is split into multiple sections for easier navigation and better perf
 
 - [QUICKSTART.md](./QUICKSTART.md) - 5-minute quick start guide
 - [API.md](./API.md) - Detailed API documentation
+- [JSON-API-COMPLIANCE.md](./JSON-API-COMPLIANCE.md) - JSON:API specification compliance
 - [Examples](../examples/) - Working code examples
 
 ## 💡 Tips for Using This Guide

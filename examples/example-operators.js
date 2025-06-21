@@ -128,7 +128,7 @@ async function seedData() {
   ];
 
   for (const product of products) {
-    await api.resources.products.insert(product);
+    await api.insert(product, { type: 'products' });
   }
   
   console.log('✅ Sample data seeded');
@@ -142,26 +142,26 @@ async function demonstrateOperators() {
   console.log('1️⃣ COMPARISON OPERATORS');
   
   // Greater than
-  const expensive = await api.resources.products.query({
+  const expensive = await api.query({
     filter: { price: { gt: 1000 } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts > $1000: ${expensive.data.length} items`);
   expensive.data.forEach(p => console.log(`  - ${p.attributes.name}: $${p.attributes.price}`));
   
   // Less than or equal
-  const affordable = await api.resources.products.query({
+  const affordable = await api.query({
     filter: { price: { lte: 500 } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts <= $500: ${affordable.data.length} items`);
   affordable.data.forEach(p => console.log(`  - ${p.attributes.name}: $${p.attributes.price}`));
   
   // Multiple conditions
-  const midRange = await api.resources.products.query({
+  const midRange = await api.query({
     filter: { 
       price: { gte: 200, lt: 1000 },
       stock: { gt: 0 }
     }
-  });
+  }, { type: 'products' });
   console.log(`\nMid-range products ($200-$999) in stock: ${midRange.data.length} items`);
   midRange.data.forEach(p => console.log(`  - ${p.attributes.name}: $${p.attributes.price}`));
   
@@ -169,16 +169,16 @@ async function demonstrateOperators() {
   console.log('\n\n2️⃣ SET OPERATORS');
   
   // IN operator
-  const appleOrSamsung = await api.resources.products.query({
+  const appleOrSamsung = await api.query({
     filter: { tags: { in: ['apple', 'samsung'] } }
-  });
+  }, { type: 'products' });
   console.log(`\nApple or Samsung products: ${appleOrSamsung.data.length} items`);
   appleOrSamsung.data.forEach(p => console.log(`  - ${p.attributes.name}`));
   
   // NOT IN operator
-  const notElectronics = await api.resources.products.query({
+  const notElectronics = await api.query({
     filter: { category: { nin: ['Electronics'] } }
-  });
+  }, { type: 'products' });
   console.log(`\nNon-electronics: ${notElectronics.data.length} items`);
   notElectronics.data.forEach(p => console.log(`  - ${p.attributes.name} (${p.attributes.category})`));
   
@@ -186,30 +186,30 @@ async function demonstrateOperators() {
   console.log('\n\n3️⃣ STRING OPERATORS');
   
   // Starts with
-  const appleProducts = await api.resources.products.query({
+  const appleProducts = await api.query({
     filter: { name: { startsWith: 'Apple' } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts starting with 'Apple': ${appleProducts.data.length} items`);
   appleProducts.data.forEach(p => console.log(`  - ${p.attributes.name}`));
   
   // Ends with
-  const proProducts = await api.resources.products.query({
+  const proProducts = await api.query({
     filter: { name: { endsWith: 'Pro' } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts ending with 'Pro': ${proProducts.data.length} items`);
   proProducts.data.forEach(p => console.log(`  - ${p.attributes.name}`));
   
   // Contains
-  const withAI = await api.resources.products.query({
+  const withAI = await api.query({
     filter: { description: { contains: 'AI' } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts with 'AI' in description: ${withAI.data.length} items`);
   withAI.data.forEach(p => console.log(`  - ${p.attributes.name}`));
   
   // LIKE pattern
-  const laptops = await api.resources.products.query({
+  const laptops = await api.query({
     filter: { description: { like: '%laptop%' } }
-  });
+  }, { type: 'products' });
   console.log(`\nProducts matching '%laptop%': ${laptops.data.length} items`);
   laptops.data.forEach(p => console.log(`  - ${p.attributes.name}`));
   
@@ -217,15 +217,15 @@ async function demonstrateOperators() {
   console.log('\n\n4️⃣ BOOLEAN & NOT EQUAL');
   
   // Active products
-  const active = await api.resources.products.query({
+  const active = await api.query({
     filter: { active: true }
-  });
+  }, { type: 'products' });
   console.log(`\nActive products: ${active.data.length} items`);
   
   // Not equal
-  const notAccessories = await api.resources.products.query({
+  const notAccessories = await api.query({
     filter: { category: { ne: 'Accessories' } }
-  });
+  }, { type: 'products' });
   console.log(`\nNot accessories: ${notAccessories.data.length} items`);
   notAccessories.data.forEach(p => console.log(`  - ${p.attributes.name} (${p.attributes.category})`));
 }

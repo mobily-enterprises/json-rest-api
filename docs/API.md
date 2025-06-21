@@ -1083,6 +1083,186 @@ Standard error codes:
 
 ## Plugins
 
+### JSONAPIStrictPlugin
+
+Transforms responses to be fully compliant with JSON:API specification, including proper relationship objects, compound documents with included array, and correct meta information structure.
+
+```javascript
+import { JSONAPIStrictPlugin } from 'json-rest-api';
+
+api.use(JSONAPIStrictPlugin);
+```
+
+**Features:**
+
+1. **Relationship Objects** - Moves foreign keys from attributes to relationships
+2. **Compound Documents** - Creates `included` array for related resources
+3. **Relationship Links** - Adds self and related links to each relationship
+4. **Meta Standardization** - Ensures consistent meta format
+5. **Error Arrays** - Formats errors according to JSON:API spec
+
+**Detailed Transformation Examples:**
+
+#### Single Resource
+```javascript
+// Request
+GET /api/posts/1
+
+// Without plugin (default):
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "attributes": {
+      "title": "My Post",
+      "content": "Post content",
+      "authorId": "42",
+      "author": { 
+        "id": 42, 
+        "name": "John Doe",
+        "email": "john@example.com"
+      }
+    }
+  }
+}
+
+// With plugin (JSON:API strict):
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "attributes": {
+      "title": "My Post",
+      "content": "Post content"
+    },
+    "relationships": {
+      "author": {
+        "data": { "type": "users", "id": "42" },
+        "links": {
+          "self": "/api/posts/1/relationships/author",
+          "related": "/api/posts/1/author"
+        }
+      }
+    }
+  },
+  "included": [{
+    "id": "42",
+    "type": "users",
+    "attributes": {
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }]
+}
+```
+
+#### Collection with Pagination
+```javascript
+// Request
+GET /api/posts?page[size]=2&page[number]=1
+
+// With plugin response:
+{
+  "data": [
+    {
+      "id": "1",
+      "type": "posts",
+      "attributes": {
+        "title": "First Post"
+      },
+      "relationships": {
+        "author": {
+          "data": { "type": "users", "id": "42" }
+        }
+      }
+    },
+    {
+      "id": "2",
+      "type": "posts",
+      "attributes": {
+        "title": "Second Post"
+      },
+      "relationships": {
+        "author": {
+          "data": { "type": "users", "id": "43" }
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "id": "42",
+      "type": "users",
+      "attributes": { "name": "John Doe" }
+    },
+    {
+      "id": "43",
+      "type": "users",
+      "attributes": { "name": "Jane Smith" }
+    }
+  ],
+  "meta": {
+    "total": 10,
+    "totalCount": 10,
+    "currentPage": 1,
+    "pageSize": 2,
+    "pageCount": 5
+  },
+  "links": {
+    "first": "/api/posts?page[number]=1&page[size]=2",
+    "last": "/api/posts?page[number]=5&page[size]=2",
+    "next": "/api/posts?page[number]=2&page[size]=2"
+  }
+}
+```
+
+#### Error Response
+```javascript
+// Request
+GET /api/posts/999
+
+// With plugin response:
+{
+  "errors": [{
+    "status": "404",
+    "code": "NOT_FOUND",
+    "title": "NotFoundError",
+    "detail": "Post with id '999' not found",
+    "meta": {
+      "timestamp": "2024-01-01T12:00:00.000Z"
+    }
+  }]
+}
+```
+
+**Hook Integration:**
+
+The plugin uses these hooks:
+- `afterHTTPResponse` - Transforms successful responses
+- `beforeHTTPResponse` - Adds relationship links
+- `afterError` - Formats error responses
+
+**Performance Considerations:**
+
+- Transformation happens after database query
+- Minimal overhead (~1-2ms per response)
+- No additional database queries
+- Efficient deduplication for included resources
+
+**Compatibility:**
+
+- Works with all storage plugins
+- Compatible with sparse fieldsets
+- Supports all query parameters
+- Works with pagination and filtering
+
+**Configuration:**
+
+Currently no configuration options. Future versions may support:
+- Custom link generation
+- Selective transformation
+- Resource-specific rules
+
 ### ViewsPlugin
 
 Provides view-based control over response shapes with smart defaults.

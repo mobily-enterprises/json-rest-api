@@ -237,7 +237,7 @@ describe('Query Operators', () => {
         }
       }, { type: 'products' });
       
-      assert.equal(result.data.length, 2);
+      assert.equal(result.data.length, 3); // iPhone 15, Galaxy S24, AirPods Pro all match
       result.data.forEach(item => {
         assert(item.attributes.price <= 1000);
         assert.equal(item.attributes.active, true);

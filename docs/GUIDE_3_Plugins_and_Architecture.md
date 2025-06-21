@@ -214,6 +214,170 @@ Endpoints created:
 - `PATCH /api/{type}/{id}` - Update resource
 - `DELETE /api/{type}/{id}` - Delete resource
 
+#### JSONAPIStrictPlugin
+
+Transform API responses to be fully compliant with the JSON:API specification. This plugin converts the simplified default format into strict JSON:API format with proper relationship objects, compound documents, and standardized meta information.
+
+```javascript
+import { JSONAPIStrictPlugin } from 'json-rest-api';
+
+// Enable strict JSON:API compliance
+api.use(JSONAPIStrictPlugin);
+```
+
+**What This Plugin Does:**
+
+1. **Moves Relationships Out of Attributes**
+   - Foreign key fields (like `authorId`) are removed from attributes
+   - Relationships are placed in a separate `relationships` object
+   - Each relationship includes `data` with type and id
+
+2. **Creates Compound Documents**
+   - Related resources are moved to an `included` array
+   - Prevents duplicate resources in the included array
+   - Maintains resource linkage through type/id references
+
+3. **Adds Relationship Links**
+   - Each relationship gets `self` and `related` links
+   - Self link: `/api/posts/1/relationships/author`
+   - Related link: `/api/posts/1/author`
+
+4. **Standardizes Meta Information**
+   - Ensures consistent meta format in collections
+   - Includes `totalCount`, `currentPage`, `pageSize`
+
+5. **Formats Errors to JSON:API Spec**
+   - Errors returned as array with standard fields
+   - Each error has status, code, title, and detail
+
+**Example Transformation:**
+
+```javascript
+// Without JSONAPIStrictPlugin (default simplified format):
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "attributes": {
+      "title": "My Blog Post",
+      "content": "Post content here",
+      "authorId": "42",              // Foreign key in attributes
+      "author": {                    // Joined data in attributes
+        "id": 42,
+        "name": "John Doe",
+        "email": "john@example.com"
+      }
+    }
+  }
+}
+
+// With JSONAPIStrictPlugin (strict JSON:API format):
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "attributes": {
+      "title": "My Blog Post",
+      "content": "Post content here"
+      // No foreign keys or joined data here
+    },
+    "relationships": {
+      "author": {
+        "data": { "type": "users", "id": "42" },
+        "links": {
+          "self": "/api/posts/1/relationships/author",
+          "related": "/api/posts/1/author"
+        }
+      }
+    }
+  },
+  "included": [{
+    "id": "42",
+    "type": "users",
+    "attributes": {
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }]
+}
+```
+
+**Working with Includes:**
+
+```javascript
+// Request multiple related resources
+GET /api/posts/1?include=author,category,comments
+
+// Response includes all in the included array
+{
+  "data": { /* post data */ },
+  "included": [
+    { "type": "users", "id": "42", /* author */ },
+    { "type": "categories", "id": "5", /* category */ },
+    { "type": "comments", "id": "101", /* comment 1 */ },
+    { "type": "comments", "id": "102", /* comment 2 */ }
+  ]
+}
+```
+
+**Collection Responses:**
+
+```javascript
+GET /api/posts?page[size]=10
+
+{
+  "data": [ /* array of posts */ ],
+  "meta": {
+    "total": 145,
+    "totalCount": 145,      // JSON:API style
+    "currentPage": 1,
+    "pageSize": 10,
+    "pageCount": 15
+  },
+  "links": {
+    "first": "/api/posts?page[number]=1&page[size]=10",
+    "last": "/api/posts?page[number]=15&page[size]=10",
+    "next": "/api/posts?page[number]=2&page[size]=10"
+  }
+}
+```
+
+**Error Responses:**
+
+```javascript
+// 404 Not Found
+{
+  "errors": [{
+    "status": "404",
+    "code": "NOT_FOUND",
+    "title": "NotFoundError",
+    "detail": "Post with id '999' not found",
+    "source": { "parameter": "id" }
+  }]
+}
+```
+
+**Important Notes:**
+
+1. **Request Format Unchanged**: You still send data in the simple format
+2. **Response Only**: The plugin only transforms responses
+3. **Sparse Fieldsets Work**: `?fields[posts]=title,content` still works
+4. **Performance**: Minimal overhead, transformation happens after query
+5. **Opt-in**: Only active when you explicitly use the plugin
+
+**When to Use This Plugin:**
+
+- ✅ Building a public API that needs JSON:API compliance
+- ✅ Integrating with JSON:API client libraries (Ember Data, etc.)
+- ✅ Need standardized relationship handling
+- ✅ Want consistent error formatting
+
+**When NOT to Use:**
+
+- ❌ Internal APIs where simplicity matters more
+- ❌ Mobile apps where bandwidth is critical (more verbose)
+- ❌ Simple CRUD apps without complex relationships
+
 #### PositioningPlugin
 
 Manage record order for drag-and-drop interfaces.

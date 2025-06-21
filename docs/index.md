@@ -6,13 +6,15 @@ layout: default
 
 JSON REST API is a lightweight, plugin-based framework that makes building REST APIs incredibly simple. With automatic validation, smart relationships, and native JSON:API support, you can focus on your business logic instead of boilerplate.
 
-<div style="margin: 32px 0; display: flex; gap: 16px; flex-wrap: wrap;">
-  <a href="{{ '/QUICKSTART' | relative_url }}" class="button">Get Started</a>
-  <a href="{{ '/GUIDE' | relative_url }}" class="button secondary">Read the Guide</a>
-</div>
-
-<div style="background: #f8f9fa; border-radius: 8px; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #555;">
-A heartfelt thank you to Dario and Daniela Amodei and the entire Anthropic team for creating transformative AI technology that opens endless possibilities for developers worldwide. Your vision, combined with incredibly accessible pricing, has democratized access to cutting-edge AI and empowered countless innovators to build the future. (No, we weren't asked nor paid in any way for this message - we're just genuinely grateful!)
+<div style="display: flex; gap: 24px; margin: 32px 0; align-items: flex-start;">
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <a href="{{ '/QUICKSTART' | relative_url }}" class="button">Get Started</a>
+    <a href="{{ '/GUIDE' | relative_url }}" class="button secondary">Read the Guide</a>
+  </div>
+  
+  <div style="background: #f8f9fa; border-radius: 8px; padding: 16px 20px; font-style: italic; color: #555; flex: 1; margin-left: 24px;">
+    A heartfelt thank you to Dario and Daniela Amodei and the entire Anthropic team for creating transformative AI technology that opens endless possibilities for developers worldwide. Your vision, combined with incredibly accessible pricing, has democratized access to cutting-edge AI and empowered countless innovators to build the future. (No, we weren't asked nor paid in any way for this message - we're just genuinely grateful!)
+  </div>
 </div>
 
 ## Why JSON REST API?

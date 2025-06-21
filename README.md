@@ -219,6 +219,36 @@ GET /api/posts?
 </details>
 
 <details>
+<summary><strong>Advanced Query Operators</strong></summary>
+
+```javascript
+// Comparison operators
+GET /api/products?filter[price][gt]=100        // Greater than
+GET /api/products?filter[price][gte]=100       // Greater than or equal
+GET /api/products?filter[price][lt]=1000       // Less than
+GET /api/products?filter[price][lte]=1000      // Less than or equal
+GET /api/products?filter[status][ne]=draft     // Not equal
+
+// Set operators
+GET /api/products?filter[category][in]=electronics,accessories
+GET /api/products?filter[tags][nin]=discontinued,legacy
+
+// String operators
+GET /api/products?filter[name][startsWith]=Apple
+GET /api/products?filter[name][endsWith]=Pro
+GET /api/products?filter[description][contains]=wireless
+GET /api/products?filter[name][like]=%phone%   // SQL LIKE pattern
+
+// Combine multiple operators
+GET /api/products?
+  filter[price][gte]=100&
+  filter[price][lt]=1000&
+  filter[category][in]=electronics,computers&
+  filter[name][contains]=Pro
+```
+</details>
+
+<details>
 <summary><strong>API Versioning</strong></summary>
 
 ```javascript
@@ -319,6 +349,8 @@ api.use(HTTPPlugin, {
 ```
 
 See [Security Guide](docs/GUIDE_7_Security.md) for comprehensive security documentation.
+
+For JSON:API specification compliance details, see [JSON:API Compliance Guide](docs/JSON-API-COMPLIANCE.md).
 
 ## Installation
 
