@@ -5,11 +5,13 @@ This guide covers security features and best practices for the JSON REST API lib
 ## Table of Contents
 
 1. [Field Security](#field-security)
-2. [CORS Configuration](#cors-configuration)
-3. [JWT Authentication](#jwt-authentication)
-4. [Authorization](#authorization)
-5. [Additional Security Features](#additional-security-features)
-6. [Security Checklist](#security-checklist)
+2. [Error Sanitization](#error-sanitization)
+3. [Input Size Validation](#input-size-validation)
+4. [CORS Configuration](#cors-configuration)
+5. [JWT Authentication](#jwt-authentication)
+6. [Authorization](#authorization)
+7. [Additional Security Features](#additional-security-features)
+8. [Security Checklist](#security-checklist)
 
 ## Field Security
 
@@ -79,6 +81,189 @@ api.hook('beforeQuery', async (context) => {
     );
   }
 });
+```
+
+## Error Sanitization
+
+**Built into Core** - The API automatically sanitizes error messages in production to prevent information disclosure.
+
+### How It Works
+
+- **Production** (`NODE_ENV=production`): Error messages are sanitized, stack traces removed
+- **Development**: Full error details shown for debugging
+- **Server errors** (5xx): Logged server-side with full details
+- **Client errors** (4xx): Messages preserved as they're meant for users
+
+### Automatic Sanitization
+
+```javascript
+// In production, internal errors are sanitized
+throw new Error("Cannot read property 'name' of undefined");
+// Response: "Invalid request data"
+
+throw new Error("ECONNREFUSED 127.0.0.1:3306");
+// Response: "Service temporarily unavailable"
+
+// Client errors (4xx) are not sanitized
+throw new NotFoundError('User', '123');
+// Response: "User with id '123' not found"
+```
+
+### Configuration Options
+
+```javascript
+// Via HTTP plugin
+api.use(HTTPPlugin, {
+  // Control sanitization behavior
+  errorSanitization: true,      // Always sanitize
+  forceProductionErrors: true,  // Force production mode
+  forceDevelopmentErrors: true  // Force development mode
+});
+
+// Via environment variable
+process.env.NODE_ENV = 'production'; // Enable sanitization
+```
+
+### Error Response Format
+
+**Development Mode**:
+```json
+{
+  "errors": [{
+    "status": "500",
+    "code": "INTERNAL_ERROR",
+    "title": "InternalError",
+    "detail": "Cannot read property 'name' of undefined",
+    "meta": {
+      "timestamp": "2025-01-20T10:30:00.000Z",
+      "stack": [
+        "TypeError: Cannot read property 'name' of undefined",
+        "    at processUser (/app/lib/users.js:45:20)"
+      ],
+      "context": { "userId": 123 }
+    }
+  }]
+}
+```
+
+**Production Mode**:
+```json
+{
+  "errors": [{
+    "status": "500",
+    "code": "INTERNAL_ERROR",
+    "title": "InternalError",
+    "detail": "Invalid request data",
+    "meta": {
+      "timestamp": "2025-01-20T10:30:00.000Z"
+    }
+  }]
+}
+```
+
+### Safe Context Fields
+
+In production, only these context fields are included:
+- `resourceType` - Type of resource involved
+- `field` - Field name for validation errors
+- `value` - Field value (only for 4xx errors)
+- `limit` - Limit that was exceeded
+
+### Server-Side Logging
+
+In production, 5xx errors are logged server-side with full details:
+
+```javascript
+// Automatically logged to console.error
+[ERROR] {
+  timestamp: '2025-01-20T10:30:00.000Z',
+  code: 'INTERNAL_ERROR',
+  message: 'Database connection failed: ECONNREFUSED',
+  context: { query: 'SELECT * FROM users' },
+  stack: 'Error: Database connection failed...'
+}
+```
+
+## Input Size Validation
+
+**Built into Schema** - Prevent DoS attacks by limiting the size of arrays and objects.
+
+### Array Limits
+
+```javascript
+const schema = new Schema({
+  tags: {
+    type: 'array',
+    maxItems: 100,  // Maximum 100 tags
+    maxItemsErrorMessage: 'Too many tags (max 100)'
+  },
+  
+  // Without limit - triggers warning
+  unlimitedArray: { type: 'array' }
+});
+```
+
+### Object Limits
+
+```javascript
+const schema = new Schema({
+  metadata: {
+    type: 'object',
+    maxKeys: 50,     // Max 50 properties
+    maxDepth: 5,     // Max 5 levels deep
+    maxKeysErrorMessage: 'Metadata too complex',
+    maxDepthErrorMessage: 'Metadata too deeply nested'
+  },
+  
+  // Without limits - triggers warning
+  config: { type: 'object' }
+});
+```
+
+### Automatic Warnings
+
+The schema automatically warns about unlimited fields:
+
+```
+⚠️  WARNING: Field 'config' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   config: { type: 'object', maxKeys: 100, maxDepth: 5 }
+
+⚠️  WARNING: Field 'unlimitedArray' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   unlimitedArray: { type: 'array', maxItems: 1000 }
+```
+
+### Validation Examples
+
+```javascript
+// This will be rejected
+const data = {
+  tags: Array(200).fill('tag'),  // Exceeds maxItems: 100
+  metadata: {
+    // 60 properties - exceeds maxKeys: 50
+    prop1: 'value1',
+    prop2: 'value2',
+    // ... prop60
+  }
+};
+
+// Nested depth validation
+const deepData = {
+  metadata: {
+    level1: {
+      level2: {
+        level3: {
+          level4: {
+            level5: {
+              level6: 'too deep!' // Exceeds maxDepth: 5
+            }
+          }
+        }
+      }
+    }
+  }
+};
 ```
 
 ## CORS Configuration

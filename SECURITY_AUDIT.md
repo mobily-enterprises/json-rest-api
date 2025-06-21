@@ -9,23 +9,23 @@
 This security audit identified **15 vulnerabilities** across the JSON REST API codebase:
 - **2 CRITICAL** vulnerabilities ✅ BOTH FIXED
 - **5 HIGH** severity issues (2 FIXED, 3 remaining)
-- **6 MEDIUM** severity issues (2 FIXED, 4 remaining)
+- **6 MEDIUM** severity issues (4 FIXED, 2 remaining)
 - **2 LOW** severity issues for consideration
 
-**Fixed Issues (6 total)**:
+**Fixed Issues (8 total)**:
 - ✅ SQL Injection via Field Names (CRITICAL)
 - ✅ Prototype Pollution (CRITICAL)
 - ✅ NoSQL Injection in Memory Storage (HIGH)
 - ✅ Weak Authentication Token (HIGH) - via JwtPlugin
 - ✅ Resource Exhaustion via Complex Queries (MEDIUM) - via QueryLimitsPlugin
 - ✅ Race Conditions in Positioning (MEDIUM) - via PositioningPlugin
+- ✅ Information Disclosure in Errors (MEDIUM) - via error sanitization
+- ✅ Missing Input Size Validation (MEDIUM) - via Schema maxItems/maxKeys/maxDepth
 
-**Remaining Issues (9 total)**:
+**Remaining Issues (7 total)**:
 - Missing Authorization Layer (HIGH) - partially addressed via AuthorizationPlugin
 - Path Traversal in Nested Fields (HIGH)
 - Unsafe CORS + Credentials (HIGH) - partially addressed via CorsPlugin
-- Information Disclosure in Errors (MEDIUM)
-- Missing Input Size Validation (MEDIUM)
 - Circular Reference DoS (MEDIUM)
 - Missing Content-Type Validation (MEDIUM)
 - Regex DoS (LOW)
@@ -323,35 +323,83 @@ api.use(PositioningPlugin, {
 });
 ```
 
-### 10. Information Disclosure in Errors (MEDIUM)
+### 10. Information Disclosure in Errors (MEDIUM) ✅ FIXED
 
 **Location**: Error handling
 
-**Description**: Stack traces and internal paths exposed.
+**Description**: Stack traces and internal paths exposed in error responses.
 
-**Example Response**:
+**Status**: FIXED - Added environment-based error sanitization
+- Production mode: Sanitizes error messages and removes stack traces
+- Development mode: Shows full error details for debugging
+- Server errors mapped to safe messages in production
+- Sensitive context fields filtered out
+- Full errors logged server-side for debugging
+
+**Solution**:
+```javascript
+// Automatic sanitization based on NODE_ENV
+process.env.NODE_ENV = 'production'; // Enables sanitization
+
+// Or configure via HTTP plugin
+api.use(HTTPPlugin, {
+  errorSanitization: true,      // Always sanitize
+  forceProductionErrors: true,  // Force production mode
+  forceDevelopmentErrors: true  // Force development mode
+});
+```
+
+**Example sanitized response**:
 ```json
 {
-  "error": {
-    "message": "Cannot read property 'name' of undefined",
-    "stack": "TypeError: Cannot read property 'name' of undefined\n    at /home/user/app/lib/api.js:123:45"
-  }
+  "errors": [{
+    "status": "500",
+    "code": "INTERNAL_ERROR",
+    "title": "InternalError",
+    "detail": "Service temporarily unavailable",
+    "meta": {
+      "timestamp": "2025-01-20T10:30:00.000Z"
+    }
+  }]
 }
 ```
 
-### 11. Missing Input Size Validation (MEDIUM)
+### 11. Missing Input Size Validation (MEDIUM) ✅ FIXED
 
 **Location**: Schema validation
 
-**Description**: No limits on array/object sizes.
+**Description**: No limits on array/object sizes allowing DoS attacks.
 
-**Attack**:
+**Status**: FIXED - Added size validation parameters to Schema
+- `maxItems` - Limits array length
+- `maxKeys` - Limits object property count
+- `maxDepth` - Limits object nesting depth
+- Warning system for unlimited fields
+- Custom error messages supported
+
+**Solution**:
 ```javascript
-POST /api/posts
-{
-  "tags": ["tag1", "tag2", ... "tag1000000"],  // 1 million tags
-  "metadata": { /* deeply nested object */ }
-}
+const schema = new Schema({
+  tags: { 
+    type: 'array',
+    maxItems: 100,
+    maxItemsErrorMessage: 'Too many tags'
+  },
+  metadata: { 
+    type: 'object',
+    maxKeys: 50,    // Max 50 properties
+    maxDepth: 5,    // Max 5 levels deep
+  },
+  // This triggers a warning
+  dangerousField: { type: 'object' }
+});
+```
+
+**Console warning**:
+```
+⚠️  WARNING: Field 'dangerousField' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   dangerousField: { type: 'object', maxKeys: 100, maxDepth: 5 }
 ```
 
 ### 12. Circular Reference DoS (MEDIUM)

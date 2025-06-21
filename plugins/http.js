@@ -39,9 +39,21 @@ export const HTTPPlugin = {
       return body;
     };
 
-    // Helper to format JSON:API errors
+    // Helper to format JSON:API errors with sanitization options
     const formatErrors = (error) => {
-      return formatErrorResponse(error);
+      // Allow overriding sanitization via plugin options
+      const sanitizeOptions = {};
+      if (options.errorSanitization !== undefined) {
+        sanitizeOptions.sanitize = options.errorSanitization;
+      }
+      if (options.forceProductionErrors) {
+        sanitizeOptions.forceProduction = true;
+      }
+      if (options.forceDevelopmentErrors) {
+        sanitizeOptions.forceDevelopment = true;
+      }
+      
+      return formatErrorResponse(error, sanitizeOptions);
     };
     
     // Parse sort parameter from string to array
@@ -258,7 +270,7 @@ export const HTTPPlugin = {
         res.json(result);
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
@@ -282,7 +294,7 @@ export const HTTPPlugin = {
         res.json(result);
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
@@ -303,7 +315,7 @@ export const HTTPPlugin = {
            .json(result);
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
@@ -327,7 +339,7 @@ export const HTTPPlugin = {
         res.json(result);
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
@@ -350,7 +362,7 @@ export const HTTPPlugin = {
         res.json(result);
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
@@ -368,7 +380,7 @@ export const HTTPPlugin = {
         res.status(204).end();
       } catch (error) {
         const apiError = normalizeError(error);
-        res.status(apiError.status).json(formatErrors(apiError));
+        res.status(apiError.status).json(formatErrors(error));
       }
     });
 
