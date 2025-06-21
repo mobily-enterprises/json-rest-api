@@ -1,4 +1,4 @@
-import { BadRequestError, InternalError } from '../lib/errors.js';
+import { BadRequestError, InternalError } from '../../lib/errors.js';
 import { EventEmitter } from 'events';
 
 /**

@@ -56,27 +56,7 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Additional Security** - Rate limiting, CSP, and more
 - **Security Checklist** - Development to production
 
-### [8. Microservices Architecture](./GUIDE_8_Microservices.md)
-- **When to Use Microservices** - Is it right for your project?
-- **Basic Setup** - Get started with microservices
-- **Transport Layers** - TCP, Redis, NATS, RabbitMQ, Kafka, gRPC
-- **Message Patterns** - Request-response and pub-sub
-- **Service Discovery** - Finding and connecting services
-- **Circuit Breakers & Health** - Resilience patterns
-- **Real-World Examples** - E-commerce, chat, analytics
-- **Testing & Deployment** - Best practices
-
-### [9. CQRS Pattern](./GUIDE_9_CQRS.md)
-- **When to Use CQRS** - Understanding the trade-offs
-- **Basic Implementation** - Commands and queries
-- **Event Sourcing** - Store all changes as events
-- **Projections** - Build optimized read models
-- **Sagas** - Orchestrate complex workflows
-- **Separate Databases** - Different stores for reads/writes
-- **Real-World Examples** - E-commerce, banking, analytics
-- **Migration Strategy** - Adopting CQRS incrementally
-
-### [10. API Gateway](./GUIDE_10_API_Gateway.md)
+### [8. API Gateway](./GUIDE_8_API_Gateway.md)
 - **When to Use API Gateway** - API orchestration patterns
 - **Basic Setup** - Transform into an API gateway
 - **External API Integration** - Call any REST API
@@ -86,15 +66,24 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Real-World Examples** - Checkout flows, aggregation
 - **Performance & Monitoring** - Health checks and metrics
 
-### [11. Domain-Driven Design](./GUIDE_11_Domain_Driven_Design.md)
-- **When to Use DDD** - Understanding the trade-offs
-- **Core DDD Concepts** - Ubiquitous language and bounded contexts
-- **Building Blocks** - Value objects, entities, aggregates
-- **Implementing DDD** - Step-by-step guide with JSON-REST-API
-- **Domain Events** - Event-driven architecture
-- **Specifications** - Encapsulate business rules
-- **Real-World Example** - Complete e-commerce implementation
-- **Best Practices** - Do's and don'ts of DDD
+### [9. CLI Interface](./GUIDE_9_CLI_Interface.md)
+- **Installation** - Adding CLI capabilities
+- **Interactive Mode** - REPL for your API
+- **Command Line Mode** - One-off commands
+- **Advanced Usage** - Authentication, scripting, custom commands
+- **Integration** - Works with all plugins
+- **Tips & Best Practices** - Shell scripting and automation
+
+## 🏢 Enterprise Features
+
+For advanced enterprise patterns and architectures, see the [Enterprise Guide](./enterprise/ENTERPRISE_GUIDE.md):
+
+- **Microservices Architecture** - Distributed systems with multiple transports
+- **CQRS Pattern** - Command Query Responsibility Segregation
+- **Domain-Driven Design** - Building blocks and bounded contexts
+- **Architecture Enforcement** - Enforce naming conventions and patterns
+- **Dependency Management** - Visualize and manage complex dependencies
+- **Bounded Contexts** - Implement DDD patterns at scale
 
 ## 🚀 Quick Links
 
@@ -102,17 +91,16 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Need a quick reference?** Check [API.md](./API.md)
 - **Building a plugin?** See [Creating Custom Plugins](./GUIDE_3_Plugins_and_Architecture.md#creating-custom-plugins)
 - **Deployment ready?** Check [Production, Deployment & Testing](./GUIDE_5_Production_and_Deployment.md)
-- **Building microservices?** See [Microservices Architecture](./GUIDE_8_Microservices.md)
-- **Need CQRS?** Check [CQRS Pattern](./GUIDE_9_CQRS.md)
-- **API orchestration?** See [API Gateway](./GUIDE_10_API_Gateway.md)
-- **Complex business logic?** Try [Domain-Driven Design](./GUIDE_11_Domain_Driven_Design.md)
+- **API orchestration?** See [API Gateway](./GUIDE_8_API_Gateway.md)
+- **Need CLI access?** Check [CLI Interface](./GUIDE_9_CLI_Interface.md)
+- **Enterprise architecture?** See the [Enterprise Guide](./enterprise/ENTERPRISE_GUIDE.md)
 
 ## 📖 Other Documentation
 
 - [QUICKSTART.md](./QUICKSTART.md) - 5-minute quick start guide
 - [API.md](./API.md) - Detailed API documentation
 - [JSON-API-COMPLIANCE.md](./JSON-API-COMPLIANCE.md) - JSON:API specification compliance
-- [Examples](../examples/) - Working code examples
+- [Examples](./examples/) - Working code examples
 
 ## 💡 Tips for Using This Guide
 
@@ -124,7 +112,7 @@ This guide is split into multiple sections for easier navigation and better perf
 ## 🆘 Need Help?
 
 - Check the [Troubleshooting](./GUIDE_5_Production_and_Deployment.md#troubleshooting) section
-- Browse the [examples](../examples/) directory
+- Browse the [examples](./examples/) directory
 - Report issues on [GitHub](https://github.com/your-repo/json-rest-api)
 
 ---

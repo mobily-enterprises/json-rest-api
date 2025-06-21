@@ -801,7 +801,7 @@ Use `robustTeardown` from test-teardown.js to properly close connections.
 ## Get Help
 
 - 📖 Check this guide
-- 🏗️ Browse [examples](../examples/)
+- 🏗️ Browse [examples](./examples/)
 
 ---
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { BadRequestError, InternalError } from '../lib/errors.js';
+import { BadRequestError, InternalError } from '../../lib/errors.js';
 
 /**
  * CQRSPlugin - Implements Command Query Responsibility Segregation
@@ -278,16 +278,16 @@ export const CQRSPlugin = {
     // Separate read/write APIs if configured
     if (separateDatabases && readDatabase && writeDatabase) {
       // Create separate API instances for read and write
-      const { createApi } = require('../index.js');
+      const { createApi } = require('../../index.js');
       
       // Write API
       api._writeApi = createApi();
-      const WritePlugin = require(`../plugins/${writeDatabase.plugin}.js`);
+      const WritePlugin = require(`../${writeDatabase.plugin}.js`);
       api._writeApi.use(WritePlugin, writeDatabase.options);
       
       // Read API  
       api._readApi = createApi();
-      const ReadPlugin = require(`../plugins/${readDatabase.plugin}.js`);
+      const ReadPlugin = require(`../${readDatabase.plugin}.js`);
       api._readApi.use(ReadPlugin, readDatabase.options);
       
       // Copy schemas to both

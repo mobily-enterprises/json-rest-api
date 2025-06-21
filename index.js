@@ -37,10 +37,16 @@ export { JwtPlugin } from './plugins/jwt.js';
 export { QueryLimitsPlugin } from './plugins/query-limits.js';
 export { ViewsPlugin } from './plugins/views.js';
 export { SimplifiedRecordsPlugin } from './plugins/simplified-records.js';
-export { MicroservicesPlugin } from './plugins/microservices.js';
-export { CQRSPlugin, Command, Query, Event } from './plugins/cqrs.js';
 export { ApiGatewayPlugin } from './plugins/api-gateway.js';
-export { DDDPlugin, ValueObject, Entity, Aggregate, Repository, DomainService, Specification } from './plugins/ddd.js';
+export { CLIPlugin } from './plugins/cli.js';
+
+// Enterprise plugins
+export { MicroservicesPlugin } from './plugins/enterprise/microservices.js';
+export { CQRSPlugin, Command, Query, Event } from './plugins/enterprise/cqrs.js';
+export { DDDPlugin, ValueObject, Entity, Aggregate, Repository, DomainService, Specification } from './plugins/enterprise/ddd.js';
+export { BoundedContextPlugin } from './plugins/enterprise/bounded-context.js';
+export { ArchitectureEnforcementPlugin } from './plugins/enterprise/architecture-enforcement.js';
+export { DependencyGraphPlugin } from './plugins/enterprise/dependency-graph.js';
 
 // Import for internal use
 import { Api } from './lib/api.js';

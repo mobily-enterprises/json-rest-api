@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { BadRequestError, InternalError } from '../lib/errors.js';
+import { BadRequestError, InternalError } from '../../lib/errors.js';
 
 /**
  * MicroservicesPlugin - Adds microservices capabilities to JSON-REST-API

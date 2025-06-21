@@ -140,6 +140,12 @@ npm install json-rest-api
 
 ### Advanced Topics
 
-- [Microservices Architecture]({{ '/GUIDE_8_Microservices' | relative_url }}) - Build distributed systems
-- [CQRS Pattern]({{ '/GUIDE_9_CQRS' | relative_url }}) - Command Query Responsibility Segregation
-- [API Gateway]({{ '/GUIDE_10_API_Gateway' | relative_url }}) - Orchestrate external services
+- [API Gateway]({{ '/GUIDE_8_API_Gateway' | relative_url }}) - Orchestrate external services
+- [CLI Interface]({{ '/GUIDE_9_CLI_Interface' | relative_url }}) - Command-line interface for your API
+
+### Enterprise Features
+
+- [Enterprise Guide]({{ '/enterprise/ENTERPRISE_GUIDE' | relative_url }}) - Complete guide for enterprise teams
+- [Microservices Architecture]({{ '/enterprise/GUIDE_8_Microservices' | relative_url }}) - Build distributed systems
+- [CQRS Pattern]({{ '/enterprise/GUIDE_9_CQRS' | relative_url }}) - Command Query Responsibility Segregation
+- [Domain-Driven Design]({{ '/enterprise/GUIDE_11_Domain_Driven_Design' | relative_url }}) - DDD patterns and implementation

@@ -125,6 +125,8 @@ api.hook('afterGet', async (context) => {
 
 **→ Need the details?** See the complete [API Reference](docs/API.md)
 
+**→ Building for enterprise?** See the [Enterprise Guide](docs/enterprise/ENTERPRISE_GUIDE.md)
+
 **→ Curious about internals?** Explore the [architecture docs](docs/architecture/)
 
 ## 🛠️ Quick Examples
