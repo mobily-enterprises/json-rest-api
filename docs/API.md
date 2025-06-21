@@ -227,6 +227,7 @@ new Schema(structure: SchemaStructure)
 | `maxItems` | array | Maximum array length |
 | `maxKeys` | object | Maximum object properties |
 | `maxDepth` | object | Maximum nesting depth |
+| `permissions` | all | Field-level access control |
 
 ### Format Validation
 
@@ -263,6 +264,68 @@ const schema = new Schema({
 });
 ```
 
+### Field Permissions
+
+The `permissions` parameter provides fine-grained access control at the field level:
+
+```javascript
+const schema = new Schema({
+  // Public field - anyone can read
+  name: { type: 'string' },
+  
+  // Role-based permission
+  email: { 
+    type: 'string',
+    permissions: { read: 'authenticated' }
+  },
+  
+  // Multiple roles (OR logic)
+  salary: {
+    type: 'number',
+    permissions: { read: ['hr', 'manager', 'admin'] }
+  },
+  
+  // Never readable
+  password: {
+    type: 'string',
+    permissions: { read: false }
+  },
+  
+  // Function-based permission
+  notes: {
+    type: 'string',
+    permissions: {
+      read: (user, record) => {
+        return user?.id === record.authorId || user?.roles?.includes('admin');
+      }
+    }
+  },
+  
+  // Separate permissions for operations
+  status: {
+    type: 'string',
+    permissions: {
+      read: true,           // Anyone can read
+      write: 'admin',       // Only admin can write
+      include: 'authenticated' // Must be logged in to include in relationships
+    }
+  }
+});
+```
+
+#### Permission Types
+
+1. **Boolean**: `true` (public) or `false` (never allowed)
+2. **String**: Role name that user must have
+3. **Array**: List of roles (user needs at least one)
+4. **Function**: `(user, record) => boolean` for custom logic
+
+#### Permission Operations
+
+- `read`: Controls if field is included in responses
+- `write`: Controls if field can be set/updated (not yet implemented)
+- `include`: Controls if relationship can be included via `include` parameter
+
 ### Field Types
 
 | Type | Description | MySQL Type |
@@ -292,6 +355,172 @@ if (errors.length > 0) {
 Options:
 - `partial`: boolean - Allow partial data (for updates)
 - `skipRequired`: boolean - Skip required field validation
+
+## Query Parameters
+
+The API supports JSON:API compliant query parameters for filtering, sorting, pagination, and more:
+
+### Filtering
+
+Use the `filter` parameter to filter results. Fields must be marked `searchable: true` in the schema:
+
+```javascript
+// Schema
+new Schema({
+  name: { type: 'string', searchable: true },
+  age: { type: 'number', searchable: true },
+  email: { type: 'string' } // Not searchable
+})
+
+// Simple filtering
+?filter[name]=John
+?filter[age]=25
+
+// Advanced operators
+?filter[age][gte]=18          // Greater than or equal
+?filter[age][lt]=65           // Less than
+?filter[name][like]=%john%    // SQL LIKE
+?filter[tags][contains]=javascript  // Array contains
+?filter[status][in]=active,pending  // IN clause
+?filter[email][ne]=null       // Not equal (NOT NULL)
+```
+
+#### Available Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| (none) | Equals | `filter[name]=John` |
+| `ne` | Not equals | `filter[status][ne]=deleted` |
+| `gt` | Greater than | `filter[age][gt]=18` |
+| `gte` | Greater than or equal | `filter[age][gte]=18` |
+| `lt` | Less than | `filter[age][lt]=65` |
+| `lte` | Less than or equal | `filter[age][lte]=65` |
+| `like` | SQL LIKE | `filter[name][like]=%john%` |
+| `ilike` | Case-insensitive LIKE | `filter[email][ilike]=%@EXAMPLE.COM` |
+| `in` | IN clause | `filter[status][in]=active,pending` |
+| `nin` | NOT IN | `filter[role][nin]=guest,banned` |
+| `between` | Between two values | `filter[age][between]=18,65` |
+| `contains` | Array contains | `filter[tags][contains]=javascript` |
+| `contained` | Array is contained by | `filter[permissions][contained]=read,write` |
+| `overlaps` | Arrays overlap | `filter[skills][overlaps]=js,python` |
+| `null` | IS NULL | `filter[deletedAt][null]=true` |
+| `notnull` | IS NOT NULL | `filter[email][notnull]=true` |
+
+### Sorting
+
+Use the `sort` parameter to order results:
+
+```javascript
+// Single field ascending
+?sort=name
+
+// Single field descending (prefix with -)
+?sort=-createdAt
+
+// Multiple fields
+?sort=-createdAt,name
+
+// Sort on relationship fields (if relationship is included)
+?sort=author.name&include=author
+```
+
+### Pagination
+
+Use the `page` parameter for pagination:
+
+```javascript
+// Page-based pagination (JSON:API style)
+?page[size]=20&page[number]=2
+
+// Limit/offset style
+?limit=20&offset=40
+```
+
+### Sparse Fieldsets
+
+Use the `fields` parameter to request only specific fields:
+
+```javascript
+// Only return name and email for users
+?fields[users]=name,email
+
+// Different fields for different resource types
+?fields[users]=name,email&fields[posts]=title,createdAt
+```
+
+### Including Relationships
+
+Use the `include` parameter to include related resources:
+
+```javascript
+// Single relationship
+?include=author
+
+// Multiple relationships
+?include=author,category
+
+// Nested relationships (dot notation)
+?include=author.country
+
+// Multiple levels
+?include=author.country,comments.author
+```
+
+#### Include Permissions
+
+Relationships can have include permissions that control access:
+
+```javascript
+new Schema({
+  authorId: {
+    type: 'id',
+    refs: { resource: 'authors' },
+    permissions: {
+      read: true,              // Anyone can see the ID
+      include: 'authenticated' // Must be logged in to include full author data
+    }
+  }
+})
+```
+
+### Views (with ViewsPlugin)
+
+Use the `view` parameter to request predefined response shapes:
+
+```javascript
+// Use a named view
+?view=summary
+
+// Views are defined in resource configuration
+api.addResource('posts', schema, {
+  views: {
+    summary: {
+      fields: ['id', 'title', 'createdAt'],
+      joins: []
+    },
+    full: {
+      fields: true, // All fields
+      joins: ['authorId', 'categoryId']
+    }
+  }
+})
+```
+
+### Complete Example
+
+```javascript
+// Complex query with all parameters
+GET /api/posts?
+  filter[status]=published&
+  filter[createdAt][gte]=2024-01-01&
+  sort=-createdAt&
+  page[size]=10&
+  page[number]=1&
+  fields[posts]=title,summary,createdAt&
+  fields[users]=name,avatar&
+  include=author,category&
+  view=card
+```
 
 ## QueryBuilder Class
 
@@ -406,8 +635,8 @@ if ('users' in api.resources) { }
 Get a single resource by ID.
 ```javascript
 const user = await api.resources.users.get(123);
-const userWithJoins = await api.resources.users.get(123, {
-  joins: ['departmentId']
+const userWithIncludes = await api.resources.users.get(123, {
+  include: 'departmentId'
 });
 ```
 
@@ -422,7 +651,7 @@ const users = await api.resources.users.query({
   },
   sort: [{ field: 'name', direction: 'ASC' }],
   page: { size: 20, number: 1 },
-  joins: ['departmentId']
+  include: 'departmentId'
 });
 ```
 
@@ -461,7 +690,7 @@ All methods accept an options object:
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `joins` | boolean \| string[] | Control which joins to perform (supports nested paths) |
+| `include` | string | Comma-separated list of relationships to include (supports nested paths) |
 | `excludeJoins` | string[] | Exclude specific eager joins |
 | `artificialDelay` | number | Override delay for this operation |
 | `allowNotFound` | boolean | Don't throw if resource not found (get only) |
@@ -469,28 +698,29 @@ All methods accept an options object:
 | `partial` | boolean | Allow partial data (update only) |
 | `fullRecord` | boolean | Require complete record (PUT semantics) |
 
-### Nested Joins
+### Nested Includes
 
-The `joins` option supports dot notation for multi-level joins:
+The `include` parameter supports dot notation for multi-level relationships:
 
 ```javascript
 // Single level
-joins: ['authorId', 'categoryId']
+include: 'authorId,categoryId'
 
 // Nested (two levels)
-joins: ['authorId.countryId']
+include: 'authorId.countryId'
 
 // Multiple nested paths
-joins: ['authorId.countryId', 'editorId.departmentId']
+include: 'authorId.countryId,editorId.departmentId'
 
 // Three levels deep
-joins: ['authorId.departmentId.countryId']
+include: 'authorId.departmentId.countryId'
 ```
 
 Requirements:
-- Each field in the path must have `refs.join` configuration
-- Parent joins are automatically included
+- Each field in the path must have `refs` configuration
+- Parent relationships are automatically included
 - Invalid paths throw `BadRequestError` with details
+- Permission checks occur at each level
 - Hooks execute from innermost to outermost level
 
 ## Transaction API

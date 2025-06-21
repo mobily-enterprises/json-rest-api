@@ -737,20 +737,34 @@ const orderSchema = new Schema({
   }
 });
 
-// Query with join
+// Query with include
 const orders = await api.resources.orders.query({
-  joins: ['customerId']
+  include: 'customerId'
 });
 
-// Result includes customer data
+// Result with JSON:API format
 {
-  id: '123',
-  customerId: '456',
-  customer: {
+  data: [{
+    id: '123',
+    type: 'orders',
+    attributes: {
+      customerId: '456'
+      // other order fields
+    },
+    relationships: {
+      customer: {
+        data: { type: 'customers', id: '456' }
+      }
+    }
+  }],
+  included: [{
+    type: 'customers',
     id: '456',
-    name: 'John Doe',
-    email: 'john@example.com'
-  }
+    attributes: {
+      name: 'John Doe',
+      email: 'john@example.com'
+    }
+  }]
 }
 ```
 
@@ -854,9 +868,9 @@ refs: {
 }
 ```
 
-### Nested Joins
+### Nested Includes
 
-Join through multiple levels of relationships using dot notation:
+Include through multiple levels of relationships using dot notation:
 
 ```javascript
 // Schema setup
@@ -883,6 +897,9 @@ const userSchema = new Schema({
     refs: {
       resource: 'cities',
       join: { fields: ['name'] }
+    },
+    permissions: {
+      include: 'authenticated' // Must be logged in to include city
     }
   }
 });
@@ -898,40 +915,72 @@ const postSchema = new Schema({
   }
 });
 
-// Query with nested joins
+// Query with nested includes
 const posts = await api.resources.posts.query({
-  joins: ['authorId.cityId.countryId']
+  include: 'authorId.cityId.countryId'
 });
 
-// Result
+// Result with JSON:API format
 {
-  id: '1',
-  title: 'Hello World',
-  authorId: '10',
-  author: {
-    id: '10',
-    name: 'Alice',
-    cityId: '20',
-    city: {
-      id: '20', 
-      name: 'New York',
-      countryId: '30',
-      country: {
-        id: '30',
+  data: [{
+    id: '1',
+    type: 'posts',
+    attributes: {
+      title: 'Hello World',
+      authorId: '10'
+    },
+    relationships: {
+      author: {
+        data: { type: 'users', id: '10' }
+      }
+    }
+  }],
+  included: [
+    {
+      type: 'users',
+      id: '10',
+      attributes: {
+        name: 'Alice',
+        cityId: '20'
+      },
+      relationships: {
+        city: {
+          data: { type: 'cities', id: '20' }
+        }
+      }
+    },
+    {
+      type: 'cities', 
+      id: '20',
+      attributes: {
+        name: 'New York',
+        countryId: '30'
+      },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: '30' }
+        }
+      }
+    },
+    {
+      type: 'countries',
+      id: '30',
+      attributes: {
         name: 'United States',
         code: 'US'
       }
     }
-  }
+  ]
 }
 ```
 
-#### Nested Join Rules
+#### Nested Include Rules
 
-1. **Each level must have join config** - Every field in the path needs `refs.join`
-2. **Parent joins are automatic** - Requesting `a.b.c` includes `a` and `a.b`
-3. **Hooks run innermost first** - Country → City → User → Post
-4. **Placement follows field config** - Each level's placement rules apply
+1. **Each level must have refs** - Every field in the path needs `refs` configuration
+2. **Parent includes are automatic** - Requesting `a.b.c` includes `a` and `a.b`
+3. **Permission checks at each level** - User must have permission for each relationship
+4. **Hooks run innermost first** - Country → City → User → Post
+5. **JSON:API format** - Related data goes in `included` array, not nested
 
 ### Join Configuration
 

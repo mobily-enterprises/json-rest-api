@@ -213,7 +213,7 @@ export const HTTPPlugin = {
       if (Object.keys(params.filter).length === 0) {
         // Copy non-standard query params as filters
         for (const [key, value] of Object.entries(req.query)) {
-          if (!['sort', 'page', 'pageSize', 'include', 'fields', 'joins', 'excludeJoins', 'view'].includes(key) &&
+          if (!['sort', 'page', 'pageSize', 'include', 'fields', 'view'].includes(key) &&
               !key.includes('[')) {
             params.filter[key] = value;
           }

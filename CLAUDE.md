@@ -55,24 +55,44 @@ new Schema({
 **Searchable Fields**: Enable filtering via query parameters
 - Mark fields with `searchable: true` in schema
 - Query with `?filter[fieldName]=value`
+- Advanced operators: `?filter[age][gte]=18`
 - Can also define mapped searchable fields in resource options
 
-**Refs & Joins**: Automatic relationship handling
+**Field Permissions**: Schema-level access control
+```javascript
+email: { 
+  type: 'string',
+  permissions: { 
+    read: 'authenticated',     // Role-based
+    write: ['admin', 'owner'], // Multiple roles
+    include: true              // Control relationship includes
+  }
+}
+```
+
+**Refs & Includes**: Automatic relationship handling
 ```javascript
 authorId: {
   type: 'id',
   refs: {
     resource: 'authors',
     join: {
-      eager: true,              // Auto-join
+      eager: true,              // Auto-include
       fields: ['id', 'name'],   // Select specific fields
       preserveId: true          // Keep both ID and object
     }
+  },
+  permissions: {
+    read: true,                 // Anyone can see ID
+    include: 'authenticated'    // Must be logged in to include
   }
 }
 ```
 
-**Nested Joins**: `joins: ['authorId.countryId']`
+**Nested Includes**: `?include=authorId.countryId`
+- Unified `include` parameter replaces `joins`
+- Permission checks at each level
+- Supports dot notation for deep nesting
 
 ### Implementation Notes
 

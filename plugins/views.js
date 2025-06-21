@@ -235,7 +235,7 @@ function applyConfigToContext(context, config) {
   
   const { params } = context;
   
-  // Apply joins configuration
+  // Apply joins configuration as include parameter
   if ('joins' in config) {
     if (config.joins === true) {
       // Find all refs in the schema
@@ -247,12 +247,14 @@ function applyConfigToContext(context, config) {
             refs.push(fieldName);
           }
         }
-        params.joins = refs;
-      } else {
-        params.joins = true; // Fallback
+        params.include = refs.join(',');
       }
-    } else {
-      params.joins = config.joins;
+    } else if (Array.isArray(config.joins)) {
+      // Convert joins array to include string
+      params.include = config.joins.join(',');
+    } else if (config.joins === false || (Array.isArray(config.joins) && config.joins.length === 0)) {
+      // No includes
+      params.include = '';
     }
   }
   

@@ -111,14 +111,11 @@ export const SQLPlugin = {
         query.select(`${table}.${idProperty}`, ...fields);
         
         // Handle advanced refs with join configuration
-        const requestedJoins = determineRequestedJoins(schema, context.params || context.options);
+        const user = context.options?.user;
+        const requestedJoins = await determineRequestedJoins(api, schema, context.params || context.options, user);
         
-        // Check for nested joins in the original join list
-        let nestedJoinPaths = [];
-        if (Array.isArray(context.params?.joins || context.options?.joins)) {
-          nestedJoinPaths = (context.params?.joins || context.options?.joins)
-            .filter(path => path.includes('.'));
-        }
+        // Get nested joins from processed include parameter
+        const nestedJoinMap = context.params?._nestedJoins || new Map();
         
         // Track joined fields in context
         context.joinFields = {};
@@ -136,7 +133,8 @@ export const SQLPlugin = {
             resource: joinedResource,
             fields: joinMeta.join?.fields || joinMeta.fields,
             preserveId: joinMeta.join?.preserveId !== false, // Default to true if not explicitly false
-            runHooks: joinMeta.join?.runHooks
+            runHooks: joinMeta.join?.runHooks,
+            nestedJoins: nestedJoinMap.get(field)?.nestedJoins || {}
           };
           
           // Join the table
@@ -916,41 +914,36 @@ function hasEagerJoins(schema, options) {
   return false;
 }
 
-function determineRequestedJoins(schema, params) {
+async function determineRequestedJoins(api, schema, params, user) {
   const joins = new Map();
   
-  // Add eager joins - check current eager status
-  for (const [field, def] of Object.entries(schema.structure)) {
-    if (def.refs && def.refs.join?.eager === true) {
-      joins.set(field, def.refs);
-    }
-  }
-  
-  // Add explicitly requested joins
-  if (params.joins && Array.isArray(params.joins)) {
-    for (const joinField of params.joins) {
-      // Skip nested joins (handled separately)
-      if (joinField.includes('.')) continue;
-      
-      const fieldDef = schema.structure[joinField];
-      if (fieldDef?.refs) {
-        joins.set(joinField, fieldDef.refs);
+  // Add eager joins only if no include parameter specified
+  if (!params.include) {
+    for (const [field, def] of Object.entries(schema.structure)) {
+      if (def.refs && def.refs.join?.eager === true) {
+        // Check permission for eager joins too
+        if (!user || await api.checkIncludePermission(user, def)) {
+          joins.set(field, def.refs);
+        }
       }
     }
   }
   
-  // Add includes from JSON:API include parameter
+  // Process include parameter
   if (params.include) {
-    // Include can be comma-separated
-    const includes = params.include.split(',').map(s => s.trim());
-    for (const includeField of includes) {
-      // Skip nested includes (handled separately)
-      if (includeField.includes('.')) continue;
-      
-      const fieldDef = schema.structure[includeField];
+    const includeResult = await api.processIncludeParam(schema, params.include, user);
+    
+    // Add simple joins
+    for (const field of includeResult.joins) {
+      const fieldDef = schema.structure[field];
       if (fieldDef?.refs) {
-        joins.set(includeField, fieldDef.refs);
+        joins.set(field, fieldDef.refs);
       }
+    }
+    
+    // Store nested joins for later processing
+    if (includeResult.nestedJoins.size > 0) {
+      params._nestedJoins = includeResult.nestedJoins;
     }
   }
   
