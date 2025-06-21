@@ -163,6 +163,25 @@ export const AlaSQLAdapter = {
       return sql;
     });
     
+    // Clear position counters when dropping tables (for tests)
+    api.implement('db.dropTable', async (context) => {
+      const { table } = context;
+      
+      // Clear position counters for this table
+      for (const key of positionCounters.keys()) {
+        if (key.startsWith(`${table}:`)) {
+          positionCounters.delete(key);
+        }
+      }
+      
+      // Drop the table
+      try {
+        db.exec(`DROP TABLE \`${table}\``);
+      } catch (e) {
+        // Ignore if table doesn't exist
+      }
+    });
+    
     // Table creation for AlaSQL
     api.implement('db.createTable', async (context) => {
       const { table, schema, idProperty } = context;

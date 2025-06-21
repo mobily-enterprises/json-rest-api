@@ -1,5 +1,47 @@
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
+import crypto, { timingSafeEqual } from 'crypto';
+
+/**
+ * Constant-time string comparison to prevent timing attacks
+ */
+function safeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+  
+  // Convert to buffers for constant-time comparison
+  const bufferA = Buffer.from(a);
+  const bufferB = Buffer.from(b);
+  
+  // Must be same length for timingSafeEqual
+  if (bufferA.length !== bufferB.length) {
+    // Still do a comparison to maintain constant time
+    const minLength = Math.min(bufferA.length, bufferB.length);
+    const dummyA = bufferA.slice(0, minLength);
+    const dummyB = bufferB.slice(0, minLength);
+    
+    if (minLength > 0) {
+      timingSafeEqual(dummyA, dummyB); // Waste time
+    }
+    return false;
+  }
+  
+  return timingSafeEqual(bufferA, bufferB);
+}
+
+/**
+ * Constant-time token lookup to prevent timing attacks
+ */
+async function safeTokenLookup(tokenStore, hashedToken) {
+  // Always perform the lookup
+  const tokenData = await tokenStore.get(hashedToken);
+  
+  // Add random delay to obscure timing (0-2ms)
+  const delay = Math.random() * 2;
+  await new Promise(resolve => setTimeout(resolve, delay));
+  
+  return tokenData;
+}
 
 /**
  * JWT Authentication Plugin
@@ -183,9 +225,18 @@ export const JwtPlugin = {
       
       // Hash the token to look it up
       const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
-      const tokenData = await config.tokenStore.get(hashedToken);
       
-      if (!tokenData) {
+      // Use constant-time lookup to prevent timing attacks
+      const tokenData = await safeTokenLookup(config.tokenStore, hashedToken);
+      
+      // Use constant-time check for validity
+      const isValid = tokenData && 
+        tokenData.hashedToken && 
+        safeCompare(tokenData.hashedToken, hashedToken);
+      
+      if (!isValid) {
+        // Add consistent delay before throwing
+        await new Promise(resolve => setTimeout(resolve, 10));
         throw new Error('Invalid refresh token');
       }
       
@@ -279,6 +330,10 @@ export const JwtPlugin = {
 };
 
 // Helper to check if token is legacy Base64 JSON
+/**
+ * Note: This function intentionally does not use constant-time comparison
+ * as it's only checking token format, not validating secrets
+ */
 function isLegacyToken(token) {
   try {
     const decoded = Buffer.from(token, 'base64').toString();

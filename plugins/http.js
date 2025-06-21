@@ -1,5 +1,5 @@
 import express from 'express';
-import { NotFoundError, BadRequestError, formatErrorResponse, normalizeError } from '../lib/errors.js';
+import { NotFoundError, BadRequestError, ApiError, formatErrorResponse, normalizeError } from '../lib/errors.js';
 
 /**
  * HTTP plugin for JSON REST API with JSON:API compliance
@@ -18,6 +18,45 @@ export const HTTPPlugin = {
     router.use(express.json({
       type: ['application/json', 'application/vnd.api+json']
     }));
+    
+    // Content-Type validation middleware
+    if (options.validateContentType !== false) {
+      router.use((req, res, next) => {
+        // Skip validation for requests without body
+        if (!['POST', 'PUT', 'PATCH'].includes(req.method)) {
+          return next();
+        }
+        
+        const contentType = req.headers['content-type'];
+        
+        // Require Content-Type header for requests with body
+        if (!contentType || contentType.trim() === '') {
+          const error = new BadRequestError(
+            'Content-Type header is required for requests with body'
+          ).withContext({ method: req.method });
+          return res.status(400).json(formatErrors(error));
+        }
+        
+        // Check if content type is acceptable
+        const validTypes = options.allowedContentTypes || 
+          ['application/json', 'application/vnd.api+json'];
+        
+        const hasValidType = validTypes.some(type => 
+          contentType.toLowerCase().includes(type.toLowerCase())
+        );
+        
+        if (!hasValidType) {
+          const error = new ApiError(
+            `Content-Type must be one of: ${validTypes.join(', ')}`,
+            415,
+            'UNSUPPORTED_MEDIA_TYPE'
+          );
+          return res.status(415).json(formatErrors(error));
+        }
+        
+        next();
+      });
+    }
 
     // Base path for all routes
     const basePath = options.basePath || '/api';

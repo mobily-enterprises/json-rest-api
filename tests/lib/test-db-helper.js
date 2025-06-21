@@ -83,7 +83,8 @@ async function cleanupMemory(api) {
     const tables = api._alasqlDb.tables;
     for (const tableName in tables) {
       try {
-        api._alasqlDb.exec(`DROP TABLE \`${tableName}\``);
+        // Use the API's dropTable method to also clear position counters
+        await api.execute('db.dropTable', { table: tableName });
       } catch (e) {
         // Ignore errors
       }

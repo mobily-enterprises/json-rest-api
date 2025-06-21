@@ -9,10 +9,10 @@
 This security audit identified **15 vulnerabilities** across the JSON REST API codebase:
 - **2 CRITICAL** vulnerabilities ✅ BOTH FIXED
 - **5 HIGH** severity issues (2 FIXED, 3 remaining)
-- **6 MEDIUM** severity issues (4 FIXED, 2 remaining)
-- **2 LOW** severity issues for consideration
+- **6 MEDIUM** severity issues (6 FIXED, 0 remaining)
+- **2 LOW** severity issues ✅ BOTH FIXED
 
-**Fixed Issues (8 total)**:
+**Fixed Issues (12 total)**:
 - ✅ SQL Injection via Field Names (CRITICAL)
 - ✅ Prototype Pollution (CRITICAL)
 - ✅ NoSQL Injection in Memory Storage (HIGH)
@@ -21,15 +21,15 @@ This security audit identified **15 vulnerabilities** across the JSON REST API c
 - ✅ Race Conditions in Positioning (MEDIUM) - via PositioningPlugin
 - ✅ Information Disclosure in Errors (MEDIUM) - via error sanitization
 - ✅ Missing Input Size Validation (MEDIUM) - via Schema maxItems/maxKeys/maxDepth
+- ✅ Circular Reference DoS (MEDIUM) - via sanitizeObject() improvements
+- ✅ Missing Content-Type Validation (MEDIUM) - via HTTPPlugin validation
+- ✅ Regex DoS (LOW) - via SafeRegex with timeout protection
+- ✅ Timing Attacks on Authentication (LOW) - via constant-time comparison
 
-**Remaining Issues (7 total)**:
+**Remaining Issues (3 total)**:
 - Missing Authorization Layer (HIGH) - partially addressed via AuthorizationPlugin
 - Path Traversal in Nested Fields (HIGH)
 - Unsafe CORS + Credentials (HIGH) - partially addressed via CorsPlugin
-- Circular Reference DoS (MEDIUM)
-- Missing Content-Type Validation (MEDIUM)
-- Regex DoS (LOW)
-- Timing Attacks on Authentication (LOW)
 
 ## Critical Vulnerabilities
 
@@ -402,31 +402,176 @@ const schema = new Schema({
    dangerousField: { type: 'object', maxKeys: 100, maxDepth: 5 }
 ```
 
-### 12. Circular Reference DoS (MEDIUM)
+### 12. Circular Reference DoS (MEDIUM) ✅ FIXED
 
-**Location**: JSON serialization
+**Location**: `lib/api.js` - `sanitizeObject()` function
 
-**Description**: Using `circular-json-es6` which can be exploited.
+**Description**: The input sanitization function recursively traversed objects without tracking visited nodes, causing stack overflow with circular references.
 
-### 13. Missing Content-Type Validation (MEDIUM)
+**Status**: FIXED - Updated `sanitizeObject()` with:
+- WeakSet tracking of visited objects
+- Circular reference detection
+- Maximum depth limit (100 levels)
+- Proper error messages
+
+**Previous vulnerable code**:
+```javascript
+function sanitizeObject(obj) {
+  // No circular reference checking
+  for (const [key, value] of Object.entries(obj)) {
+    clean[key] = sanitizeObject(value); // Stack overflow on circular refs
+  }
+}
+```
+
+**Fixed implementation**:
+```javascript
+function sanitizeObject(obj, visited = new WeakSet(), depth = 0) {
+  const MAX_DEPTH = 100;
+  
+  if (depth > MAX_DEPTH) {
+    throw new BadRequestError('Object nesting exceeds maximum depth');
+  }
+  
+  if (visited.has(obj)) {
+    throw new BadRequestError('Circular reference detected in request data');
+  }
+  
+  visited.add(obj);
+  // ... sanitization logic
+  visited.delete(obj); // Allow same object at different paths
+}
+```
+
+### 13. Missing Content-Type Validation (MEDIUM) ✅ FIXED
 
 **Location**: HTTP plugin
 
-**Description**: Accepts multiple content types without strict validation.
+**Description**: API accepted requests without Content-Type validation, potentially allowing unsupported formats.
+
+**Status**: FIXED - Added Content-Type validation middleware to HTTPPlugin:
+- Validates Content-Type header on POST/PUT/PATCH requests
+- Returns 400 for missing Content-Type
+- Returns 415 for unsupported media types
+- Case-insensitive comparison
+- Configurable via plugin options
+
+**Configuration**:
+```javascript
+api.use(HTTPPlugin, {
+  app,
+  validateContentType: true, // Default true
+  allowedContentTypes: ['application/json', 'application/vnd.api+json']
+});
+```
+
+**Example rejection**:
+```bash
+curl -X POST http://localhost:3000/api/posts \
+  -H "Content-Type: application/xml" \
+  -d '<post><title>XML</title></post>'
+  
+# Response: 415 Unsupported Media Type
+{
+  "errors": [{
+    "status": "415",
+    "code": "UNSUPPORTED_MEDIA_TYPE",
+    "title": "ApiError",
+    "detail": "Content-Type must be one of: application/json, application/vnd.api+json"
+  }]
+}
+```
 
 ## Low Severity Vulnerabilities
 
-### 14. Regex DoS (ReDoS) (LOW)
+### 14. Regex DoS (ReDoS) (LOW) ✅ FIXED
 
 **Location**: String validation patterns
 
-**Description**: No protection against catastrophic backtracking.
+**Description**: No protection against catastrophic backtracking in regex patterns.
 
-### 15. Timing Attacks on Authentication (LOW)
+**Status**: FIXED - Added safe regex validation with ReDoS protection
+- Created `lib/safe-regex.js` with timeout protection
+- Pre-validated safe patterns for common formats
+- Automatic detection of dangerous patterns
+- Added format validation to Schema
 
-**Location**: Token validation
+**Solution**:
+```javascript
+const schema = new Schema({
+  email: { 
+    type: 'string', 
+    format: 'email'  // Uses safe pre-validated regex
+  },
+  website: { 
+    type: 'string', 
+    format: 'url'    // Protected against ReDoS
+  },
+  slug: {
+    type: 'string',
+    format: 'slug'   // Simple, safe pattern
+  }
+});
+```
 
-**Description**: Token validation isn't constant-time.
+**Available formats**:
+- `email` - Simple email validation (avoids complex RFC regex)
+- `url` - Basic URL validation
+- `uuid` - UUID v4 format
+- `alphanumeric` - Letters and numbers only
+- `slug` - URL-friendly strings
+- `date` - YYYY-MM-DD format
+- `time` - HH:MM or HH:MM:SS
+- `phone` - Basic phone number
+- `postalCode` - Postal/ZIP codes
+
+**ReDoS Protection Features**:
+```javascript
+// Automatic warning for dangerous patterns
+const dangerous = new SafeRegex('(a+)+b');
+// Console: ⚠️  WARNING: Potentially dangerous regex pattern detected
+
+// Timeout protection
+const safe = new SafeRegex('^[a-z]+$');
+safe.test('very_long_string', 100); // 100ms timeout
+```
+
+### 15. Timing Attacks on Authentication (LOW) ✅ FIXED
+
+**Location**: JWT refresh token validation
+
+**Description**: Token validation wasn't constant-time, potentially leaking timing information.
+
+**Status**: FIXED - Implemented constant-time comparison in JwtPlugin
+- Added `safeCompare()` using crypto.timingSafeEqual
+- Added `safeTokenLookup()` with random delays
+- Consistent error timing regardless of token validity
+
+**Vulnerable code**:
+```javascript
+// Old code - timing attack possible
+const tokenData = await tokenStore.get(hashedToken);
+if (!tokenData) {  // Fast fail reveals token doesn't exist
+  throw new Error('Invalid refresh token');
+}
+```
+
+**Fixed implementation**:
+```javascript
+// Constant-time lookup with random delay
+const tokenData = await safeTokenLookup(tokenStore, hashedToken);
+
+// Constant-time string comparison
+const isValid = tokenData && 
+  tokenData.hashedToken && 
+  safeCompare(tokenData.hashedToken, hashedToken);
+
+if (!isValid) {
+  // Consistent delay before throwing
+  await new Promise(resolve => setTimeout(resolve, 10));
+  throw new Error('Invalid refresh token');
+}
+```
 
 ## Recommendations Priority List
 

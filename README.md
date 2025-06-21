@@ -1,5 +1,7 @@
 # JSON REST API
 
+([Website](https://mobily-enterprises.github.io/json-rest-api/))
+
 > **What if building REST APIs was as simple as defining schemas?**
 
 Transform your schemas into fully-featured REST APIs with one line of code. No boilerplate. No repetition. Just pure productivity.
@@ -241,9 +243,56 @@ const SlugPlugin = {
 
 - **Battle-tested** - 95% test coverage
 - **Performance** - Optimized queries, connection pooling
-- **Security** - Rate limiting, CORS, authentication hooks
+- **Security** - Built-in protections against common vulnerabilities
 - **Monitoring** - Structured logging, error tracking
 - **Standards** - JSON:API compliant, REST best practices
+
+## 🔒 Security Features
+
+### Built-in Protections
+
+- **SQL Injection Prevention** - Parameterized queries and identifier escaping
+- **Prototype Pollution Protection** - Automatic sanitization of dangerous keys
+- **Circular Reference Protection** - Prevents DoS from circular JSON structures
+- **Input Size Validation** - Configurable limits on arrays and objects
+- **Error Sanitization** - Stack traces hidden in production
+- **Content-Type Validation** - Strict media type checking
+- **JWT Authentication** - Secure token-based auth via JwtPlugin
+- **CORS Support** - Configurable cross-origin policies
+- **ReDoS Protection** - Safe regex patterns with timeout detection
+- **Timing Attack Prevention** - Constant-time token validation
+
+### Example: Input Validation
+
+```javascript
+const schema = new Schema({
+  email: {
+    type: 'string',
+    format: 'email'  // Safe email validation with ReDoS protection
+  },
+  tags: { 
+    type: 'array',
+    maxItems: 100    // Prevent DoS from huge arrays
+  },
+  metadata: { 
+    type: 'object',
+    maxKeys: 50,     // Limit object properties
+    maxDepth: 5      // Limit nesting depth
+  }
+});
+```
+
+### Example: Content-Type Validation
+
+```javascript
+api.use(HTTPPlugin, {
+  app,
+  validateContentType: true,  // Default: true
+  allowedContentTypes: ['application/json', 'application/vnd.api+json']
+});
+```
+
+See [Security Guide](docs/GUIDE_7_Security.md) for comprehensive security documentation.
 
 ## Installation
 

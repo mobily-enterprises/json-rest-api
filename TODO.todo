@@ -1,12 +1,12 @@
 
-TODO
-* Implement missing parts of security audit
-* Resolve last little bits of TODO
-* Place the web site in docs/ (the only option available now in GitHub)
+NOW:
 * Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
 
-
-You made this comment on the missing features of:
+TOMORROW:
+* Resolve last little bits of TODO
+* Run ANOTHER security audit
+* FINAL check that ALL documentation is correct and covers everything
+* Write MANY more tests, make them pass by fixing code
 
   7. Store Templates
 
@@ -32,79 +32,4 @@ You made this comment on the missing features of:
     - Query result caching
     - Batch operations
     - Transaction support across operations
-
-    **************************************************************************
-    DONE
-    **************************************************************************
-
-
-  5. Error Handling
-
-  - Missing structured error classes:
-    - BadRequest, NotFound, Conflict classes
-    - Error code standardization
-    - Multi-field validation errors
-    - Error context preservation
-
-    10. Utility Features
-
-  - Missing from original:
-    - artificial delay for testing <-- ADD!!!
-    - Request decoration pattern <-- I DON'T KNOW WHAT THIS IS, BUT IF IT'S BEST PRACTICE/INDUSTRU STANDARD, TELL ME ABOUT IT
-    - Store inheritance/extension <--- THIS, I NEVER WANTED, NEVER USED IN 10 YEARS IN PRODUCTION
-    - Automatic timestamp fields <-- WOULD BE NICE
-    - Soft delete support <-- WOULD BE NICE BUT I DON'T THINK THE ORIGINAL HAD IT. I WILL IMPLEMENT IT IN THE FUTURE
-
-      2. MySQL Schema Synchronization
-
-  - Current MySQL plugin is basic, missing:
-    - Automatic table creation/modification
-    - Column type mapping from schema
-    - Index creation for searchable fields
-    - Foreign key constraint management
-    - Schema migration tracking
-
-  9. Schema Features
-
-  - SimplSchema integration missing:
-    - onlyObjectValues for partial updates
-    - Conditional defaults based on other fields
-    - Array validation with item schemas
-    - Custom error messages per validator
-
-1. Positioning System
-
-  - Current has basic positioning plugin but lacks:
-    - Filtering support during repositioning
-    - Gap-free positioning algorithm
-    - Complex position calculations with conditions
-    - Batch repositioning operations
-
-      3. Advanced Querying
-
-  - Missing query capabilities:
-    - Complex field joins (queryFieldsAndJoins hook)
-    - Nested object queries
-    - Array field queries
-    - Custom SQL conditions
-    - Aggregation support
-
-      4. Versioning Management
-
-  - Current versioning is rudimentary, missing:
-    - Version range negotiation
-    - Store registry with semver matching
-    - Version-specific schema transformations
-    - Backward compatibility helpers
-
-  6. Hook System Gaps
-
-  - Missing hooks from original:
-    - beforeId, afterId
-    - beforeRetrieve, afterRetrieve
-    - beforeInsert, afterInsert (full lifecycle)
-    - queryFieldsAndJoins
-    - updateConditionsAndArgs
-    - deleteConditionsAndArgs
-
 

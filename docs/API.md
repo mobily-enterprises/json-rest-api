@@ -184,6 +184,16 @@ new Schema(structure: SchemaStructure)
     unique: true,             // Optional
     silent: true,             // Optional - exclude from default SELECT
     searchable: true,         // Optional - allow filtering by this field
+    format: 'email',          // Optional - format validation (see formats below)
+    enum: ['a', 'b', 'c'],    // Optional - allowed values
+    validator: (val) => {},   // Optional - custom validation function
+    trim: true,               // Optional - trim whitespace (strings)
+    uppercase: true,          // Optional - convert to uppercase
+    lowercase: true,          // Optional - convert to lowercase
+    notEmpty: true,           // Optional - disallow empty strings
+    maxItems: 100,            // Optional - max array length
+    maxKeys: 50,              // Optional - max object properties
+    maxDepth: 5,              // Optional - max object nesting
     refs: {                   // Optional - foreign key reference
       resource: 'users',
       join: {                 // Optional - automatic join config
@@ -193,6 +203,64 @@ new Schema(structure: SchemaStructure)
     }
   }
 }
+```
+
+### Field Parameters
+
+| Parameter | Types | Description |
+|-----------|-------|-------------|
+| `type` | all | Field type (required) |
+| `required` | all | Field must be present |
+| `default` | all | Default value or function |
+| `min` | string, number | Minimum length/value |
+| `max` | string, number | Maximum length/value |
+| `unique` | all | Enforce uniqueness |
+| `silent` | all | Exclude from SELECT |
+| `searchable` | all | Allow filtering |
+| `format` | string | Format validation |
+| `enum` | all | Allowed values |
+| `validator` | all | Custom validation |
+| `trim` | string | Trim whitespace |
+| `uppercase` | string | Convert to uppercase |
+| `lowercase` | string | Convert to lowercase |
+| `notEmpty` | string | Disallow empty strings |
+| `maxItems` | array | Maximum array length |
+| `maxKeys` | object | Maximum object properties |
+| `maxDepth` | object | Maximum nesting depth |
+
+### Format Validation
+
+The `format` parameter provides safe regex validation with ReDoS protection:
+
+| Format | Description | Example |
+|--------|-------------|---------|
+| `email` | Email address | `user@example.com` |
+| `url` | HTTP/HTTPS URL | `https://example.com` |
+| `uuid` | UUID v4 | `123e4567-e89b-12d3-a456-426614174000` |
+| `alphanumeric` | Letters and numbers | `abc123` |
+| `slug` | URL-friendly string | `my-cool-page` |
+| `date` | Date (YYYY-MM-DD) | `2024-01-15` |
+| `time` | Time (HH:MM[:SS]) | `14:30` or `14:30:45` |
+| `phone` | Phone number | `+1 (555) 123-4567` |
+| `postalCode` | Postal/ZIP code | `12345` or `A1B 2C3` |
+
+Example:
+```javascript
+const schema = new Schema({
+  email: { 
+    type: 'string', 
+    required: true,
+    format: 'email'  // Safe email validation
+  },
+  website: { 
+    type: 'string', 
+    format: 'url'    // ReDoS-protected URL validation
+  },
+  tags: {
+    type: 'array',
+    maxItems: 10     // Prevent DoS from huge arrays
+  }
+});
 ```
 
 ### Field Types
