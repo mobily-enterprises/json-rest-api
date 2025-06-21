@@ -115,6 +115,48 @@ export const ValidationPlugin = {
       if (options.validate) {
         await options.validate(context, context.errors);
       }
+      
+      // Validate foreign key references
+      if ((method === 'insert' || method === 'update') && context.data) {
+        const schema = api.schemas.get(type);
+        if (!schema) return;
+        
+        // Check each field with refs
+        for (const [fieldName, definition] of Object.entries(schema.structure)) {
+          if (definition.refs && context.data[fieldName] !== undefined && context.data[fieldName] !== null) {
+            const refResource = definition.refs.resource;
+            const refId = context.data[fieldName];
+            
+            // Skip if no resource defined
+            if (!refResource) continue;
+            
+            // Check if the referenced record exists
+            try {
+              // Use the API's get method to check if the record exists
+              const getImpl = api.implementers.get('get');
+              if (getImpl) {
+                await getImpl({
+                  id: refId,
+                  options: { type: refResource }
+                });
+              }
+            } catch (error) {
+              // If it's a NotFoundError, the reference is invalid
+              if (error.code === 'RESOURCE_NOT_FOUND' || error.name === 'NotFoundError') {
+                context.errors.push({
+                  field: fieldName,
+                  message: `Referenced ${refResource} with id ${refId} does not exist`,
+                  code: ErrorCodes.INVALID_REFERENCE,
+                  value: refId
+                });
+              } else {
+                // Re-throw other errors
+                throw error;
+              }
+            }
+          }
+        }
+      }
     });
 
     // Add search schema validation for queries

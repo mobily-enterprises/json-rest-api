@@ -210,7 +210,7 @@ Now that you've seen how easy it is, dive deeper:
 ## Need Help?
 
 - 📖 Read the [comprehensive guide](./GUIDE.md)
-- 🏗️ Check the [examples](./examples/) directory
+- 🏗️ Check the [examples](../examples/) directory
 - 🐛 Report issues on GitHub
 
 ---

@@ -685,6 +685,89 @@ if (!validation.valid) {
 4. **Provide alternatives** - Offer paginated or simplified endpoints
 5. **Use field selection** - Encourage clients to request only needed fields
 
+## Circular Reference and Prototype Pollution Protection
+
+### Circular Reference Protection
+
+The API automatically detects and prevents circular references that could cause DoS attacks:
+
+```javascript
+// This malicious payload would cause infinite recursion
+const circular = { name: 'root' };
+circular.self = circular;  // Creates a circular reference
+
+// API automatically detects and rejects this
+try {
+  await api.create('posts', {
+    title: 'Test',
+    metadata: circular  // Will be rejected
+  });
+} catch (error) {
+  // Error: Circular reference detected in field 'metadata'
+}
+```
+
+**How it works:**
+- Uses a Set to track visited objects during traversal
+- Detects cycles before they cause stack overflow
+- Provides clear error messages indicating the problematic field
+- No performance impact on normal operations
+
+### Prototype Pollution Protection
+
+The API prevents prototype pollution attacks that could compromise application security:
+
+```javascript
+// These attack payloads are automatically sanitized
+const attacks = [
+  { "__proto__": { "isAdmin": true } },
+  { "constructor": { "prototype": { "isAdmin": true } } },
+  { "a": { "__proto__": { "isAdmin": true } } }  // Nested attempts
+];
+
+// All dangerous keys are removed during validation
+for (const payload of attacks) {
+  const cleaned = await api.create('posts', payload);
+  // __proto__, constructor, and prototype keys are stripped
+}
+```
+
+**Protected keys:**
+- `__proto__`
+- `constructor`
+- `prototype`
+- Any variations with different casing
+
+**Deep protection:**
+- Recursively checks all nested objects
+- Removes dangerous keys at any depth
+- Works with arrays of objects
+- No false positives on legitimate data
+
+### Safe Object Validation
+
+The validation system ensures objects are safe before processing:
+
+```javascript
+const schema = new Schema({
+  config: {
+    type: 'object',
+    maxKeys: 50,     // Prevent memory exhaustion
+    maxDepth: 5,     // Prevent deep nesting attacks
+    validate: (obj) => {
+      // Custom validation runs after security checks
+      return true;
+    }
+  }
+});
+```
+
+**Protection layers:**
+1. Circular reference check (first)
+2. Prototype pollution sanitization
+3. Size and depth limits
+4. Custom validation (last)
+
 ## Additional Security Features
 
 ### SecurityPlugin Features
@@ -736,10 +819,21 @@ Security headers automatically added:
 2. **Prototype Pollution Prevention**
    - Input sanitization removes dangerous keys
    - `__proto__`, `constructor`, `prototype` are blocked
+   - Deep object validation prevents nested pollution attempts
 
 3. **XSS Prevention**
    - Input sanitization escapes HTML entities
    - Content-Type headers prevent MIME sniffing
+
+4. **Circular Reference Protection**
+   - Automatic detection of circular references in JSON
+   - Prevents DoS attacks from infinite recursion
+   - Safe handling with clear error messages
+
+5. **ReDoS Protection**
+   - Built-in email validation with safe regex patterns
+   - Timeout detection for potentially malicious patterns
+   - Pre-compiled patterns for better performance
 
 ## Security Checklist
 

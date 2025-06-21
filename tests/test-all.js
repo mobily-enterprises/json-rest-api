@@ -981,8 +981,8 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       const books = await api.resources.books.query({});
       
       // Should have author data due to eager join
-      assert(books.data[0].attributes.authorId);
-      assert.equal(books.data[0].attributes.authorId.name, 'J.K. Rowling');
+      assert(books.data[0].attributes.author);
+      assert.equal(books.data[0].attributes.author.name, 'J.K. Rowling');
     });
     
     it('should support explicit joins', async () => {
@@ -1017,8 +1017,10 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
         const withJoin = await api.resources.books.query({
           joins: ['authorId']
         });
-        assert.equal(typeof withJoin.data[0].attributes.authorId, 'object');
-        assert.equal(withJoin.data[0].attributes.authorId.name, 'J.K. Rowling');
+        // With preserveId defaulting to true, joined data is in 'author' field
+        assert.equal(typeof withJoin.data[0].attributes.authorId, 'string');
+        assert.equal(typeof withJoin.data[0].attributes.author, 'object');
+        assert.equal(withJoin.data[0].attributes.author.name, 'J.K. Rowling');
       } finally {
         // Always restore original eager setting
         api.schemas.get('books').structure.authorId.refs.join.eager = originalEager;
@@ -1362,7 +1364,7 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       
       // Query with joins
       const projectWithOwner = await api.resources.projects.get(project.data.id);
-      assert(projectWithOwner.data.attributes.ownerId.username);
+      assert(projectWithOwner.data.attributes.owner.username);
       
       // Complex query
       const allTasks = await api.resources.tasks.query({
@@ -1370,8 +1372,8 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       });
       
       assert.equal(allTasks.data.length, 3);
-      assert(allTasks.data[0].attributes.projectId.name);
-      assert(allTasks.data[0].attributes.assigneeId.username);
+      assert(allTasks.data[0].attributes.project.name);
+      assert(allTasks.data[0].attributes.assignee.username);
       
       await robustTeardown({ api });
     });

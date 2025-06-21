@@ -1223,6 +1223,361 @@ api.use(QueryLimitsPlugin, {
 }
 ```
 
+### LoggingPlugin
+
+Implements structured logging with security best practices.
+
+```javascript
+import { LoggingPlugin } from 'json-rest-api/plugins/logging.js';
+
+api.use(LoggingPlugin, {
+  level: 'info', // 'error', 'warn', 'info', 'debug'
+  format: 'json', // 'json' or 'pretty'
+  includeRequest: true,
+  includeResponse: true,
+  includeTiming: true,
+  sensitiveFields: ['password', 'token', 'secret', 'authorization'],
+  logger: console, // Can be replaced with winston, bunyan, etc.
+  auditLog: true // Enable audit logging for create/update/delete
+});
+```
+
+**Features:**
+- Structured JSON logging
+- Request/response logging
+- SQL query logging
+- Performance timing
+- Sensitive data redaction
+- Audit logging for changes
+- Custom logger support
+
+**Log Methods:**
+```javascript
+api.log.error('Database error', { code: 'DB_001', details: error });
+api.log.warn('Validation warning', { field: 'email' });
+api.log.info('User login', { userId: user.id });
+api.log.debug('Query executed', { sql, duration: 123 });
+```
+
+### OpenAPIPlugin
+
+Generates OpenAPI 3.0 specification and serves Swagger UI.
+
+```javascript
+import { OpenAPIPlugin } from 'json-rest-api/plugins/openapi.js';
+
+api.use(OpenAPIPlugin, {
+  title: 'My API',
+  version: '1.0.0',
+  description: 'REST API with JSON:API specification',
+  servers: [
+    { url: 'http://localhost:3000/api' },
+    { url: 'https://api.example.com' }
+  ],
+  contact: {
+    name: 'API Support',
+    email: 'support@example.com'
+  },
+  license: {
+    name: 'MIT',
+    url: 'https://opensource.org/licenses/MIT'
+  }
+});
+```
+
+**Endpoints:**
+- `GET /openapi.json` - OpenAPI specification
+- `GET /docs` - Swagger UI interface
+
+**Features:**
+- Auto-generates API documentation from schemas
+- JSON:API compliant paths
+- Security scheme definitions
+- Request/response examples
+- Interactive Swagger UI
+
+### SecurityPlugin
+
+Implements comprehensive security features.
+
+```javascript
+import { SecurityPlugin } from 'json-rest-api/plugins/security.js';
+
+api.use(SecurityPlugin, {
+  rateLimit: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP'
+  },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https:']
+    }
+  },
+  authentication: {
+    type: 'bearer', // 'bearer', 'basic', 'apikey'
+    header: 'Authorization',
+    queryParam: 'api_key',
+    required: true
+  },
+  publicRead: false,
+  allowUnknownFilters: false,
+  verifyToken: async (token, context) => {
+    // Custom token verification
+    return await verifyJWT(token);
+  }
+});
+```
+
+**Features:**
+- Rate limiting per IP
+- Security headers (CSP, X-Frame-Options, etc.)
+- Authentication middleware
+- Input sanitization
+- SQL injection protection
+- Request ID tracking
+- XSS prevention
+
+**Security Headers Added:**
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Strict-Transport-Security`
+- `Content-Security-Policy`
+- `X-Request-ID`
+
+### VersioningPlugin
+
+Manages API versioning and resource version control.
+
+```javascript
+import { VersioningPlugin } from 'json-rest-api/plugins/versioning.js';
+
+api.use(VersioningPlugin, {
+  // API versioning
+  apiVersion: '2.0.0',
+  versionHeader: 'api-version',
+  versionParam: 'v',
+  strict: false, // Allow version mismatch
+  
+  // Resource versioning
+  versionField: 'version',
+  lastModifiedField: 'lastModified',
+  modifiedByField: 'modifiedBy',
+  optimisticLocking: true,
+  trackHistory: true,
+  historyTable: 'posts_history'
+});
+```
+
+**Features:**
+- API version negotiation
+- Resource version tracking
+- Optimistic locking
+- Version history
+- Version comparison/diffing
+- Version restoration
+
+**Methods:**
+```javascript
+// Compare versions
+api.compareVersions('1.2.3', '1.2.4'); // returns -1
+
+// Get version history
+const history = await api.getVersionHistory('posts', postId);
+
+// Restore specific version
+await api.restoreVersion('posts', postId, 3);
+
+// Diff between versions
+const diff = await api.diffVersions('posts', postId, 3, 5);
+```
+
+**Optimistic Locking:**
+```javascript
+// Update with version check
+await api.update('posts', postId, {
+  title: 'New Title',
+  version: 3 // Must match current version
+});
+// Throws 409 Conflict if version mismatch
+```
+
+### SQLPlugin
+
+Generic SQL implementation that works with any database adapter.
+
+```javascript
+import { SQLPlugin } from 'json-rest-api/plugins/sql-generic.js';
+
+// This plugin is automatically used when you install a database adapter
+// No explicit configuration needed
+api.use(SQLPlugin);
+```
+
+**Features:**
+- Works with MySQLAdapter or AlaSQLAdapter
+- Smart query building
+- JSON field handling
+- Array field searching
+- Join support
+- Automatic table creation
+- Transaction support
+
+**Database Adapters:**
+- **MySQLAdapter**: Production MySQL/MariaDB support
+- **AlaSQLAdapter**: In-memory SQL for development/testing
+
+## Database Adapters
+
+Database adapters provide the low-level implementation for storage plugins. They implement the `db.*` interface that plugins use.
+
+### AlaSQLAdapter
+
+Powers the MemoryPlugin with in-memory SQL database functionality.
+
+```javascript
+import { AlaSQLAdapter } from 'json-rest-api/plugins/adapters/alasql-adapter.js';
+
+// Usually not used directly - MemoryPlugin handles this
+const adapter = new AlaSQLAdapter();
+api.use(adapter);
+```
+
+**Features:**
+- Full SQL support via AlaSQL library
+- In-memory storage (no persistence)
+- Automatic table creation
+- JSON field support
+- Basic transaction simulation
+- Perfect for testing and development
+
+### MySQLAdapter
+
+Powers the MySQLPlugin with production MySQL/MariaDB support.
+
+```javascript
+import { MySQLAdapter } from 'json-rest-api/plugins/adapters/mysql-adapter.js';
+
+// Usually not used directly - MySQLPlugin handles this
+const adapter = new MySQLAdapter({
+  connection: {
+    host: 'localhost',
+    user: 'root',
+    password: 'password',
+    database: 'myapp'
+  }
+});
+api.use(adapter);
+```
+
+**Features:**
+- Connection pooling
+- Real transactions
+- Prepared statements
+- JSON column support
+- Automatic schema sync
+- Production-ready performance
+
+**Adapter vs Plugin:**
+- **Adapters** implement the database interface (`db.query`, `db.connect`, etc.)
+- **Plugins** (MemoryPlugin, MySQLPlugin) use adapters and add convenience features
+- **SQLPlugin** provides the common SQL logic that works with any adapter
+
+## Plugin Compatibility Matrix
+
+### Storage Plugin Compatibility
+
+| Plugin | MemoryPlugin | MySQLPlugin | Notes |
+|--------|--------------|-------------|-------|
+| **ValidationPlugin** | ✅ | ✅ | Always included automatically |
+| **TimestampsPlugin** | ✅ | ✅ | Works with all storage backends |
+| **HTTPPlugin** | ✅ | ✅ | Must be added last |
+| **PositioningPlugin** | ✅ | ✅ | MySQL supports transactions for atomic operations |
+| **CorsPlugin** | ✅ | ✅ | Works independently of storage |
+| **JwtPlugin** | ✅ | ✅ | Works independently of storage |
+| **AuthorizationPlugin** | ✅ | ✅ | Works with any storage backend |
+| **ViewsPlugin** | ✅ | ✅ | Works with any storage backend |
+| **QueryLimitsPlugin** | ✅ | ✅ | Works with any storage backend |
+| **LoggingPlugin** | ✅ | ✅ | Logs SQL queries for both backends |
+| **OpenAPIPlugin** | ✅ | ✅ | Generates docs for any backend |
+| **SecurityPlugin** | ✅ | ✅ | Works independently of storage |
+| **VersioningPlugin** | ✅ | ✅ | History tables work with both |
+| **SQLPlugin** | ✅ | ✅ | Required for both SQL backends |
+
+### Plugin Order Dependencies
+
+| Plugin | Must Come After | Must Come Before | Notes |
+|--------|-----------------|------------------|-------|
+| **Storage Plugins** | - | All others | Foundation for everything |
+| **ValidationPlugin** | Storage | - | Auto-included with storage |
+| **TimestampsPlugin** | Storage | HTTPPlugin | Modifies data before HTTP |
+| **PositioningPlugin** | Storage | HTTPPlugin | Modifies data before HTTP |
+| **VersioningPlugin** | Storage, Timestamps | HTTPPlugin | Tracks after timestamps |
+| **AuthorizationPlugin** | Storage, JWT | HTTPPlugin | Needs auth before HTTP |
+| **ViewsPlugin** | Storage | HTTPPlugin | Filters data before response |
+| **QueryLimitsPlugin** | Storage | HTTPPlugin | Validates before execution |
+| **LoggingPlugin** | All data plugins | HTTPPlugin | Logs all operations |
+| **HTTPPlugin** | All others | - | Must be last |
+| **CorsPlugin** | - | HTTPPlugin | Can be anywhere before HTTP |
+| **JwtPlugin** | - | Authorization, HTTP | Provides auth for other plugins |
+| **SecurityPlugin** | - | HTTPPlugin | Can be anywhere before HTTP |
+| **OpenAPIPlugin** | All others | - | Documents final API |
+
+### Feature Compatibility
+
+| Feature | Memory | MySQL | Notes |
+|---------|---------|--------|-------|
+| **Transactions** | ❌ | ✅ | MySQL supports ACID transactions |
+| **Concurrent Writes** | ⚠️ | ✅ | Memory may have race conditions |
+| **Large Datasets** | ❌ | ✅ | Memory limited by RAM |
+| **Persistence** | ❌ | ✅ | Memory data lost on restart |
+| **Complex Joins** | ✅ | ✅ | Both support SQL joins |
+| **JSON Fields** | ✅ | ✅ | Both support JSON data types |
+| **Full-text Search** | ❌ | ✅ | MySQL has FULLTEXT indexes |
+| **Atomic Positioning** | ❌ | ✅ | MySQL uses transactions |
+| **Prepared Statements** | ⚠️ | ✅ | Memory has basic support |
+| **Connection Pooling** | N/A | ✅ | MySQL supports multiple connections |
+
+### Recommended Plugin Combinations
+
+**Development/Testing:**
+```javascript
+api
+  .use(MemoryPlugin)         // Fast in-memory storage
+  .use(TimestampsPlugin)     // Track creation/updates
+  .use(LoggingPlugin)        // Debug queries
+  .use(HTTPPlugin);          // REST endpoints
+```
+
+**Production API:**
+```javascript
+api
+  .use(MySQLPlugin, { connection })  // Production database
+  .use(TimestampsPlugin)             // Track changes
+  .use(VersioningPlugin)             // Version control
+  .use(JwtPlugin, { secret })        // Authentication
+  .use(AuthorizationPlugin)          // Access control
+  .use(QueryLimitsPlugin)            // Prevent abuse
+  .use(SecurityPlugin)               // Security headers
+  .use(LoggingPlugin)                // Audit trail
+  .use(HTTPPlugin);                  // REST endpoints
+```
+
+**Public API:**
+```javascript
+api
+  .use(MySQLPlugin, { connection })
+  .use(CorsPlugin)                   // Cross-origin access
+  .use(QueryLimitsPlugin)            // Rate limiting
+  .use(ViewsPlugin)                  // Field filtering
+  .use(OpenAPIPlugin)                // API documentation
+  .use(HTTPPlugin);                  // REST endpoints
+```
+
 ## Type Definitions
 
 ### Query Parameters

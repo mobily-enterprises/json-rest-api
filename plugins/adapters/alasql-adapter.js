@@ -155,7 +155,9 @@ export const AlaSQLAdapter = {
         upsert: false,       // No native upsert
         schemas: false,      // No schema support
         tableCreation: true,
-        requiresIdGeneration: true // Needs manual ID generation
+        requiresIdGeneration: true, // Needs manual ID generation
+        ilike: false,        // AlaSQL doesn't support ILIKE, use LOWER() instead
+        jsonFunctions: false // No JSON_CONTAINS etc
       };
     });
     

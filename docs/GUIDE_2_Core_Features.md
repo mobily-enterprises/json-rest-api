@@ -302,60 +302,72 @@ await api.resources.posts.query({
 
 ### Filter Operators
 
+The API supports multiple operators for advanced filtering:
+
 ```javascript
-// Basic equality
+// Basic equality (default when no operator specified)
 filter: { active: true }
+filter: { status: 'published' }
 
 // Comparison operators
 filter: {
-  age: { $gt: 18 },        // Greater than
-  price: { $lte: 100 },    // Less than or equal
-  status: { $ne: 'deleted' } // Not equal
+  age: { gt: 18 },           // Greater than
+  age: { gte: 18 },          // Greater than or equal
+  price: { lt: 100 },        // Less than
+  price: { lte: 100 },       // Less than or equal
+  status: { ne: 'deleted' }  // Not equal
 }
 
-// Array operators
+// Multiple conditions on same field
 filter: {
-  status: { $in: ['active', 'pending'] },
-  category: { $nin: ['spam', 'trash'] }
+  age: { gte: 18, lt: 65 }   // Age between 18 and 64
 }
 
-// Range operator
+// Set operators
 filter: {
-  createdAt: { $between: ['2024-01-01', '2024-12-31'] }
+  status: { in: ['active', 'pending'] },      // In array
+  category: { nin: ['spam', 'trash'] }        // Not in array
 }
 
-// Pattern matching
+// String matching operators
 filter: {
-  email: { $like: '%@example.com' },
-  name: { $like: 'John%' }
+  email: { endsWith: '@example.com' },        // Ends with
+  name: { startsWith: 'John' },               // Starts with
+  description: { contains: 'javascript' },     // Contains
+  title: { like: 'App%Dev%' }                 // SQL LIKE pattern
+}
+
+// Case-insensitive search (database dependent)
+filter: {
+  name: { ilike: 'john%' }   // Case-insensitive LIKE
 }
 ```
 
-### Complex Queries
+#### Query String Format
 
-```javascript
-// OR conditions
-filter: {
-  $or: [
-    { status: 'published' },
-    { authorId: currentUserId }
-  ]
-}
+When using HTTP endpoints, operators use bracket notation:
 
-// Nested AND/OR
-filter: {
-  category: 'tech',
-  $or: [
-    { featured: true },
-    { 
-      $and: [
-        { likes: { $gte: 100 } },
-        { publishedAt: { $gte: '2024-01-01' } }
-      ]
-    }
-  ]
-}
+```bash
+# Basic equality
+GET /api/posts?filter[status]=published
+
+# Comparison operators
+GET /api/posts?filter[views][gt]=100
+GET /api/posts?filter[price][lte]=50
+
+# Multiple operators on same field
+GET /api/posts?filter[age][gte]=18&filter[age][lt]=65
+
+# Set operators (comma-separated)
+GET /api/posts?filter[status][in]=active,pending
+GET /api/posts?filter[category][nin]=spam,trash
+
+# String operators
+GET /api/posts?filter[email][endsWith]=@example.com
+GET /api/posts?filter[name][startsWith]=John
+GET /api/posts?filter[title][contains]=javascript
 ```
+
 
 ### Sorting
 
@@ -592,6 +604,35 @@ refs: {
   onUpdate: 'cascade'   // What happens on update
 }
 ```
+
+### Referential Integrity
+
+When using the ValidationPlugin, foreign key references are automatically validated to ensure data integrity:
+
+```javascript
+// This will fail with 422 if user with ID 999 doesn't exist
+await api.resources.posts.create({
+  title: 'My Post',
+  authorId: 999  // Non-existent user
+});
+
+// Error response:
+{
+  "errors": [{
+    "status": "422",
+    "code": "INVALID_REFERENCE",
+    "title": "Validation Error",
+    "detail": "Referenced users with id 999 does not exist",
+    "source": { "pointer": "/data/attributes/authorId" },
+    "meta": { "field": "authorId" }
+  }]
+}
+```
+
+This validation happens automatically for all fields with `refs` configuration when:
+- Creating new records (INSERT)
+- Updating existing records (UPDATE)
+- The referenced ID is not null
 
 ### Automatic Joins
 

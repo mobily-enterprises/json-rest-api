@@ -210,9 +210,11 @@ export const MySQLAdapter = {
         returning: false, // MySQL doesn't support RETURNING
         arrays: false,    // No native array type
         json: true,       // Native JSON support
+        jsonFunctions: true, // Supports JSON_CONTAINS, JSON_EXTRACT, etc.
         upsert: true,     // INSERT ... ON DUPLICATE KEY UPDATE
         schemas: true,    // Database schemas
-        tableCreation: true
+        tableCreation: true,
+        ilike: false      // MySQL doesn't support ILIKE, use LOWER() instead
       };
     });
     

@@ -11,6 +11,10 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
   <a href="{{ '/GUIDE' | relative_url }}" class="button secondary">Read the Guide</a>
 </div>
 
+<div style="background: #f8f9fa; border-radius: 8px; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #555;">
+A heartfelt thank you to Dario and Daniela Amodei and the entire Anthropic team for creating transformative AI technology that opens endless possibilities for developers worldwide. Your vision, combined with incredibly accessible pricing, has democratized access to cutting-edge AI and empowered countless innovators to build the future. (No, we weren't asked nor paid in any way for this message - we're just genuinely grateful!)
+</div>
+
 ## Why JSON REST API?
 
 <div class="feature-grid">
@@ -48,34 +52,55 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
 ## Quick Example
 
 ```javascript
-import { Api, HTTPPlugin, MemoryPlugin, Schema } from 'json-rest-api'
+import { createApi, Schema } from 'json-rest-api'
 import express from 'express'
 
-// Create your API
-const api = new Api()
-api.use(MemoryPlugin)
-api.use(HTTPPlugin, { app: express() })
+const app = express()
+const api = createApi({ 
+  storage: 'memory',
+  http: { app }
+})
 
-// Define a schema
-const userSchema = new Schema({
+api.addResource('users', new Schema({
   name: { type: 'string', required: true },
   email: { type: 'string', format: 'email' },
   age: { type: 'number', min: 0 }
+}))
+
+app.listen(3000, () => {
+  console.log('API running at http://localhost:3000/api/users')
 })
-
-// Add a resource
-api.addResource('users', userSchema)
-
-// Start the server
-api.listen(3000)
 ```
 
 That's it! You now have a fully functional REST API with:
-- `GET /users` - List all users
-- `GET /users/:id` - Get a specific user
-- `POST /users` - Create a new user
-- `PATCH /users/:id` - Update a user
-- `DELETE /users/:id` - Delete a user
+- `GET /api/users` - List all users
+- `GET /api/users/:id` - Get a specific user
+- `POST /api/users` - Create a new user
+- `PATCH /api/users/:id` - Update a user
+- `DELETE /api/users/:id` - Delete a user
+
+## Try It Out
+
+```bash
+# Create a user
+curl -X POST http://localhost:3000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"attributes":{"name":"Alice","email":"alice@example.com","age":28}}}'
+
+# List all users
+curl http://localhost:3000/api/users
+
+# Get a specific user
+curl http://localhost:3000/api/users/1
+
+# Update a user
+curl -X PATCH http://localhost:3000/api/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"attributes":{"age":29}}}'
+
+# Delete a user
+curl -X DELETE http://localhost:3000/api/users/1
+```
 
 ## Ready to Start?
 
@@ -94,4 +119,4 @@ npm install json-rest-api
 - [Complete Guide]({{ '/GUIDE' | relative_url }}) - Everything you need to know
 - [API Reference]({{ '/API' | relative_url }}) - Detailed API documentation
 - [Tutorial]({{ '/ONBOARDING' | relative_url }}) - Step-by-step walkthrough
-- [GitHub](https://github.com/yourusername/json-rest-api) - Source code and issues
+- [GitHub](https://github.com/mobily-enterprises/json-rest-api) - Source code and issues

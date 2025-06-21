@@ -67,7 +67,7 @@ This guide is split into multiple sections for easier navigation and better perf
 
 - [QUICKSTART.md](./QUICKSTART.md) - 5-minute quick start guide
 - [API.md](./API.md) - Detailed API documentation
-- [Examples](./examples/) - Working code examples
+- [Examples](../examples/) - Working code examples
 
 ## 💡 Tips for Using This Guide
 
@@ -79,7 +79,7 @@ This guide is split into multiple sections for easier navigation and better perf
 ## 🆘 Need Help?
 
 - Check the [Troubleshooting](./GUIDE_5_Production_and_Deployment.md#troubleshooting) section
-- Browse the [examples](./examples/) directory
+- Browse the [examples](../examples/) directory
 - Report issues on [GitHub](https://github.com/your-repo/json-rest-api)
 
 ---

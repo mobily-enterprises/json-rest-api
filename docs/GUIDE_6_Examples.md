@@ -16,7 +16,7 @@ This section provides working examples demonstrating various features of the JSO
 
 ## Basic Example - Getting Started
 
-**File**: [`example.js`](./examples/example.js)
+**File**: [`example.js`](../examples/example.js)
 
 This example demonstrates:
 - Creating APIs with both memory and MySQL storage
@@ -52,7 +52,7 @@ const schema = new Schema({
 
 ## API Versioning Example
 
-**File**: [`example-versioning.js`](./examples/example-versioning.js)
+**File**: [`example-versioning.js`](../examples/example-versioning.js)
 
 This example demonstrates:
 - Creating multiple versions of the same API
@@ -82,7 +82,7 @@ apiV2.mount(app);  // Available at /api/2.0.0/users
 
 ## Authorization Example
 
-**File**: [`example-authorization.js`](./examples/example-authorization.js)
+**File**: [`example-authorization.js`](../examples/example-authorization.js)
 
 This comprehensive example demonstrates:
 - Role-based access control (RBAC)
@@ -142,7 +142,7 @@ if (user.hasRole('admin')) {
 ### Running the Example
 
 ```bash
-node docs/examples/example-authorization.js
+node examples/example-authorization.js
 ```
 
 The example demonstrates:
@@ -154,7 +154,7 @@ The example demonstrates:
 
 ## Advanced Queries Example
 
-**File**: [`advanced-queries.js`](./examples/advanced-queries.js)
+**File**: [`advanced-queries.js`](../examples/advanced-queries.js)
 
 This example demonstrates:
 - Complex filtering with operators ($gt, $in, $between, etc.)
@@ -183,7 +183,7 @@ const results = await api.resources.posts.query({
 
 ## Advanced References Demo
 
-**File**: [`advanced-refs-demo.js`](./examples/advanced-refs-demo.js)
+**File**: [`advanced-refs-demo.js`](../examples/advanced-refs-demo.js)
 
 This example demonstrates:
 - Setting up complex relationships
@@ -218,7 +218,7 @@ const posts = await api.resources.posts.query({
 
 ## Silent Fields Example
 
-**File**: [`silent-fields.js`](./examples/silent-fields.js)
+**File**: [`silent-fields.js`](../examples/silent-fields.js)
 
 This example demonstrates:
 - Using silent fields for sensitive data
@@ -243,7 +243,7 @@ const users = await api.resources.users.query();
 
 ## Smart Joins Example
 
-**File**: [`smart-joins.js`](./examples/smart-joins.js) / [`simple-smart-joins.js`](./examples/simple-smart-joins.js)
+**File**: [`smart-joins.js`](../examples/smart-joins.js) / [`simple-smart-joins.js`](../examples/simple-smart-joins.js)
 
 This example demonstrates:
 - Automatic join detection from schema refs
@@ -271,7 +271,7 @@ const posts = await api.resources.posts.query({
 
 ## Query Builder Example
 
-**File**: [`query-builder-json-api.js`](./examples/query-builder-json-api.js)
+**File**: [`query-builder-json-api.js`](../examples/query-builder-json-api.js)
 
 This example demonstrates:
 - Direct QueryBuilder usage for complex queries
@@ -299,7 +299,7 @@ const results = await connection.query(sql, query.getArgs());
 
 ## No SQL Strings Example
 
-**File**: [`no-sql-strings.js`](./examples/no-sql-strings.js)
+**File**: [`no-sql-strings.js`](../examples/no-sql-strings.js)
 
 This example demonstrates:
 - Type-safe query building
@@ -327,7 +327,7 @@ const query = new QueryBuilder('users')
 
 ## Virtual Search Fields Example
 
-**File**: [`virtual-search-fields.js`](./examples/virtual-search-fields.js)
+**File**: [`virtual-search-fields.js`](../examples/virtual-search-fields.js)
 
 This example demonstrates:
 - Creating virtual searchable fields that don't map to database columns
@@ -391,8 +391,8 @@ await api.resources.messages.query({
 
 3. **Run an example**:
    ```bash
-   node docs/examples/example.js
-   node docs/examples/example-versioning.js
+   node examples/example.js
+   node examples/example-versioning.js
    ```
 
 ## Best Practices Demonstrated

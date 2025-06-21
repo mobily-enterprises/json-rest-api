@@ -1,20 +1,13 @@
 
-NOW:
+
+    
 * Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
 
-TOMORROW:
-* Resolve last little bits of TODO
-* Run ANOTHER security audit
-* FINAL check that ALL documentation is correct and covers everything
-* Write MANY more tests, make them pass by fixing code
+DOING:
+* Check that all tests still pass, and add MORE tests, make them pass by FIXING code
 
-  7. Store Templates
 
-  - No equivalent to storeTemplate.js:
-    - Automatic REST endpoint generation
-    - Built-in authentication handling
-    - Session management
-    - Request/response transformation
+* Resolve last little bits of TODO and in the second security audit
 
   11. JSON:API Compliance Gaps
 

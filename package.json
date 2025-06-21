@@ -24,6 +24,9 @@
     "test:mysql": "DB_TYPE=mysql node tests/test-all.js",
     "test:all-db": "npm test && npm run test:mysql",
     "test:ci": "npm run test:all-db",
+    "test:http": "node tests/http/run-all-tests.js",
+    "test:http:mysql": "DB_TYPE=mysql MYSQL_USER=root MYSQL_PASSWORD='' node tests/http/run-all-tests.js",
+    "test:all": "npm test && npm run test:http",
     "sync-docs": "node scripts/sync-docs-website.js",
     "docs:dev": "cd docs-website && npx http-server -p 8080"
   },

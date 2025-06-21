@@ -697,7 +697,7 @@ Thank you for your interest in contributing! Here's how to get started:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/json-rest-api.git
+git clone https://github.com/mobily-enterprises/json-rest-api.git
 cd json-rest-api
 
 # Install dependencies
@@ -801,7 +801,7 @@ Use `robustTeardown` from test-teardown.js to properly close connections.
 ## Get Help
 
 - 📖 Check this guide
-- 🏗️ Browse [examples](./examples/)
+- 🏗️ Browse [examples](../examples/)
 
 ---
 

@@ -10,7 +10,14 @@ Transform your schemas into fully-featured REST APIs with one line of code. No b
 // This is all you need for a complete REST API with validation, 
 // pagination, filtering, and more:
 
-const api = createApi({ storage: 'memory' });
+import { createApi, Schema } from 'json-rest-api';
+import express from 'express';
+
+const app = express();
+const api = createApi({ 
+  storage: 'memory',
+  http: { app }  // Pass Express app to enable HTTP
+});
 
 api.addResource('users', new Schema({
   name: { type: 'string', required: true, searchable: true },
@@ -18,8 +25,14 @@ api.addResource('users', new Schema({
   role: { type: 'string', enum: ['user', 'admin'], searchable: true }
 }));
 
-api.mount(app); // Done! Full REST API ready at /api/users
+app.listen(3000); // Done! Full REST API ready at http://localhost:3000/api/users
 ```
+
+---
+
+*A heartfelt thank you to Dario and Daniela Amodei and the entire Anthropic team for creating transformative AI technology that opens endless possibilities for developers worldwide. Your vision, combined with incredibly accessible pricing, has democratized access to cutting-edge AI and empowered countless innovators to build the future. (No, we weren't asked nor paid in any way for this message - we're just genuinely grateful!)*
+
+---
 
 ## ✨ The Magic
 
@@ -44,31 +57,37 @@ npm install json-rest-api
 import { createApi, Schema } from 'json-rest-api';
 import express from 'express';
 
+// Create Express app
+const app = express();
+
 // Create your API - choose your storage
 const api = createApi({
-  storage: 'memory' // Perfect for development/testing
+  storage: 'memory', // Perfect for development/testing
+  http: { app }      // Enable HTTP endpoints
+  
   // OR use MySQL for production:
   // storage: 'mysql',
-  // connection: { host: 'localhost', database: 'myapp' }
+  // connection: { host: 'localhost', database: 'myapp' },
+  // http: { app }
 });
 
-// Define a resource with relationships
+// Define a resource (no relationships needed for simple example)
 api.addResource('posts', new Schema({
   title: { type: 'string', required: true, min: 5, searchable: true },
   content: { type: 'string', required: true },
-  authorId: { 
-    type: 'id', 
-    refs: { 
-      resource: 'users',
-      join: { eager: true, fields: ['name', 'avatar'] }
-    }
-  },
+  author: { type: 'string', required: true, searchable: true },
   published: { type: 'boolean', default: false, searchable: true },
-  tags: { type: 'array' }
+  tags: { type: 'array' },
+  createdAt: { type: 'timestamp', default: () => Date.now() }
 }));
 
+// Start the server
+app.listen(3000, () => {
+  console.log('API running at http://localhost:3000/api');
+});
+
 // That's it! You now have:
-// GET    /api/posts?filter[published]=true&filter[title]=hello&include=author
+// GET    /api/posts?filter[published]=true&filter[author]=jane
 // GET    /api/posts?sort=-createdAt&page[size]=10
 // POST   /api/posts
 // PATCH  /api/posts/123
@@ -91,20 +110,18 @@ api.hook('beforeInsert', async (context) => {
 
 // Need computed fields? Easy:
 api.hook('afterGet', async (context) => {
-  if (context.options.type === 'users' && context.result) {
-    const posts = await api.resources.posts.query({
-      filter: { authorId: context.result.id }
-    });
-    context.result.postCount = posts.meta.total;
+  if (context.options.type === 'posts' && context.result) {
+    // Add word count to each post
+    context.result.wordCount = context.result.content.split(/\s+/).length;
   }
 });
 ```
 
 ## 📚 Ready to Dive In?
 
-**→ Just getting started?** Check out [GET_STARTED.md](docs/GET_STARTED.md) for a 5-minute tutorial
+**→ Just getting started?** Check out [QUICKSTART.md](docs/QUICKSTART.md) for a 5-minute tutorial
 
-**→ Want to master it?** Read the comprehensive [GUIDES.md](docs/GUIDES.md)
+**→ Want to master it?** Read the comprehensive [Guide](docs/GUIDE.md)
 
 **→ Need the details?** See the complete [API Reference](docs/API.md)
 
@@ -141,9 +158,17 @@ const userSchema = new Schema({
 <summary><strong>Smart Relationships</strong></summary>
 
 ```javascript
-// Define relationships in your schema
-const postSchema = new Schema({
+// First, define the users resource
+api.addResource('users', new Schema({
+  name: { type: 'string', required: true },
+  email: { type: 'string', required: true },
+  avatar: { type: 'string' }
+}));
+
+// Then, define posts with a relationship to users
+api.addResource('posts', new Schema({
   title: { type: 'string', required: true },
+  content: { type: 'string', required: true },
   authorId: { 
     type: 'id',
     refs: { 
@@ -155,7 +180,7 @@ const postSchema = new Schema({
       }
     }
   }
-});
+}));
 
 // GET /api/posts returns:
 {
@@ -164,8 +189,8 @@ const postSchema = new Schema({
     "type": "posts",
     "attributes": {
       "title": "Hello World",
-      "authorId": "42",
-      "author": {
+      "content": "My first post",
+      "authorId": {
         "id": "42",
         "name": "Jane Doe",
         "avatar": "https://..."
@@ -183,14 +208,13 @@ const postSchema = new Schema({
 // All query combinations work out of the box:
 GET /api/posts?
   filter[published]=true&
+  filter[author]=jane&
   filter[tags]=javascript,nodejs&
   filter[createdAt][$gte]=2024-01-01&
   sort=-createdAt,title&
   page[size]=10&
   page[number]=2&
-  include=author,comments.author&
-  fields[posts]=title,summary&
-  fields[users]=name,avatar
+  fields[posts]=title,author,tags,createdAt
 ```
 </details>
 
@@ -223,9 +247,11 @@ const apiV2 = createApi({
 // Use built-in plugins
 api
   .use(MySQLPlugin, { connection: dbConfig })
-  .use(TimestampsPlugin)  // Adds createdAt/updatedAt
-  .use(SoftDeletePlugin)  // Adds deletedAt
-  .use(AuditPlugin)       // Tracks who changed what
+  .use(TimestampsPlugin)      // Adds createdAt/updatedAt
+  .use(ValidationPlugin)      // Schema validation
+  .use(VersioningPlugin)      // API and resource versioning
+  .use(LoggingPlugin)         // Structured logging
+  .use(SecurityPlugin)        // Security headers & rate limiting
 
 // Or create your own
 const SlugPlugin = {
@@ -306,4 +332,4 @@ MIT
 
 ---
 
-**Ready to build something amazing?** Start with [GET_STARTED.md](docs/GET_STARTED.md) →
+**Ready to build something amazing?** Start with [QUICKSTART.md](docs/QUICKSTART.md) →

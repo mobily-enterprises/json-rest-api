@@ -19,6 +19,7 @@ export const HTTPPlugin = {
       type: ['application/json', 'application/vnd.api+json']
     }));
     
+    
     // Content-Type validation middleware
     if (options.validateContentType !== false) {
       router.use((req, res, next) => {
@@ -65,11 +66,16 @@ export const HTTPPlugin = {
     const getUserFromRequest = options.getUserFromRequest || ((req) => req.user);
 
     // Helper to parse JSON:API request body
-    const parseJsonApiBody = (body) => {
+    const parseJsonApiBody = (body, includeId = false) => {
       if (body.data) {
         if (body.data.attributes) {
           // JSON:API format
-          return { ...body.data.attributes, id: body.data.id };
+          const result = { ...body.data.attributes };
+          // Only include id if explicitly requested and it exists
+          if (includeId && body.data.id) {
+            result.id = body.data.id;
+          }
+          return result;
         }
         // Assume data is the actual data
         return body.data;
@@ -114,14 +120,30 @@ export const HTTPPlugin = {
       const params = {
         filter: {},
         sort: parseSortParam(req.query.sort),
-        page: {
-          size: req.query['page[size]'] || req.query.pageSize,
-          number: req.query['page[number]'] || req.query.page
-        },
+        page: {},
         include: req.query.include,
         fields: {},
         view: req.query.view
       };
+      
+      // Only include page parameters if they are provided
+      // Check for JSON:API format first
+      if (req.query.page && typeof req.query.page === 'object') {
+        if (req.query.page.size !== undefined) {
+          params.page.size = req.query.page.size;
+        }
+        if (req.query.page.number !== undefined) {
+          params.page.number = req.query.page.number;
+        }
+      } else {
+        // Legacy format support
+        if (req.query.pageSize !== undefined) {
+          params.page.size = req.query.pageSize;
+        }
+        if (req.query.page !== undefined && typeof req.query.page !== 'object') {
+          params.page.number = req.query.page;
+        }
+      }
       
       if (api.options.debug) {
         console.log('Raw query:', req.query);
@@ -130,15 +152,22 @@ export const HTTPPlugin = {
       
       // Parse filters
       // Express already parses filter[field]=value into { filter: { field: value } }
+      // Also supports filter[field][operator]=value syntax
       if (req.query.filter && typeof req.query.filter === 'object') {
         for (const [key, value] of Object.entries(req.query.filter)) {
-          // Convert string booleans to actual booleans
-          if (value === 'true') {
-            params.filter[key] = true;
-          } else if (value === 'false') {
-            params.filter[key] = false;
-          } else {
+          if (typeof value === 'object' && value !== null) {
+            // Handle operator syntax: filter[field][operator]=value
             params.filter[key] = value;
+          } else {
+            // Handle simple syntax: filter[field]=value (implies 'eq' operator)
+            // Convert string booleans to actual booleans
+            if (value === 'true') {
+              params.filter[key] = true;
+            } else if (value === 'false') {
+              params.filter[key] = false;
+            } else {
+              params.filter[key] = value;
+            }
           }
         }
       }
@@ -151,16 +180,28 @@ export const HTTPPlugin = {
       }
       
       // Legacy support for filter[field] syntax if Express doesn't parse it
+      // Also handles filter[field][operator] syntax
+      const filterRegex = /^filter\[([^\]]+)\](?:\[([^\]]+)\])?$/;
       for (const [key, value] of Object.entries(req.query)) {
-        if (key.startsWith('filter[') && key.endsWith(']')) {
-          const filterKey = key.slice(7, -1);
-          // Convert string booleans to actual booleans
-          if (value === 'true') {
-            params.filter[filterKey] = true;
-          } else if (value === 'false') {
-            params.filter[filterKey] = false;
+        const filterMatch = key.match(filterRegex);
+        if (filterMatch) {
+          const [, field, operator] = filterMatch;
+          if (operator) {
+            // filter[field][operator]=value syntax
+            if (!params.filter[field]) {
+              params.filter[field] = {};
+            }
+            params.filter[field][operator] = value;
           } else {
-            params.filter[filterKey] = value;
+            // filter[field]=value syntax
+            // Convert string booleans to actual booleans
+            if (value === 'true') {
+              params.filter[field] = true;
+            } else if (value === 'false') {
+              params.filter[field] = false;
+            } else {
+              params.filter[field] = value;
+            }
           }
         } else if (key.startsWith('fields[') && key.endsWith(']')) {
           const fieldType = key.slice(7, -1);
@@ -190,32 +231,62 @@ export const HTTPPlugin = {
     const buildLinks = (req, params, meta) => {
       const links = {};
       const baseUrl = `${req.protocol}://${req.get('host')}${req.baseUrl}${req.path}`;
-      const queryParams = new URLSearchParams(req.query);
+      
+      // Build query string manually to handle bracket notation
+      const buildQueryString = (pageNum) => {
+        const parts = [];
+        
+        // Add all existing query params
+        for (const [key, value] of Object.entries(req.query)) {
+          if (key === 'page' && typeof value === 'object') {
+            // Handle page object
+            if (value.size !== undefined) {
+              parts.push(`page[size]=${encodeURIComponent(value.size)}`);
+            }
+            if (pageNum !== undefined) {
+              parts.push(`page[number]=${encodeURIComponent(pageNum)}`);
+            } else if (value.number !== undefined) {
+              parts.push(`page[number]=${encodeURIComponent(value.number)}`);
+            }
+          } else if (key === 'filter' && typeof value === 'object') {
+            // Handle filter object
+            for (const [filterKey, filterValue] of Object.entries(value)) {
+              parts.push(`filter[${filterKey}]=${encodeURIComponent(filterValue)}`);
+            }
+          } else if (key === 'fields' && typeof value === 'object') {
+            // Handle fields object
+            for (const [fieldKey, fieldValue] of Object.entries(value)) {
+              parts.push(`fields[${fieldKey}]=${encodeURIComponent(fieldValue)}`);
+            }
+          } else {
+            // Other params
+            parts.push(`${key}=${encodeURIComponent(value)}`);
+          }
+        }
+        
+        return parts.join('&');
+      };
 
-      // Self link
-      links.self = `${baseUrl}?${queryParams}`;
+      // Self link - preserve current state
+      links.self = `${baseUrl}?${buildQueryString()}`;
 
       if (meta.totalPages > 1) {
         const currentPage = meta.pageNumber;
 
         // First page
-        queryParams.set('page[number]', '1');
-        links.first = `${baseUrl}?${queryParams}`;
+        links.first = `${baseUrl}?${buildQueryString(1)}`;
 
         // Last page
-        queryParams.set('page[number]', String(meta.totalPages));
-        links.last = `${baseUrl}?${queryParams}`;
+        links.last = `${baseUrl}?${buildQueryString(meta.totalPages)}`;
 
         // Previous page
         if (currentPage > 1) {
-          queryParams.set('page[number]', String(currentPage - 1));
-          links.prev = `${baseUrl}?${queryParams}`;
+          links.prev = `${baseUrl}?${buildQueryString(currentPage - 1)}`;
         }
 
         // Next page
         if (currentPage < meta.totalPages) {
-          queryParams.set('page[number]', String(currentPage + 1));
-          links.next = `${baseUrl}?${queryParams}`;
+          links.next = `${baseUrl}?${buildQueryString(currentPage + 1)}`;
         }
       }
 
@@ -293,6 +364,11 @@ export const HTTPPlugin = {
     // GET collection
     router.get(`${routePrefix}/:type`, async (req, res) => {
       try {
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
         const params = parseQueryParams(req);
         const user = getUserFromRequest(req);
         const result = await api.query(params, {
@@ -316,6 +392,11 @@ export const HTTPPlugin = {
     // GET single resource
     router.get(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
         const params = parseQueryParams(req);
         const user = getUserFromRequest(req);
         const result = await api.get(req.params.id, {
@@ -323,6 +404,7 @@ export const HTTPPlugin = {
           user,
           isHttp: true,
           view: params.view,
+          include: params.include,
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -340,7 +422,12 @@ export const HTTPPlugin = {
     // POST new resource
     router.post(`${routePrefix}/:type`, async (req, res) => {
       try {
-        const data = parseJsonApiBody(req.body);
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
+        const data = parseJsonApiBody(req.body, false); // Don't include id for POST
         const user = getUserFromRequest(req);
         const result = await api.insert(data, {
           type: req.params.type,
@@ -361,6 +448,11 @@ export const HTTPPlugin = {
     // PUT full replacement
     router.put(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
         const data = parseJsonApiBody(req.body);
         const user = getUserFromRequest(req);
         const result = await api.update(req.params.id, data, {
@@ -385,6 +477,11 @@ export const HTTPPlugin = {
     // PATCH partial update
     router.patch(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
         const data = parseJsonApiBody(req.body);
         const user = getUserFromRequest(req);
         const result = await api.update(req.params.id, data, {
@@ -408,6 +505,11 @@ export const HTTPPlugin = {
     // DELETE resource
     router.delete(`${routePrefix}/:type/:id`, async (req, res) => {
       try {
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
         const user = getUserFromRequest(req);
         await api.delete(req.params.id, {
           type: req.params.type,
@@ -423,11 +525,51 @@ export const HTTPPlugin = {
       }
     });
 
-    // OPTIONS for CORS
+    // CORS middleware
+    if (options.cors !== false) {
+      router.use((req, res, next) => {
+        // Set CORS headers
+        const origin = req.headers.origin || '*';
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        
+        // Handle preflight
+        if (req.method === 'OPTIONS') {
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+          res.header('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+          res.header('Access-Control-Max-Age', '86400'); // 24 hours
+          return res.status(204).end();
+        }
+        
+        next();
+      });
+    }
+    
+    // OPTIONS for CORS (fallback if middleware disabled)
     router.options('*', (req, res) => {
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      if (options.cors === false) {
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      }
       res.status(204).end();
+    });
+    
+    // Error handler for JSON parsing errors (must be after all routes)
+    router.use((err, req, res, next) => {
+      // Handle body-parser errors
+      if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        const error = new BadRequestError(
+          'Invalid JSON in request body',
+          'INVALID_JSON'
+        ).withContext({ 
+          detail: err.message,
+          position: err.body ? err.body.substring(0, 50) + '...' : undefined
+        });
+        return res.status(400).json(formatErrors(error));
+      }
+      
+      // Pass other errors to next handler
+      next(err);
     });
 
     // Mount router on Express app if provided

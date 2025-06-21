@@ -156,6 +156,13 @@ api.use(ValidationPlugin, {
 });
 ```
 
+Features:
+- Schema-based validation for all field types
+- Custom validation functions
+- Foreign key reference validation (ensures referenced records exist)
+- Automatic error formatting to JSON:API specification
+- Support for partial updates vs full record validation
+
 #### TimestampsPlugin
 
 Automatically manages created/updated timestamps.
