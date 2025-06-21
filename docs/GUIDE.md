@@ -74,6 +74,15 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Integration** - Works with all plugins
 - **Tips & Best Practices** - Shell scripting and automation
 
+### [10. TypeScript Support](./GUIDE_10_TypeScript.md)
+- **Why TypeScript** - Benefits for API development
+- **Getting Started** - Setup and configuration
+- **Type Inference** - Automatic types from schemas
+- **Type-Safe Resources** - Compile-time guarantees
+- **Client SDK** - Type-safe API consumption
+- **Migration Guide** - Converting existing projects
+- **Advanced Patterns** - Decorators and generics
+
 ## 🏢 Enterprise Features
 
 For advanced enterprise patterns and architectures, see the [Enterprise Guide](./enterprise/ENTERPRISE_GUIDE.md):

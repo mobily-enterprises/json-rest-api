@@ -150,8 +150,8 @@ Validates data against schemas. **Always included automatically!**
 api.use(ValidationPlugin, {
   // Custom error messages
   messages: {
-    required: 'Field {{field}} is required',
-    min: 'Field {{field}} must be at least {{min}}'
+    required: 'Field {field} is required',
+    min: 'Field {field} must be at least {min}'
   }
 });
 ```

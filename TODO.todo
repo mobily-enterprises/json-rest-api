@@ -1,15 +1,16 @@
 * Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
 
-
+* IMPORTANT: Discuss 1:n fetches, how to do them (join? loading?), and how to do them with JSON:API
+* Have non-db fields in the schema (they won't be saved)
 * Figure out why IDs are coming back as strings in the Memory plugin, maybe it's normal
 * Add way to download the schemas (including joins of each table) to the client
 * ADD non-DB APIs
 
-* Have non-db fields in the schema (they won't be saved)
-* IMPORTANT: Discuss 1:n fetches, how to do them (join? loading?), and how to do them with JSON:API
 
 
 * check that JSON:API is fully enforced
+
+
 
 
  Critical Missing Features:
@@ -18,7 +19,7 @@
   DINE 3. 400 errors for unknown parameters
 
   Nice-to-Have Missing Features:
-  1. Nested includes
+  DONE 1. Nested includes
   DONE 2. Advanced filtering operators
   DONE 3. Self/related links
   DONE 4. Sorting on relationships
@@ -38,10 +39,10 @@
     DONE - Hexagonal architecture
   
     3. Large Enterprise Teams
-    - Strict architectural enforcement
-    - Complex dependency graphs
-    - Multiple bounded contexts
-    - Need for consultants/training
+    DONE - Strict architectural enforcement
+    DONE - Complex dependency graphs
+    DONE - Multiple bounded contexts
+    DONE - Need for consultants/training
   4. Type Safety Requirements
     - Compile-time guarantees
     - Complex type transformations

@@ -17,6 +17,7 @@ include:
   - GUIDE.md
   - API.md
   - ONBOARDING.md
+  - JSON-API-COMPLIANCE.md
   - GUIDE_1_Getting_Started.md
   - GUIDE_2_Core_Features.md
   - GUIDE_3_Plugins_and_Architecture.md
@@ -24,10 +25,13 @@ include:
   - GUIDE_5_Production_and_Deployment.md
   - GUIDE_6_Examples.md
   - GUIDE_7_Security.md
+  - GUIDE_8_API_Gateway.md
+  - GUIDE_9_CLI_Interface.md
+  - enterprise/
+  - examples/
 
 exclude:
   - _old/
-  - examples/
   - vendor/
 
 highlighter: rouge

@@ -1023,7 +1023,7 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
         
         // Query with explicit join
         const withJoin = await api.resources.books.query({
-          joins: ['authorId']
+          include: 'authorId'
         });
         // With JSON:API format, joined data is in relationships/included
         assert.equal(typeof withJoin.data[0].attributes.authorId, 'string');
