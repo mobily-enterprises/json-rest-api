@@ -188,6 +188,9 @@ import { HTTPPlugin } from 'json-rest-api';
 api.use(HTTPPlugin, {
   basePath: '/api',
   
+  // Strict JSON:API compliance mode (new!)
+  strictJsonApi: true,  // Enforce JSON:API spec compliance
+  
   // Per-resource options
   typeOptions: {
     users: {
@@ -214,64 +217,83 @@ Endpoints created:
 - `PATCH /api/{type}/{id}` - Update resource
 - `DELETE /api/{type}/{id}` - Delete resource
 
-#### JSONAPIStrictPlugin
+**Strict JSON:API Mode:**
 
-Transform API responses to be fully compliant with the JSON:API specification. This plugin converts the simplified default format into strict JSON:API format with proper relationship objects, compound documents, and standardized meta information.
+When `strictJsonApi: true` is enabled:
+
+1. **Content-Type Enforcement**: Only accepts `application/vnd.api+json` for POST/PUT/PATCH requests
+   - Returns 415 Unsupported Media Type for other content types
+   - GET and DELETE requests are not affected
+
+2. **Query Parameter Validation**: Only accepts standard JSON:API query parameters
+   - ✅ Allowed: `include`, `fields`, `sort`, `page`, `filter`, `view`
+   - ❌ Rejected: Unknown parameters, legacy parameters (`pageSize`, `joins`)
+   - Returns 400 Bad Request with details about unknown parameters
+
+3. **No Legacy Filter Support**: Direct filter parameters are rejected
+   - ❌ `GET /api/users?name=John` (legacy)
+   - ✅ `GET /api/users?filter[name]=John` (JSON:API)
+
+Example with strict mode:
+```javascript
+// Strict mode configuration
+api.use(HTTPPlugin, {
+  strictJsonApi: true  // Enable strict compliance
+});
+
+// Valid requests:
+POST /api/users
+Content-Type: application/vnd.api+json
+
+GET /api/users?filter[name]=John&page[size]=10
+
+// Invalid requests (return errors):
+POST /api/users
+Content-Type: application/json  // 415 error
+
+GET /api/users?name=John&unknownParam=value  // 400 error
+```
+
+#### SimplifiedRecordsPlugin
+
+Transform JSON:API compliant responses into a simplified, more convenient format. The library is JSON:API compliant by default, and this plugin provides a simpler format that's easier to work with.
 
 ```javascript
-import { JSONAPIStrictPlugin } from 'json-rest-api';
+import { SimplifiedRecordsPlugin } from 'json-rest-api';
 
-// Enable strict JSON:API compliance
-api.use(JSONAPIStrictPlugin);
+// Enable simplified format
+api.use(SimplifiedRecordsPlugin, {
+  flattenResponse: false,   // Keep data wrapper
+  includeType: true,        // Keep type field
+  embedRelationships: true  // Embed related objects
+});
 ```
 
 **What This Plugin Does:**
 
-1. **Moves Relationships Out of Attributes**
-   - Foreign key fields (like `authorId`) are removed from attributes
-   - Relationships are placed in a separate `relationships` object
-   - Each relationship includes `data` with type and id
+1. **Flattens Attributes**
+   - Moves attributes directly into the resource object
+   - No need to access `data.attributes.field`
+   - Just use `data.field` directly
 
-2. **Creates Compound Documents**
-   - Related resources are moved to an `included` array
-   - Prevents duplicate resources in the included array
-   - Maintains resource linkage through type/id references
+2. **Embeds Relationships**
+   - Places related objects directly in the response
+   - No need to resolve relationships from `included` array
+   - Related data is right where you expect it
 
-3. **Adds Relationship Links**
-   - Each relationship gets `self` and `related` links
-   - Self link: `/api/posts/1/relationships/author`
-   - Related link: `/api/posts/1/author`
+3. **Optional Response Flattening**
+   - Remove the `data` wrapper for single resources
+   - Collections can return as `{ records: [...], meta: {...} }`
+   - Cleaner, more intuitive responses
 
-4. **Standardizes Meta Information**
-   - Ensures consistent meta format in collections
-   - Includes `totalCount`, `currentPage`, `pageSize`
-
-5. **Formats Errors to JSON:API Spec**
-   - Errors returned as array with standard fields
-   - Each error has status, code, title, and detail
+4. **Type Field Control**
+   - Optionally exclude the `type` field
+   - Useful when working with single-type endpoints
 
 **Example Transformation:**
 
 ```javascript
-// Without JSONAPIStrictPlugin (default simplified format):
-{
-  "data": {
-    "id": "1",
-    "type": "posts",
-    "attributes": {
-      "title": "My Blog Post",
-      "content": "Post content here",
-      "authorId": "42",              // Foreign key in attributes
-      "author": {                    // Joined data in attributes
-        "id": 42,
-        "name": "John Doe",
-        "email": "john@example.com"
-      }
-    }
-  }
-}
-
-// With JSONAPIStrictPlugin (strict JSON:API format):
+// Default JSON:API format:
 {
   "data": {
     "id": "1",
@@ -279,15 +301,10 @@ api.use(JSONAPIStrictPlugin);
     "attributes": {
       "title": "My Blog Post",
       "content": "Post content here"
-      // No foreign keys or joined data here
     },
     "relationships": {
       "author": {
-        "data": { "type": "users", "id": "42" },
-        "links": {
-          "self": "/api/posts/1/relationships/author",
-          "related": "/api/posts/1/author"
-        }
+        "data": { "type": "users", "id": "42" }
       }
     }
   },
@@ -299,6 +316,23 @@ api.use(JSONAPIStrictPlugin);
       "email": "john@example.com"
     }
   }]
+}
+
+// With SimplifiedRecordsPlugin:
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "title": "My Blog Post",
+    "content": "Post content here",
+    "authorId": "42",
+    "author": {
+      "id": "42",
+      "type": "users",
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }
 }
 ```
 

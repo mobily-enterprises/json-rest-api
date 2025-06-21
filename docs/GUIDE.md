@@ -56,12 +56,45 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Additional Security** - Rate limiting, CSP, and more
 - **Security Checklist** - Development to production
 
+### [8. Microservices Architecture](./GUIDE_8_Microservices.md)
+- **When to Use Microservices** - Is it right for your project?
+- **Basic Setup** - Get started with microservices
+- **Transport Layers** - TCP, Redis, NATS, RabbitMQ, Kafka, gRPC
+- **Message Patterns** - Request-response and pub-sub
+- **Service Discovery** - Finding and connecting services
+- **Circuit Breakers & Health** - Resilience patterns
+- **Real-World Examples** - E-commerce, chat, analytics
+- **Testing & Deployment** - Best practices
+
+### [9. CQRS Pattern](./GUIDE_9_CQRS.md)
+- **When to Use CQRS** - Understanding the trade-offs
+- **Basic Implementation** - Commands and queries
+- **Event Sourcing** - Store all changes as events
+- **Projections** - Build optimized read models
+- **Sagas** - Orchestrate complex workflows
+- **Separate Databases** - Different stores for reads/writes
+- **Real-World Examples** - E-commerce, banking, analytics
+- **Migration Strategy** - Adopting CQRS incrementally
+
+### [10. API Gateway](./GUIDE_10_API_Gateway.md)
+- **When to Use API Gateway** - API orchestration patterns
+- **Basic Setup** - Transform into an API gateway
+- **External API Integration** - Call any REST API
+- **Saga Orchestration** - Coordinate distributed transactions
+- **Circuit Breakers** - Resilience and fault tolerance
+- **Request Transformations** - Adapt any API format
+- **Real-World Examples** - Checkout flows, aggregation
+- **Performance & Monitoring** - Health checks and metrics
+
 ## 🚀 Quick Links
 
 - **New to JSON REST API?** Start with [Getting Started](./GUIDE_1_Getting_Started.md)
 - **Need a quick reference?** Check [API.md](./API.md)
 - **Building a plugin?** See [Creating Custom Plugins](./GUIDE_3_Plugins_and_Architecture.md#creating-custom-plugins)
 - **Deployment ready?** Check [Production, Deployment & Testing](./GUIDE_5_Production_and_Deployment.md)
+- **Building microservices?** See [Microservices Architecture](./GUIDE_8_Microservices.md)
+- **Need CQRS?** Check [CQRS Pattern](./GUIDE_9_CQRS.md)
+- **API orchestration?** See [API Gateway](./GUIDE_10_API_Gateway.md)
 
 ## 📖 Other Documentation
 

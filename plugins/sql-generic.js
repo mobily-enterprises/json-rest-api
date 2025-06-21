@@ -22,6 +22,34 @@ function parseJsonFields(row, schema) {
   return result;
 }
 
+// Helper to parse sort parameters
+function parseSort(sort) {
+  if (!sort) return [];
+  
+  // Handle array format (already parsed)
+  if (Array.isArray(sort)) {
+    return sort.map(s => {
+      if (typeof s === 'string') {
+        return { field: s, direction: 'ASC' };
+      }
+      return { field: s.field, direction: s.direction || 'ASC' };
+    });
+  }
+  
+  // Handle string format
+  if (typeof sort === 'string') {
+    return sort.split(',').map(field => {
+      field = field.trim();
+      if (field.startsWith('-')) {
+        return { field: field.slice(1), direction: 'DESC' };
+      }
+      return { field, direction: 'ASC' };
+    });
+  }
+  
+  return [];
+}
+
 /**
  * Generic SQL Plugin
  * 
@@ -233,21 +261,55 @@ export const SQLPlugin = {
         const sorts = parseSort(context.params.sort);
         
         // Get the schema to validate sort fields
-        const schema = api.getSchema?.(context.options.type);
+        const schema = api.schemas?.get(context.options.type);
         const allowedFields = schema ? Object.keys(schema.structure) : [];
         
         for (const { field, direction } of sorts) {
-          // Validate field against schema if available
-          if (schema && !allowedFields.includes(field) && !context.options.searchableFields?.[field]) {
+          // Check if this is a mapped searchable field
+          const searchableFields = context.options.searchableFields || {};
+          const mappedField = searchableFields[field];
+          
+          if (mappedField && mappedField !== '*') {
+            // Handle mapped relationship fields (e.g., 'author.name' -> 'authorId.name')
+            if (mappedField.includes('.')) {
+              const [joinField, targetField] = mappedField.split('.');
+              const fieldDef = schema.structure[joinField];
+              
+              if (fieldDef?.refs) {
+                // Ensure the join is added
+                const joinTable = fieldDef.refs.resource;
+                const joinAlias = `__${joinField}_join`;
+                
+                // Check if join already exists
+                if (!context.query.parts.joins.some(j => j.table && j.table.includes(joinAlias))) {
+                  const idProperty = api.options.idProperty || 'id';
+                  
+                  // Don't double-escape identifiers - just use the raw names
+                  context.query.leftJoin(
+                    `${joinTable} AS ${joinAlias}`,
+                    `${joinAlias}.${idProperty} = ${table}.${joinField}`
+                  );
+                }
+                
+                // Sort by the joined field
+                context.query.orderBy(`${joinAlias}.${targetField}`, direction);
+              } else {
+                throw new BadRequestError(`Invalid sort field mapping: ${field}`);
+              }
+            } else {
+              // Simple mapped field
+              const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
+              const escapedField = await api.execute('db.formatIdentifier', { identifier: mappedField });
+              context.query.orderBy(`${escapedTable}.${escapedField}`, direction);
+            }
+          } else if (allowedFields.includes(field)) {
+            // Regular field
+            const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
+            const escapedField = await api.execute('db.formatIdentifier', { identifier: field });
+            context.query.orderBy(`${escapedTable}.${escapedField}`, direction);
+          } else {
             throw new BadRequestError(`Invalid sort field: ${field}`);
           }
-          
-          // Get proper identifier escaping from adapter
-          const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
-          const escapedField = await api.execute('db.formatIdentifier', { identifier: field });
-          
-          // Use escaped identifiers
-          context.query.orderBy(`${escapedTable}.${escapedField}`, direction);
         }
       }
       
@@ -910,7 +972,11 @@ const OPERATORS = {
   'notlike': 'NOT LIKE',
   'startsWith': 'LIKE',
   'endsWith': 'LIKE',
-  'contains': 'LIKE'
+  'contains': 'LIKE',
+  'icontains': 'LIKE',  // Case-insensitive contains
+  'between': 'BETWEEN',
+  'null': 'IS',
+  'notnull': 'IS NOT'
 };
 
 async function applyAdvancedFilterOperator(query, table, field, operator, value, schema, api) {
@@ -931,6 +997,17 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
     processedValue = `${value}%`;
   } else if (operator === 'endsWith') {
     processedValue = `%${value}`;
+  } else if (operator === 'icontains') {
+    processedValue = `%${value}%`;
+  } else if (operator === 'between') {
+    // Validate between operator has array with 2 values
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new ValidationError()
+        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
+    }
+  } else if (operator === 'null' || operator === 'notnull') {
+    // For null checks, we ignore the value and use NULL
+    processedValue = null;
   }
   
   // Build the SQL condition
@@ -949,7 +1026,7 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
       }
       const placeholders = value.map(() => '?').join(', ');
       query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} (${placeholders})`, ...value);
-    } else if (operator === 'ilike') {
+    } else if (operator === 'ilike' || operator === 'icontains') {
       // Case-insensitive LIKE
       const features = await api.execute('db.features', {});
       if (features.ilike) {
@@ -957,6 +1034,15 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
       } else {
         query.where(`LOWER(${escapedAlias}.${escapedTarget}) LIKE LOWER(?)`, processedValue);
       }
+    } else if (operator === 'between') {
+      // BETWEEN requires two values
+      query.where(`${escapedAlias}.${escapedTarget} BETWEEN ? AND ?`, value[0], value[1]);
+    } else if (operator === 'null') {
+      // IS NULL
+      query.where(`${escapedAlias}.${escapedTarget} IS NULL`);
+    } else if (operator === 'notnull') {
+      // IS NOT NULL
+      query.where(`${escapedAlias}.${escapedTarget} IS NOT NULL`);
     } else {
       query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} ?`, processedValue);
     }
@@ -1014,7 +1100,7 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
         const placeholders = value.map(() => '?').join(', ');
         query.where(`${escapedTable}.${escapedField} ${OPERATORS[operator]} (${placeholders})`, ...value);
       }
-    } else if (operator === 'ilike') {
+    } else if (operator === 'ilike' || operator === 'icontains') {
       // Case-insensitive LIKE
       const features = await api.execute('db.features', {});
       if (features.ilike) {
@@ -1022,6 +1108,15 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
       } else {
         query.where(`LOWER(${escapedTable}.${escapedField}) LIKE LOWER(?)`, processedValue);
       }
+    } else if (operator === 'between') {
+      // BETWEEN requires two values
+      query.where(`${escapedTable}.${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
+    } else if (operator === 'null') {
+      // IS NULL
+      query.where(`${escapedTable}.${escapedField} IS NULL`);
+    } else if (operator === 'notnull') {
+      // IS NOT NULL
+      query.where(`${escapedTable}.${escapedField} IS NOT NULL`);
     } else {
       query.where(`${escapedTable}.${escapedField} ${OPERATORS[operator]} ?`, processedValue);
     }
@@ -1046,6 +1141,17 @@ async function applyCountFilterOperator(countQuery, table, field, operator, valu
     processedValue = `${value}%`;
   } else if (operator === 'endsWith') {
     processedValue = `%${value}`;
+  } else if (operator === 'icontains') {
+    processedValue = `%${value}%`;
+  } else if (operator === 'between') {
+    // Validate between operator has array with 2 values
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new ValidationError()
+        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
+    }
+  } else if (operator === 'null' || operator === 'notnull') {
+    // For null checks, we ignore the value and use NULL
+    processedValue = null;
   }
   
   // Regular field (no joined fields in count query)
@@ -1098,7 +1204,7 @@ async function applyCountFilterOperator(countQuery, table, field, operator, valu
       const placeholders = value.map(() => '?').join(', ');
       countQuery.where(`${table}.${field} ${OPERATORS[operator]} (${placeholders})`, ...value);
     }
-  } else if (operator === 'ilike') {
+  } else if (operator === 'ilike' || operator === 'icontains') {
     // Case-insensitive LIKE
     const features = await api.execute('db.features', {});
     if (features.ilike) {
@@ -1106,6 +1212,15 @@ async function applyCountFilterOperator(countQuery, table, field, operator, valu
     } else {
       countQuery.where(`LOWER(${table}.${field}) LIKE LOWER(?)`, processedValue);
     }
+  } else if (operator === 'between') {
+    // BETWEEN requires two values
+    countQuery.where(`${table}.${field} BETWEEN ? AND ?`, value[0], value[1]);
+  } else if (operator === 'null') {
+    // IS NULL
+    countQuery.where(`${table}.${field} IS NULL`);
+  } else if (operator === 'notnull') {
+    // IS NOT NULL
+    countQuery.where(`${table}.${field} IS NOT NULL`);
   } else {
     countQuery.where(`${table}.${field} ${OPERATORS[operator]} ?`, processedValue);
   }
@@ -1129,6 +1244,17 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
     processedValue = `${value}%`;
   } else if (operator === 'endsWith') {
     processedValue = `%${value}`;
+  } else if (operator === 'icontains') {
+    processedValue = `%${value}%`;
+  } else if (operator === 'between') {
+    // Validate between operator has array with 2 values
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new ValidationError()
+        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
+    }
+  } else if (operator === 'null' || operator === 'notnull') {
+    // For null checks, we ignore the value and use NULL
+    processedValue = null;
   }
   
   // Build the SQL condition
@@ -1145,6 +1271,23 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
       const placeholders = value.map(() => '?').join(', ');
       condition = `${escapedField} ${OPERATORS[operator]} (${placeholders})`;
       query.where(condition, ...value);
+    } else if (operator === 'ilike' || operator === 'icontains') {
+      // Case-insensitive LIKE for joined fields
+      const features = await api.execute('db.features', {});
+      if (features.ilike) {
+        query.where(`${escapedField} ILIKE ?`, processedValue);
+      } else {
+        query.where(`LOWER(${escapedField}) LIKE LOWER(?)`, processedValue);
+      }
+    } else if (operator === 'between') {
+      // BETWEEN requires two values
+      query.where(`${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
+    } else if (operator === 'null') {
+      // IS NULL
+      query.where(`${escapedField} IS NULL`);
+    } else if (operator === 'notnull') {
+      // IS NOT NULL
+      query.where(`${escapedField} IS NOT NULL`);
     } else {
       condition = `${escapedField} ${OPERATORS[operator]} ?`;
       query.where(condition, processedValue);
@@ -1203,7 +1346,7 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
         condition = `${escapedField} ${OPERATORS[operator]} (${placeholders})`;
         query.where(condition, ...value);
       }
-    } else if (operator === 'ilike') {
+    } else if (operator === 'ilike' || operator === 'icontains') {
       // Case-insensitive LIKE - use LOWER for databases that don't support ILIKE
       const features = await api.execute('db.features', {});
       if (features.ilike) {
@@ -1211,6 +1354,15 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
       } else {
         query.where(`LOWER(${escapedField}) LIKE LOWER(?)`, processedValue);
       }
+    } else if (operator === 'between') {
+      // BETWEEN requires two values
+      query.where(`${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
+    } else if (operator === 'null') {
+      // IS NULL
+      query.where(`${escapedField} IS NULL`);
+    } else if (operator === 'notnull') {
+      // IS NOT NULL
+      query.where(`${escapedField} IS NOT NULL`);
     } else {
       condition = `${escapedField} ${OPERATORS[operator]} ?`;
       query.where(condition, processedValue);
@@ -1218,41 +1370,6 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
   }
 }
 
-function parseSort(sort) {
-  if (!sort) return [];
-  
-  const sorts = [];
-  
-  if (Array.isArray(sort)) {
-    // Handle array format
-    for (const item of sort) {
-      if (typeof item === 'string') {
-        const desc = item.startsWith('-');
-        sorts.push({
-          field: desc ? item.slice(1) : item,
-          direction: desc ? 'DESC' : 'ASC'
-        });
-      } else if (item.field) {
-        sorts.push({
-          field: item.field,
-          direction: item.direction || 'ASC'
-        });
-      }
-    }
-  } else if (typeof sort === 'string') {
-    // Handle comma-separated format
-    const fields = sort.split(',');
-    for (const field of fields) {
-      const desc = field.startsWith('-');
-      sorts.push({
-        field: desc ? field.slice(1) : field.trim(),
-        direction: desc ? 'DESC' : 'ASC'
-      });
-    }
-  }
-  
-  return sorts;
-}
 
 function extractFieldFromError(message) {
   // Try to extract field name from various error formats

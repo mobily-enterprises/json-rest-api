@@ -318,4 +318,94 @@ describe('Query Operators', () => {
       );
     });
   });
+  
+  describe('Null/NotNull Operators', () => {
+    test.beforeEach(async () => {
+      // Add some products with null values
+      await api.insert({ name: 'Orphan Product', price: 100, stock: 10, category: null, active: true }, { type: 'products' });
+      await api.insert({ name: 'No Tags Product', price: 50, stock: 5, tags: null, active: true }, { type: 'products' });
+    });
+    
+    test('null operator', async () => {
+      const result = await api.query({
+        filter: { category: { null: true } }
+      }, { type: 'products' });
+      
+      // In AlaSQL, both null and undefined match IS NULL
+      // Orphan Product has category: null
+      // No Tags Product has category: undefined (not specified)
+      assert.equal(result.data.length, 2);
+      
+      const names = result.data.map(d => d.attributes.name).sort();
+      assert.deepEqual(names, ['No Tags Product', 'Orphan Product']);
+      
+      // Verify one is null and one is undefined
+      const orphan = result.data.find(d => d.attributes.name === 'Orphan Product');
+      assert.equal(orphan.attributes.category, null);
+      
+      const noTags = result.data.find(d => d.attributes.name === 'No Tags Product');
+      assert.equal(noTags.attributes.category, undefined);
+    });
+    
+    test('notnull operator', async () => {
+      const result = await api.query({
+        filter: { category: { notnull: true } }
+      }, { type: 'products' });
+      
+      assert.equal(result.data.length, 5); // Original 5 products have categories
+      result.data.forEach(item => {
+        assert.notEqual(item.attributes.category, null);
+      });
+    });
+  });
+  
+  describe('Between Operator', () => {
+    test('between operator with numbers', async () => {
+      const result = await api.query({
+        filter: { price: { between: [200, 1000] } }
+      }, { type: 'products' });
+      
+      assert.equal(result.data.length, 3); // AirPods Pro (249), Galaxy S24 (899), iPhone 15 (999)
+      result.data.forEach(item => {
+        assert(item.attributes.price >= 200 && item.attributes.price <= 1000);
+      });
+    });
+    
+    test('between operator validates array input', async () => {
+      await assert.rejects(
+        api.query({
+          filter: { price: { between: 500 } }
+        }, { type: 'products' }),
+        (err) => {
+          assert.equal(err.name, 'ValidationError');
+          assert(err.validationErrors[0].message.includes('requires an array with exactly 2 values'));
+          return true;
+        }
+      );
+    });
+  });
+  
+  describe('Case-Insensitive Contains (icontains)', () => {
+    test('icontains operator', async () => {
+      // First add a product with mixed case
+      await api.insert({ name: 'MACBOOK AIR', price: 1299, category: 'Computers', active: true }, { type: 'products' });
+      
+      const result = await api.query({
+        filter: { name: { icontains: 'macbook' } }
+      }, { type: 'products' });
+      
+      assert.equal(result.data.length, 2); // MacBook Pro and MACBOOK AIR
+      const names = result.data.map(d => d.attributes.name).sort();
+      assert.deepEqual(names, ['MACBOOK AIR', 'MacBook Pro']);
+    });
+    
+    test('icontains with tags', async () => {
+      const result = await api.query({
+        filter: { tags: { icontains: 'APPLE' } }
+      }, { type: 'products' });
+      
+      // Should find all Apple products even though tags are lowercase
+      assert.equal(result.data.length, 3);
+    });
+  });
 });

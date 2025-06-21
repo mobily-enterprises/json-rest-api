@@ -835,6 +835,96 @@ Security headers automatically added:
    - Timeout detection for potentially malicious patterns
    - Pre-compiled patterns for better performance
 
+## JSON:API Compliance and Security
+
+The HTTPPlugin provides security features through JSON:API compliance:
+
+### Strict Mode Security
+
+Enable strict JSON:API mode to enforce security best practices:
+
+```javascript
+api.use(HTTPPlugin, {
+  strictJsonApi: true,  // Enable strict mode
+  
+  // Additional security options
+  validateContentType: true,
+  errorSanitization: true
+});
+```
+
+**Security Benefits:**
+
+1. **Content-Type Validation**
+   - Prevents CSRF attacks by enforcing `application/vnd.api+json`
+   - Rejects requests with incorrect Content-Type (415 error)
+   
+2. **Parameter Whitelisting**
+   - Only allows known JSON:API parameters
+   - Prevents parameter pollution attacks
+   - Returns 400 error for unknown parameters
+   
+3. **Structured Error Responses**
+   - Never exposes internal error details in production
+   - Consistent error format prevents information leakage
+   - Source pointers help debugging without exposing internals
+
+### Enhanced Error Security
+
+Errors are automatically sanitized in production:
+
+```javascript
+// Development shows full details:
+{
+  "errors": [{
+    "status": "500",
+    "code": "DATABASE_ERROR",
+    "detail": "ER_NO_SUCH_TABLE: Table 'mydb.users' doesn't exist",
+    "meta": {
+      "stack": ["at Connection.query...", "..."],
+      "sql": "SELECT * FROM users WHERE id = ?"
+    }
+  }]
+}
+
+// Production shows safe message:
+{
+  "errors": [{
+    "status": "500",
+    "code": "INTERNAL_ERROR",
+    "detail": "An error occurred processing your request",
+    "meta": {
+      "timestamp": "2024-01-15T10:30:00Z"
+    }
+  }]
+}
+```
+
+### Query Security with Advanced Operators
+
+The new filter operators include built-in protections:
+
+1. **SQL Injection Prevention**
+   - All operators use parameterized queries
+   - Values are never interpolated into SQL
+   
+2. **Type Validation**
+   - Operators validate input types
+   - Array operators check for valid arrays
+   - Range operators verify two values
+   
+3. **Safe Pattern Matching**
+   - LIKE patterns are escaped automatically
+   - Prevents wildcard injection attacks
+
+Example of safe filtering:
+```javascript
+// These are all safe - values are parameterized:
+GET /api/users?filter[email][ilike]=%admin%
+GET /api/posts?filter[tags][contains]=javascript
+GET /api/orders?filter[total][between]=100,500
+```
+
 ## Security Checklist
 
 ### Development

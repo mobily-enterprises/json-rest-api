@@ -282,14 +282,29 @@ await runHttpTests('Query Parameters and Filtering', async ({ baseUrl }, storage
   
   assertStatus(includeResponse, 200)
   
-  // Check that author data is included
+  // Check that author data is included in JSON:API format
+  if (!includeResponse.data.included || !Array.isArray(includeResponse.data.included)) {
+    throw new Error('No included section in response')
+  }
+  
+  // Check each post has author relationship
   for (const post of includeResponse.data.data) {
-    if (!post.attributes.author || typeof post.attributes.author !== 'object') {
-      throw new Error('Author data not included in post')
+    if (!post.relationships || !post.relationships.author) {
+      throw new Error('Author relationship missing in post')
     }
     
-    if (!post.attributes.author.id || !post.attributes.author.name) {
-      throw new Error('Author data incomplete')
+    // Find the author in included section
+    const authorId = post.relationships.author.data.id
+    const author = includeResponse.data.included.find(
+      item => item.type === 'users' && item.id === authorId
+    )
+    
+    if (!author) {
+      throw new Error(`Author ${authorId} not found in included section`)
+    }
+    
+    if (!author.attributes || !author.attributes.name) {
+      throw new Error('Author data incomplete in included section')
     }
   }
   

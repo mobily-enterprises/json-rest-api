@@ -980,9 +980,17 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
     it('should support eager joins', async () => {
       const books = await api.resources.books.query({});
       
-      // Should have author data due to eager join
-      assert(books.data[0].attributes.author);
-      assert.equal(books.data[0].attributes.author.name, 'J.K. Rowling');
+      // Should have author data in relationships and included
+      assert(books.data[0].relationships.author);
+      assert.equal(books.data[0].relationships.author.data.type, 'authors');
+      assert.equal(books.data[0].relationships.author.data.id, '1');
+      
+      // Check included array
+      assert(books.included);
+      assert(books.included.length > 0);
+      const author = books.included.find(r => r.type === 'authors' && r.id === '1');
+      assert(author);
+      assert.equal(author.attributes.name, 'J.K. Rowling');
     });
     
     it('should support explicit joins', async () => {
@@ -1017,10 +1025,13 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
         const withJoin = await api.resources.books.query({
           joins: ['authorId']
         });
-        // With preserveId defaulting to true, joined data is in 'author' field
+        // With JSON:API format, joined data is in relationships/included
         assert.equal(typeof withJoin.data[0].attributes.authorId, 'string');
-        assert.equal(typeof withJoin.data[0].attributes.author, 'object');
-        assert.equal(withJoin.data[0].attributes.author.name, 'J.K. Rowling');
+        assert(withJoin.data[0].relationships.author);
+        assert(withJoin.included);
+        const joinedAuthor = withJoin.included.find(r => r.type === 'authors' && r.id === author1.data.id);
+        assert(joinedAuthor);
+        assert.equal(joinedAuthor.attributes.name, 'J.K. Rowling');
       } finally {
         // Always restore original eager setting
         api.schemas.get('books').structure.authorId.refs.join.eager = originalEager;
@@ -1039,8 +1050,12 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       
       // Should have both ID and joined data
       assert(book.attributes.authorId);
-      assert(book.attributes.author);
-      assert.equal(book.attributes.author.name, 'J.K. Rowling');
+      assert(book.relationships.author);
+      
+      // Find the author in the included array
+      const author = books.included.find(inc => inc.type === 'authors' && inc.id === book.relationships.author.data.id);
+      assert(author);
+      assert.equal(author.attributes.name, 'J.K. Rowling');
       
       // Reset for other tests
       delete api.schemas.get('books').structure.authorId.refs.join.preserveId;
@@ -1364,7 +1379,9 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       
       // Query with joins
       const projectWithOwner = await api.resources.projects.get(project.data.id);
-      assert(projectWithOwner.data.attributes.owner.username);
+      // Owner should be in relationships since we're JSON:API compliant
+      assert(projectWithOwner.data.relationships.owner);
+      assert(projectWithOwner.data.relationships.owner.data.id === user.data.id);
       
       // Complex query
       const allTasks = await api.resources.tasks.query({
@@ -1372,8 +1389,21 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       });
       
       assert.equal(allTasks.data.length, 3);
-      assert(allTasks.data[0].attributes.project.name);
-      assert(allTasks.data[0].attributes.assignee.username);
+      // With JSON:API compliance, relationships are in relationships section
+      assert(allTasks.data[0].relationships.project);
+      assert(allTasks.data[0].relationships.assignee);
+      
+      // Check that related data is in included array
+      const projectId = allTasks.data[0].relationships.project.data.id;
+      const assigneeId = allTasks.data[0].relationships.assignee.data.id;
+      
+      const includedProject = allTasks.included.find(inc => inc.type === 'projects' && inc.id === projectId);
+      const includedAssignee = allTasks.included.find(inc => inc.type === 'users' && inc.id === assigneeId);
+      
+      assert(includedProject);
+      assert(includedProject.attributes.name);
+      assert(includedAssignee);
+      assert(includedAssignee.attributes.username);
       
       await robustTeardown({ api });
     });

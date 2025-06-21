@@ -339,9 +339,25 @@ filter: {
 
 // Case-insensitive search (database dependent)
 filter: {
-  name: { ilike: 'john%' }   // Case-insensitive LIKE
+  name: { ilike: 'john%' },          // Case-insensitive LIKE
+  description: { icontains: 'SQL' },  // Case-insensitive contains
+  path: { notlike: '/admin/%' }      // NOT LIKE pattern
+}
+
+// Null checking
+filter: {
+  deletedAt: { null: true },         // IS NULL
+  category: { notnull: true }        // IS NOT NULL
+}
+
+// Range queries
+filter: {
+  age: { between: [18, 65] },        // BETWEEN 18 AND 65
+  price: { between: [10.00, 99.99] } // BETWEEN 10.00 AND 99.99
 }
 ```
+
+**Note on null operator**: In memory storage (AlaSQL), fields that were not provided during insert (undefined) will also match `{ null: true }`. This is a limitation of AlaSQL's NULL handling.
 
 #### Query String Format
 
@@ -366,6 +382,15 @@ GET /api/posts?filter[category][nin]=spam,trash
 GET /api/posts?filter[email][endsWith]=@example.com
 GET /api/posts?filter[name][startsWith]=John
 GET /api/posts?filter[title][contains]=javascript
+GET /api/posts?filter[bio][icontains]=developer
+
+# Null checking
+GET /api/posts?filter[deletedAt][null]=true
+GET /api/posts?filter[category][notnull]=true
+
+# Range queries
+GET /api/posts?filter[age][between]=18,65
+GET /api/posts?filter[price][between]=10.00,99.99
 ```
 
 #### Complete Operator Reference
@@ -383,9 +408,14 @@ GET /api/posts?filter[title][contains]=javascript
 | `nin` | Not in array | `{ role: { nin: ['admin', 'root'] } }` | `WHERE role NOT IN ('admin', 'root')` |
 | `like` | SQL LIKE | `{ name: { like: '%john%' } }` | `WHERE name LIKE '%john%'` |
 | `ilike` | Case-insensitive LIKE | `{ email: { ilike: '%@GMAIL.COM' } }` | `WHERE LOWER(email) LIKE LOWER('%@GMAIL.COM')` |
+| `notlike` | NOT LIKE | `{ path: { notlike: '/admin/%' } }` | `WHERE path NOT LIKE '/admin/%'` |
 | `contains` | Contains substring | `{ bio: { contains: 'developer' } }` | `WHERE bio LIKE '%developer%'` |
+| `icontains` | Case-insensitive contains | `{ bio: { icontains: 'DEVELOPER' } }` | `WHERE LOWER(bio) LIKE LOWER('%DEVELOPER%')` |
 | `startsWith` | Starts with | `{ name: { startsWith: 'Dr.' } }` | `WHERE name LIKE 'Dr.%'` |
 | `endsWith` | Ends with | `{ email: { endsWith: '@company.com' } }` | `WHERE email LIKE '%@company.com'` |
+| `null` | Is null | `{ deletedAt: { null: true } }` | `WHERE deletedAt IS NULL` |
+| `notnull` | Is not null | `{ category: { notnull: true } }` | `WHERE category IS NOT NULL` |
+| `between` | Between two values | `{ age: { between: [18, 65] } }` | `WHERE age BETWEEN 18 AND 65` |
 
 **Notes:**
 - The `ilike` operator uses `LOWER()` function for case-insensitive comparison in databases that don't support native `ILIKE`
@@ -408,7 +438,38 @@ sort: [
   { field: 'priority', direction: 'desc' },
   { field: 'createdAt', direction: 'asc' }
 ]
+
+// Sorting by relationship fields (requires searchableFields mapping)
+sort: 'author.name'        // Sort by author's name
+sort: '-category.title'    // Sort by category title descending
+
+// Multiple fields including relationships
+sort: ['category.title', '-author.name', 'createdAt']
 ```
+
+**Sorting on Relationship Fields:**
+
+To enable sorting on relationship fields, define searchable field mappings:
+
+```javascript
+api.addResource('posts', postSchema, {
+  searchableFields: {
+    'author.name': 'authorId.name',       // Map author.name to authorId.name
+    'category.title': 'categoryId.title'  // Map category.title to categoryId.title
+  }
+});
+
+// Now you can sort by these fields
+const sortedPosts = await api.resources.posts.query({
+  sort: 'author.name'  // Automatically joins authors table
+});
+```
+
+This feature:
+- Automatically adds necessary JOINs to the query
+- Only works with relationships defined in your schema
+- Requires the target field to be sortable in the related resource
+- Maintains query performance by only joining when needed
 
 ### Pagination
 

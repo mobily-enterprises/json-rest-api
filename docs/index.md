@@ -49,6 +49,21 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
     <h3>🎯 JSON:API Compliant</h3>
     <p>Follow industry standards with native JSON:API support. Compatible with any JSON:API client library.</p>
   </div>
+  
+  <div class="feature-card">
+    <h3>🌐 Microservices Ready</h3>
+    <p>Build distributed systems with native microservices support. Multiple transports, service discovery, and more.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🎭 CQRS Support</h3>
+    <p>Implement Command Query Responsibility Segregation with event sourcing, projections, and sagas.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🔄 API Gateway</h3>
+    <p>Transform into an API gateway to orchestrate external services with circuit breakers and saga support.</p>
+  </div>
 </div>
 
 ## Quick Example
@@ -122,3 +137,9 @@ npm install json-rest-api
 - [API Reference]({{ '/API' | relative_url }}) - Detailed API documentation
 - [Tutorial]({{ '/ONBOARDING' | relative_url }}) - Step-by-step walkthrough
 - [GitHub](https://github.com/mobily-enterprises/json-rest-api) - Source code and issues
+
+### Advanced Topics
+
+- [Microservices Architecture]({{ '/GUIDE_8_Microservices' | relative_url }}) - Build distributed systems
+- [CQRS Pattern]({{ '/GUIDE_9_CQRS' | relative_url }}) - Command Query Responsibility Segregation
+- [API Gateway]({{ '/GUIDE_10_API_Gateway' | relative_url }}) - Orchestrate external services

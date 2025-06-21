@@ -40,10 +40,10 @@ With just a schema definition, you get:
 
 - ✅ **Complete REST endpoints** - GET, POST, PATCH, DELETE
 - ✅ **Automatic validation** - Type checking, constraints, custom rules  
-- ✅ **Smart querying** - Filtering, sorting, pagination, search
+- ✅ **Smart querying** - Advanced filtering (19 operators), relationship sorting, pagination, search
 - ✅ **Relationships** - Automatic joins, nested includes
 - ✅ **Versioning** - API and resource versioning built-in
-- ✅ **JSON:API compliant** - Industry standard responses
+- ✅ **JSON:API compliant** - Full spec compliance with strict mode, meta formatting, enhanced errors
 - ✅ **Extensible** - Hooks, plugins, custom types
 - ✅ **Multiple backends** - Memory (AlaSQL), MySQL, or build your own
 
@@ -282,6 +282,7 @@ api
   .use(VersioningPlugin)      // API and resource versioning
   .use(LoggingPlugin)         // Structured logging
   .use(SecurityPlugin)        // Security headers & rate limiting
+  .use(ApiGatewayPlugin)      // Transform into API gateway/orchestrator
 
 // Or create your own
 const SlugPlugin = {

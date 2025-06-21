@@ -36,7 +36,10 @@ export { CorsPlugin } from './plugins/cors.js';
 export { JwtPlugin } from './plugins/jwt.js';
 export { QueryLimitsPlugin } from './plugins/query-limits.js';
 export { ViewsPlugin } from './plugins/views.js';
-export { JSONAPIStrictPlugin } from './plugins/json-api-strict.js';
+export { SimplifiedRecordsPlugin } from './plugins/simplified-records.js';
+export { MicroservicesPlugin } from './plugins/microservices.js';
+export { CQRSPlugin, Command, Query, Event } from './plugins/cqrs.js';
+export { ApiGatewayPlugin } from './plugins/api-gateway.js';
 
 // Import for internal use
 import { Api } from './lib/api.js';

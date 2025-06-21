@@ -66,6 +66,7 @@ export async function setupTestApi(options = {}) {
   const { plugin, config } = getTestPlugin();
   const api = new Api(options);
   api.use(plugin, config);
+  
   return api;
 }
 

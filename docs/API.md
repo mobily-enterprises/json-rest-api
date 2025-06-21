@@ -1317,50 +1317,44 @@ Standard error codes:
 
 ## Plugins
 
-### JSONAPIStrictPlugin
+### SimplifiedRecordsPlugin
 
-Transforms responses to be fully compliant with JSON:API specification, including proper relationship objects, compound documents with included array, and correct meta information structure.
+Transforms JSON:API compliant responses into a simplified format that's more convenient for developers.
 
 ```javascript
-import { JSONAPIStrictPlugin } from 'json-rest-api';
+import { SimplifiedRecordsPlugin } from 'json-rest-api';
 
-api.use(JSONAPIStrictPlugin);
+api.use(SimplifiedRecordsPlugin, {
+  flattenResponse: false,   // Keep data wrapper (default)
+  includeType: true,        // Keep type field (default)
+  embedRelationships: true  // Embed related objects (default)
+});
 ```
 
 **Features:**
 
-1. **Relationship Objects** - Moves foreign keys from attributes to relationships
-2. **Compound Documents** - Creates `included` array for related resources
-3. **Relationship Links** - Adds self and related links to each relationship
-4. **Meta Standardization** - Ensures consistent meta format
-5. **Error Arrays** - Formats errors according to JSON:API spec
+1. **Flattened Attributes** - Moves attributes directly into the resource object
+2. **Embedded Relationships** - Places related objects directly in the response
+3. **Optional Response Flattening** - Removes the data wrapper for single resources
+4. **Type Field Control** - Optionally exclude the type field
+5. **Developer Convenience** - Provides a familiar, intuitive format
 
-**Detailed Transformation Examples:**
+**Configuration Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `flattenResponse` | boolean | `false` | Remove data wrapper for single resources |
+| `includeType` | boolean | `true` | Include the type field in responses |
+| `embedRelationships` | boolean | `true` | Embed related objects instead of using relationships/included |
+
+**Transformation Examples:**
 
 #### Single Resource
 ```javascript
 // Request
 GET /api/posts/1
 
-// Without plugin (default):
-{
-  "data": {
-    "id": "1",
-    "type": "posts",
-    "attributes": {
-      "title": "My Post",
-      "content": "Post content",
-      "authorId": "42",
-      "author": { 
-        "id": 42, 
-        "name": "John Doe",
-        "email": "john@example.com"
-      }
-    }
-  }
-}
-
-// With plugin (JSON:API strict):
+// Without plugin (JSON:API default):
 {
   "data": {
     "id": "1",
@@ -1371,11 +1365,7 @@ GET /api/posts/1
     },
     "relationships": {
       "author": {
-        "data": { "type": "users", "id": "42" },
-        "links": {
-          "self": "/api/posts/1/relationships/author",
-          "related": "/api/posts/1/author"
-        }
+        "data": { "type": "users", "id": "42" }
       }
     }
   },
@@ -1388,59 +1378,73 @@ GET /api/posts/1
     }
   }]
 }
+
+// With SimplifiedRecordsPlugin:
+{
+  "data": {
+    "id": "1",
+    "type": "posts",
+    "title": "My Post",
+    "content": "Post content",
+    "authorId": "42",
+    "author": {
+      "id": "42",
+      "type": "users",
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }
+}
+
+// With flattenResponse: true
+{
+  "id": "1",
+  "type": "posts",
+  "title": "My Post",
+  "content": "Post content",
+  "authorId": "42",
+  "author": {
+    "id": "42",
+    "type": "users",
+    "name": "John Doe",
+    "email": "john@example.com"
+  }
+}
 ```
 
 #### Collection with Pagination
 ```javascript
-// Request
-GET /api/posts?page[size]=2&page[number]=1
-
-// With plugin response:
+// With SimplifiedRecordsPlugin + flattenResponse: true
 {
-  "data": [
+  "records": [
     {
       "id": "1",
       "type": "posts",
-      "attributes": {
-        "title": "First Post"
-      },
-      "relationships": {
-        "author": {
-          "data": { "type": "users", "id": "42" }
-        }
+      "title": "First Post",
+      "authorId": "42",
+      "author": {
+        "id": "42",
+        "type": "users",
+        "name": "John Doe"
       }
     },
     {
       "id": "2",
       "type": "posts",
-      "attributes": {
-        "title": "Second Post"
-      },
-      "relationships": {
-        "author": {
-          "data": { "type": "users", "id": "43" }
-        }
+      "title": "Second Post",
+      "authorId": "43",
+      "author": {
+        "id": "43",
+        "type": "users",
+        "name": "Jane Smith"
       }
     }
   ],
-  "included": [
-    {
-      "id": "42",
-      "type": "users",
-      "attributes": { "name": "John Doe" }
-    },
-    {
-      "id": "43",
-      "type": "users",
-      "attributes": { "name": "Jane Smith" }
-    }
-  ],
   "meta": {
-    "total": 10,
     "totalCount": 10,
-    "currentPage": 1,
+    "pageNumber": 1,
     "pageSize": 2,
-    "pageCount": 5
+    "totalPages": 5
   },
   "links": {
     "first": "/api/posts?page[number]=1&page[size]=2",
@@ -1450,51 +1454,21 @@ GET /api/posts?page[size]=2&page[number]=1
 }
 ```
 
-#### Error Response
-```javascript
-// Request
-GET /api/posts/999
-
-// With plugin response:
-{
-  "errors": [{
-    "status": "404",
-    "code": "NOT_FOUND",
-    "title": "NotFoundError",
-    "detail": "Post with id '999' not found",
-    "meta": {
-      "timestamp": "2024-01-01T12:00:00.000Z"
-    }
-  }]
-}
-```
-
-**Hook Integration:**
-
-The plugin uses these hooks:
-- `afterHTTPResponse` - Transforms successful responses
-- `beforeHTTPResponse` - Adds relationship links
-- `afterError` - Formats error responses
 
 **Performance Considerations:**
 
-- Transformation happens after database query
-- Minimal overhead (~1-2ms per response)
+- Transformation happens after response formatting
+- Minimal overhead (~1ms per response)
 - No additional database queries
-- Efficient deduplication for included resources
+- Works with both programmatic and HTTP APIs
 
 **Compatibility:**
 
 - Works with all storage plugins
-- Compatible with sparse fieldsets
-- Supports all query parameters
-- Works with pagination and filtering
+- Compatible with all query features
+- Maintains all functionality
+- Requests remain JSON:API formatted
 
-**Configuration:**
-
-Currently no configuration options. Future versions may support:
-- Custom link generation
-- Selective transformation
 - Resource-specific rules
 
 ### ViewsPlugin
@@ -1636,6 +1610,220 @@ api.use(QueryLimitsPlugin, {
   }
 }
 ```
+
+### HTTPPlugin
+
+Adds RESTful JSON:API endpoints to your Express application.
+
+```javascript
+import { HTTPPlugin } from 'json-rest-api';
+
+api.use(HTTPPlugin, {
+  app: expressApp,              // Required: Express app instance
+  basePath: '/api',             // API base path (default: '/api')
+  strictJsonApi: false,         // Enable strict JSON:API compliance (default: false)
+  
+  // JSON:API Enhancements (new features)
+  jsonApiVersion: '1.0',        // Add version to all responses
+  jsonApiMetaFormat: true,      // Use meta.page format for pagination
+  includeLinks: true,           // Add self/related links to resources
+  
+  // Per-resource options
+  typeOptions: {
+    users: {
+      searchFields: ['name', 'email'],
+      allowedMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+    }
+  },
+  
+  // Content-Type validation
+  validateContentType: true,    // Validate Content-Type header (default: true)
+  allowedContentTypes: [        // Accepted content types (when not strict)
+    'application/json',
+    'application/vnd.api+json'
+  ],
+  
+  // Middleware
+  middleware: [],               // Global middleware
+  getUserFromRequest: (req) => req.user,  // Extract user from request
+  
+  // CORS configuration (passed to cors package)
+  cors: {
+    origin: '*',
+    credentials: true
+  }
+});
+```
+
+**Features:**
+
+1. **Full JSON:API Compliance** - Implements JSON:API specification
+2. **Strict Mode** - Optional strict compliance enforcement
+3. **Query Parameters** - Support for filtering, sorting, pagination, sparse fieldsets
+4. **Content Negotiation** - Validates Content-Type headers
+5. **Error Handling** - JSON:API compliant error responses
+6. **Middleware Support** - Integrate with Express middleware
+
+**Endpoints Created:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/{type}` | List resources with filtering, sorting, pagination |
+| GET | `/api/{type}/{id}` | Get single resource |
+| POST | `/api/{type}` | Create new resource |
+| PUT | `/api/{type}/{id}` | Replace resource |
+| PATCH | `/api/{type}/{id}` | Update resource |
+| DELETE | `/api/{type}/{id}` | Delete resource |
+
+**Strict JSON:API Mode:**
+
+When `strictJsonApi: true`:
+
+1. **Content-Type**: Only accepts `application/vnd.api+json`
+   ```
+   POST /api/users
+   Content-Type: application/vnd.api+json  ✅
+   Content-Type: application/json         ❌ 415 Error
+   ```
+
+2. **Query Parameters**: Only standard JSON:API parameters allowed
+   - ✅ `include`, `fields`, `sort`, `page`, `filter`, `view`
+   - ❌ Legacy: `pageSize`, `joins`, direct filters
+
+3. **Examples**:
+   ```javascript
+   // Valid in strict mode:
+   GET /api/users?filter[name]=John&page[size]=10
+   GET /api/posts?include=author&fields[posts]=title,content
+   
+   // Invalid in strict mode (400 error):
+   GET /api/users?name=John        // Direct filter
+   GET /api/users?pageSize=10      // Legacy pagination
+   GET /api/users?unknownParam=x   // Unknown parameter
+   ```
+
+**Query Parameter Support:**
+
+| Parameter | Format | Example |
+|-----------|--------|---------|
+| `include` | Comma-separated relationships | `?include=author,comments` |
+| `fields` | Sparse fieldsets by type | `?fields[posts]=title,content` |
+| `sort` | Comma-separated, `-` for DESC | `?sort=-createdAt,title` |
+| `page` | Pagination with size/number | `?page[size]=10&page[number]=2` |
+| `filter` | Field-based filtering | `?filter[status]=published` |
+
+**Advanced JSON:API Features:**
+
+1. **JSON:API Version Declaration**
+   ```javascript
+   api.use(HTTPPlugin, { jsonApiVersion: '1.0' });
+   
+   // All responses include:
+   {
+     "jsonapi": { "version": "1.0" },
+     "data": { /* ... */ }
+   }
+   ```
+
+2. **Meta Field Naming Format**
+   ```javascript
+   api.use(HTTPPlugin, { jsonApiMetaFormat: true });
+   
+   // Pagination meta follows JSON:API convention:
+   {
+     "data": [ /* ... */ ],
+     "meta": {
+       "page": {
+         "total": 100,
+         "size": 10,
+         "number": 2,
+         "totalPages": 10
+       }
+     }
+   }
+   ```
+
+3. **Enhanced Error Format**
+   - Errors include `source` field pointing to the problematic field
+   - Support for `source.pointer` (JSON Pointer) and `source.parameter`
+   ```json
+   {
+     "errors": [{
+       "status": "422",
+       "code": "VALIDATION_ERROR",
+       "title": "Validation Error",
+       "detail": "Name must be at least 3 characters",
+       "source": {
+         "pointer": "/data/attributes/name"
+       }
+     }]
+   }
+   ```
+
+4. **Self and Related Links**
+   ```javascript
+   api.use(HTTPPlugin, { includeLinks: true });
+   
+   // Resources include links:
+   {
+     "data": {
+       "type": "posts",
+       "id": "1",
+       "attributes": { /* ... */ },
+       "relationships": {
+         "author": {
+           "data": { "type": "users", "id": "42" },
+           "links": {
+             "self": "http://api.example.com/api/posts/1/relationships/author",
+             "related": "http://api.example.com/api/posts/1/author"
+           }
+         }
+       },
+       "links": {
+         "self": "http://api.example.com/api/posts/1"
+       }
+     }
+   }
+   ```
+
+5. **Sorting on Relationship Fields**
+   ```javascript
+   // Define searchable fields including relationships
+   api.addResource('posts', postSchema, {
+     searchableFields: {
+       'author.name': 'authorId.name',    // Sort by author's name
+       'category.title': 'categoryId.title' // Sort by category title
+     }
+   });
+   
+   // Now you can sort by relationship fields:
+   GET /api/posts?sort=author.name,-category.title
+   ```
+
+**Advanced Filter Operators:**
+
+The library now supports additional filter operators beyond basic equality:
+
+| Operator | SQL Equivalent | Example | Description |
+|----------|---------------|---------|-------------|
+| `eq` | `=` | `?filter[age][eq]=25` | Equal to (default) |
+| `ne` | `!=` | `?filter[status][ne]=draft` | Not equal to |
+| `gt` | `>` | `?filter[price][gt]=100` | Greater than |
+| `gte` | `>=` | `?filter[age][gte]=18` | Greater than or equal |
+| `lt` | `<` | `?filter[stock][lt]=10` | Less than |
+| `lte` | `<=` | `?filter[price][lte]=50` | Less than or equal |
+| `in` | `IN` | `?filter[status][in]=active,pending` | In array |
+| `nin` | `NOT IN` | `?filter[role][nin]=admin,root` | Not in array |
+| `like` | `LIKE` | `?filter[name][like]=%john%` | Pattern match |
+| `ilike` | `ILIKE` | `?filter[email][ilike]=%@EXAMPLE.COM` | Case-insensitive pattern |
+| `notlike` | `NOT LIKE` | `?filter[path][notlike]=/admin/%` | Not matching pattern |
+| `startsWith` | `LIKE x%` | `?filter[name][startsWith]=John` | Starts with |
+| `endsWith` | `LIKE %x` | `?filter[email][endsWith]=.com` | Ends with |
+| `contains` | `LIKE %x%` | `?filter[bio][contains]=developer` | Contains substring |
+| `icontains` | `ILIKE %x%` | `?filter[title][icontains]=NEWS` | Case-insensitive contains |
+| `between` | `BETWEEN` | `?filter[age][between]=18,65` | Between two values |
+| `null` | `IS NULL` | `?filter[deletedAt][null]=true` | Is null |
+| `notnull` | `IS NOT NULL` | `?filter[email][notnull]=true` | Is not null |
 
 ### LoggingPlugin
 
@@ -1901,6 +2089,1013 @@ api.use(adapter);
 - **Plugins** (MemoryPlugin, MySQLPlugin) use adapters and add convenience features
 - **SQLPlugin** provides the common SQL logic that works with any adapter
 
+### CQRSPlugin
+
+Implements Command Query Responsibility Segregation (CQRS) pattern, separating reads and writes into different models, handlers, or even databases. Includes support for Event Sourcing, Projections, and Sagas.
+
+```javascript
+import { CQRSPlugin, Command, Query, Event } from 'json-rest-api';
+
+api.use(CQRSPlugin, {
+  eventStore: false,        // Enable event sourcing
+  projections: false,       // Enable projections for read models
+  sagas: false,            // Enable sagas for complex workflows
+  separateDatabases: false, // Use different databases for read/write
+  
+  // Only if separateDatabases is true
+  writeDatabase: {
+    plugin: 'mysql',
+    options: { /* connection options */ }
+  },
+  readDatabase: {
+    plugin: 'memory',    // Can be different type
+    options: { /* connection options */ }
+  }
+});
+```
+
+**Features:**
+
+1. **Command/Query Separation** - Different handlers for reads and writes
+2. **Event Sourcing** - Store all changes as events
+3. **Projections** - Build optimized read models from events
+4. **Sagas** - Orchestrate complex multi-step workflows
+5. **Separate Databases** - Different datastores for read/write sides
+6. **Auto-Generated Handlers** - CRUD operations as commands/queries
+
+#### Command and Query Definition
+
+##### Defining Commands (Writes)
+
+```javascript
+// Simple command handler
+api.command('CreateOrder', async (command) => {
+  const { customerId, items } = command.data;
+  
+  // Validation and business logic
+  if (!items || items.length === 0) {
+    throw new Error('Order must have items');
+  }
+  
+  // Execute write operation
+  const order = await api.resources.orders.create({
+    customerId,
+    items,
+    total: calculateTotal(items),
+    status: 'pending'
+  });
+  
+  // Optionally emit domain events
+  await api.emitDomainEvent(new Event('OrderPlaced', order, order.data.id));
+  
+  return order;
+});
+
+// Command handler with event sourcing
+api.command('ShipOrder', async (command) => {
+  const { orderId, carrier, trackingNumber } = command.data;
+  
+  // Load current state
+  const order = await api.resources.orders.get(orderId);
+  
+  // Business rule validation
+  if (order.data.attributes.status !== 'paid') {
+    throw new Error('Can only ship paid orders');
+  }
+  
+  // Update state
+  const result = await api.resources.orders.update(orderId, {
+    status: 'shipped',
+    shippedAt: new Date(),
+    carrier,
+    trackingNumber
+  });
+  
+  // Emit event for event store and projections
+  await api.emitDomainEvent(new Event(
+    'OrderShipped',
+    { orderId, carrier, trackingNumber },
+    orderId
+  ));
+  
+  return result;
+});
+```
+
+##### Defining Queries (Reads)
+
+```javascript
+// Simple query handler
+api.query('GetOrdersByCustomer', async (query) => {
+  const { customerId, status, limit = 10 } = query.criteria;
+  
+  const filter = { customerId };
+  if (status) filter.status = status;
+  
+  return await api.resources.orders.query({
+    filter,
+    page: { size: limit },
+    sort: [{ field: 'createdAt', direction: 'DESC' }]
+  });
+});
+
+// Query with complex aggregation
+api.query('GetCustomerStats', async (query) => {
+  const { customerId, dateRange } = query.criteria;
+  
+  // Could query a read-optimized view or projection
+  const orders = await api.resources.orders.query({
+    filter: { 
+      customerId,
+      createdAt: { between: dateRange }
+    }
+  });
+  
+  // Calculate statistics
+  const stats = {
+    totalOrders: orders.data.length,
+    totalSpent: orders.data.reduce((sum, order) => 
+      sum + order.attributes.total, 0
+    ),
+    averageOrderValue: orders.data.length > 0 
+      ? this.totalSpent / orders.data.length 
+      : 0
+  };
+  
+  return stats;
+});
+```
+
+#### Executing Commands and Queries
+
+```javascript
+// Using Command class
+const createCommand = new Command({
+  customerId: '123',
+  items: [
+    { productId: 'abc', quantity: 2, price: 29.99 }
+  ]
+});
+createCommand.constructor.name = 'CreateOrder';
+const order = await api.execute(createCommand);
+
+// Using Query class
+const statsQuery = new Query({
+  customerId: '123',
+  dateRange: ['2024-01-01', '2024-12-31']
+});
+statsQuery.constructor.name = 'GetCustomerStats';
+const stats = await api.execute(statsQuery);
+
+// Alternative: Direct execution (when you have the handler name)
+const result = await api._cqrs.commandBus.execute({
+  constructor: { name: 'CreateOrder' },
+  data: { customerId: '123', items: [...] }
+});
+```
+
+#### Auto-Generated CRUD Commands and Queries
+
+For each resource, the plugin automatically generates standard CRUD operations:
+
+```javascript
+// Commands (writes) - generated pattern: {Action}{Resource}
+// These are automatically created when you use addResource()
+
+// Create command
+const createCmd = new Command({ name: 'John', email: 'john@example.com' });
+createCmd.constructor.name = 'CreateUsers';
+await api.execute(createCmd);
+
+// Update command  
+const updateCmd = new Command({ id: 123, data: { name: 'Jane' } });
+updateCmd.constructor.name = 'UpdateUsers';
+await api.execute(updateCmd);
+
+// Delete command
+const deleteCmd = new Command({ id: 123 });
+deleteCmd.constructor.name = 'DeleteUsers';
+await api.execute(deleteCmd);
+
+// Queries (reads) - generated patterns
+// Get by ID
+const getQuery = new Query({ id: 123 });
+getQuery.constructor.name = 'GetUsersById';
+await api.execute(getQuery);
+
+// List/search
+const listQuery = new Query({ filter: { active: true }, page: { size: 20 } });
+listQuery.constructor.name = 'ListUsers';
+await api.execute(listQuery);
+```
+
+#### Event Sourcing
+
+When `eventStore: true`, all domain events are stored and can be replayed:
+
+```javascript
+// Emit domain events
+await api.emitDomainEvent(new Event(
+  'ProductPriceChanged',      // Event type
+  { oldPrice: 99, newPrice: 79, reason: 'Sale' },  // Event data
+  productId                   // Aggregate ID
+));
+
+// Subscribe to domain events
+api.onDomainEvent('ProductPriceChanged', async (event) => {
+  console.log(`Price changed for product ${event.aggregateId}`);
+  // Update search index, send notifications, etc.
+});
+
+// Subscribe to all events
+api.onDomainEvent('*', async (event) => {
+  console.log(`Event: ${event.type} on ${event.aggregateId}`);
+});
+
+// Access event store directly
+const eventStore = api.getEventStore();
+
+// Get all events for an aggregate
+const events = await eventStore.getEvents(aggregateId, fromVersion);
+
+// Get all events (for rebuilding projections)
+const allEvents = await eventStore.getAllEvents(fromTimestamp);
+
+// Save snapshot for performance
+await eventStore.saveSnapshot(aggregateId, currentState, version);
+const snapshot = await eventStore.getSnapshot(aggregateId);
+```
+
+#### Projections
+
+Build read-optimized views from events:
+
+```javascript
+// Define a projection
+const ordersByCustomerProjection = {
+  // Which events this projection handles
+  handles: ['OrderCreated', 'OrderCancelled'],
+  
+  // Internal state
+  ordersByCustomer: new Map(),
+  
+  // Handle each event
+  async handle(event) {
+    switch (event.type) {
+      case 'OrderCreated':
+        const customerId = event.data.attributes.customerId;
+        if (!this.ordersByCustomer.has(customerId)) {
+          this.ordersByCustomer.set(customerId, []);
+        }
+        this.ordersByCustomer.get(customerId).push({
+          orderId: event.aggregateId,
+          total: event.data.attributes.total,
+          createdAt: event.timestamp
+        });
+        break;
+        
+      case 'OrderCancelled':
+        // Remove from projection
+        for (const [customerId, orders] of this.ordersByCustomer) {
+          const index = orders.findIndex(o => o.orderId === event.aggregateId);
+          if (index >= 0) {
+            orders.splice(index, 1);
+            break;
+          }
+        }
+        break;
+    }
+  },
+  
+  // Reset projection (for rebuilds)
+  async reset() {
+    this.ordersByCustomer.clear();
+  },
+  
+  // Query methods
+  getOrdersForCustomer(customerId) {
+    return this.ordersByCustomer.get(customerId) || [];
+  }
+};
+
+// Register projection
+api.projection('ordersByCustomer', ordersByCustomerProjection);
+
+// Rebuild projection from all events
+await api._cqrs.projectionManager.rebuild('ordersByCustomer', eventStore);
+
+// Use projection in queries
+api.query('GetCustomerOrderHistory', async (query) => {
+  const projection = api._cqrs.projectionManager.projections.get('ordersByCustomer');
+  return projection.getOrdersForCustomer(query.criteria.customerId);
+});
+```
+
+#### Sagas
+
+Orchestrate complex business processes:
+
+```javascript
+// Define a saga
+class OrderFulfillmentSaga {
+  constructor() {
+    this.state = {
+      orderId: null,
+      paymentId: null,
+      shipmentId: null,
+      status: 'started'
+    };
+  }
+  
+  // Events that start this saga
+  get startsWith() {
+    return ['OrderCreated'];
+  }
+  
+  // All events this saga handles
+  get handles() {
+    return ['OrderCreated', 'PaymentProcessed', 'PaymentFailed', 
+            'InventoryReserved', 'InventoryUnavailable', 'OrderShipped'];
+  }
+  
+  // Handle events and orchestrate process
+  async handle(event) {
+    switch (event.type) {
+      case 'OrderCreated':
+        this.state.orderId = event.aggregateId;
+        // Initiate payment
+        const payment = await api.resources.payments.create({
+          orderId: this.state.orderId,
+          amount: event.data.attributes.total
+        });
+        this.state.paymentId = payment.data.id;
+        break;
+        
+      case 'PaymentProcessed':
+        // Reserve inventory
+        await api.resources.inventory.reserve({
+          orderId: this.state.orderId,
+          items: this.state.items
+        });
+        break;
+        
+      case 'PaymentFailed':
+        // Compensate - cancel order
+        await api.resources.orders.update(this.state.orderId, {
+          status: 'cancelled',
+          reason: 'Payment failed'
+        });
+        this.state.status = 'failed';
+        break;
+        
+      case 'InventoryReserved':
+        // Create shipment
+        const shipment = await api.resources.shipments.create({
+          orderId: this.state.orderId
+        });
+        this.state.shipmentId = shipment.data.id;
+        break;
+        
+      case 'OrderShipped':
+        // Complete the saga
+        await api.resources.orders.update(this.state.orderId, {
+          status: 'completed'
+        });
+        this.state.status = 'completed';
+        break;
+    }
+  }
+  
+  // Check if saga is complete
+  isComplete() {
+    return ['completed', 'failed'].includes(this.state.status);
+  }
+}
+
+// Register saga
+api.saga('OrderFulfillment', OrderFulfillmentSaga);
+```
+
+#### Separate Read/Write Databases
+
+Use different databases optimized for their workload:
+
+```javascript
+api.use(CQRSPlugin, {
+  separateDatabases: true,
+  writeDatabase: {
+    plugin: 'mysql',        // ACID compliant for writes
+    options: {
+      host: 'write-db.example.com',
+      database: 'myapp_write'
+    }
+  },
+  readDatabase: {
+    plugin: 'memory',       // Fast in-memory for reads
+    options: {}
+  },
+  eventStore: true         // Sync via events
+});
+
+// Commands automatically use write database
+api.command('UpdateProduct', async (command) => {
+  // This uses api._writeApi internally
+  return await api._writeApi.resources.products.update(
+    command.data.id,
+    command.data.updates
+  );
+});
+
+// Queries automatically use read database
+api.query('SearchProducts', async (query) => {
+  // This uses api._readApi internally
+  return await api._readApi.resources.products.query({
+    filter: query.criteria
+  });
+});
+
+// Automatic synchronization via events
+// When writeDatabase updates, events sync to readDatabase
+```
+
+#### Advanced Usage
+
+##### Custom Event Store Implementation
+
+```javascript
+class MongoEventStore {
+  constructor(mongoClient) {
+    this.events = mongoClient.collection('events');
+  }
+  
+  async append(event) {
+    await this.events.insertOne(event);
+    return event;
+  }
+  
+  async getEvents(aggregateId, fromVersion = 0) {
+    return await this.events
+      .find({ aggregateId, version: { $gte: fromVersion } })
+      .sort({ version: 1 })
+      .toArray();
+  }
+}
+
+// Replace default event store
+api._cqrs.eventStore = new MongoEventStore(mongoClient);
+```
+
+##### Command Validation
+
+```javascript
+api.command('TransferMoney', async (command) => {
+  const { fromAccount, toAccount, amount } = command.data;
+  
+  // Validate command
+  if (amount <= 0) {
+    throw new BadRequestError('Amount must be positive');
+  }
+  
+  if (fromAccount === toAccount) {
+    throw new BadRequestError('Cannot transfer to same account');
+  }
+  
+  // Check business rules
+  const source = await api.resources.accounts.get(fromAccount);
+  if (source.data.attributes.balance < amount) {
+    throw new BadRequestError('Insufficient funds');
+  }
+  
+  // Execute in transaction if available
+  await api.transaction(async (trx) => {
+    await trx.resources.accounts.update(fromAccount, {
+      balance: source.data.attributes.balance - amount
+    });
+    
+    await trx.resources.accounts.update(toAccount, {
+      balance: { increment: amount }  // If supported
+    });
+  });
+  
+  // Emit event
+  await api.emitDomainEvent(new Event('MoneyTransferred', {
+    fromAccount,
+    toAccount,
+    amount,
+    timestamp: Date.now()
+  }));
+});
+```
+
+##### Testing CQRS Code
+
+```javascript
+// Test commands
+describe('CreateOrder command', () => {
+  it('should create order and emit event', async () => {
+    const events = [];
+    api.onDomainEvent('*', (event) => events.push(event));
+    
+    const command = new Command({
+      customerId: '123',
+      items: [{ productId: 'abc', quantity: 1 }]
+    });
+    command.constructor.name = 'CreateOrder';
+    
+    const result = await api.execute(command);
+    
+    expect(result.data.attributes.status).toBe('pending');
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('OrderCreated');
+  });
+});
+
+// Test projections
+describe('OrderStats projection', () => {
+  it('should calculate stats correctly', async () => {
+    const projection = createOrderStatsProjection();
+    
+    await projection.handle(new Event('OrderCreated', {
+      attributes: { total: 100, customerId: '123' }
+    }));
+    
+    await projection.handle(new Event('OrderCreated', {
+      attributes: { total: 200, customerId: '123' }
+    }));
+    
+    const stats = projection.getCustomerStats('123');
+    expect(stats.totalOrders).toBe(2);
+    expect(stats.totalRevenue).toBe(300);
+  });
+});
+```
+
+#### CQRS Best Practices
+
+1. **Keep Commands Task-Oriented**
+   ```javascript
+   // Good: Task-focused command
+   api.command('ActivateUser', handler);
+   
+   // Bad: Generic CRUD command
+   api.command('UpdateUser', handler);
+   ```
+
+2. **Make Commands Idempotent**
+   ```javascript
+   api.command('ProcessPayment', async (command) => {
+     const { paymentId } = command.data;
+     
+     // Check if already processed
+     const existing = await api.resources.payments.get(paymentId);
+     if (existing.data.attributes.status === 'processed') {
+       return existing;  // Idempotent
+     }
+     
+     // Process payment...
+   });
+   ```
+
+3. **Design Events for Replaying**
+   ```javascript
+   // Good: Complete event data
+   new Event('OrderShipped', {
+     orderId,
+     shippedAt: Date.now(),
+     carrier: 'FedEx',
+     trackingNumber: '123456',
+     items: [...],  // Include all relevant data
+   });
+   
+   // Bad: Minimal event
+   new Event('OrderShipped', { orderId });
+   ```
+
+4. **Use Projections for Complex Queries**
+   ```javascript
+   // Instead of complex joins, maintain a projection
+   api.projection('productSalesRanking', {
+     handles: ['OrderCreated'],
+     rankings: new Map(),
+     
+     async handle(event) {
+       // Update rankings based on order data
+     },
+     
+     getTopProducts(limit = 10) {
+       return Array.from(this.rankings.entries())
+         .sort((a, b) => b[1] - a[1])
+         .slice(0, limit);
+     }
+   });
+   ```
+
+5. **Handle Eventual Consistency**
+   ```javascript
+   api.query('GetOrder', async (query) => {
+     const { orderId, consistency = 'eventual' } = query.criteria;
+     
+     if (consistency === 'strong') {
+       // Query write database directly
+       return await api._writeApi.resources.orders.get(orderId);
+     } else {
+       // Query read database (may be slightly out of date)
+       return await api._readApi.resources.orders.get(orderId);
+     }
+   });
+   ```
+
+### ApiGatewayPlugin
+
+```javascript
+import { ApiGatewayPlugin } from 'json-rest-api/plugins/api-gateway';
+```
+
+Transforms JSON-REST-API into an API gateway/orchestrator. Instead of database-backed resources, create resources that call external APIs with built-in resilience, transformations, and saga orchestration.
+
+#### Basic Usage
+
+```javascript
+// Enable API Gateway features
+api.use(ApiGatewayPlugin, {
+  enableSagas: true,      // Enable saga orchestration
+  enableMetrics: true,    // Track API performance
+  defaultTimeout: 30000,  // 30 second timeout
+  defaultRetries: 3       // Retry failed requests
+});
+
+// Add an API-backed resource
+api.addApiResource('users', {
+  baseUrl: 'https://api.userservice.com',
+  auth: { type: 'bearer', token: process.env.USER_API_TOKEN },
+  endpoints: {
+    get: { path: '/users/:id' },
+    list: { path: '/users' },
+    create: { path: '/users', method: 'POST' },
+    update: { path: '/users/:id', method: 'PUT' },
+    delete: { path: '/users/:id', method: 'DELETE' }
+  }
+});
+
+// Use it like a normal resource
+const user = await api.resources.users.get(123);
+const users = await api.resources.users.query({ active: true });
+```
+
+#### Features
+
+1. **External API Integration** - Call any REST API as a resource
+2. **Request/Response Transformation** - Adapt any API format
+3. **Circuit Breakers** - Protect against cascading failures
+4. **Automatic Retries** - Handle transient failures
+5. **Saga Orchestration** - Coordinate multi-service transactions
+6. **Health Monitoring** - Track API status and performance
+
+#### API Resource Configuration
+
+##### Authentication Types
+
+```javascript
+// Bearer token
+api.addApiResource('github', {
+  baseUrl: 'https://api.github.com',
+  auth: { type: 'bearer', token: process.env.GITHUB_TOKEN }
+});
+
+// API Key
+api.addApiResource('weather', {
+  baseUrl: 'https://api.weather.com',
+  auth: { 
+    type: 'apiKey',
+    header: 'X-API-Key',
+    key: process.env.WEATHER_KEY
+  }
+});
+
+// Basic Auth
+api.addApiResource('legacy', {
+  baseUrl: 'https://old.system.com',
+  auth: {
+    type: 'basic',
+    username: process.env.LEGACY_USER,
+    password: process.env.LEGACY_PASS
+  }
+});
+```
+
+##### Request/Response Transformations
+
+```javascript
+api.addApiResource('payments', {
+  baseUrl: 'https://api.stripe.com/v1',
+  auth: { type: 'bearer', token: process.env.STRIPE_KEY },
+  
+  transformers: {
+    charge: {
+      // Transform outgoing request
+      request: (data) => ({
+        amount: Math.round(data.amount * 100), // Convert to cents
+        currency: data.currency || 'usd',
+        source: data.token,
+        metadata: { orderId: data.orderId }
+      }),
+      
+      // Transform incoming response
+      response: (stripeData) => ({
+        id: stripeData.id,
+        amount: stripeData.amount / 100, // Convert back
+        status: stripeData.status,
+        created: new Date(stripeData.created * 1000)
+      })
+    }
+  },
+  
+  endpoints: {
+    charge: { path: '/charges', method: 'POST' },
+    refund: { path: '/refunds', method: 'POST' }
+  }
+});
+
+// Use transformed API
+const payment = await api.resources.payments.charge({
+  amount: 99.99,  // Dollars, will be converted to cents
+  token: 'tok_visa',
+  orderId: 'ORD-123'
+});
+```
+
+##### Circuit Breaker Configuration
+
+```javascript
+api.addApiResource('flaky-service', {
+  baseUrl: 'https://unreliable.api.com',
+  
+  // Circuit breaker settings
+  circuitBreaker: {
+    failureThreshold: 5,      // Open after 5 failures
+    resetTimeout: 60000,      // Try again after 1 minute
+    monitoringPeriod: 10000   // Within 10 second window
+  },
+  
+  timeout: 5000,              // 5 second timeout
+  retries: 2,                 // Retry twice on failure
+  retryDelay: 1000           // 1 second between retries
+});
+
+// Circuit breaker states:
+// CLOSED: Normal operation
+// OPEN: Rejecting all requests (fail fast)
+// HALF_OPEN: Testing if service recovered
+```
+
+#### Saga Orchestration
+
+Sagas coordinate complex workflows across multiple services with automatic rollback on failure:
+
+```javascript
+api.saga('CheckoutSaga', {
+  startsWith: 'CheckoutStarted',  // Triggering event
+  
+  async handle(event, { executeStep, compensate, emit }) {
+    const { orderId, customerId, items, paymentToken } = event.data;
+    
+    try {
+      // Step 1: Reserve inventory
+      const reservation = await executeStep('reserveInventory', 
+        // Action
+        async () => {
+          return await api.resources.inventory.reserve({
+            items,
+            orderId
+          });
+        },
+        // Compensation (rollback)
+        async () => {
+          await api.resources.inventory.cancel(reservation.id);
+        }
+      );
+      
+      // Step 2: Process payment
+      const payment = await executeStep('processPayment',
+        async () => {
+          return await api.resources.payments.charge({
+            amount: calculateTotal(items),
+            token: paymentToken,
+            orderId
+          });
+        },
+        async () => {
+          await api.resources.payments.refund(payment.id);
+        }
+      );
+      
+      // Step 3: Create shipment
+      const shipment = await executeStep('createShipment',
+        async () => {
+          return await api.resources.shipping.create({
+            orderId,
+            items
+          });
+        },
+        async () => {
+          await api.resources.shipping.cancel(shipment.id);
+        }
+      );
+      
+      // Success - confirm everything
+      await api.resources.inventory.confirm(reservation.id);
+      await emit('CheckoutCompleted', { orderId });
+      
+    } catch (error) {
+      // Automatic rollback of completed steps
+      await compensate();
+      await emit('CheckoutFailed', { orderId, error: error.message });
+    }
+  }
+});
+
+// Trigger the saga
+await api.emitEvent('CheckoutStarted', {
+  orderId: 'ORD-123',
+  customerId: 'CUST-456',
+  items: [{ sku: 'WIDGET-1', quantity: 2 }],
+  paymentToken: 'tok_visa'
+});
+```
+
+#### Health Monitoring
+
+```javascript
+// Get API health status
+const health = api.getApiHealth();
+
+console.log(health);
+// {
+//   users: {
+//     url: 'https://api.users.com',
+//     circuit: { state: 'CLOSED', failures: 0 },
+//     metrics: {
+//       requests: 1543,
+//       errors: 12,
+//       avgResponseTime: 234
+//     }
+//   },
+//   payments: {
+//     url: 'https://api.stripe.com',
+//     circuit: { state: 'OPEN', failures: 5 },
+//     metrics: {
+//       requests: 89,
+//       errors: 5,
+//       avgResponseTime: 567
+//     }
+//   },
+//   sagas: {
+//     active: [
+//       { id: 'abc123', name: 'CheckoutSaga', state: 'RUNNING' }
+//     ]
+//   }
+// }
+```
+
+#### Batch Operations
+
+```javascript
+// Execute multiple API calls
+const results = await api.batchApiCalls([
+  { resource: 'users', method: 'get', data: 1 },
+  { resource: 'orders', method: 'query', data: { userId: 1 } },
+  { resource: 'reviews', method: 'query', data: { userId: 1 } }
+]);
+
+// With transaction semantics (rollback on failure)
+const results = await api.batchApiCalls([
+  { resource: 'users', method: 'create', data: userData },
+  { resource: 'accounts', method: 'create', data: accountData },
+  { resource: 'profile', method: 'create', data: profileData }
+], { transactional: true });
+```
+
+#### Custom Methods
+
+```javascript
+api.addApiResource('orders', {
+  baseUrl: 'https://api.orders.com',
+  endpoints: {
+    // Standard CRUD
+    get: { path: '/orders/:id' },
+    create: { path: '/orders', method: 'POST' },
+    
+    // Custom methods
+    ship: { path: '/orders/:id/ship', method: 'POST' },
+    cancel: { path: '/orders/:id/cancel', method: 'POST' },
+    getInvoice: { path: '/orders/:id/invoice' }
+  },
+  methods: {
+    ship: { path: '/orders/:id/ship', method: 'POST' },
+    cancel: { path: '/orders/:id/cancel', method: 'POST' },
+    getInvoice: { path: '/orders/:id/invoice' }
+  }
+});
+
+// Use custom methods
+await api.resources.orders.ship({ id: orderId, carrier: 'ups' });
+const invoice = await api.resources.orders.getInvoice({ id: orderId });
+```
+
+#### Advanced Configuration
+
+```javascript
+// Configure API after creation
+api.configureApi('payments', {
+  // Add or update transformers
+  transformers: {
+    list: {
+      request: (params) => ({
+        limit: params.pageSize || 10,
+        starting_after: params.cursor
+      }),
+      response: (data) => ({
+        items: data.data,
+        hasMore: data.has_more,
+        nextCursor: data.data[data.data.length - 1]?.id
+      })
+    }
+  },
+  
+  // Add custom headers
+  headers: {
+    'X-Custom-Header': 'value'
+  }
+});
+```
+
+#### API Gateway Best Practices
+
+1. **Use Environment Variables for Configuration**
+   ```javascript
+   api.addApiResource('service', {
+     baseUrl: process.env.SERVICE_URL,
+     auth: { type: 'bearer', token: process.env.SERVICE_TOKEN }
+   });
+   ```
+
+2. **Implement Proper Error Handling**
+   ```javascript
+   try {
+     const result = await api.resources.payments.charge(data);
+   } catch (error) {
+     if (error.status === 402) {
+       // Payment failed
+       await handlePaymentFailure(error);
+     } else if (error.code === 'ETIMEDOUT') {
+       // Timeout - maybe retry later
+       await queueForRetry(data);
+     } else {
+       // Unknown error
+       throw error;
+     }
+   }
+   ```
+
+3. **Monitor Circuit Breaker States**
+   ```javascript
+   setInterval(() => {
+     const health = api.getApiHealth();
+     
+     for (const [service, status] of Object.entries(health)) {
+       if (status.circuit.state === 'OPEN') {
+         alertOps(`Circuit breaker OPEN for ${service}`);
+       }
+     }
+   }, 30000); // Check every 30 seconds
+   ```
+
+4. **Use Sagas for Complex Workflows**
+   ```javascript
+   // Don't manually orchestrate
+   // Use sagas for automatic rollback and state management
+   api.saga('ComplexWorkflow', {
+     async handle(event, { executeStep, compensate }) {
+       // Saga handles failures and rollbacks automatically
+     }
+   });
+   ```
+
+5. **Transform APIs to Your Domain**
+   ```javascript
+   // Transform external API responses to match your domain model
+   transformers: {
+     get: {
+       response: (externalUser) => ({
+         id: externalUser.user_id,
+         name: externalUser.full_name,
+         email: externalUser.email_address,
+         // Map to your expected format
+       })
+     }
+   }
+   ```
+
 ## Plugin Compatibility Matrix
 
 ### Storage Plugin Compatibility
@@ -1921,6 +3116,10 @@ api.use(adapter);
 | **SecurityPlugin** | ✅ | ✅ | Works independently of storage |
 | **VersioningPlugin** | ✅ | ✅ | History tables work with both |
 | **SQLPlugin** | ✅ | ✅ | Required for both SQL backends |
+| **SimplifiedRecordsPlugin** | ✅ | ✅ | Works with any storage backend |
+| **MicroservicesPlugin** | ✅ | ✅ | Works independently of storage |
+| **CQRSPlugin** | ✅ | ✅ | Can use separate databases for read/write |
+| **ApiGatewayPlugin** | ✅ | ✅ | Works independently of storage |
 
 ### Plugin Order Dependencies
 
@@ -1939,7 +3138,11 @@ api.use(adapter);
 | **CorsPlugin** | - | HTTPPlugin | Can be anywhere before HTTP |
 | **JwtPlugin** | - | Authorization, HTTP | Provides auth for other plugins |
 | **SecurityPlugin** | - | HTTPPlugin | Can be anywhere before HTTP |
+| **SimplifiedRecordsPlugin** | Storage | - | Transforms responses |
 | **OpenAPIPlugin** | All others | - | Documents final API |
+| **MicroservicesPlugin** | Storage | HTTPPlugin | Can be used anywhere |
+| **CQRSPlugin** | Storage | HTTPPlugin | Should be early to intercept operations |
+| **ApiGatewayPlugin** | - | HTTPPlugin | Independent of storage, before HTTP |
 
 ### Feature Compatibility
 
@@ -2010,6 +3213,52 @@ interface QueryParams {
   excludeJoins?: string[];
 }
 ```
+
+### Filter Operators
+
+The `filter` parameter supports advanced operators for complex queries:
+
+```typescript
+// Basic equality
+filter: { status: 'active' }
+
+// Operator syntax
+filter: {
+  field: {
+    operator: value
+  }
+}
+```
+
+#### Available Operators
+
+| Operator | Description | Example | SQL Equivalent |
+|----------|-------------|---------|----------------|
+| (none) | Equals | `{ status: 'active' }` | `WHERE status = 'active'` |
+| `eq` | Equals | `{ age: { eq: 25 } }` | `WHERE age = 25` |
+| `ne` | Not equals | `{ status: { ne: 'deleted' } }` | `WHERE status != 'deleted'` |
+| `gt` | Greater than | `{ price: { gt: 100 } }` | `WHERE price > 100` |
+| `gte` | Greater than or equal | `{ age: { gte: 18 } }` | `WHERE age >= 18` |
+| `lt` | Less than | `{ stock: { lt: 10 } }` | `WHERE stock < 10` |
+| `lte` | Less than or equal | `{ price: { lte: 99.99 } }` | `WHERE price <= 99.99` |
+| `in` | In array | `{ status: { in: ['active', 'pending'] } }` | `WHERE status IN ('active', 'pending')` |
+| `nin` | Not in array | `{ role: { nin: ['admin', 'root'] } }` | `WHERE role NOT IN ('admin', 'root')` |
+| `like` | SQL LIKE | `{ name: { like: '%john%' } }` | `WHERE name LIKE '%john%'` |
+| `ilike` | Case-insensitive LIKE | `{ email: { ilike: '%@GMAIL.COM' } }` | `WHERE LOWER(email) LIKE LOWER('%@GMAIL.COM')` |
+| `contains` | Contains substring | `{ bio: { contains: 'developer' } }` | `WHERE bio LIKE '%developer%'` |
+| `icontains` | Case-insensitive contains | `{ bio: { icontains: 'DEVELOPER' } }` | `WHERE LOWER(bio) LIKE LOWER('%DEVELOPER%')` |
+| `startsWith` | Starts with | `{ name: { startsWith: 'Dr.' } }` | `WHERE name LIKE 'Dr.%'` |
+| `endsWith` | Ends with | `{ email: { endsWith: '@company.com' } }` | `WHERE email LIKE '%@company.com'` |
+| `null` | Is null | `{ deletedAt: { null: true } }` | `WHERE deletedAt IS NULL` |
+| `notnull` | Is not null | `{ category: { notnull: true } }` | `WHERE category IS NOT NULL` |
+| `between` | Between two values | `{ age: { between: [18, 65] } }` | `WHERE age BETWEEN 18 AND 65` |
+
+**Notes:**
+- Multiple operators can be used on the same field: `{ age: { gte: 18, lt: 65 } }`
+- The `ilike` and `icontains` operators use `LOWER()` for databases without native case-insensitive support
+- For array fields, `in` and `nin` check if the array contains any of the specified values
+- The `between` operator requires an array with exactly 2 values
+- In memory storage (AlaSQL), undefined fields also match `{ null: true }` queries
 
 ### Schema Field Definition
 

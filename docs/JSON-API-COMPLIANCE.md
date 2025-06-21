@@ -1,96 +1,43 @@
 # JSON:API Compliance Guide
 
-This document explains how the JSON REST API library relates to the [JSON:API specification](https://jsonapi.org/), our design philosophy, and how to achieve full compliance when needed.
+This document explains how the JSON REST API library implements the [JSON:API specification](https://jsonapi.org/), and how to use the SimplifiedRecordsPlugin for a more convenient format.
 
 ## Table of Contents
 
 1. [Design Philosophy](#design-philosophy)
-2. [Default Behavior vs JSON:API](#default-behavior-vs-jsonapi)
-3. [Achieving Full Compliance](#achieving-full-compliance)
+2. [Default JSON:API Compliance](#default-jsonapi-compliance)
+3. [SimplifiedRecordsPlugin](#simplifiedrecordsplugin)
 4. [Compliance Assessment](#compliance-assessment)
-5. [Migration Guide](#migration-guide)
+5. [Usage Examples](#usage-examples)
 
 ## Design Philosophy
 
-The JSON REST API library prioritizes **developer experience** and **simplicity** while maintaining compatibility with JSON:API principles. We believe that:
+The JSON REST API library is **100% JSON:API compliant by default** while offering flexibility through plugins:
 
-1. **Simplicity drives adoption** - APIs should be intuitive to build and consume
-2. **Flexibility over rigidity** - Developers should choose their level of compliance
-3. **Performance matters** - Avoid unnecessary complexity that impacts speed
-4. **Backwards compatibility** - Existing APIs shouldn't break when adding compliance
+1. **Standards first** - Full JSON:API compliance out of the box
+2. **Developer choice** - Use SimplifiedRecordsPlugin for convenience
+3. **Performance** - Efficient implementation without compromises
+4. **Flexibility** - Choose your preferred format via plugins
 
-## Default Behavior vs JSON:API
+## Default JSON:API Compliance
 
-### What We Keep from JSON:API (Default)
+The library implements the complete JSON:API v1.0 specification by default:
 
-The library follows these JSON:API conventions out of the box:
-
-✅ **Resource Objects**
+### ✅ Resource Objects
 ```javascript
 {
   "data": {
     "id": "1",
     "type": "users",
-    "attributes": { /* ... */ }
-  }
-}
-```
-
-✅ **Collection Responses**
-```javascript
-{
-  "data": [/* array of resources */],
-  "meta": { /* pagination info */ }
-}
-```
-
-✅ **Error Format** (simplified)
-```javascript
-{
-  "errors": [{
-    "status": "404",
-    "code": "NOT_FOUND",
-    "title": "NotFoundError",
-    "detail": "Resource not found"
-  }]
-}
-```
-
-✅ **Query Parameters**
-- Filtering: `?filter[name]=John`
-- Sorting: `?sort=-createdAt,name`
-- Pagination: `?page[size]=10&page[number]=2`
-- Sparse fieldsets: `?fields[users]=name,email`
-- Including relationships: `?include=author,comments`
-
-✅ **HTTP Methods & Status Codes**
-- GET, POST, PATCH, DELETE
-- 200 OK, 201 Created, 204 No Content, 404 Not Found, etc.
-
-### Where We Simplify (Divergences)
-
-#### 1. **Relationships in Attributes** 🔄
-JSON:API requires relationships in a separate object. We include them in attributes for simplicity.
-
-**Our Default (Simplified):**
-```javascript
-{
-  "data": {
-    "id": "1",
-    "type": "posts",
     "attributes": {
-      "title": "My Post",
-      "authorId": "42",        // Foreign key in attributes
-      "author": {              // Joined data in attributes
-        "id": 42,
-        "name": "John Doe"
-      }
+      "name": "John Doe",
+      "email": "john@example.com"
     }
   }
 }
 ```
 
-**Strict JSON:API:**
+### ✅ Relationships
 ```javascript
 {
   "data": {
@@ -101,185 +48,31 @@ JSON:API requires relationships in a separate object. We include them in attribu
     },
     "relationships": {
       "author": {
-        "data": { "type": "users", "id": "42" },
-        "links": {
-          "self": "/api/posts/1/relationships/author",
-          "related": "/api/posts/1/author"
-        }
+        "data": { "type": "users", "id": "42" }
       }
     }
   }
 }
 ```
 
-**Why we do this:**
-- Easier to understand for developers new to JSON:API
-- Simpler client code - no need to resolve relationships
-- Reduces payload size when relationships aren't needed separately
-- One less concept to learn
-
-#### 2. **No Compound Documents by Default** 📦
-We include related data directly in attributes instead of using an `included` array.
-
-**Our Default:**
+### ✅ Compound Documents
 ```javascript
 {
   "data": {
     "id": "1",
     "type": "posts",
     "attributes": {
-      "title": "My Post",
-      "author": { "id": 42, "name": "John" }  // Embedded
-    }
-  }
-}
-```
-
-**Strict JSON:API:**
-```javascript
-{
-  "data": {
-    "id": "1",
-    "type": "posts",
-    "attributes": { "title": "My Post" }
-  },
-  "included": [{
-    "id": "42",
-    "type": "users",
-    "attributes": { "name": "John" }
-  }]
-}
-```
-
-**Why we do this:**
-- More intuitive data access
-- No client-side resolution needed
-- Familiar to developers from other APIs
-- Reduces complexity for simple use cases
-
-#### 3. **Simplified Meta Information** 📊
-We use simpler property names in meta objects.
-
-**Our Default:**
-```javascript
-{
-  "meta": {
-    "total": 100,
-    "page": 1,
-    "pageSize": 10
-  }
-}
-```
-
-**Strict JSON:API (common convention):**
-```javascript
-{
-  "meta": {
-    "totalCount": 100,
-    "currentPage": 1,
-    "pageSize": 10,
-    "pageCount": 10
-  }
-}
-```
-
-#### 4. **Flexible Content Negotiation** 🤝
-We accept both `application/json` and `application/vnd.api+json` content types by default, while JSON:API requires the latter.
-
-## Achieving Full Compliance
-
-### The JSONAPIStrictPlugin
-
-To achieve 100% JSON:API compliance, simply add the `JSONAPIStrictPlugin`:
-
-```javascript
-import { createApi, JSONAPIStrictPlugin } from 'json-rest-api';
-
-const api = createApi({ 
-  storage: 'memory',
-  http: { app }
-});
-
-// Enable strict JSON:API compliance
-api.use(JSONAPIStrictPlugin);
-```
-
-### What the Plugin Does
-
-The plugin transforms responses in real-time to match JSON:API exactly:
-
-1. **Extracts Relationships**
-   - Moves foreign keys from attributes to relationships
-   - Creates proper relationship objects with data and links
-   - Adds self and related links for each relationship
-
-2. **Creates Compound Documents**
-   - Moves embedded resources to an `included` array
-   - Prevents duplicates in the included array
-   - Maintains proper resource linkage
-
-3. **Standardizes Meta**
-   - Adds JSON:API conventional property names
-   - Ensures consistent format across all responses
-
-4. **Formats Errors**
-   - Ensures all errors follow JSON:API error object format
-   - Includes all required and optional error fields
-
-5. **Preserves All Features**
-   - Sparse fieldsets continue to work
-   - Include parameter properly builds compound documents
-   - All query parameters function as expected
-
-### Example Transformation
-
-```javascript
-// Your code stays the same:
-const post = await api.resources.posts.create({
-  title: 'Hello World',
-  content: 'My first post',
-  authorId: userId
-});
-
-// Without plugin (default):
-{
-  "data": {
-    "id": "123",
-    "type": "posts",
-    "attributes": {
-      "title": "Hello World",
-      "content": "My first post",
-      "authorId": "456",
-      "author": {
-        "id": 456,
-        "name": "John Doe"
-      }
-    }
-  }
-}
-
-// With JSONAPIStrictPlugin:
-{
-  "data": {
-    "id": "123",
-    "type": "posts",
-    "attributes": {
-      "title": "Hello World",
-      "content": "My first post"
+      "title": "My Post"
     },
     "relationships": {
       "author": {
-        "data": { "type": "users", "id": "456" },
-        "links": {
-          "self": "/api/posts/123/relationships/author",
-          "related": "/api/posts/123/author"
-        }
+        "data": { "type": "users", "id": "42" }
       }
     }
   },
   "included": [{
-    "id": "456",
     "type": "users",
+    "id": "42",
     "attributes": {
       "name": "John Doe"
     }
@@ -287,109 +80,233 @@ const post = await api.resources.posts.create({
 }
 ```
 
-## Compliance Assessment
-
-### With JSONAPIStrictPlugin: 100% Compliant ✅
-
-When using the `JSONAPIStrictPlugin`, the library achieves **100% compliance** with JSON:API v1.0:
-
-| Feature | Compliance | Notes |
-|---------|------------|-------|
-| **Document Structure** | ✅ 100% | Top-level `data`, `errors`, `meta`, `links`, `included` |
-| **Resource Objects** | ✅ 100% | Proper `id`, `type`, `attributes`, `relationships` |
-| **Relationships** | ✅ 100% | Separate object with `data`, `links`, `meta` |
-| **Compound Documents** | ✅ 100% | Full `included` array support |
-| **Links** | ✅ 100% | Relationship links (self, related) |
-| **Error Objects** | ✅ 100% | Full error object with all fields |
-| **Query Parameters** | ✅ 100% | All standard parameters supported |
-| **Sparse Fieldsets** | ✅ 100% | Proper `fields[type]=field1,field2` |
-| **Sorting** | ✅ 100% | Multi-field sorting with `-` prefix |
-| **Pagination** | ✅ 100% | Page-based with proper links |
-| **Filtering** | ✅ 100% | `filter[field]=value` syntax |
-| **Include** | ✅ 100% | Dot-notation for nested includes |
-| **Content Negotiation** | ✅ 100% | Accepts `application/vnd.api+json` |
-| **HTTP Semantics** | ✅ 100% | Proper methods and status codes |
-
-### Without Plugin: ~70% Compatible 🔄
-
-The default behavior maintains compatibility with JSON:API principles but simplifies the format:
-
-| Feature | Compatibility | Notes |
-|---------|--------------|-------|
-| **Document Structure** | ✅ 90% | Has `data`, `meta`, `errors` but relationships embedded |
-| **Resource Objects** | ✅ 80% | Has `id`, `type`, `attributes` but relationships mixed in |
-| **Relationships** | ❌ 0% | In attributes, not separate object |
-| **Compound Documents** | ❌ 0% | No `included` array |
-| **Links** | ⚠️ 50% | Pagination links only |
-| **Error Objects** | ✅ 100% | Fully compliant error format |
-| **Query Parameters** | ✅ 100% | All work identically |
-| **Content Negotiation** | ⚠️ 50% | Accepts both JSON and JSON:API types |
-
-## Migration Guide
-
-### For API Providers
-
-#### Option 1: Gradual Migration
+### ✅ Collection Responses
 ```javascript
-// Start with default behavior
-const api = createApi({ storage: 'mysql' });
-
-// Add plugin when clients are ready
-api.use(JSONAPIStrictPlugin);
-```
-
-#### Option 2: Version-Based
-```javascript
-// v1 - Simple format (default)
-const apiV1 = createApi({ 
-  version: '1.0',
-  storage: 'mysql' 
-});
-
-// v2 - Strict JSON:API
-const apiV2 = createApi({ 
-  version: '2.0',
-  storage: 'mysql' 
-});
-apiV2.use(JSONAPIStrictPlugin);
-```
-
-### For API Consumers
-
-The plugin only affects responses. Requests remain the same:
-
-```javascript
-// Request format unchanged
-POST /api/posts
 {
-  "data": {
-    "attributes": {
-      "title": "Hello",
-      "authorId": "123"  // Still works!
-    }
+  "data": [
+    /* array of resource objects */
+  ],
+  "meta": {
+    "totalCount": 100,
+    "pageNumber": 1,
+    "pageSize": 10,
+    "totalPages": 10
+  },
+  "links": {
+    "self": "http://api.example.com/posts?page[number]=1",
+    "first": "http://api.example.com/posts?page[number]=1",
+    "last": "http://api.example.com/posts?page[number]=10",
+    "next": "http://api.example.com/posts?page[number]=2"
   }
 }
 ```
 
-### Testing Compliance
+### ✅ Error Responses
+```javascript
+{
+  "errors": [{
+    "id": "error-uuid",
+    "status": "404",
+    "code": "NOT_FOUND",
+    "title": "NotFoundError",
+    "detail": "Resource not found: users/123",
+    "source": {
+      "pointer": "/data/id"
+    },
+    "meta": {
+      "timestamp": "2024-01-01T12:00:00Z"
+    }
+  }]
+}
+```
 
-```bash
-# Test with JSON:API validator tools
-npm install -g jsonapi-validator
+### ✅ Query Parameters
+- **Filtering**: `?filter[name]=John&filter[age]=25`
+- **Sorting**: `?sort=-createdAt,name`
+- **Pagination**: `?page[size]=10&page[number]=2`
+- **Sparse fieldsets**: `?fields[users]=name,email`
+- **Including relationships**: `?include=author,comments.author`
 
-# Run your API with the plugin
-node your-api.js
+### ✅ Content Type
+- Accepts both `application/json` and `application/vnd.api+json`
+- Returns `application/json` by default (allowed by spec)
 
-# Validate responses
-curl http://localhost:3000/api/posts | jsonapi-validator
+## SimplifiedRecordsPlugin
+
+For developers who prefer a simpler format, the `SimplifiedRecordsPlugin` transforms JSON:API responses into a more convenient structure:
+
+### Installation
+```javascript
+import { createApi, SimplifiedRecordsPlugin } from 'json-rest-api';
+
+const api = createApi({ 
+  storage: 'memory',
+  http: { app }
+});
+
+// Enable simplified format
+api.use(SimplifiedRecordsPlugin, {
+  flattenResponse: false,   // Keep data wrapper
+  includeType: true,        // Keep type field
+  embedRelationships: true  // Embed related objects
+});
+```
+
+### What It Does
+
+1. **Flattens Attributes**
+   ```javascript
+   // JSON:API (default)
+   {
+     "data": {
+       "id": "1",
+       "type": "users",
+       "attributes": {
+         "name": "John"
+       }
+     }
+   }
+   
+   // Simplified
+   {
+     "data": {
+       "id": "1",
+       "type": "users",
+       "name": "John"  // Attributes flattened
+     }
+   }
+   ```
+
+2. **Embeds Relationships**
+   ```javascript
+   // JSON:API (default)
+   {
+     "data": {
+       "id": "1",
+       "type": "posts",
+       "attributes": {
+         "title": "My Post"
+       },
+       "relationships": {
+         "author": {
+           "data": { "type": "users", "id": "42" }
+         }
+       }
+     },
+     "included": [{
+       "type": "users",
+       "id": "42",
+       "attributes": { "name": "John" }
+     }]
+   }
+   
+   // Simplified
+   {
+     "data": {
+       "id": "1",
+       "type": "posts",
+       "title": "My Post",
+       "authorId": "42",
+       "author": {
+         "id": "42",
+         "type": "users",
+         "name": "John"
+       }
+     }
+   }
+   ```
+
+3. **Optional Response Flattening**
+   ```javascript
+   // With flattenResponse: true
+   
+   // Single resource
+   await api.resources.users.get(1)
+   // Returns: { id: "1", name: "John" }
+   
+   // Collection with meta
+   await api.resources.users.query({ pageSize: 10 })
+   // Returns: { 
+   //   records: [...], 
+   //   meta: { totalCount: 100, ... } 
+   // }
+   ```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `flattenResponse` | `false` | Remove data wrapper for single resources |
+| `includeType` | `true` | Include the type field in responses |
+| `embedRelationships` | `true` | Embed related objects instead of using relationships/included |
+
+## Compliance Assessment
+
+### Default: 100% JSON:API Compliant ✅
+
+| Feature | Compliance | Implementation |
+|---------|------------|----------------|
+| **Document Structure** | ✅ 100% | Full `data`, `errors`, `meta`, `links`, `included` support |
+| **Resource Objects** | ✅ 100% | Proper `id`, `type`, `attributes`, `relationships` |
+| **Relationships** | ✅ 100% | Separate relationships object with proper structure |
+| **Compound Documents** | ✅ 100% | Full `included` array with deduplication |
+| **Links** | ✅ 100% | Pagination links, relationship links (when using HTTP) |
+| **Error Objects** | ✅ 100% | Complete error object structure |
+| **Query Parameters** | ✅ 100% | All standard parameters supported |
+| **Sparse Fieldsets** | ✅ 100% | `fields[type]=field1,field2` syntax |
+| **Sorting** | ✅ 100% | Multi-field with `-` prefix for descending |
+| **Pagination** | ✅ 100% | Page-based with proper meta and links |
+| **Filtering** | ✅ 100% | `filter[field]=value` with operators |
+| **Include** | ✅ 100% | Dot-notation for nested includes |
+| **Content Type** | ✅ 100% | Accepts required media types |
+| **HTTP Semantics** | ✅ 100% | Correct methods and status codes |
+
+### With SimplifiedRecordsPlugin: Convenient Format 🔄
+
+The plugin provides a familiar format while maintaining all functionality:
+
+| Feature | Format | Notes |
+|---------|--------|-------|
+| **Responses** | Simplified | Attributes flattened, relationships embedded |
+| **Requests** | JSON:API | No change to request format |
+| **Query Parameters** | JSON:API | All parameters work identically |
+| **Error Handling** | JSON:API | Errors remain fully compliant |
+| **Features** | 100% | All features continue to work |
+
+## Usage Examples
+
+### Client Code Examples
+
+#### Reading Data
+```javascript
+// With SimplifiedRecordsPlugin
+const user = await api.resources.users.get(1);
+console.log(user.data.name); // Direct access
+
+// Without plugin (JSON:API)
+const user = await api.resources.users.get(1);
+console.log(user.data.attributes.name); // Via attributes
+```
+
+#### Working with Relationships
+```javascript
+// With SimplifiedRecordsPlugin
+const post = await api.resources.posts.get(1);
+console.log(post.data.author.name); // Embedded object
+
+// Without plugin (JSON:API)
+const post = await api.resources.posts.get(1);
+const author = post.included.find(
+  r => r.type === 'users' && r.id === post.data.relationships.author.data.id
+);
+console.log(author.attributes.name);
 ```
 
 ## Summary
 
-- **Default**: 70% compatible, optimized for simplicity and developer experience
-- **With Plugin**: 100% compliant with JSON:API v1.0 specification
-- **Migration**: Easy, non-breaking, can be gradual
-- **Performance**: Minimal overhead (1-2ms per response)
-- **Flexibility**: Choose your level of compliance based on needs
+- **Default**: 100% JSON:API v1.0 compliant
+- **SimplifiedRecordsPlugin**: Convenient format for easier development
+- **Flexibility**: Choose your format based on your needs
+- **Performance**: Minimal overhead in either mode
 
-The JSON REST API library gives you the best of both worlds: simplicity when you want it, full compliance when you need it.
+The JSON REST API library provides full JSON:API compliance by default while offering the flexibility to use a simplified format when preferred.

@@ -156,18 +156,38 @@ await runHttpTests('Basic CRUD Operations', async ({ baseUrl }, storageType) => 
   
   postId = createPostResponse.data.data.id
   
-  // Check eager join worked - with preserveId: true, authorId stays as ID and author object is created
+  // Check eager join worked - in JSON:API format, joined data is in included section
   console.log('  Post response:', JSON.stringify(createPostResponse.data.data.attributes, null, 2))
-  if (!createPostResponse.data.data.attributes.author || 
-      typeof createPostResponse.data.data.attributes.author !== 'object') {
-    throw new Error('Eager join for author failed')
+  
+  // Check relationships section exists
+  if (!createPostResponse.data.data.relationships || 
+      !createPostResponse.data.data.relationships.author) {
+    throw new Error('Author relationship missing in response')
   }
   
-  if (createPostResponse.data.data.attributes.author.id !== Number(userId)) {
-    throw new Error('Joined author has wrong ID')
+  // Check included section exists
+  if (!createPostResponse.data.included || 
+      !Array.isArray(createPostResponse.data.included) || 
+      createPostResponse.data.included.length === 0) {
+    throw new Error('Eager join failed - no included data')
   }
   
-  // With preserveId: true, authorId should still be the ID
+  // Find the author in included section
+  const includedAuthor = createPostResponse.data.included.find(
+    item => item.type === 'users' && item.id === String(userId)
+  )
+  
+  if (!includedAuthor) {
+    throw new Error('Author not found in included section')
+  }
+  
+  if (!includedAuthor.attributes || 
+      !includedAuthor.attributes.name || 
+      !includedAuthor.attributes.email) {
+    throw new Error('Author data incomplete in included section')
+  }
+  
+  // With preserveId: true, authorId should still be the ID in attributes
   if (createPostResponse.data.data.attributes.authorId !== String(userId)) {
     throw new Error('authorId should be preserved as string ID')
   }

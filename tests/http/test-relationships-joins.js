@@ -133,27 +133,44 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(getPostResponse, 200)
   
-  // Check eager join for authorId
+  // Check eager join for authorId in JSON:API format
   const postData = getPostResponse.data.data
-  if (!postData.attributes.author || typeof postData.attributes.author !== 'object') {
-    throw new Error('Author should be eagerly joined as object')
+  
+  // Check relationships section
+  if (!postData.relationships || !postData.relationships.author) {
+    throw new Error('Author relationship missing')
   }
   
-  if (postData.attributes.author.id !== Number(users[0].id)) {
+  // Check included section for eager join
+  if (!getPostResponse.data.included || !Array.isArray(getPostResponse.data.included)) {
+    throw new Error('Eager join failed - no included section')
+  }
+  
+  // Find author in included
+  const authorRel = postData.relationships.author.data
+  const author = getPostResponse.data.included.find(
+    item => item.type === 'users' && item.id === authorRel.id
+  )
+  
+  if (!author) {
+    throw new Error('Author not found in included section')
+  }
+  
+  if (author.id !== String(users[0].id)) {
     throw new Error('Joined author has wrong ID')
   }
   
-  if (!postData.attributes.author.name || !postData.attributes.author.email) {
+  if (!author.attributes || !author.attributes.name || !author.attributes.email) {
     throw new Error('Joined author missing required fields')
   }
   
-  // preserveId should keep authorId as string
+  // preserveId should keep authorId as string in attributes
   if (postData.attributes.authorId !== String(users[0].id)) {
     throw new Error('authorId should be preserved as string')
   }
   
-  // categoryId should NOT be eagerly joined (not configured)
-  if (typeof postData.attributes.categoryId === 'object') {
+  // categoryId should NOT have a relationship (not eagerly joined)
+  if (postData.relationships && postData.relationships.category) {
     throw new Error('categoryId should not be eagerly joined')
   }
   
@@ -166,15 +183,30 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(getPostsResponse, 200)
   
-  // All posts should have author joined
+  // Check that included section exists for eager joins
+  if (!getPostsResponse.data.included || !Array.isArray(getPostsResponse.data.included)) {
+    throw new Error('Eager joins failed - no included section for collection')
+  }
+  
+  // All posts should have author relationship
   for (const post of getPostsResponse.data.data) {
-    if (!post.attributes.author || typeof post.attributes.author !== 'object') {
-      throw new Error(`Post ${post.id} missing author join`)
+    if (!post.relationships || !post.relationships.author) {
+      throw new Error(`Post ${post.id} missing author relationship`)
+    }
+    
+    // Find author in included section
+    const authorRel = post.relationships.author.data
+    const author = getPostsResponse.data.included.find(
+      item => item.type === 'users' && item.id === authorRel.id
+    )
+    
+    if (!author) {
+      throw new Error(`Post ${post.id} author not found in included section`)
     }
     
     // Verify author data matches
-    const expectedAuthor = users.find(u => u.id === post.attributes.authorId)
-    if (post.attributes.author.id !== Number(expectedAuthor.id)) {
+    const expectedAuthor = users.find(u => String(u.id) === authorRel.id)
+    if (author.id !== String(expectedAuthor.id)) {
       throw new Error(`Post ${post.id} has wrong author data`)
     }
   }
@@ -188,20 +220,42 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(includeResponse, 200)
   
-  // Posts should now have both author (eager) and category (included)
+  // Check that both author (eager) and category (included) are in included section
+  if (!includeResponse.data.included || !Array.isArray(includeResponse.data.included)) {
+    throw new Error('No included section when using include parameter')
+  }
+  
   for (const post of includeResponse.data.data) {
-    // Author should still be joined
-    if (!post.attributes.author) {
-      throw new Error('Author join missing when using include')
+    // Should have both relationships
+    if (!post.relationships || !post.relationships.author) {
+      throw new Error('Author relationship missing when using include')
     }
     
-    // Category should now be joined
-    if (!post.attributes.category || typeof post.attributes.category !== 'object') {
-      throw new Error('Category not joined with include parameter')
+    if (!post.relationships.category) {
+      throw new Error('Category relationship missing with include parameter')
     }
     
-    const expectedCategory = categories.find(c => c.id === post.attributes.categoryId)
-    if (post.attributes.category.id !== Number(expectedCategory.id)) {
+    // Verify both are in included section
+    const authorRel = post.relationships.author.data
+    const categoryRel = post.relationships.category.data
+    
+    const author = includeResponse.data.included.find(
+      item => item.type === 'users' && item.id === authorRel.id
+    )
+    const category = includeResponse.data.included.find(
+      item => item.type === 'categories' && item.id === categoryRel.id
+    )
+    
+    if (!author) {
+      throw new Error('Author not found in included section')
+    }
+    
+    if (!category) {
+      throw new Error('Category not found in included section')
+    }
+    
+    const expectedCategory = categories.find(c => String(c.id) === categoryRel.id)
+    if (category.id !== String(expectedCategory.id)) {
       throw new Error('Joined category has wrong data')
     }
   }
@@ -216,25 +270,51 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(multiIncludeResponse, 200)
   
+  // Check included section exists
+  if (!multiIncludeResponse.data.included || !Array.isArray(multiIncludeResponse.data.included)) {
+    throw new Error('No included section for multiple includes')
+  }
+  
   for (const comment of multiIncludeResponse.data.data) {
-    // User should be eagerly joined (configured in schema)
-    if (!comment.attributes.user || typeof comment.attributes.user !== 'object') {
-      throw new Error('User not eagerly joined in comment')
+    // User should have relationship (eager join in schema)
+    if (!comment.relationships || !comment.relationships.user) {
+      throw new Error('User relationship missing in comment')
     }
     
-    // Post should be included via parameter
-    if (!comment.attributes.post || typeof comment.attributes.post !== 'object') {
-      throw new Error('Post not joined via include parameter')
+    // Post should have relationship (via include parameter)
+    if (!comment.relationships.post) {
+      throw new Error('Post relationship missing with include parameter')
     }
     
-    // Verify data
-    const expectedUser = users.find(u => u.id === comment.attributes.userId)
-    if (comment.attributes.user.id !== Number(expectedUser.id)) {
+    // Find user in included section
+    const userRel = comment.relationships.user.data
+    const user = multiIncludeResponse.data.included.find(
+      item => item.type === 'users' && item.id === userRel.id
+    )
+    
+    if (!user) {
+      throw new Error('User not found in included section')
+    }
+    
+    // Find post in included section
+    const postRel = comment.relationships.post.data
+    const post = multiIncludeResponse.data.included.find(
+      item => item.type === 'posts' && item.id === postRel.id
+    )
+    
+    if (!post) {
+      throw new Error('Post not found in included section')
+    }
+    
+    // Verify user data
+    const expectedUser = users.find(u => String(u.id) === userRel.id)
+    if (user.id !== String(expectedUser.id)) {
       throw new Error('Joined user has wrong data')
     }
     
-    const expectedPost = posts.find(p => p.id === comment.attributes.postId)
-    if (comment.attributes.post.id !== Number(expectedPost.id)) {
+    // Verify post data
+    const expectedPost = posts.find(p => String(p.id) === postRel.id)
+    if (post.id !== String(expectedPost.id)) {
       throw new Error('Joined post has wrong data')
     }
   }
@@ -271,12 +351,25 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   const categoryData = getCategoryResponse.data.data
   
-  
-  if (!categoryData.attributes.parent || typeof categoryData.attributes.parent !== 'object') {
-    throw new Error('Parent category not joined')
+  // Check parent relationship in JSON:API format
+  if (!categoryData.relationships || !categoryData.relationships.parent) {
+    throw new Error('Parent relationship missing')
   }
   
-  if (categoryData.attributes.parent.id !== Number(categories[0].id)) {
+  if (!getCategoryResponse.data.included || !Array.isArray(getCategoryResponse.data.included)) {
+    throw new Error('Parent category not in included section')
+  }
+  
+  const parentRel = categoryData.relationships.parent.data
+  const parent = getCategoryResponse.data.included.find(
+    item => item.type === 'categories' && item.id === parentRel.id
+  )
+  
+  if (!parent) {
+    throw new Error('Parent category not found in included section')
+  }
+  
+  if (parent.id !== String(categories[0].id)) {
     throw new Error('Joined parent has wrong ID')
   }
   
@@ -284,18 +377,21 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   console.log('  7.6 Join with field selection')
   
   // The schema specifies only certain fields for author join
-  const joinedPost = getPostResponse.data.data
+  // Find the author from the first test's response
+  const firstAuthor = getPostResponse.data.included.find(
+    item => item.type === 'users' && item.id === getPostResponse.data.data.relationships.author.data.id
+  )
   
   // Should have id, name, email (as specified in schema)
-  if (!joinedPost.attributes.author.id || 
-      !joinedPost.attributes.author.name || 
-      !joinedPost.attributes.author.email) {
+  if (!firstAuthor || 
+      !firstAuthor.attributes.name || 
+      !firstAuthor.attributes.email) {
     throw new Error('Joined author missing specified fields')
   }
   
   // Should NOT have other fields like role, isActive
-  if (joinedPost.attributes.author.role !== undefined || 
-      joinedPost.attributes.author.isActive !== undefined) {
+  if (firstAuthor.attributes.role !== undefined || 
+      firstAuthor.attributes.isActive !== undefined) {
     throw new Error('Joined author should not include non-specified fields')
   }
   
@@ -310,13 +406,19 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
     const filterJoinResponse = parseResponse(filterJoinResult.raw)
     
     if (filterJoinResponse.status === 200) {
-      // If supported, verify results
-      const authorOnePosts = filterJoinResponse.data.data.filter(
-        p => p.attributes.author.name === 'Author One'
-      )
-      
-      if (authorOnePosts.length !== filterJoinResponse.data.data.length) {
-        throw new Error('Filter on joined field not working correctly')
+      // If supported, verify results - need to check included section
+      if (filterJoinResponse.data.included) {
+        const authorOneId = filterJoinResponse.data.included.find(
+          item => item.type === 'users' && item.attributes.name === 'Author One'
+        )?.id
+        
+        const authorOnePosts = filterJoinResponse.data.data.filter(
+          p => p.relationships?.author?.data?.id === authorOneId
+        )
+        
+        if (authorOnePosts.length !== filterJoinResponse.data.data.length) {
+          throw new Error('Filter on joined field not working correctly')
+        }
       }
       console.log('  ✓ Filtering on joined fields supported')
     } else if (filterJoinResponse.status === 422) {
@@ -418,13 +520,13 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
     
     console.log(`  ✓ Query with joins completed in ${perfTime}ms`)
     
-    // Verify all joins were performed
+    // Verify all joins were performed via relationships
     const totalPosts = perfResponse.data.data.length
-    const postsWithAuthor = perfResponse.data.data.filter(p => p.attributes.author).length
-    const postsWithCategory = perfResponse.data.data.filter(p => p.attributes.category).length
+    const postsWithAuthor = perfResponse.data.data.filter(p => p.relationships?.author).length
+    const postsWithCategory = perfResponse.data.data.filter(p => p.relationships?.category).length
     
     if (postsWithAuthor !== totalPosts) {
-      throw new Error('Not all posts have author joined')
+      throw new Error('Not all posts have author relationship')
     }
     
     if (postsWithCategory !== totalPosts) {
