@@ -361,6 +361,41 @@ export const HTTPPlugin = {
     
     // Routes
     
+    // Batch operations endpoint (must be before /:type routes)
+    router.post(`/batch`, async (req, res) => {
+      try {
+        const { operations, options: batchOptions = {} } = req.body;
+        const user = getUserFromRequest(req);
+        
+        if (!Array.isArray(operations)) {
+          throw new BadRequestError('Operations must be an array');
+        }
+        
+        // Add user context to all operations
+        const opsWithUser = operations.map(op => ({
+          ...op,
+          options: { ...op.options, user }
+        }));
+        
+        const results = await api.batch(opsWithUser, batchOptions);
+        
+        // Return appropriate status based on results
+        const status = results.failed > 0 ? 207 : 200; // 207 Multi-Status
+        
+        res.status(status).json({
+          data: results.results,
+          meta: {
+            successful: results.successful,
+            failed: results.failed,
+            total: results.results.length
+          }
+        });
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+    
     // GET collection
     router.get(`${routePrefix}/:type`, async (req, res) => {
       try {
@@ -519,6 +554,149 @@ export const HTTPPlugin = {
         });
 
         res.status(204).end();
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // Bulk create endpoint
+    router.post(`${routePrefix}/:type/bulk`, async (req, res) => {
+      try {
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
+        const user = getUserFromRequest(req);
+        const { data, options = {} } = req.body;
+        
+        if (!Array.isArray(data)) {
+          throw new BadRequestError('Data must be an array for bulk operations');
+        }
+        
+        // Extract attributes from JSON:API format
+        const items = data.map(item => {
+          if (item.attributes) {
+            return item.attributes;
+          }
+          return item;
+        });
+        
+        const results = await api.resources[req.params.type].bulk.create(items, {
+          ...options,
+          user
+        });
+        
+        // Format response
+        const formatted = results.map(item => ({
+          type: req.params.type,
+          id: String(item.id || item[api.options.idProperty]),
+          attributes: Object.keys(item).reduce((attrs, key) => {
+            if (key !== 'id' && key !== api.options.idProperty) {
+              attrs[key] = item[key];
+            }
+            return attrs;
+          }, {})
+        }));
+        
+        res.status(201).json({ data: formatted });
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // Bulk update endpoint
+    router.patch(`${routePrefix}/:type/bulk`, async (req, res) => {
+      try {
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
+        const user = getUserFromRequest(req);
+        const { data, filter, options = {} } = req.body;
+        
+        let result;
+        
+        if (filter) {
+          // Update by filter
+          const updates = data?.attributes || data || {};
+          result = await api.resources[req.params.type].bulk.update({
+            filter,
+            data: updates
+          }, { ...options, user });
+          
+          res.json({ 
+            data: { type: 'bulk-update', id: 'filter' },
+            meta: { updated: result.updated }
+          });
+        } else {
+          // Update specific records
+          if (!Array.isArray(data)) {
+            throw new BadRequestError('Data must be an array for bulk updates');
+          }
+          
+          const updates = data.map(item => ({
+            id: item.id,
+            data: item.attributes || item
+          }));
+          
+          const results = await api.resources[req.params.type].bulk.update(updates, {
+            ...options,
+            user
+          });
+          
+          // Format response
+          const formatted = results.map(item => ({
+            type: req.params.type,
+            id: String(item.id || item[api.options.idProperty]),
+            attributes: Object.keys(item).reduce((attrs, key) => {
+              if (key !== 'id' && key !== api.options.idProperty) {
+                attrs[key] = item[key];
+              }
+              return attrs;
+            }, {})
+          }));
+          
+          res.json({ data: formatted });
+        }
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // Bulk delete endpoint
+    router.delete(`${routePrefix}/:type/bulk`, async (req, res) => {
+      try {
+        if (!api.schemas || !api.schemas.has(req.params.type)) {
+          throw new NotFoundError(`Resource type '${req.params.type}' not found`);
+        }
+        
+        const user = getUserFromRequest(req);
+        const { data, filter, options = {} } = req.body;
+        
+        let result;
+        
+        if (filter) {
+          // Delete by filter
+          result = await api.resources[req.params.type].bulk.delete({
+            filter
+          }, { ...options, user });
+        } else if (data?.ids) {
+          // Delete by IDs
+          result = await api.resources[req.params.type].bulk.delete(data.ids, {
+            ...options,
+            user
+          });
+        } else {
+          throw new BadRequestError('Must provide either filter or data.ids for bulk delete');
+        }
+        
+        res.json({ 
+          data: { type: 'bulk-delete', id: 'result' },
+          meta: { deleted: result.deleted || result.length }
+        });
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));

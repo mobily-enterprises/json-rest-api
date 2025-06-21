@@ -493,6 +493,240 @@ Requirements:
 - Invalid paths throw `BadRequestError` with details
 - Hooks execute from innermost to outermost level
 
+## Transaction API
+
+High-level transaction support for database operations.
+
+### api.transaction(fn, options)
+
+Execute operations within a database transaction.
+
+```javascript
+// Basic transaction
+const result = await api.transaction(async (trx) => {
+  const user = await trx.resources.users.create({ name: 'Alice' });
+  const account = await trx.resources.accounts.create({ 
+    userId: user.id, 
+    balance: 1000 
+  });
+  return { user, account };
+});
+
+// With options
+const result = await api.transaction(async (trx) => {
+  // Operations here
+}, {
+  timeout: 5000,        // Transaction timeout in ms
+  retries: 3,           // Number of retry attempts
+  isolationLevel: 'READ COMMITTED'
+});
+```
+
+### Transaction Methods
+
+#### trx.savepoint(name, fn)
+
+Create a savepoint within a transaction.
+
+```javascript
+await api.transaction(async (trx) => {
+  const user = await trx.resources.users.create({ name: 'Bob' });
+  
+  try {
+    await trx.savepoint('risky_operation', async () => {
+      // If this fails, only rolls back to savepoint
+      await trx.resources.accounts.create({ userId: user.id, balance: -100 });
+    });
+  } catch (error) {
+    // User creation is preserved
+  }
+});
+```
+
+### Requirements
+
+- Storage adapter must support transactions (MySQL, PostgreSQL)
+- Memory storage gracefully degrades (no actual transactions)
+- Nested transactions are supported via savepoints
+- All operations within transaction share the same connection
+
+## Batch Operations API
+
+Execute multiple operations efficiently.
+
+### api.batch(operations, options)
+
+Execute multiple mixed operations.
+
+```javascript
+const results = await api.batch([
+  { method: 'create', type: 'users', data: { name: 'Alice' } },
+  { method: 'create', type: 'users', data: { name: 'Bob' } },
+  { method: 'update', type: 'products', id: 123, data: { price: 99.99 } },
+  { method: 'delete', type: 'orders', id: 456 }
+], {
+  stopOnError: false,  // Continue on failures
+  parallel: true       // Execute independent operations in parallel
+});
+
+// Results structure
+{
+  results: [
+    { success: true, data: { id: 1, name: 'Alice' }, operation: {...} },
+    { success: true, data: { id: 2, name: 'Bob' }, operation: {...} },
+    { success: true, data: { id: 123, price: 99.99 }, operation: {...} },
+    { success: false, error: {...}, operation: {...} }
+  ],
+  successful: 3,
+  failed: 1
+}
+```
+
+### api.batch.transaction(fn, options)
+
+Execute batch operations within a transaction.
+
+```javascript
+const results = await api.batch.transaction(async (batch) => {
+  // All operations share the same transaction
+  await batch.resources.accounts.create([
+    { name: 'Checking', balance: 1000 },
+    { name: 'Savings', balance: 5000 }
+  ]);
+  
+  await batch.resources.users.update([
+    { id: 1, data: { verified: true } },
+    { id: 2, data: { verified: true } }
+  ]);
+});
+```
+
+## Bulk Operations API
+
+Optimized operations for multiple records of the same type.
+
+### resources.{type}.bulk.create(items, options)
+
+Bulk create multiple records.
+
+```javascript
+const users = await api.resources.users.bulk.create([
+  { name: 'Alice', email: 'alice@example.com' },
+  { name: 'Bob', email: 'bob@example.com' },
+  { name: 'Charlie', email: 'charlie@example.com' }
+], {
+  chunk: 1000,         // Process in chunks
+  validate: true,      // Validate all before inserting
+  returnIds: true      // Return generated IDs
+});
+```
+
+### resources.{type}.bulk.update(updates, options)
+
+Bulk update multiple records.
+
+```javascript
+// Update specific records
+const results = await api.resources.products.bulk.update([
+  { id: 1, data: { price: 19.99 } },
+  { id: 2, data: { price: 29.99 } },
+  { id: 3, data: { price: 39.99 } }
+]);
+
+// Update by filter
+const result = await api.resources.products.bulk.update({
+  filter: { category: 'electronics' },
+  data: { discounted: true }
+});
+// Returns: { updated: 42 }
+```
+
+### resources.{type}.bulk.delete(idsOrFilter, options)
+
+Bulk delete multiple records.
+
+```javascript
+// Delete by IDs
+const results = await api.resources.users.bulk.delete([1, 2, 3]);
+
+// Delete by filter
+const result = await api.resources.users.bulk.delete({
+  filter: { inactive: true, lastLogin: { lt: '2023-01-01' } }
+});
+// Returns: { deleted: 156 }
+```
+
+### Performance Notes
+
+- Bulk operations use optimized SQL (single INSERT/UPDATE/DELETE)
+- Memory storage falls back to individual operations
+- Progress callbacks available for large datasets
+- Chunking prevents memory issues
+
+## Connection Pool Configuration
+
+Configure database connection pooling for optimal performance.
+
+### Pool Options (MySQL)
+
+```javascript
+const api = createApi({
+  storage: 'mysql',
+  mysql: {
+    host: 'localhost',
+    user: 'root',
+    password: 'password',
+    database: 'myapp',
+    pool: {
+      max: 20,                    // Maximum connections
+      min: 5,                     // Minimum connections
+      acquireTimeout: 30000,      // Max time to acquire connection (ms)
+      idleTimeout: 60000,         // Time before idle connection is closed
+      connectionLimit: 100,       // Hard limit on total connections
+      queueLimit: 0,              // Max queued requests (0 = unlimited)
+      enableKeepAlive: true,      // TCP keep-alive
+      keepAliveInitialDelay: 0    // Keep-alive delay (ms)
+    }
+  }
+});
+```
+
+### Pool Monitoring
+
+```javascript
+// Get pool statistics
+const stats = await api.getPoolStats();
+{
+  total: 20,        // Total connections
+  active: 5,        // Currently in use
+  idle: 15,         // Available connections
+  waiting: 0,       // Requests waiting for connection
+  timeout: 30000,   // Acquire timeout
+  created: 20,      // Total connections created
+  destroyed: 0      // Total connections destroyed
+}
+
+// Monitor pool events
+api.on('pool:acquire', (connection) => {
+  console.log('Connection acquired:', connection.threadId);
+});
+
+api.on('pool:release', (connection) => {
+  console.log('Connection released:', connection.threadId);
+});
+
+api.on('pool:timeout', (info) => {
+  console.error('Pool timeout:', info);
+});
+```
+
+### Best Practices
+
+1. **Connection Limits**: Set `max` based on database server limits
+2. **Timeouts**: Balance between responsiveness and connection reuse
+3. **Monitoring**: Track pool stats in production
+4. **Graceful Shutdown**: Always call `api.disconnect()` on shutdown
+
 ## Plugin Interface
 
 Plugins extend API functionality.

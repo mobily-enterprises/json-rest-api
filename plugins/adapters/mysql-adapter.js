@@ -11,26 +11,79 @@ export const MySQLAdapter = {
   install(api, options = {}) {
     // Initialize connection pools
     const pools = new Map();
+    const poolStats = new Map();
+    
+    // Helper to create pool with enhanced configuration
+    const createPool = (config) => {
+      const poolConfig = {
+        ...config,
+        // Apply pool-specific settings if provided
+        ...(config.pool ? {
+          connectionLimit: config.pool.max || config.connectionLimit || 10,
+          queueLimit: config.pool.queueLimit || 0,
+          waitForConnections: config.pool.waitForConnections !== false,
+          acquireTimeout: config.pool.acquireTimeout || 60000,
+          timeout: config.pool.timeout || 60000
+        } : {})
+      };
+      
+      return mysql.createPool(poolConfig);
+    };
     
     if (options.connections) {
       for (const conn of options.connections) {
-        const pool = mysql.createPool(conn.config);
+        const pool = createPool(conn.config);
         pools.set(conn.name || 'default', {
           pool,
-          options: conn.options || {}
+          options: conn.options || {},
+          config: conn.config
+        });
+        poolStats.set(conn.name || 'default', {
+          acquired: 0,
+          released: 0,
+          errors: 0,
+          timeouts: 0,
+          totalAcquireTime: 0,
+          maxUsed: 0
         });
       }
     } else if (options.connection) {
-      const pool = mysql.createPool(options.connection);
-      pools.set('default', { pool, options: {} });
+      const pool = createPool(options.connection);
+      pools.set('default', { 
+        pool, 
+        options: {},
+        config: options.connection
+      });
+      poolStats.set('default', {
+        acquired: 0,
+        released: 0,
+        errors: 0,
+        timeouts: 0,
+        totalAcquireTime: 0,
+        maxUsed: 0
+      });
     }
     
     // Store pools on API instance for cleanup
     api._mysqlPools = pools;
+    api._mysqlPoolStats = poolStats;
     
     // Implement database interface
     api.implement('db.query', async (context) => {
-      const { sql, params, connection = 'default' } = context;
+      const { sql, params, connection = 'default', transaction } = context;
+      
+      // Use transaction connection if available
+      if (transaction && transaction.connection) {
+        try {
+          const [rows, fields] = await transaction.connection.execute(sql, params);
+          return { rows, fields, info: rows };
+        } catch (error) {
+          error.sql = sql;
+          error.params = params;
+          throw error;
+        }
+      }
+      
       const poolInfo = pools.get(connection);
       
       if (!poolInfo) {
@@ -291,5 +344,88 @@ export const MySQLAdapter = {
         }
       }
     });
+    
+    // Add pool monitoring methods to API
+    api.getPoolStats = async (connectionName = 'default') => {
+      const poolInfo = pools.get(connectionName);
+      const stats = poolStats.get(connectionName);
+      
+      if (!poolInfo || !stats) {
+        throw new InternalError(`Connection '${connectionName}' not found`);
+      }
+      
+      // Get pool status from mysql2
+      const pool = poolInfo.pool;
+      const poolPromise = pool.pool || pool; // Handle different mysql2 versions
+      
+      return {
+        // Connection counts
+        total: poolInfo.config?.pool?.max || poolInfo.config?.connectionLimit || 10,
+        active: poolPromise._allConnections?.length || 0,
+        idle: poolPromise._freeConnections?.length || 0,
+        waiting: poolPromise._connectionQueue?.length || 0,
+        
+        // Statistics
+        acquired: stats.acquired,
+        released: stats.released,
+        errors: stats.errors,
+        timeouts: stats.timeouts,
+        averageAcquireTime: stats.acquired > 0 ? stats.totalAcquireTime / stats.acquired : 0,
+        maxUsed: stats.maxUsed
+      };
+    };
+    
+    // Get all pool stats
+    api.getAllPoolStats = async () => {
+      const allStats = {};
+      for (const [name] of pools) {
+        allStats[name] = await api.getPoolStats(name);
+      }
+      return allStats;
+    };
+    
+    // Enhanced connection acquisition with stats
+    const originalExecute = api.implementers.get('db.query');
+    api.implement('db.query', async (context) => {
+      const connectionName = context.connection || 'default';
+      const stats = poolStats.get(connectionName);
+      
+      if (stats && !context.transaction) {
+        const startTime = Date.now();
+        stats.acquired++;
+        
+        try {
+          const result = await originalExecute(context);
+          stats.released++;
+          stats.totalAcquireTime += Date.now() - startTime;
+          
+          // Update max used
+          const poolInfo = pools.get(connectionName);
+          if (poolInfo) {
+            const pool = poolInfo.pool.pool || poolInfo.pool;
+            const active = (pool._allConnections?.length || 0) - (pool._freeConnections?.length || 0);
+            stats.maxUsed = Math.max(stats.maxUsed, active);
+          }
+          
+          return result;
+        } catch (error) {
+          stats.errors++;
+          if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+            stats.timeouts++;
+          }
+          throw error;
+        }
+      }
+      
+      return originalExecute(context);
+    });
+    
+    // Mark adapter capabilities
+    api.storagePlugin = api.storagePlugin || {};
+    api.storagePlugin.supportsTransactions = true;
+    api.storagePlugin.supportsSavepoints = true;
+    api.storagePlugin.supportsPoolMonitoring = true;
+    api.storagePlugin.supportsBulkInsert = true;
+    api.storagePlugin.supportsBulkUpdate = true;
   }
 };

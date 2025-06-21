@@ -48,6 +48,16 @@ export const SQLPlugin = {
       if (!hasAdapter) {
         throw new InternalError('No database adapter installed. Install MySQLAdapter or AlaSQLAdapter first.');
       }
+      
+      // Add transaction methods if storage supports it
+      if (api.storagePlugin?.supportsTransactions) {
+        const { addTransactionMethods } = await import('../lib/transaction.js');
+        addTransactionMethods(api);
+      }
+      
+      // Add batch operations
+      const { addBatchMethods } = await import('../lib/batch.js');
+      addBatchMethods(api);
     });
     
     /**
@@ -313,7 +323,11 @@ export const SQLPlugin = {
             console.log('Query Args:', args);
           }
           
-          const result = await api.execute('db.query', { sql, params: args });
+          const result = await api.execute('db.query', { 
+            sql, 
+            params: args,
+            transaction: context.options?.transaction 
+          });
           const rows = result.rows;
           
           if (!rows[0] && !options.allowNotFound) {
@@ -335,7 +349,11 @@ export const SQLPlugin = {
             console.log('Simple GET params:', [queryId]);
           }
           
-          const result = await api.execute('db.query', { sql, params: [queryId] });
+          const result = await api.execute('db.query', { 
+            sql, 
+            params: [queryId],
+            transaction: context.options?.transaction 
+          });
           const rows = result.rows;
 
           if (!rows[0] && !options.allowNotFound) {
@@ -455,7 +473,11 @@ export const SQLPlugin = {
             console.log('Query Params:', args);
           }
           
-          const result = await api.execute('db.query', { sql, params: args });
+          const result = await api.execute('db.query', { 
+            sql, 
+            params: args,
+            transaction: context.options?.transaction 
+          });
           const rows = result.rows;
           
           // Parse JSON fields for each row
