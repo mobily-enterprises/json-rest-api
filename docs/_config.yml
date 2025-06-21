@@ -1,0 +1,37 @@
+theme: jekyll-theme-minimal
+title: JSON REST API
+description: A lightweight, plugin-based REST API framework for Node.js
+show_downloads: false
+
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: true
+
+include:
+  - README.md
+  - QUICKSTART.md
+  - GUIDE.md
+  - API.md
+  - ONBOARDING.md
+  - GUIDE_1_Getting_Started.md
+  - GUIDE_2_Core_Features.md
+  - GUIDE_3_Plugins_and_Architecture.md
+  - GUIDE_4_Advanced_Topics.md
+  - GUIDE_5_Production_and_Deployment.md
+  - GUIDE_6_Examples.md
+  - GUIDE_7_Security.md
+
+exclude:
+  - _old/
+  - examples/
+
+highlighter: rouge
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge

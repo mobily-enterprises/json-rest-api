@@ -1,59 +1,65 @@
-# 🌐 How to Deploy the Documentation Website on GitHub Pages
+# Deploying the Documentation Website on GitHub Pages
 
-This guide shows you how to deploy the JSON REST API documentation as a beautiful website using GitHub Pages.
+This project uses GitHub Pages to host documentation directly from the `/docs` folder.
 
-## Quick Start (3 steps)
+## Quick Start (2 steps)
 
-### 1️⃣ Push to GitHub
-```bash
-git add docs-website/
-git commit -m "Add documentation website"
-git push origin main
-```
-
-### 2️⃣ Enable GitHub Pages
+### 1. Enable GitHub Pages
 1. Go to your repository on GitHub.com
 2. Click **Settings** → **Pages** (in left sidebar)
 3. Under **Source**, select **Deploy from a branch**
 4. Under **Branch**, choose:
    - Branch: `main`
-   - Folder: `/docs-website`
+   - Folder: `/docs`
 5. Click **Save**
 
-### 3️⃣ Access Your Site
-- Wait 2-5 minutes
+### 2. Access Your Site
+- Wait 2-5 minutes for initial deployment
 - Your site will be at: `https://[your-username].github.io/json-rest-api/`
 - The URL appears at the top of the Pages settings
 
-## Keeping Docs in Sync
+## How It Works
 
-When you update documentation in the `docs/` folder:
+GitHub Pages automatically:
+- Serves files from the `/docs` folder
+- Processes Markdown files using Jekyll
+- Uses the `_config.yml` for theme and settings
+- Shows `index.md` as the homepage
+
+## Making Changes
+
+Simply edit any `.md` files in the `/docs` folder:
 
 ```bash
-# 1. Sync the changes to the website
-npm run sync-docs
+# Edit documentation
+vim docs/GUIDE.md
 
-# 2. Commit and push
-git add docs-website/content/
+# Commit and push
+git add docs/
 git commit -m "Update documentation"
 git push
 ```
 
-The website updates automatically!
+The website updates automatically within minutes!
 
-## Test Locally
+## Local Preview (Optional)
+
+To preview the site locally with Jekyll:
 
 ```bash
-# Start local server
-npm run docs:dev
+# Install Jekyll (one time)
+gem install bundler jekyll
 
-# Open in browser
-# http://localhost:8080
+# Run local server
+cd docs
+jekyll serve
+
+# Open http://localhost:4000
 ```
 
 ## Custom Domain (Optional)
 
-1. Edit `docs-website/CNAME` with your domain
+1. Create `docs/CNAME` with your domain
 2. Add DNS records pointing to GitHub:
    - A records: `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
    - OR CNAME record: `[your-username].github.io`
@@ -64,17 +70,11 @@ npm run docs:dev
 **Site not showing?**
 - Check Actions tab for deployment status
 - Verify Pages is enabled in Settings
-- Clear browser cache
+- Ensure `/docs` folder is selected
 
 **404 errors?**
-- Run `npm run sync-docs` after adding new docs
 - Check file names (case-sensitive!)
+- Verify links use `.md` extension
+- Clear browser cache
 
-## How It Works
-
-1. **Original docs stay in `/docs`** - Your markdown files remain where they are
-2. **Sync script copies to website** - `npm run sync-docs` copies them to `/docs-website/content`
-3. **Website renders markdown** - JavaScript app converts markdown to beautiful HTML
-4. **GitHub Pages serves it** - Automatically deploys when you push
-
-That's it! Your documentation is now a professional website. 🎉
+That's it! No build scripts or generators needed - GitHub Pages handles everything. 🎉
