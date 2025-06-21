@@ -8,7 +8,8 @@ This section covers advanced features including API versioning, programmatic usa
 2. [Programmatic Usage](#programmatic-usage)
 3. [Query Builder](#query-builder)
 4. [Error Handling](#error-handling)
-5. [Performance Optimization](#performance-optimization)
+5. [Best Practices](#best-practices)
+6. [Performance Optimization](#performance-optimization)
 
 ## API Versioning
 
@@ -481,6 +482,145 @@ try {
     }
   }]
 }
+```
+
+## Best Practices
+
+### 1. Always Use the Resource Proxy API
+
+The resource proxy API provides a more intuitive and maintainable way to interact with your resources:
+
+```javascript
+// ✅ Preferred
+const user = await api.resources.users.get(123);
+const posts = await api.resources.posts.query({ filter: { authorId: 123 } });
+
+// ❌ Avoid
+const user = await api.get(123, { type: 'users' });
+const posts = await api.query({ filter: { authorId: 123 } }, { type: 'posts' });
+```
+
+### 2. Always Mark Searchable Fields
+
+Only fields marked as `searchable: true` can be filtered in queries. This prevents arbitrary field access and improves security:
+
+```javascript
+const schema = new Schema({
+  // Can be filtered
+  email: { type: 'string', searchable: true },
+  status: { type: 'string', searchable: true },
+  
+  // Cannot be filtered
+  internalNotes: { type: 'string' },
+  apiKey: { type: 'string', silent: true }
+});
+```
+
+### 3. Use Virtual Search Fields
+
+For complex searches that don't map directly to database columns:
+
+```javascript
+api.addResource('posts', schema, {
+  searchableFields: {
+    title: 'title',     // Normal field mapping
+    author: 'authorId', // Different name mapping
+    search: '*'         // Virtual field (marked with *)
+  }
+});
+
+// Handle virtual fields in hooks
+api.hook('modifyQuery', async (context) => {
+  if (context.params.filter?.search) {
+    const searchTerm = context.params.filter.search;
+    delete context.params.filter.search;
+    
+    // Transform to actual database query
+    context.query.where(
+      '(title LIKE ? OR content LIKE ? OR tags LIKE ?)',
+      `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`
+    );
+  }
+});
+```
+
+### 4. Common Patterns
+
+#### Multi-Tenant APIs
+
+Implement tenant isolation at the query level:
+
+```javascript
+// Add tenant context to all queries
+api.hook('beforeQuery', async (context) => {
+  const tenantId = context.options.user?.tenantId;
+  if (tenantId) {
+    context.params.filter.tenantId = tenantId;
+  }
+});
+
+// Add tenant ID on creation
+api.hook('beforeInsert', async (context) => {
+  const tenantId = context.options.user?.tenantId;
+  if (tenantId) {
+    context.data.tenantId = tenantId;
+  }
+});
+```
+
+#### Audit Logging
+
+Track all data modifications:
+
+```javascript
+api.hook('afterInsert', async (context) => {
+  await auditLog.create({
+    action: 'create',
+    resource: context.options.type,
+    resourceId: context.result.data.id,
+    userId: context.options.user?.id,
+    data: context.result.data,
+    timestamp: Date.now()
+  });
+});
+
+api.hook('afterUpdate', async (context) => {
+  await auditLog.create({
+    action: 'update',
+    resource: context.options.type,
+    resourceId: context.id,
+    userId: context.options.user?.id,
+    changes: context.data,
+    timestamp: Date.now()
+  });
+});
+```
+
+#### Soft Deletes
+
+Implement soft deletes instead of hard deletes:
+
+```javascript
+// Add deletedAt field to schema
+const schema = new Schema({
+  // ... other fields
+  deletedAt: { type: 'timestamp', silent: true }
+});
+
+// Override delete behavior
+api.hook('beforeDelete', async (context) => {
+  // Convert delete to update
+  context.method = 'update';
+  context.data = { deletedAt: Date.now() };
+});
+
+// Filter out soft-deleted records
+api.hook('beforeQuery', async (context) => {
+  // Add filter to exclude soft-deleted records
+  if (!context.params.filter.includeDeleted) {
+    context.params.filter.deletedAt = null;
+  }
+});
 ```
 
 ## Performance Optimization

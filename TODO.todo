@@ -1,4 +1,10 @@
+
 TODO
+* Implement missing parts of security audit
+* Resolve last little bits of TODO
+* Place the web site in docs/ (the only option available now in GitHub)
+* Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
+
 
 You made this comment on the missing features of:
 

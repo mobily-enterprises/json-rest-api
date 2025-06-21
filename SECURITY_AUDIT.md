@@ -243,11 +243,18 @@ cors: {
 
 ## Medium Severity Vulnerabilities
 
-### 8. Resource Exhaustion via Complex Queries (MEDIUM)
+### 8. Resource Exhaustion via Complex Queries (MEDIUM) ✅ FIXED
 
 **Location**: Query processing
 
 **Description**: No limits on query complexity.
+
+**Status**: FIXED - Added QueryLimitsPlugin
+- Limits join depth and count
+- Limits page size
+- Limits filter and sort complexity
+- Cost-based query rejection
+- Admin bypass capability
 
 **Attack Vector**:
 ```javascript

@@ -41,7 +41,7 @@ api.use(ValidationPlugin);   // Add validation
 
 ### Schemas Define Your Data
 
-Schemas are like TypeScript interfaces but with runtime validation:
+Schemas are like TypeScript interfaces but with runtime validation. This is **schema-driven development** - your data structure drives everything:
 
 ```javascript
 import { Schema } from 'json-rest-api';
@@ -52,6 +52,10 @@ const userSchema = new Schema({
   email: { type: 'string', required: true, match: /^[^@]+@[^@]+\.[^@]+$/, searchable: true },
   age: { type: 'number', min: 0, max: 150, searchable: true },
   active: { type: 'boolean', default: true, searchable: true },
+  
+  // Security considerations
+  password: { type: 'string', silent: true }, // Never exposed in queries
+  apiKey: { type: 'string', silent: true },   // Hidden from responses
   
   // Special types
   id: { type: 'id' },  // Auto-increment ID
@@ -67,6 +71,12 @@ const userSchema = new Schema({
   }
 });
 ```
+
+**Key concepts:**
+- `searchable: true` - Field can be filtered in queries
+- `silent: true` - Field is never exposed (for passwords, secrets)
+- `required: true` - Field must be provided on creation
+- `default: value` - Auto-fill if not provided
 
 ### Resources = Your Data Models
 
@@ -104,18 +114,31 @@ await api.resources.users.batch.create([
 
 ### Plugin Architecture
 
-Plugins extend functionality by hooking into the API lifecycle:
+Plugins extend functionality by hooking into the API lifecycle. **Plugin order is critical**:
 
 ```javascript
-// Plugins are added in order
+// Always load plugins in this order:
 api
-  .use(ValidationPlugin)      // Validates data
-  .use(MySQLPlugin, config)   // Provides storage
-  .use(TimestampsPlugin)      // Manages timestamps
-  .use(HTTPPlugin);           // Adds REST endpoints
+  .use(MySQLPlugin)        // Storage first (or MemoryPlugin)
+  .use(ValidationPlugin)   // Validation 
+  .use(AuthorizationPlugin) // Security/auth plugins
+  .use(HTTPPlugin)         // HTTP last (mounts routes)
 
-// Order matters! Storage plugins must come before feature plugins
+// ❌ Wrong order - HTTP before storage
+api.use(HTTPPlugin).use(MySQLPlugin);  // Will fail!
+
+// ✅ Correct order - storage → features → HTTP
+api
+  .use(MySQLPlugin, config)
+  .use(ValidationPlugin)
+  .use(TimestampsPlugin)
+  .use(HTTPPlugin);
 ```
+
+**Why order matters:**
+- Storage plugins implement the core CRUD operations
+- Feature plugins hook into these operations
+- HTTP plugin creates routes based on what's available
 
 ### Hooks Enable Custom Logic
 

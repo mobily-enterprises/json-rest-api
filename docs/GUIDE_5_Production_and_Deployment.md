@@ -7,10 +7,11 @@ This section covers best practices for organizing resources, implementing authen
 1. [Organizing Resources](#organizing-resources)
 2. [Authentication & Security](#authentication--security)
 3. [Best Practices](#best-practices)
-4. [Testing](#testing)
-5. [Contributing](#contributing)
-6. [Troubleshooting](#troubleshooting)
-7. [Get Help](#get-help)
+4. [Deployment Checklist](#deployment-checklist)
+5. [Testing](#testing)
+6. [Contributing](#contributing)
+7. [Troubleshooting](#troubleshooting)
+8. [Get Help](#get-help)
 
 ## Organizing Resources
 
@@ -399,6 +400,59 @@ The JSON REST API automatically protects against common vulnerabilities:
 18. **Document complex queries** - Help future maintainers
 19. **Mark fields as searchable** - Only searchable fields can be filtered
 20. **Use searchableFields mappings** - For filtering by joined data
+
+## Deployment Checklist
+
+Before deploying to production, ensure you've addressed all these items:
+
+### Environment & Configuration
+- [ ] **JWT_SECRET** environment variable set (minimum 32 characters)
+- [ ] **CORS_ORIGINS** environment variable configured with production domains
+- [ ] **Database credentials** secured and not hardcoded
+- [ ] **Node environment** set to production (`NODE_ENV=production`)
+- [ ] **API versioning** strategy defined
+
+### Security
+- [ ] **HTTPS enforced** via load balancer or reverse proxy
+- [ ] **Rate limiting** configured (using SecurityPlugin or external service)
+- [ ] **Authentication middleware** properly configured
+- [ ] **Authorization rules** defined for all resources
+- [ ] **Sensitive fields** marked with `silent: true` in schemas
+- [ ] **Error messages** don't leak sensitive information or stack traces
+
+### Database
+- [ ] **Database migrations** run and schema synchronized
+- [ ] **Indexes created** on all searchable and frequently queried fields
+- [ ] **Connection pooling** configured for MySQL
+- [ ] **Backup strategy** in place with regular automated backups
+- [ ] **Recovery plan** tested and documented
+
+### Infrastructure
+- [ ] **Load balancer** configured (if using multiple instances)
+- [ ] **Health check endpoint** implemented
+- [ ] **Monitoring/alerting** set up for errors and performance
+- [ ] **Logging** configured with appropriate log levels
+- [ ] **Process manager** (PM2, systemd, etc.) configured for auto-restart
+
+### Performance
+- [ ] **Caching strategy** implemented for frequently accessed data
+- [ ] **CDN configured** for static assets (if applicable)
+- [ ] **Query performance** tested under load
+- [ ] **Connection limits** appropriate for expected traffic
+
+### Operations
+- [ ] **Deployment process** documented and automated
+- [ ] **Rollback procedure** tested and documented
+- [ ] **Environment variables** documented and managed securely
+- [ ] **API documentation** up to date and accessible
+- [ ] **Support procedures** defined for handling issues
+
+### Testing
+- [ ] **All tests passing** in production environment
+- [ ] **Load testing** completed and acceptable
+- [ ] **Security audit** performed
+- [ ] **API endpoints** manually verified in production
+- [ ] **Error handling** tested for edge cases
 
 ## Testing
 

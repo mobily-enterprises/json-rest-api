@@ -294,7 +294,211 @@ const jwtToken = await api.generateToken({...});
 
 ## Authorization
 
-See the [Authorization Guide](./GUIDE_5_Production_and_Deployment.md#authentication--security) for details on role-based access control.
+The **AuthorizationPlugin** provides role-based access control (RBAC) with fine-grained permissions.
+
+### Basic Setup
+
+```javascript
+import { AuthorizationPlugin } from 'json-rest-api/plugins/authorization.js';
+
+api.use(AuthorizationPlugin, {
+  // Define roles and permissions
+  roles: {
+    admin: { 
+      permissions: '*' // All permissions
+    },
+    editor: { 
+      permissions: ['posts.*', 'media.*'] 
+    },
+    user: { 
+      permissions: [
+        'posts.create',
+        'posts.read',
+        'posts.update.own', // Only own posts
+        'posts.delete.own'
+      ]
+    }
+  },
+  
+  // Bridge to your auth system
+  enhanceUser: async (user) => {
+    // Load roles from your database/JWT/session
+    const roles = await getUserRoles(user.id);
+    return { ...user, roles };
+  },
+  
+  // Resource-specific rules
+  resources: {
+    posts: {
+      ownerField: 'authorId',
+      public: ['read'],
+      authenticated: ['create'],
+      owner: ['update', 'delete']
+    }
+  }
+});
+```
+
+### Permission Hierarchy
+
+Permissions follow a hierarchical pattern:
+- `*` - All permissions
+- `resource.*` - All actions on a resource
+- `resource.action` - Specific action on a resource
+- `resource.action.own` - Action only on owned items
+
+### Ownership-Based Access
+
+Define ownership rules per resource:
+
+```javascript
+resources: {
+  posts: {
+    ownerField: 'authorId',       // Which field defines ownership
+    owner: ['update', 'delete']   // Owner-only actions
+  },
+  comments: {
+    ownerField: 'userId',
+    authenticated: ['create'],    // Any logged-in user
+    owner: ['update', 'delete'],  // Only comment author
+    permissions: {
+      delete: 'comments.moderate' // Override with permission
+    }
+  }
+}
+```
+
+### Checking Permissions
+
+```javascript
+// In hooks or custom code
+if (!user.can('posts.update')) {
+  throw new ForbiddenError('Insufficient permissions');
+}
+
+// Check ownership
+if (!user.owns(post) && !user.can('posts.update.any')) {
+  throw new ForbiddenError('You can only edit your own posts');
+}
+```
+
+## Query Complexity Limits
+
+The **QueryLimitsPlugin** prevents resource exhaustion attacks by limiting query complexity:
+
+### Basic Setup
+
+```javascript
+import { QueryLimitsPlugin } from 'json-rest-api/plugins/query-limits.js';
+
+api.use(QueryLimitsPlugin, {
+  maxJoins: 5,           // Maximum total joins in a query
+  maxJoinDepth: 3,       // Maximum nesting depth for joins
+  maxPageSize: 100,      // Maximum records per page
+  defaultPageSize: 20,   // Default page size
+  maxFilterFields: 10,   // Maximum filter conditions
+  maxSortFields: 3,      // Maximum sort fields
+  maxQueryCost: 100      // Maximum total query cost
+});
+```
+
+### Query Cost Calculation
+
+The plugin calculates a "cost" for each query based on its complexity:
+
+```javascript
+// Cost weights (configurable)
+costs: {
+  join: 10,           // Each join costs 10 points
+  nestedJoin: 15,     // Additional cost for nested joins
+  filter: 2,          // Each filter condition
+  sort: 3,            // Each sort field
+  pageSize: 0.1       // Per record requested
+}
+```
+
+### Resource-Specific Limits
+
+Override limits for specific resources:
+
+```javascript
+api.use(QueryLimitsPlugin, {
+  maxPageSize: 50,  // Global default
+  
+  resources: {
+    // Allow larger page sizes for posts
+    posts: {
+      maxPageSize: 200,
+      maxQueryCost: 150
+    },
+    // Restrict comments more strictly
+    comments: {
+      maxPageSize: 20,
+      maxJoins: 2
+    }
+  }
+});
+```
+
+### Admin/Premium User Bypass
+
+Allow certain users to bypass limits:
+
+```javascript
+api.use(QueryLimitsPlugin, {
+  // Bypass for specific roles
+  bypassRoles: ['admin', 'superadmin'],
+  
+  // Custom bypass logic
+  bypassCheck: (user) => {
+    return user?.subscription === 'premium' || 
+           user?.trustLevel > 100;
+  }
+});
+```
+
+### Example Error Messages
+
+When limits are exceeded, clear error messages explain the issue:
+
+```json
+{
+  "error": {
+    "message": "Maximum number of joins (5) exceeded",
+    "status": 400,
+    "context": {
+      "joinCount": 7,
+      "maxJoins": 5,
+      "joins": ["authorId", "categoryId", "tags", "comments", "comments.authorId", "relatedPosts", "relatedPosts.authorId"]
+    }
+  }
+}
+```
+
+### Validating Query Complexity
+
+Check if a query would exceed limits before executing:
+
+```javascript
+const validation = api.validateQueryComplexity({
+  joins: ['authorId', 'categoryId'],
+  filter: { status: 'published' },
+  page: { size: 50 }
+}, 'posts', req.user);
+
+if (!validation.valid) {
+  // Show warning or adjust query
+  console.log(`Query cost: ${validation.cost}/${validation.maxCost}`);
+}
+```
+
+### Best Practices
+
+1. **Set reasonable defaults** - Balance security with usability
+2. **Monitor query costs** - Track which queries are expensive
+3. **Educate API users** - Document limits in your API docs
+4. **Provide alternatives** - Offer paginated or simplified endpoints
+5. **Use field selection** - Encourage clients to request only needed fields
 
 ## Additional Security Features
 
