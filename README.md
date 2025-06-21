@@ -41,7 +41,7 @@ With just a schema definition, you get:
 - ✅ **Complete REST endpoints** - GET, POST, PATCH, DELETE
 - ✅ **Automatic validation** - Type checking, constraints, custom rules  
 - ✅ **Smart querying** - Advanced filtering (19 operators), relationship sorting, pagination, search
-- ✅ **Relationships** - Automatic joins, nested includes
+- ✅ **Relationships** - Automatic joins, nested includes, JSON:API relationship endpoints
 - ✅ **Versioning** - API and resource versioning built-in
 - ✅ **JSON:API compliant** - Full spec compliance with strict mode, meta formatting, enhanced errors
 - ✅ **Extensible** - Hooks, plugins, custom types
@@ -247,6 +247,53 @@ GET /api/products?
   filter[price][lt]=1000&
   filter[category][in]=electronics,computers&
   filter[name][contains]=Pro
+```
+</details>
+
+<details>
+<summary><strong>Relationship Endpoints</strong></summary>
+
+```javascript
+// Define relationships with provideUrl flag
+api.addResource('articles', new Schema({
+  title: { type: 'string', required: true },
+  authorId: { 
+    type: 'id', 
+    refs: { 
+      resource: 'users',
+      provideUrl: true    // Enable relationship endpoints
+    }
+  },
+  tags: {
+    type: 'list',
+    virtual: true,
+    foreignResource: 'tags',
+    foreignKey: 'articleId',
+    provideUrl: true      // Enable relationship endpoints
+  }
+}));
+
+// Now you get JSON:API compliant relationship endpoints:
+
+// Get relationship linkage
+GET /api/articles/1/relationships/author
+// { "data": { "type": "users", "id": "42" } }
+
+// Get related resource
+GET /api/articles/1/author
+// { "data": { "type": "users", "id": "42", "attributes": {...} } }
+
+// Update to-one relationship
+PATCH /api/articles/1/relationships/author
+// Body: { "data": { "type": "users", "id": "99" } }
+
+// Add to to-many relationship
+POST /api/articles/1/relationships/tags
+// Body: { "data": [{ "type": "tags", "id": "5" }] }
+
+// Remove from to-many relationship
+DELETE /api/articles/1/relationships/tags
+// Body: { "data": [{ "type": "tags", "id": "5" }] }
 ```
 </details>
 

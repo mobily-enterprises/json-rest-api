@@ -676,6 +676,473 @@ export const HTTPPlugin = {
       }
     });
 
+    // GET relationship endpoint
+    router.get(`${routePrefix}/:type/:id/relationships/:field`, async (req, res) => {
+      try {
+        const { type, id, field } = req.params;
+        
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(type)) {
+          throw new NotFoundError(`Resource type '${type}' not found`);
+        }
+        
+        const schema = api.schemas.get(type);
+        const fieldDef = schema.structure[field];
+        
+        if (!fieldDef) {
+          throw new NotFoundError(`Relationship '${field}' not found on resource '${type}'`);
+        }
+        
+        // Check if relationship endpoints are enabled
+        const provideUrl = fieldDef.provideUrl || fieldDef.refs?.provideUrl;
+        if (!provideUrl) {
+          throw new BadRequestError(`Relationship endpoint not enabled for '${field}'`);
+        }
+        
+        const user = getUserFromRequest(req);
+        
+        // Check field permissions
+        if (fieldDef.permissions?.read !== undefined) {
+          const hasPermission = api.checkFieldPermission(user, fieldDef.permissions.read);
+          if (!hasPermission) {
+            throw new NotFoundError(`Relationship '${field}' not found on resource '${type}'`);
+          }
+        }
+        
+        // Get the parent resource
+        const parent = await api.get(id, { type, user });
+        if (!parent.data) {
+          throw new NotFoundError(type, id);
+        }
+        
+        // Handle to-one relationships
+        if (fieldDef.refs) {
+          const relatedId = parent.data.attributes[field];
+          const response = {
+            data: relatedId ? {
+              type: fieldDef.refs.resource,
+              id: String(relatedId)
+            } : null,
+            links: {
+              self: buildResourceUrl(req, type, id, 'relationships', field),
+              related: buildResourceUrl(req, type, id, field)
+            }
+          };
+          
+          res.json(wrapResponse(response));
+          return;
+        }
+        
+        // Handle to-many relationships
+        if (fieldDef.type === 'list' && fieldDef.foreignResource) {
+          const params = parseQueryParams(req);
+          
+          // Force filter by parent ID
+          const filter = {
+            ...params.filter,
+            [fieldDef.foreignKey]: id
+          };
+          
+          // Apply default filter if any
+          if (fieldDef.defaultFilter) {
+            Object.assign(filter, fieldDef.defaultFilter);
+          }
+          
+          // Query related resources
+          const result = await api.query({
+            ...params,
+            filter,
+            sort: params.sort || fieldDef.defaultSort,
+            page: params.page || (fieldDef.limit ? { size: fieldDef.limit } : undefined)
+          }, {
+            type: fieldDef.foreignResource,
+            user,
+            isHttp: true
+          });
+          
+          // Return just the linkage data
+          const response = {
+            data: result.data.map(item => ({
+              type: item.type,
+              id: item.id
+            })),
+            links: {
+              self: buildResourceUrl(req, type, id, 'relationships', field),
+              related: buildResourceUrl(req, type, id, field)
+            },
+            meta: result.meta
+          };
+          
+          res.json(wrapResponse(response));
+          return;
+        }
+        
+        throw new BadRequestError(`Invalid relationship type for '${field}'`);
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // GET related resource endpoint
+    router.get(`${routePrefix}/:type/:id/:field`, async (req, res) => {
+      try {
+        const { type, id, field } = req.params;
+        
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(type)) {
+          throw new NotFoundError(`Resource type '${type}' not found`);
+        }
+        
+        const schema = api.schemas.get(type);
+        const fieldDef = schema.structure[field];
+        
+        if (!fieldDef) {
+          throw new NotFoundError(`Relationship '${field}' not found on resource '${type}'`);
+        }
+        
+        // Check if relationship endpoints are enabled
+        const provideUrl = fieldDef.provideUrl || fieldDef.refs?.provideUrl;
+        if (!provideUrl) {
+          throw new BadRequestError(`Relationship endpoint not enabled for '${field}'`);
+        }
+        
+        const user = getUserFromRequest(req);
+        
+        // Check field permissions
+        if (fieldDef.permissions?.read !== undefined) {
+          const hasPermission = api.checkFieldPermission(user, fieldDef.permissions.read);
+          if (!hasPermission) {
+            throw new NotFoundError(`Relationship '${field}' not found on resource '${type}'`);
+          }
+        }
+        
+        // Get the parent resource
+        const parent = await api.get(id, { type, user });
+        if (!parent.data) {
+          throw new NotFoundError(type, id);
+        }
+        
+        // Handle to-one relationships
+        if (fieldDef.refs) {
+          const relatedId = parent.data.attributes[field];
+          if (!relatedId) {
+            res.json(wrapResponse({ data: null }));
+            return;
+          }
+          
+          const result = await api.get(relatedId, {
+            type: fieldDef.refs.resource,
+            user,
+            isHttp: true,
+            req
+          });
+          
+          res.json(wrapResponse(addLinks(result, req, fieldDef.refs.resource)));
+          return;
+        }
+        
+        // Handle to-many relationships
+        if (fieldDef.type === 'list' && fieldDef.foreignResource) {
+          const params = parseQueryParams(req);
+          
+          // Force filter by parent ID
+          const filter = {
+            ...params.filter,
+            [fieldDef.foreignKey]: id
+          };
+          
+          // Apply default filter if any
+          if (fieldDef.defaultFilter) {
+            Object.assign(filter, fieldDef.defaultFilter);
+          }
+          
+          // Query related resources with full data
+          const result = await api.query({
+            ...params,
+            filter,
+            sort: params.sort || fieldDef.defaultSort,
+            page: params.page || (fieldDef.limit ? { size: fieldDef.limit } : undefined)
+          }, {
+            type: fieldDef.foreignResource,
+            user,
+            isHttp: true,
+            req
+          });
+          
+          res.json(wrapResponse(addLinks(result, req, fieldDef.foreignResource)));
+          return;
+        }
+        
+        throw new BadRequestError(`Invalid relationship type for '${field}'`);
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // PATCH relationship endpoint (to-one relationships)
+    router.patch(`${routePrefix}/:type/:id/relationships/:field`, async (req, res) => {
+      try {
+        const { type, id, field } = req.params;
+        
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(type)) {
+          throw new NotFoundError(`Resource type '${type}' not found`);
+        }
+        
+        const schema = api.schemas.get(type);
+        const fieldDef = schema.structure[field];
+        
+        if (!fieldDef || !fieldDef.refs) {
+          throw new BadRequestError(`Cannot update relationship '${field}' - not a to-one relationship`);
+        }
+        
+        // Check if relationship endpoints are enabled
+        const provideUrl = fieldDef.provideUrl || fieldDef.refs?.provideUrl;
+        if (!provideUrl) {
+          throw new BadRequestError(`Relationship endpoint not enabled for '${field}'`);
+        }
+        
+        const user = getUserFromRequest(req);
+        
+        // Validate request body
+        if (!req.body || !('data' in req.body)) {
+          throw new BadRequestError('Request must include "data" member');
+        }
+        
+        const newRelationship = req.body.data;
+        let newId = null;
+        
+        if (newRelationship !== null) {
+          if (!newRelationship.type || !newRelationship.id) {
+            throw new BadRequestError('Relationship data must include "type" and "id"');
+          }
+          
+          if (newRelationship.type !== fieldDef.refs.resource) {
+            throw new BadRequestError(`Invalid type '${newRelationship.type}' - expected '${fieldDef.refs.resource}'`);
+          }
+          
+          newId = newRelationship.id;
+        }
+        
+        // Update the parent resource
+        const updateData = { [field]: newId };
+        const result = await api.update(id, updateData, { type, user });
+        
+        if (!result.data) {
+          throw new NotFoundError(type, id);
+        }
+        
+        // Return the updated relationship
+        const response = {
+          data: newId ? {
+            type: fieldDef.refs.resource,
+            id: String(newId)
+          } : null
+        };
+        
+        res.json(wrapResponse(response));
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // POST relationship endpoint (to-many relationships)
+    router.post(`${routePrefix}/:type/:id/relationships/:field`, async (req, res) => {
+      try {
+        const { type, id, field } = req.params;
+        
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(type)) {
+          throw new NotFoundError(`Resource type '${type}' not found`);
+        }
+        
+        const schema = api.schemas.get(type);
+        const fieldDef = schema.structure[field];
+        
+        if (!fieldDef || fieldDef.type !== 'list' || !fieldDef.foreignResource) {
+          throw new BadRequestError(`Cannot add to relationship '${field}' - not a to-many relationship`);
+        }
+        
+        // Check if relationship endpoints are enabled
+        const provideUrl = fieldDef.provideUrl || fieldDef.refs?.provideUrl;
+        if (!provideUrl) {
+          throw new BadRequestError(`Relationship endpoint not enabled for '${field}'`);
+        }
+        
+        const user = getUserFromRequest(req);
+        
+        // Validate request body
+        if (!req.body || !req.body.data || !Array.isArray(req.body.data)) {
+          throw new BadRequestError('Request must include "data" member as an array');
+        }
+        
+        // Verify parent exists
+        const parent = await api.get(id, { type, user });
+        if (!parent.data) {
+          throw new NotFoundError(type, id);
+        }
+        
+        // Add relationships by updating the foreign resources
+        const results = [];
+        for (const item of req.body.data) {
+          if (!item.type || !item.id) {
+            throw new BadRequestError('Each relationship item must include "type" and "id"');
+          }
+          
+          if (item.type !== fieldDef.foreignResource) {
+            throw new BadRequestError(`Invalid type '${item.type}' - expected '${fieldDef.foreignResource}'`);
+          }
+          
+          // Update the foreign resource to point to this parent
+          const updateData = { [fieldDef.foreignKey]: id };
+          await api.update(item.id, updateData, { 
+            type: fieldDef.foreignResource, 
+            user 
+          });
+          
+          results.push(item);
+        }
+        
+        // Query the updated relationships
+        const filter = {
+          [fieldDef.foreignKey]: id
+        };
+        
+        // Apply default filter if any
+        if (fieldDef.defaultFilter) {
+          Object.assign(filter, fieldDef.defaultFilter);
+        }
+        
+        const updatedRelationships = await api.query({
+          filter,
+          sort: fieldDef.defaultSort
+        }, {
+          type: fieldDef.foreignResource,
+          user
+        });
+        
+        // Return the updated linkage data
+        const response = {
+          data: updatedRelationships.data.map(item => ({
+            type: item.type,
+            id: item.id
+          })),
+          links: {
+            self: buildResourceUrl(req, type, id, 'relationships', field),
+            related: buildResourceUrl(req, type, id, field)
+          }
+        };
+        
+        res.json(wrapResponse(response));
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
+    // DELETE relationship endpoint (to-many relationships)
+    router.delete(`${routePrefix}/:type/:id/relationships/:field`, async (req, res) => {
+      try {
+        const { type, id, field } = req.params;
+        
+        // Check if resource type exists
+        if (!api.schemas || !api.schemas.has(type)) {
+          throw new NotFoundError(`Resource type '${type}' not found`);
+        }
+        
+        const schema = api.schemas.get(type);
+        const fieldDef = schema.structure[field];
+        
+        if (!fieldDef || fieldDef.type !== 'list' || !fieldDef.foreignResource) {
+          throw new BadRequestError(`Cannot remove from relationship '${field}' - not a to-many relationship`);
+        }
+        
+        // Check if relationship endpoints are enabled
+        const provideUrl = fieldDef.provideUrl || fieldDef.refs?.provideUrl;
+        if (!provideUrl) {
+          throw new BadRequestError(`Relationship endpoint not enabled for '${field}'`);
+        }
+        
+        const user = getUserFromRequest(req);
+        
+        // Validate request body
+        if (!req.body || !req.body.data || !Array.isArray(req.body.data)) {
+          throw new BadRequestError('Request must include "data" member as an array');
+        }
+        
+        // Verify parent exists
+        const parent = await api.get(id, { type, user });
+        if (!parent.data) {
+          throw new NotFoundError(type, id);
+        }
+        
+        // Remove relationships by nullifying the foreign key
+        for (const item of req.body.data) {
+          if (!item.type || !item.id) {
+            throw new BadRequestError('Each relationship item must include "type" and "id"');
+          }
+          
+          if (item.type !== fieldDef.foreignResource) {
+            throw new BadRequestError(`Invalid type '${item.type}' - expected '${fieldDef.foreignResource}'`);
+          }
+          
+          // Check current relationship
+          const currentResource = await api.get(item.id, {
+            type: fieldDef.foreignResource,
+            user
+          });
+          
+          if (currentResource.data && 
+              String(currentResource.data.attributes[fieldDef.foreignKey]) === String(id)) {
+            // Nullify the foreign key
+            const updateData = { [fieldDef.foreignKey]: null };
+            await api.update(item.id, updateData, { 
+              type: fieldDef.foreignResource, 
+              user 
+            });
+          }
+        }
+        
+        // Query the updated relationships
+        const filter = {
+          [fieldDef.foreignKey]: id
+        };
+        
+        // Apply default filter if any
+        if (fieldDef.defaultFilter) {
+          Object.assign(filter, fieldDef.defaultFilter);
+        }
+        
+        const updatedRelationships = await api.query({
+          filter,
+          sort: fieldDef.defaultSort
+        }, {
+          type: fieldDef.foreignResource,
+          user
+        });
+        
+        // Return the updated linkage data
+        const response = {
+          data: updatedRelationships.data.map(item => ({
+            type: item.type,
+            id: item.id
+          })),
+          links: {
+            self: buildResourceUrl(req, type, id, 'relationships', field),
+            related: buildResourceUrl(req, type, id, field)
+          }
+        };
+        
+        res.json(wrapResponse(response));
+      } catch (error) {
+        const apiError = normalizeError(error);
+        res.status(apiError.status).json(formatErrors(error));
+      }
+    });
+
     // POST new resource
     router.post(`${routePrefix}/:type`, async (req, res) => {
       try {
@@ -779,7 +1246,37 @@ export const HTTPPlugin = {
           ...options.typeOptions?.[req.params.type]
         });
 
-        res.status(204).end();
+        // Query the updated relationships
+        const filter = {
+          [fieldDef.foreignKey]: id
+        };
+        
+        // Apply default filter if any
+        if (fieldDef.defaultFilter) {
+          Object.assign(filter, fieldDef.defaultFilter);
+        }
+        
+        const updatedRelationships = await api.query({
+          filter,
+          sort: fieldDef.defaultSort
+        }, {
+          type: fieldDef.foreignResource,
+          user
+        });
+        
+        // Return the updated linkage data
+        const response = {
+          data: updatedRelationships.data.map(item => ({
+            type: item.type,
+            id: item.id
+          })),
+          links: {
+            self: buildResourceUrl(req, type, id, 'relationships', field),
+            related: buildResourceUrl(req, type, id, field)
+          }
+        };
+        
+        res.json(wrapResponse(response));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));

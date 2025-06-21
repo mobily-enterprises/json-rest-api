@@ -127,6 +127,83 @@ The library implements the complete JSON:API v1.0 specification by default:
 - **Sparse fieldsets**: `?fields[users]=name,email`
 - **Including relationships**: `?include=author,comments.author`
 
+### ✅ Relationship Endpoints
+The library fully supports JSON:API relationship endpoints when enabled with the `provideUrl` flag:
+
+#### Fetching Relationships
+```javascript
+// GET /articles/1/relationships/author
+// Returns just the linkage data
+{
+  "data": { "type": "users", "id": "42" },
+  "links": {
+    "self": "/articles/1/relationships/author",
+    "related": "/articles/1/author"
+  }
+}
+
+// GET /articles/1/author  
+// Returns the full related resource
+{
+  "data": {
+    "type": "users",
+    "id": "42",
+    "attributes": { "name": "John Doe" }
+  }
+}
+```
+
+#### Updating To-One Relationships
+```javascript
+// PATCH /articles/1/relationships/author
+// Request body:
+{
+  "data": { "type": "users", "id": "99" }
+}
+
+// To clear a relationship, send null:
+{
+  "data": null
+}
+```
+
+#### Managing To-Many Relationships
+```javascript
+// POST /articles/1/relationships/tags
+// Add tags to the article
+{
+  "data": [
+    { "type": "tags", "id": "5" },
+    { "type": "tags", "id": "6" }
+  ]
+}
+
+// DELETE /articles/1/relationships/tags
+// Remove specific tags
+{
+  "data": [
+    { "type": "tags", "id": "5" }
+  ]
+}
+```
+
+To enable relationship endpoints, use the `provideUrl` flag in your schema:
+```javascript
+authorId: { 
+  type: 'id', 
+  refs: { 
+    resource: 'users',
+    provideUrl: true  // Enable relationship endpoints
+  }
+},
+tags: {
+  type: 'list',
+  foreignResource: 'tags',
+  foreignKey: 'articleId',
+  provideUrl: true  // Enable relationship endpoints
+}
+```
+
 ### ✅ Content Type
 - Accepts both `application/json` and `application/vnd.api+json`
 - Returns `application/json` by default (allowed by spec)
@@ -258,6 +335,7 @@ api.use(SimplifiedRecordsPlugin, {
 | **Pagination** | ✅ 100% | Page-based with proper meta and links |
 | **Filtering** | ✅ 100% | `filter[field]=value` with operators |
 | **Include** | ✅ 100% | Dot-notation for nested includes |
+| **Relationship URLs** | ✅ 100% | Full support for relationship endpoints |
 | **Content Type** | ✅ 100% | Accepts required media types |
 | **HTTP Semantics** | ✅ 100% | Correct methods and status codes |
 

@@ -199,7 +199,8 @@ new Schema(structure: SchemaStructure)
       join: {                 // Optional - automatic join config
         eager: true,
         fields: ['id', 'name']
-      }
+      },
+      provideUrl: true        // Optional - enable relationship endpoints
     }
   }
 }
@@ -381,6 +382,90 @@ api.hook('afterGet', async (context) => {
 | `'array'` | Array (stored as JSON) | TEXT |
 | `'object'` | Object (stored as JSON) | TEXT |
 | `'list'` | To-many relationship (virtual) | Not stored |
+
+### Relationships
+
+The library supports both to-one and to-many relationships with automatic loading and JSON:API compliant endpoints.
+
+#### To-One Relationships (refs)
+
+To-one relationships are defined using the `refs` property on ID fields:
+
+```javascript
+const postSchema = new Schema({
+  title: { type: 'string', required: true },
+  authorId: {
+    type: 'id',
+    refs: {
+      resource: 'users',        // Related resource type
+      join: {                   // Optional auto-join configuration
+        eager: true,            // Always include when queried
+        fields: ['id', 'name'], // Specific fields to include
+        preserveId: true        // Keep both ID and joined object
+      },
+      provideUrl: true          // Enable relationship endpoints
+    }
+  }
+});
+```
+
+#### To-Many Relationships (list)
+
+To-many relationships are defined using `type: 'list'` with virtual fields:
+
+```javascript
+const userSchema = new Schema({
+  name: { type: 'string', required: true },
+  posts: {
+    type: 'list',
+    virtual: true,              // Not stored in users table
+    foreignResource: 'posts',   // Related resource type
+    foreignKey: 'authorId',     // Field in related resource
+    defaultFilter: { published: true }, // Optional default filter
+    defaultSort: '-createdAt',  // Optional default sort
+    provideUrl: true            // Enable relationship endpoints
+  }
+});
+```
+
+#### Relationship Endpoints
+
+When `provideUrl: true` is set, the following endpoints become available:
+
+##### For To-One Relationships:
+- `GET /posts/1/relationships/author` - Get relationship linkage
+- `GET /posts/1/author` - Get full related resource  
+- `PATCH /posts/1/relationships/author` - Update relationship
+
+##### For To-Many Relationships:
+- `GET /users/1/relationships/posts` - Get relationship linkages
+- `GET /users/1/posts` - Get full related resources
+- `POST /users/1/relationships/posts` - Add to relationship
+- `DELETE /users/1/relationships/posts` - Remove from relationship
+
+#### Loading Relationships
+
+Use the `include` parameter to load related resources:
+
+```javascript
+// Include author when getting a post
+const post = await api.get(1, { 
+  type: 'posts', 
+  include: 'author' 
+});
+
+// Include posts when getting a user
+const user = await api.get(1, { 
+  type: 'users', 
+  include: 'posts' 
+});
+
+// Nested includes
+const post = await api.get(1, { 
+  type: 'posts', 
+  include: 'author.country' 
+});
+```
 
 ### Methods
 

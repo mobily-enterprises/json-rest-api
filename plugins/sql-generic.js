@@ -70,6 +70,25 @@ export const SQLPlugin = {
         await api._processJoinedData(context, record);
       }
     }, 90);
+    
+    // Also process joined data for get operations
+    api.hook('afterGet', async (context) => {
+      if (api.options.debug && context.options?.type === 'offices') {
+        console.log('afterGet hook for offices:', {
+          hasJoinFields: !!context.joinFields,
+          joinFieldsCount: context.joinFields ? Object.keys(context.joinFields).length : 0,
+          hasResult: !!context.result
+        });
+      }
+      
+      if (!context.joinFields || Object.keys(context.joinFields).length === 0) {
+        return;
+      }
+      
+      if (context.result) {
+        await api._processJoinedData(context, context.result);
+      }
+    }, 90);
     // Ensure a database adapter is installed
     api.hook('afterConnect', async () => {
       const hasAdapter = api.implementers.has('db.query');
@@ -342,6 +361,9 @@ export const SQLPlugin = {
         const needsJoins = schema && options.joins !== false && hasEagerJoins(schema, options);
         
         if (needsJoins) {
+          if (api.options.debug) {
+            console.log('Get using query builder for joins');
+          }
           // Use query builder for complex get with joins
           const query = new QueryBuilder(table, api);
           
@@ -918,13 +940,24 @@ function hasEagerJoins(schema, options) {
 async function determineRequestedJoins(api, schema, params, user) {
   const joins = new Map();
   
+  if (api.options.debug && params?.type === 'offices') {
+    console.log('determineRequestedJoins for offices:', {
+      hasParams: !!params,
+      hasInclude: !!params?.include,
+      includeValue: params?.include
+    });
+  }
+  
   // Add eager joins only if no include parameter specified
-  if (!params.include) {
+  if (!params?.include) {
     for (const [field, def] of Object.entries(schema.structure)) {
       if (def.refs && def.refs.join?.eager === true) {
         // Check permission for eager joins too
         if (!user || await api.checkIncludePermission(user, def)) {
           joins.set(field, def.refs);
+          if (api.options.debug && params?.type === 'offices') {
+            console.log(`Added eager join for field: ${field}`);
+          }
         }
       }
     }

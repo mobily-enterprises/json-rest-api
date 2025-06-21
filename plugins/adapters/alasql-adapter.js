@@ -27,8 +27,17 @@ export const AlaSQLAdapter = {
         // AlaSQL doesn't like newlines in SQL
         const cleanSql = sql.replace(/\n/g, ' ');
         
+        if (api.options.debug && cleanSql.includes('FROM `offices`')) {
+          console.log('AlaSQL offices query:', cleanSql);
+          console.log('AlaSQL offices params:', params);
+        }
+        
         // Execute query
         const result = db.exec(cleanSql, params);
+        
+        if (api.options.debug && cleanSql.includes('FROM `offices`') && cleanSql.includes('WHERE offices.id = ?')) {
+          console.log('AlaSQL single office result:', JSON.stringify(result, null, 2));
+        }
         
         // Determine affected rows based on query type
         let affectedRows = 0;
