@@ -10,9 +10,6 @@
 
 * check that JSON:API is fully enforced
 
-
-
-
  Critical Missing Features:
   1. Relationship endpoints (/articles/1/relationships/author)
   DONE 2. Strict content-type enforcement
@@ -53,5 +50,4 @@
     - Advanced scheduling needs
 
 LATER:
-  CLI interface
   Mongo interface
