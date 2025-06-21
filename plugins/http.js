@@ -293,6 +293,108 @@ export const HTTPPlugin = {
       return links;
     };
 
+    // Helper to wrap responses with JSON:API metadata
+    const wrapResponse = (data) => {
+      let result = data;
+      
+      // Transform meta fields if configured
+      if (options.jsonApiMetaFormat && result && result.meta) {
+        const oldMeta = result.meta;
+        
+        // Check if it's pagination meta
+        if (oldMeta.total !== undefined || oldMeta.pageSize !== undefined) {
+          result = {
+            ...result,
+            meta: {
+              page: {
+                total: oldMeta.total,
+                size: oldMeta.pageSize,
+                number: oldMeta.pageNumber,
+                totalPages: oldMeta.totalPages
+              }
+            }
+          };
+        }
+      }
+      
+      // Add JSON:API version if configured
+      if (options.jsonApiVersion) {
+        // Don't wrap if already has jsonapi field
+        if (result && typeof result === 'object' && !result.jsonapi) {
+          result = {
+            jsonapi: { version: options.jsonApiVersion },
+            ...result
+          };
+        }
+      }
+      
+      return result;
+    };
+    
+    // Helper to build resource URLs
+    const buildResourceUrl = (req, type, id = null, relationship = null) => {
+      const baseUrl = `${req.protocol}://${req.get('host')}${basePath}`;
+      let url = `${baseUrl}/${type}`;
+      
+      if (id) {
+        url += `/${id}`;
+      }
+      
+      if (relationship) {
+        url += `/relationships/${relationship}`;
+      }
+      
+      return url;
+    };
+
+    // Strict JSON:API mode validation
+    if (options.strictJsonApi) {
+      router.use((req, res, next) => {
+        // Content-Type validation for strict mode
+        if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+          const contentType = req.headers['content-type'];
+          if (!contentType || !contentType.includes('application/vnd.api+json')) {
+            const error = new ApiError(
+              'Content-Type must be application/vnd.api+json in strict JSON:API mode',
+              415,
+              'UNSUPPORTED_MEDIA_TYPE'
+            );
+            return res.status(415).json(formatErrors(error));
+          }
+        }
+        
+        // Query parameter validation for strict mode
+        if (req.method === 'GET') {
+          const allowedParams = ['include', 'fields', 'sort', 'page', 'filter', 'view'];
+          const unknownParams = [];
+          
+          for (const param of Object.keys(req.query)) {
+            // Check top-level params
+            if (!allowedParams.includes(param)) {
+              // Check if it's a bracket notation param
+              const bracketMatch = param.match(/^(filter|fields|page)\[/);
+              if (!bracketMatch) {
+                unknownParams.push(param);
+              }
+            }
+          }
+          
+          if (unknownParams.length > 0) {
+            const error = new BadRequestError(
+              `Unknown query parameter(s): ${unknownParams.join(', ')}. Allowed parameters in strict JSON:API mode: ${allowedParams.join(', ')}`
+            ).withContext({ 
+              unknownParameters: unknownParams,
+              allowedParameters: allowedParams,
+              parameter: unknownParams[0]  // For source.parameter in JSON:API error
+            });
+            return res.status(400).json(formatErrors(error));
+          }
+        }
+        
+        next();
+      });
+    }
+
     // Version-aware routing
     let routePrefix = '';
     if (api.options.name && api.options.version) {
@@ -359,6 +461,124 @@ export const HTTPPlugin = {
       }
     }, 80); // High priority to run before response is sent
     
+    // Helper function to add links to a response
+    const addLinks = (result, req, type) => {
+      if (!options.includeLinks || !result) return result;
+      
+      // Add links to single resource
+      if (result.data && !Array.isArray(result.data)) {
+        const resource = result.data;
+        if (resource.id) {
+          resource.links = {
+            self: buildResourceUrl(req, type, resource.id)
+          };
+          
+          // Add relationship links
+          if (resource.relationships) {
+            for (const [relName, relData] of Object.entries(resource.relationships)) {
+              if (!relData.links) {
+                relData.links = {
+                  self: buildResourceUrl(req, type, resource.id, relName),
+                  related: `${buildResourceUrl(req, type, resource.id)}/${relName}`
+                };
+              }
+            }
+          }
+          
+          // Add top-level self link for single resource responses
+          result.links = result.links || {};
+          result.links.self = buildResourceUrl(req, type, resource.id);
+        }
+      }
+      
+      // Add links to collection resources
+      if (result.data && Array.isArray(result.data)) {
+        for (const resource of result.data) {
+          if (resource.id) {
+            resource.links = {
+              self: buildResourceUrl(req, type, resource.id)
+            };
+            
+            // Add relationship links
+            if (resource.relationships) {
+              for (const [relName, relData] of Object.entries(resource.relationships)) {
+                if (!relData.links) {
+                  relData.links = {
+                    self: buildResourceUrl(req, type, resource.id, relName),
+                    related: `${buildResourceUrl(req, type, resource.id)}/${relName}`
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Add links to included resources
+      if (result.included && Array.isArray(result.included)) {
+        for (const resource of result.included) {
+          if (resource.id && resource.type) {
+            resource.links = {
+              self: buildResourceUrl(req, resource.type, resource.id)
+            };
+          }
+        }
+      }
+      
+      return result;
+    };
+    
+    // Implement batch method if not present
+    if (!api.batch) {
+      api.batch = async (operations, options = {}) => {
+        const results = [];
+        let successful = 0;
+        let failed = 0;
+        
+        for (const op of operations) {
+          try {
+            let result;
+            const opOptions = { ...options, ...op.options };
+            
+            switch (op.method) {
+              case 'get':
+                result = await api.get(op.id, opOptions);
+                break;
+              case 'query':
+                result = await api.query(op.params || {}, opOptions);
+                break;
+              case 'insert':
+              case 'create':
+                result = await api.insert(op.data, opOptions);
+                break;
+              case 'update':
+                result = await api.update(op.id, op.data, opOptions);
+                break;
+              case 'delete':
+                result = await api.delete(op.id, opOptions);
+                break;
+              default:
+                throw new BadRequestError(`Unknown batch operation method: ${op.method}`);
+            }
+            
+            results.push({ 
+              success: true, 
+              data: result 
+            });
+            successful++;
+          } catch (error) {
+            results.push({ 
+              success: false, 
+              error: normalizeError(error).toJSON() 
+            });
+            failed++;
+          }
+        }
+        
+        return { results, successful, failed };
+      };
+    }
+    
     // Routes
     
     // Batch operations endpoint (must be before /:type routes)
@@ -374,7 +594,7 @@ export const HTTPPlugin = {
         // Add user context to all operations
         const opsWithUser = operations.map(op => ({
           ...op,
-          options: { ...op.options, user }
+          options: { ...op.options, user, type: op.type }
         }));
         
         const results = await api.batch(opsWithUser, batchOptions);
@@ -382,14 +602,14 @@ export const HTTPPlugin = {
         // Return appropriate status based on results
         const status = results.failed > 0 ? 207 : 200; // 207 Multi-Status
         
-        res.status(status).json({
+        res.status(status).json(wrapResponse({
           data: results.results,
           meta: {
             successful: results.successful,
             failed: results.failed,
             total: results.results.length
           }
-        });
+        }));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -409,6 +629,7 @@ export const HTTPPlugin = {
         const result = await api.query(params, {
           type: req.params.type,
           user,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -417,7 +638,7 @@ export const HTTPPlugin = {
           result.links = buildLinks(req, params, result.meta);
         }
 
-        res.json(result);
+        res.json(wrapResponse(addLinks(result, req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -440,6 +661,7 @@ export const HTTPPlugin = {
           isHttp: true,
           view: params.view,
           include: params.include,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -447,7 +669,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(result);
+        res.json(wrapResponse(addLinks(result, req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -468,12 +690,13 @@ export const HTTPPlugin = {
           type: req.params.type,
           user,
           isHttp: true,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
         res.status(201)
            .location(`${basePath}${routePrefix}/${req.params.type}/${result.data.id}`)
-           .json(result);
+           .json(wrapResponse(result));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -495,6 +718,7 @@ export const HTTPPlugin = {
           user,
           fullRecord: true,  // Validate as complete record for PUT
           isHttp: true,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -502,7 +726,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(result);
+        res.json(wrapResponse(addLinks(result, req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -523,6 +747,7 @@ export const HTTPPlugin = {
           type: req.params.type,
           user,
           isHttp: true,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -530,7 +755,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(result);
+        res.json(wrapResponse(addLinks(result, req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -550,6 +775,7 @@ export const HTTPPlugin = {
           type: req.params.type,
           user,
           isHttp: true,
+          req, // Pass request for link generation
           ...options.typeOptions?.[req.params.type]
         });
 
@@ -599,7 +825,7 @@ export const HTTPPlugin = {
           }, {})
         }));
         
-        res.status(201).json({ data: formatted });
+        res.status(201).json(wrapResponse({ data: formatted }));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -626,10 +852,10 @@ export const HTTPPlugin = {
             data: updates
           }, { ...options, user });
           
-          res.json({ 
+          res.json(wrapResponse({ 
             data: { type: 'bulk-update', id: 'filter' },
             meta: { updated: result.updated }
-          });
+          }));
         } else {
           // Update specific records
           if (!Array.isArray(data)) {
@@ -658,7 +884,7 @@ export const HTTPPlugin = {
             }, {})
           }));
           
-          res.json({ data: formatted });
+          res.json(wrapResponse({ data: formatted }));
         }
       } catch (error) {
         const apiError = normalizeError(error);
@@ -693,10 +919,10 @@ export const HTTPPlugin = {
           throw new BadRequestError('Must provide either filter or data.ids for bulk delete');
         }
         
-        res.json({ 
+        res.json(wrapResponse({ 
           data: { type: 'bulk-delete', id: 'result' },
           meta: { deleted: result.deleted || result.length }
-        });
+        }));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));

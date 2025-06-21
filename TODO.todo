@@ -34,9 +34,10 @@
     2. Complex Architectures
     DONE - CQRS/Event Sourcing
     DONE - Saga orchestration
-    - Domain-Driven Design
-    - Hexagonal architecture
-  3. Large Enterprise Teams
+    DONE - Domain-Driven Design
+    DONE - Hexagonal architecture
+  
+    3. Large Enterprise Teams
     - Strict architectural enforcement
     - Complex dependency graphs
     - Multiple bounded contexts
@@ -50,3 +51,6 @@
     - Complex queue management
     - Advanced scheduling needs
 
+LATER:
+  CLI interface
+  Mongo interface

@@ -86,6 +86,16 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Real-World Examples** - Checkout flows, aggregation
 - **Performance & Monitoring** - Health checks and metrics
 
+### [11. Domain-Driven Design](./GUIDE_11_Domain_Driven_Design.md)
+- **When to Use DDD** - Understanding the trade-offs
+- **Core DDD Concepts** - Ubiquitous language and bounded contexts
+- **Building Blocks** - Value objects, entities, aggregates
+- **Implementing DDD** - Step-by-step guide with JSON-REST-API
+- **Domain Events** - Event-driven architecture
+- **Specifications** - Encapsulate business rules
+- **Real-World Example** - Complete e-commerce implementation
+- **Best Practices** - Do's and don'ts of DDD
+
 ## 🚀 Quick Links
 
 - **New to JSON REST API?** Start with [Getting Started](./GUIDE_1_Getting_Started.md)
@@ -95,6 +105,7 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Building microservices?** See [Microservices Architecture](./GUIDE_8_Microservices.md)
 - **Need CQRS?** Check [CQRS Pattern](./GUIDE_9_CQRS.md)
 - **API orchestration?** See [API Gateway](./GUIDE_10_API_Gateway.md)
+- **Complex business logic?** Try [Domain-Driven Design](./GUIDE_11_Domain_Driven_Design.md)
 
 ## 📖 Other Documentation
 

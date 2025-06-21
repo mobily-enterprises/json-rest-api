@@ -40,6 +40,7 @@ export { SimplifiedRecordsPlugin } from './plugins/simplified-records.js';
 export { MicroservicesPlugin } from './plugins/microservices.js';
 export { CQRSPlugin, Command, Query, Event } from './plugins/cqrs.js';
 export { ApiGatewayPlugin } from './plugins/api-gateway.js';
+export { DDDPlugin, ValueObject, Entity, Aggregate, Repository, DomainService, Specification } from './plugins/ddd.js';
 
 // Import for internal use
 import { Api } from './lib/api.js';

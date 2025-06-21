@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { Api, Schema, MemoryPlugin, BadRequestError } from '../index.js';
+import { Api, Schema, MemoryPlugin, ValidationPlugin, BadRequestError } from '../index.js';
 import { HTTPPlugin } from '../plugins/http.js';
 import express from 'express';
 import fetch from 'node-fetch';
@@ -111,6 +111,7 @@ describe('JSON:API Compliance Features', () => {
   test('should format errors with source field', async () => {
     const api = new Api();
     api.use(MemoryPlugin);
+    api.use(ValidationPlugin);
     
     const app = express();
     api.use(HTTPPlugin, { app });
@@ -247,6 +248,7 @@ describe('JSON:API Compliance Features', () => {
   test('should support sorting on relationship fields', async () => {
     const api = new Api();
     api.use(MemoryPlugin);
+    api.use(ValidationPlugin);
     
     // Create schemas
     api.addResource('categories', new Schema({
@@ -272,9 +274,9 @@ describe('JSON:API Compliance Features', () => {
     const cat2 = await api.resources.categories.create({ name: 'Alpha' });
     const cat3 = await api.resources.categories.create({ name: 'Beta' });
     
-    await api.resources.articles.create({ title: 'Article 1', categoryId: cat1.id });
-    await api.resources.articles.create({ title: 'Article 2', categoryId: cat2.id });
-    await api.resources.articles.create({ title: 'Article 3', categoryId: cat3.id });
+    await api.resources.articles.create({ title: 'Article 1', categoryId: cat1.data.id });
+    await api.resources.articles.create({ title: 'Article 2', categoryId: cat2.data.id });
+    await api.resources.articles.create({ title: 'Article 3', categoryId: cat3.data.id });
     
     // Test sorting by category name
     const result = await api.query({ 

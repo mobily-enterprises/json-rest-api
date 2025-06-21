@@ -3096,6 +3096,385 @@ api.configureApi('payments', {
    }
    ```
 
+### DDDPlugin
+
+```javascript
+import { DDDPlugin } from 'json-rest-api/plugins/ddd';
+```
+
+Provides Domain-Driven Design support with rails and structure for implementing DDD correctly. Includes base classes for value objects, entities, aggregates, repositories, and domain services.
+
+#### Basic Usage
+
+```javascript
+// Enable DDD support
+api.use(DDDPlugin, {
+  logEvents: true  // Log domain events for debugging
+});
+
+// Define value objects
+class Money extends api.ValueObject {
+  constructor({ amount, currency }) {
+    if (amount < 0) throw new Error('Money cannot be negative');
+    super({ amount, currency });
+  }
+  
+  add(other) {
+    if (this.currency !== other.currency) {
+      throw new Error('Cannot add different currencies');
+    }
+    return new Money({
+      amount: this.amount + other.amount,
+      currency: this.currency
+    });
+  }
+}
+
+// Define aggregates
+class Order extends api.Aggregate {
+  static get schema() {
+    return {
+      customerId: { type: 'id', required: true },
+      items: { type: 'array', default: [] },
+      total: { type: 'value', valueObject: Money },
+      status: { type: 'string', default: 'pending' }
+    };
+  }
+  
+  addItem(productId, price, quantity) {
+    this.enforceInvariant(
+      this.status === 'pending',
+      'Can only add items to pending orders'
+    );
+    
+    this.items.push({ productId, price, quantity });
+    this.recalculateTotal();
+    
+    this.recordEvent('ItemAddedToOrder', {
+      orderId: this.id,
+      productId,
+      quantity
+    });
+  }
+}
+
+// Define repositories
+class OrderRepository extends api.Repository {
+  constructor() {
+    super('orders', Order);
+  }
+  
+  async findByCustomer(customerId) {
+    return await this.query({ customerId });
+  }
+}
+
+// Define bounded context
+api.boundedContext('sales', {
+  aggregates: [Order, Customer],
+  repositories: [OrderRepository, CustomerRepository],
+  services: [PricingService]
+});
+```
+
+#### Features
+
+1. **Value Objects** - Immutable objects defined by their values
+2. **Entities** - Objects with persistent identity
+3. **Aggregates** - Consistency boundaries with invariant enforcement
+4. **Repositories** - Abstract data access
+5. **Domain Services** - Cross-aggregate business logic
+6. **Bounded Contexts** - Clear boundaries between domains
+7. **Domain Events** - Capture important business occurrences
+8. **Specifications** - Encapsulate business rules
+
+#### Value Objects
+
+```javascript
+// Immutable, compared by value
+class Email extends api.ValueObject {
+  constructor(value) {
+    if (!value || !value.includes('@')) {
+      throw new Error('Invalid email');
+    }
+    super({ value });
+  }
+  
+  getDomain() {
+    return this.value.split('@')[1];
+  }
+}
+
+// Usage
+const email1 = new Email('john@example.com');
+const email2 = new Email('john@example.com');
+console.log(email1.equals(email2)); // true - same value
+
+// Immutable - create new instance for changes
+const newEmail = email1.with({ value: 'jane@example.com' });
+```
+
+#### Aggregates
+
+```javascript
+class ShoppingCart extends api.Aggregate {
+  static get schema() {
+    return {
+      customerId: { type: 'id', required: true },
+      items: { type: 'array', default: [] },
+      status: { type: 'string', default: 'active' }
+    };
+  }
+  
+  addItem(productId, quantity) {
+    // Enforce business rules
+    this.enforceInvariant(
+      this.status === 'active',
+      'Cannot modify inactive cart'
+    );
+    
+    this.enforceInvariant(
+      quantity > 0,
+      'Quantity must be positive'
+    );
+    
+    this.enforceInvariant(
+      this.items.length < 50,
+      'Cart cannot exceed 50 items'
+    );
+    
+    // Update state
+    this.items.push({ productId, quantity });
+    
+    // Record domain event
+    this.recordEvent('ItemAddedToCart', {
+      cartId: this.id,
+      productId,
+      quantity
+    });
+  }
+  
+  checkout() {
+    this.enforceInvariant(
+      this.items.length > 0,
+      'Cannot checkout empty cart'
+    );
+    
+    this.status = 'checkedOut';
+    this.recordEvent('CartCheckedOut', {
+      cartId: this.id,
+      customerId: this.customerId
+    });
+  }
+}
+```
+
+#### Repositories
+
+```javascript
+class CustomerRepository extends api.Repository {
+  constructor() {
+    super('customers', Customer); // resource name, aggregate class
+  }
+  
+  // Custom query methods
+  async findByEmail(email) {
+    const results = await this.query({ email });
+    return results[0] || null;
+  }
+  
+  async findPremiumCustomers() {
+    return await this.query({
+      creditLimit: { gte: 10000 },
+      status: 'active'
+    });
+  }
+}
+
+// Usage
+const repo = api.getRepository('CustomerRepository');
+const customer = await repo.findByEmail('john@example.com');
+await repo.save(customer);
+```
+
+#### Domain Services
+
+```javascript
+class PricingService extends api.DomainService {
+  calculateDiscount(customer, order) {
+    let discount = 0;
+    
+    // Premium customers get 10% off
+    if (customer.isPremium()) {
+      discount += 0.10;
+    }
+    
+    // Bulk orders get 5% off
+    if (order.itemCount > 10) {
+      discount += 0.05;
+    }
+    
+    return Math.min(discount, 0.15); // Max 15%
+  }
+}
+
+// Usage
+const service = api.getService('PricingService');
+const discount = service.calculateDiscount(customer, order);
+```
+
+#### Bounded Contexts
+
+```javascript
+// Define separate contexts for different domains
+api.boundedContext('sales', {
+  aggregates: [Order, Customer, Product],
+  repositories: [OrderRepository, CustomerRepository],
+  services: [PricingService]
+});
+
+api.boundedContext('inventory', {
+  aggregates: [InventoryItem, Warehouse],
+  repositories: [InventoryRepository],
+  services: [StockService]
+});
+
+// Get context components
+const salesContext = api.getContext('sales');
+const orderRepo = api.getRepository('OrderRepository', 'sales');
+```
+
+#### Domain Events
+
+```javascript
+// Define events
+const OrderPlaced = api.domainEvent('OrderPlaced', {
+  orderId: true,     // required fields
+  customerId: true,
+  total: true
+});
+
+// Listen to events
+api.onDomainEvent('OrderPlaced', async (event) => {
+  console.log('New order:', event.data.orderId);
+  // Send confirmation email
+  // Update inventory
+  // Notify warehouse
+});
+
+// Events from aggregates are auto-published when saved
+const order = new Order();
+order.place(customerId, items);
+await orderRepo.save(order); // 'OrderPlaced' event emitted
+
+// Manual event emission
+await api.emitDomainEvent('SystemMaintenance', {
+  scheduledFor: '2024-01-15T02:00:00Z'
+});
+```
+
+#### Specifications
+
+```javascript
+// Define business rules as specifications
+class PremiumCustomerSpec extends api.Specification {
+  isSatisfiedBy(customer) {
+    return customer.creditLimit >= 10000 ||
+           customer.loyaltyYears >= 5;
+  }
+  
+  toQuery() {
+    return {
+      $or: [
+        { creditLimit: { gte: 10000 } },
+        { loyaltyYears: { gte: 5 } }
+      ]
+    };
+  }
+}
+
+// Combine specifications
+const premiumSpec = new PremiumCustomerSpec();
+const activeSpec = api.specification('Active',
+  customer => customer.status === 'active',
+  () => ({ status: 'active' })
+);
+
+const eligibleCustomers = premiumSpec.and(activeSpec);
+
+// Use for queries
+const customers = await customerRepo.findBySpec(eligibleCustomers);
+```
+
+#### DDD Best Practices
+
+1. **Keep Aggregates Small**
+   ```javascript
+   // Good: Focused aggregate
+   class Order extends Aggregate {
+     customerId: string;  // Reference, not embedded
+     items: OrderItem[];  // Part of aggregate
+   }
+   ```
+
+2. **Use Value Objects for Domain Concepts**
+   ```javascript
+   // Bad: Primitive obsession
+   class Product {
+     price: number;
+     currency: string;
+   }
+   
+   // Good: Rich value object
+   class Product {
+     price: Money;
+   }
+   ```
+
+3. **Make Implicit Concepts Explicit**
+   ```javascript
+   // Bad: Hidden business rule
+   if (order.total > 1000 && customer.joinDate < lastYear) {
+     discount = 0.1;
+   }
+   
+   // Good: Named concept
+   const loyaltyDiscount = new LoyaltyDiscount();
+   if (loyaltyDiscount.isEligible(customer, order)) {
+     discount = loyaltyDiscount.calculate();
+   }
+   ```
+
+4. **Domain Events Should Be Past Tense**
+   ```javascript
+   // Bad: Commands
+   'CreateOrder', 'UpdateCustomer'
+   
+   // Good: Events
+   'OrderCreated', 'CustomerUpdated'
+   ```
+
+5. **Protect Invariants in Aggregates**
+   ```javascript
+   class Order extends Aggregate {
+     ship() {
+       // Enforce business rules
+       this.enforceInvariant(
+         this.status === 'paid',
+         'Can only ship paid orders'
+       );
+       
+       this.enforceInvariant(
+         this.shippingAddress !== null,
+         'Shipping address required'
+       );
+       
+       this.status = 'shipped';
+       this.recordEvent('OrderShipped', { orderId: this.id });
+     }
+   }
+   ```
+
 ## Plugin Compatibility Matrix
 
 ### Storage Plugin Compatibility
@@ -3120,6 +3499,7 @@ api.configureApi('payments', {
 | **MicroservicesPlugin** | ✅ | ✅ | Works independently of storage |
 | **CQRSPlugin** | ✅ | ✅ | Can use separate databases for read/write |
 | **ApiGatewayPlugin** | ✅ | ✅ | Works independently of storage |
+| **DDDPlugin** | ✅ | ✅ | Works with any storage backend |
 
 ### Plugin Order Dependencies
 
@@ -3143,6 +3523,7 @@ api.configureApi('payments', {
 | **MicroservicesPlugin** | Storage | HTTPPlugin | Can be used anywhere |
 | **CQRSPlugin** | Storage | HTTPPlugin | Should be early to intercept operations |
 | **ApiGatewayPlugin** | - | HTTPPlugin | Independent of storage, before HTTP |
+| **DDDPlugin** | Storage | HTTPPlugin | Should be early to set up domain model |
 
 ### Feature Compatibility
 
