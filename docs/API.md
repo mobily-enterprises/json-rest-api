@@ -216,6 +216,7 @@ new Schema(structure: SchemaStructure)
 | `max` | string, number | Maximum length/value |
 | `unique` | all | Enforce uniqueness |
 | `silent` | all | Exclude from SELECT |
+| `virtual` | all | Computed field, not stored |
 | `searchable` | all | Allow filtering |
 | `format` | string | Format validation |
 | `enum` | all | Allowed values |
@@ -325,6 +326,46 @@ const schema = new Schema({
 - `read`: Controls if field is included in responses
 - `write`: Controls if field can be set/updated (not yet implemented)
 - `include`: Controls if relationship can be included via `include` parameter
+
+### Virtual Fields
+
+Virtual fields are computed properties that are not stored in the database. They are populated by hooks (typically `afterGet`) and can be used to add derived data to your resources.
+
+```javascript
+const productSchema = new Schema({
+  name: { type: 'string', required: true },
+  cost: { type: 'number', required: true },
+  price: { type: 'number', required: true },
+  
+  // Virtual fields - computed, not stored
+  profit: { 
+    type: 'number', 
+    virtual: true 
+  },
+  margin: { 
+    type: 'string', 
+    virtual: true,
+    permissions: { read: 'manager' } // Can have permissions
+  }
+});
+
+// Populate virtual fields with afterGet hook
+api.hook('afterGet', async (context) => {
+  if (context.options.type === 'products') {
+    const product = context.result;
+    product.profit = product.price - product.cost;
+    product.margin = `${Math.round((product.profit / product.price) * 100)}%`;
+  }
+});
+```
+
+#### Virtual Field Characteristics
+
+- **Not stored**: Values are never saved to the database
+- **Not queryable**: Cannot be used in filters or searches
+- **Computed on read**: Populated by hooks when resources are fetched
+- **Support permissions**: Can have field-level permissions like regular fields
+- **Work everywhere**: Populated for single gets, queries, and included resources
 
 ### Field Types
 

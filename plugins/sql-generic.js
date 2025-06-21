@@ -188,11 +188,11 @@ export const SQLPlugin = {
         const allowedFields = new Set();
         const fieldMappings = {};
         
-        // 1. Add fields marked as searchable in schema
+        // 1. Add fields marked as searchable in schema (excluding virtual fields)
         const schema = api.schemas.get(context.options.type);
         if (schema) {
           for (const [field, def] of Object.entries(schema.structure)) {
-            if (def.searchable === true) {
+            if (def.searchable === true && !def.virtual) {
               allowedFields.add(field);
             }
           }
@@ -460,7 +460,7 @@ export const SQLPlugin = {
           
           if (schema) {
             for (const [field, def] of Object.entries(schema.structure)) {
-              if (def.searchable === true) {
+              if (def.searchable === true && !def.virtual) {
                 allowedFields.add(field);
               }
             }
@@ -595,11 +595,12 @@ export const SQLPlugin = {
           data[idProperty] = await api.execute('db.generateId', { table });
         }
         
-        // Clean data - remove undefined values and silent fields
+        // Clean data - remove undefined values, silent fields, and virtual fields
         const cleanData = {};
         if (schema) {
           for (const [key, value] of Object.entries(data)) {
-            if (value !== undefined && (!schema.structure[key]?.silent || key === idProperty)) {
+            const fieldDef = schema.structure[key];
+            if (value !== undefined && (!fieldDef?.silent || key === idProperty) && !fieldDef?.virtual) {
               cleanData[key] = value;
             }
           }

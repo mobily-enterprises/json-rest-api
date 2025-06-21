@@ -48,7 +48,9 @@ new Schema({
   password: { type: 'string', silent: true }, // Excluded from SELECT
   tags: { type: 'array' },
   metadata: { type: 'object' },
-  status: { type: 'string', searchable: true } // Can filter by this field
+  status: { type: 'string', searchable: true }, // Can filter by this field
+  // Virtual fields - computed, not stored
+  profit: { type: 'number', virtual: true }
 })
 ```
 
@@ -102,6 +104,7 @@ authorId: {
 - Error classes with context
 - Resource proxy API for intuitive access
 - Version negotiation support
+- Virtual fields for computed properties
 
 ### Plugin Development
 ```javascript
