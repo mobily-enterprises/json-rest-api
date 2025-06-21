@@ -16,6 +16,9 @@ export const AlaSQLAdapter = {
     let idCounter = options.initialIdCounter || 1;
     const idCounters = new Map(); // Per-table counters
     
+    // Position counters for atomic positioning
+    const positionCounters = new Map(); // Key: "table:field:filter" -> counter
+    
     // Implement database interface
     api.implement('db.query', async (context) => {
       const { sql, params } = context;
@@ -206,5 +209,61 @@ export const AlaSQLAdapter = {
         }
       }
     });
+    
+    // Atomic positioning support using counters
+    api.implement('atomicGetNextPosition', async (context) => {
+      const { type, filter, field } = context;
+      
+      // Create a unique key for this position sequence
+      const filterKey = JSON.stringify(filter || {});
+      const counterKey = `${type}:${field}:${filterKey}`;
+      
+      // Get or initialize counter for this sequence
+      if (!positionCounters.has(counterKey)) {
+        // Initialize counter by checking existing max position
+        const db = api._alasqlDb;
+        const conditions = [];
+        const values = [];
+        
+        for (const [key, value] of Object.entries(filter || {})) {
+          conditions.push(`\`${key}\` = ?`);
+          values.push(value);
+        }
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        
+        let maxPos = 0;
+        try {
+          const result = db.exec(`
+            SELECT MAX(\`${field}\`) as maxPos 
+            FROM \`${type}\` 
+            ${whereClause}
+          `, values);
+          
+          maxPos = result[0]?.maxPos || 0;
+        } catch (error) {
+          // Table doesn't exist yet - that's OK
+          if (!error.message?.includes('Table does not exist')) {
+            throw error;
+          }
+        }
+        
+        positionCounters.set(counterKey, maxPos);
+      }
+      
+      // Atomically increment and return next position
+      // This is synchronous, so truly atomic in JavaScript!
+      const currentMax = positionCounters.get(counterKey);
+      const nextPos = currentMax + 1;
+      positionCounters.set(counterKey, nextPos);
+      
+      return nextPos;
+    });
+    
+    // Mark that we support atomic operations
+    api.storagePlugin = api.storagePlugin || {};
+    api.storagePlugin.supportsAtomicIncrement = true;
+    api.storagePlugin.atomicGetNextPosition = async (type, filter, field) => {
+      return await api.execute('atomicGetNextPosition', { type, filter, field });
+    };
   }
 };

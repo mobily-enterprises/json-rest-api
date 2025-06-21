@@ -99,6 +99,110 @@ export const MySQLAdapter = {
       return result.info.affectedRows;
     });
     
+    // Atomic operations support
+    api.implement('db.transaction', async (context) => {
+      const { fn, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const conn = await poolInfo.pool.getConnection();
+      
+      try {
+        await conn.beginTransaction();
+        const result = await fn(conn);
+        await conn.commit();
+        return result;
+      } catch (error) {
+        await conn.rollback();
+        throw error;
+      } finally {
+        conn.release();
+      }
+    });
+    
+    // Mark that this adapter supports atomic operations
+    api.storagePlugin = api.storagePlugin || {};
+    api.storagePlugin.supportsAtomicUpdates = true;
+    api.storagePlugin.supportsAtomicIncrement = true;
+    api.storagePlugin.supportsBulkUpdate = true;
+    
+    // Atomic get next position using SELECT ... FOR UPDATE
+    api.storagePlugin.atomicGetNextPosition = async (type, filter, field) => {
+      return await api.execute('db.transaction', {
+        fn: async (conn) => {
+          // Build WHERE clause
+          const conditions = [];
+          const values = [];
+          
+          for (const [key, value] of Object.entries(filter)) {
+            conditions.push(`\`${key}\` = ?`);
+            values.push(value);
+          }
+          
+          const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+          
+          // Get max position with lock
+          const sql = `
+            SELECT MAX(\`${field}\`) as maxPos 
+            FROM \`${type}\` 
+            ${whereClause}
+            FOR UPDATE
+          `;
+          
+          const [rows] = await conn.execute(sql, values);
+          const nextPos = (rows[0]?.maxPos || 0) + 1;
+          
+          return nextPos;
+        }
+      });
+    };
+    
+    // Atomic bulk position shift
+    api.storagePlugin.atomicShiftPositions = async (type, params) => {
+      const { field, from, delta, filter = {}, excludeIds = [] } = params;
+      
+      return await api.execute('db.transaction', {
+        fn: async (conn) => {
+          // Build WHERE clause
+          const conditions = [`\`${field}\` >= ?`];
+          const values = [from];
+          
+          for (const [key, value] of Object.entries(filter)) {
+            if (key === field && typeof value === 'object') {
+              // Handle range conditions like { $lte: 5 }
+              for (const [op, val] of Object.entries(value)) {
+                if (op === '$lte') conditions.push(`\`${key}\` <= ?`);
+                else if (op === '$lt') conditions.push(`\`${key}\` < ?`);
+                else if (op === '$gte') conditions.push(`\`${key}\` >= ?`);
+                else if (op === '$gt') conditions.push(`\`${key}\` > ?`);
+                values.push(val);
+              }
+            } else {
+              conditions.push(`\`${key}\` = ?`);
+              values.push(value);
+            }
+          }
+          
+          if (excludeIds.length > 0) {
+            conditions.push(`\`id\` NOT IN (${excludeIds.map(() => '?').join(',')})`);
+            values.push(...excludeIds);
+          }
+          
+          const sql = `
+            UPDATE \`${type}\`
+            SET \`${field}\` = \`${field}\` + ?
+            WHERE ${conditions.join(' AND ')}
+          `;
+          
+          const [result] = await conn.execute(sql, [delta, ...values]);
+          return { shifted: result.affectedRows };
+        }
+      });
+    };
+    
     // MySQL-specific features
     api.implement('db.features', (context) => {
       return {

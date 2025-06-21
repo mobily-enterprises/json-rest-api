@@ -237,7 +237,23 @@ function applyConfigToContext(context, config) {
   
   // Apply joins configuration
   if ('joins' in config) {
-    params.joins = config.joins;
+    if (config.joins === true) {
+      // Find all refs in the schema
+      const schema = context.api.schemas?.get(context.options.type);
+      if (schema) {
+        const refs = [];
+        for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+          if (fieldDef.refs) {
+            refs.push(fieldName);
+          }
+        }
+        params.joins = refs;
+      } else {
+        params.joins = true; // Fallback
+      }
+    } else {
+      params.joins = config.joins;
+    }
   }
   
   // Apply pagination
@@ -288,7 +304,7 @@ function filterFields(data, allowedFields) {
     if (data.attributes) {
       filtered.attributes = {};
       for (const field of allowedFields) {
-        if (field in data.attributes) {
+        if (field !== 'id' && field in data.attributes) {
           filtered.attributes[field] = data.attributes[field];
         }
       }

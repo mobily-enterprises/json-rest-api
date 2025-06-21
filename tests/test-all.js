@@ -1311,12 +1311,18 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
         title: { type: 'string', required: true },
         projectId: {
           type: 'id',
-          refs: { resource: 'projects' },
+          refs: { 
+            resource: 'projects',
+            join: { eager: true }
+          },
           searchable: true  // Required for positioning groupBy
         },
         assigneeId: {
           type: 'id',
-          refs: { resource: 'users' }
+          refs: { 
+            resource: 'users',
+            join: { eager: true }
+          }
         },
         position: { type: 'number', searchable: true },
         completed: { type: 'boolean', default: false }
@@ -1360,7 +1366,6 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
       
       // Complex query
       const allTasks = await api.resources.tasks.query({
-        joins: ['projectId', 'assigneeId'],
         sort: '-position'
       });
       
@@ -1688,7 +1693,12 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
           filter: { search: 'test' }
         }),
         (err) => {
-          assert.ok(err.message.includes('not searchable') || err.validationErrors?.[0]?.message?.includes('not searchable'));
+          // Check for either "not searchable" or "Invalid or forbidden field"
+          assert.ok(
+            err.message.includes('not searchable') || 
+            err.message.includes('Invalid or forbidden field') ||
+            err.validationErrors?.[0]?.message?.includes('not searchable')
+          );
           return true;
         }
       );

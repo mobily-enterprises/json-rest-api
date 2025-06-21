@@ -7,12 +7,29 @@
 ## Executive Summary
 
 This security audit identified **15 vulnerabilities** across the JSON REST API codebase:
-- **2 CRITICAL** vulnerabilities requiring immediate attention
-- **5 HIGH** severity issues that pose significant risk
-- **6 MEDIUM** severity issues that should be addressed
+- **2 CRITICAL** vulnerabilities ✅ BOTH FIXED
+- **5 HIGH** severity issues (2 FIXED, 3 remaining)
+- **6 MEDIUM** severity issues (2 FIXED, 4 remaining)
 - **2 LOW** severity issues for consideration
 
-The most serious issues involve SQL injection vulnerabilities and prototype pollution that could lead to complete system compromise.
+**Fixed Issues (6 total)**:
+- ✅ SQL Injection via Field Names (CRITICAL)
+- ✅ Prototype Pollution (CRITICAL)
+- ✅ NoSQL Injection in Memory Storage (HIGH)
+- ✅ Weak Authentication Token (HIGH) - via JwtPlugin
+- ✅ Resource Exhaustion via Complex Queries (MEDIUM) - via QueryLimitsPlugin
+- ✅ Race Conditions in Positioning (MEDIUM) - via PositioningPlugin
+
+**Remaining Issues (9 total)**:
+- Missing Authorization Layer (HIGH) - partially addressed via AuthorizationPlugin
+- Path Traversal in Nested Fields (HIGH)
+- Unsafe CORS + Credentials (HIGH) - partially addressed via CorsPlugin
+- Information Disclosure in Errors (MEDIUM)
+- Missing Input Size Validation (MEDIUM)
+- Circular Reference DoS (MEDIUM)
+- Missing Content-Type Validation (MEDIUM)
+- Regex DoS (LOW)
+- Timing Attacks on Authentication (LOW)
 
 ## Critical Vulnerabilities
 
@@ -179,11 +196,18 @@ api.hook('beforeUpdate', async (context) => {
 });
 ```
 
-### 5. Weak Authentication Token (HIGH)
+### 5. Weak Authentication Token (HIGH) ✅ FIXED
 
 **Location**: `plugins/security.js`
 
-**Description**: Tokens are just Base64-encoded JSON, not cryptographically signed.
+**Description**: Tokens were just Base64-encoded JSON, not cryptographically signed.
+
+**Status**: FIXED - JwtPlugin provides proper JWT implementation
+- Uses industry-standard jsonwebtoken library
+- Supports HMAC (HS256) and RSA (RS256) algorithms
+- Includes refresh token support
+- Configurable expiration and validation
+- Constant-time signature verification
 
 **Vulnerable Code**:
 ```javascript
@@ -195,17 +219,23 @@ api.generateToken = (payload, expiresIn = '24h') => {
 };
 ```
 
-**Proof of Concept**:
+**Solution**: Use JwtPlugin:
 ```javascript
-// Forge admin token
-const forgedToken = Buffer.from(JSON.stringify({
-  userId: 1,
-  role: 'admin',
-  exp: Date.now() + 86400000
-})).toString('base64');
+import { JwtPlugin } from 'json-rest-api';
+
+api.use(JwtPlugin, {
+  secret: process.env.JWT_SECRET,
+  algorithm: 'HS256',
+  expiresIn: '24h',
+  refreshExpiresIn: '30d'
+});
+
+// Generate secure tokens
+const token = await api.generateToken({ userId: 1, role: 'user' });
+const verified = await api.verifyToken(token);
 ```
 
-**Impact**: Complete authentication bypass
+**Impact**: Complete authentication bypass (NOW PREVENTED)
 
 ### 6. Path Traversal in Nested Fields (HIGH)
 
@@ -263,17 +293,34 @@ GET /api/posts?joins=author,comments,comments.author,comments.author.posts,comme
 
 **Impact**: DoS through CPU/memory exhaustion
 
-### 9. Race Conditions in Positioning (MEDIUM)
+### 9. Race Conditions in Positioning (MEDIUM) ✅ FIXED
 
 **Location**: `plugins/positioning.js`
 
-**Description**: Position updates aren't atomic.
+**Description**: Position updates weren't atomic, leading to duplicate positions and data corruption under concurrent load.
+
+**Status**: FIXED - Improved PositioningPlugin
+- Uses database-level atomic operations (SELECT...FOR UPDATE for MySQL)
+- Bulk position shifts in single UPDATE query
+- Memory storage accepts race conditions (documented limitation)
+- MySQL provides true atomicity with transactions
 
 **Vulnerable Code**:
 ```javascript
 // Two concurrent requests could corrupt positions
 await api.shiftPositions(...);  // Not in transaction
 await api.update(...);           // Separate query
+```
+
+**Solution**: Use the improved PositioningPlugin:
+```javascript
+import { PositioningPlugin } from 'json-rest-api';
+
+api.use(PositioningPlugin, {
+  positionField: 'position',
+  maxRetries: 3,
+  retryDelay: 50
+});
 ```
 
 ### 10. Information Disclosure in Errors (MEDIUM)

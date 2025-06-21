@@ -215,7 +215,8 @@ Manage record order for drag-and-drop interfaces.
 import { PositioningPlugin } from 'json-rest-api';
 
 api.use(PositioningPlugin, {
-  field: 'position',  // Field name for position
+  positionField: 'position',     // Field name for position
+  beforeIdField: 'beforeId',     // Virtual field for repositioning
   
   // Position within filtered subsets
   typeOptions: {
@@ -225,7 +226,26 @@ api.use(PositioningPlugin, {
   }
 });
 
-// Usage
+// Resource configuration
+api.addResource('tasks', taskSchema, {
+  positioning: {
+    field: 'position',
+    groupBy: 'projectId'  // Separate sequences per project
+  }
+});
+```
+
+**Features:**
+- **Automatic Positioning**: New records get next available position
+- **Drag & Drop Support**: Use `beforeId` to reposition records
+- **Position Groups**: Maintain separate sequences with `groupBy`
+- **Database Transactions**: Uses transactions when available (MySQL)
+- **Simple Fallback**: Basic positioning for memory storage
+
+**Usage Examples:**
+
+```javascript
+// Create with position
 await api.resources.tasks.create({
   title: 'New task',
   beforeId: '123'  // Place before task 123
@@ -234,6 +254,9 @@ await api.resources.tasks.create({
 // Reposition
 await api.reposition('tasks', '456', '789'); // Move 456 before 789
 await api.reposition('tasks', '456', null);  // Move to end
+
+// Note: With memory storage, concurrent creates may produce duplicate positions
+// Use MySQL for guaranteed atomic positioning
 ```
 
 ## Creating Custom Plugins
