@@ -7,8 +7,9 @@ This section covers the essential features of JSON REST API: schemas, resources,
 1. [Schemas & Validation](#schemas--validation)
 2. [Resources & CRUD Operations](#resources--crud-operations)
 3. [Querying & Filtering](#querying--filtering)
-4. [Relationships & Joins](#relationships--joins)
-5. [Hooks & Events](#hooks--events)
+4. [Views & Response Shaping](#views--response-shaping)
+5. [Relationships & Joins](#relationships--joins)
+6. [Hooks & Events](#hooks--events)
 ## Schemas & Validation
 
 ### Schema Structure
@@ -198,7 +199,7 @@ await api.resources.posts.delete(456);  // Sets deletedAt timestamp
 // Simple query
 const users = await api.resources.users.query();
 
-// Advanced query
+// Advanced query (without ViewsPlugin)
 const results = await api.resources.posts.query({
   filter: { 
     published: true,
@@ -206,8 +207,13 @@ const results = await api.resources.posts.query({
     tags: 'javascript'  // Searches array field
   },
   sort: '-createdAt,title',  // Sort by createdAt DESC, then title ASC
-  page: { size: 20, number: 1 },
-  joins: ['authorId', 'categoryId']
+  page: { size: 20, number: 1 }
+});
+
+// With ViewsPlugin - cleaner approach using named views
+const results = await api.resources.posts.query({
+  filter: { published: true },
+  view: 'detailed'  // Predefined view with joins and field selection
 });
 
 // Response structure
@@ -429,6 +435,120 @@ GET /api/posts?
   fields[posts]=title,summary&
   include=author,category
 ```
+
+## Views & Response Shaping
+
+The ViewsPlugin provides a clean way to control what data is returned from your API without exposing technical details in URLs.
+
+### Why Views?
+
+Instead of allowing clients to control joins and fields directly (which exposes your database structure), views provide predefined data shapes:
+
+```javascript
+// Without views - exposes implementation
+GET /api/posts?joins=authorId,categoryId&fields=id,title,excerpt
+
+// With views - clean and secure
+GET /api/posts?view=card
+```
+
+### Setting Up Views
+
+```javascript
+import { ViewsPlugin } from 'json-rest-api';
+
+api.use(ViewsPlugin);
+
+api.addResource('posts', postSchema, {
+  // Optional: Override smart defaults
+  defaults: {
+    query: {
+      joins: ['authorId'],    // Always include author in lists
+      pageSize: 10
+    },
+    get: {
+      joins: ['authorId', 'categoryId']  // Include these for single posts
+    }
+  },
+  
+  // Optional: Named views
+  views: {
+    // Minimal data for mobile/lists
+    card: {
+      query: {
+        joins: ['authorId'],
+        fields: ['id', 'title', 'excerpt', 'thumbnail', 'authorId']
+      }
+    },
+    
+    // Full data for detail pages
+    full: {
+      get: {
+        joins: true,  // All relationships
+        fields: null  // All fields
+      }
+    },
+    
+    // Admin view with extra data
+    admin: {
+      query: {
+        joins: ['authorId', 'editorId'],
+        includeFields: ['updatedAt', 'status']
+      },
+      get: {
+        joins: true,
+        includeFields: ['internalNotes', 'auditLog']
+      }
+    }
+  },
+  
+  // Optional: Restrict view access
+  viewPermissions: {
+    admin: 'admin'  // Requires admin role
+  }
+});
+```
+
+### Using Views
+
+```javascript
+// List posts - uses smart defaults (no joins)
+const posts = await api.resources.posts.query();
+
+// List with specific view
+const cards = await api.resources.posts.query({ view: 'card' });
+
+// Get single post - uses smart defaults (all joins)
+const post = await api.resources.posts.get(123);
+
+// Get with minimal view
+const minimal = await api.resources.posts.get(123, { view: 'minimal' });
+
+// Admin view (requires permission)
+const adminData = await api.resources.posts.query(
+  { view: 'admin' },
+  { user: { roles: ['admin'] } }
+);
+```
+
+### Smart Defaults
+
+Without any configuration, ViewsPlugin provides sensible defaults:
+
+- **Queries (lists)**: No joins, reasonable page size
+- **Get (single)**: All defined relationships included
+
+This means most APIs work great with zero configuration!
+
+### Views vs Direct Control
+
+The ViewsPlugin is recommended over direct join/field control because:
+
+1. **Security**: Doesn't expose database structure
+2. **Performance**: Backend controls what's efficient
+3. **Consistency**: Predefined shapes ensure consistent responses
+4. **Versioning**: Easy to evolve views without breaking clients
+5. **Documentation**: Named views are self-documenting
 
 ## Relationships & Joins
 
@@ -719,9 +839,9 @@ const postSchema = new Schema({
   }
 });
 
-// Request specific joins
+// With ViewsPlugin - use predefined views
 const posts = await api.resources.posts.query({
-  joins: ['authorId']  // Explicit join request
+  view: 'withAuthor'  // Use a named view
 });
 ```
 

@@ -362,7 +362,7 @@ const users = await api.resources.users.query({
 - `filter`: Object with field/value pairs (fields must be marked `searchable: true`)
 - `sort`: Array of sort objects or string (e.g., '-createdAt,name')
 - `page`: Object with `size` and `number` for pagination
-- `joins`: Array of field names to join (overrides eager joins)
+- `view`: String name of a predefined view (requires ViewsPlugin)
 
 #### `create(data, options?)` / `post(data, options?)`
 Create a new resource.
@@ -1012,6 +1012,148 @@ Standard error codes:
 - `INTERNAL_ERROR` - Server error
 - `DUPLICATE_RESOURCE` - Duplicate key
 - `DATABASE_ERROR` - Database operation failed
+
+## Plugins
+
+### ViewsPlugin
+
+Provides view-based control over response shapes with smart defaults.
+
+```javascript
+import { ViewsPlugin } from 'json-rest-api/plugins/views.js';
+
+api.use(ViewsPlugin, {
+  // Global defaults override (optional)
+  defaults: {
+    query: { pageSize: 30 },
+    get: { joins: true }
+  }
+});
+```
+
+**Features:**
+- Smart defaults (no joins for lists, all joins for single records)
+- Resource-level default overrides
+- Named views for different use cases
+- Field filtering
+- View-based permissions
+
+**Resource Configuration:**
+
+```javascript
+api.addResource('posts', postSchema, {
+  // Optional: Override defaults for this resource
+  defaults: {
+    query: {
+      joins: ['authorId'],    // Include author in lists
+      pageSize: 10,
+      sort: '-createdAt'
+    },
+    get: {
+      joins: ['authorId', 'categoryId'],  // Limit joins for single records
+      excludeFields: ['internalNotes']
+    }
+  },
+  
+  // Optional: Named views
+  views: {
+    minimal: {
+      query: {
+        joins: [],
+        fields: ['id', 'title', 'createdAt']
+      },
+      get: {
+        joins: ['authorId'],
+        fields: ['id', 'title', 'content', 'authorId']
+      }
+    },
+    admin: {
+      query: { joins: true },
+      get: { joins: true, includeFields: ['internalNotes'] }
+    }
+  },
+  
+  // Optional: View permissions
+  viewPermissions: {
+    admin: 'admin'  // Requires 'admin' role
+  }
+});
+```
+
+**Usage:**
+
+```javascript
+// Uses smart defaults or resource defaults
+GET /api/posts
+GET /api/posts/123
+
+// Use named views
+GET /api/posts?view=minimal
+GET /api/posts/123?view=admin
+```
+
+**API Methods:**
+
+```javascript
+// Get available views for a resource
+const views = api.getResourceViews('posts'); // ['minimal', 'admin']
+
+// Get view configuration
+const config = api.getViewConfig('posts', 'minimal', 'query');
+```
+
+### QueryLimitsPlugin
+
+Prevents resource exhaustion by limiting query complexity.
+
+```javascript
+import { QueryLimitsPlugin } from 'json-rest-api/plugins/query-limits.js';
+
+api.use(QueryLimitsPlugin, {
+  maxJoins: 5,
+  maxJoinDepth: 3,
+  maxPageSize: 100,
+  defaultPageSize: 20,
+  maxFilterFields: 10,
+  maxSortFields: 3,
+  maxQueryCost: 100,
+  
+  // Optional: Resource-specific limits
+  resources: {
+    posts: {
+      maxPageSize: 200,
+      maxQueryCost: 150
+    }
+  },
+  
+  // Optional: Bypass for certain users
+  bypassRoles: ['admin'],
+  bypassCheck: (user) => user?.isPremium
+});
+```
+
+**Features:**
+- Limits join count and depth
+- Limits page size
+- Limits filter and sort complexity
+- Cost-based query rejection
+- Resource-specific overrides
+- Admin/premium user bypass
+
+**Error Example:**
+
+```json
+{
+  "error": {
+    "message": "Maximum number of joins (5) exceeded",
+    "context": {
+      "joinCount": 7,
+      "maxJoins": 5,
+      "joins": ["author", "category", "tags", "comments", "related"]
+    }
+  }
+}
+```
 
 ## Type Definitions
 

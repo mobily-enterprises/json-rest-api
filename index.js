@@ -35,6 +35,7 @@ export { AuthorizationPlugin } from './plugins/authorization.js';
 export { CorsPlugin } from './plugins/cors.js';
 export { JwtPlugin } from './plugins/jwt.js';
 export { QueryLimitsPlugin } from './plugins/query-limits.js';
+export { ViewsPlugin } from './plugins/views.js';
 
 // Import for internal use
 import { Api } from './lib/api.js';

@@ -69,21 +69,13 @@ export const HTTPPlugin = {
         },
         include: req.query.include,
         fields: {},
-        joins: req.query.joins,
-        excludeJoins: req.query.excludeJoins
+        view: req.query.view
       };
       
       if (api.options.debug) {
         console.log('Raw query:', req.query);
       }
 
-      // Parse joins parameters
-      if (params.joins && typeof params.joins === 'string') {
-        params.joins = params.joins === 'false' ? false : params.joins.split(',');
-      }
-      if (params.excludeJoins && typeof params.excludeJoins === 'string') {
-        params.excludeJoins = params.excludeJoins.split(',');
-      }
       
       // Parse filters
       // Express already parses filter[field]=value into { filter: { field: value } }
@@ -129,7 +121,7 @@ export const HTTPPlugin = {
       if (Object.keys(params.filter).length === 0) {
         // Copy non-standard query params as filters
         for (const [key, value] of Object.entries(req.query)) {
-          if (!['sort', 'page', 'pageSize', 'include', 'fields'].includes(key) &&
+          if (!['sort', 'page', 'pageSize', 'include', 'fields', 'joins', 'excludeJoins', 'view'].includes(key) &&
               !key.includes('[')) {
             params.filter[key] = value;
           }
@@ -278,9 +270,8 @@ export const HTTPPlugin = {
         const result = await api.get(req.params.id, {
           type: req.params.type,
           user,
-          joins: params.joins,
-          excludeJoins: params.excludeJoins,
           isHttp: true,
+          view: params.view,
           ...options.typeOptions?.[req.params.type]
         });
 
