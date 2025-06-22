@@ -720,7 +720,7 @@ export const SQLPlugin = {
         return cleanData;
       } catch (error) {
         if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
-          const field = extractFieldFromError(error.message);
+          const field = extractFieldNameFromDatabaseError(error.message);
           throw new ConflictError(error.message)
             .withContext({ 
               field, 
@@ -809,14 +809,7 @@ export const SQLPlugin = {
           })
         );
         
-        const values = fields.map(f => {
-          const value = cleanData[f];
-          // Convert objects/arrays to JSON strings
-          if (schema?.structure[f] && (schema.structure[f].type === 'object' || schema.structure[f].type === 'array')) {
-            return JSON.stringify(value);
-          }
-          return value;
-        });
+        const values = fields.map(f => prepareValueForStorage(cleanData[f], schema?.structure[f]));
         
         // Convert ID if needed
         const queryId = await api.execute('db.convertId', { id });
@@ -850,7 +843,7 @@ export const SQLPlugin = {
         return await getImpl(getContext);
       } catch (error) {
         if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
-          const field = extractFieldFromError(error.message);
+          const field = extractFieldNameFromDatabaseError(error.message);
           throw new ConflictError(error.message)
             .withContext({ 
               field, 
@@ -1343,8 +1336,8 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
 
 
 
-function extractFieldFromError(message) {
-  // Try to extract field name from various error formats
+function extractFieldNameFromDatabaseError(message) {
+  // Try to extract field name from various database error messages
   const patterns = [
     /for key '([^']+)'/,
     /column '([^']+)'/,

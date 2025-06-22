@@ -20,7 +20,7 @@ export {
   formatErrorResponse
 } from './lib/errors.js';
 
-// Plugin exports
+// Core plugins
 export { MemoryPlugin } from './plugins/core/memory.js';
 export { MySQLPlugin } from './plugins/core/mysql.js';
 export { HTTPPlugin } from './plugins/core/http.js';
@@ -30,24 +30,26 @@ export { VersioningPlugin } from './plugins/core-extra/versioning.js';
 export { SecurityPlugin } from './plugins/core-extra/security.js';
 export { LoggingPlugin } from './plugins/core-extra/logging.js';
 export { TimestampsPlugin } from './plugins/core/timestamps.js';
+
+// Core-extra plugins
 export { AuthorizationPlugin } from './plugins/core-extra/authorization.js';
 export { CorsPlugin } from './plugins/core-extra/cors.js';
 export { JwtPlugin } from './plugins/core-extra/jwt.js';
 export { QueryLimitsPlugin } from './plugins/core-extra/query-limits.js';
 export { ViewsPlugin } from './plugins/core-extra/views.js';
-export { SimplifiedRecordsPlugin } from './plugins/protocols/simplified-records.js';
-export { ApiGatewayPlugin } from './plugins/infrastructure/api-gateway.js';
-export { CLIPlugin } from './plugins/infrastructure/cli.js';
-export { DiscoveryPlugin } from './plugins/protocols/schema-export/index.js';
 export { MigrationPlugin } from './plugins/core-extra/migration-plugin.js';
 
 // Protocol plugins
 export { GraphQLPlugin } from './plugins/protocols/graphql/index.js';
 export { WebSocketPlugin } from './plugins/protocols/websocket/index.js';
 export { GRPCPlugin } from './plugins/protocols/grpc/index.js';
+export { SimplifiedRecordsPlugin } from './plugins/protocols/simplified-records.js';
+export { DiscoveryPlugin } from './plugins/protocols/schema-export/index.js';
 
 // Infrastructure plugins
 export { ServiceDiscoveryPlugin } from './plugins/infrastructure/service-discovery/index.js';
+export { ApiGatewayPlugin } from './plugins/infrastructure/api-gateway.js';
+export { CLIPlugin } from './plugins/infrastructure/cli.js';
 
 // Enterprise plugins
 export { MicroservicesPlugin } from './plugins/enterprise/microservices.js';

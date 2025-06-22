@@ -147,6 +147,21 @@ code {
   color: #d32f2f;
 }
 
+/* Make plugin names in h1 headers larger without background */
+h1 code.language-plaintext.highlighter-rouge {
+  font-size: 1.2em; /* 20% larger */
+  background-color: transparent;
+  padding: 0;
+}
+
+/* Specifically for plugin headers */
+h1[id^="plugin-"] code {
+  font-size: 1.2em;
+  font-weight: 500;
+  background-color: transparent;
+  padding: 0;
+}
+
 pre {
   background-color: #1e1e1e;
   color: #d4d4d4;
