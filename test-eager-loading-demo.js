@@ -77,7 +77,17 @@ async function demonstrateEagerLoading() {
   const singleOffice = await api.get(office1.data.id, { type: 'offices' });
   console.log('Office attributes:', singleOffice.data.attributes);
   console.log('Country in attributes?', typeof singleOffice.data.attributes.countryId === 'object' ? 'YES' : 'NO');
+  console.log('Has relationships?', singleOffice.data.relationships ? 'YES' : 'NO');
+  if (singleOffice.data.relationships) {
+    console.log('Relationships:', Object.keys(singleOffice.data.relationships));
+    console.log('Country relationship:', singleOffice.data.relationships.country);
+  }
   console.log('Included resources:', singleOffice.included?.map(r => `${r.type}:${r.id}`));
+  
+  // Show the included country
+  if (singleOffice.included && singleOffice.included.length > 0) {
+    console.log('Included country data:', singleOffice.included[0].attributes);
+  }
   
   // Test 2: Get person with offices
   console.log('\n2. Get person with offices included:');
@@ -123,23 +133,55 @@ async function demonstrateEagerLoading() {
   // Test with SimplifiedRecordsPlugin
   console.log('4. Get single office (with SimplifiedRecordsPlugin):');
   const simplifiedOffice = await simplifiedApi.get('1', { type: 'offices' });
+  
+  // Check if it's flattened (no data wrapper)
+  if (simplifiedOffice.data) {
+    console.log('NOT flattened - still has data wrapper');
+  } else {
+    console.log('Flattened response (no data wrapper)');
+  }
+  
   console.log('Office data:', JSON.stringify(simplifiedOffice, null, 2));
-  console.log('\nCountry embedded?', typeof simplifiedOffice.countryId === 'object' ? 'YES' : 'NO');
+  
+  // For flattened response, check direct properties
+  const officeData = simplifiedOffice.data || simplifiedOffice;
+  console.log('\nCountry embedded?', typeof officeData.country === 'object' ? 'YES (as country)' : 
+    (typeof officeData.countryId === 'object' ? 'YES (as countryId)' : 'NO'));
+  
+  if (typeof officeData.country === 'object') {
+    console.log('Country data (as country):', officeData.country);
+  } else if (typeof officeData.countryId === 'object') {
+    console.log('Country data (as countryId):', officeData.countryId);
+  }
   
   console.log('\n5. Get person with offices (with SimplifiedRecordsPlugin):');
   const simplifiedPerson = await simplifiedApi.get('1', {
     type: 'people',
     include: 'offices'
   });
-  console.log('Person:', JSON.stringify(simplifiedPerson, null, 2));
   
-  // Check if offices have embedded countries
-  if (simplifiedPerson.offices && simplifiedPerson.offices.length > 0) {
-    console.log('\nFirst office country embedded?', 
-      typeof simplifiedPerson.offices[0].countryId === 'object' ? 'YES' : 'NO');
-    if (typeof simplifiedPerson.offices[0].countryId === 'object') {
-      console.log('Country data in office:', simplifiedPerson.offices[0].countryId);
+  const personData = simplifiedPerson.data || simplifiedPerson;
+  console.log('Person name:', personData.name || personData.attributes?.name);
+  
+  // Check if offices are embedded
+  if (personData.offices && Array.isArray(personData.offices)) {
+    console.log('Offices embedded directly:', personData.offices.length);
+    const firstOffice = personData.offices[0];
+    console.log('\nFirst office:', {
+      name: firstOffice.name,
+      countryId: firstOffice.countryId
+    });
+    console.log('First office country embedded?', 
+      typeof firstOffice.country === 'object' ? 'YES (as country)' : 
+      (typeof firstOffice.countryId === 'object' ? 'YES (as countryId)' : 'NO'));
+    
+    if (typeof firstOffice.country === 'object') {
+      console.log('Country data in office:', firstOffice.country);
+    } else if (typeof firstOffice.countryId === 'object') {
+      console.log('Country data in office:', firstOffice.countryId);
     }
+  } else {
+    console.log('Offices NOT embedded - check included section');
   }
 }
 
