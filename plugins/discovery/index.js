@@ -47,7 +47,8 @@ export const DiscoveryPlugin = {
  */
 function installRoutes(api, options) {
   const router = api.router;
-  const basePath = options.basePath || '/api';
+  // Use api.basePath if available (set by HTTPPlugin), otherwise use options
+  const basePath = api.basePath || options.basePath || '/api';
   
   // IMPORTANT: Discovery routes must be added BEFORE the generic /:type routes
   // We need to use a more specific path or register them earlier

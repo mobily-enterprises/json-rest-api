@@ -13,6 +13,9 @@ export const HTTPPlugin = {
   install(api, options = {}) {
     const router = express.Router();
     api.router = router;
+    
+    // Store basePath for other plugins to use
+    api.basePath = options.basePath || '/api';
 
     // Middleware for JSON parsing
     router.use(express.json({
@@ -59,8 +62,8 @@ export const HTTPPlugin = {
       });
     }
 
-    // Base path for all routes
-    const basePath = options.basePath || '/api';
+    // Base path for all routes (already stored on api object)
+    const basePath = api.basePath;
     
     // User extraction function
     const getUserFromRequest = options.getUserFromRequest || ((req) => req.user);
@@ -461,6 +464,134 @@ export const HTTPPlugin = {
       }
     }, 80); // High priority to run before response is sent
     
+    // Transform API response to JSON:API format with relationships
+    const transformToJsonApi = (result, type) => {
+      if (!result || !result.data) return result;
+      
+      const schema = api.schemas?.get(type);
+      if (!schema) return result;
+      
+      const processRecord = (record) => {
+        if (!record) return record;
+        
+        // Don't process if record already has correct structure
+        if (record.relationships) return record;
+        
+        // Initialize relationships object
+        const relationships = {};
+        
+        // Check each field for refs to create relationships
+        for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+          if (!fieldDef.refs) continue;
+          
+          // Check if this field has a value in attributes
+          const fieldValue = record.attributes?.[fieldName] || record[fieldName];
+          if (fieldValue === undefined || fieldValue === null) continue;
+          
+          // Determine relationship name (remove 'Id' suffix if present)
+          const relationshipName = fieldName.endsWith('Id') 
+            ? fieldName.slice(0, -2) 
+            : fieldName;
+          
+          // Check if joined data exists
+          let joinedData = null;
+          let idValue = fieldValue;
+          
+          // If field value is an object, it's joined data (no preserveId)
+          if (typeof fieldValue === 'object' && fieldValue !== null) {
+            // Check if this is actually joined data with an id property
+            if (fieldValue.id !== undefined) {
+              joinedData = fieldValue;
+              idValue = fieldValue.id;
+              // Replace the object with just the ID in attributes
+              if (record.attributes) {
+                record.attributes[fieldName] = idValue;
+              } else {
+                record[fieldName] = idValue;
+              }
+            }
+          }
+          
+          // Check for joined data in separate field (preserveId case)
+          const attrs = record.attributes || record;
+          if (attrs[relationshipName] && typeof attrs[relationshipName] === 'object') {
+            joinedData = attrs[relationshipName];
+            // Only remove from attributes if preserveId is false
+            // Default preserveId to true if not explicitly set
+            const preserveId = fieldDef.refs?.join?.preserveId !== false;
+            if (!preserveId) {
+              delete attrs[relationshipName]; // Remove from attributes
+            }
+          }
+          
+          // Also check for alternate field names (e.g., 'author' for 'authorId')
+          const altFieldName = fieldDef.refs?.join?.resourceField;
+          if (altFieldName && attrs[altFieldName] && typeof attrs[altFieldName] === 'object') {
+            joinedData = attrs[altFieldName];
+            // Only remove from attributes if preserveId is false
+            // Default preserveId to true if not explicitly set
+            const preserveId = fieldDef.refs?.join?.preserveId !== false;
+            if (!preserveId) {
+              delete attrs[altFieldName]; // Remove from attributes
+            }
+          }
+          
+          // Create relationship entry
+          relationships[relationshipName] = {
+            data: {
+              type: fieldDef.refs.resource,
+              id: String(idValue)
+            }
+          };
+          
+          // If we have joined data, add to included
+          if (joinedData) {
+            // Initialize included array if needed
+            if (!result.included) {
+              result.included = [];
+            }
+            const existingIndex = result.included.findIndex(
+              item => item.type === fieldDef.refs.resource && item.id === String(idValue)
+            );
+            
+            if (existingIndex === -1) {
+              // Format joined data for included section
+              const includedItem = {
+                type: fieldDef.refs.resource,
+                id: String(idValue),
+                attributes: {}
+              };
+              
+              // Copy non-id fields to attributes
+              for (const [key, value] of Object.entries(joinedData)) {
+                if (key !== 'id' && key !== 'type') {
+                  includedItem.attributes[key] = value;
+                }
+              }
+              
+              result.included.push(includedItem);
+            }
+          }
+        }
+        
+        // Add relationships to record if any exist
+        if (Object.keys(relationships).length > 0) {
+          record.relationships = relationships;
+        }
+        
+        return record;
+      };
+      
+      // Process single record or array
+      if (Array.isArray(result.data)) {
+        result.data = result.data.map(processRecord);
+      } else {
+        result.data = processRecord(result.data);
+      }
+      
+      return result;
+    };
+    
     // Helper function to add links to a response
     const addLinks = (result, req, type) => {
       if (!options.includeLinks || !result) return result;
@@ -581,6 +712,11 @@ export const HTTPPlugin = {
     
     // Routes
     
+    // Install discovery routes if available (must be before /:type routes)
+    if (api._installDiscoveryRoutes) {
+      api._installDiscoveryRoutes();
+    }
+    
     // Batch operations endpoint (must be before /:type routes)
     router.post(`/batch`, async (req, res) => {
       try {
@@ -638,7 +774,7 @@ export const HTTPPlugin = {
           result.links = buildLinks(req, params, result.meta);
         }
 
-        res.json(wrapResponse(addLinks(result, req, req.params.type)));
+        res.json(wrapResponse(addLinks(transformToJsonApi(result, req.params.type), req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -669,7 +805,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(wrapResponse(addLinks(result, req, req.params.type)));
+        res.json(wrapResponse(addLinks(transformToJsonApi(result, req.params.type), req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -1193,7 +1329,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(wrapResponse(addLinks(result, req, req.params.type)));
+        res.json(wrapResponse(addLinks(transformToJsonApi(result, req.params.type), req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -1222,7 +1358,7 @@ export const HTTPPlugin = {
           throw new NotFoundError(req.params.type, req.params.id);
         }
 
-        res.json(wrapResponse(addLinks(result, req, req.params.type)));
+        res.json(wrapResponse(addLinks(transformToJsonApi(result, req.params.type), req, req.params.type)));
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -1246,37 +1382,7 @@ export const HTTPPlugin = {
           ...options.typeOptions?.[req.params.type]
         });
 
-        // Query the updated relationships
-        const filter = {
-          [fieldDef.foreignKey]: id
-        };
-        
-        // Apply default filter if any
-        if (fieldDef.defaultFilter) {
-          Object.assign(filter, fieldDef.defaultFilter);
-        }
-        
-        const updatedRelationships = await api.query({
-          filter,
-          sort: fieldDef.defaultSort
-        }, {
-          type: fieldDef.foreignResource,
-          user
-        });
-        
-        // Return the updated linkage data
-        const response = {
-          data: updatedRelationships.data.map(item => ({
-            type: item.type,
-            id: item.id
-          })),
-          links: {
-            self: buildResourceUrl(req, type, id, 'relationships', field),
-            related: buildResourceUrl(req, type, id, field)
-          }
-        };
-        
-        res.json(wrapResponse(response));
+        res.status(204).send();
       } catch (error) {
         const apiError = normalizeError(error);
         res.status(apiError.status).json(formatErrors(error));
@@ -1547,12 +1653,14 @@ export const HTTPPlugin = {
             if (record[derivedField]) {
               joinedData = record[derivedField];
               relationshipName = derivedField;
-              delete record[derivedField]; // Remove from attributes
+              // When preserveId is true, keep the joined data in attributes
+              // Only delete if not preserveId
             }
           }
           
-          if (joinedData && relationshipName) {
-            // Add to relationships
+          if (joinedData && relationshipName && !preserveId) {
+            // Only process as relationship if not preserveId
+            // When preserveId is true, keep data in attributes for backward compatibility
             record.relationships[relationshipName] = {
               data: {
                 type: fieldDef.refs.resource,

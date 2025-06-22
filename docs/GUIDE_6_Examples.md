@@ -395,6 +395,121 @@ await api.resources.messages.query({
    node examples/example-versioning.js
    ```
 
+## Computed Resources Example
+
+The ComputedPlugin allows you to create API resources that generate data on-the-fly without any database storage.
+
+### Running the Example
+
+```bash
+node examples/example-computed.js
+```
+
+### What It Demonstrates
+
+1. **Simple Computed Resource** - Random data generation
+   ```javascript
+   api.addResource('random', randomSchema, {
+     compute: {
+       query: async (params, context) => {
+         // Generate 100 random records
+         return Array.from({ length: 100 }, (_, i) => ({
+           id: i + 1,
+           value: Math.random() * 1000,
+           category: ['A', 'B', 'C', 'D'][i % 4]
+         }));
+       }
+     }
+   });
+   ```
+
+2. **Data Aggregation** - Compute statistics from database resources
+   ```javascript
+   api.addResource('user-stats', statsSchema, {
+     compute: {
+       get: async (userId, context) => {
+         // Access other resources
+         const user = await context.api.resources.users.get(userId);
+         const posts = await context.api.resources.posts.query({ 
+           filter: { userId } 
+         });
+         
+         // Return computed statistics
+         return {
+           id: userId,
+           username: user.data.attributes.name,
+           postCount: posts.data.length,
+           avgPostLength: calculateAverage(posts)
+         };
+       }
+     }
+   });
+   ```
+
+3. **External API Proxy** - Wrap external APIs with your schema
+   ```javascript
+   api.addResource('weather', weatherSchema, {
+     compute: {
+       get: async (city, context) => {
+         // In production: call real weather API
+         // const response = await fetch(`https://api.weather.com/city/${city}`);
+         // return transformWeatherData(response);
+         
+         // Mock implementation
+         return {
+           id: city,
+           temperature: 20 + Math.random() * 15,
+           conditions: ['Sunny', 'Cloudy', 'Rainy'][Math.floor(Math.random() * 3)]
+         };
+       }
+     }
+   });
+   ```
+
+4. **Performance Optimization** - Handle operations yourself for efficiency
+   ```javascript
+   api.addResource('server-metrics', metricsSchema, {
+     compute: {
+       query: async (params, context) => {
+         const allMetrics = generateMetrics();
+         
+         // Apply filtering ourselves for performance
+         if (params.filter?.category) {
+           return allMetrics.filter(m => m.category === params.filter.category);
+         }
+         
+         return allMetrics;
+       },
+       
+       handlesFiltering: true  // Tell plugin we handle filtering
+     }
+   });
+   ```
+
+### Key Features Shown
+
+- **Mixed Resources**: Database and computed resources in same API
+- **Full API Features**: Filtering, sorting, pagination work automatically
+- **Resource Access**: Computed resources can query database resources
+- **Optimization**: Control filtering/sorting for performance
+- **Schema Validation**: All computed data is validated
+
+### Try These Queries
+
+```bash
+# Random data with filtering and sorting
+GET /api/random?filter[category]=A&filter[value][gte]=500&sort=-value
+
+# User statistics aggregation
+GET /api/user-stats/1
+
+# Weather data (mock external API)
+GET /api/weather/London
+
+# Server metrics with custom filtering
+GET /api/server-metrics?filter[category]=performance
+```
+
 ## Best Practices Demonstrated
 
 All examples follow these best practices:

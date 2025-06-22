@@ -29,6 +29,7 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Query Builder** - Advanced SQL queries
 - **Error Handling** - Handle errors gracefully
 - **Performance Optimization** - Make it fast
+- **Computed Resources** - Generate data without a database
 
 ### [5. Production, Deployment & Testing](./GUIDE_5_Production_and_Deployment.md)
 - **Organizing Resources** - Structure your project
@@ -46,6 +47,7 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Relationships** - Advanced refs and nested joins
 - **Security Patterns** - Silent fields and authentication
 - **Query Builder** - Direct SQL generation
+- **Computed Resources** - Generate data without database
 - **Best Practices** - All examples follow conventions
 
 ### [7. Security Best Practices](./GUIDE_7_Security.md)

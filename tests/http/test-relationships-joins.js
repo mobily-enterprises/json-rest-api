@@ -214,35 +214,53 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   // 7.3 Include parameter for additional joins
   console.log('  7.3 Include parameter for additional joins')
   
+  // Test 7.3a: Include parameter overrides eager joins (by design)
+  console.log('    7.3a Testing that explicit includes override eager joins')
   const includeCmd = curlCmd(`${baseUrl}/api/posts?include=categoryId`)
   const includeResult = await curl(includeCmd)
   const includeResponse = parseResponse(includeResult.raw)
   
   assertStatus(includeResponse, 200)
   
-  // Check that both author (eager) and category (included) are in included section
-  if (!includeResponse.data.included || !Array.isArray(includeResponse.data.included)) {
-    throw new Error('No included section when using include parameter')
+  // Check that only the explicitly included relationship is present
+  for (const post of includeResponse.data.data) {
+    // Should have ONLY category relationship (include overrides eager)
+    if (!post.relationships || !post.relationships.category) {
+      throw new Error('Category relationship missing with include parameter')
+    }
+    
+    // Author relationship should NOT be present when using explicit include
+    if (post.relationships.author) {
+      throw new Error('Author relationship should not be present when using explicit include (by design)')
+    }
   }
   
-  for (const post of includeResponse.data.data) {
-    // Should have both relationships
+  // Test 7.3b: Include multiple relationships explicitly
+  console.log('    7.3b Testing multiple explicit includes')
+  const multiPostIncludeCmd = curlCmd(`${baseUrl}/api/posts?include=categoryId,authorId`)
+  const multiPostIncludeResult = await curl(multiPostIncludeCmd)
+  const multiPostIncludeResponse = parseResponse(multiPostIncludeResult.raw)
+  
+  assertStatus(multiPostIncludeResponse, 200)
+  
+  // Now both relationships should be present
+  for (const post of multiPostIncludeResponse.data.data) {
     if (!post.relationships || !post.relationships.author) {
-      throw new Error('Author relationship missing when using include')
+      throw new Error('Author relationship missing when explicitly included')
     }
     
     if (!post.relationships.category) {
-      throw new Error('Category relationship missing with include parameter')
+      throw new Error('Category relationship missing when explicitly included')
     }
     
     // Verify both are in included section
     const authorRel = post.relationships.author.data
     const categoryRel = post.relationships.category.data
     
-    const author = includeResponse.data.included.find(
+    const author = multiPostIncludeResponse.data.included.find(
       item => item.type === 'users' && item.id === authorRel.id
     )
-    const category = includeResponse.data.included.find(
+    const category = multiPostIncludeResponse.data.included.find(
       item => item.type === 'categories' && item.id === categoryRel.id
     )
     
@@ -509,7 +527,7 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   }
   
   // Query with multiple joins
-  const perfCmd = curlCmd(`${baseUrl}/api/posts?include=categoryId&page[size]=50`)
+  const perfCmd = curlCmd(`${baseUrl}/api/posts?include=categoryId,authorId&page[size]=50`)
   const perfStart = Date.now()
   const perfResult = await curl(perfCmd)
   const perfTime = Date.now() - perfStart

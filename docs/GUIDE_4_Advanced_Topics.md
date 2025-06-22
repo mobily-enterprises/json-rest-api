@@ -1014,6 +1014,329 @@ api.on('pool:timeout', (info) => {
 5. **Use transactions wisely**: Long transactions hold connections
 
 
+## Computed Resources (No Database)
+
+The ComputedPlugin enables you to create API resources that generate data on-the-fly without any database storage. This powerful feature allows you to mix computed resources with database-backed resources in the same API instance.
+
+### When to Use Computed Resources
+
+Computed resources are perfect for:
+
+1. **Aggregations & Statistics**: Calculate real-time statistics from existing data
+2. **External API Proxies**: Wrap third-party APIs with your schema and features
+3. **Real-time Data**: System metrics, server status, live calculations
+4. **Mock Data**: Generate test data during development
+5. **Derived Values**: Data that can be calculated from other sources
+
+### Basic Usage
+
+```javascript
+import { ComputedPlugin } from 'json-rest-api';
+
+api.use(ComputedPlugin);
+
+// Simple computed resource
+api.addResource('random-numbers', numberSchema, {
+  compute: {
+    get: async (id, context) => {
+      return {
+        id,
+        value: Math.random() * 1000,
+        generatedAt: new Date()
+      };
+    },
+    
+    query: async (params, context) => {
+      // Generate 100 items
+      // The plugin handles filtering, sorting, pagination!
+      return Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        value: Math.random() * 1000,
+        category: ['A', 'B', 'C'][i % 3]
+      }));
+    }
+  }
+});
+
+// Use it like any other resource!
+// GET /api/random-numbers?filter[value][gte]=500&sort=-value
+```
+
+### Aggregating Database Data
+
+Computed resources can access other resources to create aggregations:
+
+```javascript
+api.addResource('dashboard-stats', statsSchema, {
+  compute: {
+    get: async (period, context) => {
+      // Access multiple resources
+      const [users, orders, revenue] = await Promise.all([
+        context.api.resources.users.query({
+          filter: { createdAt: { gte: periodStart(period) } }
+        }),
+        context.api.resources.orders.query({
+          filter: { status: 'completed' }
+        }),
+        context.api.resources.transactions.query({
+          filter: { type: 'revenue' }
+        })
+      ]);
+      
+      // Calculate and return statistics
+      return {
+        id: period,
+        newUsers: users.data.length,
+        totalOrders: orders.data.length,
+        revenue: revenue.data.reduce((sum, t) => 
+          sum + t.attributes.amount, 0
+        ),
+        period,
+        calculatedAt: new Date()
+      };
+    }
+  }
+});
+```
+
+### External API Proxy Pattern
+
+Wrap external APIs with your schema and get all API features for free:
+
+```javascript
+api.addResource('github-repos', repoSchema, {
+  compute: {
+    query: async (params, context) => {
+      // Use filters in external API call
+      const username = params.filter?.username || 'torvalds';
+      
+      // Fetch from GitHub
+      const response = await fetch(
+        `https://api.github.com/users/${username}/repos`
+      );
+      const repos = await response.json();
+      
+      // Transform to your schema
+      return repos.map(repo => ({
+        id: repo.id,
+        name: repo.name,
+        stars: repo.stargazers_count,
+        language: repo.language,
+        owner: username
+      }));
+    },
+    
+    get: async (repoId, context) => {
+      const response = await fetch(
+        `https://api.github.com/repositories/${repoId}`
+      );
+      
+      if (!response.ok) return null; // Triggers NotFoundError
+      
+      const repo = await response.json();
+      return transformRepo(repo);
+    }
+  }
+});
+
+// Now you get validation, filtering, sorting, pagination, auth, etc.!
+// GET /api/github-repos?filter[language]=JavaScript&sort=-stars
+```
+
+### Performance Optimization
+
+By default, the plugin handles filtering, sorting, and pagination for you. For external APIs or large datasets, you can optimize by handling these yourself:
+
+```javascript
+api.addResource('products', productSchema, {
+  compute: {
+    query: async (params, context) => {
+      // Build external API URL with parameters
+      const url = new URL('https://api.store.com/products');
+      
+      // Apply filters directly
+      if (params.filter?.category) {
+        url.searchParams.set('category', params.filter.category);
+      }
+      
+      // Apply sorting
+      if (params.sort) {
+        url.searchParams.set('sort', params.sort);
+      }
+      
+      // Apply pagination
+      if (params.page) {
+        url.searchParams.set('limit', params.page.size);
+        url.searchParams.set('offset', 
+          (params.page.number - 1) * params.page.size
+        );
+      }
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      return data.products;
+    },
+    
+    // Tell plugin you handle these operations
+    handlesFiltering: true,
+    handlesSorting: true,
+    handlesPagination: true
+  }
+});
+```
+
+### Real-time System Metrics
+
+```javascript
+import os from 'os';
+
+api.addResource('system-health', healthSchema, {
+  compute: {
+    get: async (metric, context) => {
+      switch (metric) {
+        case 'cpu':
+          const load = os.loadavg();
+          return {
+            id: 'cpu',
+            usage: load[0],
+            cores: os.cpus().length,
+            loadAverage: load
+          };
+          
+        case 'memory':
+          const total = os.totalmem();
+          const free = os.freemem();
+          return {
+            id: 'memory',
+            total,
+            used: total - free,
+            percentage: ((total - free) / total) * 100
+          };
+          
+        default:
+          return null;
+      }
+    }
+  }
+});
+```
+
+### Write Operations
+
+Computed resources can also support insert, update, and delete:
+
+```javascript
+api.addResource('cache-entries', cacheSchema, {
+  compute: {
+    insert: async (data, context) => {
+      const entry = {
+        id: generateId(),
+        key: data.key,
+        value: data.value,
+        ttl: data.ttl || 3600
+      };
+      
+      await redisClient.set(entry.key, entry.value, {
+        EX: entry.ttl
+      });
+      
+      return entry;
+    },
+    
+    update: async (id, data, context) => {
+      const existing = await redisClient.get(id);
+      if (!existing) return null;
+      
+      await redisClient.set(id, { ...existing, ...data });
+      return { id, ...data };
+    },
+    
+    delete: async (id, context) => {
+      const result = await redisClient.del(id);
+      return result > 0; // true if deleted
+    }
+  }
+});
+```
+
+### Best Practices
+
+1. **Always Return Arrays from query**: The query function must return an array
+2. **Return null for Not Found**: In get/update, return null to trigger NotFoundError
+3. **Include IDs**: Ensure all returned objects have an ID field
+4. **Handle Errors Gracefully**: Catch and wrap external API errors
+5. **Consider Caching**: Cache expensive computations when appropriate
+6. **Use Context**: Access `context.api` for other resources, `context.options.user` for auth
+
+### Advanced Patterns
+
+#### Search Aggregator
+
+```javascript
+api.addResource('search', searchResultSchema, {
+  compute: {
+    query: async (params, context) => {
+      const query = params.filter?.q;
+      if (!query) return [];
+      
+      // Search across multiple resources
+      const [users, posts, products] = await Promise.all([
+        context.api.resources.users.query({
+          filter: { name: { contains: query } }
+        }),
+        context.api.resources.posts.query({
+          filter: { title: { contains: query } }
+        }),
+        context.api.resources.products.query({
+          filter: { name: { contains: query } }
+        })
+      ]);
+      
+      // Combine and score results
+      return [
+        ...users.data.map(u => ({
+          id: `user-${u.id}`,
+          type: 'user',
+          title: u.attributes.name,
+          score: calculateRelevance(u.attributes.name, query)
+        })),
+        ...posts.data.map(p => ({
+          id: `post-${p.id}`,
+          type: 'post',
+          title: p.attributes.title,
+          score: calculateRelevance(p.attributes.title, query)
+        })),
+        // ... products
+      ].sort((a, b) => b.score - a.score);
+    }
+  }
+});
+```
+
+#### Computed Relationships
+
+Regular resources can have computed relationships:
+
+```javascript
+api.addResource('users', userSchema.extend({
+  // Virtual computed field
+  stats: {
+    type: 'object',
+    virtual: true,
+    computed: true,
+    async resolve(user, context) {
+      const stats = await context.api.resources['user-stats'].get(user.id);
+      return stats.data.attributes;
+    }
+  }
+}));
+```
+
+### Summary
+
+The ComputedPlugin provides incredible flexibility for creating dynamic API resources without database storage. By combining computed and database resources, you can build rich APIs that serve exactly the data your clients need, whether it's aggregated statistics, external API data, real-time metrics, or complex calculations.
+
 ---
 
 **← Previous**: [Plugins & Architecture](./GUIDE_3_Plugins_and_Architecture.md) | **Next**: [Production, Deployment & Testing →](./GUIDE_5_Production_and_Deployment.md)

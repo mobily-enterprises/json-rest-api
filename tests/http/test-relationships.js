@@ -130,19 +130,36 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(postWithAuthorResponse, 200)
   
-  // Check author is loaded as object with preserveId
-  const postAttrs = postWithAuthorResponse.data.data.attributes
+  // Check author is loaded in JSON:API format
+  const postResource = postWithAuthorResponse.data.data
+  const postAttrs = postResource.attributes
   
   if (typeof postAttrs.authorId !== 'string') {
     throw new Error('authorId should be preserved as string ID')
   }
   
-  if (!postAttrs.author || typeof postAttrs.author !== 'object') {
-    throw new Error('Author should be eagerly loaded as object')
+  // In JSON:API format, relationship should be in relationships section
+  if (!postResource.relationships || !postResource.relationships.author) {
+    throw new Error('Author relationship should be present')
   }
   
-  if (!postAttrs.author.id || !postAttrs.author.name || !postAttrs.author.email) {
-    throw new Error('Author object missing required fields')
+  if (!postResource.relationships.author.data || postResource.relationships.author.data.type !== 'users') {
+    throw new Error('Author relationship should reference users resource')
+  }
+  
+  // Check that author data is in included array
+  const included = postWithAuthorResponse.data.included
+  if (!included || !Array.isArray(included)) {
+    throw new Error('Response should have included array for eager loaded data')
+  }
+  
+  const authorData = included.find(item => item.type === 'users' && item.id === postAttrs.authorId)
+  if (!authorData) {
+    throw new Error('Author data should be in included array')
+  }
+  
+  if (!authorData.attributes.name || !authorData.attributes.email) {
+    throw new Error('Author data missing required fields')
   }
   
   // 7.2 Lazy loading with include parameter
@@ -180,20 +197,22 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
       throw new Error('Comment missing content')
     }
     
-    // Based on the schema, the join is configured without preserveId
-    // So userId contains the full user object
-    if (comment.attributes.userId && typeof comment.attributes.userId === 'object') {
-      // This is the expected behavior when preserveId is not set
-      if (!comment.attributes.userId.id || !comment.attributes.userId.name) {
-        throw new Error('User object missing required fields')
-      }
-    } else if (typeof comment.attributes.userId === 'string' && comment.attributes.user) {
-      // Alternative structure with preserveId
-      if (!comment.attributes.user.id || !comment.attributes.user.name) {
-        throw new Error('User object missing required fields')
-      }
-    } else {
-      throw new Error('Neither userId object nor separate user field found')
+    // In JSON:API format, check for user relationship
+    if (!comment.relationships || !comment.relationships.user) {
+      throw new Error('User relationship should be present for eagerly loaded field')
+    }
+    
+    // Find user data in included array
+    const userData = multiIncludeResponse.data.included.find(
+      item => item.type === 'users' && item.id === comment.attributes.userId
+    )
+    
+    if (!userData) {
+      throw new Error('User data should be in included array')
+    }
+    
+    if (!userData.id || !userData.attributes.name) {
+      throw new Error('User data missing required fields')
     }
   }
   
@@ -352,22 +371,28 @@ await runHttpTests('Relationships and Joins', async ({ baseUrl }, storageType) =
   
   assertStatus(complexJoinResponse, 200)
   
-  // Verify join data integrity
+  // Verify join data integrity in JSON:API format
   for (const comment of complexJoinResponse.data.data) {
     const attrs = comment.attributes
     
-    // Should have userId as ID and user as object
+    // Should have userId as string
     if (typeof attrs.userId !== 'string') {
       throw new Error('userId should be string')
     }
     
-    if (!attrs.user || typeof attrs.user !== 'object') {
-      throw new Error('user should be object')
+    // Should have user relationship (eager loaded)
+    if (!comment.relationships || !comment.relationships.user) {
+      throw new Error('User relationship should be present')
     }
     
-    // User object should match userId
-    if (String(attrs.user.id) !== attrs.userId) {
-      throw new Error('user.id should match userId')
+    // Verify user data is in included array
+    if (complexJoinResponse.data.included) {
+      const userData = complexJoinResponse.data.included.find(
+        item => item.type === 'users' && item.id === attrs.userId
+      )
+      if (!userData) {
+        throw new Error('User data should be in included array for eager loaded relationship')
+      }
     }
   }
   

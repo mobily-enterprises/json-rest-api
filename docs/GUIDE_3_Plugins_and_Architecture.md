@@ -139,6 +139,51 @@ Features:
 - Advanced querying with QueryBuilder
 - Multiple connection support
 
+#### ComputedPlugin
+
+Generate data on-the-fly without any database storage. Perfect for computed/derived data, external API proxies, real-time calculations, and mock data.
+
+```javascript
+import { ComputedPlugin } from 'json-rest-api';
+
+api.use(ComputedPlugin);
+
+// Mix computed resources with database-backed ones!
+api.addResource('user-stats', statsSchema, {
+  compute: {
+    get: async (userId, context) => {
+      // Access other resources
+      const user = await context.api.resources.users.get(userId);
+      const posts = await context.api.resources.posts.query({ 
+        filter: { userId } 
+      });
+      
+      // Return computed data
+      return {
+        id: userId,
+        username: user.data.attributes.name,
+        postCount: posts.data.length,
+        avgPostLength: calculateAverage(posts)
+      };
+    },
+    
+    query: async (params, context) => {
+      // Generate multiple items
+      // Plugin handles filtering, sorting, pagination!
+      return generateData();
+    }
+  }
+});
+```
+
+Features:
+- No database required - generates data on demand
+- Full API feature support (validation, auth, hooks, filtering, etc.)
+- Can access other resources (both computed and database)
+- Automatic filtering/sorting/pagination
+- Performance optimization options
+- Perfect for aggregations, external APIs, real-time data
+
 ### Feature Plugins
 
 #### ValidationPlugin

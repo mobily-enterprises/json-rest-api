@@ -2537,6 +2537,87 @@ api.use(adapter);
 - **Plugins** (MemoryPlugin, MySQLPlugin) use adapters and add convenience features
 - **SQLPlugin** provides the common SQL logic that works with any adapter
 
+### ComputedPlugin
+
+Provides a way to create API resources that generate data on-the-fly without any database storage. Perfect for computed/derived data, external API proxies, real-time calculations, and mock data generation.
+
+```javascript
+import { ComputedPlugin } from 'json-rest-api/plugins/computed.js';
+
+api.use(ComputedPlugin);
+
+// Mix computed resources with database-backed ones
+api.addResource('users', userSchema);  // Regular DB resource
+
+// Computed resource - generates data on the fly
+api.addResource('user-stats', statsSchema, {
+  compute: {
+    get: async (id, context) => {
+      // Access other resources
+      const user = await context.api.resources.users.get(id);
+      const posts = await context.api.resources.posts.query({ 
+        filter: { userId: id } 
+      });
+      
+      // Return computed data
+      return {
+        id,
+        username: user.data.attributes.name,
+        postCount: posts.data.length,
+        avgPostLength: posts.data.reduce((sum, p) => 
+          sum + p.attributes.content.length, 0) / posts.data.length
+      };
+    },
+    
+    query: async (params, context) => {
+      // Generate multiple items
+      // Plugin handles filtering, sorting, pagination automatically!
+      return generateData();
+    }
+  }
+});
+
+// External API proxy example
+api.addResource('weather', weatherSchema, {
+  compute: {
+    query: async (params, context) => {
+      const response = await fetch('https://api.weather.com/...');
+      const data = await response.json();
+      
+      // Transform and return - all API features work!
+      return data.map(item => ({
+        id: item.city,
+        temperature: item.temp,
+        conditions: item.weather
+      }));
+    },
+    
+    // Tell plugin you handle filtering for performance
+    handlesFiltering: true,
+    handlesSorting: true,
+    handlesPagination: true
+  }
+});
+```
+
+**Features:**
+- Mix computed and database resources in same API
+- Full API feature support (validation, auth, hooks, filtering, etc.)
+- Automatic filtering/sorting/pagination of results
+- Can access other resources via context.api
+- Support for all CRUD operations (if implemented)
+- Perfect for aggregations, external APIs, real-time data
+
+**Compute Options:**
+- `get(id, context)` - Get single computed item
+- `query(params, context)` - Query multiple computed items
+- `insert(data, context)` - Create computed item (optional)
+- `update(id, data, context)` - Update computed item (optional)
+- `delete(id, context)` - Delete computed item (optional)
+- `handlesFiltering` - True if compute function handles filtering
+- `handlesSorting` - True if compute function handles sorting
+- `handlesPagination` - True if compute function handles pagination
+
 ### CQRSPlugin
 
 Implements Command Query Responsibility Segregation (CQRS) pattern, separating reads and writes into different models, handlers, or even databases. Includes support for Event Sourcing, Projections, and Sagas.

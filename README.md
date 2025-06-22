@@ -45,7 +45,7 @@ With just a schema definition, you get:
 - ✅ **Versioning** - API and resource versioning built-in
 - ✅ **JSON:API compliant** - Full spec compliance with strict mode, meta formatting, enhanced errors
 - ✅ **Extensible** - Hooks, plugins, custom types
-- ✅ **Multiple backends** - Memory (AlaSQL), MySQL, or build your own
+- ✅ **Multiple backends** - Memory (AlaSQL), MySQL, Computed (no database), or build your own
 
 ## 🚀 See It In Action
 
@@ -294,6 +294,62 @@ POST /api/articles/1/relationships/tags
 // Remove from to-many relationship
 DELETE /api/articles/1/relationships/tags
 // Body: { "data": [{ "type": "tags", "id": "5" }] }
+```
+</details>
+
+<details>
+<summary><strong>Computed Resources (No Database)</strong></summary>
+
+```javascript
+import { ComputedPlugin } from 'json-rest-api/plugins';
+
+api.use(ComputedPlugin);
+
+// Mix computed resources with database-backed ones
+api.addResource('users', userSchema);  // Regular DB resource
+
+// Computed resource - generates data on the fly
+api.addResource('user-stats', statsSchema, {
+  compute: {
+    get: async (userId, context) => {
+      // Access other resources
+      const user = await context.api.resources.users.get(userId);
+      const posts = await context.api.resources.posts.query({ 
+        filter: { userId } 
+      });
+      
+      // Return computed data
+      return {
+        id: userId,
+        username: user.data.attributes.name,
+        postCount: posts.data.length,
+        avgPostLength: posts.data.reduce((sum, p) => 
+          sum + p.attributes.content.length, 0) / posts.data.length
+      };
+    }
+  }
+});
+
+// External API proxy example
+api.addResource('weather', weatherSchema, {
+  compute: {
+    query: async (params, context) => {
+      // Fetch from external API
+      const response = await fetch('https://api.weather.com/...');
+      const data = await response.json();
+      
+      // Transform and return - filtering/sorting handled automatically!
+      return data.map(item => ({
+        id: item.city,
+        temperature: item.temp,
+        conditions: item.weather
+      }));
+    }
+  }
+});
+
+// All features work: validation, filtering, pagination, hooks!
+GET /api/weather?filter[temperature][gte]=20&sort=-temperature
 ```
 </details>
 
