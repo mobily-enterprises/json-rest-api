@@ -1,5 +1,7 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
+import { Schema } from '../../lib/schema.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
 import { MySQLPlugin } from '../../plugins/mysql.js';
 
@@ -24,15 +26,15 @@ const testBackends = [
 for (const backend of testBackends) {
   if (backend.skip) continue;
   
-  test.serial(`${backend.name}: SQL injection in filter values`, async t => {
+  test(`${backend.name}: SQL injection in filter values`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('users', {
+    api.addResource('users', new Schema({
       name: { type: 'string', searchable: true },
       email: { type: 'string', searchable: true },
       role: { type: 'string', searchable: true }
-    });
+    }));
     
     await api.connect();
     
@@ -56,21 +58,21 @@ for (const backend of testBackends) {
         
         // Verify no damage was done
         const allUsers = await api.query({}, { type: 'users' });
-        t.is(allUsers.results.length, 2); // Both users still exist
+        assert.equal(allUsers.results.length, 2); // Both users still exist
       }
     } finally {
       await api.disconnect();
     }
   });
   
-  test.serial(`${backend.name}: SQL injection in advanced operators`, async t => {
+  test(`${backend.name}: SQL injection in advanced operators`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('products', {
+    api.addResource('products', new Schema({
       name: { type: 'string', searchable: true },
       price: { type: 'number', searchable: true }
-    });
+    }));
     
     await api.connect();
     
@@ -96,21 +98,21 @@ for (const backend of testBackends) {
         
         // Verify table still exists and data intact
         const products = await api.query({}, { type: 'products' });
-        t.is(products.results.length, 2);
+        assert.equal(products.results.length, 2);
       }
     } finally {
       await api.disconnect();
     }
   });
   
-  test.serial(`${backend.name}: SQL injection in sort parameters`, async t => {
+  test(`${backend.name}: SQL injection in sort parameters`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('items', {
+    api.addResource('items', new Schema({
       name: { type: 'string' },
       value: { type: 'number' }
-    });
+    }));
     
     await api.connect();
     
@@ -126,7 +128,7 @@ for (const backend of testBackends) {
       ];
       
       for (const sort of maliciousSorts) {
-        await t.throwsAsync(
+        await assert.rejects(
           api.query({ sort }, { type: 'items' }),
           { message: /Invalid sort field/ }
         );
@@ -134,19 +136,19 @@ for (const backend of testBackends) {
       
       // Verify data intact
       const items = await api.query({}, { type: 'items' });
-      t.is(items.results.length, 2);
+      assert.equal(items.results.length, 2);
     } finally {
       await api.disconnect();
     }
   });
   
-  test.serial(`${backend.name}: SQL injection in ID parameters`, async t => {
+  test(`${backend.name}: SQL injection in ID parameters`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('records', {
+    api.addResource('records', new Schema({
       data: { type: 'string' }
-    });
+    }));
     
     await api.connect();
     
@@ -171,20 +173,20 @@ for (const backend of testBackends) {
       
       // Verify table intact
       const allRecords = await api.query({}, { type: 'records' });
-      t.is(allRecords.results.length, 1);
+      assert.equal(allRecords.results.length, 1);
     } finally {
       await api.disconnect();
     }
   });
   
-  test.serial(`${backend.name}: SQL injection in data values`, async t => {
+  test(`${backend.name}: SQL injection in data values`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('entries', {
+    api.addResource('entries', new Schema({
       title: { type: 'string' },
       description: { type: 'string' }
-    });
+    }));
     
     await api.connect();
     
@@ -200,25 +202,25 @@ for (const backend of testBackends) {
       
       // Verify data was inserted safely
       const retrieved = await api.get(entry.id, { type: 'entries' });
-      t.is(retrieved.title, maliciousData.title);
-      t.is(retrieved.description, maliciousData.description);
+      assert.equal(retrieved.title, maliciousData.title);
+      assert.equal(retrieved.description, maliciousData.description);
       
       // Table should still exist
       const allEntries = await api.query({}, { type: 'entries' });
-      t.is(allEntries.results.length, 1);
+      assert.equal(allEntries.results.length, 1);
     } finally {
       await api.disconnect();
     }
   });
   
-  test.serial(`${backend.name}: Filter value validation prevents injection`, async t => {
+  test(`${backend.name}: Filter value validation prevents injection`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('accounts', {
+    api.addResource('accounts', new Schema({
       balance: { type: 'number', searchable: true },
       status: { type: 'string', searchable: true, pattern: '^[a-zA-Z]+$' }
-    });
+    }));
     
     await api.connect();
     
@@ -233,14 +235,14 @@ for (const backend of testBackends) {
       ];
       
       for (const filter of dangerousFilters) {
-        await t.throwsAsync(
+        await assert.rejects(
           api.query({ filter }, { type: 'accounts' }),
           { message: /Invalid|filter/ }
         );
       }
       
       // Pattern validation should reject SQL
-      await t.throwsAsync(
+      await assert.rejects(
         api.query({ filter: { status: "active' OR '1'='1" } }, { type: 'accounts' }),
         { message: /does not match required pattern/ }
       );
@@ -249,18 +251,18 @@ for (const backend of testBackends) {
     }
   });
   
-  test.serial(`${backend.name}: Nested field injection attempts`, async t => {
+  test(`${backend.name}: Nested field injection attempts`, async () => {
     const api = new Api();
     api.use(backend.plugin, backend.options);
     
-    api.addResource('posts', {
+    api.addResource('posts', new Schema({
       title: { type: 'string' },
       authorId: { type: 'id', refs: 'authors', searchable: true }
-    });
+    }));
     
-    api.addResource('authors', {
+    api.addResource('authors', new Schema({
       name: { type: 'string', searchable: true }
-    });
+    }));
     
     await api.connect();
     
@@ -277,7 +279,7 @@ for (const backend of testBackends) {
       });
       
       // Attempt injection in nested field filter
-      await t.throwsAsync(
+      await assert.rejects(
         api.query({ 
           filter: { author: "John'; DROP TABLE posts; --" } 
         }, { type: 'posts' }),

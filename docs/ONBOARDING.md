@@ -1,6 +1,6 @@
-# JSON REST API Onboarding Guide
+# Contributing to JSON REST API
 
-Welcome! This guide will teach you everything about this codebase. We'll start from the basics and build up your understanding step by step.
+Welcome, developer! This onboarding guide will help you understand the codebase architecture and get you ready to contribute. Whether you're fixing bugs, adding features, or improving documentation, this guide will give you the knowledge you need.
 
 ## Table of Contents
 

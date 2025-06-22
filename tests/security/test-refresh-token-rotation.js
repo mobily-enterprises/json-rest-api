@@ -1,9 +1,10 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
 import { JwtPlugin } from '../../plugins/jwt.js';
 
-test.beforeEach(t => {
+test.beforeEach(async () => {
   const api = new Api();
   api.use(MemoryPlugin);
   api.use(JwtPlugin, {
@@ -13,11 +14,12 @@ test.beforeEach(t => {
     rotateRefreshTokens: true
   });
   
-  t.context.api = api;
+  globalThis.api = api;
 });
 
-test('Refresh token rotation: generates new token on refresh', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: generates new token on refresh', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Generate initial tokens
   const userId = 123;
@@ -29,32 +31,34 @@ test('Refresh token rotation: generates new token on refresh', async t => {
   // Refresh the tokens
   const result = await api.refreshAccessToken(refreshToken);
   
-  t.truthy(result.accessToken);
-  t.truthy(result.refreshToken);
-  t.not(result.refreshToken, refreshToken); // New refresh token
-  t.true(result.rotated);
-  t.is(result.expiresIn, '1h');
+  assert.ok(result.accessToken);
+  assert.ok(result.refreshToken);
+  assert.notEqual(result.refreshToken, refreshToken); // New refresh token
+  assert.equal(result.rotated, true);
+  assert.equal(result.expiresIn, '1h');
 });
 
-test('Refresh token rotation: old token cannot be reused', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: old token cannot be reused', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const refreshToken = await api.generateRefreshToken(userId);
   
   // Use the refresh token once
   const result = await api.refreshAccessToken(refreshToken);
-  t.truthy(result.refreshToken);
+  assert.ok(result.refreshToken);
   
   // Try to use the old token again
-  await t.throwsAsync(
+  await assert.rejects(
     api.refreshAccessToken(refreshToken),
     { message: /Refresh token reuse detected/ }
   );
 });
 
-test('Refresh token rotation: token family tracking', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: token family tracking', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const token1 = await api.generateRefreshToken(userId);
@@ -68,13 +72,14 @@ test('Refresh token rotation: token family tracking', async t => {
   const token3 = result2.refreshToken;
   
   // All tokens should be in the same family
-  t.not(token1, token2);
-  t.not(token2, token3);
-  t.not(token1, token3);
+  assert.notEqual(token1, token2);
+  assert.notEqual(token2, token3);
+  assert.notEqual(token1, token3);
 });
 
-test('Refresh token rotation: family revocation on reuse', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: family revocation on reuse', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const token1 = await api.generateRefreshToken(userId);
@@ -88,19 +93,19 @@ test('Refresh token rotation: family revocation on reuse', async t => {
   const token3 = result2.refreshToken;
   
   // Try to reuse token2 (which was already used)
-  await t.throwsAsync(
+  await assert.rejects(
     api.refreshAccessToken(token2),
     { message: /Refresh token reuse detected/ }
   );
   
   // Token3 should also be revoked (same family)
-  await t.throwsAsync(
+  await assert.rejects(
     api.refreshAccessToken(token3),
     { message: /Invalid refresh token/ }
   );
 });
 
-test('Refresh token rotation: can disable rotation', async t => {
+test('Refresh token rotation: can disable rotation', async () => {
   const api = new Api();
   api.use(MemoryPlugin);
   api.use(JwtPlugin, {
@@ -113,16 +118,17 @@ test('Refresh token rotation: can disable rotation', async t => {
   
   // Refresh without rotation
   const result1 = await api.refreshAccessToken(refreshToken);
-  t.is(result1.refreshToken, refreshToken); // Same token
-  t.false(result1.rotated);
+  assert.equal(result1.refreshToken, refreshToken); // Same token
+  assert.equal(result1.rotated);
   
   // Can use the same token again
   const result2 = await api.refreshAccessToken(refreshToken);
-  t.is(result2.refreshToken, refreshToken);
+  assert.equal(result2.refreshToken, refreshToken);
 });
 
-test('Refresh token rotation: per-request rotation control', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: per-request rotation control', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const refreshToken = await api.generateRefreshToken(userId);
@@ -130,15 +136,15 @@ test('Refresh token rotation: per-request rotation control', async t => {
   // Disable rotation for this request
   const result = await api.refreshAccessToken(refreshToken, { rotate: false });
   
-  t.is(result.refreshToken, refreshToken); // Same token
-  t.false(result.rotated);
+  assert.equal(result.refreshToken, refreshToken); // Same token
+  assert.equal(result.rotated);
   
   // Token can still be used
   const result2 = await api.refreshAccessToken(refreshToken);
-  t.not(result2.refreshToken, refreshToken); // Now it rotates
+  assert.notEqual(result2.refreshToken, refreshToken); // Now it rotates
 });
 
-test('Refresh token rotation: expired tokens are cleaned up', async t => {
+test('Refresh token rotation: expired tokens are cleaned up', async () => {
   const api = new Api();
   api.use(MemoryPlugin);
   api.use(JwtPlugin, {
@@ -153,14 +159,15 @@ test('Refresh token rotation: expired tokens are cleaned up', async t => {
   await new Promise(resolve => setTimeout(resolve, 150));
   
   // Should fail with expiration error
-  await t.throwsAsync(
+  await assert.rejects(
     api.refreshAccessToken(refreshToken),
     { message: /Refresh token expired/ }
   );
 });
 
-test('Refresh token rotation: metadata is preserved', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: metadata is preserved', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const metadata = { 
@@ -176,13 +183,13 @@ test('Refresh token rotation: metadata is preserved', async t => {
   
   // Verify access token has the metadata
   const decoded = await api.verifyToken(result.accessToken);
-  t.is(decoded.userId, userId);
-  t.is(decoded.role, 'admin');
-  t.deepEqual(decoded.permissions, ['read', 'write']);
-  t.is(decoded.department, 'IT');
+  assert.equal(decoded.userId, userId);
+  assert.equal(decoded.role, 'admin');
+  assert.deepEqual(decoded.permissions, ['read', 'write']);
+  assert.equal(decoded.department, 'IT');
 });
 
-test('Refresh token rotation: onRefresh hook', async t => {
+test('Refresh token rotation: onRefresh hook', async () => {
   let hookCalled = false;
   let hookPayload = null;
   let hookTokenData = null;
@@ -207,23 +214,23 @@ test('Refresh token rotation: onRefresh hook', async t => {
   const result = await api.refreshAccessToken(refreshToken);
   
   // Hook should have been called
-  t.true(hookCalled);
-  t.is(hookPayload.userId, userId);
-  t.is(hookPayload.role, 'user');
-  t.truthy(hookTokenData.createdAt);
+  assert.equal(hookCalled, true);
+  assert.equal(hookPayload.userId, userId);
+  assert.equal(hookPayload.role, 'user');
+  assert.ok(hookTokenData.createdAt);
   
   // Verify payload was modified
   const decoded = await api.verifyToken(result.accessToken);
-  t.truthy(decoded.refreshedAt);
+  assert.ok(decoded.refreshedAt);
 });
 
-test('Refresh token rotation: security event logging', async t => {
+test('Refresh token rotation: security event logging', async () => {
   const logs = [];
   const originalWarn = console.warn;
   console.warn = (...args) => logs.push(args);
   
   try {
-    const { api } = t.context;
+    
     
     const userId = 123;
     const token1 = await api.generateRefreshToken(userId);
@@ -232,22 +239,23 @@ test('Refresh token rotation: security event logging', async t => {
     const result = await api.refreshAccessToken(token1);
     
     // Reuse token (triggers security event)
-    await t.throwsAsync(
+    await assert.rejects(
       api.refreshAccessToken(token1)
     );
     
     // Check security event was logged
-    t.true(logs.length > 0);
+    assert.equal(logs.length > 0, true);
     const warning = logs.find(log => log[0].includes('Token family'));
-    t.truthy(warning);
-    t.regex(warning[0], /revoked due to token reuse detection/);
+    assert.ok(warning);
+    assert.match(warning[0], /revoked due to token reuse detection/);
   } finally {
     console.warn = originalWarn;
   }
 });
 
-test('Refresh token rotation: concurrent refresh attempts', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: concurrent refresh attempts', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const refreshToken = await api.generateRefreshToken(userId);
@@ -265,17 +273,18 @@ test('Refresh token rotation: concurrent refresh attempts', async t => {
   const successes = results.filter(r => r.status === 'fulfilled');
   const failures = results.filter(r => r.status === 'rejected');
   
-  t.is(successes.length, 1);
-  t.is(failures.length, 2);
+  assert.equal(successes.length, 1);
+  assert.equal(failures.length, 2);
   
   // Failures should be due to token reuse
   for (const failure of failures) {
-    t.regex(failure.reason.message, /reuse detected|Invalid/);
+    assert.match(failure.reason.message, /reuse detected|Invalid/);
   }
 });
 
-test('Refresh token rotation: parent token tracking', async t => {
-  const { api } = t.context;
+test('Refresh token rotation: parent token tracking', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const userId = 123;
   const token1 = await api.generateRefreshToken(userId);
@@ -290,6 +299,6 @@ test('Refresh token rotation: parent token tracking', async t => {
   // Each token should track its parent
   // (This would require exposing token data for testing, 
   // but the internal implementation tracks parentToken)
-  t.not(token1, token2);
-  t.not(token2, token3);
+  assert.notEqual(token1, token2);
+  assert.notEqual(token2, token3);
 });

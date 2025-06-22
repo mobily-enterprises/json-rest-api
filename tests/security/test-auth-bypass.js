@@ -1,9 +1,11 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
+import { Schema } from '../../lib/schema.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
 import { AuthorizationPlugin } from '../../plugins/authorization.js';
 
-test.beforeEach(t => {
+test.beforeEach(async () => {
   const api = new Api();
   api.use(MemoryPlugin);
   
@@ -30,21 +32,22 @@ test.beforeEach(t => {
     }
   });
   
-  api.addResource('posts', {
+  api.addResource('posts', new Schema({
     title: { type: 'string', required: true },
     content: { type: 'string' },
     userId: { type: 'id' }
-  });
+  }));
   
-  api.addResource('secrets', {
+  api.addResource('secrets', new Schema({
     data: { type: 'string', required: true }
-  });
+  }));
   
-  t.context.api = api;
+  globalThis.api = api;
 });
 
-test('Auth bypass: _skipAuth without _internal flag is blocked', async t => {
-  const { api } = t.context;
+test('Auth bypass: _skipAuth without _internal flag is blocked', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Create a secret as admin
   const adminUser = { id: 1, roles: ['admin'] };
@@ -57,7 +60,7 @@ test('Auth bypass: _skipAuth without _internal flag is blocked', async t => {
   const regularUser = { id: 2, roles: ['user'] };
   
   // Should still check auth and fail
-  await t.throwsAsync(
+  await assert.rejects(
     api.get(secret.id, { 
       type: 'secrets', 
       user: regularUser,
@@ -67,8 +70,9 @@ test('Auth bypass: _skipAuth without _internal flag is blocked', async t => {
   );
 });
 
-test('Auth bypass: _internal flag requires genuine internal call', async t => {
-  const { api } = t.context;
+test('Auth bypass: _internal flag requires genuine internal call', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Create a post
   const user = { id: 1, roles: ['user'] };
@@ -86,11 +90,11 @@ test('Auth bypass: _internal flag requires genuine internal call', async t => {
   });
   
   // Should succeed with both flags
-  t.is(result.title, 'My post');
+  assert.equal(result.title, 'My post');
 });
 
-test('Auth bypass: suspicious attempts are logged', async t => {
-  const { api } = t.context;
+test('Auth bypass: suspicious attempts are logged', async () => {
+  
   const logs = [];
   
   // Capture console.warn
@@ -108,7 +112,7 @@ test('Auth bypass: suspicious attempts are logged', async t => {
     // Try to bypass with _skipAuth
     const attackerUser = { id: 999, roles: [] };
     
-    await t.throwsAsync(
+    await assert.rejects(
       api.get(secret.id, {
         type: 'secrets',
         user: attackerUser,
@@ -118,22 +122,23 @@ test('Auth bypass: suspicious attempts are logged', async t => {
     );
     
     // Check that warning was logged
-    t.true(logs.length > 0);
+    assert.equal(logs.length > 0, true);
     const warning = logs[0][0];
-    t.regex(warning, /Suspicious auth bypass attempt/);
-    t.regex(warning, /secrets\.read/);
-    t.regex(warning, /999/); // user id
-    t.regex(warning, /192\.168\.1\.100/); // IP
+    assert.match(warning, /Suspicious auth bypass attempt/);
+    assert.match(warning, /secrets\.read/);
+    assert.match(warning, /999/); // user id
+    assert.match(warning, /192\.168\.1\.100/); // IP
   } finally {
     console.warn = originalWarn;
   }
 });
 
-test('Auth bypass: cannot bypass field-level permissions', async t => {
-  const { api } = t.context;
+test('Auth bypass: cannot bypass field-level permissions', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Add resource with field permissions
-  api.addResource('profiles', {
+  api.addResource('profiles', new Schema({
     name: { type: 'string' },
     email: { 
       type: 'string',
@@ -143,7 +148,7 @@ test('Auth bypass: cannot bypass field-level permissions', async t => {
       type: 'string',
       permission: 'admin'
     }
-  });
+  }));
   
   // Create profile as admin
   const adminUser = { id: 1, roles: ['admin'] };
@@ -165,13 +170,14 @@ test('Auth bypass: cannot bypass field-level permissions', async t => {
   });
   
   // Should get the record but sensitive fields filtered
-  t.is(result.name, 'John Doe');
-  t.is(result.email, undefined); // No permission
-  t.is(result.ssn, undefined); // Admin only
+  assert.equal(result.name, 'John Doe');
+  assert.equal(result.email, undefined); // No permission
+  assert.equal(result.ssn, undefined); // Admin only
 });
 
-test('Auth bypass: ownership checks cannot be bypassed', async t => {
-  const { api } = t.context;
+test('Auth bypass: ownership checks cannot be bypassed', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // User 1 creates a post
   const user1 = { id: 1, roles: ['user'], permissions: ['posts.update.own'] };
@@ -189,7 +195,7 @@ test('Auth bypass: ownership checks cannot be bypassed', async t => {
   };
   
   // Should still check ownership
-  await t.throwsAsync(
+  await assert.rejects(
     api.update(post.id, 
       { title: 'Hacked!' },
       { 
@@ -203,11 +209,12 @@ test('Auth bypass: ownership checks cannot be bypassed', async t => {
   
   // Verify post wasn't changed
   const unchanged = await api.get(post.id, { type: 'posts', user: user1 });
-  t.is(unchanged.title, 'User 1 post');
+  assert.equal(unchanged.title, 'User 1 post');
 });
 
-test('Auth bypass: query operations check auth', async t => {
-  const { api } = t.context;
+test('Auth bypass: query operations check auth', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Create secrets as admin
   const adminUser = { id: 1, roles: ['admin'] };
@@ -218,7 +225,7 @@ test('Auth bypass: query operations check auth', async t => {
   const regularUser = { id: 2, roles: ['user'] };
   
   // Should fail even with _skipAuth (no _internal)
-  await t.throwsAsync(
+  await assert.rejects(
     api.query({}, { 
       type: 'secrets', 
       user: regularUser,
@@ -228,8 +235,9 @@ test('Auth bypass: query operations check auth', async t => {
   );
 });
 
-test('Auth bypass: delete operations check auth', async t => {
-  const { api } = t.context;
+test('Auth bypass: delete operations check auth', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // User 1 creates a post
   const user1 = { 
@@ -252,7 +260,7 @@ test('Auth bypass: delete operations check auth', async t => {
   };
   
   // Should fail with _skipAuth but no ownership
-  await t.throwsAsync(
+  await assert.rejects(
     api.delete(post.id, {
       type: 'posts',
       user: user2,
@@ -263,11 +271,11 @@ test('Auth bypass: delete operations check auth', async t => {
   
   // Post should still exist
   const exists = await api.get(post.id, { type: 'posts', user: user1 });
-  t.truthy(exists);
+  assert.ok(exists);
 });
 
-test('Auth bypass: hooks still run with _internal flag', async t => {
-  const { api } = t.context;
+test('Auth bypass: hooks still run with _internal flag', async () => {
+  
   let hookRan = false;
   
   // Add a hook
@@ -291,11 +299,12 @@ test('Auth bypass: hooks still run with _internal flag', async t => {
   });
   
   // Hook should have run
-  t.true(hookRan);
+  assert.equal(hookRan, true);
 });
 
-test('Auth bypass: cannot bypass resource-level conditions', async t => {
-  const { api } = t.context;
+test('Auth bypass: cannot bypass resource-level conditions', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Add conditional resource
   api.configureResourceAuth('conditional', {
@@ -305,12 +314,12 @@ test('Auth bypass: cannot bypass resource-level conditions', async t => {
     }
   });
   
-  api.addResource('conditional', {
+  api.addResource('conditional', new Schema({
     data: { type: 'string' }
-  });
+  }));
   
   // Try to access without meeting condition
-  await t.throwsAsync(
+  await assert.rejects(
     api.insert({ data: 'test' }, {
       type: 'conditional',
       _skipAuth: true,

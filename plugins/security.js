@@ -1,10 +1,8 @@
 /**
  * Security plugin implementing industry-standard security practices
  */
-import createDOMPurify from 'isomorphic-dompurify';
+import DOMPurify from 'isomorphic-dompurify';
 import { DistributedRateLimiter } from '../lib/distributed-rate-limiter.js';
-
-const DOMPurify = createDOMPurify();
 
 export const SecurityPlugin = {
   install(api, options = {}) {
@@ -258,10 +256,8 @@ function sanitizeObject(obj, depth = 0) {
 function sanitizeValue(value, isKey = false) {
   if (typeof value !== 'string') return value;
   
-  // Block dangerous URL schemes
-  if (value.match(/^(javascript|data|vbscript|file|about):/i)) {
-    return '';
-  }
+  // Block dangerous URL schemes - replace them with empty string
+  value = value.replace(/(javascript|data|vbscript|file|about):[^\s]*/gi, '');
   
   // For keys, just remove dangerous characters
   if (isKey) {

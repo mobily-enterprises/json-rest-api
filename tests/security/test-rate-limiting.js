@@ -1,12 +1,14 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import { Api } from '../../lib/api.js';
+import { Schema } from '../../lib/schema.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
 import { SecurityPlugin } from '../../plugins/security.js';
 import { HTTPPlugin } from '../../plugins/http.js';
 
-test('Rate limiting: blocks after limit exceeded', async t => {
+test('Rate limiting: blocks after limit exceeded', async () => {
   const api = new Api();
   const app = express();
   
@@ -20,9 +22,9 @@ test('Rate limiting: blocks after limit exceeded', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Make 5 requests (should succeed)
   for (let i = 0; i < 5; i++) {
@@ -31,9 +33,9 @@ test('Rate limiting: blocks after limit exceeded', async t => {
       .expect(200);
     
     // Check rate limit headers
-    t.is(res.headers['x-ratelimit-limit'], '5');
-    t.is(res.headers['x-ratelimit-remaining'], String(4 - i));
-    t.truthy(res.headers['x-ratelimit-reset']);
+    assert.equal(res.headers['x-ratelimit-limit'], '5');
+    assert.equal(res.headers['x-ratelimit-remaining'], String(4 - i));
+    assert.ok(res.headers['x-ratelimit-reset']);
   }
   
   // 6th request should be rate limited
@@ -41,13 +43,13 @@ test('Rate limiting: blocks after limit exceeded', async t => {
     .get('/api/items')
     .expect(429);
   
-  t.is(res.body.errors[0].status, '429');
-  t.is(res.body.errors[0].title, 'Too Many Requests');
-  t.is(res.body.errors[0].detail, 'Too many requests');
-  t.truthy(res.headers['retry-after']);
+  assert.equal(res.body.errors[0].status, '429');
+  assert.equal(res.body.errors[0].title, 'Too Many Requests');
+  assert.equal(res.body.errors[0].detail, 'Too many requests');
+  assert.ok(res.headers['retry-after']);
 });
 
-test('Rate limiting: different IPs have separate limits', async t => {
+test('Rate limiting: different IPs have separate limits', async () => {
   const api = new Api();
   const app = express();
   
@@ -66,9 +68,9 @@ test('Rate limiting: different IPs have separate limits', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Make 3 requests from IP1
   for (let i = 0; i < 3; i++) {
@@ -90,10 +92,10 @@ test('Rate limiting: different IPs have separate limits', async t => {
     .set('X-Test-IP', '192.168.1.2')
     .expect(200);
   
-  t.is(res.headers['x-ratelimit-remaining'], '2');
+  assert.equal(res.headers['x-ratelimit-remaining'], '2');
 });
 
-test('Rate limiting: custom key generator', async t => {
+test('Rate limiting: custom key generator', async () => {
   const api = new Api();
   const app = express();
   
@@ -110,9 +112,9 @@ test('Rate limiting: custom key generator', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Make 3 requests with API key 1
   for (let i = 0; i < 3; i++) {
@@ -135,7 +137,7 @@ test('Rate limiting: custom key generator', async t => {
     .expect(200);
 });
 
-test('Rate limiting: headers are set correctly', async t => {
+test('Rate limiting: headers are set correctly', async () => {
   const api = new Api();
   const app = express();
   
@@ -148,27 +150,27 @@ test('Rate limiting: headers are set correctly', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   const res = await request(app)
     .get('/api/items')
     .expect(200);
   
-  t.is(res.headers['x-ratelimit-limit'], '100');
-  t.is(res.headers['x-ratelimit-remaining'], '99');
+  assert.equal(res.headers['x-ratelimit-limit'], '100');
+  assert.equal(res.headers['x-ratelimit-remaining'], '99');
   
   const resetTime = new Date(res.headers['x-ratelimit-reset']);
   const now = new Date();
   const diff = resetTime - now;
   
   // Reset time should be approximately 15 minutes in the future
-  t.true(diff > 14 * 60 * 1000);
-  t.true(diff < 16 * 60 * 1000);
+  assert.equal(diff > 14 * 60 * 1000, true);
+  assert.equal(diff < 16 * 60 * 1000, true);
 });
 
-test('Rate limiting: sliding window behavior', async t => {
+test('Rate limiting: sliding window behavior', async () => {
   const api = new Api();
   const app = express();
   
@@ -181,9 +183,9 @@ test('Rate limiting: sliding window behavior', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Make 2 requests
   await request(app).get('/api/items').expect(200);
@@ -199,7 +201,7 @@ test('Rate limiting: sliding window behavior', async t => {
   await request(app).get('/api/items').expect(200);
 });
 
-test('Rate limiting: distributed rate limiting with Redis simulation', async t => {
+test('Rate limiting: distributed rate limiting with Redis simulation', async () => {
   const api1 = new Api();
   const api2 = new Api();
   const app1 = express();
@@ -239,14 +241,14 @@ test('Rate limiting: distributed rate limiting with Redis simulation', async t =
   
   // Make 1 request to api2 (should count against same limit)
   const res = await request(app2).get('/api/items').expect(200);
-  t.is(res.headers['x-ratelimit-remaining'], '0');
+  assert.equal(res.headers['x-ratelimit-remaining'], '0');
   
   // Next request to either API should fail
   await request(app1).get('/api/items').expect(429);
   await request(app2).get('/api/items').expect(429);
 });
 
-test('Rate limiting: error meta information', async t => {
+test('Rate limiting: error meta information', async () => {
   const api = new Api();
   const app = express();
   
@@ -259,9 +261,9 @@ test('Rate limiting: error meta information', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // First request succeeds
   await request(app).get('/api/items').expect(200);
@@ -271,16 +273,16 @@ test('Rate limiting: error meta information', async t => {
     .get('/api/items')
     .expect(429);
   
-  t.is(res.body.errors[0].status, '429');
-  t.truthy(res.body.errors[0].meta.retryAfter);
-  t.truthy(res.body.errors[0].meta.resetAt);
+  assert.equal(res.body.errors[0].status, '429');
+  assert.ok(res.body.errors[0].meta.retryAfter);
+  assert.ok(res.body.errors[0].meta.resetAt);
   
   // Verify resetAt is a valid ISO date
   const resetAt = new Date(res.body.errors[0].meta.resetAt);
-  t.false(isNaN(resetAt.getTime()));
+  assert.equal(isNaN(resetAt.getTime()));
 });
 
-test('Rate limiting: graceful degradation without Redis', async t => {
+test('Rate limiting: graceful degradation without Redis', async () => {
   const api = new Api();
   const app = express();
   
@@ -299,9 +301,9 @@ test('Rate limiting: graceful degradation without Redis', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Should still work with in-memory fallback
   for (let i = 0; i < 3; i++) {

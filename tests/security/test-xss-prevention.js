@@ -1,25 +1,34 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
+import { Schema } from '../../lib/schema.js';
 import { SecurityPlugin } from '../../plugins/security.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
+import { ValidationPlugin } from '../../plugins/validation.js';
 
-test.beforeEach(t => {
+test.beforeEach(async () => {
   const api = new Api();
   api.use(MemoryPlugin);
-  api.use(SecurityPlugin);
-  
-  api.addResource('posts', {
-    title: { type: 'string', required: true },
-    content: { type: 'string' },
-    tags: { type: 'array' },
-    metadata: { type: 'object' }
+  api.use(ValidationPlugin);
+  api.use(SecurityPlugin, {
+    authentication: {
+      required: false
+    }
   });
   
-  t.context.api = api;
+  api.addResource('posts', new Schema({
+    title: { type: 'string', required: true },
+    content: { type: 'string', canBeNull: true },
+    tags: { type: 'array', canBeNull: true },
+    metadata: { type: 'object', canBeNull: true }
+  }));
+  
+  globalThis.api = api;
 });
 
-test('XSS: blocks script tags in string fields', async t => {
-  const { api } = t.context;
+test('XSS: blocks script tags in string fields', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: '<script>alert("XSS")</script>My Post',
@@ -29,15 +38,16 @@ test('XSS: blocks script tags in string fields', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // DOMPurify should strip all script tags
-  t.false(result.title.includes('<script>'));
-  t.false(result.title.includes('</script>'));
-  t.false(result.content.includes('<script>'));
-  t.true(result.title.includes('My Post'));
-  t.true(result.content.includes('Normal content'));
+  assert.equal(result.data.attributes.title.includes('<script>'), false);
+  assert.equal(result.data.attributes.title.includes('</script>'), false);
+  assert.equal(result.data.attributes.content.includes('<script>'), false);
+  assert.equal(result.data.attributes.title.includes('My Post'), true);
+  assert.equal(result.data.attributes.content.includes('Normal content'), true);
 });
 
-test('XSS: blocks javascript: URLs', async t => {
-  const { api } = t.context;
+test('XSS: blocks javascript: URLs', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: 'Post with malicious link',
@@ -47,11 +57,12 @@ test('XSS: blocks javascript: URLs', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // javascript: URLs should be removed
-  t.is(result.content, 'Click here: ');
+  assert.equal(result.data.attributes.content, 'Click here: ');
 });
 
-test('XSS: blocks data: URLs with scripts', async t => {
-  const { api } = t.context;
+test('XSS: blocks data: URLs with scripts', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: 'Post with data URL',
@@ -61,11 +72,12 @@ test('XSS: blocks data: URLs with scripts', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // data: URLs with scripts should be removed
-  t.is(result.content, 'Image: ');
+  assert.equal(result.data.attributes.content, 'Image: ');
 });
 
-test('XSS: sanitizes HTML entities', async t => {
-  const { api } = t.context;
+test('XSS: sanitizes HTML entities', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: '<img src=x onerror=alert("XSS")>',
@@ -75,15 +87,16 @@ test('XSS: sanitizes HTML entities', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // All HTML should be stripped
-  t.false(result.title.includes('<img'));
-  t.false(result.title.includes('onerror'));
-  t.false(result.content.includes('<div'));
-  t.false(result.content.includes('onclick'));
-  t.is(result.content, 'Click me');
+  assert.equal(result.data.attributes.title.includes('<img'), false);
+  assert.equal(result.data.attributes.title.includes('onerror'), false);
+  assert.equal(result.data.attributes.content.includes('<div'), false);
+  assert.equal(result.data.attributes.content.includes('onclick'), false);
+  assert.equal(result.data.attributes.content, 'Click me');
 });
 
-test('XSS: sanitizes nested objects', async t => {
-  const { api } = t.context;
+test('XSS: sanitizes nested objects', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: 'Post with metadata',
@@ -96,14 +109,15 @@ test('XSS: sanitizes nested objects', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // Nested fields should also be sanitized
-  t.false(result.metadata.author.includes('<script>'));
-  t.true(result.metadata.author.includes('John'));
-  t.false(result.metadata.bio.includes('<img'));
-  t.true(result.metadata.bio.includes('Normal bio'));
+  assert.equal(result.data.attributes.metadata.author.includes('<script>'), false);
+  assert.equal(result.data.attributes.metadata.author.includes('John'), true);
+  assert.equal(result.data.attributes.metadata.bio.includes('<img'), false);
+  assert.equal(result.data.attributes.metadata.bio.includes('Normal bio'), true);
 });
 
-test('XSS: sanitizes arrays', async t => {
-  const { api } = t.context;
+test('XSS: sanitizes arrays', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: 'Post with tags',
@@ -117,14 +131,15 @@ test('XSS: sanitizes arrays', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // Array elements should be sanitized
-  t.false(result.tags[0].includes('<script>'));
-  t.true(result.tags[0].includes('javascript'));
-  t.is(result.tags[1], 'normal-tag');
-  t.is(result.tags[2], ''); // javascript: URL removed
+  assert.equal(result.data.attributes.tags[0].includes('<script>'), false);
+  assert.equal(result.data.attributes.tags[0].includes('javascript'), true);
+  assert.equal(result.data.attributes.tags[1], 'normal-tag');
+  assert.equal(result.data.attributes.tags[2], ''); // javascript: URL removed
 });
 
-test('XSS: handles null and undefined values', async t => {
-  const { api } = t.context;
+test('XSS: handles null and undefined values', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const data = {
     title: 'Normal post',
@@ -134,13 +149,14 @@ test('XSS: handles null and undefined values', async t => {
   
   const result = await api.insert(data, { type: 'posts' });
   
-  t.is(result.title, 'Normal post');
-  t.is(result.content, null);
+  assert.equal(result.data.attributes.title, 'Normal post');
+  assert.equal(result.data.attributes.content, null);
   // undefined is typically omitted in JSON
 });
 
-test('XSS: prevents stored XSS on retrieval', async t => {
-  const { api } = t.context;
+test('XSS: prevents stored XSS on retrieval', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   // Even if somehow malicious data was stored, it should be sanitized on retrieval
   const data = {
@@ -150,19 +166,20 @@ test('XSS: prevents stored XSS on retrieval', async t => {
   const created = await api.insert(data, { type: 'posts' });
   
   // Manually update with malicious content (simulating compromised DB)
-  await api.update(created.id, {
+  await api.update(created.data.id, {
     title: '<script>alert("Stored XSS")</script>Updated'
   }, { type: 'posts' });
   
-  const retrieved = await api.get(created.id, { type: 'posts' });
+  const retrieved = await api.get(created.data.id, { type: 'posts' });
   
   // Should be sanitized on retrieval
-  t.false(retrieved.title.includes('<script>'));
-  t.true(retrieved.title.includes('Updated'));
+  assert.equal(retrieved.data.attributes.title.includes('<script>'), false);
+  assert.equal(retrieved.data.attributes.title.includes('Updated'), true);
 });
 
-test('XSS: blocks vbscript: URLs', async t => {
-  const { api } = t.context;
+test('XSS: blocks vbscript: URLs', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const maliciousData = {
     title: 'IE-specific attack',
@@ -172,11 +189,12 @@ test('XSS: blocks vbscript: URLs', async t => {
   const result = await api.insert(maliciousData, { type: 'posts' });
   
   // vbscript: URLs should be removed
-  t.is(result.content, 'Click: ');
+  assert.equal(result.data.attributes.content, 'Click: ');
 });
 
-test('XSS: handles complex nested structures', async t => {
-  const { api } = t.context;
+test('XSS: handles complex nested structures', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const complexData = {
     title: 'Complex post',
@@ -196,14 +214,15 @@ test('XSS: handles complex nested structures', async t => {
   const result = await api.insert(complexData, { type: 'posts' });
   
   // Deep nested values should be sanitized
-  t.false(result.metadata.nested.deep.value.includes('<script>'));
-  t.true(result.metadata.nested.deep.value.includes('Safe content'));
-  t.false(result.metadata.nested.array[0].item.includes('<img'));
-  t.is(result.metadata.nested.array[1].item, 'safe item');
+  assert.equal(result.data.attributes.metadata.nested.deep.value.includes('<script>'), false);
+  assert.equal(result.data.attributes.metadata.nested.deep.value.includes('Safe content'), true);
+  assert.equal(result.data.attributes.metadata.nested.array[0].item.includes('<img'), false);
+  assert.equal(result.data.attributes.metadata.nested.array[1].item, 'safe item');
 });
 
-test('XSS: preserves legitimate content', async t => {
-  const { api } = t.context;
+test('XSS: preserves legitimate content', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const legitimateData = {
     title: 'Code example: <Array>',
@@ -213,12 +232,13 @@ test('XSS: preserves legitimate content', async t => {
   const result = await api.insert(legitimateData, { type: 'posts' });
   
   // Legitimate content should be preserved
-  t.is(result.title, 'Code example: ');  // HTML tags stripped but content preserved
-  t.true(result.content.includes('=>'));
+  assert.equal(result.data.attributes.title, 'Code example: ');  // HTML tags stripped but content preserved
+  assert.equal(result.data.attributes.content.includes('=>'), true);
 });
 
-test('XSS: handles unicode and special characters', async t => {
-  const { api } = t.context;
+test('XSS: handles unicode and special characters', async () => {
+  const api = globalThis.api;
+  const logs = globalThis.logs;
   
   const data = {
     title: 'Unicode: 你好世界 & émojis 🎉',
@@ -228,8 +248,8 @@ test('XSS: handles unicode and special characters', async t => {
   const result = await api.insert(data, { type: 'posts' });
   
   // Unicode should be preserved
-  t.true(result.title.includes('你好世界'));
-  t.true(result.title.includes('🎉'));
+  assert.equal(result.data.attributes.title.includes('你好世界'), true);
+  assert.equal(result.data.attributes.title.includes('🎉'), true);
   // Special chars should be handled appropriately
-  t.true(result.content.includes('&'));
+  assert.equal(result.data.attributes.content.includes('&'), true);
 });

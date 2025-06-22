@@ -1,17 +1,405 @@
-# Security Best Practices
+# JSON REST API - Security Best Practices
 
-This guide covers security features and best practices for the JSON REST API library.
+This guide covers all security features available in the JSON REST API library, helping you build secure and robust APIs.
 
 ## Table of Contents
 
-1. [Field Security](#field-security)
-2. [Error Sanitization](#error-sanitization)
-3. [Input Size Validation](#input-size-validation)
-4. [CORS Configuration](#cors-configuration)
-5. [JWT Authentication](#jwt-authentication)
-6. [Authorization](#authorization)
-7. [Additional Security Features](#additional-security-features)
-8. [Security Checklist](#security-checklist)
+1. [XSS Protection](#xss-protection)
+2. [SQL Injection Prevention](#sql-injection-prevention)
+3. [Prototype Pollution Protection](#prototype-pollution-protection)
+4. [Rate Limiting](#rate-limiting)
+5. [Security Headers](#security-headers)
+6. [Authentication & Authorization](#authentication--authorization)
+7. [Error Sanitization](#error-sanitization)
+8. [Type Validation](#type-validation)
+9. [Audit Logging](#audit-logging)
+10. [CSRF Protection](#csrf-protection)
+11. [Field Security](#field-security)
+12. [CORS Configuration](#cors-configuration)
+13. [Query Complexity Limits](#query-complexity-limits)
+14. [Security Checklist](#security-checklist)
+
+## XSS Protection
+
+The SecurityPlugin provides automatic XSS protection using DOMPurify for all string inputs.
+
+```javascript
+import { Api } from 'json-rest-api';
+import { SecurityPlugin } from 'json-rest-api/plugins';
+
+const api = new Api();
+api.use(SecurityPlugin); // XSS protection enabled by default
+
+// Malicious input is automatically sanitized
+const result = await api.insert({
+  comment: '<script>alert("XSS")</script>Hello' // Becomes: 'Hello'
+}, { type: 'comments' });
+```
+
+### Configuration
+
+```javascript
+api.use(SecurityPlugin, {
+  sanitizer: {
+    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a'],
+    ALLOWED_ATTR: ['href'],
+    ALLOW_DATA_ATTR: false
+  }
+});
+```
+
+## SQL Injection Prevention
+
+Built-in protection against SQL injection attacks in filter parameters.
+
+```javascript
+// These dangerous patterns are automatically blocked:
+try {
+  await api.query({
+    filter: {
+      name: "'; DROP TABLE users; --" // Throws ValidationError
+    }
+  }, { type: 'items' });
+} catch (error) {
+  // "Filter value contains dangerous SQL patterns"
+}
+
+// Safe queries work normally
+const results = await api.query({
+  filter: {
+    name: "O'Brien", // Properly escaped
+    status: 'active'
+  }
+}, { type: 'items' });
+```
+
+### Filter Value Limits
+
+- Maximum filter value length: 1000 characters
+- Dangerous patterns detected: SQL commands, comments, null bytes
+- Automatic parameterized queries for all database operations
+
+## Prototype Pollution Protection
+
+Deep validation prevents prototype pollution attacks in nested objects.
+
+```javascript
+// These attacks are automatically blocked:
+try {
+  await api.insert({
+    "__proto__": { "isAdmin": true }, // Blocked
+    "constructor": { "prototype": { "isAdmin": true } }, // Blocked
+    nested: {
+      "__proto__.isAdmin": true // Deep detection
+    }
+  }, { type: 'configs' });
+} catch (error) {
+  // "Potential prototype pollution detected"
+}
+
+// Safe nested objects work normally
+const config = await api.insert({
+  settings: {
+    theme: 'dark',
+    preferences: {
+      notifications: true
+    }
+  }
+}, { type: 'configs' });
+```
+
+## Rate Limiting
+
+Distributed rate limiting with Redis support and in-memory fallback.
+
+```javascript
+import { DistributedRateLimiter } from 'json-rest-api/lib';
+import Redis from 'ioredis';
+
+// With Redis (recommended for production)
+const redis = new Redis({
+  host: 'localhost',
+  port: 6379
+});
+
+api.use(SecurityPlugin, {
+  rateLimit: {
+    max: 100,        // 100 requests
+    window: 900000,  // per 15 minutes
+    keyGenerator: (options) => options.request?.ip || 'anonymous',
+    storage: new DistributedRateLimiter({ redis })
+  }
+});
+
+// Without Redis (in-memory fallback)
+api.use(SecurityPlugin, {
+  rateLimit: {
+    max: 100,
+    window: 900000
+  }
+});
+```
+
+### Advanced Rate Limiting
+
+```javascript
+// Different limits per operation
+api.use(SecurityPlugin, {
+  rateLimit: {
+    insert: { max: 20, window: 3600000 },    // 20 creates per hour
+    update: { max: 50, window: 3600000 },    // 50 updates per hour
+    delete: { max: 10, window: 3600000 },    // 10 deletes per hour
+    query: { max: 1000, window: 3600000 }    // 1000 queries per hour
+  }
+});
+
+// Custom key generation (e.g., per user)
+api.use(SecurityPlugin, {
+  rateLimit: {
+    keyGenerator: (options) => {
+      return options.user?.id || options.request?.ip || 'anonymous';
+    }
+  }
+});
+```
+
+## Security Headers
+
+Comprehensive security headers for all HTTP responses.
+
+```javascript
+api.use(SecurityPlugin, {
+  helmet: {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"]
+      }
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    }
+  }
+});
+```
+
+### Default Headers
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+- `Strict-Transport-Security` (HTTPS only)
+
+## Authentication & Authorization
+
+### JWT with Refresh Token Rotation
+
+```javascript
+import { JWTPlugin } from 'json-rest-api/plugins';
+
+api.use(JWTPlugin, {
+  secret: process.env.JWT_SECRET,
+  accessTokenExpiry: '15m',
+  refreshTokenExpiry: '7d',
+  rotateRefreshTokens: true, // Enable rotation
+  reuseDetection: true      // Detect token reuse attacks
+});
+
+// Login endpoint with refresh token
+api.post('/auth/login', async (req, res) => {
+  const user = await validateCredentials(req.body);
+  
+  const { accessToken, refreshToken } = await api.generateTokenPair({
+    userId: user.id,
+    roles: user.roles
+  });
+  
+  res.json({ accessToken, refreshToken });
+});
+
+// Refresh endpoint with rotation
+api.post('/auth/refresh', async (req, res) => {
+  try {
+    const { accessToken, refreshToken } = await api.refreshAccessToken(
+      req.body.refreshToken
+    );
+    res.json({ accessToken, refreshToken });
+  } catch (error) {
+    if (error.code === 'TOKEN_REUSE_DETECTED') {
+      // Entire token family has been revoked
+      res.status(401).json({ error: 'Session compromised, please login again' });
+    }
+  }
+});
+```
+
+### Role-Based Access Control
+
+```javascript
+import { AuthorizationPlugin } from 'json-rest-api/plugins';
+
+api.use(AuthorizationPlugin, {
+  roles: {
+    admin: ['*'],                          // All permissions
+    editor: ['posts.*', 'comments.*'],     // All posts and comments operations
+    author: ['posts.create', 'posts.update:own', 'posts.delete:own'],
+    reader: ['posts.read', 'comments.read']
+  },
+  
+  // Custom permission checks
+  customChecks: {
+    'posts.update:own': async (user, resource, recordId) => {
+      const post = await api.get(recordId, { type: 'posts' });
+      return post.authorId === user.id;
+    }
+  }
+});
+
+// Secure internal operations
+api.hook('beforeInsert', async (context) => {
+  // _skipAuth only works with _internal flag
+  if (context._skipAuth && !context._internal) {
+    throw new Error('Unauthorized: _skipAuth requires _internal flag');
+  }
+});
+```
+
+## Type Validation
+
+Strict type validation prevents type coercion attacks.
+
+```javascript
+// Strict mode enabled by default
+const api = new Api();
+api.addResource('products', {
+  price: { type: 'number' },    // "19.99" is rejected
+  quantity: { type: 'number' },  // "10" is rejected
+  active: { type: 'boolean' }    // "true" is rejected
+});
+
+// Disable strict mode if needed (not recommended)
+api.addResource('legacy', new Schema({
+  price: { type: 'number' }
+}, {
+  strictMode: false  // Allows "19.99" -> 19.99
+}));
+
+// Per-field control
+api.addResource('mixed', {
+  strictPrice: { type: 'number', strictNumber: true },
+  loosePrice: { type: 'number', strictNumber: false }
+});
+```
+
+## Audit Logging
+
+Comprehensive security event logging for compliance and monitoring.
+
+```javascript
+import { AuditLogPlugin } from 'json-rest-api/plugins';
+
+api.use(AuditLogPlugin, {
+  storage: 'memory',              // or provide Redis/database
+  format: 'json',                 // json, syslog, or cef
+  logToConsole: true,
+  maxLogSize: 10000,              // Rotate after 10k entries
+  
+  onSecurityEvent: async (event) => {
+    // Send to SIEM or monitoring system
+    await sendToSIEM(event);
+  }
+});
+
+// Automatic logging of security events:
+// - Authentication failures/successes
+// - Authorization failures
+// - Data modifications (create/update/delete)
+// - Rate limit violations
+// - CSRF attempts
+// - Suspicious activities
+```
+
+### Querying Audit Logs
+
+```javascript
+// Find all authentication failures
+const authFailures = await api.queryAuditLogs({
+  type: 'AUTH_FAILURE',
+  startTime: new Date(Date.now() - 86400000), // Last 24 hours
+  severity: 'WARNING'
+});
+
+// Get statistics
+const stats = await api.getAuditStats();
+console.log(stats);
+// {
+//   total: 1523,
+//   byType: { AUTH_FAILURE: 23, DATA_ACCESS: 1200, ... },
+//   bySeverity: { INFO: 1400, WARNING: 120, ERROR: 3 },
+//   byUser: { 123: 450, 456: 673, ... }
+// }
+```
+
+## CSRF Protection
+
+Double-submit cookie and synchronizer token patterns.
+
+```javascript
+import { CSRFPlugin } from 'json-rest-api/plugins';
+
+api.use(CSRFPlugin, {
+  cookie: {
+    name: 'csrf-token',
+    httpOnly: true,
+    secure: true,    // HTTPS only
+    sameSite: 'strict'
+  },
+  header: 'x-csrf-token',
+  
+  // Exempt certain paths
+  exemptPaths: ['/api/auth/login', '/api/public/*'],
+  
+  // Custom validation
+  validateFunction: async (token, request) => {
+    // Additional validation logic
+    return isValidToken(token);
+  }
+});
+
+// Client-side usage
+const response = await fetch('/api/items', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': getCsrfToken() // From cookie or meta tag
+  },
+  body: JSON.stringify(data)
+});
+```
+
+### Framework Integration
+
+```javascript
+// Express middleware
+app.use((req, res, next) => {
+  res.locals.csrfToken = req.csrfToken();
+  next();
+});
+
+// In your HTML template
+<meta name="csrf-token" content="<%= csrfToken %>">
+```
 
 ## Field Security
 
@@ -929,20 +1317,47 @@ GET /api/orders?filter[total][between]=100,500
 
 ### Development
 
-- [ ] Use HTTPS in development (with self-signed certificates)
+- [ ] Enable SecurityPlugin with default settings
+- [ ] Use strict type validation (default)
+- [ ] Implement authentication (JWT recommended)
+- [ ] Set up authorization rules
+- [ ] Enable audit logging
+- [ ] Use HTTPS in development (self-signed cert)
 - [ ] Test with authentication enabled
 - [ ] Verify CORS configuration
 - [ ] Check field permissions
+
+### Pre-Production
+
+- [ ] Configure rate limiting with Redis
+- [ ] Set strong JWT secrets (min 32 chars)
+- [ ] Review CSP directives
+- [ ] Test error sanitization
+- [ ] Configure audit log retention
+- [ ] Implement CSRF protection
+- [ ] Security scan dependencies
+- [ ] Enable all security headers
+- [ ] Test refresh token rotation
+- [ ] Verify prototype pollution protection
+- [ ] Check SQL injection prevention
+- [ ] Test XSS sanitization
 
 ### Production
 
 - [ ] **JWT_SECRET** environment variable set (min 32 characters)
 - [ ] **CORS_ORIGINS** environment variable configured
 - [ ] HTTPS enforced (via load balancer or reverse proxy)
-- [ ] Rate limiting configured
+- [ ] Rate limiting configured with Redis
 - [ ] Database credentials secured
 - [ ] Error messages don't leak sensitive information
 - [ ] Monitoring/alerting for security events
+- [ ] Use environment variables for secrets
+- [ ] Enable HSTS with preload
+- [ ] Configure proper CORS origins
+- [ ] Set up monitoring for audit logs
+- [ ] Implement log shipping to SIEM
+- [ ] Regular security updates
+- [ ] Incident response plan
 
 ### Code Review
 
@@ -951,6 +1366,13 @@ GET /api/orders?filter[total][between]=100,500
 - [ ] Permissions checked before operations
 - [ ] Sensitive fields marked as `silent`
 - [ ] Proper error handling (no stack traces in production)
+- [ ] XSS protection enabled for all string inputs
+- [ ] SQL injection prevention for all queries
+- [ ] Prototype pollution checks in place
+- [ ] Type coercion prevention (strict mode)
+- [ ] CSRF tokens validated for state-changing operations
+- [ ] Rate limiting configured appropriately
+- [ ] Audit logging for security events
 
 ### Deployment
 
@@ -959,6 +1381,13 @@ GET /api/orders?filter[total][between]=100,500
 - [ ] Firewall rules configured
 - [ ] Regular security updates
 - [ ] Backup and recovery plan
+- [ ] Security headers configured
+- [ ] Distributed rate limiting with Redis
+- [ ] Audit log retention policy
+- [ ] SIEM integration for audit logs
+- [ ] Refresh token rotation enabled
+- [ ] CSRF protection enabled
+- [ ] Monitor for suspicious activities
 
 ## Common Security Mistakes to Avoid
 
@@ -1007,6 +1436,92 @@ GET /api/orders?filter[total][between]=100,500
    if (!user.can('posts.update')) throw new ForbiddenError()
    ```
 
+## Best Practices
+
+### 1. Defense in Depth
+
+```javascript
+// Layer multiple security measures
+api.use(SecurityPlugin);      // XSS, headers, rate limiting
+api.use(JWTPlugin);           // Authentication
+api.use(AuthorizationPlugin); // Authorization  
+api.use(AuditLogPlugin);      // Monitoring
+api.use(CSRFPlugin);          // CSRF protection
+```
+
+### 2. Principle of Least Privilege
+
+```javascript
+// Grant minimal necessary permissions
+api.use(AuthorizationPlugin, {
+  roles: {
+    viewer: ['resource.read'],
+    editor: ['resource.read', 'resource.update'],
+    admin: ['resource.*']
+  },
+  defaultRole: 'viewer' // Start with minimal access
+});
+```
+
+### 3. Input Validation
+
+```javascript
+// Validate all inputs strictly
+api.addResource('users', {
+  email: {
+    type: 'string',
+    required: true,
+    pattern: /^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,}$/,
+    maxLength: 255
+  },
+  age: {
+    type: 'number',
+    min: 0,
+    max: 150
+  }
+});
+```
+
+### 4. Secure Defaults
+
+```javascript
+// The library provides secure defaults:
+// - XSS protection: ON
+// - Type coercion: OFF (strict mode)
+// - Security headers: ON
+// - Error details in production: OFF
+```
+
+### 5. Regular Updates
+
+```bash
+# Check for security updates
+npm audit
+
+# Update dependencies
+npm update
+
+# Fix vulnerabilities
+npm audit fix
+```
+
+## Compliance
+
+The security features help meet common compliance requirements:
+
+- **OWASP Top 10**: Protection against common vulnerabilities
+- **GDPR**: Audit logging and data protection
+- **PCI DSS**: Secure data handling and access controls
+- **SOC 2**: Comprehensive audit trails
+- **HIPAA**: Encryption and access controls
+
+## Summary
+
+The JSON REST API library provides comprehensive security features that are easy to enable and configure. By following this guide and enabling the recommended security plugins, you can build APIs that are secure by default and meet enterprise security requirements.
+
+Remember: Security is not a feature, it's a process. Regularly review and update your security measures, monitor your audit logs, and stay informed about new threats and best practices.
+
 ---
 
 **← Previous**: [Examples](./GUIDE_6_Examples.md)
+**→ Next**: [API Gateway](./GUIDE_8_API_Gateway.md)

@@ -1,6 +1,6 @@
 # JSON REST API
 
-([Website](https://mobily-enterprises.github.io/json-rest-api/))
+([Website](https://mobily-enterprises.github.io/json-rest-api/)) | [Why json-rest-api?](docs/COMPARISON.md)
 
 > **What if building REST APIs was as simple as defining schemas?**
 
@@ -97,6 +97,8 @@ app.listen(3000, () => {
 ## 🎯 Why This Library?
 
 **Traditional approach:** Write controllers, validators, queries, serializers... hundreds of lines per resource.
+
+**[See how json-rest-api compares to popular alternatives →](docs/COMPARISON.md)**
 
 **Our approach:** Define your schema. We handle everything else.
 

@@ -10,13 +10,19 @@ export type {
   SchemaFieldDefinition,
   SchemaType,
   ValidationContext,
+} from './schema.types.js';
+
+export type {
   HookContext,
   HookFunction,
   QueryOptions,
   QueryResult,
+} from './api.types.js';
+
+export type {
   Plugin,
   StorageAdapter,
-} from './schema.types.js';
+} from './plugin.types.js';
 
 // Type for the main Api class (will be properly typed when api.js is converted)
 export interface Api {

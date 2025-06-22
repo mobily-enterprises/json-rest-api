@@ -51,11 +51,17 @@ This guide is split into multiple sections for easier navigation and better perf
 - **Best Practices** - All examples follow conventions
 
 ### [7. Security Best Practices](./GUIDE_7_Security.md)
-- **Field Security** - Prevent unauthorized access and path traversal
-- **CORS Configuration** - Zero-config with platform detection
-- **JWT Authentication** - Secure token-based authentication
-- **Authorization** - Role-based access control
-- **Additional Security** - Rate limiting, CSP, and more
+- **XSS Protection** - Automatic sanitization with DOMPurify
+- **SQL Injection Prevention** - Parameterized queries and validation
+- **Prototype Pollution Protection** - Deep object validation
+- **Rate Limiting** - Distributed rate limiting with Redis
+- **Security Headers** - Comprehensive HTTP security headers
+- **JWT with Refresh Tokens** - Secure authentication with rotation
+- **RBAC Authorization** - Fine-grained access control
+- **Error Sanitization** - Production-safe error messages
+- **Type Validation** - Strict mode prevents coercion attacks
+- **Audit Logging** - Security event tracking and compliance
+- **CSRF Protection** - Double-submit and synchronizer tokens
 - **Security Checklist** - Development to production
 
 ### [8. API Gateway](./GUIDE_8_API_Gateway.md)

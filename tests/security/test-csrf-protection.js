@@ -1,13 +1,15 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { Api } from '../../lib/api.js';
+import { Schema } from '../../lib/schema.js';
 import { MemoryPlugin } from '../../plugins/memory.js';
 import { HTTPPlugin } from '../../plugins/http.js';
 import { CsrfPlugin } from '../../plugins/csrf.js';
 
-test('CSRF: blocks requests without token', async t => {
+test('CSRF: blocks requests without token', async () => {
   const api = new Api();
   const app = express();
   
@@ -17,9 +19,9 @@ test('CSRF: blocks requests without token', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Try POST without CSRF token
   const res = await request(app)
@@ -27,11 +29,11 @@ test('CSRF: blocks requests without token', async t => {
     .send({ name: 'Test item' })
     .expect(403);
   
-  t.is(res.body.errors[0].status, '403');
-  t.is(res.body.errors[0].detail, 'Invalid CSRF token');
+  assert.equal(res.body.errors[0].status, '403');
+  assert.equal(res.body.errors[0].detail, 'Invalid CSRF token');
 });
 
-test('CSRF: allows requests with valid token', async t => {
+test('CSRF: allows requests with valid token', async () => {
   const api = new Api();
   const app = express();
   
@@ -41,9 +43,9 @@ test('CSRF: allows requests with valid token', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Get CSRF token
   const tokenRes = await request(app)
@@ -64,10 +66,10 @@ test('CSRF: allows requests with valid token', async t => {
     .send({ name: 'Test item' })
     .expect(201);
   
-  t.is(res.body.data.attributes.name, 'Test item');
+  assert.equal(res.body.data.attributes.name, 'Test item');
 });
 
-test('CSRF: double-submit cookie validation', async t => {
+test('CSRF: double-submit cookie validation', async () => {
   const api = new Api();
   const app = express();
   
@@ -77,9 +79,9 @@ test('CSRF: double-submit cookie validation', async t => {
   api.use(CsrfPlugin, { mode: 'double-submit' });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Get token
   const tokenRes = await request(app)
@@ -106,7 +108,7 @@ test('CSRF: double-submit cookie validation', async t => {
     .expect(201);
 });
 
-test('CSRF: token in body parameter', async t => {
+test('CSRF: token in body parameter', async () => {
   const api = new Api();
   const app = express();
   
@@ -118,9 +120,9 @@ test('CSRF: token in body parameter', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Get token
   const tokenRes = await request(app)
@@ -141,7 +143,7 @@ test('CSRF: token in body parameter', async t => {
     .expect(201);
 });
 
-test('CSRF: GET requests are not protected', async t => {
+test('CSRF: GET requests are not protected', async () => {
   const api = new Api();
   const app = express();
   
@@ -151,9 +153,9 @@ test('CSRF: GET requests are not protected', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Create an item first
   const tokenRes = await request(app)
@@ -183,7 +185,7 @@ test('CSRF: GET requests are not protected', async t => {
     .expect(200);
 });
 
-test('CSRF: API token authentication bypasses CSRF', async t => {
+test('CSRF: API token authentication bypasses CSRF', async () => {
   const api = new Api();
   const app = express();
   
@@ -193,9 +195,9 @@ test('CSRF: API token authentication bypasses CSRF', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // POST with Bearer token should bypass CSRF
   await request(app)
@@ -205,7 +207,7 @@ test('CSRF: API token authentication bypasses CSRF', async t => {
     .expect(201);
 });
 
-test('CSRF: custom ignored paths', async t => {
+test('CSRF: custom ignored paths', async () => {
   const api = new Api();
   const app = express();
   
@@ -242,7 +244,7 @@ test('CSRF: custom ignored paths', async t => {
     .expect(403);
 });
 
-test('CSRF: resource-specific configuration', async t => {
+test('CSRF: resource-specific configuration', async () => {
   const api = new Api();
   const app = express();
   
@@ -252,13 +254,13 @@ test('CSRF: resource-specific configuration', async t => {
   api.use(CsrfPlugin);
   api.use(HTTPPlugin, { app });
   
-  api.addResource('public-items', {
+  api.addResource('public-items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
-  api.addResource('protected-items', {
+  api.addResource('protected-items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Disable CSRF for public-items
   api.configureCsrfForResource('public-items', { enabled: false });
@@ -276,7 +278,7 @@ test('CSRF: resource-specific configuration', async t => {
     .expect(403);
 });
 
-test('CSRF: security violation is logged', async t => {
+test('CSRF: security violation is logged', async () => {
   const logs = [];
   
   const api = new Api();
@@ -293,9 +295,9 @@ test('CSRF: security violation is logged', async t => {
     logs.push(context);
   });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Trigger CSRF violation
   await request(app)
@@ -304,14 +306,14 @@ test('CSRF: security violation is logged', async t => {
     .expect(403);
   
   // Check security event was logged
-  t.is(logs.length, 1);
-  t.is(logs[0].violationType, 'CSRF_TOKEN_INVALID');
-  t.is(logs[0].severity, 'WARNING');
-  t.is(logs[0].details.method, 'POST');
-  t.false(logs[0].details.hasRequestToken);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].violationType, 'CSRF_TOKEN_INVALID');
+  assert.equal(logs[0].severity, 'WARNING');
+  assert.equal(logs[0].details.method, 'POST');
+  assert.equal(logs[0].details.hasRequestToken);
 });
 
-test('CSRF: synchronizer token pattern', async t => {
+test('CSRF: synchronizer token pattern', async () => {
   const sessionStore = new Map();
   
   const api = new Api();
@@ -333,9 +335,9 @@ test('CSRF: synchronizer token pattern', async t => {
   });
   api.use(HTTPPlugin, { app });
   
-  api.addResource('items', {
+  api.addResource('items', new Schema({
     name: { type: 'string' }
-  });
+  }));
   
   // Get CSRF token
   const tokenRes = await request(app)
@@ -345,7 +347,7 @@ test('CSRF: synchronizer token pattern', async t => {
   const { token } = tokenRes.body;
   
   // Verify token is in session store
-  t.is(sessionStore.get('test-session-123'), token);
+  assert.equal(sessionStore.get('test-session-123'), token);
   
   // Use token
   await request(app)
@@ -356,7 +358,7 @@ test('CSRF: synchronizer token pattern', async t => {
     .expect(201);
 });
 
-test('CSRF: constant-time token comparison', async t => {
+test('CSRF: constant-time token comparison', async () => {
   const { api } = t.context = { api: new Api() };
   
   api.use(MemoryPlugin);
@@ -367,15 +369,15 @@ test('CSRF: constant-time token comparison', async t => {
   const token3 = 'b'.repeat(64);
   
   // Same tokens should validate
-  t.true(api.validateCsrfToken(token1, token2));
+  assert.equal(api.validateCsrfToken(token1, token2, true));
   
   // Different tokens should not validate
-  t.false(api.validateCsrfToken(token1, token3));
+  assert.equal(api.validateCsrfToken(token1, token3));
   
   // Different lengths should not validate
-  t.false(api.validateCsrfToken('short', 'longer-token'));
+  assert.equal(api.validateCsrfToken('short', 'longer-token'));
   
   // Null/undefined should not validate
-  t.false(api.validateCsrfToken(null, token1));
-  t.false(api.validateCsrfToken(token1, undefined));
+  assert.equal(api.validateCsrfToken(null, token1));
+  assert.equal(api.validateCsrfToken(token1, undefined));
 });
