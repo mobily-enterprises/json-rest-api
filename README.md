@@ -456,6 +456,14 @@ api
   .use(DiscoveryPlugin)       // OpenAPI & JSON Schema generation
   .use(ApiGatewayPlugin)      // Transform into API gateway/orchestrator
 
+// Advanced plugins for enterprise features
+api
+  .use(CachePlugin)           // Permission-aware caching with Redis support
+  .use(ConfigPlugin)          // Configuration management with hot-reload
+  .use(ContextPlugin)         // AsyncLocalStorage for request tracking
+  .use(InterceptorsPlugin)    // Request/response transformation pipeline
+  .use(TracingPlugin)         // OpenTelemetry-compatible distributed tracing
+
 // Or create your own
 const SlugPlugin = {
   install(api) {
@@ -547,6 +555,8 @@ api.use(DiscoveryPlugin, {
 The generated documentation is **permission-aware** - users only see the fields and endpoints they have access to!
 
 See [Discovery Guide](docs/DISCOVERY.md) for complete documentation.
+
+For advanced enterprise features like caching, configuration management, and distributed tracing, see [Advanced Plugins](plugins/advanced/README.md).
 
 ## Installation
 

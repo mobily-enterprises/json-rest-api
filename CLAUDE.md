@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Tests
-npm test                    # Main test suite
+npm test                    # Main test suite (includes advanced plugins)
 npm run test:mysql          # MySQL tests (needs MYSQL_USER and MYSQL_PASSWORD env vars)
-npm run test:all           # All tests
+npm run test:all           # All tests (main + http)
 
 # Examples
 node examples/example.js

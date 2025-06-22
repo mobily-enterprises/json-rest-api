@@ -1,0 +1,3317 @@
+
+> json-rest-api@1.0.0 test
+> node tests/test-all.js
+
+
+🧪 Running comprehensive test suite with Memory (AlaSQL)
+
+This may take a few moments...
+
+
+TAP version 13
+TAP version 13
+Running migration: 20250622084533000_create_test_table
+✓ 20250622084533000_create_test_table
+Rolling back: 20250622084533000_create_test_table
+✓ Rolled back 20250622084533000_create_test_table
+# Subtest: Migration plugin basic functionality
+ok 1 - Migration plugin basic functionality
+  ---
+  duration_ms: 32.954792
+  ...
+Running migration: 20250622084533001_first
+✓ 20250622084533001_first
+Running migration: 20250622084533002_second
+✓ 20250622084533002_second
+Running migration: 20250622084533003_third
+✓ 20250622084533003_third
+Rolling back: 20250622084533003_third
+✓ Rolled back 20250622084533003_third
+# Subtest: Migration batches and ordering
+ok 2 - Migration batches and ordering
+  ---
+  duration_ms: 11.980933
+  ...
+Running migration: 20250622084533004_users_migration
+✓ 20250622084533004_users_migration
+Rolling back: 20250622084533004_users_migration
+✓ Rolled back 20250622084533004_users_migration
+# Subtest: Migration with schema operations
+ok 3 - Migration with schema operations
+  ---
+  duration_ms: 14.953924
+  ...
+Running migration: 20250622084533005_table1
+✓ 20250622084533005_table1
+Running migration: 20250622084533006_table2
+✓ 20250622084533006_table2
+Rolling back: 20250622084533006_table2
+✓ Rolled back 20250622084533006_table2
+Rolling back: 20250622084533005_table1
+✓ Rolled back 20250622084533005_table1
+Running migration: 20250622084533005_table1
+✓ 20250622084533005_table1
+Running migration: 20250622084533006_table2
+✓ 20250622084533006_table2
+# Subtest: Migration reset and refresh
+ok 4 - Migration reset and refresh
+  ---
+  duration_ms: 10.74217
+  ...
+Running migration: 20250622084533007_bad_migration
+✗ 20250622084533007_bad_migration: Migration failed!
+# Subtest: Migration error handling
+ok 5 - Migration error handling
+  ---
+  duration_ms: 6.364559
+  ...
+# Subtest: Health Plugin Tests
+    # Subtest: Basic Health Checks
+        # Subtest: should install health plugin with default options
+        ok 1 - should install health plugin with default options
+          ---
+          duration_ms: 7.956068
+          ...
+        # Subtest: should provide liveness check
+        ok 2 - should provide liveness check
+          ---
+          duration_ms: 1.88322
+          ...
+        # Subtest: should execute default health checks
+        not ok 3 - should execute default health checks
+          ---
+          duration_ms: 10.010208
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:54:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(status.checks.api)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:61:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should register custom health checks
+        not ok 4 - should register custom health checks
+          ---
+          duration_ms: 3.008289
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:66:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(status.checks.custom)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:78:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle failing health checks
+        ok 5 - should handle failing health checks
+          ---
+          duration_ms: 2.270643
+          ...
+        # Subtest: should handle degraded health checks
+        not ok 6 - should handle degraded health checks
+          ---
+          duration_ms: 1.849803
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:97:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(status.checks.degraded1)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:114:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should respect critical check failures
+        ok 7 - should respect critical check failures
+          ---
+          duration_ms: 1.274788
+          ...
+        # Subtest: should handle check timeouts
+        ok 8 - should handle check timeouts
+          ---
+          duration_ms: 102.221007
+          ...
+        # Subtest: should track check duration
+        not ok 9 - should track check duration
+          ---
+          duration_ms: 52.452156
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:144:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'duration')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:154:34)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should unregister health checks
+        not ok 10 - should unregister health checks
+          ---
+          duration_ms: 2.323402
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:158:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(status.checks.temporary)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:166:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..10
+    not ok 1 - Basic Health Checks
+      ---
+      duration_ms: 186.129297
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:32:3'
+      failureType: 'subtestsFailed'
+      error: '5 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      stack: |-
+        async Promise.all (index 0)
+      ...
+    # Subtest: HTTP Endpoints
+        # Subtest: should expose liveness endpoint
+        not ok 1 - should expose liveness endpoint
+          ---
+          duration_ms: 16.258985
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:180:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:183:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should expose readiness endpoint
+        not ok 2 - should expose readiness endpoint
+          ---
+          duration_ms: 4.773531
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:189:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:192:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should return 503 when not ready
+        not ok 3 - should return 503 when not ready
+          ---
+          duration_ms: 3.523228
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:199:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 503 "Service Unavailable", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:207:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should expose full health endpoint
+        not ok 4 - should expose full health endpoint
+          ---
+          duration_ms: 3.991068
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:213:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:216:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should expose metrics endpoint
+        not ok 5 - should expose metrics endpoint
+          ---
+          duration_ms: 4.618379
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:223:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:226:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should use custom paths
+        not ok 6 - should use custom paths
+          ---
+          duration_ms: 3.695299
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:233:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:245:46)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should record HTTP metrics
+        not ok 7 - should record HTTP metrics
+          ---
+          duration_ms: 2.947491
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:249:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:251:46)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        1..7
+    not ok 2 - HTTP Endpoints
+      ---
+      duration_ms: 40.418532
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:175:3'
+      failureType: 'subtestsFailed'
+      error: '7 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Event System
+        # Subtest: should emit check complete events
+        ok 1 - should emit check complete events
+          ---
+          duration_ms: 1.217903
+          ...
+        # Subtest: should emit check error events
+        ok 2 - should emit check error events
+          ---
+          duration_ms: 1.057973
+          ...
+        # Subtest: should emit health update events
+        ok 3 - should emit health update events
+          ---
+          duration_ms: 0.876938
+          ...
+        1..3
+    ok 3 - Event System
+      ---
+      duration_ms: 3.26947
+      type: 'suite'
+      ...
+    # Subtest: Periodic Health Checks
+        # Subtest: should execute periodic health checks
+        ok 1 - should execute periodic health checks
+          ---
+          duration_ms: 251.773963
+          ...
+        1..1
+    ok 4 - Periodic Health Checks
+      ---
+      duration_ms: 252.008169
+      type: 'suite'
+      ...
+    # Subtest: Database Health Check
+        # Subtest: should check database connectivity
+        not ok 1 - should check database connectivity
+          ---
+          duration_ms: 3.799856
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:336:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(status.checks.database)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:348:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..1
+    not ok 5 - Database Health Check
+      ---
+      duration_ms: 3.926292
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:335:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Startup Probe
+        # Subtest: should check only critical services
+        not ok 1 - should check only critical services
+          ---
+          duration_ms: 2.469603
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:355:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(startup.checks.critical1)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:368:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..1
+    not ok 6 - Startup Probe
+      ---
+      duration_ms: 2.585336
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:354:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Complex Health Scenarios
+        # Subtest: should handle mixed health states correctly
+        not ok 1 - should handle mixed health states correctly
+          ---
+          duration_ms: 1.739538
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:374:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            Expected values to be strictly equal:
+            
+            1 !== 7
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: 7
+          actual: 1
+          operator: 'strictEqual'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:400:14)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should provide detailed check results
+        not ok 2 - should provide detailed check results
+          ---
+          duration_ms: 1.251219
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:403:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'status')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:423:29)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 7 - Complex Health Scenarios
+      ---
+      duration_ms: 3.102155
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:373:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Prometheus Metrics
+        # Subtest: should expose custom metrics
+        not ok 1 - should expose custom metrics
+          ---
+          duration_ms: 7.265239
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:433:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(res.text.includes('http_request_duration_seconds'))
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:443:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'metadata' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   metadata: { type: 'object', maxKeys: 100, maxDepth: 5 }
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'attributes' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   attributes: { type: 'object', maxKeys: 100, maxDepth: 5 }
+        # Subtest: should track health check metrics
+        not ok 2 - should track health check metrics
+          ---
+          duration_ms: 4.30555
+          location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:448:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(res.text.includes('health_check_duration_seconds'))
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-health-plugin.js:455:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 8 - Prometheus Metrics
+      ---
+      duration_ms: 11.764799
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:432:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..8
+not ok 6 - Health Plugin Tests
+  ---
+  duration_ms: 504.055155
+  type: 'suite'
+  location: '/home/merc/Development/json-rest-api/tests/test-health-plugin.js:9:1'
+  failureType: 'subtestsFailed'
+  error: '6 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: GraphQL Plugin Tests
+    # Subtest: Schema Generation
+        # Subtest: should generate GraphQL schema from resources
+        not ok 1 - should generate GraphQL schema from resources
+          ---
+          duration_ms: 3.320261
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:34:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(fields.getUsers)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:52:7)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Test.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle various field types
+        not ok 2 - should handle various field types
+          ---
+          duration_ms: 1.000325
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:56:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(productType)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:71:7)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should exclude silent fields
+        not ok 3 - should exclude silent fields
+          ---
+          duration_ms: 0.824217
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:84:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'getFields')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:94:34)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should generate input types for mutations
+        not ok 4 - should generate input types for mutations
+          ---
+          duration_ms: 0.777533
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:101:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(postInput)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:113:7)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should generate filter types
+        not ok 5 - should generate filter types
+          ---
+          duration_ms: 0.883435
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:127:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(filterType)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:138:7)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..5
+    not ok 1 - Schema Generation
+      ---
+      duration_ms: 6.960868
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:33:3'
+      failureType: 'subtestsFailed'
+      error: '5 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      stack: |-
+        async Promise.all (index 0)
+      ...
+    # Subtest: Query Operations
+        # Subtest: should execute getUser query
+        not ok 1 - should execute getUser query
+          ---
+          duration_ms: 13.168152
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:178:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:197:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should execute queryUsers with filters
+        not ok 2 - should execute queryUsers with filters
+          ---
+          duration_ms: 6.42574
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:203:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:230:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should execute queryUsers with sorting
+        not ok 3 - should execute queryUsers with sorting
+          ---
+          duration_ms: 6.504863
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:236:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:254:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should execute queryUsers with pagination
+        not ok 4 - should execute queryUsers with pagination
+          ---
+          duration_ms: 7.237462
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:261:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:284:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle complex filters
+        not ok 5 - should handle complex filters
+          ---
+          duration_ms: 6.623035
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:291:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:314:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..5
+    not ok 2 - Query Operations
+      ---
+      duration_ms: 40.241282
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:163:3'
+      failureType: 'subtestsFailed'
+      error: '5 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Mutation Operations
+        # Subtest: should create resource via mutation
+        not ok 1 - should create resource via mutation
+          ---
+          duration_ms: 7.027029
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:329:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:353:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should update resource via mutation
+        not ok 2 - should update resource via mutation
+          ---
+          duration_ms: 4.561443
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:360:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:390:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should delete resource via mutation
+        not ok 3 - should delete resource via mutation
+          ---
+          duration_ms: 5.296274
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:396:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:414:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle batch create mutation
+        not ok 4 - should handle batch create mutation
+          ---
+          duration_ms: 2.602263
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:424:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:447:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle validation errors
+        not ok 5 - should handle validation errors
+          ---
+          duration_ms: 2.413901
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:452:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(result.errors[0].message.includes('Validation'))
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:468:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..5
+    not ok 3 - Mutation Operations
+      ---
+      duration_ms: 22.171938
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:319:3'
+      failureType: 'subtestsFailed'
+      error: '5 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: HTTP Endpoint
+        # Subtest: should expose GraphQL endpoint
+        not ok 1 - should expose GraphQL endpoint
+          ---
+          duration_ms: 16.48993
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:480:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:500:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should support variables
+        not ok 2 - should support variables
+          ---
+          duration_ms: 3.266492
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:506:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:524:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        # Subtest: should handle errors properly
+        not ok 3 - should handle errors properly
+          ---
+          duration_ms: 3.203873
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:530:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 400 "Bad Request", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:542:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+⚠️  WARNING: Field 'settings' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   settings: { type: 'object', maxKeys: 100, maxDepth: 5 }
+        # Subtest: should provide GraphiQL interface
+        not ok 4 - should provide GraphiQL interface
+          ---
+          duration_ms: 3.455166
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:548:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:552:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        1..4
+    not ok 4 - HTTP Endpoint
+      ---
+      duration_ms: 26.704292
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:472:3'
+      failureType: 'subtestsFailed'
+      error: '4 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Relationships
+        # Subtest: should handle relationships in queries
+        not ok 1 - should handle relationships in queries
+          ---
+          duration_ms: 10.836135
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:584:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:607:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..1
+    not ok 5 - Relationships
+      ---
+      duration_ms: 10.919087
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:558:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Custom Scalars
+        # Subtest: should handle Date scalar
+        not ok 1 - should handle Date scalar
+          ---
+          duration_ms: 4.375469
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:615:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:646:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle JSON scalar
+        not ok 2 - should handle JSON scalar
+          ---
+          duration_ms: 3.89113
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:651:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:685:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 6 - Custom Scalars
+      ---
+      duration_ms: 8.39368
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:614:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Introspection
+        # Subtest: should support introspection queries
+        not ok 1 - should support introspection queries
+          ---
+          duration_ms: 8.809527
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:693:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(productType)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:706:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should expose schema via HTTP
+        not ok 2 - should expose schema via HTTP
+          ---
+          duration_ms: 4.566808
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:709:5'
+          failureType: 'testCodeFailure'
+          error: 'expected 200 "OK", got 404 "Not Found"'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:728:10)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+            Test._assertStatus (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:267:14)
+            /home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:323:13
+            Test._assertFunction (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:300:13)
+            Test.assert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:179:23)
+            Server.localAssert (/home/merc/Development/json-rest-api/node_modules/supertest/lib/test.js:135:14)
+            Object.onceWrapper (node:events:633:28)
+            Server.emit (node:events:519:28)
+            emitCloseNT (node:net:2340:8)
+            process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+          ...
+        1..2
+    not ok 7 - Introspection
+      ---
+      duration_ms: 13.511209
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:692:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Error Handling
+        # Subtest: should handle NotFoundError
+        not ok 1 - should handle NotFoundError
+          ---
+          duration_ms: 2.300864
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:744:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:760:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle ValidationError
+        not ok 2 - should handle ValidationError
+          ---
+          duration_ms: 1.673356
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:764:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(result.errors[0].extensions.code)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:780:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 8 - Error Handling
+      ---
+      duration_ms: 4.092159
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:736:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Virtual Fields
+        # Subtest: should handle virtual fields with resolvers
+        not ok 1 - should handle virtual fields with resolvers
+          ---
+          duration_ms: 4.217473
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:786:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(!result.errors)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:821:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..1
+    not ok 9 - Virtual Fields
+      ---
+      duration_ms: 4.32963
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:785:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Permissions
+        # Subtest: should respect field permissions in GraphQL
+        not ok 1 - should respect field permissions in GraphQL
+          ---
+          duration_ms: 1.307443
+          location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:827:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'getFields')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:846:25)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..1
+    not ok 10 - Permissions
+      ---
+      duration_ms: 1.441419
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:826:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..10
+not ok 7 - GraphQL Plugin Tests
+  ---
+  duration_ms: 139.297882
+  type: 'suite'
+  location: '/home/merc/Development/json-rest-api/tests/test-graphql-plugin.js:10:1'
+  failureType: 'subtestsFailed'
+  error: '10 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: WebSocket Plugin Tests
+    # Subtest: Connection and Authentication
+        # Subtest: should connect without authentication
+        ok 1 - should connect without authentication
+          ---
+          duration_ms: 33.187543
+          ...
+        # Subtest: should connect with JWT authentication
+        ok 2 - should connect with JWT authentication
+          ---
+          duration_ms: 8.234557
+          ...
+        # Subtest: should handle invalid authentication
+        ok 3 - should handle invalid authentication
+          ---
+          duration_ms: 6.95284
+          ...
+        # Subtest: should track connected sockets
+        ok 4 - should track connected sockets
+          ---
+          duration_ms: 9.771727
+          ...
+        1..4
+    ok 1 - Connection and Authentication
+      ---
+      duration_ms: 58.45226
+      type: 'suite'
+      ...
+    # Subtest: Resource Subscriptions
+        # Subtest: should subscribe to single resource
+        ok 1 - should subscribe to single resource
+          ---
+          duration_ms: 10.899635
+          ...
+        # Subtest: should subscribe to resource collection
+        ok 2 - should subscribe to resource collection
+          ---
+          duration_ms: 11.431685
+          ...
+        # Subtest: should subscribe with filters
+        ok 3 - should subscribe with filters
+          ---
+          duration_ms: 13.73237
+          ...
+        # Subtest: should handle subscription errors
+        ok 4 - should handle subscription errors
+          ---
+          duration_ms: 4.648429
+          ...
+        # Subtest: should unsubscribe from resources
+        ok 5 - should unsubscribe from resources
+          ---
+          duration_ms: 108.913255
+          ...
+        1..5
+    ok 2 - Resource Subscriptions
+      ---
+      duration_ms: 149.972915
+      type: 'suite'
+      ...
+    # Subtest: Real-time CRUD Operations
+        # Subtest: should create resource via WebSocket
+        ok 1 - should create resource via WebSocket
+          ---
+          duration_ms: 9.451807
+          ...
+        # Subtest: should update resource via WebSocket
+        ok 2 - should update resource via WebSocket
+          ---
+          duration_ms: 7.513608
+          ...
+        # Subtest: should delete resource via WebSocket
+        ok 3 - should delete resource via WebSocket
+          ---
+          duration_ms: 7.264108
+          ...
+        # Subtest: should handle operation errors
+        ok 4 - should handle operation errors
+          ---
+          duration_ms: 3.91268
+          ...
+        1..4
+    ok 3 - Real-time CRUD Operations
+      ---
+      duration_ms: 28.391276
+      type: 'suite'
+      ...
+    # Subtest: Real-time Updates
+        # Subtest: should broadcast resource creation
+        not ok 1 - should broadcast resource creation
+          ---
+          duration_ms: 9.470492
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:365:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'attributes')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:391:32)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should broadcast resource updates to specific subscribers
+        not ok 2 - should broadcast resource updates to specific subscribers
+          ---
+          duration_ms: 18.218982
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:394:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'attributes')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:428:33)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should broadcast deletions
+        ok 3 - should broadcast deletions
+          ---
+          duration_ms: 10.623591
+          ...
+        # Subtest: should handle filtered subscriptions
+        not ok 4 - should handle filtered subscriptions
+          ---
+          duration_ms: 24.792251
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:453:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'attributes')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            matchesFilter (file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:505:14)
+            file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:397:13
+            Array.forEach (<anonymous>)
+            file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:395:46
+            Api.executeHook (file:///home/merc/Development/json-rest-api/lib/api.js:391:28)
+            Api.insert (file:///home/merc/Development/json-rest-api/lib/api.js:1410:16)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:479:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..4
+    not ok 4 - Real-time Updates
+      ---
+      duration_ms: 63.472284
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:341:3'
+      failureType: 'subtestsFailed'
+      error: '3 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Live Queries
+        # Subtest: should create live query
+        ok 1 - should create live query
+          ---
+          duration_ms: 11.573033
+          ...
+        # Subtest: should update live query results
+        not ok 2 - should update live query results
+          ---
+          duration_ms: 8.354019
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:533:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'attributes')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            matchesFilter (file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:505:14)
+            file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:397:13
+            Array.forEach (<anonymous>)
+            file:///home/merc/Development/json-rest-api/plugins/websocket/index.js:395:46
+            Api.executeHook (file:///home/merc/Development/json-rest-api/lib/api.js:391:28)
+            Api.insert (file:///home/merc/Development/json-rest-api/lib/api.js:1410:16)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:549:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 5 - Live Queries
+      ---
+      duration_ms: 20.390393
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:492:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Presence
+        # Subtest: should handle presence join/leave
+        not ok 1 - should handle presence join/leave
+          ---
+          duration_ms: 11.307525
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:590:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            Expected values to be strictly equal:
+            + actual - expected
+            
+            + 'user2'
+            - 'user1'
+                   ^
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: 'user1'
+          actual: 'user2'
+          operator: 'strictEqual'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:599:14)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should get presence room stats
+        not ok 2 - should get presence room stats
+          ---
+          duration_ms: 9.636082
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:612:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(room1)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:622:7)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 6 - Presence
+      ---
+      duration_ms: 21.170682
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:561:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Custom Events
+        # Subtest: should handle custom events between clients
+        ok 1 - should handle custom events between clients
+          ---
+          duration_ms: 106.559042
+          ...
+        1..1
+    ok 7 - Custom Events
+      ---
+      duration_ms: 106.667413
+      type: 'suite'
+      ...
+    # Subtest: Rate Limiting
+        # Subtest: should enforce rate limits
+        ok 1 - should enforce rate limits
+          ---
+          duration_ms: 504.792419
+          ...
+        1..1
+    ok 8 - Rate Limiting
+      ---
+      duration_ms: 504.962787
+      type: 'suite'
+      ...
+    # Subtest: Statistics and Management
+        # Subtest: should provide socket statistics
+        ok 1 - should provide socket statistics
+          ---
+          duration_ms: 8.59708
+          ...
+        # Subtest: should provide room statistics
+        not ok 2 - should provide room statistics
+          ---
+          duration_ms: 8.092752
+          location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:718:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            The expression evaluated to a falsy value:
+            
+              assert(stats.presenceRooms > 0)
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: true
+          actual: false
+          operator: '=='
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:737:7)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should disconnect specific users
+        ok 3 - should disconnect specific users
+          ---
+          duration_ms: 4.390132
+          ...
+        1..3
+    not ok 9 - Statistics and Management
+      ---
+      duration_ms: 21.310259
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:699:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..9
+not ok 8 - WebSocket Plugin Tests
+  ---
+  duration_ms: 975.370121
+  type: 'suite'
+  location: '/home/merc/Development/json-rest-api/tests/test-websocket-plugin.js:10:1'
+  failureType: 'subtestsFailed'
+  error: '4 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+# Subtest: Service Discovery Plugin Tests
+    # Subtest: Basic Service Discovery
+        # Subtest: should install plugin with default options
+        not ok 1 - should install plugin with default options
+          ---
+          duration_ms: 4.186212
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:37:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should register a service
+        not ok 2 - should register a service
+          ---
+          duration_ms: 1.18655
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:52:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should discover services
+        not ok 3 - should discover services
+          ---
+          duration_ms: 0.885703
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:71:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should filter services by tags
+        not ok 4 - should filter services by tags
+          ---
+          duration_ms: 0.82369
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:99:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should filter services by metadata
+        not ok 5 - should filter services by metadata
+          ---
+          duration_ms: 0.885598
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:124:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should deregister services
+        not ok 6 - should deregister services
+          ---
+          duration_ms: 0.924111
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:149:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should handle service health
+        not ok 7 - should handle service health
+          ---
+          duration_ms: 1.021167
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:167:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..7
+    not ok 1 - Basic Service Discovery
+      ---
+      duration_ms: 10.214666
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:36:3'
+      failureType: 'subtestsFailed'
+      error: '7 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      stack: |-
+        async Promise.all (index 0)
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Load Balancing
+        # Subtest: should use round-robin by default
+        not ok 1 - should use round-robin by default
+          ---
+          duration_ms: 1.335183
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:202:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should support random strategy
+        not ok 2 - should support random strategy
+          ---
+          duration_ms: 1.017094
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:217:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should support weighted strategy
+        not ok 3 - should support weighted strategy
+          ---
+          duration_ms: 0.842733
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:235:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should support least-connections strategy
+        not ok 4 - should support least-connections strategy
+          ---
+          duration_ms: 0.853273
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:253:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should support IP hash strategy
+        not ok 5 - should support IP hash strategy
+          ---
+          duration_ms: 0.924935
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:269:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should track statistics
+        not ok 6 - should track statistics
+          ---
+          duration_ms: 0.929976
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:291:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..6
+    not ok 2 - Load Balancing
+      ---
+      duration_ms: 6.178633
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:195:3'
+      failureType: 'subtestsFailed'
+      error: '6 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Circuit Breaker
+        # Subtest: should start in closed state
+        not ok 1 - should start in closed state
+          ---
+          duration_ms: 1.514514
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:323:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should open after threshold failures
+        not ok 2 - should open after threshold failures
+          ---
+          duration_ms: 1.284968
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:328:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should transition to half-open after timeout
+        not ok 3 - should transition to half-open after timeout
+          ---
+          duration_ms: 1.10172
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:355:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should close on success in half-open state
+        not ok 4 - should close on success in half-open state
+          ---
+          duration_ms: 1.260003
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:366:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should reopen on failure in half-open state
+        not ok 5 - should reopen on failure in half-open state
+          ---
+          duration_ms: 1.073989
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:374:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should calculate error rate correctly
+        not ok 6 - should calculate error rate correctly
+          ---
+          duration_ms: 1.041832
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:389:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should emit events
+        not ok 7 - should emit events
+          ---
+          duration_ms: 1.058285
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:412:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..7
+    not ok 3 - Circuit Breaker
+      ---
+      duration_ms: 8.712295
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:307:3'
+      failureType: 'subtestsFailed'
+      error: '7 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Service Discovery with Load Balancing
+        # Subtest: should get service using load balancer
+        not ok 1 - should get service using load balancer
+          ---
+          duration_ms: 1.249501
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:427:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should handle circuit breaker integration
+        not ok 2 - should handle circuit breaker integration
+          ---
+          duration_ms: 0.898807
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:461:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should failover to healthy services
+        not ok 3 - should failover to healthy services
+          ---
+          duration_ms: 0.802499
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:498:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..3
+    not ok 4 - Service Discovery with Load Balancing
+      ---
+      duration_ms: 3.105582
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:426:3'
+      failureType: 'subtestsFailed'
+      error: '3 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Cache Management
+        # Subtest: should cache discovery results
+        not ok 1 - should cache discovery results
+          ---
+          duration_ms: 1.57298
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:530:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..1
+    not ok 5 - Cache Management
+      ---
+      duration_ms: 1.674935
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:529:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Events and Monitoring
+        # Subtest: should emit discovery events
+        not ok 1 - should emit discovery events
+          ---
+          duration_ms: 1.469193
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:563:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+        # Subtest: should provide statistics
+        not ok 2 - should provide statistics
+          ---
+          duration_ms: 1.073659
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:586:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..2
+    not ok 6 - Events and Monitoring
+      ---
+      duration_ms: 2.700804
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:562:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:6379
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)
+    # Subtest: Custom Providers
+        # Subtest: should support custom provider implementation
+        not ok 1 - should support custom provider implementation
+          ---
+          duration_ms: 1.879877
+          location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:606:5'
+          failureType: 'hookFailed'
+          error: 'Connection is closed.'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            close (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:189:25)
+            Socket.<anonymous> (/home/merc/Development/json-rest-api/node_modules/ioredis/built/redis/event_handler.js:165:20)
+            Object.onceWrapper (node:events:634:26)
+            Socket.emit (node:events:519:28)
+            TCP.<anonymous> (node:net:339:12)
+          ...
+        1..1
+    not ok 7 - Custom Providers
+      ---
+      duration_ms: 2.031463
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:605:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..7
+not ok 9 - Service Discovery Plugin Tests
+  ---
+  duration_ms: 35.014041
+  type: 'suite'
+  location: '/home/merc/Development/json-rest-api/tests/test-service-discovery-plugin.js:10:1'
+  failureType: 'subtestsFailed'
+  error: '7 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: gRPC Plugin Tests
+    # Subtest: Basic gRPC Setup
+        # Subtest: should install plugin and generate protos
+        ok 1 - should install plugin and generate protos
+          ---
+          duration_ms: 2.343051
+          ...
+        # Subtest: should generate proto files for resources
+        ok 2 - should generate proto files for resources
+          ---
+          duration_ms: 2.283781
+          ...
+        # Subtest: should generate service proto with all resources
+        ok 3 - should generate service proto with all resources
+          ---
+          duration_ms: 2.265451
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+(node:612121) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+        # Subtest: should start gRPC server
+        ok 4 - should start gRPC server
+          ---
+          duration_ms: 27.071725
+          ...
+        1..4
+    ok 1 - Basic gRPC Setup
+      ---
+      duration_ms: 34.246737
+      type: 'suite'
+      ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+    # Subtest: CRUD Operations
+        # Subtest: should create resource via gRPC
+        not ok 1 - should create resource via gRPC
+          ---
+          duration_ms: 31.176997
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:157:5'
+          failureType: 'testCodeFailure'
+          error: '3 INVALID_ARGUMENT: Validation failed'
+          code: 3
+          stack: |-
+            callErrorFromStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:361:141)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+            /home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+            process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+            ServiceClientImpl.makeUnaryRequest (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+            ServiceClientImpl.<anonymous> (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+            response (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:159:20)
+            new Promise (<anonymous>)
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:158:30)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should get resource via gRPC
+        ok 2 - should get resource via gRPC
+          ---
+          duration_ms: 18.926131
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should update resource via gRPC
+        not ok 3 - should update resource via gRPC
+          ---
+          duration_ms: 17.21778
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:198:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            Expected values to be strictly equal:
+            + actual - expected
+            
+            + 'Update Test'
+            - 'Updated Product'
+                     ^
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: 'Updated Product'
+          actual: 'Update Test'
+          operator: 'strictEqual'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:217:14)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should delete resource via gRPC
+        ok 4 - should delete resource via gRPC
+          ---
+          duration_ms: 19.274745
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should query resources via gRPC
+        ok 5 - should query resources via gRPC
+          ---
+          duration_ms: 21.94834
+          ...
+(node:612121) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 SIGTERM listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(node:612121) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 SIGINT listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should handle validation errors
+        ok 6 - should handle validation errors
+          ---
+          duration_ms: 13.186611
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should handle not found errors
+        not ok 7 - should handle not found errors
+          ---
+          duration_ms: 16.769394
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:286:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            Expected values to be strictly equal:
+            
+            13 !== 5
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: 5
+          actual: 13
+          operator: 'strictEqual'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:296:14)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..7
+    not ok 2 - CRUD Operations
+      ---
+      duration_ms: 139.054099
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:136:3'
+      failureType: 'subtestsFailed'
+      error: '3 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+⚠️  WARNING: Field 'data' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   data: { type: 'object', maxKeys: 100, maxDepth: 5 }
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+    # Subtest: Streaming Operations
+        # Subtest: should stream query results
+        not ok 1 - should stream query results
+          ---
+          duration_ms: 19.231337
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:318:5'
+          failureType: 'testCodeFailure'
+          error: '3 INVALID_ARGUMENT: Validation failed'
+          code: 3
+          stack: |-
+            callErrorFromStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+            /home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+            process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+            ServiceClientImpl.makeServerStreamRequest (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+            ServiceClientImpl.<anonymous> (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:328:33)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+⚠️  WARNING: Field 'data' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   data: { type: 'object', maxKeys: 100, maxDepth: 5 }
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should handle client streaming for batch create
+        not ok 2 - should handle client streaming for batch create
+          ---
+          duration_ms: 16.977777
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:346:5'
+          failureType: 'uncaughtException'
+          error: '14 UNAVAILABLE: No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:50051'
+          code: 14
+          stack: |-
+            callErrorFromStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:421:73)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+            /home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+            process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+            ServiceClientImpl.makeBidiStreamRequest (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:405:32)
+            ServiceClientImpl.<anonymous> (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:347:33)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 3 - Streaming Operations
+      ---
+      duration_ms: 36.480947
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:300:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'metadata' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   metadata: { type: 'object', maxKeys: 100, maxDepth: 5 }
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+    # Subtest: Type Mapping
+        # Subtest: should handle all field types
+        not ok 1 - should handle all field types
+          ---
+          duration_ms: 11.42174
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:393:5'
+          failureType: 'testCodeFailure'
+          error: '14 UNAVAILABLE: No connection established. Last error: null'
+          code: 14
+          stack: |-
+            callErrorFromStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:361:141)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+            /home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+            process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+            ServiceClientImpl.makeUnaryRequest (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+            ServiceClientImpl.<anonymous> (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+            response (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:397:20)
+            new Promise (<anonymous>)
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:396:30)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+          ...
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'metadata' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   metadata: { type: 'object', maxKeys: 100, maxDepth: 5 }
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+⚠️  WARNING: Field 'strings' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   strings: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'numbers' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   numbers: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'mixed' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   mixed: { type: 'array', maxItems: 1000 }
+        # Subtest: should handle arrays correctly
+        ok 2 - should handle arrays correctly
+          ---
+          duration_ms: 7.55267
+          ...
+        1..2
+    not ok 4 - Type Mapping
+      ---
+      duration_ms: 19.202867
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:370:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+    # Subtest: Error Handling
+        # Subtest: should map validation errors correctly
+        not ok 1 - should map validation errors correctly
+          ---
+          duration_ms: 8.910019
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:468:5'
+          failureType: 'testCodeFailure'
+          error: |-
+            Expected values to be strictly equal:
+            
+            14 !== 3
+            
+          code: 'ERR_ASSERTION'
+          name: 'AssertionError'
+          expected: 3
+          actual: 14
+          operator: 'strictEqual'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:480:14)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should handle internal errors
+        not ok 2 - should handle internal errors
+          ---
+          duration_ms: 6.642393
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:484:5'
+          failureType: 'testCodeFailure'
+          error: 'Cannot redefine property: items'
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:486:27)
+            Test.runInAsyncScope (node:async_hooks:206:9)
+            Test.run (node:internal/test_runner/test:789:25)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..2
+    not ok 5 - Error Handling
+      ---
+      duration_ms: 15.769375
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:450:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+⚠️  WARNING: Field 'data' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   data: { type: 'object', maxKeys: 100, maxDepth: 5 }
+    # Subtest: Advanced Features
+        # Subtest: should support strict type mode
+        ok 1 - should support strict type mode
+          ---
+          duration_ms: 2.181513
+          ...
+        # Subtest: should handle relationships
+        not ok 2 - should handle relationships
+          ---
+          duration_ms: 3.254992
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:520:5'
+          failureType: 'testCodeFailure'
+          error: "duplicate name 'OperationResponse' in Namespace .api"
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            Namespace.add (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/namespace.js:269:23)
+            parseType (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/parse.js:412:16)
+            parseCommon (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/parse.js:313:17)
+            parse (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/parse.js:938:21)
+            process (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:147:30)
+            fetch (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:201:13)
+            process (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:153:29)
+            fetch (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:201:13)
+            Root.load (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:231:13)
+            Root.loadSync (/home/merc/Development/json-rest-api/node_modules/protobufjs/src/root.js:275:17)
+          ...
+gRPC reflection not available: Cannot find package '@grpc/reflection' imported from /home/merc/Development/json-rest-api/plugins/grpc/index.js
+gRPC server listening on 0.0.0.0:50051
+        # Subtest: should support batch operations
+        not ok 3 - should support batch operations
+          ---
+          duration_ms: 9.126231
+          location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:562:5'
+          failureType: 'testCodeFailure'
+          error: '14 UNAVAILABLE: No connection established. Last error: null'
+          code: 14
+          stack: |-
+            callErrorFromStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:361:141)
+            Object.onReceiveStatus (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+            /home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+            process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+            ServiceClientImpl.makeUnaryRequest (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+            ServiceClientImpl.<anonymous> (/home/merc/Development/json-rest-api/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+            response (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:578:20)
+            new Promise (<anonymous>)
+            TestContext.<anonymous> (file:///home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:577:30)
+            process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..3
+    not ok 6 - Advanced Features
+      ---
+      duration_ms: 14.910142
+      type: 'suite'
+      location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:499:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    # Subtest: Proto Generation Edge Cases
+        # Subtest: should handle field name conversions
+        ok 1 - should handle field name conversions
+          ---
+          duration_ms: 2.606497
+          ...
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'metadata' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   metadata: { type: 'object', maxKeys: 100, maxDepth: 5 }
+Entering robust teardown process...
+        # Subtest: should handle special characters in resource names
+        ok 2 - should handle special characters in resource names
+          ---
+          duration_ms: 1.68582
+          ...
+        1..2
+    ok 7 - Proto Generation Edge Cases
+      ---
+      duration_ms: 4.548665
+      type: 'suite'
+      ...
+    1..7
+not ok 10 - gRPC Plugin Tests
+  ---
+  duration_ms: 264.698387
+  type: 'suite'
+  location: '/home/merc/Development/json-rest-api/tests/test-grpc-plugin.js:11:1'
+  failureType: 'subtestsFailed'
+  error: '5 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: JSON REST API - Comprehensive Test Suite
+    # Subtest: 1. Core API Tests
+        # Subtest: should create API instance with default options
+        ok 1 - should create API instance with default options
+          ---
+          duration_ms: 0.224921
+          ...
+        # Subtest: should create API instance with custom options
+        ok 2 - should create API instance with custom options
+          ---
+          duration_ms: 0.16347
+          ...
+        # Subtest: should support plugin system
+        ok 3 - should support plugin system
+          ---
+          duration_ms: 0.221879
+          ...
+        # Subtest: should track installed plugins
+        ok 4 - should track installed plugins
+          ---
+          duration_ms: 0.135974
+          ...
+        1..4
+    ok 1 - 1. Core API Tests
+      ---
+      duration_ms: 0.906906
+      type: 'suite'
+      ...
+    # Subtest: 2. Schema Tests
+        # Subtest: should create schema with various field types
+        ok 1 - should create schema with various field types
+          ---
+          duration_ms: 0.362156
+          ...
+        # Subtest: should validate data correctly
+        ok 2 - should validate data correctly
+          ---
+          duration_ms: 0.467628
+          ...
+        # Subtest: should handle partial validation
+        ok 3 - should handle partial validation
+          ---
+          duration_ms: 0.16929
+          ...
+        # Subtest: should handle default values
+        ok 4 - should handle default values
+          ---
+          duration_ms: 0.155968
+          ...
+        # Subtest: should handle silent fields
+        ok 5 - should handle silent fields
+          ---
+          duration_ms: 0.120508
+          ...
+        # Subtest: should handle refs definition
+        ok 6 - should handle refs definition
+          ---
+          duration_ms: 0.119765
+          ...
+        1..6
+    ok 2 - 2. Schema Tests
+      ---
+      duration_ms: 1.60655
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+    # Subtest: 3. Resource Management Tests
+        # Subtest: should add resources with schema
+        ok 1 - should add resources with schema
+          ---
+          duration_ms: 4.014278
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should add resources with hooks
+        ok 2 - should add resources with hooks
+          ---
+          duration_ms: 0.770614
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should create resource proxy
+        ok 3 - should create resource proxy
+          ---
+          duration_ms: 0.844314
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should throw error for non-existent resources
+        ok 4 - should throw error for non-existent resources
+          ---
+          duration_ms: 1.229552
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should validate resource type parameter
+        ok 5 - should validate resource type parameter
+          ---
+          duration_ms: 1.285938
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+⚠️  WARNING: Field 'tags' is type 'array' without maxItems limit.
+   Consider adding maxItems to prevent DoS attacks:
+   tags: { type: 'array', maxItems: 1000 }
+⚠️  WARNING: Field 'metadata' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   metadata: { type: 'object', maxKeys: 100, maxDepth: 5 }
+Entering robust teardown process...
+        # Subtest: should validate schema parameter
+        ok 6 - should validate schema parameter
+          ---
+          duration_ms: 0.730614
+          ...
+        1..6
+    ok 3 - 3. Resource Management Tests
+      ---
+      duration_ms: 9.287606
+      type: 'suite'
+      ...
+    # Subtest: 4. CRUD Operations Tests
+        # Subtest: Create (Insert)
+            # Subtest: should create a new resource
+            ok 1 - should create a new resource
+              ---
+              duration_ms: 3.150269
+              ...
+            # Subtest: should validate required fields
+            ok 2 - should validate required fields
+              ---
+              duration_ms: 1.736696
+              ...
+            # Subtest: should validate field constraints
+            ok 3 - should validate field constraints
+              ---
+              duration_ms: 1.170698
+              ...
+            # Subtest: should support post alias
+            ok 4 - should support post alias
+              ---
+              duration_ms: 4.980396
+              ...
+            1..4
+        ok 1 - Create (Insert)
+          ---
+          duration_ms: 11.260328
+          type: 'suite'
+          ...
+        # Subtest: Read (Get/Query)
+            # Subtest: should get resource by ID
+            ok 1 - should get resource by ID
+              ---
+              duration_ms: 2.549896
+              ...
+            # Subtest: should throw NotFoundError for non-existent ID
+            ok 2 - should throw NotFoundError for non-existent ID
+              ---
+              duration_ms: 1.355075
+              ...
+            # Subtest: should support allowNotFound option
+            ok 3 - should support allowNotFound option
+              ---
+              duration_ms: 1.390332
+              ...
+            # Subtest: should query resources with filters
+            ok 4 - should query resources with filters
+              ---
+              duration_ms: 2.89941
+              ...
+            # Subtest: should support pagination
+            ok 5 - should support pagination
+              ---
+              duration_ms: 4.064813
+              ...
+            # Subtest: should support sorting
+            ok 6 - should support sorting
+              ---
+              duration_ms: 3.838978
+              ...
+            1..6
+        ok 2 - Read (Get/Query)
+          ---
+          duration_ms: 16.327607
+          type: 'suite'
+          ...
+        # Subtest: Update
+            # Subtest: should update resource
+            ok 1 - should update resource
+              ---
+              duration_ms: 2.199381
+              ...
+            # Subtest: should support partial updates
+            ok 2 - should support partial updates
+              ---
+              duration_ms: 1.944652
+              ...
+            # Subtest: should validate updates
+            ok 3 - should validate updates
+              ---
+              duration_ms: 1.487862
+              ...
+            # Subtest: should throw NotFoundError for non-existent resource
+            ok 4 - should throw NotFoundError for non-existent resource
+              ---
+              duration_ms: 1.674635
+              ...
+            # Subtest: should support put alias
+            ok 5 - should support put alias
+              ---
+              duration_ms: 1.602748
+              ...
+            1..5
+        ok 3 - Update
+          ---
+          duration_ms: 9.099607
+          type: 'suite'
+          ...
+        # Subtest: Delete
+            # Subtest: should delete resource
+            ok 1 - should delete resource
+              ---
+              duration_ms: 1.770707
+              ...
+            # Subtest: should throw NotFoundError for non-existent resource
+            ok 2 - should throw NotFoundError for non-existent resource
+              ---
+              duration_ms: 1.44164
+              ...
+            # Subtest: should support remove alias
+            ok 3 - should support remove alias
+              ---
+              duration_ms: 1.583783
+              ...
+            1..3
+        ok 4 - Delete
+          ---
+          duration_ms: 4.93398
+          type: 'suite'
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        1..4
+    ok 4 - 4. CRUD Operations Tests
+      ---
+      duration_ms: 47.871267
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+    # Subtest: 5. Hook System Tests
+        # Subtest: should execute hooks in priority order
+        ok 1 - should execute hooks in priority order
+          ---
+          duration_ms: 1.386555
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should allow hooks to modify context
+        ok 2 - should allow hooks to modify context
+          ---
+          duration_ms: 0.828537
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should stop hook chain when returning false
+        ok 3 - should stop hook chain when returning false
+          ---
+          duration_ms: 0.731062
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should execute resource-specific hooks
+        ok 4 - should execute resource-specific hooks
+          ---
+          duration_ms: 4.20577
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should execute all lifecycle hooks
+        ok 5 - should execute all lifecycle hooks
+          ---
+          duration_ms: 4.472999
+          ...
+        1..5
+    ok 5 - 5. Hook System Tests
+      ---
+      duration_ms: 11.926154
+      type: 'suite'
+      ...
+    # Subtest: 6. Query Builder Tests
+        # Subtest: should build basic SELECT query
+        ok 1 - should build basic SELECT query
+          ---
+          duration_ms: 0.249839
+          ...
+        # Subtest: should add WHERE conditions
+        ok 2 - should add WHERE conditions
+          ---
+          duration_ms: 0.155832
+          ...
+        # Subtest: should add JOIN clauses
+        ok 3 - should add JOIN clauses
+          ---
+          duration_ms: 0.134505
+          ...
+        # Subtest: should add ORDER BY
+        ok 4 - should add ORDER BY
+          ---
+          duration_ms: 0.121384
+          ...
+        # Subtest: should add LIMIT and OFFSET
+        ok 5 - should add LIMIT and OFFSET
+          ---
+          duration_ms: 0.111786
+          ...
+        # Subtest: should generate COUNT query
+        ok 6 - should generate COUNT query
+          ---
+          duration_ms: 0.222395
+          ...
+        # Subtest: should clone query builder
+        ok 7 - should clone query builder
+          ---
+          duration_ms: 0.225554
+          ...
+        1..7
+    ok 6 - 6. Query Builder Tests
+      ---
+      duration_ms: 1.409117
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+    # Subtest: 7. Plugin Tests
+        # Subtest: Memory Plugin
+            # Subtest: should provide in-memory storage
+            ok 1 - should provide in-memory storage
+              ---
+              duration_ms: 4.780264
+              ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+            # Subtest: should support all CRUD operations
+            ok 2 - should support all CRUD operations
+              ---
+              duration_ms: 5.782792
+              ...
+            1..2
+        ok 1 - Memory Plugin
+          ---
+          duration_ms: 10.71375
+          type: 'suite'
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+        # Subtest: Validation Plugin
+            # Subtest: should validate on insert and update
+            ok 1 - should validate on insert and update
+              ---
+              duration_ms: 3.061621
+              ...
+            1..1
+        ok 2 - Validation Plugin
+          ---
+          duration_ms: 3.163588
+          type: 'suite'
+          ...
+Entering robust teardown process...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: Timestamps Plugin
+            # Subtest: should add timestamps automatically
+            ok 1 - should add timestamps automatically
+              ---
+              duration_ms: 109.088008
+              ...
+            1..1
+        ok 3 - Timestamps Plugin
+          ---
+          duration_ms: 109.201036
+          type: 'suite'
+          ...
+        1..3
+    ok 7 - 7. Plugin Tests
+      ---
+      duration_ms: 123.223459
+      type: 'suite'
+      ...
+    # Subtest: 8. Advanced Query Tests
+        # Subtest: should support eager joins
+        ok 1 - should support eager joins
+          ---
+          duration_ms: 6.428316
+          ...
+        # Subtest: should support explicit joins
+        ok 2 - should support explicit joins
+          ---
+          duration_ms: 9.242107
+          ...
+        # Subtest: should preserve ID when configured
+        ok 3 - should preserve ID when configured
+          ---
+          duration_ms: 3.207157
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        1..3
+    ok 8 - 8. Advanced Query Tests
+      ---
+      duration_ms: 22.356742
+      type: 'suite'
+      ...
+    # Subtest: 9. Positioning Plugin Tests
+        # Subtest: should auto-assign positions
+        ok 1 - should auto-assign positions
+          ---
+          duration_ms: 2.982085
+          ...
+        # Subtest: should handle position groups
+        ok 2 - should handle position groups
+          ---
+          duration_ms: 1.717682
+          ...
+        # Subtest: should reposition items with beforeId
+        ok 3 - should reposition items with beforeId
+          ---
+          duration_ms: 7.085279
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        1..3
+    ok 9 - 9. Positioning Plugin Tests
+      ---
+      duration_ms: 13.592407
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+    # Subtest: 10. Error Handling Tests
+        # Subtest: should create proper error instances
+        ok 1 - should create proper error instances
+          ---
+          duration_ms: 1.209462
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle NotFoundError correctly
+        ok 2 - should handle NotFoundError correctly
+          ---
+          duration_ms: 4.158996
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle ValidationError with field errors
+        ok 3 - should handle ValidationError with field errors
+          ---
+          duration_ms: 1.027534
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle ConflictError
+        ok 4 - should handle ConflictError
+          ---
+          duration_ms: 0.633799
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should support error context and chaining
+        ok 5 - should support error context and chaining
+          ---
+          duration_ms: 0.644814
+          ...
+        1..5
+    ok 10 - 10. Error Handling Tests
+      ---
+      duration_ms: 7.967864
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+⚠️  WARNING: Field 'profile' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   profile: { type: 'object', maxKeys: 100, maxDepth: 5 }
+    # Subtest: 11. Integration Tests
+        # Subtest: should work with createApi convenience function
+        ok 1 - should work with createApi convenience function
+          ---
+          duration_ms: 4.180352
+          ...
+Entering robust teardown process...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle complex real-world scenario
+        ok 2 - should handle complex real-world scenario
+          ---
+          duration_ms: 29.185046
+          ...
+        1..2
+    ok 11 - 11. Integration Tests
+      ---
+      duration_ms: 33.555545
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+    # Subtest: 12. Edge Cases & Stress Tests
+        # Subtest: should handle circular references gracefully
+        ok 1 - should handle circular references gracefully
+          ---
+          duration_ms: 4.4093
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle large datasets efficiently
+        ok 2 - should handle large datasets efficiently
+          ---
+          duration_ms: 59.478402
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle concurrent operations
+        ok 3 - should handle concurrent operations
+          ---
+          duration_ms: 4.490134
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+⚠️  WARNING: Field 'data' is type 'object' without size limits.
+   Consider adding maxKeys and/or maxDepth to prevent DoS attacks:
+   data: { type: 'object', maxKeys: 100, maxDepth: 5 }
+Entering robust teardown process...
+        # Subtest: should handle special characters in data
+        ok 4 - should handle special characters in data
+          ---
+          duration_ms: 3.649112
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        # Subtest: should handle deeply nested objects
+        ok 5 - should handle deeply nested objects
+          ---
+          duration_ms: 3.270923
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+      Creating 1000 records...
+      Created in 112ms (0.11ms per record)
+      Queried in 3ms
+Entering robust teardown process...
+        # Subtest: should handle batch operations
+        ok 6 - should handle batch operations
+          ---
+          duration_ms: 9.166542
+          ...
+        1..6
+    ok 12 - 12. Edge Cases & Stress Tests
+      ---
+      duration_ms: 84.816082
+      type: 'suite'
+      ...
+    # Subtest: 13. Performance Tests
+        # Subtest: should handle 1000 records efficiently
+        ok 1 - should handle 1000 records efficiently
+          ---
+          duration_ms: 115.775852
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+Entering robust teardown process...
+        1..1
+    ok 13 - 13. Performance Tests
+      ---
+      duration_ms: 117.105822
+      type: 'suite'
+      ...
+    # Subtest: 14. Virtual Search Fields
+        # Subtest: should allow virtual fields marked with * in searchableFields
+        ok 1 - should allow virtual fields marked with * in searchableFields
+          ---
+          duration_ms: 2.738907
+          ...
+        # Subtest: should reject non-searchable virtual fields
+        ok 2 - should reject non-searchable virtual fields
+          ---
+          duration_ms: 0.379044
+          ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+
+🧹 Running global test cleanup...
+Entering robust teardown process...
+        1..2
+    ok 14 - 14. Virtual Search Fields
+      ---
+      duration_ms: 4.258481
+      type: 'suite'
+      ...
+Performing manual TCP handle cleanup...
+No lingering TCP sockets were found to destroy.
+✅ Global cleanup complete
+    1..14
+ok 11 - JSON REST API - Comprehensive Test Suite
+  ---
+  duration_ms: 480.968621
+  type: 'suite'
+  ...
+
+❌ Process did not exit cleanly after manual handle destruction. Forcing exit.

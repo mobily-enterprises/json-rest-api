@@ -456,7 +456,7 @@ export const SQLPlugin = {
             if (schema) {
               await api.execute('db.createTable', { table, schema, idProperty });
               // Retry the operation
-              return api.implement('get')(context);
+              return api.implementers.get('get')(context);
             }
           }
           throw new InternalError(`Table '${table}' does not exist`).withContext({ table });

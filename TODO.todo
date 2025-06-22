@@ -1,9 +1,6 @@
 * Change documentation so that it adds stores to Express in QuickStart, GUIDE.md explains the "longer" version
 
-* Add way to download the schemas (including joins of each table) to the client
-* ADD non-DB APIs
-
-
+* Add way to add sort, filters, range to 1:n joins in schema
 
 
  Critical Missing Features:
@@ -14,7 +11,6 @@
     - Complex type transformations
     - Shared types across services
   5. Specific Integrations
-    - Need specific @nestjs/* packages
     - Complex queue management
     - Advanced scheduling needs
 

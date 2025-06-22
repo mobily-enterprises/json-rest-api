@@ -39,6 +39,14 @@ import {
 // Import migration tests
 import './test-migrations.js';
 
+// Import plugin tests
+import './test-health-plugin.js';
+import './test-graphql-plugin.js';
+import './test-websocket-plugin.js';
+import './test-service-discovery-plugin.js';
+import './test-grpc-plugin.js';
+
+
 // Print which database we're using
 const { name: dbName } = getTestPlugin();
 console.log(`\n🧪 Running comprehensive test suite with ${dbName}\n`);

@@ -14,6 +14,11 @@ export const HTTPPlugin = {
     const router = express.Router();
     api.router = router;
     
+    // Store app reference for other plugins to use (like GraphQL)
+    if (options.app) {
+      api.app = options.app;
+    }
+    
     // Store basePath for other plugins to use
     api.basePath = options.basePath || '/api';
 

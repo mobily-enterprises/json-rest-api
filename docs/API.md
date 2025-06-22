@@ -5018,3 +5018,243 @@ interface CollectionResponse {
 | 95-100 | Final processing |
 
 Lower numbers execute first.
+
+## Advanced Plugins
+
+The `plugins/advanced/` directory contains enterprise-grade plugins that extend JSON REST API with sophisticated features:
+
+### CachePlugin
+
+Permission-aware caching system with multi-tier support and automatic invalidation.
+
+```javascript
+import { CachePlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(CachePlugin, {
+  store: 'memory',        // 'memory' or 'redis'
+  ttl: 300,               // Time-to-live in seconds
+  maxItems: 1000,         // Max items in memory cache
+  maxMemory: 100 * 1024 * 1024, // Max memory usage (100MB)
+  redis: redisClient,     // Redis client if using Redis
+  permissionAware: true,  // Cache based on user permissions
+  enableQueryCache: true, // Cache query results
+  enableGetCache: true,   // Cache GET requests
+  warmupQueries: []       // Queries to warm cache on startup
+});
+```
+
+**Key Features:**
+- Permission-aware cache keys
+- Automatic invalidation on mutations
+- Multi-tier caching (L1: memory, L2: Redis)
+- Query result signatures for validation
+- Cache warming capabilities
+
+### ConfigPlugin
+
+Configuration management with validation, hot-reload, and multi-source support.
+
+```javascript
+import { ConfigPlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(ConfigPlugin, {
+  sources: ['env', 'file', 'args'],
+  envPrefix: 'API_',
+  configFile: 'config.json',
+  watch: true,            // Enable hot-reload
+  validateOnChange: true,
+  schemas: {
+    port: { 
+      type: 'number', 
+      min: 1, 
+      max: 65535, 
+      required: true 
+    },
+    host: { 
+      type: 'string', 
+      pattern: '^[a-zA-Z0-9.-]+$' 
+    }
+  },
+  transformers: {
+    connectionString: (v, config) => 
+      `${config.protocol}://${config.host}:${config.port}`
+  }
+});
+
+// Usage
+const port = api.config.get('port');
+api.config.watch('debug', (newVal, oldVal) => {
+  console.log('Debug mode changed');
+});
+```
+
+### VersioningPlugin
+
+Enhanced API versioning with multiple strategies and migration support.
+
+```javascript
+import { VersioningPlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(VersioningPlugin, {
+  type: 'header',         // 'header', 'path', 'query', 'accept'
+  header: 'x-api-version',
+  defaultVersion: '1',
+  versions: {
+    '1': { stable: true },
+    '2': { stable: true },
+    '3': { experimental: true }
+  }
+});
+
+// Add versioned resources
+api.addVersionedResource('users', {
+  '1': { schema: userSchemaV1 },
+  '2': { 
+    schema: userSchemaV2,
+    migrateFrom: '1',
+    migration: (data) => ({ ...data, newField: 'default' })
+  }
+});
+
+// Deprecate versions
+api.deprecateVersion('1', {
+  sunset: '2024-12-31',
+  successor: '2'
+});
+```
+
+### ContextPlugin
+
+AsyncLocalStorage-based context propagation for request tracking and debugging.
+
+```javascript
+import { ContextPlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(ContextPlugin, {
+  enableRequestId: true,
+  enableTracing: true,
+  enableUserContext: true,
+  requestIdHeader: 'x-request-id',
+  correlationIdHeader: 'x-correlation-id'
+});
+
+// Access context anywhere
+const requestId = api.context.get('requestId');
+api.context.set('customValue', 'data');
+
+// Context-aware logging
+api.log.info('Operation completed'); // Auto-includes requestId, userId
+
+// Run background tasks with context
+api.runBackgroundTask('email-notification', async () => {
+  // Has access to parent context
+});
+```
+
+### InterceptorsPlugin
+
+Request/response transformation pipeline with middleware-like capabilities.
+
+```javascript
+import { InterceptorsPlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(InterceptorsPlugin);
+
+// Add custom interceptor
+api.interceptors.request.use({
+  name: 'auth-check',
+  priority: 10,
+  async process(context) {
+    if (!context.headers?.authorization) {
+      throw new Error('Unauthorized');
+    }
+    return context;
+  }
+});
+
+// Use common patterns
+api.interceptors.request.use(
+  api.interceptors.common.rateLimit({ 
+    max: 100, 
+    window: 60000 
+  })
+);
+
+api.interceptors.response.use(
+  api.interceptors.common.transform({
+    response: (data) => ({ 
+      ...data, 
+      timestamp: Date.now() 
+    })
+  })
+);
+```
+
+### TracingPlugin
+
+Distributed tracing with OpenTelemetry compatibility.
+
+```javascript
+import { TracingPlugin } from 'json-rest-api/plugins/advanced';
+
+api.use(TracingPlugin, {
+  serviceName: 'my-api',
+  samplingRate: 0.1,      // Sample 10% of requests
+  enableAutoInstrumentation: true,
+  enableHttpTracing: true,
+  enableDatabaseTracing: true
+});
+
+// Custom spans
+await api.span('custom.operation', async (span) => {
+  span.setAttribute('user.id', userId);
+  span.addEvent('processing-started');
+  
+  const result = await doWork();
+  
+  span.addEvent('processing-completed', { 
+    items: result.length 
+  });
+  return result;
+});
+
+// Access trace data
+// GET /api/tracing/export
+// GET /api/tracing/stats
+```
+
+### Using Advanced Plugins
+
+All advanced plugins should be loaded after core plugins but before starting the API:
+
+```javascript
+import { Api } from 'json-rest-api';
+import { 
+  CachePlugin,
+  ConfigPlugin,
+  ContextPlugin,
+  InterceptorsPlugin,
+  VersioningPlugin,
+  TracingPlugin
+} from 'json-rest-api/plugins/advanced';
+
+const api = new Api();
+
+// Core plugins first
+api.use(MemoryPlugin);
+api.use(HTTPPlugin, { app });
+
+// Advanced plugins (recommended order)
+api.use(ConfigPlugin, configOptions);      // Load config first
+api.use(ContextPlugin, contextOptions);    // Context propagation
+api.use(InterceptorsPlugin);               // Request pipeline
+api.use(CachePlugin, cacheOptions);        // Caching
+api.use(VersioningPlugin, versionOptions); // API versioning
+api.use(TracingPlugin, tracingOptions);    // Distributed tracing
+
+await api.start();
+```
+
+For detailed documentation and examples, see [Advanced Plugins Guide](../plugins/advanced/README.md).
+
+---
