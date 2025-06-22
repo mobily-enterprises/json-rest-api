@@ -430,7 +430,7 @@ export const SQLPlugin = {
             throw new NotFoundError(options.type || table, id);
           }
           
-          return rows[0] ? parseJsonFields(rows[0], schema) : null;
+          return rows[0] ? parseFieldTypes(rows[0], schema) : null;
         } else {
           // Simple get without joins
           const escapeId = await api.execute('db.formatIdentifier', { identifier: idProperty });
@@ -471,7 +471,7 @@ export const SQLPlugin = {
             throw new NotFoundError(options.type || table, id);
           }
 
-          return rows[0] ? parseJsonFields(rows[0], schema) : null;
+          return rows[0] ? parseFieldTypes(rows[0], schema) : null;
         }
       } catch (error) {
         if (error.code === 'ER_NO_SUCH_TABLE' || 
@@ -592,7 +592,7 @@ export const SQLPlugin = {
           
           // Parse JSON fields for each row
           const schema = api.schemas?.get(options.type);
-          context.results = rows.map(row => parseJsonFields(row, schema));
+          context.results = rows.map(row => parseFieldTypes(row, schema));
         }
         
         // Return results with metadata
