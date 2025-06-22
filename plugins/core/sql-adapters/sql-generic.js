@@ -36,6 +36,144 @@ function parseFieldTypes(row, schema) {
   return result;
 }
 
+// Helper to convert field values for database storage
+function prepareValueForStorage(value, fieldDef) {
+  if (value === null || value === undefined) return value;
+  
+  // Convert objects/arrays to JSON strings for storage
+  if (fieldDef && (fieldDef.type === 'object' || fieldDef.type === 'array')) {
+    return JSON.stringify(value);
+  }
+  
+  return value;
+}
+
+// Helper to build searchable fields and mappings
+function getSearchableFields(api, schema, resourceType, contextOptions = {}) {
+  const allowedFields = new Set();
+  const fieldMappings = {};
+  
+  // 1. Add fields marked as searchable in schema (excluding virtual fields)
+  if (schema) {
+    for (const [field, def] of Object.entries(schema.structure)) {
+      if (def.searchable === true && !def.virtual) {
+        allowedFields.add(field);
+      }
+    }
+  }
+  
+  // 2. Add mapped searchable fields from resource options or context options
+  const resourceOptions = api.resourceOptions?.get(resourceType) || {};
+  const searchableFieldMappings = contextOptions.searchableFields || resourceOptions.searchableFields || {};
+  for (const [friendlyName, path] of Object.entries(searchableFieldMappings)) {
+    allowedFields.add(friendlyName);
+    fieldMappings[friendlyName] = path;
+  }
+  
+  return { allowedFields, fieldMappings };
+}
+
+// Helper to process joins for a query
+async function processJoins(query, table, schema, api, requestedJoins, nestedJoinMap, context) {
+  const idProperty = api.options.idProperty || 'id';
+  
+  // Track joined fields in context
+  context.joinFields = {};
+  
+  // Process joins with nesting support
+  for (const [field, refs] of requestedJoins) {
+    const joinMeta = typeof refs === 'object' ? refs : { resource: refs };
+    const joinedResource = joinMeta.resource;
+    const joinedSchema = api.schemas.get(joinedResource);
+    
+    if (!joinedSchema) continue;
+    
+    // Include the join configuration in the context
+    context.joinFields[field] = {
+      resource: joinedResource,
+      fields: joinMeta.join?.fields || joinMeta.fields,
+      preserveId: joinMeta.join?.preserveId !== false, // Default to true if not explicitly false
+      runHooks: joinMeta.join?.runHooks,
+      nestedJoins: nestedJoinMap.get(field)?.nestedJoins || {}
+    };
+    
+    // Join the table
+    const joinAlias = field;
+    const escapeId = await api.execute('db.formatIdentifier', { identifier: idProperty });
+    const escapeTable = await api.execute('db.formatIdentifier', { identifier: table });
+    const escapeField = await api.execute('db.formatIdentifier', { identifier: field });
+    const escapeJoinAlias = await api.execute('db.formatIdentifier', { identifier: joinAlias });
+    
+    // Format the table with alias
+    const tableWithAlias = `${joinedResource} AS ${joinAlias}`;
+    query.leftJoin(
+      tableWithAlias,
+      `${escapeTable}.${escapeField} = ${escapeJoinAlias}.${escapeId}`
+    );
+    
+    // Add fields from joined table with prefix
+    const fieldsToSelect = joinMeta.fields || (joinMeta.join?.fields);
+    
+    if (fieldsToSelect && Array.isArray(fieldsToSelect)) {
+      for (const f of fieldsToSelect) {
+        const escapeF = await api.execute('db.formatIdentifier', { identifier: f });
+        query.select(`${escapeJoinAlias}.${escapeF} AS __${field}__${f}`);
+      }
+    } else {
+      // Select all non-silent fields
+      const joinedFields = schemaFields(joinedSchema);
+      // Always include ID field for joined tables
+      const joinedIdProperty = api.options.idProperty || 'id';
+      const escapeJoinedId = await api.execute('db.formatIdentifier', { identifier: joinedIdProperty });
+      query.select(`${escapeJoinAlias}.${escapeJoinedId} AS __${field}__${joinedIdProperty}`);
+      
+      for (const f of joinedFields) {
+        const escapeF = await api.execute('db.formatIdentifier', { identifier: f });
+        query.select(`${escapeJoinAlias}.${escapeF} AS __${field}__${f}`);
+      }
+    }
+  }
+}
+
+// Helper to apply filters to a query
+async function applyFilters(query, filters, table, schema, api, options = {}) {
+  const { allowedFields, fieldMappings, skipJoinedFields = false } = options;
+  
+  for (const [field, value] of Object.entries(filters)) {
+    // Check if field is searchable
+    if (!allowedFields.has(field)) {
+      throw new ValidationError()
+        .addFieldError('filter', `Field '${field}' is not searchable`);
+    }
+    
+    // Get the actual field path (use mapping if exists)
+    const actualPath = fieldMappings[field] || field;
+    
+    // Check if this is a virtual field (marked with '*')
+    if (actualPath === '*') {
+      // Virtual field - skip automatic query building
+      // It will be handled by modifyQuery hooks
+      continue;
+    }
+    
+    // Skip joined fields if requested
+    if (skipJoinedFields && actualPath.includes('.')) {
+      continue;
+    }
+    
+    // Check if value is an object with operators
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Handle operator syntax: { gt: 100, lt: 200 }
+      for (const [operator, operatorValue] of Object.entries(value)) {
+        await applyFilterOperator(query, table, actualPath, operator, operatorValue, schema, api, options);
+      }
+    } else {
+      // Handle simple equality check
+      await applyFilterOperator(query, table, actualPath, 'eq', value, schema, api, options);
+    }
+  }
+}
+
 // Helper to parse sort parameters
 function parseSort(sort) {
   if (!sort) return [];
@@ -150,63 +288,8 @@ export const SQLPlugin = {
         // Get nested joins from processed include parameter
         const nestedJoinMap = context.params?._nestedJoins || new Map();
         
-        // Track joined fields in context
-        context.joinFields = {};
-        
-        // Process joins with nesting support
-        for (const [field, refs] of requestedJoins) {
-          const joinMeta = typeof refs === 'object' ? refs : { resource: refs };
-          const joinedResource = joinMeta.resource;
-          const joinedSchema = api.schemas.get(joinedResource);
-          
-          if (!joinedSchema) continue;
-          
-          // Include the join configuration in the context
-          context.joinFields[field] = {
-            resource: joinedResource,
-            fields: joinMeta.join?.fields || joinMeta.fields,
-            preserveId: joinMeta.join?.preserveId !== false, // Default to true if not explicitly false
-            runHooks: joinMeta.join?.runHooks,
-            nestedJoins: nestedJoinMap.get(field)?.nestedJoins || {}
-          };
-          
-          // Join the table
-          const joinAlias = field;
-          const idProperty = api.options.idProperty || 'id';
-          const escapeId = await api.execute('db.formatIdentifier', { identifier: idProperty });
-          const escapeTable = await api.execute('db.formatIdentifier', { identifier: table });
-          const escapeField = await api.execute('db.formatIdentifier', { identifier: field });
-          const escapeJoinAlias = await api.execute('db.formatIdentifier', { identifier: joinAlias });
-          
-          // Format the table with alias
-          const tableWithAlias = `${joinedResource} AS ${joinAlias}`;
-          query.leftJoin(
-            tableWithAlias,
-            `${escapeTable}.${escapeField} = ${escapeJoinAlias}.${escapeId}`
-          );
-          
-          // Add fields from joined table with prefix
-          const fieldsToSelect = joinMeta.fields || (joinMeta.join?.fields);
-          
-          if (fieldsToSelect && Array.isArray(fieldsToSelect)) {
-            for (const f of fieldsToSelect) {
-              const escapeF = await api.execute('db.formatIdentifier', { identifier: f });
-              query.select(`${escapeJoinAlias}.${escapeF} AS __${field}__${f}`);
-            }
-          } else {
-            // Select all non-silent fields
-            const joinedFields = schemaFields(joinedSchema);
-            // Always include ID field for joined tables
-            const joinedIdProperty = api.options.idProperty || 'id';
-            const escapeJoinedId = await api.execute('db.formatIdentifier', { identifier: joinedIdProperty });
-            query.select(`${escapeJoinAlias}.${escapeJoinedId} AS __${field}__${joinedIdProperty}`);
-            
-            for (const f of joinedFields) {
-              const escapeF = await api.execute('db.formatIdentifier', { identifier: f });
-              query.select(`${escapeJoinAlias}.${escapeF} AS __${field}__${f}`);
-            }
-          }
-        }
+        // Process all joins
+        await processJoins(query, table, schema, api, requestedJoins, nestedJoinMap, context);
       } else {
         query.select(`${table}.*`);
       }
@@ -217,61 +300,17 @@ export const SQLPlugin = {
           console.log('Applying filters:', context.params.filter);
         }
         
-        // Build set of allowed searchable fields
-        const allowedFields = new Set();
-        const fieldMappings = {};
-        
-        // 1. Add fields marked as searchable in schema (excluding virtual fields)
-        const schema = api.schemas.get(context.options.type);
-        if (schema) {
-          for (const [field, def] of Object.entries(schema.structure)) {
-            if (def.searchable === true && !def.virtual) {
-              allowedFields.add(field);
-            }
-          }
-        }
-        
-        // 2. Add mapped searchable fields from resource options or context options
-        const resourceOptions = api.resourceOptions?.get(context.options.type) || {};
-        const searchableFieldMappings = context.options.searchableFields || resourceOptions.searchableFields || {};
-        for (const [friendlyName, path] of Object.entries(searchableFieldMappings)) {
-          allowedFields.add(friendlyName);
-          fieldMappings[friendlyName] = path;
-        }
+        const { allowedFields, fieldMappings } = getSearchableFields(api, schema, context.options.type, context.options);
         
         if (api.options.debug) {
           console.log('Allowed searchable fields:', Array.from(allowedFields));
           console.log('Field mappings:', fieldMappings);
         }
         
-        for (const [field, value] of Object.entries(context.params.filter)) {
-          // Check if field is searchable
-          if (!allowedFields.has(field)) {
-            throw new ValidationError()
-              .addFieldError('filter', `Field '${field}' is not searchable`);
-          }
-          
-          // Get the actual field path (use mapping if exists)
-          const actualPath = fieldMappings[field] || field;
-          
-          // Check if this is a virtual field (marked with '*')
-          if (actualPath === '*') {
-            // Virtual field - skip automatic query building
-            // It will be handled by modifyQuery hooks
-            continue;
-          }
-          
-          // Check if value is an object with operators
-          if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            // Handle operator syntax: { gt: 100, lt: 200 }
-            for (const [operator, operatorValue] of Object.entries(value)) {
-              await applyAdvancedFilterOperator(query, table, actualPath, operator, operatorValue, schema, api);
-            }
-          } else {
-            // Handle simple equality check
-            await applyAdvancedFilterOperator(query, table, actualPath, 'eq', value, schema, api);
-          }
-        }
+        await applyFilters(query, context.params.filter, table, schema, api, {
+          allowedFields,
+          fieldMappings
+        });
       }
       
       // Store query on context
@@ -372,7 +411,7 @@ export const SQLPlugin = {
       try {
         // Check if we need to use query builder for joins
         const schema = api.schemas?.get(options.type);
-        const needsJoins = schema && options.joins !== false && hasEagerJoins(schema, options);
+        const needsJoins = schema && options.joins !== false && needsJoinProcessing(schema, options);
         
         if (needsJoins) {
           if (api.options.debug) {
@@ -505,47 +544,13 @@ export const SQLPlugin = {
         // Apply the same filters for count
         if (params.filter) {
           const schema = api.schemas.get(options.type);
-          const allowedFields = new Set();
-          const fieldMappings = {};
+          const { allowedFields, fieldMappings } = getSearchableFields(api, schema, options.type, options);
           
-          if (schema) {
-            for (const [field, def] of Object.entries(schema.structure)) {
-              if (def.searchable === true && !def.virtual) {
-                allowedFields.add(field);
-              }
-            }
-          }
-          
-          const resourceOptions = api.resourceOptions?.get(options.type) || {};
-          const searchableFieldMappings = options.searchableFields || resourceOptions.searchableFields || {};
-          for (const [friendlyName, path] of Object.entries(searchableFieldMappings)) {
-            allowedFields.add(friendlyName);
-            fieldMappings[friendlyName] = path;
-          }
-          
-          for (const [field, value] of Object.entries(params.filter)) {
-            if (!allowedFields.has(field)) {
-              throw new ValidationError()
-                .addFieldError('filter', `Field '${field}' is not searchable`);
-            }
-            
-            const actualPath = fieldMappings[field] || field;
-            if (actualPath.includes('.')) {
-              // Skip joined field filters for count query
-              continue;
-            } else {
-              // Check if value is an object with operators
-              if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                // Handle operator syntax: { gt: 100, lt: 200 }
-                for (const [operator, operatorValue] of Object.entries(value)) {
-                  await applyCountFilterOperator(countQuery, table, actualPath, operator, operatorValue, schema, api);
-                }
-              } else {
-                // Handle simple equality check
-                await applyCountFilterOperator(countQuery, table, actualPath, 'eq', value, schema, api);
-              }
-            }
-          }
+          await applyFilters(countQuery, params.filter, table, schema, api, {
+            allowedFields,
+            fieldMappings,
+            skipJoinedFields: true  // Skip joined field filters for count query
+          });
         }
         
         let countSql = countQuery.toSQL();
@@ -665,14 +670,7 @@ export const SQLPlugin = {
           fields.map(f => api.execute('db.formatIdentifier', { identifier: f }))
         );
         const placeholders = fields.map(() => '?').join(', ');
-        const values = fields.map(f => {
-          const value = cleanData[f];
-          // Convert objects/arrays to JSON strings for storage
-          if (schema?.structure[f] && (schema.structure[f].type === 'object' || schema.structure[f].type === 'array')) {
-            return JSON.stringify(value);
-          }
-          return value;
-        });
+        const values = fields.map(f => prepareValueForStorage(cleanData[f], schema?.structure[f]));
         
         const sql = `INSERT INTO ${escapeTable} (${fieldList.join(', ')}) VALUES (${placeholders})`;
         
@@ -944,7 +942,7 @@ export const SQLPlugin = {
 
 // Helper functions
 
-function hasEagerJoins(schema, options) {
+function needsJoinProcessing(schema, options) {
   // Check if any fields have refs with eager loading
   for (const [field, def] of Object.entries(schema.structure)) {
     if (def.refs && (def.refs.join?.eager || def.eager)) {
@@ -1194,7 +1192,9 @@ function validateFilterValue(field, operator, value, schema) {
   return true;
 }
 
-async function applyAdvancedFilterOperator(query, table, field, operator, value, schema, api) {
+// Consolidated filter operator function that handles all cases
+async function applyFilterOperator(query, table, field, operator, value, schema, api, options = {}) {
+  const { skipJoinedFields = false } = options;
   const fieldDef = schema?.structure?.[field];
   const isArrayField = fieldDef?.type === 'array';
   
@@ -1341,258 +1341,6 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
   }
 }
 
-async function applyCountFilterOperator(countQuery, table, field, operator, value, schema, api) {
-  const fieldDef = schema?.structure?.[field];
-  const isArrayField = fieldDef?.type === 'array';
-  
-  // Validate operator
-  if (!OPERATORS[operator]) {
-    throw new ValidationError()
-      .addFieldError('filter', `Unknown operator '${operator}' for field '${field}'`);
-  }
-  
-  // Validate filter value
-  validateFilterValue(field, operator, value, schema);
-  
-  // Handle special cases for string operators
-  let processedValue = value;
-  if (operator === 'like' || operator === 'contains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'startsWith') {
-    processedValue = `${value}%`;
-  } else if (operator === 'endsWith') {
-    processedValue = `%${value}`;
-  } else if (operator === 'icontains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'between') {
-    // Validate between operator has array with 2 values
-    if (!Array.isArray(value) || value.length !== 2) {
-      throw new ValidationError()
-        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
-    }
-  } else if (operator === 'null' || operator === 'notnull') {
-    // For null checks, we ignore the value and use NULL
-    processedValue = null;
-  }
-  
-  // Regular field (no joined fields in count query)
-  if (isArrayField && operator === 'eq') {
-    // Special handling for array fields with equality
-    const features = await api.execute('db.features', {});
-    
-    if (features.jsonFunctions) {
-      // MySQL: Use JSON_CONTAINS
-      countQuery.where(`JSON_CONTAINS(${table}.${field}, ?)`, JSON.stringify(value));
-    } else {
-      // AlaSQL/Others: Use LIKE with JSON string matching
-      countQuery.where(`${table}.${field} LIKE ?`, `%"${value}"%`);
-    }
-  } else if (operator === 'in' || operator === 'nin') {
-    if (!Array.isArray(value)) {
-      throw new ValidationError()
-        .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
-    }
-    
-    if (isArrayField) {
-      // For array fields with IN operator, check if array contains any of the values
-      const features = await api.execute('db.features', {});
-      
-      if (operator === 'in') {
-        // Array should contain at least one of the values
-        if (features.jsonFunctions) {
-          // MySQL: Use JSON_CONTAINS with OR
-          const conditions = value.map(() => `JSON_CONTAINS(${table}.${field}, ?)`).join(' OR ');
-          countQuery.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-        } else {
-          // AlaSQL: Use LIKE with OR
-          const conditions = value.map(() => `${table}.${field} LIKE ?`).join(' OR ');
-          countQuery.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-        }
-      } else {
-        // nin - Array should not contain any of the values
-        if (features.jsonFunctions) {
-          // MySQL: Use NOT JSON_CONTAINS with AND
-          const conditions = value.map(() => `NOT JSON_CONTAINS(${table}.${field}, ?)`).join(' AND ');
-          countQuery.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-        } else {
-          // AlaSQL: Use NOT LIKE with AND
-          const conditions = value.map(() => `${table}.${field} NOT LIKE ?`).join(' AND ');
-          countQuery.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-        }
-      }
-    } else {
-      // Regular field IN/NIN  
-      const placeholders = value.map(() => '?').join(', ');
-      countQuery.where(`${table}.${field} ${OPERATORS[operator]} (${placeholders})`, ...value);
-    }
-  } else if (operator === 'ilike' || operator === 'icontains') {
-    // Case-insensitive LIKE
-    const features = await api.execute('db.features', {});
-    if (features.ilike) {
-      countQuery.where(`${table}.${field} ILIKE ?`, processedValue);
-    } else {
-      countQuery.where(`LOWER(${table}.${field}) LIKE LOWER(?)`, processedValue);
-    }
-  } else if (operator === 'between') {
-    // BETWEEN requires two values
-    countQuery.where(`${table}.${field} BETWEEN ? AND ?`, value[0], value[1]);
-  } else if (operator === 'null') {
-    // IS NULL
-    countQuery.where(`${table}.${field} IS NULL`);
-  } else if (operator === 'notnull') {
-    // IS NOT NULL
-    countQuery.where(`${table}.${field} IS NOT NULL`);
-  } else {
-    countQuery.where(`${table}.${field} ${OPERATORS[operator]} ?`, processedValue);
-  }
-}
-
-async function applyFilterOperator(query, table, field, operator, value, schema, api) {
-  const fieldDef = schema?.structure?.[field];
-  const isArrayField = fieldDef?.type === 'array';
-  
-  // Validate operator
-  if (!OPERATORS[operator]) {
-    throw new ValidationError()
-      .addFieldError('filter', `Unknown operator '${operator}' for field '${field}'`);
-  }
-  
-  // Validate filter value
-  validateFilterValue(field, operator, value, schema);
-  
-  // Handle special cases for string operators
-  let processedValue = value;
-  if (operator === 'like' || operator === 'contains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'startsWith') {
-    processedValue = `${value}%`;
-  } else if (operator === 'endsWith') {
-    processedValue = `%${value}`;
-  } else if (operator === 'icontains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'between') {
-    // Validate between operator has array with 2 values
-    if (!Array.isArray(value) || value.length !== 2) {
-      throw new ValidationError()
-        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
-    }
-  } else if (operator === 'null' || operator === 'notnull') {
-    // For null checks, we ignore the value and use NULL
-    processedValue = null;
-  }
-  
-  // Build the SQL condition
-  let condition;
-  if (field.includes('.')) {
-    // Joined field
-    const escapedField = `\`${field.replace('.', '`.`')}\``;
-    
-    if (operator === 'in' || operator === 'nin') {
-      if (!Array.isArray(value)) {
-        throw new ValidationError()
-          .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
-      }
-      const placeholders = value.map(() => '?').join(', ');
-      condition = `${escapedField} ${OPERATORS[operator]} (${placeholders})`;
-      query.where(condition, ...value);
-    } else if (operator === 'ilike' || operator === 'icontains') {
-      // Case-insensitive LIKE for joined fields
-      const features = await api.execute('db.features', {});
-      if (features.ilike) {
-        query.where(`${escapedField} ILIKE ?`, processedValue);
-      } else {
-        query.where(`LOWER(${escapedField}) LIKE LOWER(?)`, processedValue);
-      }
-    } else if (operator === 'between') {
-      // BETWEEN requires two values
-      query.where(`${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
-    } else if (operator === 'null') {
-      // IS NULL
-      query.where(`${escapedField} IS NULL`);
-    } else if (operator === 'notnull') {
-      // IS NOT NULL
-      query.where(`${escapedField} IS NOT NULL`);
-    } else {
-      condition = `${escapedField} ${OPERATORS[operator]} ?`;
-      query.where(condition, processedValue);
-    }
-  } else {
-    // Regular field
-    const escapedField = `\`${table}\`.\`${field}\``;
-    
-    if (isArrayField && operator === 'eq') {
-      // Special handling for array fields with equality
-      const features = await api.execute('db.features', {});
-      
-      if (features.jsonFunctions) {
-        // MySQL: Use JSON_CONTAINS
-        query.where(`JSON_CONTAINS(${escapedField}, ?)`, JSON.stringify(value));
-      } else {
-        // AlaSQL/Others: Use LIKE with JSON string matching
-        query.where(`${escapedField} LIKE ?`, `%"${value}"%`);
-      }
-    } else if (operator === 'in' || operator === 'nin') {
-      if (!Array.isArray(value)) {
-        throw new ValidationError()
-          .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
-      }
-      
-      if (isArrayField) {
-        // For array fields with IN operator, check if array contains any of the values
-        const features = await api.execute('db.features', {});
-        
-        if (operator === 'in') {
-          // Array should contain at least one of the values
-          if (features.jsonFunctions) {
-            // MySQL: Use JSON_CONTAINS with OR
-            const conditions = value.map(() => `JSON_CONTAINS(${escapedField}, ?)`).join(' OR ');
-            query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-          } else {
-            // AlaSQL: Use LIKE with OR
-            const conditions = value.map(() => `${escapedField} LIKE ?`).join(' OR ');
-            query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-          }
-        } else {
-          // nin - Array should not contain any of the values
-          if (features.jsonFunctions) {
-            // MySQL: Use NOT JSON_CONTAINS with AND
-            const conditions = value.map(() => `NOT JSON_CONTAINS(${escapedField}, ?)`).join(' AND ');
-            query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-          } else {
-            // AlaSQL: Use NOT LIKE with AND
-            const conditions = value.map(() => `${escapedField} NOT LIKE ?`).join(' AND ');
-            query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-          }
-        }
-      } else {
-        // Regular field IN/NIN
-        const placeholders = value.map(() => '?').join(', ');
-        condition = `${escapedField} ${OPERATORS[operator]} (${placeholders})`;
-        query.where(condition, ...value);
-      }
-    } else if (operator === 'ilike' || operator === 'icontains') {
-      // Case-insensitive LIKE - use LOWER for databases that don't support ILIKE
-      const features = await api.execute('db.features', {});
-      if (features.ilike) {
-        query.where(`${escapedField} ILIKE ?`, processedValue);
-      } else {
-        query.where(`LOWER(${escapedField}) LIKE LOWER(?)`, processedValue);
-      }
-    } else if (operator === 'between') {
-      // BETWEEN requires two values
-      query.where(`${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
-    } else if (operator === 'null') {
-      // IS NULL
-      query.where(`${escapedField} IS NULL`);
-    } else if (operator === 'notnull') {
-      // IS NOT NULL
-      query.where(`${escapedField} IS NOT NULL`);
-    } else {
-      condition = `${escapedField} ${OPERATORS[operator]} ?`;
-      query.where(condition, processedValue);
-    }
-  }
-}
 
 
 function extractFieldFromError(message) {
