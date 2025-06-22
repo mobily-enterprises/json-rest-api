@@ -1,32 +1,38 @@
 import { NotFoundError, InternalError, ConflictError, ValidationError, BadRequestError, ErrorCodes } from '../../../lib/errors.js';
 import { QueryBuilder, schemaFields } from '../../../lib/query-builder.js';
 
-// Helper to parse JSON fields in a row
-function parseJsonFields(row, schema) {
-  if (!row || !schema) return row;
+// Helper to convert database values to proper JavaScript types
+function parseFieldTypes(row, schema) {
+  if (!row || !schema?.structure) return row;
   
   const result = { ...row };
-  for (const [field, def] of Object.entries(schema.structure || schema.fields || {})) {
-    if (result[field] !== null && result[field] !== undefined) {
-      // Handle JSON types
-      if (def.type === 'object' || def.type === 'array') {
-        try {
-          // MySQL returns JSON fields as strings
-          if (typeof result[field] === 'string') {
-            result[field] = JSON.parse(result[field]);
+  
+  for (const [field, def] of Object.entries(schema.structure)) {
+    const value = result[field];
+    if (value === null || value === undefined) continue;
+    
+    switch (def.type) {
+      case 'object':
+      case 'array':
+        // MySQL returns JSON as strings
+        if (typeof value === 'string') {
+          try {
+            result[field] = JSON.parse(value);
+          } catch (e) {
+            // Keep original value if parsing fails
           }
-        } catch (e) {
-          // If parsing fails, leave as is
         }
-      }
-      // Handle boolean types - MySQL returns 0/1
-      else if (def.type === 'boolean') {
-        if (typeof result[field] === 'number') {
-          result[field] = result[field] === 1;
+        break;
+        
+      case 'boolean':
+        // MySQL returns booleans as 0/1
+        if (typeof value === 'number') {
+          result[field] = value === 1;
         }
-      }
+        break;
     }
   }
+  
   return result;
 }
 
@@ -430,25 +436,20 @@ export const SQLPlugin = {
           const escapeId = await api.execute('db.formatIdentifier', { identifier: idProperty });
           const escapeTable = await api.execute('db.formatIdentifier', { identifier: table });
           
-          // Get schema for field filtering
+          // Get schema to check if we need field filtering
           const schema = api.schemas?.get(options.type);
           
-          // Build SELECT list excluding silent fields
-          let selectFields = '*';
+          // Use schemaFields helper to get non-silent, non-virtual fields
+          let sql;
           if (schema) {
-            const fields = [idProperty];
-            for (const [field, def] of Object.entries(schema.structure)) {
-              if (!def.silent && !def.virtual && field !== idProperty) {
-                fields.push(field);
-              }
-            }
-            const escapedFields = await Promise.all(
-              fields.map(f => api.execute('db.formatIdentifier', { identifier: f }))
-            );
-            selectFields = escapedFields.join(', ');
+            const fields = schemaFields(schema, table);
+            // Always include the ID field
+            sql = `SELECT ${escapeTable}.${escapeId}, ${fields.join(', ')} FROM ${escapeTable} WHERE ${escapeId} = ?`;
+          } else {
+            // No schema, fall back to SELECT *
+            sql = `SELECT * FROM ${escapeTable} WHERE ${escapeId} = ?`;
           }
           
-          const sql = `SELECT ${selectFields} FROM ${escapeTable} WHERE ${escapeId} = ?`;
           
           // Convert ID if needed
           const queryId = await api.execute('db.convertId', { id });
