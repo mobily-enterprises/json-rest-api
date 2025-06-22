@@ -38,7 +38,7 @@ export const CachePlugin = {
     // Permission-aware cache key generation
     function generateCacheKey(context, prefix = '') {
       const keyData = {
-        resource: context.options.type,
+        resource: context.options?.type || context.resource,
         method: context.method || 'query',
         id: context.id,
         query: normalizeQuery(context.query),
@@ -56,19 +56,53 @@ export const CachePlugin = {
         keyData.permissions = hashPermissions(context.user.permissions);
       }
 
-      const hash = crypto
-        .createHash('sha256')
-        .update(JSON.stringify(keyData))
-        .digest('hex')
-        .substring(0, 16);
+      // Create a clean copy without any proxy objects
+      const safeKeyData = {
+        resource: keyData.resource,
+        method: keyData.method,
+        id: keyData.id,
+        query: keyData.query ? { ...keyData.query } : {},
+        filters: keyData.filters ? JSON.parse(JSON.stringify(keyData.filters)) : undefined,
+        sort: keyData.sort,
+        include: keyData.include,
+        fields: keyData.fields ? { ...keyData.fields } : undefined,
+        page: keyData.page,
+        limit: keyData.limit
+      };
+      
+      if (keyData.userId) safeKeyData.userId = keyData.userId;
+      if (keyData.roles) safeKeyData.roles = [...keyData.roles];
+      if (keyData.permissions) safeKeyData.permissions = keyData.permissions;
+      
+      let hash;
+      try {
+        hash = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(safeKeyData))
+          .digest('hex')
+          .substring(0, 16);
+      } catch (err) {
+        // Fallback to a simpler hash if stringify fails
+        const simpleKey = `${safeKeyData.resource}:${safeKeyData.method}:${safeKeyData.id || 'list'}:${Date.now()}`;
+        hash = crypto
+          .createHash('sha256')
+          .update(simpleKey)
+          .digest('hex')
+          .substring(0, 16);
+      }
 
-      return `${prefix}:${context.options.type}:${hash}`;
+      const resource = context.options?.type || context.resource || 'unknown';
+      return `${prefix}:${resource}:${hash}`;
     }
 
     // Generate cache signature for result validation
     function generateResultSignature(result, schema) {
+      // Handle JSON:API format
+      const data = result?.data || result;
+      const count = Array.isArray(data) ? data.length : 1;
+      
       const sig = {
-        count: Array.isArray(result) ? result.length : 1,
+        count: count,
         fields: schema ? Object.keys(schema.fields).sort() : [],
         timestamp: Math.floor(Date.now() / 60000) // 1 minute precision
       };
@@ -203,7 +237,8 @@ export const CachePlugin = {
             const data = decompress(cached.data);
             
             // For queries, also check result count hasn't changed drastically
-            const currentSig = generateResultSignature(data, api.schemas[context.options.type]);
+            const resourceType = context.options?.type || context.resource;
+            const currentSig = generateResultSignature(data, api.schemas[resourceType]);
             if (cached.signature === currentSig) {
               context.result = data;
               context.skip = true;
@@ -230,7 +265,8 @@ export const CachePlugin = {
         if (!isCacheable(context) || context.cached || context.error) return;
 
         const key = generateCacheKey(context, 'query');
-        const schema = api.schemas[context.options.type];
+        const resourceType = context.options?.type || context.resource;
+        const schema = api.schemas[resourceType];
         
         try {
           await cacheStore.set(key, {

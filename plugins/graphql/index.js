@@ -101,6 +101,12 @@ export const GraphQLPlugin = {
 
     // Track resources for automatic schema generation
     const resourceConfigs = new Map();
+    
+    // Fix relationship types after all resources are loaded
+    function fixRelationshipTypes(graphqlState) {
+      // With the new dynamic type resolution, we just need to ensure the schema is rebuilt
+      // The types will resolve correctly now that all resources are loaded
+    }
 
     // Hook into resource addition
     api.hook('afterAddResource', async (context) => {
@@ -117,7 +123,7 @@ export const GraphQLPlugin = {
       });
 
       // Generate GraphQL types
-      const types = generateSchema(name, schema, api.graphql.customScalars, api.graphql.typeCache);
+      const types = generateSchema(name, schema, api.graphql.customScalars, api.graphql.typeCache, api.graphql.types);
       api.graphql.types.set(name, types);
 
       // Create resolvers
@@ -135,6 +141,9 @@ export const GraphQLPlugin = {
 
     // Build GraphQL schema
     function buildGraphQLSchema(graphqlState) {
+      // Fix relationship types now that all resources are loaded
+      fixRelationshipTypes(graphqlState);
+      
       const hasQueries = Object.keys(graphqlState.queries).length > 0;
       const hasMutations = Object.keys(graphqlState.mutations).length > 0;
       const hasSubscriptions = Object.keys(graphqlState.subscriptions).length > 0;

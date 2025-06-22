@@ -174,7 +174,7 @@ function generatePageInputType() {
 }
 
 // Main schema generation function
-export function generateSchema(resourceName, schema, customScalars = {}, sharedTypeCache = null) {
+export function generateSchema(resourceName, schema, customScalars = {}, sharedTypeCache = null, existingTypes = null) {
   const typeCache = sharedTypeCache || new Map();
   const fields = {};
   const inputFields = {};
@@ -205,16 +205,32 @@ export function generateSchema(resourceName, schema, customScalars = {}, sharedT
       if (fieldDef.refs && fieldDef.refs.resource) {
         const relFieldName = fieldName.replace(/Id$/, '');
         if (relFieldName !== fieldName && !fields[relFieldName]) {
-          // Create a lazy type reference that will be resolved later
+          // Store the relationship resource name for later resolution
+          const relResource = fieldDef.refs.resource;
+          let resolvedType = null;
+          
           fields[relFieldName] = {
-            type: GraphQLString, // Temporary - will be replaced in a second pass
+            get type() {
+              // Cache the resolved type to avoid repeated lookups
+              if (resolvedType) return resolvedType;
+              
+              // Look up the type from existing types when accessed
+              if (existingTypes && existingTypes.has(relResource)) {
+                const relatedTypes = existingTypes.get(relResource);
+                if (relatedTypes && relatedTypes.outputType) {
+                  resolvedType = relatedTypes.outputType;
+                  return resolvedType;
+                }
+              }
+              
+              // Fallback to string if type not found yet
+              resolvedType = GraphQLString;
+              return resolvedType;
+            },
             resolve: (parent) => {
               // The transformer will handle this from the relationships data
               return parent[relFieldName];
-            },
-            // Store metadata for second pass
-            __isRelationship: true,
-            __relatedResource: fieldDef.refs.resource
+            }
           };
         }
       }
