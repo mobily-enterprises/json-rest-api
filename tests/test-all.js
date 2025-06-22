@@ -37,7 +37,7 @@ import {
 } from '../index.js';
 
 // Import migration tests
-import './test-migrations.js';
+import './core-extra/test-migrations.js';
 
 // Import plugin tests
 import './test-health-plugin.js';
@@ -45,7 +45,7 @@ import './test-graphql-plugin.js';
 import './test-websocket-plugin.js';
 import './test-service-discovery-plugin.js';
 import './test-grpc-plugin.js';
-import './test-positioning.js';
+import './core/test-positioning.js';
 
 
 // Original complex tests - DISABLED DUE TO ISSUES

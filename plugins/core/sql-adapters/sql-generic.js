@@ -354,15 +354,23 @@ export const SQLPlugin = {
                 if (!context.query.parts.joins.some(j => j.table && j.table.includes(joinAlias))) {
                   const idProperty = api.options.idProperty || 'id';
                   
-                  // Don't double-escape identifiers - just use the raw names
+                  // Properly escape all identifiers
+                  const escapeJoinTable = await api.execute('db.formatIdentifier', { identifier: joinTable });
+                  const escapeJoinAlias = await api.execute('db.formatIdentifier', { identifier: joinAlias });
+                  const escapeId = await api.execute('db.formatIdentifier', { identifier: idProperty });
+                  const escapeTable = await api.execute('db.formatIdentifier', { identifier: table });
+                  const escapeJoinField = await api.execute('db.formatIdentifier', { identifier: joinField });
+                  
                   context.query.leftJoin(
-                    `${joinTable} AS ${joinAlias}`,
-                    `${joinAlias}.${idProperty} = ${table}.${joinField}`
+                    `${escapeJoinTable} AS ${escapeJoinAlias}`,
+                    `${escapeJoinAlias}.${escapeId} = ${escapeTable}.${escapeJoinField}`
                   );
                 }
                 
-                // Sort by the joined field
-                context.query.orderBy(`${joinAlias}.${targetField}`, direction);
+                // Sort by the joined field with proper escaping
+                const escapeJoinAlias = await api.execute('db.formatIdentifier', { identifier: joinAlias });
+                const escapeTargetField = await api.execute('db.formatIdentifier', { identifier: targetField });
+                context.query.orderBy(`${escapeJoinAlias}.${escapeTargetField}`, direction);
               } else {
                 throw new BadRequestError(`Invalid sort field mapping: ${field}`);
               }
@@ -1185,6 +1193,112 @@ function validateFilterValue(field, operator, value, schema) {
   return true;
 }
 
+// Process value for string operators
+function processStringOperatorValue(operator, value) {
+  switch (operator) {
+    case 'like':
+    case 'contains':
+      return `%${value}%`;
+    case 'startsWith':
+      return `${value}%`;
+    case 'endsWith':
+      return `%${value}`;
+    case 'icontains':
+      return `%${value}%`;
+    case 'null':
+    case 'notnull':
+      return null;
+    default:
+      return value;
+  }
+}
+
+// Apply filter for joined fields
+async function applyJoinedFieldFilter(query, field, operator, value, api) {
+  const [joinField, targetField] = field.split('.');
+  
+  // Escape identifiers
+  const escapedAlias = await api.execute('db.formatIdentifier', { identifier: joinField });
+  const escapedTarget = await api.execute('db.formatIdentifier', { identifier: targetField });
+  
+  const processedValue = processStringOperatorValue(operator, value);
+  
+  switch (operator) {
+    case 'in':
+    case 'nin':
+      if (!Array.isArray(value)) {
+        throw new ValidationError()
+          .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
+      }
+      const placeholders = value.map(() => '?').join(', ');
+      query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} (${placeholders})`, ...value);
+      break;
+      
+    case 'ilike':
+    case 'icontains':
+      // Case-insensitive LIKE
+      const features = await api.execute('db.features', {});
+      if (features.ilike) {
+        query.where(`${escapedAlias}.${escapedTarget} ILIKE ?`, processedValue);
+      } else {
+        query.where(`LOWER(${escapedAlias}.${escapedTarget}) LIKE LOWER(?)`, processedValue);
+      }
+      break;
+      
+    case 'between':
+      query.where(`${escapedAlias}.${escapedTarget} BETWEEN ? AND ?`, value[0], value[1]);
+      break;
+      
+    case 'null':
+      query.where(`${escapedAlias}.${escapedTarget} IS NULL`);
+      break;
+      
+    case 'notnull':
+      query.where(`${escapedAlias}.${escapedTarget} IS NOT NULL`);
+      break;
+      
+    default:
+      query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} ?`, processedValue);
+  }
+}
+
+// Apply filter for array fields
+async function applyArrayFieldFilter(query, table, field, operator, value, api) {
+  const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
+  const escapedField = await api.execute('db.formatIdentifier', { identifier: field });
+  const features = await api.execute('db.features', {});
+  
+  if (operator === 'eq') {
+    if (features.jsonFunctions) {
+      // MySQL: Use JSON_CONTAINS
+      query.where(`JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`, JSON.stringify(value));
+    } else {
+      // AlaSQL/Others: Use LIKE with JSON string matching
+      query.where(`${escapedTable}.${escapedField} LIKE ?`, `%"${value}"%`);
+    }
+  } else if (operator === 'in' || operator === 'nin') {
+    if (operator === 'in') {
+      // Array should contain at least one of the values
+      if (features.jsonFunctions) {
+        const conditions = value.map(() => `JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`).join(' OR ');
+        query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
+      } else {
+        const conditions = value.map(() => `${escapedTable}.${escapedField} LIKE ?`).join(' OR ');
+        query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
+      }
+    } else {
+      // nin - Array should not contain any of the values
+      if (features.jsonFunctions) {
+        const conditions = value.map(() => `NOT JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`).join(' AND ');
+        query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
+      } else {
+        const conditions = value.map(() => `${escapedTable}.${escapedField} NOT LIKE ?`).join(' AND ');
+        query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
+      }
+    }
+  }
+}
+
 // Consolidated filter operator function that handles all cases
 async function applyFilterOperator(query, table, field, operator, value, schema, api, options = {}) {
   const { skipJoinedFields = false } = options;
@@ -1200,136 +1314,61 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
   // Validate filter value
   validateFilterValue(field, operator, value, schema);
   
-  // Handle special cases for string operators
-  let processedValue = value;
-  if (operator === 'like' || operator === 'contains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'startsWith') {
-    processedValue = `${value}%`;
-  } else if (operator === 'endsWith') {
-    processedValue = `%${value}`;
-  } else if (operator === 'icontains') {
-    processedValue = `%${value}%`;
-  } else if (operator === 'between') {
-    // Validate between operator has array with 2 values
-    if (!Array.isArray(value) || value.length !== 2) {
-      throw new ValidationError()
-        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
-    }
-  } else if (operator === 'null' || operator === 'notnull') {
-    // For null checks, we ignore the value and use NULL
-    processedValue = null;
+  // Special validation for between operator
+  if (operator === 'between' && (!Array.isArray(value) || value.length !== 2)) {
+    throw new ValidationError()
+      .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
   }
   
   // Build the SQL condition
   if (field.includes('.')) {
-    // Joined field
-    const [joinField, targetField] = field.split('.');
-    
-    // Escape identifiers
-    const escapedAlias = await api.execute('db.formatIdentifier', { identifier: joinField });
-    const escapedTarget = await api.execute('db.formatIdentifier', { identifier: targetField });
-    
-    if (operator === 'in' || operator === 'nin') {
-      if (!Array.isArray(value)) {
-        throw new ValidationError()
-          .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
-      }
-      const placeholders = value.map(() => '?').join(', ');
-      query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} (${placeholders})`, ...value);
-    } else if (operator === 'ilike' || operator === 'icontains') {
-      // Case-insensitive LIKE
-      const features = await api.execute('db.features', {});
-      if (features.ilike) {
-        query.where(`${escapedAlias}.${escapedTarget} ILIKE ?`, processedValue);
-      } else {
-        query.where(`LOWER(${escapedAlias}.${escapedTarget}) LIKE LOWER(?)`, processedValue);
-      }
-    } else if (operator === 'between') {
-      // BETWEEN requires two values
-      query.where(`${escapedAlias}.${escapedTarget} BETWEEN ? AND ?`, value[0], value[1]);
-    } else if (operator === 'null') {
-      // IS NULL
-      query.where(`${escapedAlias}.${escapedTarget} IS NULL`);
-    } else if (operator === 'notnull') {
-      // IS NOT NULL
-      query.where(`${escapedAlias}.${escapedTarget} IS NOT NULL`);
-    } else {
-      query.where(`${escapedAlias}.${escapedTarget} ${OPERATORS[operator]} ?`, processedValue);
-    }
+    // Delegate to joined field handler
+    await applyJoinedFieldFilter(query, field, operator, value, api);
+  } else if (isArrayField && (operator === 'eq' || operator === 'in' || operator === 'nin')) {
+    // Delegate to array field handler for array-specific operations
+    await applyArrayFieldFilter(query, table, field, operator, value, api);
   } else {
-    // Regular field
+    // Regular field with regular operators
     const escapedTable = await api.execute('db.formatIdentifier', { identifier: table });
     const escapedField = await api.execute('db.formatIdentifier', { identifier: field });
+    const processedValue = processStringOperatorValue(operator, value);
     
-    if (isArrayField && operator === 'eq') {
-      // Special handling for array fields with equality
-      const features = await api.execute('db.features', {});
-      
-      if (features.jsonFunctions) {
-        // MySQL: Use JSON_CONTAINS
-        query.where(`JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`, JSON.stringify(value));
-      } else {
-        // AlaSQL/Others: Use LIKE with JSON string matching
-        query.where(`${escapedTable}.${escapedField} LIKE ?`, `%"${value}"%`);
-      }
-    } else if (operator === 'in' || operator === 'nin') {
-      if (!Array.isArray(value)) {
-        throw new ValidationError()
-          .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
-      }
-      
-      if (isArrayField) {
-        // For array fields with IN operator, check if array contains any of the values
-        const features = await api.execute('db.features', {});
-        
-        if (operator === 'in') {
-          // Array should contain at least one of the values
-          if (features.jsonFunctions) {
-            // MySQL: Use JSON_CONTAINS with OR
-            const conditions = value.map(() => `JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`).join(' OR ');
-            query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-          } else {
-            // AlaSQL: Use LIKE with OR
-            const conditions = value.map(() => `${escapedTable}.${escapedField} LIKE ?`).join(' OR ');
-            query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-          }
-        } else {
-          // nin - Array should not contain any of the values
-          if (features.jsonFunctions) {
-            // MySQL: Use NOT JSON_CONTAINS with AND
-            const conditions = value.map(() => `NOT JSON_CONTAINS(${escapedTable}.${escapedField}, ?)`).join(' AND ');
-            query.where(`(${conditions})`, ...value.map(v => JSON.stringify(v)));
-          } else {
-            // AlaSQL: Use NOT LIKE with AND
-            const conditions = value.map(() => `${escapedTable}.${escapedField} NOT LIKE ?`).join(' AND ');
-            query.where(`(${conditions})`, ...value.map(v => `%"${v}"%`));
-          }
+    switch (operator) {
+      case 'in':
+      case 'nin':
+        if (!Array.isArray(value)) {
+          throw new ValidationError()
+            .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
         }
-      } else {
-        // Regular field IN/NIN
         const placeholders = value.map(() => '?').join(', ');
         query.where(`${escapedTable}.${escapedField} ${OPERATORS[operator]} (${placeholders})`, ...value);
-      }
-    } else if (operator === 'ilike' || operator === 'icontains') {
-      // Case-insensitive LIKE
-      const features = await api.execute('db.features', {});
-      if (features.ilike) {
-        query.where(`${escapedTable}.${escapedField} ILIKE ?`, processedValue);
-      } else {
-        query.where(`LOWER(${escapedTable}.${escapedField}) LIKE LOWER(?)`, processedValue);
-      }
-    } else if (operator === 'between') {
-      // BETWEEN requires two values
-      query.where(`${escapedTable}.${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
-    } else if (operator === 'null') {
-      // IS NULL
-      query.where(`${escapedTable}.${escapedField} IS NULL`);
-    } else if (operator === 'notnull') {
-      // IS NOT NULL
-      query.where(`${escapedTable}.${escapedField} IS NOT NULL`);
-    } else {
-      query.where(`${escapedTable}.${escapedField} ${OPERATORS[operator]} ?`, processedValue);
+        break;
+        
+      case 'ilike':
+      case 'icontains':
+        // Case-insensitive LIKE
+        const features = await api.execute('db.features', {});
+        if (features.ilike) {
+          query.where(`${escapedTable}.${escapedField} ILIKE ?`, processedValue);
+        } else {
+          query.where(`LOWER(${escapedTable}.${escapedField}) LIKE LOWER(?)`, processedValue);
+        }
+        break;
+        
+      case 'between':
+        query.where(`${escapedTable}.${escapedField} BETWEEN ? AND ?`, value[0], value[1]);
+        break;
+        
+      case 'null':
+        query.where(`${escapedTable}.${escapedField} IS NULL`);
+        break;
+        
+      case 'notnull':
+        query.where(`${escapedTable}.${escapedField} IS NOT NULL`);
+        break;
+        
+      default:
+        query.where(`${escapedTable}.${escapedField} ${OPERATORS[operator]} ?`, processedValue);
     }
   }
 }

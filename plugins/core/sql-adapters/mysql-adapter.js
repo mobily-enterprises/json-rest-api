@@ -85,9 +85,13 @@ export const MySQLAdapter = {
           stats.totalAcquireTime += acquireTime;
           
           // Track max connections used (safely check for internal pool properties)
-          if (poolData.pool._allConnections && poolData.pool._freeConnections) {
-            const activeConnections = poolData.pool._allConnections.length - poolData.pool._freeConnections.length;
-            stats.maxUsed = Math.max(stats.maxUsed, activeConnections);
+          try {
+            if (poolData.pool._allConnections && poolData.pool._freeConnections) {
+              const activeConnections = poolData.pool._allConnections.length - poolData.pool._freeConnections.length;
+              stats.maxUsed = Math.max(stats.maxUsed, activeConnections);
+            }
+          } catch (e) {
+            // Ignore if internal properties are not accessible
           }
           
           try {
@@ -211,16 +215,24 @@ export const MySQLAdapter = {
         
         const pool = poolData.pool;
         
-        return {
-          ...stats,
-          // Add current pool state
-          activeConnections: pool._allConnections.length - pool._freeConnections.length,
-          totalConnections: pool._allConnections.length,
-          freeConnections: pool._freeConnections.length,
-          queueLength: pool._connectionQueue.length,
+        const poolState = {
           avgAcquireTime: stats.acquired > 0 ? stats.totalAcquireTime / stats.acquired : 0,
           errorRate: stats.acquired > 0 ? stats.errors / stats.acquired : 0
         };
+        
+        // Try to get internal pool stats, but don't fail if unavailable
+        try {
+          if (pool._allConnections && pool._freeConnections && pool._connectionQueue) {
+            poolState.activeConnections = pool._allConnections.length - pool._freeConnections.length;
+            poolState.totalConnections = pool._allConnections.length;
+            poolState.freeConnections = pool._freeConnections.length;
+            poolState.queueLength = pool._connectionQueue.length;
+          }
+        } catch (e) {
+          // Internal properties not accessible - that's OK
+        }
+        
+        return { ...stats, ...poolState };
       },
       
       // Transaction support

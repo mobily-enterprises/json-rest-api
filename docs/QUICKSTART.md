@@ -103,25 +103,36 @@ Now when you fetch tasks, the user data is automatically included!
 
 ## 5. Add Custom Logic (30 seconds)
 
-Want to add custom behavior? Use hooks:
+Want to add custom behavior? Use resource-specific hooks:
 
 ```javascript
-// Add this before api.mount(app)
-
-// Automatically set high priority for urgent tasks
-api.hook('beforeInsert', async (context) => {
-  if (context.options.type === 'tasks') {
-    const task = context.data;
-    if (task.title.toLowerCase().includes('urgent')) {
-      task.priority = 5;
+// Redefine tasks with hooks
+api.addResource('tasks', new Schema({
+  title: { type: 'string', required: true },
+  done: { type: 'boolean', default: false },
+  priority: { type: 'number', min: 1, max: 5 },
+  userId: { 
+    type: 'id',
+    refs: { 
+      resource: 'users',
+      join: { eager: true, fields: ['name'] }
     }
   }
-});
-
-// Add a computed field
-api.hook('afterGet', async (context) => {
-  if (context.options.type === 'tasks' && context.result) {
-    context.result.isHighPriority = context.result.priority >= 4;
+}), {
+  hooks: {
+    // Automatically set high priority for urgent tasks
+    beforeInsert: async (context) => {
+      if (context.data.title.toLowerCase().includes('urgent')) {
+        context.data.priority = 5;
+      }
+    },
+    
+    // Add a computed field
+    afterGet: async (context) => {
+      if (context.result) {
+        context.result.isHighPriority = context.result.priority >= 4;
+      }
+    }
   }
 });
 ```

@@ -12,6 +12,11 @@ export const AlaSQLAdapter = {
     const db = new alasql.Database();
     api._alasqlDb = db;
     
+    // Local helper to escape identifiers
+    const escapeIdentifier = (identifier) => {
+      return identifier.replace(/`/g, '``');
+    };
+    
     // ID counter for auto-increment simulation
     let idCounter = options.initialIdCounter || 1;
     const idCounters = new Map(); // Per-table counters
@@ -254,18 +259,18 @@ export const AlaSQLAdapter = {
           sqlType = 'JSON';
         }
         
-        columns.push(`\`${field}\` ${sqlType}`);
+        columns.push(`\`${escapeIdentifier(field)}\` ${sqlType}`);
       }
       
-      const createSql = `CREATE TABLE \`${table}\` (${columns.join(', ')})`;
+      const createSql = `CREATE TABLE \`${escapeIdentifier(table)}\` (${columns.join(', ')})`;
       db.exec(createSql);
       
       // Create indexes
       for (const [field, def] of Object.entries(schema.structure)) {
         if (def.searchable || def.dbIndex) {
           try {
-            const indexName = `idx_${table}_${field}`;
-            db.exec(`CREATE INDEX ${indexName} ON \`${table}\`(\`${field}\`)`);
+            const indexName = `idx_${escapeIdentifier(table)}_${escapeIdentifier(field)}`;
+            db.exec(`CREATE INDEX ${indexName} ON \`${escapeIdentifier(table)}\`(\`${escapeIdentifier(field)}\`)`);
           } catch (e) {
             // Index might already exist
           }
@@ -296,12 +301,12 @@ export const AlaSQLAdapter = {
         
         let maxPos = 0;
         try {
-          const result = db.exec(`
-            SELECT MAX(\`${field}\`) as maxPos 
-            FROM \`${type}\` 
-            ${whereClause}
-          `, values);
+          // Build parameterized query safely
+          const sql = whereClause 
+            ? `SELECT MAX(\`${escapeIdentifier(field)}\`) as maxPos FROM \`${escapeIdentifier(type)}\` ${whereClause}`
+            : `SELECT MAX(\`${escapeIdentifier(field)}\`) as maxPos FROM \`${escapeIdentifier(type)}\``;
           
+          const result = db.exec(sql, values);
           maxPos = result[0]?.maxPos || 0;
         } catch (error) {
           // Table doesn't exist yet - that's OK
