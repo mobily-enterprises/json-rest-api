@@ -19,6 +19,10 @@ export const AlaSQLAdapter = {
     // Position counters for atomic positioning
     const positionCounters = new Map(); // Key: "table:field:filter" -> counter
     
+    // Store counters on API for reset capability
+    api._positionCounters = positionCounters;
+    api._idCounters = idCounters;
+    
     // Implement database interface
     api.implement('db.query', async (context) => {
       const { sql, params } = context;
@@ -198,10 +202,20 @@ export const AlaSQLAdapter = {
       const { table } = context;
       
       // Clear position counters for this table
+      // We need to check all keys since they include field name and filter JSON
+      const keysToDelete = [];
       for (const key of positionCounters.keys()) {
-        if (key.startsWith(`${table}:`)) {
-          positionCounters.delete(key);
+        // Key format is: "type:field:{filter}"
+        // Extract the type part
+        const parts = key.split(':');
+        if (parts[0] === table) {
+          keysToDelete.push(key);
         }
+      }
+      
+      // Delete all matching keys
+      for (const key of keysToDelete) {
+        positionCounters.delete(key);
       }
       
       // Drop the table

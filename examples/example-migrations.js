@@ -14,40 +14,22 @@ api.use(MemoryPlugin)
 // Add migration support
 api.use(MigrationPlugin, {
   directory: './examples/migrations',
-  autoRun: true // Auto-run in development
+  autoRun: false // We'll run manually after connect
 })
 
 // Create a simple config file that the CLI can use
 export { api }
 
-// Define schemas (these won't create tables - migrations will)
-api.addResource('users', new Schema({
-  name: { type: 'string', required: true },
-  email: { type: 'string', required: true },
-  role: { type: 'string', default: 'user' },
-  createdAt: { type: 'datetime' }
-}))
-
-api.addResource('posts', new Schema({
-  title: { type: 'string', required: true },
-  content: { type: 'string' },
-  authorId: { 
-    type: 'id', 
-    refs: { 
-      resource: 'users',
-      join: { eager: true }
-    }
-  },
-  published: { type: 'boolean', default: false },
-  publishedAt: { type: 'datetime' },
-  tags: { type: 'array' }
-}))
-
 // Main function
 async function main() {
   try {
-    // Connect (migrations will auto-run if configured)
+    // Connect first
     await api.connect()
+    
+    // Run migrations manually
+    console.log('Running migrations...')
+    const migrated = await api.migrations.up()
+    console.log(`Completed ${migrated.length} migrations`)
     
     // Check migration status
     const status = await api.migrations.status()
@@ -55,24 +37,47 @@ async function main() {
     console.log('Applied:', status.applied.length)
     console.log('Pending:', status.pending.length)
     
+    // Now define schemas after tables exist
+    api.addResource('users', new Schema({
+      name: { type: 'string', required: true },
+      email: { type: 'string', required: true },
+      role: { type: 'string', default: 'user' },
+      createdAt: { type: 'datetime' }
+    }))
+    
+    api.addResource('posts', new Schema({
+      title: { type: 'string', required: true },
+      content: { type: 'string' },
+      authorId: { 
+        type: 'id', 
+        refs: { 
+          resource: 'users',
+          join: { eager: true }
+        }
+      },
+      published: { type: 'boolean', default: false, searchable: true },
+      publishedAt: { type: 'datetime' },
+      tags: { type: 'array', maxItems: 100 }
+    }))
+    
     // Create some data
-    const user = await api.get('users').insert({
+    const user = await api.resources.users.create({
       name: 'John Doe',
       email: 'john@example.com',
       role: 'admin'
     })
     
-    const post = await api.get('posts').insert({
+    const post = await api.resources.posts.create({
       title: 'First Post',
       content: 'This is my first post!',
-      authorId: user.id,
+      authorId: user.data.id,
       published: true,
       publishedAt: new Date(),
       tags: ['welcome', 'first']
     })
     
     // Query with joins
-    const posts = await api.get('posts').query({
+    const posts = await api.resources.posts.query({
       filter: { published: true },
       include: 'authorId'
     })

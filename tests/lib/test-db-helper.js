@@ -80,15 +80,25 @@ export async function cleanDatabase(api) {
 async function cleanupMemory(api) {
   // Recreate the AlaSQL database
   if (api._alasqlDb) {
+    // Get list of table names before we start dropping
+    const tableNames = Object.keys(api._alasqlDb.tables || {});
+    
     // Drop all tables
-    const tables = api._alasqlDb.tables;
-    for (const tableName in tables) {
+    for (const tableName of tableNames) {
       try {
         // Use the API's dropTable method to also clear position counters
         await api.execute('db.dropTable', { table: tableName });
       } catch (e) {
         // Ignore errors
       }
+    }
+    
+    // Clear all counters - this is the important part for the positioning tests
+    if (api._positionCounters) {
+      api._positionCounters.clear();
+    }
+    if (api._idCounters) {
+      api._idCounters.clear();
     }
   }
 }

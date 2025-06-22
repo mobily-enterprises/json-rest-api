@@ -1095,7 +1095,12 @@ describe('JSON REST API - Comprehensive Test Suite', () => {
     
     beforeEach(async () => {
       await cleanDatabase(api);
-      await api.connect();
+      // Recreate the tasks table after cleaning
+      await api.execute('db.createTable', {
+        table: 'tasks',
+        schema: api.resources.tasks.schema,
+        idProperty: 'id'
+      });
     });
     
     it('should auto-assign positions', async () => {
