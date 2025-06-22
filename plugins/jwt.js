@@ -145,11 +145,18 @@ export const JwtPlugin = {
       const tokenData = {
         userId,
         hashedToken,
-        metadata,
+        metadata: { ...metadata },
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + parseDuration(config.refreshExpiresIn)),
-        lastUsed: null
+        lastUsed: null,
+        used: false,
+        familyId: metadata.familyId || crypto.randomUUID(),
+        parentToken: metadata.parentToken || null
       };
+      
+      // Remove internal metadata from stored metadata
+      delete tokenData.metadata.familyId;
+      delete tokenData.metadata.parentToken;
       
       // Store hashed version
       await config.tokenStore.set(hashedToken, tokenData);
@@ -216,9 +223,9 @@ export const JwtPlugin = {
     };
     
     /**
-     * Refresh an access token using a refresh token
+     * Refresh an access token using a refresh token with rotation
      */
-    api.refreshAccessToken = async (refreshToken) => {
+    api.refreshAccessToken = async (refreshToken, options = {}) => {
       if (!refreshToken) {
         throw new Error('No refresh token provided');
       }
@@ -246,11 +253,17 @@ export const JwtPlugin = {
         throw new Error('Refresh token expired');
       }
       
-      // Update last used
-      tokenData.lastUsed = new Date();
-      await config.tokenStore.set(hashedToken, tokenData);
+      // Check if token was already used (replay attack detection)
+      if (tokenData.used && config.rotateRefreshTokens !== false) {
+        // Token reuse detected - invalidate entire token family
+        if (tokenData.familyId) {
+          await api.revokeTokenFamily(tokenData.familyId);
+        }
+        await config.tokenStore.delete(hashedToken);
+        throw new Error('Refresh token reuse detected - all tokens revoked');
+      }
       
-      // Generate new access token
+      // Generate new tokens
       const payload = {
         userId: tokenData.userId,
         ...tokenData.metadata
@@ -262,10 +275,32 @@ export const JwtPlugin = {
       
       const accessToken = await api.generateToken(payload);
       
+      // Rotate refresh token if enabled (default: true)
+      let newRefreshToken = refreshToken;
+      if (options.rotate !== false && config.rotateRefreshTokens !== false) {
+        // Mark old token as used
+        tokenData.used = true;
+        tokenData.usedAt = new Date();
+        await config.tokenStore.set(hashedToken, tokenData);
+        
+        // Generate new refresh token with same family ID
+        const familyId = tokenData.familyId || crypto.randomUUID();
+        newRefreshToken = await api.generateRefreshToken(tokenData.userId, {
+          ...tokenData.metadata,
+          familyId,
+          parentToken: hashedToken
+        });
+      } else {
+        // Update last used even if not rotating
+        tokenData.lastUsed = new Date();
+        await config.tokenStore.set(hashedToken, tokenData);
+      }
+      
       return {
         accessToken,
-        refreshToken,  // Return same refresh token
-        expiresIn: config.expiresIn
+        refreshToken: newRefreshToken,
+        expiresIn: config.expiresIn,
+        rotated: newRefreshToken !== refreshToken
       };
     };
     
@@ -275,6 +310,48 @@ export const JwtPlugin = {
     api.revokeRefreshToken = async (refreshToken) => {
       const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
       return await config.tokenStore.delete(hashedToken);
+    };
+    
+    /**
+     * Revoke all tokens in a family (used when refresh token reuse is detected)
+     */
+    api.revokeTokenFamily = async (familyId) => {
+      if (!familyId) return;
+      
+      // This is a basic implementation - in production, you'd want an index
+      // on familyId for efficient lookups
+      const toDelete = [];
+      
+      // If using Map storage
+      if (config.tokenStore instanceof Map) {
+        for (const [key, value] of config.tokenStore.entries()) {
+          if (value.familyId === familyId) {
+            toDelete.push(key);
+          }
+        }
+        
+        for (const key of toDelete) {
+          await config.tokenStore.delete(key);
+        }
+      } else if (config.tokenStore.scan) {
+        // Redis-like storage with scan
+        const stream = config.tokenStore.scan({
+          match: '*',
+          count: 100
+        });
+        
+        for await (const keys of stream) {
+          for (const key of keys) {
+            const data = await config.tokenStore.get(key);
+            if (data && data.familyId === familyId) {
+              await config.tokenStore.delete(key);
+            }
+          }
+        }
+      }
+      
+      // Log the security event
+      console.warn(`Token family ${familyId} revoked due to token reuse detection`);
     };
     
     /**

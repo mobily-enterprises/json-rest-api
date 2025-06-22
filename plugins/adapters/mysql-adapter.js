@@ -78,8 +78,11 @@ export const MySQLAdapter = {
           const [rows, fields] = await transaction.connection.execute(sql, params);
           return { rows, fields, info: rows };
         } catch (error) {
-          error.sql = sql;
-          error.params = params;
+          // Only attach SQL details in development mode
+          if (process.env.NODE_ENV !== 'production') {
+            error.sql = sql;
+            error.params = params;
+          }
           throw error;
         }
       }
@@ -94,9 +97,11 @@ export const MySQLAdapter = {
         const [rows, fields] = await poolInfo.pool.execute(sql, params);
         return { rows, fields, info: rows };
       } catch (error) {
-        // Re-throw with original error info
-        error.sql = sql;
-        error.params = params;
+        // Re-throw with original error info (only in development)
+        if (process.env.NODE_ENV !== 'production') {
+          error.sql = sql;
+          error.params = params;
+        }
         throw error;
       }
     });

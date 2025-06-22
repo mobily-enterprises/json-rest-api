@@ -62,9 +62,11 @@ export const AlaSQLAdapter = {
           } 
         };
       } catch (error) {
-        // Add context to error
-        error.sql = sql;
-        error.params = params;
+        // Add context to error (only in development)
+        if (process.env.NODE_ENV !== 'production') {
+          error.sql = sql;
+          error.params = params;
+        }
         throw error;
       }
     });

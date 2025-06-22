@@ -169,8 +169,17 @@ export const AuthorizationPlugin = {
       // Skip if no resource type (non-resource operations)
       if (!type) return;
       
-      // Skip if internal auth bypass flag is set
-      if (context.options._skipAuth) return;
+      // Skip if internal auth bypass flag is set AND it's a genuine internal call
+      if (context.options._skipAuth && context.options._internal === true) return;
+      
+      // Log suspicious auth bypass attempts
+      if (context.options._skipAuth && context.options._internal !== true) {
+        console.warn(`Suspicious auth bypass attempt for ${type}.${operation}`, {
+          user: user?.id,
+          ip: context.options.request?.ip
+        });
+        // Don't skip auth - continue with normal auth checks
+      }
       
       // Enhance user if needed
       if (user && !user._enhanced) {
@@ -211,8 +220,8 @@ export const AuthorizationPlugin = {
             }
             
             // For update/delete, fetch the resource to check ownership
-            // Use internal flag to skip auth check on this fetch
-            const result = await api.get(context.id, { type, _skipAuth: true });
+            // Use internal flags to skip auth check on this fetch
+            const result = await api.get(context.id, { type, _skipAuth: true, _internal: true });
             const ownerField = resourceConfig.ownerField || api._auth.options.ownerField;
             
             // Handle both raw result and formatted response
@@ -240,6 +249,12 @@ export const AuthorizationPlugin = {
         if (user.can(`${type}.*`)) {
           return;
         }
+        
+        // Emit authorization failed event for audit logging
+        await api.runHooks('authorizationFailed', {
+          ...context,
+          requiredPermission: basePermission
+        });
         
         throw new ForbiddenError(`Permission denied: ${basePermission}`);
       }

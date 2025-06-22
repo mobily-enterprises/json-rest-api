@@ -1011,6 +1011,161 @@ const OPERATORS = {
   'notnull': 'IS NOT'
 };
 
+// Maximum filter value length to prevent DoS
+const MAX_FILTER_VALUE_LENGTH = 1000;
+const MAX_ARRAY_FILTER_LENGTH = 100;
+
+// Validate filter value based on field type and operator
+function validateFilterValue(field, operator, value, schema) {
+  const fieldDef = schema?.structure?.[field];
+  
+  // Check for dangerous patterns in filter values
+  if (typeof value === 'string') {
+    // Check length
+    if (value.length > MAX_FILTER_VALUE_LENGTH) {
+      throw new ValidationError()
+        .addFieldError('filter', `Filter value for field '${field}' exceeds maximum length of ${MAX_FILTER_VALUE_LENGTH}`);
+    }
+    
+    // Check for SQL injection patterns
+    const dangerousPatterns = [
+      /;.*(?:DROP|DELETE|UPDATE|INSERT|CREATE|ALTER|TRUNCATE)/i,
+      /\b(?:UNION|SELECT)\b.*\b(?:FROM|WHERE)\b/i,
+      /\/\*.*\*\//,  // Block comments
+      /--\s*$/,       // SQL comments
+      /\0/            // Null bytes
+    ];
+    
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(value)) {
+        throw new ValidationError()
+          .addFieldError('filter', `Invalid characters in filter value for field '${field}'`);
+      }
+    }
+  }
+  
+  // Validate based on operator
+  if (operator === 'in' || operator === 'nin') {
+    if (!Array.isArray(value)) {
+      throw new ValidationError()
+        .addFieldError('filter', `Operator '${operator}' requires an array value for field '${field}'`);
+    }
+    
+    if (value.length > MAX_ARRAY_FILTER_LENGTH) {
+      throw new ValidationError()
+        .addFieldError('filter', `Array filter for field '${field}' exceeds maximum length of ${MAX_ARRAY_FILTER_LENGTH}`);
+    }
+    
+    // Validate each array element
+    for (const item of value) {
+      if (typeof item === 'string' && item.length > MAX_FILTER_VALUE_LENGTH) {
+        throw new ValidationError()
+          .addFieldError('filter', `Array filter value for field '${field}' exceeds maximum length`);
+      }
+    }
+  } else if (operator === 'between') {
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw new ValidationError()
+        .addFieldError('filter', `Operator 'between' requires an array with exactly 2 values for field '${field}'`);
+    }
+  }
+  
+  // Validate based on field type
+  if (fieldDef) {
+    const fieldType = fieldDef.type;
+    
+    switch (fieldType) {
+      case 'number':
+        if (operator !== 'null' && operator !== 'notnull') {
+          if (operator === 'in' || operator === 'nin') {
+            for (const item of value) {
+              if (isNaN(Number(item))) {
+                throw new ValidationError()
+                  .addFieldError('filter', `Invalid number value in array filter for field '${field}'`);
+              }
+            }
+          } else if (operator === 'between') {
+            if (isNaN(Number(value[0])) || isNaN(Number(value[1]))) {
+              throw new ValidationError()
+                .addFieldError('filter', `Invalid number values in between filter for field '${field}'`);
+            }
+          } else if (typeof value !== 'number' && isNaN(Number(value))) {
+            throw new ValidationError()
+              .addFieldError('filter', `Invalid number filter value for field '${field}'`);
+          }
+        }
+        break;
+        
+      case 'boolean':
+        if (operator !== 'null' && operator !== 'notnull' && operator !== 'eq' && operator !== 'ne') {
+          throw new ValidationError()
+            .addFieldError('filter', `Operator '${operator}' not supported for boolean field '${field}'`);
+        }
+        if (operator === 'eq' || operator === 'ne') {
+          if (value !== true && value !== false && value !== 'true' && value !== 'false' && value !== 1 && value !== 0) {
+            throw new ValidationError()
+              .addFieldError('filter', `Invalid boolean filter value for field '${field}'`);
+          }
+        }
+        break;
+        
+      case 'date':
+      case 'datetime':
+        if (operator !== 'null' && operator !== 'notnull') {
+          // Validate date format
+          const datePattern = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z?)?$/;
+          
+          if (operator === 'in' || operator === 'nin') {
+            for (const item of value) {
+              if (!datePattern.test(item) && isNaN(Date.parse(item))) {
+                throw new ValidationError()
+                  .addFieldError('filter', `Invalid date value in array filter for field '${field}'`);
+              }
+            }
+          } else if (operator === 'between') {
+            if ((!datePattern.test(value[0]) && isNaN(Date.parse(value[0]))) ||
+                (!datePattern.test(value[1]) && isNaN(Date.parse(value[1])))) {
+              throw new ValidationError()
+                .addFieldError('filter', `Invalid date values in between filter for field '${field}'`);
+            }
+          } else if (!datePattern.test(value) && isNaN(Date.parse(value))) {
+            throw new ValidationError()
+              .addFieldError('filter', `Invalid date filter value for field '${field}'`);
+          }
+        }
+        break;
+        
+      case 'string':
+        // String operators are valid, additional validation done above
+        if (fieldDef.pattern && operator === 'eq') {
+          const regex = new RegExp(fieldDef.pattern);
+          if (!regex.test(value)) {
+            throw new ValidationError()
+              .addFieldError('filter', `Filter value for field '${field}' does not match required pattern`);
+          }
+        }
+        break;
+        
+      case 'id':
+        // ID fields can be string or number
+        break;
+        
+      case 'array':
+      case 'object':
+        // Complex types - operator validation already done
+        break;
+        
+      default:
+        // Unknown type - allow but log warning
+        if (api?.options?.debug) {
+          console.warn(`Unknown field type '${fieldType}' for filter field '${field}'`);
+        }
+    }
+  }
+  
+  return true;
+}
+
 async function applyAdvancedFilterOperator(query, table, field, operator, value, schema, api) {
   const fieldDef = schema?.structure?.[field];
   const isArrayField = fieldDef?.type === 'array';
@@ -1020,6 +1175,9 @@ async function applyAdvancedFilterOperator(query, table, field, operator, value,
     throw new ValidationError()
       .addFieldError('filter', `Unknown operator '${operator}' for field '${field}'`);
   }
+  
+  // Validate filter value
+  validateFilterValue(field, operator, value, schema);
   
   // Handle special cases for string operators
   let processedValue = value;
@@ -1165,6 +1323,9 @@ async function applyCountFilterOperator(countQuery, table, field, operator, valu
       .addFieldError('filter', `Unknown operator '${operator}' for field '${field}'`);
   }
   
+  // Validate filter value
+  validateFilterValue(field, operator, value, schema);
+  
   // Handle special cases for string operators
   let processedValue = value;
   if (operator === 'like' || operator === 'contains') {
@@ -1267,6 +1428,9 @@ async function applyFilterOperator(query, table, field, operator, value, schema,
     throw new ValidationError()
       .addFieldError('filter', `Unknown operator '${operator}' for field '${field}'`);
   }
+  
+  // Validate filter value
+  validateFilterValue(field, operator, value, schema);
   
   // Handle special cases for string operators
   let processedValue = value;
