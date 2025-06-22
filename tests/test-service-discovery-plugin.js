@@ -1,9 +1,9 @@
 import { test, describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Api, Schema } from '../index.js';
-import { ServiceDiscoveryPlugin } from '../plugins/service-discovery/index.js';
-import { LoadBalancer } from '../plugins/service-discovery/load-balancer.js';
-import { CircuitBreaker } from '../plugins/service-discovery/circuit-breaker.js';
+import { ServiceDiscoveryPlugin } from '../plugins/infrastructure/service-discovery/index.js';
+import { LoadBalancer } from '../plugins/infrastructure/service-discovery/load-balancer.js';
+import { CircuitBreaker } from '../plugins/infrastructure/service-discovery/circuit-breaker.js';
 import { setupTestApi, robustTeardown } from './lib/test-db-helper.js';
 import Redis from 'ioredis';
 

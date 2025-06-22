@@ -5,8 +5,8 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { Api } from '../../lib/api.js';
 import { Schema } from '../../lib/schema.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
-import { HTTPPlugin } from '../../plugins/http.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
+import { HTTPPlugin } from '../../plugins/core/http.js';
 import { CsrfPlugin } from '../../plugins/csrf.js';
 
 test('CSRF: blocks requests without token', async () => {

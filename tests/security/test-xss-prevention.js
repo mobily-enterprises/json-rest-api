@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
 import { Schema } from '../../lib/schema.js';
 import { SecurityPlugin } from '../../plugins/security.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
-import { ValidationPlugin } from '../../plugins/validation.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
+import { ValidationPlugin } from '../../plugins/core/validation.js';
 
 test.beforeEach(async () => {
   const api = new Api();

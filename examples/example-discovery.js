@@ -1,6 +1,6 @@
 import express from 'express';
 import { Api, Schema, MemoryPlugin, HTTPPlugin } from '../index.js';
-import { DiscoveryPlugin } from '../plugins/discovery/index.js';
+import { DiscoveryPlugin } from '../plugins/protocols/schema-export/index.js';
 
 // Create Express app
 const app = express();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import { Api, Schema, HTTPPlugin } from '../index.js';
-import { HealthPlugin } from '../plugins/health/index.js';
+import { HealthPlugin } from '../plugins/infrastructure/health/index.js';
 import { setupTestApi, robustTeardown } from './lib/test-db-helper.js';
 
 describe('Health Plugin Tests', () => {

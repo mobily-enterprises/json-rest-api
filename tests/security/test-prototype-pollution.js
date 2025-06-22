@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
 import { Schema } from '../../lib/schema.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
 
 test.beforeEach(async () => {
   const api = new Api();

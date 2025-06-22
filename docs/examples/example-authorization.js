@@ -1,5 +1,5 @@
 import { Api, Schema } from '../../index.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
 import { AuthorizationPlugin } from '../../plugins/authorization.js';
 
 console.log('🔒 Authorization Example\n');

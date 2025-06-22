@@ -21,26 +21,33 @@ export {
 } from './lib/errors.js';
 
 // Plugin exports
-export { MemoryPlugin } from './plugins/memory.js';
-export { MySQLPlugin } from './plugins/mysql.js';
-export { HTTPPlugin } from './plugins/http.js';
-export { ValidationPlugin } from './plugins/validation.js';
-export { PositioningPlugin } from './plugins/positioning.js';
-export { VersioningPlugin } from './plugins/versioning.js';
-export { SecurityPlugin } from './plugins/security.js';
-export { LoggingPlugin } from './plugins/logging.js';
-export { OpenAPIPlugin } from './plugins/openapi.js';
-export { TimestampsPlugin } from './plugins/timestamps.js';
-export { AuthorizationPlugin } from './plugins/authorization.js';
-export { CorsPlugin } from './plugins/cors.js';
-export { JwtPlugin } from './plugins/jwt.js';
-export { QueryLimitsPlugin } from './plugins/query-limits.js';
-export { ViewsPlugin } from './plugins/views.js';
-export { SimplifiedRecordsPlugin } from './plugins/simplified-records.js';
-export { ApiGatewayPlugin } from './plugins/api-gateway.js';
-export { CLIPlugin } from './plugins/cli.js';
-export { DiscoveryPlugin } from './plugins/discovery/index.js';
-export { MigrationPlugin } from './plugins/migration-plugin.js';
+export { MemoryPlugin } from './plugins/core/memory.js';
+export { MySQLPlugin } from './plugins/core/mysql.js';
+export { HTTPPlugin } from './plugins/core/http.js';
+export { ValidationPlugin } from './plugins/core/validation.js';
+export { PositioningPlugin } from './plugins/core/positioning.js';
+export { VersioningPlugin } from './plugins/core-extra/versioning.js';
+export { SecurityPlugin } from './plugins/core-extra/security.js';
+export { LoggingPlugin } from './plugins/core-extra/logging.js';
+export { TimestampsPlugin } from './plugins/core/timestamps.js';
+export { AuthorizationPlugin } from './plugins/core-extra/authorization.js';
+export { CorsPlugin } from './plugins/core-extra/cors.js';
+export { JwtPlugin } from './plugins/core-extra/jwt.js';
+export { QueryLimitsPlugin } from './plugins/core-extra/query-limits.js';
+export { ViewsPlugin } from './plugins/core-extra/views.js';
+export { SimplifiedRecordsPlugin } from './plugins/protocols/simplified-records.js';
+export { ApiGatewayPlugin } from './plugins/infrastructure/api-gateway.js';
+export { CLIPlugin } from './plugins/infrastructure/cli.js';
+export { DiscoveryPlugin } from './plugins/protocols/schema-export/index.js';
+export { MigrationPlugin } from './plugins/core-extra/migration-plugin.js';
+
+// Protocol plugins
+export { GraphQLPlugin } from './plugins/protocols/graphql/index.js';
+export { WebSocketPlugin } from './plugins/protocols/websocket/index.js';
+export { GRPCPlugin } from './plugins/protocols/grpc/index.js';
+
+// Infrastructure plugins
+export { ServiceDiscoveryPlugin } from './plugins/infrastructure/service-discovery/index.js';
 
 // Enterprise plugins
 export { MicroservicesPlugin } from './plugins/enterprise/microservices.js';
@@ -52,13 +59,13 @@ export { DependencyGraphPlugin } from './plugins/enterprise/dependency-graph.js'
 
 // Import for internal use
 import { Api } from './lib/api.js';
-import { MemoryPlugin } from './plugins/memory.js';
-import { MySQLPlugin } from './plugins/mysql.js';
-import { HTTPPlugin } from './plugins/http.js';
-import { ValidationPlugin } from './plugins/validation.js';
-import { PositioningPlugin } from './plugins/positioning.js';
-import { VersioningPlugin } from './plugins/versioning.js';
-import { TimestampsPlugin } from './plugins/timestamps.js';
+import { MemoryPlugin } from './plugins/core/memory.js';
+import { MySQLPlugin } from './plugins/core/mysql.js';
+import { HTTPPlugin } from './plugins/core/http.js';
+import { ValidationPlugin } from './plugins/core/validation.js';
+import { PositioningPlugin } from './plugins/core/positioning.js';
+import { VersioningPlugin } from './plugins/core-extra/versioning.js';
+import { TimestampsPlugin } from './plugins/core/timestamps.js';
 
 // Convenience function to create a fully configured API
 export function createApi(options = {}) {

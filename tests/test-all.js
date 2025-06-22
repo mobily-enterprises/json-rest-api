@@ -45,9 +45,8 @@ import './test-graphql-plugin.js';
 import './test-websocket-plugin.js';
 import './test-service-discovery-plugin.js';
 import './test-grpc-plugin.js';
+import './test-positioning.js';
 
-// Import advanced plugin tests - using simplified versions
-import '../plugins/advanced/tests/simple-tests.js';
 
 // Original complex tests - DISABLED DUE TO ISSUES
 // These tests have incorrect API assumptions and need to be rewritten

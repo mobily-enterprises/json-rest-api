@@ -1,5 +1,5 @@
 import { createApi, Schema } from '../index.js';
-import { CQRSPlugin, Command, Query, Event } from '../plugins/cqrs.js';
+import { CQRSPlugin, Command, Query, Event } from '../plugins/enterprise/cqrs.js';
 
 // Example: Implementing CQRS with JSON-REST-API
 

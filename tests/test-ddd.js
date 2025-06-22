@@ -1,6 +1,6 @@
 import test from 'ava';
 import { createApi } from '../index.js';
-import { DDDPlugin, ValueObject, Aggregate, Repository, DomainService, Specification } from '../plugins/ddd.js';
+import { DDDPlugin, ValueObject, Aggregate, Repository, DomainService, Specification } from '../plugins/enterprise/ddd.js';
 
 // Test Value Objects
 test('ValueObject: should be immutable', t => {

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
-import { ValidationPlugin } from '../../plugins/validation.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
+import { ValidationPlugin } from '../../plugins/core/validation.js';
 import { Schema } from '../../lib/schema.js';
 
 test('Strict validation: number type coercion blocked by default', async () => {

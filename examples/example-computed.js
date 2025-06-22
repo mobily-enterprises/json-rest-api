@@ -15,10 +15,10 @@
 import express from 'express';
 import { Api } from '../lib/api.js';
 import { Schema } from '../lib/schema.js';
-import { MemoryPlugin } from '../plugins/memory.js';
-import { ComputedPlugin } from '../plugins/computed.js';
-import { HTTPPlugin } from '../plugins/http.js';
-import { ValidationPlugin } from '../plugins/validation.js';
+import { MemoryPlugin } from '../plugins/core/memory.js';
+import { ComputedPlugin } from '../plugins/core-extra/computed.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
+import { ValidationPlugin } from '../plugins/core/validation.js';
 import { NotFoundError } from '../lib/errors.js';
 
 const app = express();

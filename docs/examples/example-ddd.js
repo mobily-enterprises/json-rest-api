@@ -1,6 +1,6 @@
 import { createApi } from '../index.js';
-import { DDDPlugin, ValueObject, Aggregate, Repository, DomainService, Specification } from '../plugins/ddd.js';
-import { HTTPPlugin } from '../plugins/http.js';
+import { DDDPlugin, ValueObject, Aggregate, Repository, DomainService, Specification } from '../plugins/enterprise/ddd.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
 import express from 'express';
 
 // Create API with DDD support

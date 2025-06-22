@@ -1,8 +1,8 @@
 import { Api } from '../lib/api.js'
 import { Schema } from '../lib/schema.js'
-import { MemoryPlugin } from '../plugins/memory.js'
-import { MigrationPlugin } from '../plugins/migration-plugin.js'
-import { HTTPPlugin } from '../plugins/http.js'
+import { MemoryPlugin } from '../plugins/core/memory.js'
+import { MigrationPlugin } from '../plugins/core-extra/migration-plugin.js'
+import { HTTPPlugin } from '../plugins/core/http.js'
 import express from 'express'
 
 // Create API instance

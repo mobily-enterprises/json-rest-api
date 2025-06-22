@@ -4,7 +4,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { io as ioClient } from 'socket.io-client';
 import { Api, Schema, HTTPPlugin, ValidationPlugin } from '../index.js';
-import { WebSocketPlugin } from '../plugins/websocket/index.js';
+import { WebSocketPlugin } from '../plugins/protocols/websocket/index.js';
 import { setupTestApi, robustTeardown } from './lib/test-db-helper.js';
 
 describe('WebSocket Plugin Tests', () => {

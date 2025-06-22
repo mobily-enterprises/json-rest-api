@@ -4,9 +4,9 @@ import express from 'express';
 import request from 'supertest';
 import { Api } from '../../lib/api.js';
 import { Schema } from '../../lib/schema.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
 import { SecurityPlugin } from '../../plugins/security.js';
-import { HTTPPlugin } from '../../plugins/http.js';
+import { HTTPPlugin } from '../../plugins/core/http.js';
 
 test('Security headers: all headers are set correctly', async () => {
   const api = new Api();

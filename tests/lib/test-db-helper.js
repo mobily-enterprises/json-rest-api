@@ -1,6 +1,6 @@
 import { Api } from '../../lib/api.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
-import { MySQLPlugin } from '../../plugins/mysql.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
+import { MySQLPlugin } from '../../plugins/core/mysql.js';
 import mysql from 'mysql2/promise';
 
 /**

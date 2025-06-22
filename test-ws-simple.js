@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { Api, Schema, MemoryPlugin } from './index.js';
-import { WebSocketPlugin } from './plugins/websocket/index.js';
+import { WebSocketPlugin } from './plugins/protocols/websocket/index.js';
 import { io as ioClient } from 'socket.io-client';
 import { createServer } from 'http';
 import { robustTeardown } from './tests/test-utils.js';

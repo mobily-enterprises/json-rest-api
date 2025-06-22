@@ -1,5 +1,5 @@
 import { Api, Schema, MemoryPlugin, HTTPPlugin, ValidationPlugin } from '../index.js';
-import { WebSocketPlugin } from '../plugins/websocket/index.js';
+import { WebSocketPlugin } from '../plugins/protocols/websocket/index.js';
 import express from 'express';
 import { createServer } from 'http';
 import { io as ioClient } from 'socket.io-client';

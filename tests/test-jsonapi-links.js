@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { Api, Schema, MemoryPlugin } from '../index.js';
-import { HTTPPlugin } from '../plugins/http.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
 import express from 'express';
 import fetch from 'node-fetch';
 

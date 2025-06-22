@@ -1,7 +1,7 @@
 import { Api, Schema } from '../lib/api.js';
-import { MySQLPlugin } from '../plugins/mysql.js';
-import { HTTPPlugin } from '../plugins/http.js';
-import { ValidationPlugin } from '../plugins/validation.js';
+import { MySQLPlugin } from '../plugins/core/mysql.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
+import { ValidationPlugin } from '../plugins/core/validation.js';
 import { QueuePlugin } from '../plugins/enterprise/queue.js';
 import { SchedulerPlugin } from '../plugins/enterprise/scheduler.js';
 import {

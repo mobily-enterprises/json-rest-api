@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
 import { Api, Schema, ValidationPlugin } from '../index.js';
-import { GRPCPlugin } from '../plugins/grpc/index.js';
+import { GRPCPlugin } from '../plugins/protocols/grpc/index.js';
 import { setupTestApi, robustTeardown } from './lib/test-db-helper.js';
 import fs from 'fs/promises';
 import path from 'path';

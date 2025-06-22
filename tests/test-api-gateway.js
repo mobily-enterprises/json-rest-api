@@ -1,8 +1,9 @@
-import test from 'ava';
+import { test } from 'node:test';
+import assert from 'node:assert';
 import express from 'express';
 import { createApi } from '../index.js';
-import { ApiGatewayPlugin } from '../plugins/api-gateway.js';
-import { HTTPPlugin } from '../plugins/http.js';
+import { ApiGatewayPlugin } from '../plugins/infrastructure/api-gateway.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
 
 // Mock server for testing
 function createMockServer() {

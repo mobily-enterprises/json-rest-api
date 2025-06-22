@@ -4,7 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import { graphql } from 'graphql';
 import { Api, Schema, HTTPPlugin, ValidationPlugin } from '../index.js';
-import { GraphQLPlugin } from '../plugins/graphql/index.js';
+import { GraphQLPlugin } from '../plugins/protocols/graphql/index.js';
 import { setupTestApi, robustTeardown } from './lib/test-db-helper.js';
 
 describe('GraphQL Plugin Tests', () => {

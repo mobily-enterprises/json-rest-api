@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
 import { JwtPlugin } from '../../plugins/jwt.js';
 
 test.beforeEach(async () => {

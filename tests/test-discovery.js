@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { Api, Schema, MemoryPlugin, HTTPPlugin } from '../index.js';
-import { DiscoveryPlugin } from '../plugins/discovery/index.js';
+import { DiscoveryPlugin } from '../plugins/protocols/schema-export/index.js';
 import express from 'express';
 import request from 'supertest';
 

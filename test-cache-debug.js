@@ -1,6 +1,6 @@
 import { Api } from './lib/api.js';
 import { Schema } from './lib/schema.js';
-import { MemoryPlugin } from './plugins/memory.js';
+import { MemoryPlugin } from './plugins/core/memory.js';
 import { CachePlugin } from './plugins/advanced/cache/index.js';
 
 const api = new Api();

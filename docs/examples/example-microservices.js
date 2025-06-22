@@ -1,5 +1,5 @@
 import { createApi, Schema } from '../index.js';
-import { MicroservicesPlugin } from '../plugins/microservices.js';
+import { MicroservicesPlugin } from '../plugins/enterprise/microservices.js';
 
 // Example: Building a microservices architecture with JSON-REST-API
 

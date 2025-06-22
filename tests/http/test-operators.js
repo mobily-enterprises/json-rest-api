@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { setupServer, makeRequest, createTestData } from './setup.js';
+import { setupServer, makeRequest, createTestData } from './setup-advanced.js';
 
 describe('HTTP API - Query Operators', () => {
   let server;

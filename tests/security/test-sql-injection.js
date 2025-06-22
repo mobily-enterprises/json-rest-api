@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Api } from '../../lib/api.js';
 import { Schema } from '../../lib/schema.js';
-import { MemoryPlugin } from '../../plugins/memory.js';
-import { MySQLPlugin } from '../../plugins/mysql.js';
+import { MemoryPlugin } from '../../plugins/core/memory.js';
+import { MySQLPlugin } from '../../plugins/core/mysql.js';
 
 // Test with both memory and MySQL backends
 const testBackends = [

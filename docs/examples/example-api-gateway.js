@@ -1,6 +1,6 @@
 import { createApi } from '../index.js';
-import { ApiGatewayPlugin } from '../plugins/api-gateway.js';
-import { HTTPPlugin } from '../plugins/http.js';
+import { ApiGatewayPlugin } from '../plugins/infrastructure/api-gateway.js';
+import { HTTPPlugin } from '../plugins/core/http.js';
 import express from 'express';
 
 // Create API Gateway instance
