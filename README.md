@@ -331,6 +331,7 @@ api
   .use(VersioningPlugin)      // API and resource versioning
   .use(LoggingPlugin)         // Structured logging
   .use(SecurityPlugin)        // Security headers & rate limiting
+  .use(DiscoveryPlugin)       // OpenAPI & JSON Schema generation
   .use(ApiGatewayPlugin)      // Transform into API gateway/orchestrator
 
 // Or create your own
@@ -401,6 +402,29 @@ api.use(HTTPPlugin, {
 See [Security Guide](docs/GUIDE_7_Security.md) for comprehensive security documentation.
 
 For JSON:API specification compliance details, see [JSON:API Compliance Guide](docs/JSON-API-COMPLIANCE.md).
+
+## 📚 Automatic API Documentation
+
+Generate OpenAPI specs and interactive documentation automatically:
+
+```javascript
+api.use(DiscoveryPlugin, {
+  info: {
+    title: 'My API',
+    description: 'API Description'
+  },
+  swaggerUI: true  // Enable interactive docs
+});
+
+// Access documentation at:
+// GET /api/discovery          - Discovery index
+// GET /api/discovery/openapi  - OpenAPI 3.0 spec
+// GET /api/docs              - Swagger UI
+```
+
+The generated documentation is **permission-aware** - users only see the fields and endpoints they have access to!
+
+See [Discovery Guide](docs/DISCOVERY.md) for complete documentation.
 
 ## Installation
 

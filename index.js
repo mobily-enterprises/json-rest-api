@@ -39,6 +39,7 @@ export { ViewsPlugin } from './plugins/views.js';
 export { SimplifiedRecordsPlugin } from './plugins/simplified-records.js';
 export { ApiGatewayPlugin } from './plugins/api-gateway.js';
 export { CLIPlugin } from './plugins/cli.js';
+export { DiscoveryPlugin } from './plugins/discovery/index.js';
 
 // Enterprise plugins
 export { MicroservicesPlugin } from './plugins/enterprise/microservices.js';

@@ -40,6 +40,7 @@
     "alasql": "^4.6.6",
     "circular-json-es6": "^2.0.2",
     "express": "^4.21.1",
+    "js-yaml": "^4.1.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.13.1",
     "reflect-metadata": "^0.2.2",
@@ -51,14 +52,14 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "supertest": "^7.1.1",
-    "typescript": "^5.3.0",
-    "@types/node": "^20.0.0",
+    "@types/bcrypt": "^5.0.0",
     "@types/express": "^4.17.0",
-    "rimraf": "^5.0.0",
-    "tsx": "^4.0.0",
+    "@types/node": "^20.0.0",
     "bcrypt": "^5.1.0",
-    "@types/bcrypt": "^5.0.0"
+    "rimraf": "^5.0.0",
+    "supertest": "^7.1.1",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0"
   },
   "exports": {
     ".": {

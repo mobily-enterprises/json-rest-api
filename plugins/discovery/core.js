@@ -55,6 +55,11 @@ async function extractResourceInfo(api, resourceType, schema, user) {
   
   // Process each field in the schema
   for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
+    // Skip silent fields - they are never exposed
+    if (fieldDef.silent) {
+      continue;
+    }
+    
     // Check read permission for this field
     const canRead = api.checkFieldPermission(user, fieldDef.permissions?.read, null);
     
@@ -171,7 +176,8 @@ async function checkResourceOperations(api, resourceType, user) {
   };
   
   // Check if bulk operations are available
-  if (api._resourceProxies?.get(resourceType)?.bulk) {
+  // BatchOperationsPlugin adds _batchOperations to the API
+  if (api._batchOperations) {
     operations.bulk = {
       create: true,
       update: true,
