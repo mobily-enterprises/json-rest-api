@@ -62,8 +62,10 @@ curl -X PATCH http://localhost:3000/api/tasks/1 \
   -H "Content-Type: application/json" \
   -d '{"data": {"type": "tasks", "attributes": {"done": true}}}'
 
-# Query tasks
+# Query tasks with searchable fields
 curl "http://localhost:3000/api/tasks?filter[done]=true"
+curl "http://localhost:3000/api/tasks?filter[priority][gte]=3"
+curl "http://localhost:3000/api/tasks?filter[tags][contains]=urgent"
 ```
 
 ## 4. Add Relationships (1 minute)

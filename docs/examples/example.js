@@ -23,13 +23,33 @@ const simpleApi = createApi({
   }
 });
 
-// Define a schema
+// Define a schema with latest features
 const userSchema = new Schema({
   id: { type: 'id' },
   name: { type: 'string', required: true, min: 2, max: 100, searchable: true },
-  email: { type: 'string', required: true, lowercase: true, searchable: true },
-  age: { type: 'number', min: 0, max: 150 },
+  email: { 
+    type: 'string', 
+    required: true, 
+    format: 'email',  // Safe email validation
+    searchable: true 
+  },
+  age: { type: 'number', min: 0, max: 150, searchable: true },
   active: { type: 'boolean', default: true, searchable: true },
+  tags: { 
+    type: 'array', 
+    searchable: true,
+    maxItems: 20  // Prevent DoS
+  },
+  metadata: {
+    type: 'object',
+    maxKeys: 50,   // Security limits
+    maxDepth: 5
+  },
+  // Field-level permissions
+  internalNotes: {
+    type: 'string',
+    permissions: { read: 'admin' }  // Only admins can see
+  },
   createdAt: { type: 'timestamp', default: () => Date.now() }
 });
 
@@ -83,13 +103,45 @@ const productSchema = new Schema({
   updatedAt: { type: 'timestamp' }
 });
 
-// Create search schema from main schema
-const productSearchSchema = advancedApi.createSearchSchema(productSchema, [
-  'name', 'category', 'active'
-]);
+// Register schemas with searchable field mappings
+advancedApi.addResource('products', productSchema, {
+  // Map virtual search fields to relationships
+  searchableFields: {
+    'supplier': 'supplierId.name',     // Filter by supplier name
+    'supplierCountry': 'supplierId.country',
+    'search': '*'  // Virtual search field
+  }
+});
 
-// Register schemas
-advancedApi.addResource('products', productSchema);
+// Add supplier resource for relationships
+const supplierSchema = new Schema({
+  id: { type: 'id' },
+  name: { type: 'string', required: true, searchable: true },
+  country: { type: 'string', searchable: true },
+  // To-many relationship
+  products: {
+    type: 'list',
+    virtual: true,
+    foreignResource: 'products',
+    foreignKey: 'supplierId',
+    defaultSort: '-price'
+  }
+});
+
+advancedApi.addResource('suppliers', supplierSchema);
+
+// Update product schema to include supplier reference
+productSchema.structure.supplierId = {
+  type: 'id',
+  refs: {
+    resource: 'suppliers',
+    join: {
+      eager: true,
+      fields: ['id', 'name', 'country']
+    }
+  },
+  searchable: true  // Required for to-many queries
+};
 
 // Custom validation hook
 advancedApi.hook('afterValidate', async (context) => {
@@ -97,7 +149,7 @@ advancedApi.hook('afterValidate', async (context) => {
     const { data } = context;
     
     // Custom business rule: expensive products must have description
-    if (data.price > 1000 && !data.description) {
+    if (data.price && data.price > 1000 && !data.description) {
       context.errors.push({
         field: 'description',
         message: 'Products over $1000 must have a description',

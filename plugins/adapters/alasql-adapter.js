@@ -90,6 +90,13 @@ export const AlaSQLAdapter = {
       // Nothing to disconnect for in-memory database
     });
     
+    api.implement('db.transaction', async (context) => {
+      const { fn } = context;
+      // AlaSQL doesn't have real transactions in memory mode
+      // Just execute the function
+      return await fn();
+    });
+    
     // AlaSQL-specific formatting
     api.implement('db.formatIdentifier', (context) => {
       const { identifier } = context;
@@ -299,6 +306,112 @@ export const AlaSQLAdapter = {
       positionCounters.set(counterKey, nextPos);
       
       return nextPos;
+    });
+    
+    // Migration operations
+    api.implement('db.createMigrationsTable', async (context) => {
+      const { table = '_migrations' } = context;
+      const db = api._alasqlDb;
+      
+      // Check if table exists first
+      try {
+        db.exec(`SELECT 1 FROM \`${table}\` LIMIT 1`);
+        // Table exists, do nothing
+        return;
+      } catch (error) {
+        // Table doesn't exist, create it
+      }
+      
+      const sql = `
+        CREATE TABLE \`${table}\` (
+          id INT,
+          name VARCHAR(255) UNIQUE,
+          batch INT,
+          migrated_at DATETIME
+        )
+      `;
+      
+      db.exec(sql);
+      
+      // Initialize the id counter for this table
+      if (!idCounters.has(table)) {
+        idCounters.set(table, 0);
+      }
+    });
+    
+    api.implement('db.addColumn', async (context) => {
+      const { table, column, type, options = {} } = context;
+      const db = api._alasqlDb;
+      
+      let alasqlType = type.toUpperCase();
+      // Convert MySQL types to AlaSQL types
+      if (alasqlType.includes('VARCHAR')) alasqlType = 'STRING';
+      if (alasqlType.includes('INTEGER')) alasqlType = 'INT';
+      if (alasqlType.includes('TIMESTAMP')) alasqlType = 'DATETIME';
+      if (alasqlType.includes('BOOLEAN')) alasqlType = 'BOOL';
+      
+      let defaultValue = options.default;
+      if (defaultValue !== undefined && typeof defaultValue === 'string') {
+        defaultValue = `'${defaultValue}'`;
+      }
+      
+      const sql = `ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${alasqlType}`;
+      db.exec(sql);
+      
+      // Set default value if provided
+      if (defaultValue !== undefined) {
+        db.exec(`UPDATE \`${table}\` SET \`${column}\` = ${defaultValue} WHERE \`${column}\` IS NULL`);
+      }
+    });
+    
+    api.implement('db.dropColumn', async (context) => {
+      const { table, column } = context;
+      const db = api._alasqlDb;
+      
+      const sql = `ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``;
+      db.exec(sql);
+    });
+    
+    api.implement('db.addIndex', async (context) => {
+      const { table, columns, options = {} } = context;
+      const db = api._alasqlDb;
+      
+      const indexName = options.name || `idx_${table}_${columns.join('_')}`;
+      const columnList = columns.map(c => `\`${c}\``).join(', ');
+      
+      // AlaSQL doesn't support explicit indexes, but we can create them for reference
+      const sql = `CREATE INDEX \`${indexName}\` ON \`${table}\` (${columnList})`;
+      try {
+        db.exec(sql);
+      } catch (error) {
+        // AlaSQL may not support all index operations, that's OK
+        if (!error.message?.includes('CREATE INDEX')) {
+          throw error;
+        }
+      }
+    });
+    
+    api.implement('db.dropIndex', async (context) => {
+      const { table, name } = context;
+      const db = api._alasqlDb;
+      
+      const sql = `DROP INDEX \`${name}\``;
+      try {
+        db.exec(sql);
+      } catch (error) {
+        // AlaSQL may not support all index operations, that's OK
+        if (!error.message?.includes('DROP INDEX')) {
+          throw error;
+        }
+      }
+    });
+    
+    api.implement('db.dropTable', async (context) => {
+      const { table } = context;
+      const db = api._alasqlDb;
+      
+      const sql = `DROP TABLE IF EXISTS \`${table}\``;
+      db.exec(sql);
     });
     
     // Mark that we support atomic operations

@@ -276,6 +276,101 @@ export const MySQLAdapter = {
       };
     });
     
+    // Migration operations
+    api.implement('db.createMigrationsTable', async (context) => {
+      const { table = '_migrations', connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const sql = `
+        CREATE TABLE IF NOT EXISTS \`${table}\` (
+          id INTEGER PRIMARY KEY AUTO_INCREMENT,
+          name VARCHAR(255) NOT NULL UNIQUE,
+          batch INTEGER NOT NULL,
+          migrated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_batch (batch),
+          INDEX idx_migrated_at (migrated_at)
+        )
+      `;
+      
+      await poolInfo.pool.execute(sql);
+    });
+    
+    api.implement('db.addColumn', async (context) => {
+      const { table, column, type, options = {}, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      let columnDef = `\`${column}\` ${type}`;
+      if (options.notNull) columnDef += ' NOT NULL';
+      if (options.default !== undefined) {
+        columnDef += ` DEFAULT ${typeof options.default === 'string' ? `'${options.default}'` : options.default}`;
+      }
+      if (options.unique) columnDef += ' UNIQUE';
+      if (options.after) columnDef += ` AFTER \`${options.after}\``;
+      
+      const sql = `ALTER TABLE \`${table}\` ADD COLUMN ${columnDef}`;
+      await poolInfo.pool.execute(sql);
+    });
+    
+    api.implement('db.dropColumn', async (context) => {
+      const { table, column, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const sql = `ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``;
+      await poolInfo.pool.execute(sql);
+    });
+    
+    api.implement('db.addIndex', async (context) => {
+      const { table, columns, options = {}, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const indexName = options.name || `idx_${table}_${columns.join('_')}`;
+      const indexType = options.unique ? 'UNIQUE' : '';
+      const columnList = columns.map(c => `\`${c}\``).join(', ');
+      
+      const sql = `CREATE ${indexType} INDEX \`${indexName}\` ON \`${table}\` (${columnList})`;
+      await poolInfo.pool.execute(sql);
+    });
+    
+    api.implement('db.dropIndex', async (context) => {
+      const { table, name, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const sql = `DROP INDEX \`${name}\` ON \`${table}\``;
+      await poolInfo.pool.execute(sql);
+    });
+    
+    api.implement('db.dropTable', async (context) => {
+      const { table, connection = 'default' } = context;
+      const poolInfo = pools.get(connection);
+      
+      if (!poolInfo) {
+        throw new InternalError(`Connection '${connection}' not found`);
+      }
+      
+      const sql = `DROP TABLE IF EXISTS \`${table}\``;
+      await poolInfo.pool.execute(sql);
+    });
+    
     // Table creation for MySQL
     api.implement('db.createTable', async (context) => {
       const { table, schema, idProperty, connection = 'default' } = context;

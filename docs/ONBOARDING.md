@@ -2,6 +2,8 @@
 
 Welcome, developer! This onboarding guide will help you understand the codebase architecture and get you ready to contribute. Whether you're fixing bugs, adding features, or improving documentation, this guide will give you the knowledge you need.
 
+> **Note:** For the most up-to-date usage examples, check out the `examples/` directory and the test files in `tests/`. They demonstrate current best practices and all available features.
+
 ## Table of Contents
 
 1. [What is this codebase?](#what-is-this-codebase)
@@ -70,6 +72,8 @@ constructor(options = {}) {
     schemaVersion: null,      // Version support
     debug: false,             // Show debug logs?
     debugSQL: false,          // Show SQL queries?
+    jsonApiCompliant: true,   // Return JSON:API format responses
+    maxIncludeDepth: 3,       // Prevent infinite nested includes
     ...options                // Your custom options
   };
 ```
@@ -153,8 +157,25 @@ const userSchema = new Schema({
   age: { type: 'number', min: 0, max: 150 }
 });
 
-// Add it to the API
+// Simple add
 api.addResource('users', userSchema);
+
+// With options
+api.addResource('posts', postSchema, {
+  // Map virtual search fields to real fields
+  searchableFields: {
+    'author': 'authorId.name',     // Filter by author name via join
+    'category': 'categoryId.name', // Filter by category name
+    'search': '*'                  // Virtual field for custom search
+  },
+  // Resource-specific hooks
+  hooks: {
+    afterInsert: async (context) => {
+      // Send notification for new post
+      await notifySubscribers(context.result);
+    }
+  }
+});
 ```
 
 **What happens next:**
@@ -171,6 +192,18 @@ api.resources.users.get(123)
 api.resources.users.update(123, { name: 'John Doe' })
 api.resources.users.delete(123)
 api.resources.users.query({ filter: { age: { $gte: 18 } } })
+
+// Batch operations
+api.resources.users.batch([
+  { name: 'User 1', email: 'user1@example.com' },
+  { name: 'User 2', email: 'user2@example.com' }
+])
+
+// Include related data
+api.resources.users.get(123, { include: 'profile,posts' })
+
+// Version-specific access
+api.resources.users.version('2.0').get(123)
 ```
 
 **How does this work?**
@@ -341,7 +374,9 @@ api.hook('afterInsert', async (context) => {
 - `beforeDelete`, `afterDelete`
 - `beforeGet`, `afterGet`
 - `beforeQuery`, `afterQuery`
-- `modifyQuery` - Special hook for changing SQL queries
+- `initializeQuery` - Set up the query builder
+- `modifyQuery` - Modify SQL queries (add joins, conditions)
+- `finalizeQuery` - Last chance to modify before execution
 
 ### Running Hooks
 
@@ -431,7 +466,7 @@ api.insert({
 7. **Run afterInsert hooks** - Send emails, update cache, etc.
 8. **Format response** - Convert to JSON:API format
 
-**Output example:**
+**Output example (JSON:API format):**
 ```javascript
 {
   data: {
@@ -442,10 +477,31 @@ api.insert({
       email: 'john@example.com',
       age: 25,
       createdAt: '2024-01-20T10:30:00Z'
+    },
+    relationships: {
+      profile: {
+        data: { type: 'profiles', id: '456' }
+      }
     }
-  }
+  },
+  included: [
+    {
+      type: 'profiles',
+      id: '456',
+      attributes: {
+        bio: 'Software developer',
+        avatar: 'https://example.com/avatar.jpg'
+      }
+    }
+  ]
 }
 ```
+
+**JSON:API Compliance:**
+- Responses follow the JSON:API specification by default
+- Set `jsonApiCompliant: false` in options to use simple format
+- Relationships are properly formatted with type/id
+- Related resources are included in the `included` array
 
 #### GET (Read One)
 
@@ -493,7 +549,7 @@ async query(params, options = {}) {
     fields: params.fields || null,
     sort: params.sort || null,
     page: params.page || { limit: 50, offset: 0 },
-    joins: params.joins || [],
+    include: params.include || '',
     ...params
   };
 ```
@@ -508,7 +564,7 @@ api.resources.users.query({
   sort: ['-createdAt', 'name'],   // Newest first, then by name
   page: { limit: 10, offset: 20 }, // Page 3 (skip 20, take 10)
   fields: ['id', 'name', 'email'], // Only these fields
-  joins: ['profile', 'posts']      // Include related data
+  include: 'profile,posts'         // Include related data
 })
 ```
 
@@ -574,6 +630,106 @@ api.resources.users.delete(123)
 2. Check if resource exists
 3. Delete from storage
 4. afterDelete hooks (cleanup related data)
+
+### Global API Registry
+
+The API supports global registration for easy access across your application:
+
+```javascript
+// Register your API globally
+const api = new Api({ name: 'myapp', version: '1.0.0' });
+api.register();
+
+// Access from anywhere in your app
+const api = Api.get('myapp');           // Gets latest version
+const v1 = Api.get('myapp', '1.0.0');   // Gets specific version
+
+// Check what's registered
+Api.registry.has('myapp', '1.0.0');     // true
+Api.registry.versions('myapp');          // ['1.0.0', '2.0.0']
+Api.registry.getAllVersions('myapp');    // [api1, api2]
+```
+
+**Why use the registry?**
+1. **No prop drilling** - Access API from any module
+2. **Version management** - Run multiple API versions
+3. **Testing** - Easy to mock/replace APIs
+4. **Modularity** - Plugins can find APIs by name
+
+### The Include Parameter
+
+The `include` parameter replaces the old `joins` parameter and provides a more flexible way to include related resources:
+
+```javascript
+// Simple include
+const user = await api.resources.users.get(123, { 
+  include: 'profile' 
+});
+
+// Multiple includes (comma-separated)
+const post = await api.resources.posts.get(456, { 
+  include: 'author,category,tags' 
+});
+
+// Nested includes (dot notation)
+const comment = await api.resources.comments.get(789, { 
+  include: 'author.profile,post.category' 
+});
+
+// In queries
+const posts = await api.resources.posts.query({
+  filter: { published: true },
+  include: 'author.profile,category'
+});
+```
+
+**How includes work:**
+
+1. **Permission checks** - Each level checks permissions
+   ```javascript
+   // Schema with include permissions
+   authorId: {
+     type: 'id',
+     refs: { resource: 'users' },
+     permissions: {
+       read: true,              // Anyone can see the ID
+       include: 'authenticated' // Must be logged in to include user data
+     }
+   }
+   ```
+
+2. **Selective field loading**
+   ```javascript
+   // Schema with field selection
+   authorId: {
+     type: 'id',
+     refs: {
+       resource: 'users',
+       join: {
+         fields: ['id', 'name', 'avatar'] // Only load these fields
+       }
+     }
+   }
+   ```
+
+3. **Eager loading**
+   ```javascript
+   // Always include this relationship
+   profileId: {
+     type: 'id',
+     refs: {
+       resource: 'profiles',
+       join: {
+         eager: true // No need to specify in include parameter
+       }
+     }
+   }
+   ```
+
+4. **Max depth protection**
+   - Default limit is 3 levels deep
+   - Prevents infinite recursion
+   - Configure with `maxIncludeDepth` option
 
 ### Error Handling
 
@@ -675,12 +831,140 @@ const userSchema = new Schema({
 - `date` - Date/datetime
 - `object` - Nested object
 - `array` - List of items
+- `list` - Virtual to-many relationship (not stored)
 
 **Why use schemas?**
 1. **Validation** - Catch errors before they hit the database
 2. **Documentation** - Self-documenting API
 3. **Type safety** - Know what to expect
 4. **Security** - Prevent SQL injection, hide sensitive fields
+
+### Advanced Schema Features
+
+#### Field-Level Permissions
+
+Control who can read, write, or include related data:
+
+```javascript
+const postSchema = new Schema({
+  title: { type: 'string', required: true },
+  content: { type: 'string' },
+  authorEmail: {
+    type: 'string',
+    permissions: {
+      read: 'authenticated',      // Only logged-in users can see
+      write: ['admin', 'owner']   // Only admins or owner can modify
+    }
+  },
+  authorId: {
+    type: 'id',
+    refs: { resource: 'users' },
+    permissions: {
+      read: true,                 // Anyone can see the ID
+      include: 'authenticated'    // Must be logged in to include user data
+    }
+  }
+});
+```
+
+#### Searchable Fields
+
+Enable filtering on specific fields:
+
+```javascript
+const userSchema = new Schema({
+  name: { type: 'string', searchable: true },
+  email: { type: 'string', searchable: true },
+  password: { type: 'string', silent: true }, // Never searchable
+  status: { type: 'string', searchable: true }
+});
+
+// Now you can filter:
+// GET /api/users?filter[name]=John
+// GET /api/users?filter[status]=active
+```
+
+#### Advanced Relationships
+
+```javascript
+const authorSchema = new Schema({
+  name: { type: 'string' },
+  // To-one relationship with advanced options
+  countryId: {
+    type: 'id',
+    refs: {
+      resource: 'countries',
+      join: {
+        eager: true,              // Auto-include
+        fields: ['id', 'name'],   // Select specific fields
+        preserveId: true,         // Keep both ID and object
+        resourceField: 'country'  // Put joined data in 'country' field
+      }
+    }
+  },
+  // To-many relationship (virtual field)
+  posts: {
+    type: 'list',
+    virtual: true,                // Not stored in database
+    foreignResource: 'posts',
+    foreignKey: 'authorId',       // Field in posts that references this
+    defaultFilter: { published: true },
+    defaultSort: '-createdAt'
+  }
+});
+```
+
+#### Virtual Fields
+
+Computed fields that aren't stored:
+
+```javascript
+const orderSchema = new Schema({
+  price: { type: 'number' },
+  tax: { type: 'number' },
+  profit: { 
+    type: 'number', 
+    virtual: true  // Computed, not stored
+  }
+});
+
+// Calculate in hooks
+api.hook('afterGet', async (context) => {
+  if (context.type === 'orders' && context.result) {
+    context.result.profit = context.result.price - context.result.tax;
+  }
+});
+```
+
+#### Format Validation
+
+Safe, built-in format validators:
+
+```javascript
+const userSchema = new Schema({
+  email: { type: 'string', format: 'email' },
+  website: { type: 'string', format: 'url' },
+  slug: { type: 'string', format: 'slug' },
+  uuid: { type: 'string', format: 'uuid' }
+});
+```
+
+#### Security Limits
+
+Prevent abuse with size limits:
+
+```javascript
+const postSchema = new Schema({
+  tags: { 
+    type: 'array',
+    maxItems: 100  // Maximum 100 tags
+  },
+  metadata: { 
+    type: 'object',
+    maxKeys: 50,   // Maximum 50 properties
+    maxDepth: 5    // Maximum nesting depth
+  }
+});
 
 ### Query Builder
 

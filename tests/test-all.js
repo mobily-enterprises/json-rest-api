@@ -36,6 +36,9 @@ import {
   schemaFields
 } from '../index.js';
 
+// Import migration tests
+import './test-migrations.js';
+
 // Print which database we're using
 const { name: dbName } = getTestPlugin();
 console.log(`\n🧪 Running comprehensive test suite with ${dbName}\n`);

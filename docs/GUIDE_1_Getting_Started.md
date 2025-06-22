@@ -19,7 +19,7 @@ The API instance is your central control point. It manages resources, plugins, a
 ```javascript
 import { Api, createApi } from 'json-rest-api';
 
-// Option 1: Use the convenience function
+// Option 1: Use createApi() for quick setup
 const api = createApi({
   name: 'myapp',
   version: '1.0.0',
@@ -37,7 +37,44 @@ api.use(MemoryPlugin);      // In-memory storage (AlaSQL)
 api.use(ValidationPlugin);   // Add validation
 ```
 
-**Important**: Throughout this guide, we'll use the resource proxy API syntax (`api.resources.users.get()`) rather than the older style (`api.get(id, { type: 'users' })`). The older style is mentioned here once for reference but the proxy API is the recommended approach.
+#### What is createApi()?
+
+`createApi()` is a convenience function that automatically configures common plugins based on your options:
+
+- Sets up storage (memory/mysql) with appropriate adapter
+- Adds validation if `validation: true` (default)
+- Configures HTTP plugin if Express app is provided
+- Handles all the plugin ordering for you
+
+Use `createApi()` when you want standard functionality quickly. Use manual setup when you need precise control over plugin ordering or custom configurations.
+
+#### API Calling Methods
+
+There are two ways to interact with resources:
+
+**1. Resource Proxy API (Recommended)**
+```javascript
+// Direct, intuitive syntax through the resources property
+await api.resources.users.get(123);
+await api.resources.users.create({ name: 'Alice' });
+await api.resources.users.query({ filter: { active: true } });
+```
+
+**2. API-Level Methods**
+```javascript
+// Specify resource type in options
+await api.get(123, { type: 'users' });
+await api.create({ name: 'Alice' }, { type: 'users' });
+await api.query({ type: 'users', filter: { active: true } });
+```
+
+The resource proxy API (`api.resources.users`) is the recommended approach because:
+- More intuitive and readable
+- Better TypeScript support
+- Cleaner syntax for complex operations
+- Natural chaining for relationships
+
+The API-level methods are still supported and useful when the resource type is dynamic or determined at runtime.
 
 ### Schemas Define Your Data
 
@@ -47,9 +84,14 @@ Schemas are like TypeScript interfaces but with runtime validation. This is **sc
 import { Schema } from 'json-rest-api';
 
 const userSchema = new Schema({
-  // Basic types
+  // Basic types with format validation
   name: { type: 'string', required: true, min: 2, max: 100, searchable: true },
-  email: { type: 'string', required: true, match: /^[^@]+@[^@]+\.[^@]+$/, searchable: true },
+  email: { 
+    type: 'string', 
+    required: true, 
+    format: 'email',  // Safe email validation (ReDoS protected)
+    searchable: true 
+  },
   age: { type: 'number', min: 0, max: 150, searchable: true },
   active: { type: 'boolean', default: true, searchable: true },
   
@@ -57,17 +99,43 @@ const userSchema = new Schema({
   password: { type: 'string', silent: true }, // Never exposed in queries
   apiKey: { type: 'string', silent: true },   // Hidden from responses
   
+  // Field-level permissions (new!)
+  salary: { 
+    type: 'number',
+    permissions: { read: ['hr', 'admin', 'self'] }  // Role-based access
+  },
+  
   // Special types
   id: { type: 'id' },  // Auto-increment ID
   createdAt: { type: 'timestamp' },  // Unix timestamp
   birthday: { type: 'date' },  // YYYY-MM-DD
-  metadata: { type: 'object' },  // JSON object
-  tags: { type: 'array', searchable: true },  // JSON array
+  metadata: { 
+    type: 'object',
+    maxKeys: 50,     // Prevent DoS attacks
+    maxDepth: 5      // Limit nesting
+  },
+  tags: { 
+    type: 'array', 
+    searchable: true,
+    maxItems: 20     // Limit array size
+  },
   
-  // Relationships
+  // Relationships with auto-join
   teamId: { 
     type: 'id',
-    refs: { resource: 'teams' }  // Foreign key
+    refs: { 
+      resource: 'teams',
+      join: {
+        eager: true,  // Auto-include team data
+        fields: ['id', 'name']  // Only these fields
+      }
+    }
+  },
+  
+  // Virtual fields (computed, not stored)
+  fullName: {
+    type: 'string',
+    virtual: true  // Populated by hooks
   }
 });
 ```
@@ -93,9 +161,9 @@ const user = await api.resources.users.create({
 });
 ```
 
-### The Resource Proxy API
+### Using the Resource Proxy API
 
-The proxy API provides an intuitive interface for all operations:
+The resource proxy API provides an intuitive interface for all operations:
 
 ```javascript
 // All CRUD operations
@@ -105,11 +173,30 @@ await api.resources.users.query({ filter: { active: true } });
 await api.resources.users.update(123, { name: 'Robert' });
 await api.resources.users.delete(123);
 
-// Batch operations
-await api.resources.users.batch.create([
+// With includes (relationship loading)
+await api.resources.users.get(123, { 
+  include: 'teamId,posts'  // Load related data
+});
+
+// Nested includes (new!)
+await api.resources.posts.get(456, {
+  include: 'authorId.teamId'  // Load author AND their team
+});
+
+// Bulk operations (new!)
+await api.resources.users.bulk.create([
   { name: 'Charlie' },
   { name: 'David' }
 ]);
+
+// Advanced filtering with operators
+await api.resources.users.query({
+  filter: {
+    age: { gte: 18, lt: 65 },  // Age between 18-65
+    email: { endsWith: '@company.com' },
+    tags: { contains: 'vip' }
+  }
+});
 ```
 
 ### Plugin Architecture
@@ -224,12 +311,18 @@ api.addResource('posts', postSchema, {
 api.mount(app);
 app.listen(3000);
 
-// Your API is ready!
+// Your API is ready with advanced features!
 // GET    /api/posts?filter[published]=true&filter[tags]=nodejs&include=author
-// GET    /api/posts?filter[title]=hello  // Search by title
+// GET    /api/posts?filter[title][like]=%javascript%  // Pattern search
+// GET    /api/posts?include=authorId.countryId  // Nested includes
+// GET    /api/posts?filter[createdAt][gte]=2024-01-01  // Date filtering
 // POST   /api/posts
 // PATCH  /api/posts/123
 // DELETE /api/posts/123
+
+// Relationship endpoints (automatic with refs + provideUrl)
+// GET    /api/posts/123/author  // Get author of post
+// GET    /api/posts/123/relationships/author  // Get relationship data
 ```
 
 ## Installation & Setup

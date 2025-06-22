@@ -42,33 +42,45 @@ const schema = new Schema({
 |------|-------------|------------|
 | `'id'` | Auto-incrementing ID | INT AUTO_INCREMENT |
 | `'string'` | Text field | VARCHAR(255) |
+| `'blob'` | Binary data | BLOB |
 | `'number'` | Numeric field | DOUBLE |
 | `'boolean'` | True/false | BOOLEAN |
 | `'timestamp'` | Unix timestamp | BIGINT |
+| `'date'` | Date only (YYYY-MM-DD) | DATE |
+| `'dateTime'` | Date and time | DATETIME |
 | `'json'` | JSON data | TEXT |
 | `'array'` | Array (stored as JSON) | TEXT |
 | `'object'` | Object (stored as JSON) | TEXT |
+| `'serialize'` | Circular objects | TEXT |
+| `'list'` | To-many relationship (virtual) | Not stored |
 
 ### Validation Rules
 
 ```javascript
 const userSchema = new Schema({
-  // String validation
+  // String validation with format
   username: { 
     type: 'string', 
     required: true,
     min: 3,        // Min length
     max: 20,       // Max length
-    match: /^[a-zA-Z0-9_]+$/,  // Regex pattern
+    format: 'alphanumeric',  // Safe pattern (ReDoS protected)
     lowercase: true  // Transform to lowercase
+  },
+  
+  // Email with built-in format
+  email: {
+    type: 'string',
+    required: true,
+    format: 'email',  // Safe email validation
+    searchable: true
   },
   
   // Number validation
   age: { 
     type: 'number',
     min: 0,        // Min value
-    max: 150,      // Max value
-    integer: true  // Must be integer
+    max: 150       // Max value
   },
   
   // Enum validation
@@ -78,14 +90,39 @@ const userSchema = new Schema({
     default: 'user'
   },
   
+  // Array with size limits
+  tags: {
+    type: 'array',
+    maxItems: 20,  // Prevent DoS
+    searchable: true
+  },
+  
+  // Object with limits
+  metadata: {
+    type: 'object',
+    maxKeys: 50,   // Max properties
+    maxDepth: 5    // Max nesting
+  },
+  
   // Custom validation
-  email: {
+  phone: {
     type: 'string',
-    validate: async (value) => {
-      if (!value.includes('@')) {
-        throw new Error('Invalid email format');
+    format: 'phone',  // Built-in phone validation
+    validator: async (value) => {
+      // Additional custom checks
+      if (!value.startsWith('+')) {
+        throw new Error('Phone must include country code');
       }
-      return value.toLowerCase();
+      return value;
+    }
+  },
+  
+  // Field permissions
+  salary: {
+    type: 'number',
+    permissions: {
+      read: ['hr', 'admin'],  // Only these roles can see
+      write: 'admin'          // Only admin can modify
     }
   }
 });
@@ -154,9 +191,14 @@ const users = await api.resources.users.batch.create([
 // Get by ID
 const user = await api.resources.users.get(123);
 
-// Get with joins
+// Get with includes (new preferred syntax)
 const post = await api.resources.posts.get(456, {
-  joins: ['authorId', 'categoryId']
+  include: 'authorId,categoryId'
+});
+
+// Nested includes (new!)
+const deepPost = await api.resources.posts.get(456, {
+  include: 'authorId.countryId,categoryId.parentId'
 });
 
 // Handle not found
@@ -686,8 +728,51 @@ refs: {
   resource: 'users',     // Target resource name (required)
   field: 'id',          // Target field (default: 'id')
   onDelete: 'restrict', // What happens on delete
-  onUpdate: 'cascade'   // What happens on update
+  onUpdate: 'cascade',  // What happens on update
+  join: {
+    eager: true,        // Auto-include this relationship
+    fields: ['id', 'name', 'email'],  // Only include these fields
+    preserveId: true    // Keep both ID and joined object
+  },
+  provideUrl: true      // Enable relationship endpoints
 }
+```
+
+### To-Many Relationships (Virtual Fields)
+
+Define inverse relationships using virtual fields with `type: 'list'`:
+
+```javascript
+const authorSchema = new Schema({
+  name: { type: 'string', required: true },
+  posts: {
+    type: 'list',
+    virtual: true,              // Not stored in database
+    foreignResource: 'posts',   // Related resource
+    foreignKey: 'authorId',     // Field in related resource
+    defaultFilter: { published: true },  // Auto-filter
+    defaultSort: '-createdAt',  // Auto-sort
+    limit: 100,                 // Max results
+    permissions: { 
+      include: 'authenticated'  // Who can include this
+    }
+  }
+});
+
+// The foreign key must be searchable!
+const postSchema = new Schema({
+  authorId: { 
+    type: 'id', 
+    refs: { resource: 'authors' },
+    searchable: true  // Required for to-many queries
+  },
+  published: { type: 'boolean', searchable: true }
+});
+
+// Usage
+const author = await api.resources.authors.get(1, {
+  include: 'posts'  // Loads all author's published posts
+});
 ```
 
 ### Referential Integrity

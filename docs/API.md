@@ -32,6 +32,60 @@ new Api(options?: ApiOptions)
 | `version` | string | `null` | API version (semver) |
 | `artificialDelay` | number | `0` | Delay in ms for testing |
 
+### createApi() Function
+
+A convenience function that creates and configures an API instance with common plugins automatically:
+
+```javascript
+import { createApi } from 'json-rest-api';
+
+const api = createApi({
+  name: 'myapp',
+  version: '1.0.0',
+  storage: 'memory',  // or 'mysql'
+  validation: true,   // Default: true
+  http: { app },      // Auto-mounts HTTP routes
+  // Plugin-specific options
+  mysql: { connection: { /* ... */ } },
+  timestamps: true,
+  versioning: { /* ... */ },
+  positioning: { /* ... */ }
+});
+```
+
+#### What createApi() does:
+
+1. Creates a new `Api` instance with provided options
+2. Automatically adds plugins based on configuration:
+   - `ValidationPlugin` if `validation !== false`
+   - `MemoryPlugin` if `storage === 'memory'`
+   - `MySQLPlugin` if `storage === 'mysql'`
+   - `HTTPPlugin` if `http` options provided
+   - Other plugins based on their respective options
+3. Ensures proper plugin ordering automatically
+
+#### When to use createApi() vs manual setup:
+
+**Use createApi() when:**
+- You want standard functionality quickly
+- You don't need custom plugin ordering
+- You're using common plugin combinations
+
+**Use manual Api() + use() when:**
+- You need precise control over plugin order
+- You're using custom plugins
+- You need conditional plugin loading
+- You want to configure plugins differently
+
+```javascript
+// Manual setup example
+const api = new Api({ name: 'myapp' });
+api.use(MySQLPlugin, { /* custom config */ });
+api.use(CustomAuthPlugin);
+api.use(ValidationPlugin);
+api.use(HTTPPlugin);
+```
+
 ### Static Methods
 
 #### `Api.get(name, version)`
@@ -125,15 +179,60 @@ api.mount(expressApp, '/api');
 
 ### CRUD Methods
 
-These methods are typically called through the resource proxy API.
+There are two ways to call CRUD methods: through the **Resource Proxy API** (recommended) or through **API-level methods**.
+
+#### API Calling Methods Comparison
+
+**Resource Proxy API (Recommended):**
+```javascript
+// Direct, intuitive access through api.resources
+await api.resources.users.get(123);
+await api.resources.users.create({ name: 'John' });
+await api.resources.users.query({ filter: { active: true } });
+await api.resources.users.update(123, { name: 'John Doe' });
+await api.resources.users.delete(123);
+```
+
+**API-Level Methods:**
+```javascript
+// Specify resource type in options
+await api.get(123, { type: 'users' });
+await api.insert({ name: 'John' }, { type: 'users' });
+await api.query({ filter: { active: true } }, { type: 'users' });
+await api.update(123, { name: 'John Doe' }, { type: 'users' });
+await api.delete(123, { type: 'users' });
+```
+
+The Resource Proxy API is preferred because:
+- More intuitive and readable syntax
+- Better TypeScript/IDE support
+- Natural chaining for relationships
+- Cleaner code for complex operations
+
+API-level methods are useful when:
+- Resource type is dynamic or determined at runtime
+- Building generic utilities that work with multiple resources
+- Migrating from older codebases
 
 #### `get(id, options)`
 ```javascript
+// Resource Proxy API (recommended)
+const user = await api.resources.users.get(123);
+
+// API-level method
 const user = await api.get(123, { type: 'users' });
 ```
 
 #### `query(params, options)`
 ```javascript
+// Resource Proxy API (recommended)
+const users = await api.resources.users.query({
+  filter: { active: true },
+  sort: [{ field: 'name', direction: 'ASC' }],
+  page: { size: 20, number: 1 }
+});
+
+// API-level method
 const users = await api.query({
   filter: { active: true },
   sort: [{ field: 'name', direction: 'ASC' }],
@@ -141,8 +240,15 @@ const users = await api.query({
 }, { type: 'users' });
 ```
 
-#### `insert(data, options)`
+#### `insert(data, options)` / `create(data, options)`
 ```javascript
+// Resource Proxy API (recommended)
+const newUser = await api.resources.users.create({
+  name: 'John',
+  email: 'john@example.com'
+});
+
+// API-level method
 const newUser = await api.insert({
   name: 'John',
   email: 'john@example.com'
@@ -151,6 +257,12 @@ const newUser = await api.insert({
 
 #### `update(id, data, options)`
 ```javascript
+// Resource Proxy API (recommended)
+const updated = await api.resources.users.update(123, {
+  name: 'John Doe'
+});
+
+// API-level method
 const updated = await api.update(123, {
   name: 'John Doe'
 }, { type: 'users' });
@@ -158,6 +270,10 @@ const updated = await api.update(123, {
 
 #### `delete(id, options)`
 ```javascript
+// Resource Proxy API (recommended)
+await api.resources.users.delete(123);
+
+// API-level method
 await api.delete(123, { type: 'users' });
 ```
 
@@ -325,8 +441,22 @@ const schema = new Schema({
 #### Permission Operations
 
 - `read`: Controls if field is included in responses
-- `write`: Controls if field can be set/updated (not yet implemented)
+- `write`: Controls if field can be set/updated
 - `include`: Controls if relationship can be included via `include` parameter
+
+#### Permission Context
+
+The permission system automatically provides context to help make access decisions:
+
+```javascript
+api.hook('transformResult', async (context) => {
+  // Context includes:
+  // - context.options.user: The authenticated user object
+  // - context.options.type: The resource type
+  // - context.result: The resource being accessed
+  // - context.options.isJoinResult: Whether this is joined data
+});
+```
 
 ### Virtual Fields
 
@@ -367,21 +497,46 @@ api.hook('afterGet', async (context) => {
 - **Computed on read**: Populated by hooks when resources are fetched
 - **Support permissions**: Can have field-level permissions like regular fields
 - **Work everywhere**: Populated for single gets, queries, and included resources
+- **Excluded from validation**: Virtual fields are automatically skipped during validation
+- **Excluded from inserts/updates**: Virtual fields are removed before database operations
+
+#### To-Many Virtual Fields
+
+Virtual fields with `type: 'list'` enable to-many relationships:
+
+```javascript
+const authorSchema = new Schema({
+  name: { type: 'string', required: true },
+  posts: {
+    type: 'list',
+    virtual: true,
+    foreignResource: 'posts',
+    foreignKey: 'authorId',
+    defaultFilter: { published: true },
+    defaultSort: '-createdAt',
+    limit: 100
+  }
+});
+```
 
 ### Field Types
 
-| Type | Description | MySQL Type |
-|------|-------------|------------|
-| `'id'` | Auto-incrementing ID | INT AUTO_INCREMENT |
-| `'string'` | Text field | VARCHAR(255) |
-| `'number'` | Numeric field | DOUBLE |
-| `'boolean'` | True/false | BOOLEAN |
-| `'timestamp'` | Unix timestamp | BIGINT |
-| `'date'` | Date (YYYY-MM-DD) | DATE |
-| `'json'` | JSON data | TEXT |
-| `'array'` | Array (stored as JSON) | TEXT |
-| `'object'` | Object (stored as JSON) | TEXT |
-| `'list'` | To-many relationship (virtual) | Not stored |
+| Type | Description | MySQL Type | Notes |
+|------|-------------|------------|-------|
+| `'id'` | Auto-incrementing ID | INT AUTO_INCREMENT | Primary key |
+| `'string'` | Text field | VARCHAR(255) | Support for validation formats |
+| `'blob'` | Binary data | BLOB | For binary content |
+| `'number'` | Numeric field | DOUBLE | Integer or decimal |
+| `'boolean'` | True/false | BOOLEAN | Accepts truthy/falsy values |
+| `'timestamp'` | Unix timestamp | BIGINT | Milliseconds since epoch |
+| `'date'` | Date (YYYY-MM-DD) | DATE | Date only, no time |
+| `'dateTime'` | Date and time | DATETIME | Full date and time |
+| `'json'` | JSON data | TEXT | Stored as JSON string |
+| `'array'` | Array (stored as JSON) | TEXT | With size limits |
+| `'object'` | Object (stored as JSON) | TEXT | With depth/key limits |
+| `'serialize'` | Circular object | TEXT | Handles circular refs |
+| `'list'` | To-many relationship (virtual) | Not stored | Virtual only |
+| `'none'` | No type validation | Varies | Pass-through type |
 
 ### Relationships
 
@@ -482,6 +637,122 @@ if (errors.length > 0) {
 Options:
 - `partial`: boolean - Allow partial data (for updates)
 - `skipRequired`: boolean - Skip required field validation
+
+## Searchable Fields and Filtering
+
+### Defining Searchable Fields
+
+Fields must be explicitly marked as searchable to enable filtering:
+
+```javascript
+const userSchema = new Schema({
+  // Basic searchable fields
+  name: { type: 'string', searchable: true },
+  email: { type: 'string', searchable: true },
+  age: { type: 'number', searchable: true },
+  active: { type: 'boolean', searchable: true },
+  
+  // Arrays can be searchable too
+  tags: { type: 'array', searchable: true },
+  
+  // Non-searchable fields cannot be filtered
+  password: { type: 'string' }, // Not searchable
+  internalNotes: { type: 'string' } // Not searchable
+});
+```
+
+### Mapped Searchable Fields
+
+Create virtual search fields that map to relationships:
+
+```javascript
+api.addResource('posts', postSchema, {
+  searchableFields: {
+    // Map author name to authorId relationship
+    'author': 'authorId.name',
+    'authorEmail': 'authorId.email',
+    
+    // Map category to categoryId relationship
+    'category': 'categoryId.title',
+    
+    // Virtual search field (marked with *)
+    'search': '*'
+  }
+});
+
+// Now you can filter by relationship fields:
+// GET /api/posts?filter[author]=John
+// GET /api/posts?filter[category]=Technology
+```
+
+### Virtual Search Fields
+
+Fields marked with `*` require custom handlers:
+
+```javascript
+api.addResource('posts', postSchema, {
+  searchableFields: {
+    'search': '*' // Virtual field
+  }
+});
+
+// Implement the search logic
+api.hook('modifyQuery', async (context) => {
+  if (context.params.filter?.search && context.options.type === 'posts') {
+    const searchTerm = context.params.filter.search;
+    
+    // Add custom search conditions
+    context.query.where(
+      '(posts.title LIKE ? OR posts.content LIKE ? OR posts.tags LIKE ?)',
+      `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`
+    );
+    
+    // Remove from filter to prevent column lookup
+    delete context.params.filter.search;
+  }
+});
+
+// Usage: GET /api/posts?filter[search]=javascript
+```
+
+### Filter Operators Reference
+
+All operators require the field to be searchable:
+
+```javascript
+// Equality (default)
+?filter[status]=active
+
+// Not equal
+?filter[status][ne]=draft
+
+// Comparison operators
+?filter[age][gt]=18      // Greater than
+?filter[age][gte]=18     // Greater than or equal
+?filter[age][lt]=65      // Less than
+?filter[age][lte]=65     // Less than or equal
+
+// Range
+?filter[age][between]=18,65
+
+// Pattern matching
+?filter[name][like]=%john%        // SQL LIKE
+?filter[email][ilike]=%@GMAIL%    // Case-insensitive
+?filter[name][startsWith]=John    // Starts with
+?filter[email][endsWith]=.com     // Ends with
+?filter[bio][contains]=developer  // Contains substring
+
+// Array operators
+?filter[status][in]=active,pending     // IN
+?filter[role][nin]=guest,banned        // NOT IN
+?filter[tags][contains]=javascript     // Array contains
+?filter[permissions][contained]=read,write  // Array contained by
+?filter[skills][overlaps]=js,python    // Arrays overlap
+
+// NULL checks
+?filter[deletedAt][null]=true     // IS NULL
+?filter[email][notnull]=true      // IS NOT NULL
+```
 
 ## Relationships
 
@@ -835,7 +1106,7 @@ const args = query.getArgs(); // [true]
 
 ## Resource Proxy API
 
-The recommended way to interact with resources.
+The recommended way to interact with resources, providing an intuitive object-oriented interface.
 
 ### Accessing Resources
 
@@ -844,7 +1115,73 @@ The recommended way to interact with resources.
 const users = api.resources.users;
 
 // Check if resource exists
-if ('users' in api.resources) { }
+if ('users' in api.resources) { 
+  console.log('Users resource is available');
+}
+
+// Access resource schema
+const userSchema = api.resources.users.schema;
+
+// Access resource hooks
+const userHooks = api.resources.users.hooks;
+
+// Get resource type name
+const typeName = api.resources.users.type; // 'users'
+```
+
+### Advanced Proxy Features
+
+#### Schema Access
+
+```javascript
+// Get field definitions
+const fields = api.resources.users.schema.structure;
+
+// Check if field exists
+if ('email' in api.resources.users.schema.structure) {
+  const emailDef = api.resources.users.schema.structure.email;
+  console.log(`Email type: ${emailDef.type}`);
+}
+
+// Validate data against schema
+const errors = await api.resources.users.schema.validate(userData);
+```
+
+#### Hook Access
+
+```javascript
+// Access resource-specific hooks
+api.resources.users.hooks.afterInsert = async (context) => {
+  // Send welcome email
+  await sendEmail(context.result.email, 'Welcome!');
+};
+
+// Check if hook exists
+if (api.resources.users.hooks.beforeUpdate) {
+  console.log('Users have a beforeUpdate hook');
+}
+```
+
+#### Batch Operations
+
+```javascript
+// Bulk operations via proxy
+const bulkUsers = api.resources.users.bulk;
+
+// Bulk create
+await bulkUsers.create([
+  { name: 'User 1', email: 'user1@example.com' },
+  { name: 'User 2', email: 'user2@example.com' }
+]);
+
+// Bulk update
+await bulkUsers.update([
+  { id: 1, data: { verified: true } },
+  { id: 2, data: { verified: true } }
+]);
+
+// Bulk delete
+await bulkUsers.delete([3, 4, 5]);
 ```
 
 ### CRUD Methods
@@ -852,24 +1189,87 @@ if ('users' in api.resources) { }
 #### `get(id, options?)`
 Get a single resource by ID.
 ```javascript
+// Simple get
 const user = await api.resources.users.get(123);
+
+// With includes
 const userWithIncludes = await api.resources.users.get(123, {
-  include: 'departmentId'
+  include: 'departmentId,posts'
+});
+
+// With nested includes
+const userWithNested = await api.resources.users.get(123, {
+  include: 'departmentId.countryId,posts.categoryId'
+});
+
+// Handle not found gracefully
+const maybeUser = await api.resources.users.get(999, {
+  allowNotFound: true // Returns null instead of throwing
 });
 ```
 
 #### `query(params?, options?)`
-Query multiple resources.
+Query multiple resources with powerful filtering and sorting.
 ```javascript
-const users = await api.resources.users.query({
+// Basic query
+const users = await api.resources.users.query();
+
+// With filtering (only searchable fields)
+const activeAdmins = await api.resources.users.query({
   filter: { 
     active: true,
     role: 'admin',
-    // Only searchable fields can be filtered
+    createdAt: { gte: '2024-01-01' }
+  }
+});
+
+// Advanced filtering with operators
+const results = await api.resources.users.query({
+  filter: {
+    age: { between: [18, 65] },
+    email: { endsWith: '@company.com' },
+    tags: { contains: 'premium' },
+    deletedAt: { null: true },
+    name: { ilike: '%john%' } // Case-insensitive
+  }
+});
+
+// Sorting
+const sorted = await api.resources.posts.query({
+  sort: [{ field: 'createdAt', direction: 'DESC' }]
+});
+
+// String sort syntax
+const sorted2 = await api.resources.posts.query({
+  sort: '-createdAt,title' // DESC createdAt, ASC title
+});
+
+// Pagination
+const page2 = await api.resources.posts.query({
+  page: { size: 20, number: 2 }
+});
+
+// Include related data
+const withRelated = await api.resources.posts.query({
+  include: 'authorId,categoryId,comments'
+});
+
+// Use a view (requires ViewsPlugin)
+const summary = await api.resources.posts.query({
+  view: 'summary'
+});
+
+// Complex query example
+const complexQuery = await api.resources.posts.query({
+  filter: {
+    status: 'published',
+    authorId: { in: [1, 2, 3] },
+    tags: { overlaps: ['tech', 'news'] }
   },
-  sort: [{ field: 'name', direction: 'ASC' }],
-  page: { size: 20, number: 1 },
-  include: 'departmentId'
+  sort: '-views,title',
+  page: { size: 10, number: 1 },
+  include: 'authorId.departmentId,categoryId',
+  view: 'detailed'
 });
 ```
 
@@ -877,7 +1277,9 @@ const users = await api.resources.users.query({
 - `filter`: Object with field/value pairs (fields must be marked `searchable: true`)
 - `sort`: Array of sort objects or string (e.g., '-createdAt,name')
 - `page`: Object with `size` and `number` for pagination
+- `include`: Comma-separated relationships (supports dot notation)
 - `view`: String name of a predefined view (requires ViewsPlugin)
+- `fields`: Sparse fieldsets (e.g., `{ posts: 'title,summary' }`)
 
 #### `create(data, options?)` / `post(data, options?)`
 Create a new resource.
@@ -1220,6 +1622,100 @@ Context includes:
   options,    // Operation options
   result      // Result (in after* hooks)
 }
+```
+
+## Built-in Storage Plugins
+
+### MemoryPlugin
+
+In-memory SQL database using AlaSQL, perfect for development and testing.
+
+```javascript
+import { MemoryPlugin } from 'json-rest-api';
+
+api.use(MemoryPlugin);
+```
+
+**Features:**
+- Zero configuration required
+- Full SQL support (SELECT, JOIN, GROUP BY, etc.)
+- Automatic table creation
+- No persistence (data lost on restart)
+- Perfect for testing and prototyping
+- Supports transactions (simulated)
+- JSON and array field support
+
+**Use Cases:**
+- Development and prototyping
+- Unit testing
+- Demo applications
+- Temporary data processing
+
+### MySQLPlugin
+
+Production-ready MySQL/MariaDB storage with connection pooling.
+
+```javascript
+import { MySQLPlugin } from 'json-rest-api';
+
+api.use(MySQLPlugin, {
+  connection: {
+    host: 'localhost',
+    user: 'root',
+    password: 'password',
+    database: 'myapp',
+    // Connection pool settings
+    connectionLimit: 10,
+    queueLimit: 0,
+    waitForConnections: true
+  },
+  syncSchemas: true, // Auto-create/update tables
+  useNamedPlaceholders: true // Use :name instead of ?
+});
+```
+
+**Features:**
+- Connection pooling for performance
+- Real transactions with savepoints
+- Automatic schema synchronization
+- JSON column support (MySQL 5.7+)
+- Prepared statements for security
+- Named placeholders support
+- Graceful connection handling
+
+**Connection Options:**
+```javascript
+{
+  host: 'localhost',
+  port: 3306,
+  user: 'root',
+  password: 'password',
+  database: 'myapp',
+  charset: 'utf8mb4',
+  timezone: 'local',
+  ssl: {
+    ca: fs.readFileSync('server-ca.pem'),
+    cert: fs.readFileSync('client-cert.pem'),
+    key: fs.readFileSync('client-key.pem')
+  },
+  // Pool configuration
+  connectionLimit: 10,
+  acquireTimeout: 60000,
+  queueLimit: 0
+}
+```
+
+**Schema Synchronization:**
+
+With `syncSchemas: true`, the plugin automatically:
+- Creates missing tables
+- Adds missing columns
+- Adjusts column types if needed
+- Preserves existing data
+
+```javascript
+// Tables are created/updated when resources are added
+api.addResource('users', userSchema); // Creates 'users' table
 ```
 
 ## Built-in Plugins
@@ -1641,6 +2137,162 @@ try {
     // User not authenticated
   } else if (error.code === 'FORBIDDEN') {
     // User lacks permission
+  }
+}
+```
+
+### MigrationPlugin
+
+Database schema migration support for evolving your application over time.
+
+#### Basic Usage
+
+```javascript
+import { MigrationPlugin } from 'json-rest-api/plugins';
+
+api.use(MigrationPlugin, {
+  directory: './migrations',    // Where migration files are stored
+  table: '_migrations',         // Table to track applied migrations
+  autoRun: process.env.NODE_ENV === 'development'  // Auto-run in dev
+});
+```
+
+#### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `directory` | string | `'./migrations'` | Directory containing migration files |
+| `table` | string | `'_migrations'` | Table name for tracking migrations |
+| `autoRun` | boolean | `false` | Automatically run pending migrations on connect |
+
+#### Creating Migrations
+
+Use the CLI to create new migrations:
+
+```bash
+npm run migrate:create add_users_table
+# Creates: migrations/20240101120000_add_users_table.js
+```
+
+Migration file structure:
+```javascript
+export default {
+  async up(api, db) {
+    // Forward migration
+    await db.execute(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTO_INCREMENT,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    await db.addIndex('users', ['email']);
+  },
+  
+  async down(api, db) {
+    // Rollback migration
+    await db.dropTable('users');
+  }
+}
+```
+
+#### Migration Helper Methods
+
+The `db` object provides these helper methods:
+
+```javascript
+// Table operations
+await db.createTable(name, columns);
+await db.dropTable(name);
+
+// Column operations
+await db.addColumn(table, column, type, options);
+await db.dropColumn(table, column);
+
+// Index operations
+await db.addIndex(table, columns, options);
+await db.dropIndex(table, name);
+
+// Raw SQL
+await db.execute(sql, params);
+```
+
+#### Running Migrations
+
+```bash
+# Run all pending migrations
+npm run migrate:up
+
+# Run up to specific migration
+npm run migrate:up -- --target 20240101120000_add_users_table
+
+# Rollback last batch
+npm run migrate:down
+
+# Rollback specific number of migrations
+npm run migrate:down -- --steps 3
+
+# Check migration status
+npm run migrate:status
+
+# Reset (rollback all)
+npm run migrate:reset
+
+# Refresh (reset + run all)
+npm run migrate:refresh
+```
+
+#### Programmatic Usage
+
+```javascript
+// Run migrations programmatically
+await api.connect();
+
+// Get migration status
+const status = await api.migrations.status();
+console.log('Applied:', status.applied);
+console.log('Pending:', status.pending);
+
+// Run pending migrations
+const migrated = await api.migrations.up();
+console.log(`Ran ${migrated.length} migrations`);
+
+// Rollback
+const rolled = await api.migrations.down(1);
+console.log(`Rolled back ${rolled.length} migrations`);
+```
+
+#### Best Practices
+
+1. **Test migrations**: Always test in development first
+2. **Backup data**: Backup production data before running migrations
+3. **Atomic operations**: Use transactions when possible
+4. **Down migrations**: Always implement rollback logic
+5. **Incremental changes**: Make small, focused migrations
+6. **Version control**: Commit migrations with related code changes
+
+#### Example: Adding a Column
+
+```javascript
+// migrations/20240102000000_add_user_profile.js
+export default {
+  async up(api, db) {
+    // Add columns
+    await db.addColumn('users', 'bio', 'TEXT');
+    await db.addColumn('users', 'avatar', 'VARCHAR(500)');
+    await db.addColumn('users', 'last_login', 'TIMESTAMP');
+    
+    // Add index for queries
+    await db.addIndex('users', ['last_login']);
+  },
+  
+  async down(api, db) {
+    await db.dropIndex('users', 'idx_users_last_login');
+    await db.dropColumn('users', 'last_login');
+    await db.dropColumn('users', 'avatar');
+    await db.dropColumn('users', 'bio');
   }
 }
 ```
@@ -4103,6 +4755,122 @@ api
   .use(ViewsPlugin)                  // Field filtering
   .use(OpenAPIPlugin)                // API documentation
   .use(HTTPPlugin);                  // REST endpoints
+```
+
+## Security Features
+
+### Input Validation and Sanitization
+
+The API includes comprehensive security measures to prevent common attacks:
+
+#### Prototype Pollution Protection
+
+All input data is sanitized to prevent prototype pollution attacks:
+
+```javascript
+// These attacks are automatically blocked:
+// POST /api/users
+{
+  "__proto__": { "isAdmin": true },
+  "constructor": { "prototype": { "isAdmin": true } },
+  "name": "Attacker"
+}
+// Results in: BadRequestError - Potential prototype pollution detected
+```
+
+#### Circular Reference Protection
+
+```javascript
+// Circular references are detected and rejected:
+const data = { name: "Test" };
+data.self = data; // Creates circular reference
+
+// POST with circular data results in:
+// BadRequestError - Circular reference detected in request data
+```
+
+#### Size Limits
+
+Prevent DoS attacks with configurable limits:
+
+```javascript
+const schema = new Schema({
+  // Array size limits
+  tags: {
+    type: 'array',
+    maxItems: 100  // Max 100 tags
+  },
+  
+  // Object complexity limits
+  metadata: {
+    type: 'object',
+    maxKeys: 50,   // Max 50 properties
+    maxDepth: 5    // Max 5 levels of nesting
+  }
+});
+```
+
+#### SQL Injection Protection
+
+- All queries use parameterized statements
+- Filter values are sanitized and validated
+- Field names are checked against schema
+
+```javascript
+// These are safe:
+?filter[name]=Robert'); DROP TABLE users;--
+?filter[age][gt]=18 OR 1=1
+// Properly escaped and parameterized
+```
+
+#### Field Access Validation
+
+```javascript
+// Attempting to access system fields is blocked:
+?filter[__proto__]=malicious
+?filter[constructor.prototype]=evil
+// Results in: BadRequestError - Invalid filter field
+```
+
+### Format Validation with ReDoS Protection
+
+All regex patterns are tested for ReDoS vulnerabilities:
+
+```javascript
+const schema = new Schema({
+  email: {
+    type: 'string',
+    format: 'email'  // Safe, ReDoS-protected pattern
+  },
+  
+  custom: {
+    type: 'string',
+    validator: (value) => {
+      // Custom validation is time-limited
+      // Long-running validators are terminated
+      return complexValidation(value);
+    }
+  }
+});
+```
+
+### Error Context Sanitization
+
+Sensitive data is automatically removed from error responses:
+
+```javascript
+// Passwords, tokens, and secrets are sanitized:
+try {
+  await api.resources.users.create({
+    email: 'test@example.com',
+    password: 'secret123',
+    apiToken: 'tok_secret'
+  });
+} catch (error) {
+  // error.context will have password and apiToken removed
+  console.log(error.context);
+  // { email: 'test@example.com', password: '[REDACTED]', apiToken: '[REDACTED]' }
+}
 ```
 
 ## Type Definitions

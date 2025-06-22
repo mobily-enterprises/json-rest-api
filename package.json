@@ -34,11 +34,18 @@
     "type-check": "tsc --noEmit",
     "prebuild": "npm run clean",
     "clean": "rimraf dist",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "migrate:create": "node bin/migrate.js create",
+    "migrate:up": "node bin/migrate.js up",
+    "migrate:down": "node bin/migrate.js down",
+    "migrate:status": "node bin/migrate.js status",
+    "migrate:reset": "node bin/migrate.js reset",
+    "migrate:refresh": "node bin/migrate.js refresh"
   },
   "dependencies": {
     "alasql": "^4.6.6",
     "circular-json-es6": "^2.0.2",
+    "commander": "^12.1.0",
     "express": "^4.21.1",
     "ioredis": "^5.6.1",
     "isomorphic-dompurify": "^2.25.0",

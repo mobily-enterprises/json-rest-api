@@ -21,7 +21,12 @@ const api = createApi({
 
 api.addResource('users', new Schema({
   name: { type: 'string', required: true, searchable: true },
-  email: { type: 'string', unique: true, searchable: true },
+  email: { 
+    type: 'string', 
+    format: 'email',  // Safe email validation
+    unique: true, 
+    searchable: true 
+  },
   role: { type: 'string', enum: ['user', 'admin'], searchable: true }
 }));
 
@@ -41,7 +46,10 @@ With just a schema definition, you get:
 - ✅ **Complete REST endpoints** - GET, POST, PATCH, DELETE
 - ✅ **Automatic validation** - Type checking, constraints, custom rules  
 - ✅ **Smart querying** - Advanced filtering (19 operators), relationship sorting, pagination, search
-- ✅ **Relationships** - Automatic joins, nested includes, JSON:API relationship endpoints
+- ✅ **Relationships** - Automatic joins, nested includes, to-many relationships, JSON:API endpoints
+- ✅ **Field-level permissions** - Role-based access control per field
+- ✅ **Virtual fields** - Computed properties and to-many relationships
+- ✅ **Security built-in** - Prototype pollution protection, input validation, ReDoS protection
 - ✅ **Versioning** - API and resource versioning built-in
 - ✅ **JSON:API compliant** - Full spec compliance with strict mode, meta formatting, enhanced errors
 - ✅ **Extensible** - Hooks, plugins, custom types
@@ -71,13 +79,18 @@ const api = createApi({
   // http: { app }
 });
 
-// Define a resource (no relationships needed for simple example)
+// Define a resource with the latest features
 api.addResource('posts', new Schema({
   title: { type: 'string', required: true, min: 5, searchable: true },
   content: { type: 'string', required: true },
   author: { type: 'string', required: true, searchable: true },
   published: { type: 'boolean', default: false, searchable: true },
-  tags: { type: 'array' },
+  tags: { 
+    type: 'array',
+    searchable: true,  // Can filter by array contents
+    maxItems: 20       // Security limit
+  },
+  views: { type: 'number', default: 0, searchable: true },
   createdAt: { type: 'timestamp', default: () => Date.now() }
 }));
 
@@ -88,6 +101,7 @@ app.listen(3000, () => {
 
 // That's it! You now have:
 // GET    /api/posts?filter[published]=true&filter[author]=jane
+// GET    /api/posts?filter[views][gte]=100&filter[tags][contains]=javascript
 // GET    /api/posts?sort=-createdAt&page[size]=10
 // POST   /api/posts
 // PATCH  /api/posts/123
@@ -141,7 +155,7 @@ const userSchema = new Schema({
   email: { 
     type: 'string', 
     required: true,
-    match: /^[^@]+@[^@]+\.[^@]+$/,
+    format: 'email',  // Safe, ReDoS-protected validation
     lowercase: true
   },
   age: { type: 'number', min: 13, max: 120 },
@@ -150,7 +164,12 @@ const userSchema = new Schema({
     required: true,
     min: 3,
     max: 20,
-    match: /^[a-zA-Z0-9_]+$/
+    format: 'alphanumeric'  // Built-in safe pattern
+  },
+  metadata: {
+    type: 'object',
+    maxKeys: 50,    // Prevent DoS attacks
+    maxDepth: 5     // Limit nesting
   }
 });
 
@@ -162,46 +181,43 @@ const userSchema = new Schema({
 <summary><strong>Smart Relationships</strong></summary>
 
 ```javascript
-// First, define the users resource
+// Define users with to-many relationship
 api.addResource('users', new Schema({
-  name: { type: 'string', required: true },
-  email: { type: 'string', required: true },
-  avatar: { type: 'string' }
+  name: { type: 'string', required: true, searchable: true },
+  email: { type: 'string', format: 'email', required: true },
+  avatar: { type: 'string' },
+  // Virtual to-many relationship
+  posts: {
+    type: 'list',
+    virtual: true,
+    foreignResource: 'posts',
+    foreignKey: 'authorId',
+    defaultFilter: { published: true }  // Only show published posts
+  }
 }));
 
-// Then, define posts with a relationship to users
+// Define posts with to-one relationship
 api.addResource('posts', new Schema({
   title: { type: 'string', required: true },
   content: { type: 'string', required: true },
+  published: { type: 'boolean', searchable: true },
   authorId: { 
     type: 'id',
     refs: { 
       resource: 'users',
       join: { 
-        eager: true,           // Auto-include author
-        fields: ['name', 'avatar'], // Only these fields
-        resourceField: 'author'     // Place at post.author
+        eager: true,              // Auto-include author
+        fields: ['id', 'name', 'avatar'],  // Only these fields
+        preserveId: true          // Keep both ID and object
       }
-    }
+    },
+    searchable: true  // Required for to-many queries
   }
 }));
 
-// GET /api/posts returns:
-{
-  "data": [{
-    "id": "1",
-    "type": "posts",
-    "attributes": {
-      "title": "Hello World",
-      "content": "My first post",
-      "authorId": {
-        "id": "42",
-        "name": "Jane Doe",
-        "avatar": "https://..."
-      }
-    }
-  }]
-}
+// GET /api/posts?include=authorId
+// GET /api/users/1?include=posts  // Loads user with all their posts
+// GET /api/posts?include=authorId.posts  // Nested includes!
 ```
 </details>
 
@@ -249,6 +265,53 @@ GET /api/products?
   filter[price][lt]=1000&
   filter[category][in]=electronics,computers&
   filter[name][contains]=Pro
+```
+</details>
+
+<details>
+<summary><strong>Field-Level Permissions</strong></summary>
+
+```javascript
+// Control access to specific fields
+api.addResource('employees', new Schema({
+  name: { type: 'string', required: true },
+  
+  // Only HR and admins can see salary
+  salary: { 
+    type: 'number',
+    permissions: { 
+      read: ['hr', 'admin'] 
+    }
+  },
+  
+  // Only the employee themselves can see their SSN
+  ssn: {
+    type: 'string',
+    permissions: {
+      read: (user, record) => user.id === record.id
+    }
+  },
+  
+  // Different permissions for read/write/include
+  performanceReview: {
+    type: 'string',
+    permissions: {
+      read: ['hr', 'manager', 'self'],
+      write: ['hr', 'manager'],
+      include: 'authenticated'  // Must be logged in to include
+    }
+  },
+  
+  // Never exposed
+  internalNotes: {
+    type: 'string',
+    permissions: { read: false }  // No one can read this
+  }
+}));
+
+// Fields are automatically filtered based on user permissions
+// GET /api/employees/123 (as regular user) - salary/ssn/internalNotes hidden
+// GET /api/employees/123 (as HR) - sees salary, not ssn/internalNotes
 ```
 </details>
 
@@ -387,6 +450,7 @@ api
   .use(TimestampsPlugin)      // Adds createdAt/updatedAt
   .use(ValidationPlugin)      // Schema validation
   .use(VersioningPlugin)      // API and resource versioning
+  .use(MigrationPlugin)       // Database migrations
   .use(LoggingPlugin)         // Structured logging
   .use(SecurityPlugin)        // Security headers & rate limiting
   .use(DiscoveryPlugin)       // OpenAPI & JSON Schema generation
