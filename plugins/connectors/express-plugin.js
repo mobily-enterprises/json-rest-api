@@ -35,9 +35,9 @@ import { checkPeerDependency } from '../../lib/check-peer-dependency.js';
 
 export const ExpressPlugin = {
   name: 'express',
-  dependencies: ['rest-api'],
+  dependencies: ['rest-api', 'file-handling'],
   
-  install({ on, vars, helpers, pluginOptions, log, scopes }) {
+  async install({ on, vars, helpers, pluginOptions, log, scopes }) {
     // Check for Express dependency
     const express = checkPeerDependency('express', {
       optional: false,
@@ -51,6 +51,70 @@ export const ExpressPlugin = {
     
     // Track which scopes have routes created
     const routesCreated = new Set();
+    
+    // Register file detector if file handling is enabled
+    if (expressOptions.enableFileUploads !== false && helpers.registerFileDetector) {
+      // Determine which parser to use
+      const parserLib = expressOptions.fileParser || 'busboy';
+      const parserOptions = expressOptions.fileParserOptions || {};
+      
+      let detector;
+      
+      if (parserLib === 'multer') {
+        // Multer is Express-specific and works differently
+        log.info('Multer file parsing should be configured via Express middleware');
+      } else if (parserLib === 'busboy') {
+        // Check if busboy is available
+        try {
+          const Busboy = checkPeerDependency('busboy', {
+            optional: true,
+            log,
+            pluginName: 'Express plugin'
+          });
+          
+          if (Busboy) {
+            const { createBusboyDetector } = await import('../../lib/file-detectors/busboy-detector.js');
+            detector = createBusboyDetector(parserOptions);
+          }
+        } catch (e) {
+          log.warn('Busboy not available, file uploads disabled');
+        }
+      } else if (parserLib === 'formidable') {
+        // Check if formidable is available
+        try {
+          const formidable = checkPeerDependency('formidable', {
+            optional: true,
+            log,
+            pluginName: 'Express plugin'
+          });
+          
+          if (formidable) {
+            const { createFormidableDetector } = await import('../../lib/file-detectors/formidable-detector.js');
+            detector = createFormidableDetector(parserOptions);
+          }
+        } catch (e) {
+          log.warn('Formidable not available, file uploads disabled');
+        }
+      } else if (typeof parserLib === 'function') {
+        // Custom detector provided
+        detector = parserLib(parserOptions);
+      }
+      
+      // Register the detector
+      if (detector) {
+        helpers.registerFileDetector({
+          name: `express-${detector.name}`,
+          detect: (params) => {
+            // Only detect for Express requests
+            if (!params._expressReq) return false;
+            return detector.detect(params);
+          },
+          parse: detector.parse
+        });
+        
+        log.info(`Express plugin registered file detector: ${detector.name}`);
+      }
+    }
     
     // Create Express router
     const router = expressOptions.router || express.Router();

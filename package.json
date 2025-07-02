@@ -25,7 +25,9 @@
     "express": "^4.0.0",
     "qs": "^6.0.0",
     "content-type": "^1.0.0",
-    "raw-body": "^2.0.0"
+    "raw-body": "^2.0.0",
+    "busboy": "^1.0.0",
+    "formidable": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
@@ -38,6 +40,12 @@
       "optional": true
     },
     "raw-body": {
+      "optional": true
+    },
+    "busboy": {
+      "optional": true
+    },
+    "formidable": {
       "optional": true
     }
   }

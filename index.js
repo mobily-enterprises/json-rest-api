@@ -11,6 +11,9 @@
 // Main REST API plugin
 export { RestApiPlugin } from './plugins/rest-api-plugin.js';
 
+// File handling plugin
+export { FileHandlingPlugin } from './plugins/file-handling-plugin.js';
+
 // Connector plugins
 export { ExpressPlugin } from './plugins/connectors/express-plugin.js';
 export { HttpPlugin } from './plugins/connectors/http-plugin.js';

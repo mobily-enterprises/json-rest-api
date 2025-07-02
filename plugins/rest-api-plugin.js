@@ -15,10 +15,15 @@ import {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, emit }) {
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
+    
+    // Add event emission helper for scope methods
+    helpers.triggerEvent = (eventName, eventData) => {
+      return emit(eventName, eventData);
+    };
     
     vars.sortableFields = restApiOptions.sortableFields || [];
     vars.defaultSort = restApiOptions.defaultSort || null;
@@ -536,6 +541,13 @@ export const RestApiPlugin = {
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
 
+      // Emit event before processing
+      await helpers.triggerEvent('before:rest-api:post', {
+        scopeName,
+        params,
+        context
+      });
+
       // Make the method available to all hooks
       context.method = 'post'
 
@@ -836,6 +848,14 @@ export const RestApiPlugin = {
    */
    addScopeMethod('put', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions,
   scopeName }) => {
+    
+    // Emit event before processing
+    await helpers.triggerEvent('before:rest-api:put', {
+      scopeName,
+      params,
+      context
+    });
+    
     context.method = 'put'
 
     // Sanitise parameters
@@ -1122,6 +1142,14 @@ export const RestApiPlugin = {
      * // }
      */
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
+      
+      // Emit event before processing
+      await helpers.triggerEvent('before:rest-api:patch', {
+        scopeName,
+        params,
+        context
+      });
+      
       // Make the method available to all hooks
       context.method = 'patch'
 

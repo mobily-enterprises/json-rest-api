@@ -35,9 +35,9 @@ import { checkPeerDependency, createBasicQueryParser } from '../../lib/check-pee
 
 export const HttpPlugin = {
   name: 'http',
-  dependencies: ['rest-api'],
+  dependencies: ['rest-api', 'file-handling'],
   
-  install({ on, vars, helpers, pluginOptions, log, scopes }) {
+  async install({ on, vars, helpers, pluginOptions, log, scopes }) {
     const httpOptions = pluginOptions.http || {};
     const basePath = httpOptions.basePath || '/api';
     const strictContentType = httpOptions.strictContentType !== false;
@@ -102,6 +102,67 @@ export const HttpPlugin = {
     
     // Track which scopes have routes
     const routesCreated = new Set();
+    
+    // Register file detector if file handling is enabled
+    if (httpOptions.enableFileUploads !== false && helpers.registerFileDetector) {
+      // Determine which parser to use
+      const parserLib = httpOptions.fileParser || 'busboy';
+      const parserOptions = httpOptions.fileParserOptions || {};
+      
+      let detector;
+      
+      if (parserLib === 'busboy') {
+        // Check if busboy is available
+        try {
+          const Busboy = checkPeerDependency('busboy', {
+            optional: true,
+            log,
+            pluginName: 'HTTP plugin'
+          });
+          
+          if (Busboy) {
+            const { createBusboyDetector } = await import('../../lib/file-detectors/busboy-detector.js');
+            detector = createBusboyDetector(parserOptions);
+          }
+        } catch (e) {
+          log.warn('Busboy not available, file uploads disabled');
+        }
+      } else if (parserLib === 'formidable') {
+        // Check if formidable is available
+        try {
+          const formidable = checkPeerDependency('formidable', {
+            optional: true,
+            log,
+            pluginName: 'HTTP plugin'
+          });
+          
+          if (formidable) {
+            const { createFormidableDetector } = await import('../../lib/file-detectors/formidable-detector.js');
+            detector = createFormidableDetector(parserOptions);
+          }
+        } catch (e) {
+          log.warn('Formidable not available, file uploads disabled');
+        }
+      } else if (typeof parserLib === 'function') {
+        // Custom detector provided
+        detector = parserLib(parserOptions);
+      }
+      
+      // Register the detector
+      if (detector) {
+        helpers.registerFileDetector({
+          name: `http-${detector.name}`,
+          detect: (params) => {
+            // Only detect for HTTP requests
+            if (!params._httpReq) return false;
+            return detector.detect(params);
+          },
+          parse: detector.parse
+        });
+        
+        log.info(`HTTP plugin registered file detector: ${detector.name}`);
+      }
+    }
     
     /**
      * Parse query parameters from URL
