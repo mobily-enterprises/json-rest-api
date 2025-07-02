@@ -32,13 +32,13 @@
  * ```
  */
 
-import { RestApiValidationError } from '../lib/rest-api-errors.js';
+import { RestApiValidationError } from '../../lib/rest-api-errors.js';
 
 export const FileHandlingPlugin = {
   name: 'file-handling',
   dependencies: ['rest-api'],
   
-  install({ on, helpers, scopes, schemas, log }) {
+  install({ addHook, helpers, scopes, schemas, log }) {
     // Track which scopes have file fields
     const fileScopes = new Map(); // scopeName -> fileField[]
     
@@ -63,37 +63,36 @@ export const FileHandlingPlugin = {
     };
     
     /**
-     * Analyze schema to find file fields when scope is added
+     * Analyze schemas to find file fields
      */
-    on('scope:added', 'analyzeFileFields', ({ eventData }) => {
-      const { scopeName } = eventData;
-      const schema = schemas[scopeName];
-      
-      if (!schema) {
-        log.trace(`No schema found for scope '${scopeName}', skipping file field analysis`);
-        return;
-      }
-      
-      const fileFields = [];
-      
-      // Look for fields with type: 'file'
-      for (const [fieldName, fieldConfig] of Object.entries(schema)) {
-        if (fieldConfig.type === 'file') {
-          fileFields.push({
-            field: fieldName,
-            storage: fieldConfig.storage,
-            accepts: fieldConfig.accepts || ['*'],
-            maxSize: fieldConfig.maxSize,
-            required: fieldConfig.required || false
-          });
+    const analyzeFileFields = () => {
+      for (const [scopeName, schema] of Object.entries(schemas)) {
+        if (!schema) continue;
+        
+        const fileFields = [];
+        
+        // Look for fields with type: 'file'
+        for (const [fieldName, fieldConfig] of Object.entries(schema)) {
+          if (fieldConfig.type === 'file') {
+            fileFields.push({
+              field: fieldName,
+              storage: fieldConfig.storage,
+              accepts: fieldConfig.accepts || ['*'],
+              maxSize: fieldConfig.maxSize,
+              required: fieldConfig.required || false
+            });
+          }
+        }
+        
+        if (fileFields.length > 0) {
+          fileScopes.set(scopeName, fileFields);
+          log.info(`Scope '${scopeName}' has ${fileFields.length} file field(s): ${fileFields.map(f => f.field).join(', ')}`);
         }
       }
-      
-      if (fileFields.length > 0) {
-        fileScopes.set(scopeName, fileFields);
-        log.info(`Scope '${scopeName}' has ${fileFields.length} file field(s): ${fileFields.map(f => f.field).join(', ')}`);
-      }
-    });
+    };
+    
+    // Analyze existing schemas
+    analyzeFileFields();
     
     /**
      * Process files for a scope if it has file fields
@@ -266,19 +265,14 @@ export const FileHandlingPlugin = {
     /**
      * Hook into REST API methods to process files
      */
-    on('before:rest-api:post', 'processFilesPost', async ({ eventData }) => {
-      const { scopeName, params } = eventData;
-      await processFiles(scopeName, params);
-    });
-    
-    on('before:rest-api:put', 'processFilesPut', async ({ eventData }) => {
-      const { scopeName, params } = eventData;
-      await processFiles(scopeName, params);
-    });
-    
-    on('before:rest-api:patch', 'processFilesPatch', async ({ eventData }) => {
-      const { scopeName, params } = eventData;
-      await processFiles(scopeName, params);
+    addHook('beforeProcessing', 'fileHandling', 'processFiles', {}, async (context) => {
+      // Only process for mutation methods
+      if (!['post', 'put', 'patch'].includes(context.method)) {
+        return;
+      }
+      
+      // Process files if this scope has file fields
+      await processFiles(context.scopeName, context.params);
     });
     
     log.info('File handling plugin initialized successfully');

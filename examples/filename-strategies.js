@@ -4,10 +4,10 @@
  * Different approaches to handling uploaded filenames
  */
 
-import { SecureLocalStorage } from '../lib/storage/secure-local-storage.js';
+import { LocalStorage } from '../plugins/storage/local-storage.js';
 
 // Strategy 1: Random hash (most secure, default)
-const hashStorage = new SecureLocalStorage({
+const hashStorage = new LocalStorage({
   directory: './uploads/images',
   baseUrl: '/uploads/images',
   nameStrategy: 'hash',
@@ -16,7 +16,7 @@ const hashStorage = new SecureLocalStorage({
 // Uploads as: "a7f8d9e2b4c6e1f3.jpg"
 
 // Strategy 2: Timestamp-based (sortable)
-const timestampStorage = new SecureLocalStorage({
+const timestampStorage = new LocalStorage({
   directory: './uploads/documents',
   baseUrl: '/uploads/documents',
   nameStrategy: 'timestamp',
@@ -25,7 +25,7 @@ const timestampStorage = new SecureLocalStorage({
 // Uploads as: "1672531200000_a8f9.pdf"
 
 // Strategy 3: Sanitized original (user-friendly)
-const originalStorage = new SecureLocalStorage({
+const originalStorage = new LocalStorage({
   directory: './uploads/user-files',
   baseUrl: '/uploads/user-files',
   nameStrategy: 'original',
@@ -36,7 +36,7 @@ const originalStorage = new SecureLocalStorage({
 // Duplicates become: "My_Resume_2024_1.pdf", "My_Resume_2024_2.pdf"
 
 // Strategy 4: Custom naming function
-const customStorage = new SecureLocalStorage({
+const customStorage = new LocalStorage({
   directory: './uploads/profiles',
   baseUrl: '/uploads/profiles',
   nameStrategy: 'custom',
@@ -50,7 +50,7 @@ const customStorage = new SecureLocalStorage({
 // Uploads as: "user_12345_1672531200000.jpg"
 
 // Strategy 5: High security (no extensions)
-const secureStorage = new SecureLocalStorage({
+const secureStorage = new LocalStorage({
   directory: './uploads/secure',
   baseUrl: '/uploads/secure',
   nameStrategy: 'hash',
@@ -59,7 +59,7 @@ const secureStorage = new SecureLocalStorage({
 // All files upload as: "a7f8d9e2b4c6e1f3.bin"
 
 // Strategy 6: Whitelist extensions
-const whitelistStorage = new SecureLocalStorage({
+const whitelistStorage = new LocalStorage({
   directory: './uploads/images',
   baseUrl: '/uploads/images',
   nameStrategy: 'hash',
@@ -69,7 +69,7 @@ const whitelistStorage = new SecureLocalStorage({
 // Only allows specific image extensions
 
 // Example: Organization by date
-const dateOrganizedStorage = new SecureLocalStorage({
+const dateOrganizedStorage = new LocalStorage({
   directory: './uploads',
   baseUrl: '/uploads',
   nameStrategy: 'custom',
@@ -90,7 +90,7 @@ const dateOrganizedStorage = new SecureLocalStorage({
 // Uploads as: "2024/01/15/a7f8d9e2b4c6e1f3.jpg"
 
 // Example: Content-based naming
-const contentStorage = new SecureLocalStorage({
+const contentStorage = new LocalStorage({
   directory: './uploads/media',
   baseUrl: '/uploads/media',
   nameStrategy: 'custom',

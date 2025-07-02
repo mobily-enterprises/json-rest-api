@@ -34,7 +34,7 @@ The file handling system consists of three main components:
 ```javascript
 import { Api } from 'hooked-api';
 import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi/lib/storage/local-storage.js';
+import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
 
 // Create API
 const api = new Api({ name: 'my-api', version: '1.0.0' });
@@ -103,48 +103,26 @@ api.addScope('documents', {
 
 ## Storage Adapters
 
-Storage adapters handle where and how files are saved. The library includes three built-in adapters.
+Storage adapters handle where and how files are saved. The library includes two built-in adapters.
 
 ### Storage Adapter Comparison
 
-| Feature | LocalStorage | SecureLocalStorage | S3Storage |
-|---------|-------------|-------------------|-----------|
-| **Production Ready** | ❌ Basic only | ✅ Yes | ⚠️ Mock only |
-| **Filename Strategies** | 2 (hash, original) | 4 (hash, timestamp, original, custom) | 1 (hash only) |
-| **Path Traversal Protection** | ❌ Limited | ✅ Full | ✅ N/A |
-| **Extension Whitelist** | ❌ No | ✅ Yes | ❌ No |
-| **Duplicate Handling** | ❌ No | ✅ Yes | ✅ Automatic |
-| **Custom Naming** | ❌ No | ✅ Yes | ❌ No |
-| **Best For** | Development | Production local files | Cloud storage |
-
-### LocalStorage
-
-Saves files to the local filesystem:
-
-```javascript
-import { LocalStorage } from 'jsonrestapi/lib/storage/local-storage.js';
-
-const localStorage = new LocalStorage({
-  directory: './uploads',              // Where to save files
-  baseUrl: 'http://localhost:3000/uploads',  // Public URL prefix
-  keepOriginalName: false              // Use original filename? (default: false)
-});
-```
-
-When `keepOriginalName` is false, files are saved with unique generated names to prevent conflicts.
-
-**Filename Handling:**
-- **Default (`keepOriginalName: false`)**: Generates random hash + extension (e.g., `a7f8d9e2b4c6e1f3.jpg`)
-- **With `keepOriginalName: true`**: Sanitizes original name by replacing special characters with underscores
-
-⚠️ **Security Warning**: The basic LocalStorage has limited filename sanitization. For production use, consider using `SecureLocalStorage` (see below).
+| Feature | LocalStorage | S3Storage |
+|---------|-------------|-----------|
+| **Production Ready** | ✅ Yes | ⚠️ Mock only |
+| **Filename Strategies** | 4 (hash, timestamp, original, custom) | 1 (hash only) |
+| **Path Traversal Protection** | ✅ Full | ✅ N/A |
+| **Extension Whitelist** | ✅ Yes | ❌ No |
+| **Duplicate Handling** | ✅ Yes | ✅ Automatic |
+| **Custom Naming** | ✅ Yes | ❌ No |
+| **Best For** | Local file storage | Cloud storage |
 
 ### S3Storage
 
 Saves files to Amazon S3 or S3-compatible storage:
 
 ```javascript
-import { S3Storage } from 'jsonrestapi/lib/storage/s3-storage.js';
+import { S3Storage } from 'jsonrestapi/plugins/storage/s3-storage.js';
 
 const s3Storage = new S3Storage({
   bucket: 'my-uploads',                // S3 bucket name (required)
@@ -161,14 +139,14 @@ const s3Storage = new S3Storage({
 
 **Note**: The included S3Storage is a mock implementation for demonstration. For production use, you'll need to implement the actual AWS SDK calls.
 
-### SecureLocalStorage
+### LocalStorage
 
-A production-ready local storage adapter with advanced filename handling and security features:
+Saves files to the local filesystem with secure filename handling:
 
 ```javascript
-import { SecureLocalStorage } from 'jsonrestapi/lib/storage/secure-local-storage.js';
+import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
 
-const secureStorage = new SecureLocalStorage({
+const localStorage = new LocalStorage({
   directory: './uploads',              // Where to save files
   baseUrl: '/uploads',                 // Public URL prefix
   nameStrategy: 'hash',                // Filename strategy (see below)
@@ -434,7 +412,7 @@ When validation fails, you'll get appropriate error responses:
 ```javascript
 import { Api } from 'hooked-api';
 import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi/lib/storage/local-storage.js';
+import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
 import express from 'express';
 
 // Setup
@@ -515,24 +493,24 @@ api.addScope('articles', {
 Different strategies for different use cases:
 
 ```javascript
-import { SecureLocalStorage } from 'jsonrestapi/lib/storage/secure-local-storage.js';
+import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
 
 // User avatars - use hash for security and deduplication
-const avatarStorage = new SecureLocalStorage({
+const avatarStorage = new LocalStorage({
   directory: './uploads/avatars',
   baseUrl: '/uploads/avatars',
   nameStrategy: 'hash'
 });
 
 // Documents - use timestamp for sorting
-const documentStorage = new SecureLocalStorage({
+const documentStorage = new LocalStorage({
   directory: './uploads/documents',
   baseUrl: '/uploads/documents',
   nameStrategy: 'timestamp'
 });
 
 // User downloads - preserve original names
-const downloadStorage = new SecureLocalStorage({
+const downloadStorage = new LocalStorage({
   directory: './uploads/downloads',
   baseUrl: '/uploads/downloads',
   nameStrategy: 'original',
@@ -540,7 +518,7 @@ const downloadStorage = new SecureLocalStorage({
 });
 
 // High security - no extensions
-const secureStorage = new SecureLocalStorage({
+const secureStorage = new LocalStorage({
   directory: './uploads/secure',
   baseUrl: '/uploads/secure',
   nameStrategy: 'hash',
@@ -549,7 +527,7 @@ const secureStorage = new SecureLocalStorage({
 });
 
 // Organized by date
-const organizedStorage = new SecureLocalStorage({
+const organizedStorage = new LocalStorage({
   directory: './uploads',
   baseUrl: '/uploads',
   nameStrategy: 'custom',
@@ -706,20 +684,20 @@ Then visit http://localhost:3000 to see the test forms.
    // "..\\..\\windows\\system32\\config\\sam"
    // "uploads/../../../index.js"
    
-   // SecureLocalStorage handles this automatically
+   // LocalStorage handles this automatically
    ```
 
 3. **Extension validation** - Whitelist allowed extensions
    ```javascript
-   // Use SecureLocalStorage with whitelist
-   const storage = new SecureLocalStorage({
+   // Use LocalStorage with whitelist
+   const storage = new LocalStorage({
      allowedExtensions: ['.jpg', '.jpeg', '.png', '.pdf']
    });
    ```
 
 4. **Consider removing extensions entirely** for sensitive files
    ```javascript
-   const highSecurityStorage = new SecureLocalStorage({
+   const highSecurityStorage = new LocalStorage({
      nameStrategy: 'hash',
      preserveExtension: false  // All files become .bin
    });

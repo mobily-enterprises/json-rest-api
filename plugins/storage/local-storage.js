@@ -1,14 +1,14 @@
 /**
- * Secure Local File Storage Adapter
+ * Local File Storage Adapter
  * 
- * Enhanced version of LocalStorage with better filename handling
+ * Production-ready local storage with secure filename handling
  */
 
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-export class SecureLocalStorage {
+export class LocalStorage {
   constructor(options = {}) {
     this.directory = path.resolve(options.directory || './uploads');
     this.baseUrl = options.baseUrl || '/uploads';

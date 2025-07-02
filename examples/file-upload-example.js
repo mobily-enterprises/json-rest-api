@@ -12,8 +12,8 @@ import {
   ExpressPlugin,
   HttpPlugin 
 } from '../index.js';
-import { LocalStorage } from '../lib/storage/local-storage.js';
-import { S3Storage } from '../lib/storage/s3-storage.js';
+import { LocalStorage } from '../plugins/storage/local-storage.js';
+import { S3Storage } from '../plugins/storage/s3-storage.js';
 import express from 'express';
 
 // Create API instance

@@ -5,25 +5,20 @@ import {
   validatePostPayload, 
   validatePutPayload, 
   validatePatchPayload 
-} from '../lib/payload-validators.js';
+} from '../../lib/payload-validators.js';
 import { 
   RestApiValidationError, 
   RestApiResourceError, 
   RestApiPayloadError 
-} from '../lib/rest-api-errors.js';
+} from '../../lib/rest-api-errors.js';
 
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, emit }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions }) {
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
-    
-    // Add event emission helper for scope methods
-    helpers.triggerEvent = (eventName, eventData) => {
-      return emit(eventName, eventData);
-    };
     
     vars.sortableFields = restApiOptions.sortableFields || [];
     vars.defaultSort = restApiOptions.defaultSort || null;
@@ -541,15 +536,14 @@ export const RestApiPlugin = {
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
 
-      // Emit event before processing
-      await helpers.triggerEvent('before:rest-api:post', {
-        scopeName,
-        params,
-        context
-      });
-
       // Make the method available to all hooks
       context.method = 'post'
+      context.scopeName = scopeName
+      context.params = params
+      
+      // Run early hooks for pre-processing (e.g., file handling)
+      runHooks('beforeProcessing')
+      runHooks('beforeProcessingPost')
 
       // Sanitise parameters and payload
       params.queryParams = params.queryParams  || {}
@@ -849,14 +843,13 @@ export const RestApiPlugin = {
    addScopeMethod('put', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions,
   scopeName }) => {
     
-    // Emit event before processing
-    await helpers.triggerEvent('before:rest-api:put', {
-      scopeName,
-      params,
-      context
-    });
-    
     context.method = 'put'
+    context.scopeName = scopeName
+    context.params = params
+    
+    // Run early hooks for pre-processing (e.g., file handling)
+    runHooks('beforeProcessing')
+    runHooks('beforeProcessingPut')
 
     // Sanitise parameters
     params.queryParams = params.queryParams || {}
@@ -1143,15 +1136,14 @@ export const RestApiPlugin = {
      */
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       
-      // Emit event before processing
-      await helpers.triggerEvent('before:rest-api:patch', {
-        scopeName,
-        params,
-        context
-      });
-      
       // Make the method available to all hooks
       context.method = 'patch'
+      context.scopeName = scopeName
+      context.params = params
+      
+      // Run early hooks for pre-processing (e.g., file handling)
+      runHooks('beforeProcessing')
+      runHooks('beforeProcessingPatch')
 
       // Sanitise parameters
       params.queryParams = params.queryParams || {}

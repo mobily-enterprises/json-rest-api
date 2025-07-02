@@ -5,7 +5,6 @@ export const RestApiKnexPlugin = {
 
   install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions }) {
 
-
     // Define default storage helpers that throw errors
     helpers.dataGet = async ({ scopeName, params }) => {
       throw new Error(`No storage implementation for get. Install a storage plugin.`);

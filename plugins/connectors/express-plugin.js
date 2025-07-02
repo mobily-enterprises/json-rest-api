@@ -73,7 +73,7 @@ export const ExpressPlugin = {
           });
           
           if (Busboy) {
-            const { createBusboyDetector } = await import('../../lib/file-detectors/busboy-detector.js');
+            const { createBusboyDetector } = await import('./file-detectors/busboy-detector.js');
             detector = createBusboyDetector(parserOptions);
           }
         } catch (e) {
@@ -89,7 +89,7 @@ export const ExpressPlugin = {
           });
           
           if (formidable) {
-            const { createFormidableDetector } = await import('../../lib/file-detectors/formidable-detector.js');
+            const { createFormidableDetector } = await import('./file-detectors/formidable-detector.js');
             detector = createFormidableDetector(parserOptions);
           }
         } catch (e) {
