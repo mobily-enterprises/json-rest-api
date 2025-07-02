@@ -13,10 +13,10 @@ export { RestApiPlugin } from './plugins/core/rest-api-plugin.js';
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js';
 
 // Connector plugins
-export { ExpressPlugin } from './plugins/connectors/express-plugin.js';
-export { HttpPlugin } from './plugins/connectors/http-plugin.js';
-// Future: export { FastifyPlugin } from './plugins/connectors/fastify-plugin.js';
-// Future: export { KoaPlugin } from './plugins/connectors/koa-plugin.js';
+export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js';
+export { HttpPlugin } from './plugins/core/connectors/http-plugin.js';
+// Future: export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js';
+// Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
 
 // Error classes for consumers who need them
 export {

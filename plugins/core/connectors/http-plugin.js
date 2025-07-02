@@ -1,6 +1,6 @@
 import { createServer } from 'http';
 import { parse as parseUrl } from 'url';
-import { checkPeerDependency, createBasicQueryParser } from '../../lib/check-peer-dependency.js';
+import { checkPeerDependency, createBasicQueryParser } from '../../../lib/check-peer-dependency.js';
 
 /**
  * HTTP Plugin for Hooked API
@@ -121,7 +121,7 @@ export const HttpPlugin = {
           });
           
           if (Busboy) {
-            const { createBusboyDetector } = await import('./file-detectors/busboy-detector.js');
+            const { createBusboyDetector } = await import('../lib/busboy-detector.js');
             detector = createBusboyDetector(parserOptions);
           }
         } catch (e) {
@@ -137,7 +137,7 @@ export const HttpPlugin = {
           });
           
           if (formidable) {
-            const { createFormidableDetector } = await import('./file-detectors/formidable-detector.js');
+            const { createFormidableDetector } = await import('../lib/formidable-detector.js');
             detector = createFormidableDetector(parserOptions);
           }
         } catch (e) {
