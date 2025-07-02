@@ -1,0 +1,44 @@
+{
+  "name": "jsonrestapi",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mobily-enterprises/jsonrestapi.git"
+  },
+  "author": "Tony Mobily",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/mobily-enterprises/jsonrestapi/issues"
+  },
+  "homepage": "https://github.com/mobily-enterprises/jsonrestapi#readme",
+  "description": "REST API plugin for hooked-api with JSON:API compliance",
+  "dependencies": {
+    "hooked-api": "^1.0.0",
+    "jsonrestapi-schema": "^1.0.0"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0",
+    "qs": "^6.0.0",
+    "content-type": "^1.0.0",
+    "raw-body": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "qs": {
+      "optional": true
+    },
+    "content-type": {
+      "optional": true
+    },
+    "raw-body": {
+      "optional": true
+    }
+  }
+}
