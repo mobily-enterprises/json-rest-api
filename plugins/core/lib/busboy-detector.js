@@ -12,7 +12,7 @@
  * 
  * Usage:
  * ```javascript
- * import { createBusboyDetector } from 'jsonrestapi/lib/file-detectors/busboy-detector.js';
+ * import { createBusboyDetector } from 'jsonrestapi/plugins/core/lib/busboy-detector.js';
  * 
  * api.use(HttpPlugin, {
  *   fileParser: 'busboy',

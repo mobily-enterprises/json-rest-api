@@ -444,7 +444,7 @@ api.addScope('photos', {
 // Express app
 const app = express();
 app.use('/uploads', express.static('./uploads'));
-api.mountExpress(app);
+api.express.mount(app);
 
 // HTML form for testing
 app.get('/', (req, res) => {

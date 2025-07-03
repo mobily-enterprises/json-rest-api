@@ -19,21 +19,18 @@
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
     "hooked-api": "^1.0.0",
-    "jsonrestapi-schema": "^1.0.0"
+    "jsonrestapi-schema": "^1.0.0",
+    "qs": "^6.0.0"
   },
   "peerDependencies": {
-    "express": "^4.0.0",
-    "qs": "^6.0.0",
-    "content-type": "^1.0.0",
-    "raw-body": "^2.0.0",
     "busboy": "^1.0.0",
-    "formidable": "^3.0.0"
+    "content-type": "^1.0.0",
+    "express": "^4.0.0",
+    "formidable": "^3.0.0",
+    "raw-body": "^2.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
-      "optional": true
-    },
-    "qs": {
       "optional": true
     },
     "content-type": {
@@ -48,5 +45,8 @@
     "formidable": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "express": "^5.1.0"
   }
 }

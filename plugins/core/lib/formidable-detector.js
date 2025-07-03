@@ -13,7 +13,7 @@
  * 
  * Usage:
  * ```javascript
- * import { createFormidableDetector } from 'jsonrestapi/lib/file-detectors/formidable-detector.js';
+ * import { createFormidableDetector } from 'jsonrestapi/plugins/core/lib/formidable-detector.js';
  * 
  * api.use(ExpressPlugin, {
  *   fileParser: 'formidable',

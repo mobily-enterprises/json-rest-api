@@ -1,5 +1,3 @@
-import { checkPeerDependency } from '../../../lib/check-peer-dependency.js';
-
 /**
  * Express Plugin for Hooked API
  * 
@@ -13,10 +11,18 @@ import { checkPeerDependency } from '../../../lib/check-peer-dependency.js';
  * - Error mapping to HTTP status codes
  * - Content type validation
  * - Middleware injection points
+ * - File upload support with busboy or formidable
  * 
- * Usage:
+ * Required dependencies:
+ * - express: The Express framework
+ * 
+ * Optional dependencies:
+ * - busboy or formidable: File upload support
+ * 
+ * Basic usage:
  * ```javascript
- * import { ExpressPlugin } from './express-plugin.js';
+ * import { ExpressPlugin } from 'jsonrestapi';
+ * import express from 'express';
  * 
  * const api = new Api({ name: 'my-api', version: '1.0.0' });
  * api.use(RestApiPlugin);
@@ -26,10 +32,57 @@ import { checkPeerDependency } from '../../../lib/check-peer-dependency.js';
  *   requestSizeLimit: '10mb'   // Default: '1mb'
  * });
  * 
- * // In your Express app:
- * app.use(api.expressRouter);
- * // or
- * api.mountExpress(app, '/v1');
+ * const app = express();
+ * 
+ * // Both approaches are equivalent:
+ * 
+ * // Approach 1: Direct router usage (standard Express pattern)
+ * app.use(api.express.router);                    // Mount at root
+ * app.use('/v1', api.express.router);             // Mount at /v1
+ * app.use('/api/v2', api.express.router);         // Mount at /api/v2
+ * 
+ * // Approach 2: Convenience method (adds logging)
+ * api.express.mount(app);                         // Mount at root
+ * api.express.mount(app, '/v1');                  // Mount at /v1
+ * api.express.mount(app, '/api/v2');              // Mount at /api/v2
+ * 
+ * // The mount method is just syntactic sugar that calls app.use() and logs the mount path
+ * ```
+ * 
+ * Advanced usage with middleware:
+ * ```javascript
+ * api.use(ExpressPlugin, {
+ *   basePath: '/api',
+ *   middleware: {
+ *     // Apply middleware before all routes
+ *     beforeAll: [authMiddleware, loggingMiddleware],
+ *     
+ *     // Apply middleware to specific scopes
+ *     beforeScope: {
+ *       users: [requireAuth],
+ *       posts: [requireAuth, checkPermissions]
+ *     },
+ *     
+ *     // Apply middleware after scope routes
+ *     afterScope: {
+ *       users: [auditLogger]
+ *     }
+ *   },
+ *   
+ *   // Provide your own router instance
+ *   router: express.Router({ mergeParams: true })
+ * });
+ * ```
+ * 
+ * File upload configuration:
+ * ```javascript
+ * api.use(ExpressPlugin, {
+ *   enableFileUploads: true,  // Default: true
+ *   fileParser: 'busboy',     // 'busboy' or 'formidable'
+ *   fileParserOptions: {
+ *     limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+ *   }
+ * });
  * ```
  */
 
@@ -37,13 +90,23 @@ export const ExpressPlugin = {
   name: 'express',
   dependencies: ['rest-api', 'file-handling'],
   
-  async install({ on, vars, helpers, pluginOptions, log, scopes }) {
-    // Check for Express dependency
-    const express = checkPeerDependency('express', {
-      optional: false,
-      log,
-      pluginName: 'Express plugin'
-    });
+  async install({ on, vars, helpers, pluginOptions, log, scopes, addApiMethod, api }) {
+    // Initialize express namespace under api.http
+    if (!api.http) {
+      api.http = {};
+    }
+    api.http.express = {};
+    
+    // Import Express - will fail with clear error if not installed
+    let express;
+    try {
+      express = await import('express');
+      express = express.default || express;
+    } catch (e) {
+      console.error('Express import error:', e);
+      throw new Error('Express is required for the Express plugin. Install with: npm install express');
+    }
+    
     const expressOptions = pluginOptions.express || {};
     const basePath = expressOptions.basePath || '/api';
     const strictContentType = expressOptions.strictContentType !== false;
@@ -53,7 +116,7 @@ export const ExpressPlugin = {
     const routesCreated = new Set();
     
     // Register file detector if file handling is enabled
-    if (expressOptions.enableFileUploads !== false && helpers.registerFileDetector) {
+    if (expressOptions.enableFileUploads !== false && vars.rest?.registerFileDetector) {
       // Determine which parser to use
       const parserLib = expressOptions.fileParser || 'busboy';
       const parserOptions = expressOptions.fileParserOptions || {};
@@ -64,45 +127,24 @@ export const ExpressPlugin = {
         // Multer is Express-specific and works differently
         log.info('Multer file parsing should be configured via Express middleware');
       } else if (parserLib === 'busboy') {
-        // Check if busboy is available
         try {
-          const Busboy = checkPeerDependency('busboy', {
-            optional: true,
-            log,
-            pluginName: 'Express plugin'
-          });
-          
-          if (Busboy) {
-            const { createBusboyDetector } = await import('../lib/busboy-detector.js');
-            detector = createBusboyDetector(parserOptions);
-          }
+          const { createBusboyDetector } = await import('../lib/busboy-detector.js');
+          detector = createBusboyDetector(parserOptions);
         } catch (e) {
-          log.warn('Busboy not available, file uploads disabled');
+          log.warn('Busboy not installed. Install with: npm install busboy');
         }
       } else if (parserLib === 'formidable') {
-        // Check if formidable is available
         try {
-          const formidable = checkPeerDependency('formidable', {
-            optional: true,
-            log,
-            pluginName: 'Express plugin'
-          });
-          
-          if (formidable) {
-            const { createFormidableDetector } = await import('../lib/formidable-detector.js');
-            detector = createFormidableDetector(parserOptions);
-          }
+          const { createFormidableDetector } = await import('../lib/formidable-detector.js');
+          detector = createFormidableDetector(parserOptions);
         } catch (e) {
-          log.warn('Formidable not available, file uploads disabled');
+          log.warn('Formidable not installed. Install with: npm install formidable');
         }
-      } else if (typeof parserLib === 'function') {
-        // Custom detector provided
-        detector = parserLib(parserOptions);
       }
       
       // Register the detector
       if (detector) {
-        helpers.registerFileDetector({
+        vars.rest.registerFileDetector({
           name: `express-${detector.name}`,
           detect: (params) => {
             // Only detect for Express requests
@@ -393,11 +435,11 @@ export const ExpressPlugin = {
       finalRouter = globalRouter;
     }
     
-    // Store router in vars for external access
-    vars.expressRouter = finalRouter;
+    // Store router in api.http.express namespace
+    api.http.express.router = finalRouter;
     
     // Add convenient mounting method
-    helpers.mountExpress = (app, path = '') => {
+    api.http.express.mount = (app, path = '') => {
       app.use(path, finalRouter);
       log.info(`Express routes mounted at ${path || '/'}`);
     };

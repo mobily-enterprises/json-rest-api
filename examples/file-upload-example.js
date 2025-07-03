@@ -85,7 +85,7 @@ api.addScope('documents', {
 });
 
 // Add storage helpers for demonstration
-api.vars.helpers.dataPost = async ({ scopeName, inputRecord }) => {
+api.helpers.dataPost = async ({ scopeName, inputRecord }) => {
   console.log(`Creating ${scopeName}:`, inputRecord);
   
   // Simulate database save
@@ -100,7 +100,7 @@ api.vars.helpers.dataPost = async ({ scopeName, inputRecord }) => {
   };
 };
 
-api.vars.helpers.dataGet = async ({ scopeName, id }) => {
+api.helpers.dataGet = async ({ scopeName, id }) => {
   // Simulate database fetch
   return {
     data: {
@@ -120,7 +120,7 @@ const app = express();
 app.use('/uploads', express.static('./uploads'));
 
 // Mount API
-api.mountExpress(app, '/api');
+api.express.mount(app, '/api');
 
 // Add a simple upload form for testing
 app.get('/', (req, res) => {

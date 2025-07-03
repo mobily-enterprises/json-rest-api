@@ -27,9 +27,9 @@ import express from 'express';
  * });
  * 
  * // In your Express app:
- * app.use(api.expressRouter);
+ * app.use(api.express.router);
  * // or
- * api.mountExpress(app, '/v1');
+ * api.express.mount(app, '/v1');
  * ```
  */
 
@@ -37,7 +37,7 @@ export const ExpressPlugin = {
   name: 'express',
   dependencies: ['rest-api'],
   
-  install({ on, vars, helpers, pluginOptions, log, scopes }) {
+  install({ on, vars, helpers, pluginOptions, log, scopes, api }) {
     const expressOptions = pluginOptions.express || {};
     const basePath = expressOptions.basePath || '/api';
     const strictContentType = expressOptions.strictContentType !== false;
@@ -349,11 +349,14 @@ export const ExpressPlugin = {
       finalRouter = globalRouter;
     }
     
-    // Store router in vars for external access
-    vars.expressRouter = finalRouter;
+    // Initialize express namespace
+    api.express = {};
+    
+    // Store router in express namespace
+    api.express.router = finalRouter;
     
     // Add convenient mounting method
-    helpers.mountExpress = (app, path = '') => {
+    api.express.mount = (app, path = '') => {
       app.use(path, finalRouter);
       log.info(`Express routes mounted at ${path || '/'}`);
     };

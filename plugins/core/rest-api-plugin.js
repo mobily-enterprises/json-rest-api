@@ -15,7 +15,13 @@ import {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias }) {
+
+    // Initialize the rest namespace for REST API functionality
+    api.rest = {};
+
+    // Set up REST-friendly aliases
+    setScopeAlias('resources', 'addResource');
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};

@@ -12,11 +12,18 @@
 export { RestApiPlugin } from './plugins/core/rest-api-plugin.js';
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js';
 
+// Database plugins
+export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
+
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js';
 export { HttpPlugin } from './plugins/core/connectors/http-plugin.js';
 // Future: export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js';
 // Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
+
+// Storage plugins for file handling
+export { LocalStorage } from './plugins/storage/local-storage.js';
+export { S3Storage } from './plugins/storage/s3-storage.js';
 
 // Error classes for consumers who need them
 export {

@@ -1,6 +1,7 @@
 import express from 'express';
-import { Api } from 'hooked-api';
-import { RestApiPlugin, ExpressPlugin } from 'jsonrestapi';
+import { Api } from './index.js';
+import { RestApiPlugin } from './rest-api-plugin.js';
+import { ExpressPlugin } from './express-plugin.js';
 
 // Create an Express app
 const app = express();
@@ -98,7 +99,7 @@ const MockStoragePlugin = {
       }
       
       if (!record) {
-        const { RestApiResourceError } = await import('jsonrestapi');
+        const { RestApiResourceError } = await import('./rest-api-errors.js');
         throw new RestApiResourceError(`${scopeName} with id ${id} not found`, {
           subtype: 'not_found',
           resourceType: scopeName,
@@ -177,7 +178,7 @@ const MockStoragePlugin = {
       }
       
       if (!record) {
-        const { RestApiResourceError } = await import('jsonrestapi');
+        const { RestApiResourceError } = await import('./rest-api-errors.js');
         throw new RestApiResourceError(`${scopeName} with id ${id} not found`, {
           subtype: 'not_found',
           resourceType: scopeName,
@@ -228,7 +229,7 @@ const MockStoragePlugin = {
       if (scopeName === 'articles') {
         const index = articles.findIndex(a => a.id == id);
         if (index === -1) {
-          const { RestApiResourceError } = await import('jsonrestapi');
+          const { RestApiResourceError } = await import('./rest-api-errors.js');
           throw new RestApiResourceError(`${scopeName} with id ${id} not found`, {
             subtype: 'not_found',
             resourceType: scopeName,
@@ -245,7 +246,7 @@ const MockStoragePlugin = {
 api.use(MockStoragePlugin);
 
 // Mount the API routes
-app.use(api.vars.expressRouter);
+app.use(api.rest.express.router);
 
 // Start the server
 const PORT = process.env.PORT || 3000;
