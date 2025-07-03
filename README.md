@@ -1099,3 +1099,45 @@ await api.knex.transaction(async (trx) => {
 ```
 
 With this configuration, your REST API will automatically use MySQL for all database operations, with full support for filtering, sorting, and pagination as described in the previous sections.
+
+### Advanced Filtering with Hooks
+
+The REST API Knex Plugin supports extensible filtering through hooks. When adding custom filters, always use grouping to prevent accidental security bypasses:
+
+```javascript
+// Add a tenant isolation filter
+api.addHook('knexQueryFiltering', 'tenantFilter', { order: -100 }, ({ query }) => {
+  query.where(function() {
+    this.where('tenant_id', getCurrentTenant());
+    this.where('deleted_at', null);
+  });
+});
+
+// Add a complex search filter
+api.addHook('knexQueryFiltering', 'searchFilter', {}, ({ query, filters }) => {
+  if (filters.search) {
+    query.where(function() {
+      const term = `%${filters.search}%`;
+      this.where('title', 'like', term)
+          .orWhere('description', 'like', term)
+          .orWhere('tags', 'like', term);
+    });
+  }
+});
+
+// Add region-based filtering
+api.addHook('knexQueryFiltering', 'regionFilter', {}, ({ query }) => {
+  query.where(function() {
+    const userRegion = getUserRegion();
+    // Show items from user's region, global items, or items without a region
+    this.where('region', userRegion)
+        .orWhere('region', 'global')
+        .orWhereNull('region');
+  });
+});
+```
+
+These filters will be combined with AND, ensuring that security filters cannot be bypassed:
+- `WHERE (tenant_id = 123 AND deleted_at IS NULL) AND (title LIKE '%search%' OR description LIKE '%search%' OR tags LIKE '%search%') AND (region = 'US' OR region = 'global' OR region IS NULL)`
+
+**Important**: Always wrap your filter conditions in `query.where(function() { ... })` to ensure proper grouping. This prevents OR conditions from accidentally bypassing other filters.

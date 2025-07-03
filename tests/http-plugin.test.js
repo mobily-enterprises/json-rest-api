@@ -2,17 +2,15 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { Api, resetGlobalRegistryForTesting } from 'hooked-api';
 import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js';
-import { ExpressPlugin } from '../plugins/core/connectors/express-plugin.js';
-import express from 'express';
+import { HttpPlugin } from '../plugins/core/connectors/http-plugin.js';
 import { 
   RestApiValidationError, 
   RestApiResourceError, 
   RestApiPayloadError 
 } from '../lib/rest-api-errors.js';
 
-describe('ExpressPlugin', () => {
+describe('HttpPlugin', () => {
   let api;
-  let app;
   let server;
   let baseUrl;
   
@@ -22,7 +20,7 @@ describe('ExpressPlugin', () => {
     
     // Create API instance
     api = new Api({
-      name: 'test-express-api',
+      name: 'test-http-api',
       version: '1.0.0'
     });
     
@@ -252,8 +250,9 @@ describe('ExpressPlugin', () => {
   });
 
   describe('Plugin Installation', () => {
-    test('should install successfully and create http.express namespace', async () => {
-      await api.use(ExpressPlugin, {
+    test('should install successfully and create http namespace', async () => {
+      await api.use(HttpPlugin, {
+        port: 0, // Use random port
         basePath: '/api',
         strictContentType: true
       });
@@ -261,9 +260,9 @@ describe('ExpressPlugin', () => {
       setupResourcesAndData();
       
       assert.ok(api.http, 'Should create http namespace');
-      assert.ok(api.http.express, 'Should create express namespace');
-      assert.ok(api.http.express.router, 'Should create router');
-      assert.ok(typeof api.http.express.mount === 'function', 'Should create mount function');
+      assert.ok(api.http.server, 'Should create server');
+      assert.ok(api.http.handler, 'Should create handler function');
+      assert.ok(typeof api.http.startServer === 'function', 'Should create startServer function');
     });
 
     test('should require rest-api plugin as dependency', async () => {
@@ -276,119 +275,59 @@ describe('ExpressPlugin', () => {
       
       // This should fail because rest-api plugin is not installed
       await assert.rejects(
-        newApi.use(ExpressPlugin),
+        newApi.use(HttpPlugin),
         Error,
         'Should require rest-api plugin'
       );
     });
 
-    test('should create routes for existing scopes', async () => {
-      await api.use(ExpressPlugin, {
+    test('should start server on configured port', async () => {
+      await api.use(HttpPlugin, {
+        port: 0, // Use random port
         basePath: '/api'
       });
       
       setupResourcesAndData();
       
-      // Router should have routes for books and authors
-      const router = api.http.express.router;
-      assert.ok(router.stack.length > 0, 'Should have routes');
+      server = api.http.startServer();
+      const port = server.address().port;
+      baseUrl = `http://localhost:${port}`;
       
-      // Check that we can access the router
-      assert.ok(router, 'Router should exist');
+      assert.ok(port > 0, 'Should bind to a valid port');
+      
+      // Test basic connectivity
+      const response = await fetch(`${baseUrl}/api/books`);
+      assert.strictEqual(response.status, 200);
     });
 
-    test('should create routes for dynamically added scopes', async () => {
-      await api.use(ExpressPlugin, {
-        basePath: '/api'
-      });
-      
-      setupResourcesAndData();
-      
-      const initialRoutes = api.http.express.router.stack.length;
-      
-      // Add new scope after plugin installation
-      api.addResource('categories', {
-        schema: {
-          name: { type: 'string', required: true }
-        }
-      });
-      
-      // Should have more routes now
-      assert.ok(api.http.express.router.stack.length > initialRoutes, 'Should add routes for new scope');
-    });
-  });
-
-  describe('Router Configuration', () => {
     test('should use custom basePath', async () => {
-      await api.use(ExpressPlugin, {
+      await api.use(HttpPlugin, {
+        port: 0,
         basePath: '/v1/api'
       });
       
       setupResourcesAndData();
       
-      app = express();
-      app.use(api.http.express.router);
-      
-      server = app.listen(0);
+      server = api.http.startServer();
       const port = server.address().port;
       
       const response = await fetch(`http://localhost:${port}/v1/api/books`);
       assert.strictEqual(response.status, 200, 'Should respond on custom basePath');
     });
-
-    test('should support custom router instance', async () => {
-      const customRouter = express.Router({ mergeParams: true });
-      
-      await api.use(ExpressPlugin, {
-        basePath: '/api',
-        router: customRouter
-      });
-      
-      setupResourcesAndData();
-      
-      // The custom router should be wrapped, not replaced
-      assert.ok(api.http.express.router, 'Should have router');
-    });
-
-    test('should apply global middleware', async () => {
-      let middlewareCalled = false;
-      const globalMiddleware = (req, res, next) => {
-        middlewareCalled = true;
-        next();
-      };
-      
-      await api.use(ExpressPlugin, {
-        basePath: '/api',
-        middleware: {
-          beforeAll: [globalMiddleware]
-        }
-      });
-      
-      setupResourcesAndData();
-      
-      app = express();
-      app.use(api.http.express.router);
-      server = app.listen(0);
-      const port = server.address().port;
-      
-      await fetch(`http://localhost:${port}/api/books`);
-      assert.ok(middlewareCalled, 'Should call global middleware');
-    });
   });
 
   describe('HTTP Endpoints', () => {
     beforeEach(async () => {
-      await api.use(ExpressPlugin, {
+      await api.use(HttpPlugin, {
+        port: 0,
         basePath: '/api',
         strictContentType: false // Disable for easier testing
       });
       
       setupResourcesAndData();
       
-      // Create fresh Express app for this test suite
-      app = express();
-      app.use(api.http.express.router);
-      server = app.listen(0);
+      // Start server for this test suite on random port
+      server = api.http.startServer(0);
       const port = server.address().port;
       baseUrl = `http://localhost:${port}`;
     });
@@ -398,7 +337,7 @@ describe('ExpressPlugin', () => {
       const data = await response.json();
       
       assert.strictEqual(response.status, 200);
-      assert.strictEqual(response.headers.get('content-type'), 'application/vnd.api+json; charset=utf-8');
+      assert.strictEqual(response.headers.get('content-type'), 'application/vnd.api+json');
       assert.ok(Array.isArray(data.data));
       assert.strictEqual(data.data.length, 3);
       assert.strictEqual(data.data[0].type, 'books');
@@ -506,7 +445,7 @@ describe('ExpressPlugin', () => {
       assert.strictEqual(data.errors[0].status, '422');
     });
 
-    test('PUT /api/{scope}/{id} - should update resource (JSON:API compliant)', async () => {
+    test('PUT /api/{scope}/{id} - should update resource', async () => {
       const inputRecord = {
         data: {
           type: 'books',
@@ -580,21 +519,29 @@ describe('ExpressPlugin', () => {
       assert.ok(data.errors);
       assert.strictEqual(data.errors[0].status, '404');
     });
+
+    test('should return 405 for invalid methods', async () => {
+      // POST to single resource (not allowed)
+      const response = await fetch(`${baseUrl}/api/books/1`, {
+        method: 'POST'
+      });
+      
+      assert.strictEqual(response.status, 405);
+    });
   });
 
   describe('Content Type Validation', () => {
     beforeEach(async () => {
-      await api.use(ExpressPlugin, {
+      await api.use(HttpPlugin, {
+        port: 0,
         basePath: '/api',
         strictContentType: true
       });
       
       setupResourcesAndData();
       
-      // Create fresh Express app for this test suite
-      app = express();
-      app.use(api.http.express.router);
-      server = app.listen(0);
+      // Start server for this test suite on random port
+      server = api.http.startServer(0);
       const port = server.address().port;
       baseUrl = `http://localhost:${port}`;
     });
@@ -684,17 +631,16 @@ describe('ExpressPlugin', () => {
 
   describe('Error Handling', () => {
     beforeEach(async () => {
-      await api.use(ExpressPlugin, {
+      await api.use(HttpPlugin, {
+        port: 0,
         basePath: '/api',
         strictContentType: false
       });
       
       setupResourcesAndData();
       
-      // Create fresh Express app for this test suite
-      app = express();
-      app.use(api.http.express.router);
-      server = app.listen(0);
+      // Start server for this test suite on random port
+      server = api.http.startServer(0);
       const port = server.address().port;
       baseUrl = `http://localhost:${port}`;
     });
@@ -770,58 +716,22 @@ describe('ExpressPlugin', () => {
         body: 'invalid json{'
       });
       
+      // Should return 400 for malformed JSON
       assert.strictEqual(response.status, 400);
-    });
-  });
-
-  describe('Mount Method', () => {
-    test('should mount router at root path', async () => {
-      await api.use(ExpressPlugin, {
-        basePath: '/api'
-      });
-      
-      setupResourcesAndData();
-      
-      app = express();
-      api.http.express.mount(app);
-      
-      server = app.listen(0);
-      const port = server.address().port;
-      
-      const response = await fetch(`http://localhost:${port}/api/books`);
-      assert.strictEqual(response.status, 200);
-    });
-
-    test('should mount router at custom path', async () => {
-      await api.use(ExpressPlugin, {
-        basePath: '/api'
-      });
-      
-      setupResourcesAndData();
-      
-      app = express();
-      api.http.express.mount(app, '/v1');
-      
-      server = app.listen(0);
-      const port = server.address().port;
-      
-      const response = await fetch(`http://localhost:${port}/v1/api/books`);
-      assert.strictEqual(response.status, 200);
     });
   });
 
   describe('Query Parameter Parsing', () => {
     beforeEach(async () => {
-      await api.use(ExpressPlugin, {
+      await api.use(HttpPlugin, {
+        port: 0,
         basePath: '/api'
       });
       
       setupResourcesAndData();
       
-      // Create fresh Express app for this test suite
-      app = express();
-      app.use(api.http.express.router);
-      server = app.listen(0);
+      // Start server for this test suite on random port
+      server = api.http.startServer(0);
       const port = server.address().port;
       baseUrl = `http://localhost:${port}`;
     });
@@ -835,11 +745,6 @@ describe('ExpressPlugin', () => {
 
     test('should parse fields parameter', async () => {
       const response = await fetch(`${baseUrl}/api/books?fields[books]=title,author&fields[authors]=name`);
-      
-      if (response.status !== 200) {
-        const errorData = await response.text();
-        console.log(`[DEBUG] Fields test failed with status ${response.status}:`, errorData);
-      }
       
       assert.strictEqual(response.status, 200);
     });
@@ -868,6 +773,51 @@ describe('ExpressPlugin', () => {
       
       assert.strictEqual(response.status, 200);
       assert.ok(data.data.length <= 2);
+    });
+  });
+
+  describe('Server Lifecycle', () => {
+    test('should start server with custom port', async () => {
+      await api.use(HttpPlugin, {
+        port: 0,
+        basePath: '/api'
+      });
+      
+      setupResourcesAndData();
+      
+      server = api.http.startServer(0); // Use random port
+      const port = server.address().port;
+      
+      assert.ok(port > 0, 'Should bind to a valid port');
+      
+      const response = await fetch(`http://localhost:${port}/api/books`);
+      assert.strictEqual(response.status, 200);
+    });
+
+    test('should provide access to raw HTTP server', async () => {
+      await api.use(HttpPlugin, {
+        port: 0,
+        basePath: '/api'
+      });
+      
+      setupResourcesAndData();
+      
+      // Should be able to configure the raw server
+      assert.ok(api.http.server);
+      assert.ok(typeof api.http.server.listen === 'function');
+    });
+
+    test('should provide request handler for custom server usage', async () => {
+      await api.use(HttpPlugin, {
+        port: 0,
+        basePath: '/api'
+      });
+      
+      setupResourcesAndData();
+      
+      // Should be able to use the handler independently
+      assert.ok(api.http.handler);
+      assert.ok(typeof api.http.handler === 'function');
     });
   });
 });

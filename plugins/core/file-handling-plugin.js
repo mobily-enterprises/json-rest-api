@@ -277,14 +277,25 @@ export const FileHandlingPlugin = {
     /**
      * Hook into REST API methods to process files
      */
-    addHook('beforeProcessing', 'processFiles', {}, async (context) => {
+    addHook('beforeProcessing', 'processFiles', {}, async (hookContext) => {
+      // The context structure appears to be nested - extract the actual context
+      const actualContext = hookContext.context || hookContext;
+      const method = actualContext.method;
+      const scopeName = actualContext.scopeName;
+      const params = actualContext.params;
+      
       // Only process for mutation methods
-      if (!['post', 'put', 'patch'].includes(context.method)) {
+      if (!['post', 'put', 'patch'].includes(method)) {
         return;
       }
       
       // Process files if this scope has file fields
-      await processFiles(context.scopeName, context.params);
+      await processFiles(scopeName, params);
+      
+      // Also ensure we update the params in both possible locations
+      if (hookContext.methodParams) {
+        hookContext.methodParams.inputRecord = params.inputRecord;
+      }
     });
     
     log.info('File handling plugin initialized successfully');

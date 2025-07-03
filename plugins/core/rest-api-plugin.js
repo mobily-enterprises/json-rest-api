@@ -319,7 +319,8 @@ export const RestApiPlugin = {
         scopeName, 
         queryParams: params.queryParams,
         idProperty: vars.idProperty,
-        searchSchema  // Pass the searchSchema (explicit or generated)
+        searchSchema,  // Pass the searchSchema (explicit or generated)
+        runHooks
       })
     
       // Make a backup
@@ -432,7 +433,8 @@ export const RestApiPlugin = {
         scopeName, 
         id: params.id, 
         queryParams: params.queryParams,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       })
     
       // Check if record was found
@@ -703,7 +705,8 @@ export const RestApiPlugin = {
       context.record = await helpers.dataPost({
         scopeName,
         inputRecord: context.inputRecord,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
       
       runHooks('afterDataCallPost')
@@ -715,7 +718,8 @@ export const RestApiPlugin = {
           scopeName,
           id: context.record.data.id,
           queryParams: params.queryParams,
-          idProperty: vars.idProperty
+          idProperty: vars.idProperty,
+          runHooks
         });
       } else {
         context.returnRecord = context.record;
@@ -980,7 +984,8 @@ export const RestApiPlugin = {
       context.recordBefore = await helpers.dataGet({
         scopeName,
         id: context.id,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
 
       context.exists = !!context.recordBefore
@@ -989,7 +994,8 @@ export const RestApiPlugin = {
       context.exists = await helpers.dataExists({
         scopeName,
         id: context.id,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
     }
     context.isCreate = !context.exists;
@@ -1038,7 +1044,8 @@ export const RestApiPlugin = {
       schema: context.schema,
       inputRecord: context.inputRecord,
       isCreate: context.isCreate,  // Helper knows what to do
-      idProperty: vars.idProperty
+      idProperty: vars.idProperty,
+      runHooks
     });
     runHooks('afterDataCallPut')
     runHooks('afterDataCall')
@@ -1056,7 +1063,8 @@ export const RestApiPlugin = {
         scopeName,
         id: context.id,
         queryParams: params.queryParams,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
     } else {
       context.returnRecord = context.record;
@@ -1341,7 +1349,8 @@ export const RestApiPlugin = {
         scopeName,
         id: context.id,
         inputRecord: context.inputRecord,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
 
       runHooks('afterDataCallPatch')
@@ -1356,7 +1365,8 @@ export const RestApiPlugin = {
           scopeName,
           id: context.id,
           queryParams: params.queryParams,
-          idProperty: vars.idProperty
+          idProperty: vars.idProperty,
+          runHooks
         });
       } else {
         context.returnRecord = context.record;
@@ -1436,7 +1446,8 @@ export const RestApiPlugin = {
       await helpers.dataDelete({
         scopeName,
         id: context.id,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        runHooks
       });
       
       runHooks('afterDataCallDelete')
@@ -1453,7 +1464,7 @@ export const RestApiPlugin = {
 
 
         // Define default storage helpers that throw errors
-    helpers.dataExists = async function({ scopeName, id, idProperty }) {
+    helpers.dataExists = async function({ scopeName, id, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;
@@ -1463,7 +1474,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for exists. Install a storage plugin.`);
     };
 
-    helpers.dataGet = async function({ scopeName, id, queryParams, idProperty }) {
+    helpers.dataGet = async function({ scopeName, id, queryParams, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;
@@ -1473,7 +1484,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for get. Install a storage plugin.`);
     };
     
-    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema }) {
+    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;
@@ -1483,7 +1494,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for query. Install a storage plugin.`);
     };
     
-    helpers.dataPost = async function({ scopeName, inputRecord, idProperty }) {
+    helpers.dataPost = async function({ scopeName, inputRecord, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;
@@ -1493,7 +1504,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for post. Install a storage plugin.`);
     };
 
-    helpers.dataPatch = async function({ scopeName, id, inputRecord, idProperty }) {
+    helpers.dataPatch = async function({ scopeName, id, inputRecord, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;
@@ -1503,7 +1514,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for patch. Install a storage plugin.`);
     };
 
-    helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty }) {
+    helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schemaDefinition = scope.schema;
@@ -1513,7 +1524,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for put. Install a storage plugin.`);
     };
     
-    helpers.dataDelete = async function({ scopeName, id, idProperty }) {
+    helpers.dataDelete = async function({ scopeName, id, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;

@@ -74,8 +74,7 @@ import { parse as parseUrl } from 'url';
  * ```
  */
 
-// Import qs for query string parsing
-import qs from 'qs';
+import { parseJsonApiQuery } from '../../../lib/query-parser.js';
 
 export const HttpPlugin = {
   name: 'http',
@@ -157,35 +156,11 @@ export const HttpPlugin = {
     }
     
     /**
-     * Parse query parameters from URL
+     * Parse query parameters from URL using shared JSON:API parser
      */
     const parseQueryParams = (url) => {
       const queryString = url.split('?')[1] || '';
-      const rawParams = qs.parse(queryString);
-      const queryParams = {};
-      
-      // Transform to expected format
-      if (rawParams.include) {
-        queryParams.include = rawParams.include.split(',').map(s => s.trim());
-      }
-      
-      if (rawParams.fields) {
-        queryParams.fields = rawParams.fields;
-      }
-      
-      if (rawParams.filter) {
-        queryParams.filter = rawParams.filter;
-      }
-      
-      if (rawParams.sort) {
-        queryParams.sort = rawParams.sort.split(',').map(s => s.trim());
-      }
-      
-      if (rawParams.page) {
-        queryParams.page = rawParams.page;
-      }
-      
-      return queryParams;
+      return parseJsonApiQuery(queryString);
     };
     
     /**
@@ -384,7 +359,21 @@ export const HttpPlugin = {
             limit: requestSizeLimit,
             encoding: ct.parameters.charset || 'utf-8'
           });
-          params.inputRecord = JSON.parse(rawBody);
+          
+          try {
+            params.inputRecord = JSON.parse(rawBody);
+          } catch (jsonError) {
+            // Handle JSON parsing errors as 400 Bad Request
+            res.writeHead(400, { 'Content-Type': 'application/vnd.api+json' });
+            res.end(JSON.stringify({
+              errors: [{
+                status: '400',
+                title: 'Bad Request',
+                detail: 'Invalid JSON in request body'
+              }]
+            }));
+            return;
+          }
         }
         
         // Store HTTP request/response in params for plugins that need it
@@ -427,7 +416,7 @@ export const HttpPlugin = {
     
     // Add convenient start method
     api.http.startServer = (customPort) => {
-      const finalPort = customPort || port;
+      const finalPort = customPort !== undefined ? customPort : port;
       server.listen(finalPort, () => {
         log.info(`HTTP server listening on port ${finalPort}`);
         log.info(`API available at http://localhost:${finalPort}${basePath}`);

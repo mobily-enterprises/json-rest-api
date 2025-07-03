@@ -8,7 +8,64 @@
  * ## Filtering System
  * 
  * Filtering is implemented via the 'knexQueryFiltering' hook, allowing extensibility.
- * The plugin provides a core searchSchemaFilter hook that handles:
+ * 
+ * ### IMPORTANT: Filter Grouping Best Practice
+ * 
+ * To prevent accidental filter bypass, ALWAYS wrap your filter conditions in a group
+ * using query.where(function() { ... }):
+ * 
+ * ```javascript
+ * addHook('knexQueryFiltering', 'myPlugin', {}, ({ query, filters }) => {
+ *   query.where(function() {
+ *     // All your conditions go inside this function
+ *     this.where('tenant_id', getCurrentTenant());
+ *     this.where('deleted_at', null);
+ *     
+ *     // Even OR conditions are safe when grouped
+ *     if (filters.status) {
+ *       this.where('status', filters.status)
+ *           .orWhere('override_status', filters.status);
+ *     }
+ *   });
+ * });
+ * ```
+ * 
+ * This produces SQL like:
+ * WHERE (existing conditions) AND (tenant_id = 123 AND deleted_at IS NULL AND (status = 'active' OR override_status = 'active'))
+ * 
+ * ### Why Grouping Matters
+ * 
+ * Without grouping, OR conditions can accidentally bypass security filters:
+ * 
+ * ❌ BAD (without grouping):
+ * ```javascript
+ * // Plugin A adds security filter
+ * query.where('tenant_id', 123);
+ * 
+ * // Plugin B adds feature filter with OR
+ * query.where('status', 'active').orWhere('featured', true);
+ * ```
+ * Result: WHERE tenant_id = 123 AND status = 'active' OR featured = true
+ * This exposes ALL featured items regardless of tenant!
+ * 
+ * ✅ GOOD (with grouping):
+ * ```javascript
+ * // Plugin A adds security filter
+ * query.where(function() { 
+ *   this.where('tenant_id', 123);
+ * });
+ * 
+ * // Plugin B adds feature filter with OR
+ * query.where(function() { 
+ *   this.where('status', 'active').orWhere('featured', true);
+ * });
+ * ```
+ * Result: WHERE (tenant_id = 123) AND (status = 'active' OR featured = true)
+ * Only shows active or featured items from tenant 123!
+ * 
+ * ### Core searchSchema Filter
+ * 
+ * The built-in searchSchema filter handles various filter types:
  * 
  * 1. Basic equality filtering: { status: 'published' } => WHERE status = 'published'
  * 2. Operator-based filtering via 'filterUsing':
@@ -31,8 +88,10 @@
  *      complexSearch: {
  *        type: 'string',
  *        applyFilter: (query, value) => {
- *          // Direct Knex query manipulation
- *          query.whereRaw('MATCH(title, body) AGAINST (?)', [value]);
+ *          // IMPORTANT: Use grouping for safety!
+ *          query.where(function() {
+ *            this.whereRaw('MATCH(title, body) AGAINST (?)', [value]);
+ *          });
  *        }
  *      }
  *    }
@@ -46,13 +105,73 @@
  *      }
  *    }
  * 
- * ## Extensibility via Hooks
+ * ## Real-World Hook Examples
  * 
- * Other plugins can add filtering conditions:
- * 
- * addHook('knexQueryFiltering', 'tenantFilter', {}, ({ query, scopeName }) => {
- *   query.where('tenant_id', currentTenant.id);
+ * ### Multi-tenant Security Filter
+ * ```javascript
+ * addHook('knexQueryFiltering', 'tenantSecurity', { order: -100 }, ({ query }) => {
+ *   query.where(function() {
+ *     this.where('tenant_id', getCurrentTenant())
+ *         .where('deleted_at', null);
+ *   });
  * });
+ * ```
+ * 
+ * ### Region-based Filtering with Fallback
+ * ```javascript
+ * addHook('knexQueryFiltering', 'regionFilter', {}, ({ query, filters }) => {
+ *   query.where(function() {
+ *     const userRegion = getUserRegion();
+ *     this.where(function() {
+ *       this.where('region', userRegion)
+ *           .orWhere('region', 'global')
+ *           .orWhereNull('region');
+ *     });
+ *   });
+ * });
+ * ```
+ * 
+ * ### Complex Permission System
+ * ```javascript
+ * addHook('knexQueryFiltering', 'permissions', {}, ({ query, scopeName }) => {
+ *   if (scopeName === 'documents') {
+ *     query.where(function() {
+ *       const userId = getCurrentUser().id;
+ *       const userGroups = getCurrentUser().groups;
+ *       
+ *       // User can see: their own docs, public docs, or group docs they belong to
+ *       this.where('owner_id', userId)
+ *           .orWhere('visibility', 'public')
+ *           .orWhere(function() {
+ *             this.where('visibility', 'group')
+ *                 .whereIn('group_id', userGroups);
+ *           });
+ *     });
+ *   }
+ * });
+ * ```
+ * 
+ * ### Advanced Search with Multiple Conditions
+ * ```javascript
+ * addHook('knexQueryFiltering', 'advancedSearch', {}, ({ query, filters }) => {
+ *   if (filters.q) {
+ *     query.where(function() {
+ *       // Full-text search across multiple fields
+ *       const searchTerm = `%${filters.q}%`;
+ *       this.where('title', 'like', searchTerm)
+ *           .orWhere('description', 'like', searchTerm)
+ *           .orWhere('tags', 'like', searchTerm);
+ *     });
+ *   }
+ *   
+ *   if (filters.priceRange) {
+ *     query.where(function() {
+ *       const [min, max] = filters.priceRange;
+ *       this.whereBetween('price', [min, max]);
+ *     });
+ *   }
+ * });
+ * ```
  * 
  * ## Direct Knex Access
  * 
@@ -92,41 +211,47 @@ export const RestApiKnexPlugin = {
       async ({ query, filters, searchSchema, scopeName }) => {
         if (!filters || !searchSchema) return;
         
-        Object.entries(filters).forEach(([filterKey, filterValue]) => {
-          const fieldDef = searchSchema[filterKey];
-          if (!fieldDef) return; // Ignore unknown filters
-          
-          // Handle multi-field OR search via likeOneOf
-          if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-            query.where(function() {
-              fieldDef.likeOneOf.forEach((field, index) => {
-                if (index === 0) {
-                  this.where(field, 'like', `%${filterValue}%`);
-                } else {
-                  this.orWhere(field, 'like', `%${filterValue}%`);
-                }
-              });
-            });
-          } 
-          // Handle custom filter function
-          else if (fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function') {
-            fieldDef.applyFilter(query, filterValue);
-          } 
-          // Standard filtering with operators
-          else {
-            const dbField = fieldDef.actualField || filterKey;
-            const operator = fieldDef.filterUsing || '=';
+        // Wrap all searchSchema filters in a group for safety
+        // This prevents any OR conditions from escaping and affecting other filters
+        query.where(function() {
+          Object.entries(filters).forEach(([filterKey, filterValue]) => {
+            const fieldDef = searchSchema[filterKey];
+            if (!fieldDef) return; // Ignore unknown filters
             
-            if (operator === 'like') {
-              query.where(dbField, 'like', `%${filterValue}%`);
-            } else if (operator === 'in' && Array.isArray(filterValue)) {
-              query.whereIn(dbField, filterValue);
-            } else if (operator === 'between' && Array.isArray(filterValue) && filterValue.length === 2) {
-              query.whereBetween(dbField, filterValue);
-            } else {
-              query.where(dbField, operator, filterValue);
+            // Handle multi-field OR search via likeOneOf
+            if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
+              // This creates a sub-group within our main group
+              this.where(function() {
+                fieldDef.likeOneOf.forEach((field, index) => {
+                  if (index === 0) {
+                    this.where(field, 'like', `%${filterValue}%`);
+                  } else {
+                    this.orWhere(field, 'like', `%${filterValue}%`);
+                  }
+                });
+              });
+            } 
+            // Handle custom filter function
+            else if (fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function') {
+              // Pass 'this' context to applyFilter so it operates within our group
+              fieldDef.applyFilter.call(this, this, filterValue);
+            } 
+            // Standard filtering with operators
+            else {
+              const dbField = fieldDef.actualField || filterKey;
+              const operator = fieldDef.filterUsing || '=';
+              
+              if (operator === 'like') {
+                this.where(dbField, 'like', `%${filterValue}%`);
+              } else if (operator === 'in' && Array.isArray(filterValue)) {
+                this.whereIn(dbField, filterValue);
+              } else if (operator === 'between' && Array.isArray(filterValue) && filterValue.length === 2) {
+                this.whereBetween(dbField, filterValue);
+              } else {
+                this.where(dbField, operator, filterValue);
+              }
             }
-          }
+          });
         });
       }
     );
@@ -146,7 +271,7 @@ export const RestApiKnexPlugin = {
     };
 
     // EXISTS - check if a record exists by ID
-    helpers.dataExists = async ({ scopeName, id, idProperty }) => {
+    helpers.dataExists = async ({ scopeName, id, idProperty, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       
@@ -161,7 +286,7 @@ export const RestApiKnexPlugin = {
     };
 
     // GET - retrieve a single record by ID
-    helpers.dataGet = async ({ scopeName, id }) => {
+    helpers.dataGet = async ({ scopeName, id, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
@@ -184,9 +309,9 @@ export const RestApiKnexPlugin = {
     };
     
     // QUERY - retrieve multiple records
-    helpers.dataQuery = async function({ scopeName, queryParams = {}, searchSchema }) {
+    helpers.dataQuery = async function({ scopeName, queryParams = {}, searchSchema, runHooks }) {
       const tableName = getTableName(scopeName);
-      const scope = this.scopes[scopeName];
+      const scope = scopes[scopeName];
       const scopeOptions = scope?.options || {};
       const sortableFields = scopeOptions.sortableFields || vars.sortableFields;
       
@@ -195,7 +320,10 @@ export const RestApiKnexPlugin = {
       // Start building the query
       let query = knex(tableName);
       
-      // Run filtering hooks - all filtering is done via hooks
+      // Run filtering hooks
+      // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
+      // to ensure proper grouping and prevent accidental filter bypass.
+      // See plugin documentation for examples and best practices.
       await runHooks('knexQueryFiltering', {
         query,
         filters: queryParams.filter,
@@ -242,7 +370,7 @@ export const RestApiKnexPlugin = {
     };
     
     // POST - create a new record
-    helpers.dataPost = async ({ scopeName, inputRecord }) => {
+    helpers.dataPost = async ({ scopeName, inputRecord, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
@@ -265,7 +393,7 @@ export const RestApiKnexPlugin = {
     };
     
     // PUT - replace an entire record or create if it doesn't exist
-    helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty }) => {
+    helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       
@@ -321,7 +449,7 @@ export const RestApiKnexPlugin = {
     };
     
     // PATCH - partially update a record
-    helpers.dataPatch = async ({ scopeName, id, inputRecord }) => {
+    helpers.dataPatch = async ({ scopeName, id, inputRecord, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
@@ -358,7 +486,7 @@ export const RestApiKnexPlugin = {
     };
     
     // DELETE - remove a record
-    helpers.dataDelete = async ({ scopeName, id }) => {
+    helpers.dataDelete = async ({ scopeName, id, runHooks }) => {
       const tableName = getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       

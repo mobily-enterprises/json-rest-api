@@ -89,6 +89,7 @@
 
 // Import Express as a regular dependency
 import express from 'express';
+import { parseJsonApiQuery } from '../../../lib/query-parser.js';
 
 export const ExpressPlugin = {
   name: 'express',
@@ -183,38 +184,13 @@ export const ExpressPlugin = {
     }
     
     /**
-     * Query parameter parser
-     * Express with qs already handles bracket notation (filter[status] -> filter.status)
-     * This just transforms the data to match our expected format
+     * Query parameter parser using shared JSON:API parser
+     * Handles bracket notation parsing consistently across all plugins
      */
     const parseQueryParams = (req) => {
-      const query = req.query;
-      const queryParams = {};
-      
-      // Parse include (comma-separated string to array)
-      if (query.include) {
-        queryParams.include = query.include.split(',').map(s => s.trim());
-      }
-      
-      // Copy fields, filter, and page if they exist as objects
-      if (query.fields && typeof query.fields === 'object') {
-        queryParams.fields = query.fields;
-      }
-      
-      if (query.filter && typeof query.filter === 'object') {
-        queryParams.filter = query.filter;
-      }
-      
-      if (query.page && typeof query.page === 'object') {
-        queryParams.page = query.page;
-      }
-      
-      // Parse sort (comma-separated string to array)
-      if (query.sort) {
-        queryParams.sort = query.sort.split(',').map(s => s.trim());
-      }
-      
-      return queryParams;
+      // Extract query string from URL (Express doesn't give us the raw query string)
+      const queryString = req.url.split('?')[1] || '';
+      return parseJsonApiQuery(queryString);
     };
     
     /**
@@ -296,7 +272,6 @@ export const ExpressPlugin = {
      */
     const createRequestHandler = (scopeName, methodName) => {
       return async (req, res) => {
-        console.log(`[EXPRESS HANDLER] Called for ${methodName} on ${scopeName}`);
         try {
           const params = {};
           
@@ -308,6 +283,11 @@ export const ExpressPlugin = {
           // Add query parameters
           if (['query', 'get'].includes(methodName)) {
             params.queryParams = parseQueryParams(req);
+            // Debug fields parameter specifically
+            if (req.url.includes('fields[')) {
+              console.log(`[DEBUG] Fields URL: ${req.url}`);
+              console.log(`[DEBUG] Parsed fields:`, JSON.stringify(params.queryParams.fields));
+            }
           }
           
           // Add body for mutations
