@@ -152,6 +152,12 @@ api.vars.helpers.dataDelete = async ({ scopeName, id }) => {
   // Just return success
   return { success: true };
 };
+
+api.vars.helpers.dataExists = async ({ scopeName, id }) => {
+  // For demo purposes, check if record exists
+  // In real apps, this would check your database
+  return id === '1' || id === '2' || id === '3'; // Our fake books exist
+};
 ```
 
 ### Using the API Programmatically
@@ -186,10 +192,10 @@ console.log(newBook);
 
 // Update a book (replace all fields)
 const updatedBook = await api.resources.books.put({
-  id: '1',
   inputRecord: {
     data: {
       type: 'books',
+      id: '1',
       attributes: {
         title: 'Updated Title',
         author: 'Updated Author',
@@ -201,10 +207,10 @@ const updatedBook = await api.resources.books.put({
 
 // Partially update a book
 const patchedBook = await api.resources.books.patch({
-  id: '1',
   inputRecord: {
     data: {
       type: 'books',
+      id: '1',
       attributes: {
         title: 'New Title Only'
       }
@@ -468,6 +474,7 @@ curl -X PATCH http://localhost:3000/api/books/1 \
   -d '{
     "data": {
       "type": "books",
+      "id": "1",
       "attributes": {
         "title": "Updated Title"
       }
@@ -492,36 +499,6 @@ curl -X DELETE http://localhost:3000/api/books/1
 
 # Returns: 204 No Content (empty response)
 ```
-
-### Database Integration with Knex
-
-While these examples use fake data helpers for demonstration, jsonrestapi includes a basic Knex plugin for database integration:
-
-```javascript
-import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
-import knex from 'knex';
-
-// Create your Knex instance
-const db = knex({
-  client: 'postgres',
-  connection: process.env.DATABASE_URL
-});
-
-// Use the Knex plugin
-await api.use(RestApiPlugin);
-await api.use(RestApiKnexPlugin, {
-  knex: { knex: db }
-});
-
-// Now all your resources automatically use the database!
-api.addResource('books', {
-  schema: { /* ... */ }
-});
-```
-
-The basic Knex plugin provides simple CRUD operations. More advanced database plugins (coming soon) will add filtering, sorting, pagination, and relationships out of the box!
-
 
 ### File Upload Support in Connector Plugins
 
@@ -755,19 +732,370 @@ const s3Storage = new S3Storage({
 
 > **Looking for a complete example with multiple files?** Check out our [Complete File Upload Guide](docs/mini-guides/file-uploads-complete.md) that shows multiple file fields, HTML forms, and static file serving.
 
-## Next Steps
+## Database Configuration with MySQL
 
-This tutorial covered the basics of creating a REST API with jsonrestapi:
+The REST API Knex Plugin supports MySQL databases out of the box. Here's how to configure your API to use MySQL:
 
-1. The REST API plugin for core functionality
-2. Connector plugins for HTTP access (Express or pure HTTP)
-3. File handling with storage adapters
+### Installing MySQL Driver
 
-In future sections, we'll cover:
-- Database integration for persistent storage
-- Advanced querying with filters, sorting, and pagination
-- Relationships between resources
-- Authentication and authorization
-- Custom validation and business logic
+First, install the MySQL driver for Knex:
 
-For now, you have everything you need to create a basic REST API with file upload support!
+```bash
+npm install mysql2
+```
+
+### Basic MySQL Configuration
+
+```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, RestApiKnexPlugin, HttpPlugin } from 'json-rest-api';
+import knex from 'knex';
+
+// Create a Knex instance with MySQL configuration
+const db = knex({
+  client: 'mysql2',
+  connection: {
+    host: 'localhost',
+    port: 3306,
+    user: 'your_database_user',
+    password: 'your_database_password',
+    database: 'your_database_name'
+  },
+  pool: { 
+    min: 2,
+    max: 10 
+  }
+});
+
+// Create the API
+const api = new Api({ name: 'my-api' });
+
+// Install plugins
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, { knex: db });
+await api.use(HttpPlugin);
+
+// The Knex instance is now available as api.knex for direct queries
+console.log('Database connected:', await api.knex.raw('SELECT 1+1 AS result'));
+
+// Add a sample resource
+api.addResource('users', {
+  schema: {
+    id: { type: 'id' },
+    name: { type: 'string', required: true },
+    email: { type: 'string', required: true }
+  }
+});
+
+// Create the users table if it doesn't exist
+await api.knex.schema.createTableIfNotExists('users', (table) => {
+  table.increments('id');
+  table.string('name');
+  table.string('email');
+  table.timestamps(true, true);
+});
+
+// Start the HTTP server
+api.http.startServer();
+console.log('API server running at http://localhost:3000/api');
+console.log('Try: curl http://localhost:3000/api/users');
+```
+
+### Testing the API with curl
+
+Once your server is running, you can test it with these curl commands:
+
+```bash
+# Get all users (initially empty)
+curl http://localhost:3000/api/users
+
+# Create a new user
+curl -X POST http://localhost:3000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "users",
+      "attributes": {
+        "name": "John Doe",
+        "email": "john@example.com"
+      }
+    }
+  }'
+
+# Get all users again (should show the created user)
+curl http://localhost:3000/api/users
+
+# Get a specific user
+curl http://localhost:3000/api/users/1
+
+# Update a user
+curl -X PATCH http://localhost:3000/api/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "users",
+      "id": "1",
+      "attributes": {
+        "name": "John Smith"
+      }
+    }
+  }'
+
+# Delete a user
+curl -X DELETE http://localhost:3000/api/users/1
+```
+
+### Using Environment Variables
+
+For production deployments, use environment variables to store sensitive credentials:
+
+```javascript
+// Load environment variables (using dotenv package)
+import dotenv from 'dotenv';
+dotenv.config();
+
+const db = knex({
+  client: 'mysql2',
+  connection: {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 3306,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME
+  },
+  pool: { 
+    min: 2,
+    max: 10 
+  }
+});
+```
+
+Create a `.env` file (remember to add it to `.gitignore`):
+
+```
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=myapp_user
+DB_PASSWORD=secret_password
+DB_NAME=myapp_db
+```
+
+### Connection URL Format
+
+You can also use a connection URL:
+
+```javascript
+const db = knex({
+  client: 'mysql2',
+  connection: process.env.DATABASE_URL || 'mysql://user:pass@localhost:3306/dbname'
+});
+```
+
+### Advanced MySQL Configuration
+
+For production environments, consider these additional options:
+
+```javascript
+const db = knex({
+  client: 'mysql2',
+  connection: {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    ssl: {
+      // For MySQL servers with SSL/TLS
+      rejectUnauthorized: true,
+      ca: fs.readFileSync('path/to/ca.pem')
+    },
+    timezone: 'UTC',
+    charset: 'utf8mb4',
+    connectTimeout: 60000,  // 60 seconds
+    stringifyObjects: false,
+    multipleStatements: true
+  },
+  pool: {
+    min: 2,
+    max: 10,
+    createTimeoutMillis: 30000,
+    acquireTimeoutMillis: 30000,
+    idleTimeoutMillis: 30000,
+    reapIntervalMillis: 1000,
+    createRetryIntervalMillis: 100
+  },
+  acquireConnectionTimeout: 60000,
+  debug: process.env.NODE_ENV === 'development'
+});
+```
+
+### Creating Tables
+
+Once connected, you can create tables using Knex migrations or directly:
+
+```javascript
+// Create a books table
+await api.knex.schema.createTable('books', (table) => {
+  table.increments('id').primary();
+  table.string('title', 255).notNullable();
+  table.string('author', 255).notNullable();
+  table.integer('year').unsigned();
+  table.string('isbn', 20).unique();
+  table.text('description');
+  table.decimal('price', 10, 2);
+  table.boolean('in_stock').defaultTo(true);
+  table.timestamps(true, true);  // created_at, updated_at
+  
+  // Indexes for better query performance
+  table.index(['author']);
+  table.index(['year']);
+});
+```
+
+### Complete Example with MySQL
+
+Here's a complete working example:
+
+```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, RestApiKnexPlugin, HttpPlugin } from 'json-rest-api';
+import knex from 'knex';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// Configure MySQL connection
+const db = knex({
+  client: 'mysql2',
+  connection: {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 3306,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'bookstore'
+  },
+  pool: { min: 2, max: 10 }
+});
+
+// Create API instance
+const api = new Api({ name: 'bookstore-api' });
+
+// Install plugins
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, { knex: db });
+await api.use(HttpPlugin);
+
+// Define the books resource with filtering
+api.addResource('books', {
+  schema: {
+    id: { type: 'id' },
+    title: { 
+      type: 'string', 
+      required: true,
+      search: { filterUsing: 'like' }  // Enable LIKE filtering
+    },
+    author: { 
+      type: 'string', 
+      required: true,
+      search: true  // Enable exact match filtering
+    },
+    year: { 
+      type: 'number',
+      search: {
+        year_min: { filterUsing: '>=' },
+        year_max: { filterUsing: '<=' }
+      }
+    },
+    price: { 
+      type: 'decimal',
+      search: true
+    },
+    in_stock: { 
+      type: 'boolean',
+      search: true
+    }
+  },
+  sortableFields: ['title', 'author', 'year', 'price'],
+  tableName: 'books'  // Explicitly set table name (optional)
+});
+
+// Start the HTTP server
+api.http.startServer(3000);
+console.log('API running at http://localhost:3000/api');
+
+// Test the database connection
+try {
+  await db.raw('SELECT 1+1 AS result');
+  console.log('Database connected successfully');
+} catch (error) {
+  console.error('Database connection failed:', error);
+}
+```
+
+### Troubleshooting MySQL Connections
+
+Common issues and solutions:
+
+1. **Authentication Error**: If you get "ER_NOT_SUPPORTED_AUTH_MODE", your MySQL 8.0 server might be using the newer authentication plugin. Fix:
+   ```sql
+   ALTER USER 'your_user'@'localhost' IDENTIFIED WITH mysql_native_password BY 'your_password';
+   FLUSH PRIVILEGES;
+   ```
+
+2. **Connection Timeout**: Increase the `connectTimeout` in your configuration.
+
+3. **SSL/TLS Issues**: For cloud MySQL instances (AWS RDS, Google Cloud SQL), you may need to configure SSL:
+   ```javascript
+   connection: {
+     // ... other config
+     ssl: {
+       rejectUnauthorized: true,
+       ca: fs.readFileSync('path/to/server-ca.pem')
+     }
+   }
+   ```
+
+4. **Character Set Issues**: Use `utf8mb4` for full Unicode support including emojis:
+   ```javascript
+   connection: {
+     // ... other config
+     charset: 'utf8mb4'
+   }
+   ```
+
+### Direct Database Access
+
+The plugin exposes the Knex instance as `api.knex`, allowing you to run complex queries directly:
+
+```javascript
+// Complex query with joins
+const results = await api.knex('books')
+  .join('authors', 'books.author_id', 'authors.id')
+  .select('books.*', 'authors.name as author_name')
+  .where('books.year', '>', 2020)
+  .orderBy('books.created_at', 'desc')
+  .limit(10);
+
+// Raw SQL queries
+const stats = await api.knex.raw(`
+  SELECT 
+    COUNT(*) as total_books,
+    AVG(price) as avg_price,
+    MAX(price) as max_price
+  FROM books
+  WHERE in_stock = ?
+`, [true]);
+
+// Transactions
+await api.knex.transaction(async (trx) => {
+  const [authorId] = await trx('authors').insert({ name: 'New Author' });
+  await trx('books').insert({
+    title: 'New Book',
+    author_id: authorId,
+    year: 2024
+  });
+});
+```
+
+With this configuration, your REST API will automatically use MySQL for all database operations, with full support for filtering, sorting, and pagination as described in the previous sections.

@@ -20,6 +20,58 @@ export const RestApiPlugin = {
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
 
+    // Helper function to generate searchSchema from schema fields with 'search' property
+    const generateSearchSchemaFromSchema = (schema) => {
+      if (!schema) return null;
+      
+      const searchSchema = {};
+      
+      Object.entries(schema).forEach(([fieldName, fieldDef]) => {
+        if (fieldDef.search) {
+          if (fieldDef.search === true) {
+            // Simple boolean - use field definition with default filter
+            searchSchema[fieldName] = {
+              type: fieldDef.type,
+              enum: fieldDef.enum,
+              // Default filter behavior based on type
+              filterUsing: fieldDef.type === 'string' ? '=' : '='
+            };
+          } else if (typeof fieldDef.search === 'object') {
+            // Check if search defines multiple filter fields
+            const hasNestedFilters = Object.values(fieldDef.search).some(
+              v => typeof v === 'object' && v.filterUsing
+            );
+            
+            if (hasNestedFilters) {
+              // Multiple filters from one field (like published_after/before)
+              Object.entries(fieldDef.search).forEach(([filterName, filterDef]) => {
+                searchSchema[filterName] = {
+                  type: fieldDef.type,
+                  actualField: fieldName,
+                  ...filterDef
+                };
+              });
+            } else {
+              // Single filter with config
+              searchSchema[fieldName] = {
+                type: fieldDef.type,
+                ...fieldDef.search
+              };
+            }
+          }
+        }
+      });
+      
+      // Handle _virtual search definitions
+      if (schema._virtual?.search) {
+        Object.entries(schema._virtual.search).forEach(([filterName, filterDef]) => {
+          searchSchema[filterName] = filterDef;
+        });
+      }
+      
+      return Object.keys(searchSchema).length > 0 ? searchSchema : null;
+    };
+
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
 
@@ -216,14 +268,20 @@ export const RestApiPlugin = {
       // Check payload with sortable fields validation
       validateQueryPayload(params, sortableFields);
 
+      // Generate searchSchema if not explicitly defined
+      let searchSchema = scopeOptions.searchSchema;
+      if (!searchSchema && scopeOptions.schema) {
+        searchSchema = generateSearchSchemaFromSchema(scopeOptions.schema);
+      }
+
       // Validate search/filter parameters against searchSchema
       if (params.queryParams.filter && Object.keys(params.queryParams.filter).length > 0) {
-        // Use searchSchema if defined, otherwise fall back to the main schema
-        const schemaToValidate = scopeOptions.searchSchema || scopeOptions.schema;
+        // Use searchSchema (explicit or generated) for validation
+        const schemaToValidate = searchSchema || scopeOptions.schema;
         
         if (schemaToValidate) {
           // Create a schema instance for validation
-          const filterSchema = new CreateSchema(schemaToValidate);
+          const filterSchema = CreateSchema(schemaToValidate);
           
           // Validate the filter parameters
           const { validatedObject, errors } = await filterSchema.validate(params.queryParams.filter, { 
@@ -260,7 +318,8 @@ export const RestApiPlugin = {
       context.record = await helpers.dataQuery({
         scopeName, 
         queryParams: params.queryParams,
-        idProperty: vars.idProperty
+        idProperty: vars.idProperty,
+        searchSchema  // Pass the searchSchema (explicit or generated)
       })
     
       // Make a backup
@@ -700,13 +759,15 @@ export const RestApiPlugin = {
    *
    * @example
    * // Case 1: Update a simple resource with only attributes.
-   * const updatedArticle = await api.put('articles', '123', {
-   *   "data": {
-   *     "type": "articles",
-   *     "id": "123",
-   *     "attributes": {
-   *       "title": "Updated Title",
-   *       "body": "This is the completely replaced content."
+   * const updatedArticle = await api.resources.articles.put({
+   *   inputRecord: {
+   *     "data": {
+   *       "type": "articles",
+   *       "id": "123",
+   *       "attributes": {
+   *         "title": "Updated Title",
+   *         "body": "This is the completely replaced content."
+   *       }
    *     }
    *   }
    * });
@@ -725,23 +786,25 @@ export const RestApiPlugin = {
    *
    * @example
    * // Case 2: Replace a resource and update its relationships to EXISTING resources.
-   * const replacedArticle = await api.put('articles', '124', {
-   *   "data": {
-   *     "type": "articles",
-   *     "id": "124",
-   *     "attributes": {
-   *       "title": "Completely New Title",
-   *       "body": "Entirely new content"
-   *     },
-   *     "relationships": {
-   *       "authors": {
-   *         "data": [
-   *           { "type": "people", "id": "15" },
-   *           { "type": "people", "id": "16" }
-   *         ]
+   * const replacedArticle = await api.resources.articles.put({
+   *   inputRecord: {
+   *     "data": {
+   *       "type": "articles",
+   *       "id": "124",
+   *       "attributes": {
+   *         "title": "Completely New Title",
+   *         "body": "Entirely new content"
    *       },
-   *       "publisher": {
-   *         "data": { "type": "publishers", "id": "pub-3" }
+   *       "relationships": {
+   *         "authors": {
+   *           "data": [
+   *             { "type": "people", "id": "15" },
+   *             { "type": "people", "id": "16" }
+   *           ]
+   *         },
+   *         "publisher": {
+   *           "data": { "type": "publishers", "id": "pub-3" }
+   *         }
    *       }
    *     }
    *   }
@@ -772,25 +835,28 @@ export const RestApiPlugin = {
    *
    * @example
    * // Case 3: Replace a resource and include related resources in the response.
-   * const replacedWithIncluded = await api.put('articles', '125', {
-   *   "data": {
-   *     "type": "articles",
-   *     "id": "125",
-   *     "attributes": {
-   *       "title": "Article with Author Included",
-   *       "body": "Content that replaces the previous version"
-   *     },
-   *     "relationships": {
-   *       "author": {
-   *         "data": { "type": "people", "id": "20" }
+   * const replacedWithIncluded = await api.resources.articles.put({
+   *   inputRecord: {
+   *     "data": {
+   *       "type": "articles",
+   *       "id": "125",
+   *       "attributes": {
+   *         "title": "Article with Author Included",
+   *         "body": "Content that replaces the previous version"
+   *       },
+   *       "relationships": {
+   *         "author": {
+   *           "data": { "type": "people", "id": "20" }
+   *         }
    *       }
    *     }
-   *   }
-   * }, {
-   *   include: ['author'],
-   *   fields: {
-   *     articles: 'title,body',
-   *     people: 'name,email'
+   *   },
+   *   queryParams: {
+   *     include: ['author'],
+   *     fields: {
+   *       articles: 'title,body',
+   *       people: 'name,email'
+   *     }
    *   }
    * });
    * @see PUT /api/articles/125?include=author&fields[articles]=title,body&fields[people]=name,email
@@ -825,19 +891,20 @@ export const RestApiPlugin = {
    * // Case 4: Invalid - attempting to create new resources with PUT will fail.
    * // This will throw an error because PUT cannot create new resources:
    * try {
-   *   await api.put('articles', '126', {
-   *     "data": {
-   *       "type": "articles",
-   *       "id": "126",
-   *       "attributes": {
-   *         "title": "Invalid PUT"
-   *       },
-   *       "relationships": {
-   *         "author": {
-   *           "data": { "type": "people", "id": "temp-new-author" }
+   *   await api.resources.articles.put({
+   *     inputRecord: {
+   *       "data": {
+   *         "type": "articles",
+   *         "id": "126",
+   *         "attributes": {
+   *           "title": "Invalid PUT"
+   *         },
+   *         "relationships": {
+   *           "author": {
+   *             "data": { "type": "people", "id": "temp-new-author" }
+   *           }
    *         }
-   *       }
-   *     },
+   *       },
    *     "included": [
    *       { "type": "people", "id": "temp-new-author", "attributes": { "name": "New Author" } }
    *     ]
@@ -864,7 +931,24 @@ export const RestApiPlugin = {
 
     context.inputRecord = params.inputRecord
     context.queryParams = params.queryParams
-    context.id = params.id
+    
+    // Extract ID from request body as per JSON:API spec
+    context.id = params.inputRecord.data.id
+    
+    // If both URL path ID and request body ID are provided, they must match
+    if (params.id && params.id !== context.id) {
+      throw new RestApiValidationError(
+        `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
+        { 
+          fields: ['data.id'], 
+          violations: [{ 
+            field: 'data.id', 
+            rule: 'id_consistency', 
+            message: `Request body ID must match URL path ID when both are provided` 
+          }] 
+        }
+      );
+    }
 
     // Validate - PUT cannot have included
     if (context.inputRecord.included) {
@@ -1014,13 +1098,15 @@ export const RestApiPlugin = {
      *
      * @example
      * // Case 1: Update only specific attributes of a resource.
-     * const patchedArticle = await api.patch('articles', '123', {
-     *   "data": {
-     *     "type": "articles",
-     *     "id": "123",
-     *     "attributes": {
-     *       "title": "Updated Title Only"
-     *       // Note: 'body' and other attributes remain unchanged
+     * const patchedArticle = await api.resources.articles.patch({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "id": "123",
+     *       "attributes": {
+     *         "title": "Updated Title Only"
+     *         // Note: 'body' and other attributes remain unchanged
+     *       }
      *     }
      *   }
      * });
@@ -1040,19 +1126,21 @@ export const RestApiPlugin = {
      *
      * @example
      * // Case 2: Update attributes and relationships partially.
-     * const patchedWithRelationships = await api.patch('articles', '124', {
-     *   "data": {
-     *     "type": "articles",
-     *     "id": "124",
-     *     "attributes": {
-     *       "status": "published"
-     *       // Other attributes like title, body remain unchanged
-     *     },
-     *     "relationships": {
-     *       "reviewer": {
-     *         "data": { "type": "people", "id": "30" }
+     * const patchedWithRelationships = await api.resources.articles.patch({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "id": "124",
+     *       "attributes": {
+     *         "status": "published"
+     *         // Other attributes like title, body remain unchanged
+     *       },
+     *       "relationships": {
+     *         "reviewer": {
+     *           "data": { "type": "people", "id": "30" }
+     *         }
+     *         // Other relationships like authors, publisher remain unchanged
      *       }
-     *       // Other relationships like authors, publisher remain unchanged
      *     }
      *   }
      * });
@@ -1077,19 +1165,22 @@ export const RestApiPlugin = {
      *
      * @example
      * // Case 3: Patch with included resources in response.
-     * const patchedWithIncluded = await api.patch('articles', '125', {
-     *   "data": {
-     *     "type": "articles",
-     *     "id": "125",
-     *     "attributes": {
-     *       "last-modified": "2024-07-01T12:00:00Z"
+     * const patchedWithIncluded = await api.resources.articles.patch({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "id": "125",
+     *       "attributes": {
+     *         "last-modified": "2024-07-01T12:00:00Z"
+     *       }
      *     }
-     *   }
-     * }, {
-     *   include: ['author', 'reviewer'],
-     *   fields: {
-     *     articles: 'title,last-modified',
-     *     people: 'name'
+     *   },
+     *   queryParams: {
+     *     include: ['author', 'reviewer'],
+     *     fields: {
+     *       articles: 'title,last-modified',
+     *       people: 'name'
+     *     }
      *   }
      * });
      * @see PATCH /api/articles/125?include=author,reviewer&fields[articles]=title,last-modified&fields[people]=name
@@ -1115,13 +1206,15 @@ export const RestApiPlugin = {
      *
      * @example
      * // Case 4: Clear a relationship using null.
-     * const clearedRelationship = await api.patch('articles', '126', {
-     *   "data": {
-     *     "type": "articles",
-     *     "id": "126",
-     *     "relationships": {
-     *       "reviewer": {
-     *         "data": null  // Clear the reviewer relationship
+     * const clearedRelationship = await api.resources.articles.patch({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "id": "126",
+     *       "relationships": {
+     *         "reviewer": {
+     *           "data": null  // Clear the reviewer relationship
+     *         }
      *       }
      *     }
      *   }
@@ -1158,7 +1251,24 @@ export const RestApiPlugin = {
 
       context.inputRecord = params.inputRecord
       context.queryParams = params.queryParams
-      context.id = params.id
+      
+      // Extract ID from request body as per JSON:API spec
+      context.id = params.inputRecord.data.id
+      
+      // If both URL path ID and request body ID are provided, they must match
+      if (params.id && params.id !== context.id) {
+        throw new RestApiValidationError(
+          `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
+          { 
+            fields: ['data.id'], 
+            violations: [{ 
+              field: 'data.id', 
+              rule: 'id_consistency', 
+              message: `Request body ID must match URL path ID when both are provided` 
+            }] 
+          }
+        );
+      }
 
       // Validate - PATCH cannot have included
       if (context.inputRecord.included) {
@@ -1363,7 +1473,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for get. Install a storage plugin.`);
     };
     
-    helpers.dataQuery = async function({ scopeName, queryParams, idProperty }) {
+    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = this.scopes[scopeName];
       const schema = scope.schema;

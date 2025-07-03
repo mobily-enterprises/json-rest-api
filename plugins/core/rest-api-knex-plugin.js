@@ -1,9 +1,74 @@
 
+/**
+ * REST API Knex Plugin - SQL Storage Implementation
+ * 
+ * This plugin provides SQL database operations for the REST API plugin using Knex.js.
+ * It implements filtering, sorting, and pagination with a hook-based architecture.
+ * 
+ * ## Filtering System
+ * 
+ * Filtering is implemented via the 'knexQueryFiltering' hook, allowing extensibility.
+ * The plugin provides a core searchSchemaFilter hook that handles:
+ * 
+ * 1. Basic equality filtering: { status: 'published' } => WHERE status = 'published'
+ * 2. Operator-based filtering via 'filterUsing':
+ *    - 'like': Contains search => WHERE field LIKE '%value%'
+ *    - '>', '<', '>=', '<=': Comparison operators
+ *    - 'in': Array values => WHERE field IN (...)
+ *    - 'between': Range values => WHERE field BETWEEN x AND y
+ * 
+ * 3. Multi-field search via 'likeOneOf':
+ *    searchSchema: {
+ *      search: {
+ *        type: 'string',
+ *        likeOneOf: ['title', 'body', 'tags']
+ *      }
+ *    }
+ *    => WHERE (title LIKE '%value%' OR body LIKE '%value%' OR tags LIKE '%value%')
+ * 
+ * 4. Custom filters via 'applyFilter' function:
+ *    searchSchema: {
+ *      complexSearch: {
+ *        type: 'string',
+ *        applyFilter: (query, value) => {
+ *          // Direct Knex query manipulation
+ *          query.whereRaw('MATCH(title, body) AGAINST (?)', [value]);
+ *        }
+ *      }
+ *    }
+ * 
+ * 5. Field mapping via 'actualField':
+ *    searchSchema: {
+ *      publishedAfter: {
+ *        type: 'date',
+ *        actualField: 'published_at',
+ *        filterUsing: '>='
+ *      }
+ *    }
+ * 
+ * ## Extensibility via Hooks
+ * 
+ * Other plugins can add filtering conditions:
+ * 
+ * addHook('knexQueryFiltering', 'tenantFilter', {}, ({ query, scopeName }) => {
+ *   query.where('tenant_id', currentTenant.id);
+ * });
+ * 
+ * ## Direct Knex Access
+ * 
+ * The plugin exposes Knex directly via api.knex for advanced use cases:
+ * 
+ * const results = await api.knex('articles')
+ *   .join('users', 'articles.author_id', 'users.id')
+ *   .where('status', 'published')
+ *   .select('articles.*', 'users.name as author_name');
+ */
+
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install({ helpers, vars, pluginOptions, api, log, scopes }) {
+  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, runHooks }) {
     
     // Get Knex configuration from plugin options
     const knexOptions = pluginOptions.knex || pluginOptions['rest-api-knex'];
@@ -13,11 +78,58 @@ export const RestApiKnexPlugin = {
     
     const knex = knexOptions.knex;
     
+    // Expose Knex directly for advanced use cases
+    api.knex = knex;
+    
     // Helper to get table name for a scope
     const getTableName = (scopeName) => {
       const scopeOptions = scopes[scopeName]?.options || {};
       return scopeOptions.tableName || scopeName;
     };
+    
+    // Register the core searchSchema filter hook
+    addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
+      async ({ query, filters, searchSchema, scopeName }) => {
+        if (!filters || !searchSchema) return;
+        
+        Object.entries(filters).forEach(([filterKey, filterValue]) => {
+          const fieldDef = searchSchema[filterKey];
+          if (!fieldDef) return; // Ignore unknown filters
+          
+          // Handle multi-field OR search via likeOneOf
+          if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
+            query.where(function() {
+              fieldDef.likeOneOf.forEach((field, index) => {
+                if (index === 0) {
+                  this.where(field, 'like', `%${filterValue}%`);
+                } else {
+                  this.orWhere(field, 'like', `%${filterValue}%`);
+                }
+              });
+            });
+          } 
+          // Handle custom filter function
+          else if (fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function') {
+            fieldDef.applyFilter(query, filterValue);
+          } 
+          // Standard filtering with operators
+          else {
+            const dbField = fieldDef.actualField || filterKey;
+            const operator = fieldDef.filterUsing || '=';
+            
+            if (operator === 'like') {
+              query.where(dbField, 'like', `%${filterValue}%`);
+            } else if (operator === 'in' && Array.isArray(filterValue)) {
+              query.whereIn(dbField, filterValue);
+            } else if (operator === 'between' && Array.isArray(filterValue) && filterValue.length === 2) {
+              query.whereBetween(dbField, filterValue);
+            } else {
+              query.where(dbField, operator, filterValue);
+            }
+          }
+        });
+      }
+    );
     
     // Helper to convert DB record to JSON:API format
     const toJsonApi = (scopeName, record) => {
@@ -72,14 +184,57 @@ export const RestApiKnexPlugin = {
     };
     
     // QUERY - retrieve multiple records
-    helpers.dataQuery = async ({ scopeName, queryParams = {} }) => {
+    helpers.dataQuery = async function({ scopeName, queryParams = {}, searchSchema }) {
       const tableName = getTableName(scopeName);
+      const scope = this.scopes[scopeName];
+      const scopeOptions = scope?.options || {};
+      const sortableFields = scopeOptions.sortableFields || vars.sortableFields;
       
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
-      // Very basic implementation - just get all records
-      // Ignoring include, fields, filter, sort, page for now
-      const records = await knex(tableName).select('*');
+      // Start building the query
+      let query = knex(tableName);
+      
+      // Run filtering hooks - all filtering is done via hooks
+      await runHooks('knexQueryFiltering', {
+        query,
+        filters: queryParams.filter,
+        searchSchema,
+        scopeName,
+        tableName
+      });
+      
+      // Apply sorting directly (no hooks)
+      if (queryParams.sort && queryParams.sort.length > 0) {
+        queryParams.sort.forEach(sortField => {
+          const desc = sortField.startsWith('-');
+          const field = desc ? sortField.substring(1) : sortField;
+          
+          // Check if field is sortable
+          if (sortableFields && sortableFields.length > 0 && !sortableFields.includes(field)) {
+            log.warn(`Ignoring non-sortable field: ${field}`);
+            return; // Skip non-sortable fields
+          }
+          
+          query.orderBy(field, desc ? 'desc' : 'asc');
+        });
+      }
+      
+      // Apply pagination directly (no hooks)
+      if (queryParams.page) {
+        const pageSize = Math.min(
+          queryParams.page.size || vars.pageSize || 20,
+          vars.maxPageSize || 100
+        );
+        const pageNumber = queryParams.page.number || 1;
+        
+        query
+          .limit(pageSize)
+          .offset((pageNumber - 1) * pageSize);
+      }
+      
+      // Execute the query
+      const records = await query;
       
       return {
         data: records.map(record => toJsonApi(scopeName, record))

@@ -405,11 +405,15 @@ export const ExpressPlugin = {
     
     // Listen for scope additions
     on('scope:added', 'createExpressRoutes', ({ eventData }) => {
+      log.info(`Creating routes for scope added via event: ${eventData.scopeName}`);
       createRoutesForScope(eventData.scopeName);
     });
     
     // Create routes for any existing scopes
-    for (const scopeName of Object.keys(scopes)) {
+    // Use api.scopes instead of scopes parameter to get all scopes
+    log.info(`Available scopes during plugin install: ${Object.keys(api.scopes || {}).join(', ')}`);
+    for (const scopeName of Object.keys(api.scopes || {})) {
+      log.info(`Creating routes for existing scope: ${scopeName}`);
       createRoutesForScope(scopeName);
     }
     
