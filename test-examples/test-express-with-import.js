@@ -1,7 +1,7 @@
 // Import express first to ensure it's available
 import express from 'express';
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
 
 // Make express available globally for the plugin
 global.express = express;

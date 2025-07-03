@@ -1,6 +1,6 @@
 {
-  "name": "jsonrestapi",
-  "version": "1.0.0",
+  "name": "json-rest-api",
+  "version": "1.0.2",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
     "hooked-api": "^1.0.0",
-    "jsonrestapi-schema": "^1.0.0",
+    "json-rest-schema": "^1.0.0",
     "qs": "^6.0.0"
   },
   "peerDependencies": {

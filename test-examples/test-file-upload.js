@@ -1,6 +1,6 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
+import { LocalStorage } from 'json-rest-api';
 import express from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';

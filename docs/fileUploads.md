@@ -33,8 +33,8 @@ The file handling system consists of three main components:
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
+import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 
 // Create API
 const api = new Api({ name: 'my-api', version: '1.0.0' });
@@ -122,7 +122,7 @@ Storage adapters handle where and how files are saved. The library includes two 
 Saves files to Amazon S3 or S3-compatible storage:
 
 ```javascript
-import { S3Storage } from 'jsonrestapi/plugins/storage/s3-storage.js';
+import { S3Storage } from 'json-rest-api/plugins/storage/s3-storage.js';
 
 const s3Storage = new S3Storage({
   bucket: 'my-uploads',                // S3 bucket name (required)
@@ -144,7 +144,7 @@ const s3Storage = new S3Storage({
 Saves files to the local filesystem with secure filename handling:
 
 ```javascript
-import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
+import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 
 const localStorage = new LocalStorage({
   directory: './uploads',              // Where to save files
@@ -411,8 +411,8 @@ When validation fails, you'll get appropriate error responses:
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
+import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 import express from 'express';
 
 // Setup
@@ -493,7 +493,7 @@ api.addScope('articles', {
 Different strategies for different use cases:
 
 ```javascript
-import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
+import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 
 // User avatars - use hash for security and deduplication
 const avatarStorage = new LocalStorage({
@@ -649,7 +649,7 @@ Use the included example to test your setup:
 
 ```javascript
 // Run the example
-node ./node_modules/jsonrestapi/examples/file-upload-example.js
+node ./node_modules/json-rest-api/examples/file-upload-example.js
 ```
 
 Then visit http://localhost:3000 to see the test forms.

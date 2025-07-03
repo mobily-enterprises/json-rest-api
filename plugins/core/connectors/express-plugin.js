@@ -21,7 +21,7 @@
  * 
  * Basic usage:
  * ```javascript
- * import { ExpressPlugin } from 'jsonrestapi';
+ * import { ExpressPlugin } from 'json-rest-api';
  * import express from 'express';
  * 
  * const api = new Api({ name: 'my-api', version: '1.0.0' });

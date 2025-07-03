@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin } from 'jsonrestapi';
+import { RestApiPlugin } from 'json-rest-api';
 
 const api = new Api({
   name: 'my-library-api',

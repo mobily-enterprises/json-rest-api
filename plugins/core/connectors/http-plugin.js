@@ -23,7 +23,7 @@ import { parse as parseUrl } from 'url';
  * 
  * Basic usage:
  * ```javascript
- * import { HttpPlugin } from 'jsonrestapi';
+ * import { HttpPlugin } from 'json-rest-api';
  * 
  * const api = new Api({ name: 'my-api', version: '1.0.0' });
  * api.use(RestApiPlugin);

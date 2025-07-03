@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'jsonrestapi';
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
 import knex from 'knex';
 import express from 'express';
 

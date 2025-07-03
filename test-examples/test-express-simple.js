@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
 import express from 'express';
 
 const api = new Api({

@@ -18,7 +18,7 @@ This tutorial will guide you through building a REST API using the `jsonrestapi`
 First, let's install the required packages:
 
 ```bash
-npm install hooked-api jsonrestapi
+npm install hooked-api json-rest-api
 ```
 
 Create a new file called `api.js`:
@@ -41,7 +41,7 @@ The `RestApiPlugin` is the foundation of jsonrestapi. It adds REST methods (quer
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin } from 'jsonrestapi';
+import { RestApiPlugin } from 'json-rest-api';
 
 const api = new Api({
   name: 'my-library-api',
@@ -270,7 +270,7 @@ Then update your code:
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, ExpressPlugin } from 'jsonrestapi';
+import { RestApiPlugin, ExpressPlugin } from 'json-rest-api';
 import express from 'express';
 
 const api = new Api({
@@ -325,7 +325,7 @@ If you prefer not to use Express, the HTTP plugin provides a lightweight alterna
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, HttpPlugin } from 'jsonrestapi';
+import { RestApiPlugin, HttpPlugin } from 'json-rest-api';
 
 const api = new Api({
   name: 'my-library-api',
@@ -499,7 +499,7 @@ While these examples use fake data helpers for demonstration, jsonrestapi includ
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin } from 'jsonrestapi';
+import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
 import knex from 'knex';
 
 // Create your Knex instance
@@ -584,7 +584,7 @@ First, let's add file support to our books API. We'll allow users to upload book
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
 import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
 import express from 'express';
 

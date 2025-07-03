@@ -1,4 +1,4 @@
-import CreateSchema from 'jsonrestapi-schema'
+import CreateSchema from 'json-rest-schema'
 import { 
   validateGetPayload, 
   validateQueryPayload, 

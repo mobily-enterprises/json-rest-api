@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin } from 'jsonrestapi';
+import { RestApiPlugin } from 'json-rest-api';
 
 // Create a minimal test plugin to check what parameters are available
 const TestPlugin = {

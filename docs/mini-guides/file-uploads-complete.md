@@ -10,8 +10,8 @@ This guide shows a complete example of implementing file uploads with jsonrestap
 
 ```javascript
 import { Api } from 'hooked-api';
-import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'jsonrestapi';
-import { LocalStorage } from 'jsonrestapi/plugins/storage/local-storage.js';
+import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api';
+import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 import express from 'express';
 
 // Create API
