@@ -19,11 +19,11 @@ const api = new Api({
 });
 
 // Use plugins
-api.use(RestApiPlugin);
-api.use(RestApiKnexPlugin, {
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, {
   knex: { knex: db }  // Pass the knex instance
 });
-api.use(ExpressPlugin);
+await api.use(ExpressPlugin);
 
 // Create the books table
 await db.schema.createTable('books', (table) => {

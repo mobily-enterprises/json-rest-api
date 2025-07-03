@@ -79,7 +79,7 @@ import qs from 'qs';
 
 export const HttpPlugin = {
   name: 'http',
-  dependencies: ['rest-api', 'file-handling'],
+  dependencies: ['rest-api'],
   
   async install({ on, vars, helpers, pluginOptions, log, scopes, api }) {
     // Initialize http namespace
@@ -121,7 +121,7 @@ export const HttpPlugin = {
     };
     
     // Register file detector if file handling is enabled
-    if (httpOptions.enableFileUploads !== false && api.rest.registerFileDetector) {
+    if (httpOptions.enableFileUploads !== false && vars.rest?.registerFileDetector) {
       const parserLib = httpOptions.fileParser || 'busboy';
       const parserOptions = httpOptions.fileParserOptions || {};
       
@@ -144,7 +144,7 @@ export const HttpPlugin = {
       }
       
       if (detector) {
-        api.rest.registerFileDetector({
+        vars.rest.registerFileDetector({
           name: `http-${detector.name}`,
           detect: (params) => {
             if (!params._httpReq) return false;
@@ -287,7 +287,7 @@ export const HttpPlugin = {
       const [scopeName, id] = pathParts;
       
       // Check if scope exists
-      if (!scopes[scopeName]) {
+      if (!api.scopes[scopeName]) {
         handleError({ 
           code: 'REST_API_RESOURCE', 
           subtype: 'not_found',
@@ -394,7 +394,7 @@ export const HttpPlugin = {
         log.debug(`HTTP ${req.method} ${pathname}`, { scopeName, methodName, params });
         
         // Call the API method
-        const scope = scopes[scopeName];
+        const scope = api.scopes[scopeName];
         const result = await scope[methodName](params);
         
         // Send response

@@ -49,7 +49,7 @@ const api = new Api({
 });
 
 // Use the REST API plugin
-api.use(RestApiPlugin);
+await api.use(RestApiPlugin);
 ```
 
 ### Creating a Books Resource
@@ -279,8 +279,8 @@ const api = new Api({
 });
 
 // Add plugins
-api.use(RestApiPlugin);
-api.use(ExpressPlugin, {
+await api.use(RestApiPlugin);
+await api.use(ExpressPlugin, {
   basePath: '/api',  // Optional, defaults to '/api'
 });
 
@@ -333,8 +333,8 @@ const api = new Api({
 });
 
 // Add plugins
-api.use(RestApiPlugin);
-api.use(HttpPlugin, {
+await api.use(RestApiPlugin);
+await api.use(HttpPlugin, {
   port: 3000,                // Server port (default: 3000)
   basePath: '/api',          // API base path (default: '/api')
   strictContentType: true,   // Enforce JSON content types (default: true)
@@ -509,8 +509,8 @@ const db = knex({
 });
 
 // Use the Knex plugin
-api.use(RestApiPlugin);
-api.use(RestApiKnexPlugin, {
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, {
   knex: { knex: db }
 });
 
@@ -535,7 +535,7 @@ Both the Express and HTTP plugins provide support for the FileHandlingPlugin by:
 
 ##### Express Plugin
 ```javascript
-api.use(ExpressPlugin, {
+await api.use(ExpressPlugin, {
   enableFileUploads: true,   // Enable file upload support (default: true)
   fileParser: 'busboy',      // Parser: 'busboy' or 'formidable'
   fileParserOptions: {       // Options passed to the file parser
@@ -549,7 +549,7 @@ api.use(ExpressPlugin, {
 
 ##### HTTP Plugin
 ```javascript
-api.use(HttpPlugin, {
+await api.use(HttpPlugin, {
   enableFileUploads: true,   // Enable file upload support (default: true)
   fileParser: 'busboy',      // Parser: 'busboy' or 'formidable'
   fileParserOptions: {       // Options passed to the file parser
@@ -600,9 +600,9 @@ const coverStorage = new LocalStorage({
 });
 
 // Add plugins (ORDER MATTERS!)
-api.use(RestApiPlugin);
-api.use(FileHandlingPlugin);  // Must come after RestApiPlugin
-api.use(ExpressPlugin);       // Must come after FileHandlingPlugin
+await api.use(RestApiPlugin);
+await api.use(FileHandlingPlugin);  // Must come after RestApiPlugin
+await api.use(ExpressPlugin);       // Must come after FileHandlingPlugin
 
 // Update the books schema to include a cover image
 api.addResource('books', {

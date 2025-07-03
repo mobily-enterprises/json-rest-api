@@ -33,6 +33,21 @@ export const RestApiKnexPlugin = {
       };
     };
 
+    // EXISTS - check if a record exists by ID
+    helpers.dataExists = async ({ scopeName, id, idProperty }) => {
+      const tableName = getTableName(scopeName);
+      const idProp = idProperty || vars.idProperty || 'id';
+      
+      log.debug(`[Knex] EXISTS ${tableName}/${id}`);
+      
+      const record = await knex(tableName)
+        .where(idProp, id)
+        .select(idProp)
+        .first();
+      
+      return !!record;
+    };
+
     // GET - retrieve a single record by ID
     helpers.dataGet = async ({ scopeName, id }) => {
       const tableName = getTableName(scopeName);
@@ -94,41 +109,60 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    // PUT - replace an entire record
-    helpers.dataPut = async ({ scopeName, id, inputRecord }) => {
+    // PUT - replace an entire record or create if it doesn't exist
+    helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty }) => {
       const tableName = getTableName(scopeName);
-      const idProperty = vars.idProperty || 'id';
+      const idProp = idProperty || vars.idProperty || 'id';
       
-      log.debug(`[Knex] PUT ${tableName}/${id}`, inputRecord);
+      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`, inputRecord);
       
       // Extract attributes from JSON:API format
       const attributes = inputRecord.data.attributes;
       
-      // Check if record exists
-      const exists = await knex(tableName)
-        .where(idProperty, id)
-        .first();
-      
-      if (!exists) {
-        const error = new Error(`Record not found: ${scopeName}/${id}`);
-        error.code = 'REST_API_RESOURCE';
-        error.subtype = 'not_found';
-        throw error;
+      if (isCreate) {
+        // Create mode - insert new record with specified ID
+        const recordData = {
+          ...attributes,
+          [idProp]: id
+        };
+        
+        await knex(tableName).insert(recordData);
+        
+        // Fetch the created record
+        const newRecord = await knex(tableName)
+          .where(idProp, id)
+          .first();
+        
+        return {
+          data: toJsonApi(scopeName, newRecord)
+        };
+      } else {
+        // Update mode - check if record exists first
+        const exists = await knex(tableName)
+          .where(idProp, id)
+          .first();
+        
+        if (!exists) {
+          const error = new Error(`Record not found: ${scopeName}/${id}`);
+          error.code = 'REST_API_RESOURCE';
+          error.subtype = 'not_found';
+          throw error;
+        }
+        
+        // Update the record (replace all fields)
+        await knex(tableName)
+          .where(idProp, id)
+          .update(attributes);
+        
+        // Fetch the updated record
+        const updatedRecord = await knex(tableName)
+          .where(idProp, id)
+          .first();
+        
+        return {
+          data: toJsonApi(scopeName, updatedRecord)
+        };
       }
-      
-      // Update the record (replace all fields)
-      await knex(tableName)
-        .where(idProperty, id)
-        .update(attributes);
-      
-      // Fetch the updated record
-      const updatedRecord = await knex(tableName)
-        .where(idProperty, id)
-        .first();
-      
-      return {
-        data: toJsonApi(scopeName, updatedRecord)
-      };
     };
     
     // PATCH - partially update a record

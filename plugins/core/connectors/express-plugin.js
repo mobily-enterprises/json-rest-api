@@ -14,10 +14,11 @@
  * - File upload support with busboy or formidable
  * 
  * Required dependencies:
- * - express: The Express framework
+ * - express: npm install express
  * 
- * Optional dependencies:
- * - busboy or formidable: File upload support
+ * Optional dependencies (for file uploads):
+ * - busboy: npm install busboy
+ * - formidable: npm install formidable
  * 
  * Basic usage:
  * ```javascript
@@ -86,9 +87,12 @@
  * ```
  */
 
+// Import Express as a regular dependency
+import express from 'express';
+
 export const ExpressPlugin = {
   name: 'express',
-  dependencies: ['rest-api', 'file-handling'],
+  dependencies: ['rest-api'],
   
   async install({ on, vars, helpers, pluginOptions, log, scopes, addApiMethod, api }) {
     // Initialize express namespace under api.http
@@ -96,16 +100,6 @@ export const ExpressPlugin = {
       api.http = {};
     }
     api.http.express = {};
-    
-    // Import Express - will fail with clear error if not installed
-    let express;
-    try {
-      express = await import('express');
-      express = express.default || express;
-    } catch (e) {
-      console.error('Express import error:', e);
-      throw new Error('Express is required for the Express plugin. Install with: npm install express');
-    }
     
     const expressOptions = pluginOptions.express || {};
     const basePath = expressOptions.basePath || '/api';
@@ -302,6 +296,7 @@ export const ExpressPlugin = {
      */
     const createRequestHandler = (scopeName, methodName) => {
       return async (req, res) => {
+        console.log(`[EXPRESS HANDLER] Called for ${methodName} on ${scopeName}`);
         try {
           const params = {};
           
@@ -332,7 +327,7 @@ export const ExpressPlugin = {
           log.debug(`HTTP ${req.method} ${req.path}`, { scopeName, methodName, params });
           
           // Call the API method
-          const scope = scopes[scopeName];
+          const scope = api.scopes[scopeName];
           if (!scope) {
             return handleError({ 
               code: 'REST_API_RESOURCE', 
@@ -403,6 +398,9 @@ export const ExpressPlugin = {
       }
       
       routesCreated.add(scopeName);
+      
+      // Ensure 404 handler stays at the end after adding routes
+      ensure404HandlerIsLast();
     };
     
     // Listen for scope additions
@@ -415,16 +413,36 @@ export const ExpressPlugin = {
       createRoutesForScope(scopeName);
     }
     
-    // 404 handler for unmatched routes within the API
-    router.use((req, res) => {
-      res.status(404).json({
-        errors: [{
-          status: '404',
-          title: 'Not Found',
-          detail: `The requested endpoint ${req.method} ${req.path} does not exist`
-        }]
-      });
-    });
+    // Store 404 handler to be added later
+    const notFoundHandler = (req, res, next) => {
+      // Only handle requests that start with our basePath
+      if (req.path.startsWith(basePath)) {
+        res.status(404).json({
+          errors: [{
+            status: '404',
+            title: 'Not Found',
+            detail: `The requested endpoint ${req.method} ${req.path} does not exist`
+          }]
+        });
+      } else {
+        // Pass through requests that don't match our basePath
+        next();
+      }
+    };
+    
+    // Function to ensure 404 handler is always last
+    const ensure404HandlerIsLast = () => {
+      // Remove existing 404 handler if present
+      const existingIndex = router.stack.findIndex(layer => layer.handle === notFoundHandler);
+      if (existingIndex !== -1) {
+        router.stack.splice(existingIndex, 1);
+      }
+      // Add at the end
+      router.use(notFoundHandler);
+    };
+    
+    // Add 404 handler initially
+    ensure404HandlerIsLast();
     
     // Apply global middleware if configured
     let finalRouter = router;

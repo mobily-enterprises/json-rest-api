@@ -36,9 +36,9 @@ const s3Storage = new S3Storage({
 });
 
 // Use plugins - order matters!
-api.use(RestApiPlugin);
-api.use(FileHandlingPlugin); // Must come after RestApiPlugin
-api.use(ExpressPlugin, {
+await api.use(RestApiPlugin);
+await api.use(FileHandlingPlugin); // Must come after RestApiPlugin
+await api.use(ExpressPlugin, {
   fileParser: 'busboy', // or 'formidable'
   fileParserOptions: {
     limits: { 

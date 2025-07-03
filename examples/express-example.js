@@ -13,13 +13,13 @@ const api = new Api({
 });
 
 // Install plugins
-api.use(RestApiPlugin, {
+await api.use(RestApiPlugin, {
   idProperty: 'id',
   pageSize: 10,
   sortableFields: ['title', 'created_at']
 });
 
-api.use(ExpressPlugin, {
+await api.use(ExpressPlugin, {
   basePath: '/api',
   strictContentType: false, // Make testing easier
   requestSizeLimit: '5mb'
@@ -243,7 +243,7 @@ const MockStoragePlugin = {
 };
 
 // Install the mock storage plugin
-api.use(MockStoragePlugin);
+await api.use(MockStoragePlugin);
 
 // Mount the API routes
 app.use(api.rest.express.router);
