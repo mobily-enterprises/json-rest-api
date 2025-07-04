@@ -468,15 +468,17 @@ export const RestApiKnexPlugin = {
         log.trace('[CROSS-TABLE-SEARCH] Checking scopeOptions', { hasSearchSchema: !!hookParams.scopeOptions?.searchSchema });
         
         // Extract the data from the context we actually receive
-        const scopeName = hookParams.scopeName;
+        const scopeName = hookParams.context?.knexQuery?.scopeName
+        // const scopeName = hookParams.scopeName; // this would be identical
         
         log.trace('[CROSS-TABLE-SEARCH] Method params inspection', { hasFilter: !!hookParams.methodParams?.queryParams?.filter });
-        
-        const filters = hookParams.methodParams?.queryParams?.filter;
-        const searchSchema = hookParams.scopeOptions?.searchSchema;
+
+        const filters = hookParams.context?.knexQuery?.filters;
+        const searchSchema = hookParams.context?.knexQuery?.searchSchema;
         const query = hookParams.context?.knexQuery?.query;
         const tableName = hookParams.context?.knexQuery?.tableName;
-        
+
+
         log.trace('[CROSS-TABLE-SEARCH] Extracted from hook context', { scopeName, hasFilters: !!filters, hasSearchSchema: !!searchSchema });
         
         if (!filters || !searchSchema) {

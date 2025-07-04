@@ -373,7 +373,14 @@ export const RestApiPlugin = {
           params.queryParams.filter = validatedObject;
         }
       }
-      
+    
+      /*
+      TODO: Make them general context fields
+      const filters = hookParams.context?.knexQuery?.filters;
+      const searchSchema = hookParams.context?.knexQuery?.searchSchema;
+      const tableName = hookParams.context?.knexQuery?.tableName; 
+      */
+
       runHooks('checkPermissions')
       runHooks('checkPermissionsQuery')
       
