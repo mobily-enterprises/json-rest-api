@@ -29,15 +29,15 @@ describe('Express Debug', () => {
     // Add simple helper that returns data
     api.customize({
       helpers: {
-        dataQuery: async () => ({
-          data: [
-            { type: 'books', id: '1', attributes: { title: 'Test Book' } }
-          ]
-        })
+        dataQuery: async (params) => {
+          return {
+            data: [
+              { type: 'books', id: '1', attributes: { title: 'Test Book' } }
+            ]
+          };
+        }
       }
     });
-    
-    console.log('Routes created, router stack length:', api.http.express.router.stack.length);
     
     const app = express();
     app.use(api.http.express.router);

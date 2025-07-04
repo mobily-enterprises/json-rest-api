@@ -69,29 +69,33 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     });
     
     // Insert test data
-    const companyId = await db('companies').insert({
+    const companyResult = await db('companies').insert({
       name: 'Tech Corp',
       industry: 'Technology'
     }).returning('id');
+    const companyId = companyResult[0].id || companyResult[0];
     
-    const company2Id = await db('companies').insert({
+    const company2Result = await db('companies').insert({
       name: 'Media Inc',
       industry: 'Media'
     }).returning('id');
+    const company2Id = company2Result[0].id || company2Result[0];
     
-    const authorId = await db('people').insert({
+    const authorResult = await db('people').insert({
       name: 'John Doe',
       email: 'john@techcorp.com',
-      company_id: companyId[0]
+      company_id: companyId
     }).returning('id');
+    const authorId = authorResult[0].id || authorResult[0];
     
-    const author2Id = await db('people').insert({
+    const author2Result = await db('people').insert({
       name: 'Jane Smith',
       email: 'jane@mediainc.com',
-      company_id: company2Id[0]
+      company_id: company2Id
     }).returning('id');
+    const author2Id = author2Result[0].id || author2Result[0];
     
-    const commenterIds = await db('people').insert([
+    const commenterResults = await db('people').insert([
       {
         name: 'Bob Reader',
         email: 'bob@reader.com',
@@ -100,43 +104,43 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       {
         name: 'Alice Commenter',
         email: 'alice@reader.com', 
-        company_id: companyId[0]
+        company_id: companyId
       }
     ]).returning('id');
     
-    const articleIds = await db('articles').insert([
+    const articleResults = await db('articles').insert([
       {
         title: 'JavaScript Best Practices',
         body: 'Here are some JavaScript best practices...',
-        author_id: authorId[0]
+        author_id: authorId
       },
       {
         title: 'Node.js Performance Tips',
         body: 'Optimizing Node.js applications...',
-        author_id: authorId[0]
+        author_id: authorId
       },
       {
         title: 'React Hooks Guide',
         body: 'A comprehensive guide to React hooks...',
-        author_id: author2Id[0]
+        author_id: author2Id
       }
     ]).returning('id');
     
     await db('comments').insert([
       {
         body: 'Great article!',
-        article_id: articleIds[0],
-        user_id: commenterIds[0]
+        article_id: articleResults[0].id || articleResults[0],
+        user_id: commenterResults[0].id || commenterResults[0]
       },
       {
         body: 'Very helpful tips',
-        article_id: articleIds[1],
-        user_id: commenterIds[1]
+        article_id: articleResults[1].id || articleResults[1],
+        user_id: commenterResults[1].id || commenterResults[1]
       },
       {
         body: 'I love React hooks',
-        article_id: articleIds[2],
-        user_id: commenterIds[0]
+        article_id: articleResults[2].id || articleResults[2],
+        user_id: commenterResults[0].id || commenterResults[0]
       }
     ]);
     
@@ -335,6 +339,11 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
         }
       });
       
+      // Log results at trace level for debugging
+      if (process.env.LOG_LEVEL === 'trace' || process.env.DEBUG) {
+        console.log('[TRACE] [TEST] Company name search results:', { count: result.data.length, people: result.data.map(p => ({ name: p.attributes.name, company_id: p.attributes.company_id })) });
+      }
+      
       assert.strictEqual(result.data.length, 2, 'Should find 2 people at Tech Corp');
       const names = result.data.map(p => p.attributes.name).sort();
       assert.deepStrictEqual(names, ['Alice Commenter', 'John Doe']);
@@ -405,13 +414,13 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
   describe('Helper Function Validation', () => {
     test('should validate cross-table field successfully', async () => {
       // Should not throw for valid indexed field
-      assert.doesNotThrow(() => {
-        api.crossTableSearch.validateCrossTableField('people', 'name');
+      await assert.doesNotReject(async () => {
+        await api.crossTableSearch.validateCrossTableField('people', 'name');
       });
     });
     
     test('should build join chain for many-to-one relationship', async () => {
-      const joinInfo = api.crossTableSearch.buildJoinChain('articles', 'people.name');
+      const joinInfo = await api.crossTableSearch.buildJoinChain('articles', 'people.name');
       
       assert.ok(joinInfo.joinAlias, 'Should have join alias');
       assert.ok(joinInfo.targetTableName, 'Should have target table name');
@@ -420,7 +429,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     });
     
     test('should build join chain for one-to-many relationship', async () => {
-      const joinInfo = api.crossTableSearch.buildJoinChain('people', 'articles.title');
+      const joinInfo = await api.crossTableSearch.buildJoinChain('people', 'articles.title');
       
       assert.ok(joinInfo.joinAlias, 'Should have join alias');
       assert.ok(joinInfo.targetTableName, 'Should have target table name');

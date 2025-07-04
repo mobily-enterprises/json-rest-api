@@ -15,10 +15,46 @@ import {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes }) {
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
+    
+    // Helper function to move HTTP objects from params to context
+    const moveHttpObjectsToContext = (params, context) => {
+      // Check for request ID from Express/HTTP plugins
+      if (params._requestId && api._httpRequests) {
+        const httpData = api._httpRequests.get(params._requestId);
+        if (httpData) {
+          if (httpData.req && httpData.res) {
+            // Express request
+            context.expressReq = httpData.req;
+            context.expressRes = httpData.res;
+          } else if (httpData.httpReq && httpData.httpRes) {
+            // HTTP request
+            context.httpReq = httpData.httpReq;
+            context.httpRes = httpData.httpRes;
+          }
+          // Clean up the WeakMap entry
+          api._httpRequests.delete(params._requestId);
+        }
+        delete params._requestId;
+      }
+      
+      // Legacy support - remove if present
+      if (params._expressReq) {
+        context.expressReq = params._expressReq;
+        context.expressRes = params._expressRes;
+        delete params._expressReq;
+        delete params._expressRes;
+      }
+      if (params._httpReq) {
+        context.httpReq = params._httpReq;
+        context.httpRes = params._httpRes;
+        delete params._httpReq;
+        delete params._httpRes;
+      }
+    };
 
     // Helper function to generate searchSchema from schema fields with 'search' property
     const generateSearchSchemaFromSchema = (schema) => {
@@ -103,6 +139,29 @@ export const RestApiPlugin = {
       runHooks('enrichAttributes')
 
       return context.attributes
+    })
+
+    // Helper scope methods for cross-table search functionality
+    addScopeMethod('getSchema', async ({ scopeOptions }) => {
+      return scopeOptions.schema || null;
+    })
+
+    addScopeMethod('getSearchSchema', async ({ scopeOptions }) => {
+      // Return explicit searchSchema if defined, otherwise generate from schema
+      if (scopeOptions.searchSchema) {
+        return scopeOptions.searchSchema;
+      }
+      
+      // Generate searchSchema from schema fields with 'search' property
+      if (scopeOptions.schema) {
+        return generateSearchSchemaFromSchema(scopeOptions.schema);
+      }
+      
+      return null;
+    })
+
+    addScopeMethod('getRelationships', async ({ scopeOptions }) => {
+      return scopeOptions.relationships || {};
     })
 
 
@@ -243,17 +302,22 @@ export const RestApiPlugin = {
  * //   ]
  * // }
  */
-    addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
+    addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
       // Make the method available to all hooks
       context.method = 'query'
+      
+      // Move HTTP objects from params to context
+      moveHttpObjectsToContext(params, context);
 
       // Sanitise parameters
+      log.trace('[QUERY-METHOD] Before sanitizing params:', params);
       params.queryParams = params.queryParams || {}
       params.queryParams.include = params.queryParams.include || []
       params.queryParams.fields = params.queryParams.fields || {}
       params.queryParams.filter = params.queryParams.filter || {} 
       params.queryParams.sort = params.queryParams.sort || []
       params.queryParams.page = params.queryParams.page || {}
+      log.trace('[QUERY-METHOD] After sanitizing params:', params);
 
       // Get scope-specific or global configuration
       const sortableFields = scopeOptions.sortableFields || vars.sortableFields;
@@ -320,11 +384,21 @@ export const RestApiPlugin = {
         queryParams: params.queryParams,
         idProperty: vars.idProperty,
         searchSchema,  // Pass the searchSchema (explicit or generated)
-        runHooks
+        runHooks,
+        context  // Pass context so it can be shared with hooks
       })
     
       // Make a backup
-      context.originalRecord = structuredClone(context.record)
+      try {
+        context.originalRecord = structuredClone(context.record)
+      } catch (e) {
+        log.error('Failed to clone record:', {
+          error: e.message,
+          recordKeys: Object.keys(context.record || {}),
+          hasExpressReq: !!context.expressReq
+        });
+        throw e;
+      }
 
       // This will enhance record, which is the WHOLE JSON:API record
       runHooks('enrichRecord')
@@ -414,7 +488,9 @@ export const RestApiPlugin = {
 
       // Make the method available to all hooks
       context.method = 'get'
-
+      
+      // Move HTTP objects from params to context
+      moveHttpObjectsToContext(params, context);
 
       // Sanitise parameters
       params.queryParams = params.queryParams || {}
@@ -605,12 +681,15 @@ export const RestApiPlugin = {
 
       // Make the method available to all hooks
       context.method = 'post'
+      
+      // Move HTTP objects from params to context
+      moveHttpObjectsToContext(params, context);
       context.scopeName = scopeName
       context.params = params
       
       // Run early hooks for pre-processing (e.g., file handling)
-      runHooks('beforeProcessing')
-      runHooks('beforeProcessingPost')
+      await runHooks('beforeProcessing')
+      await runHooks('beforeProcessingPost')
 
       // Sanitise parameters and payload
       params.queryParams = params.queryParams  || {}
@@ -921,12 +1000,16 @@ export const RestApiPlugin = {
   scopeName }) => {
     
     context.method = 'put'
+    
+    // Move HTTP objects from params to context
+    moveHttpObjectsToContext(params, context);
+    
     context.scopeName = scopeName
     context.params = params
     
     // Run early hooks for pre-processing (e.g., file handling)
-    runHooks('beforeProcessing')
-    runHooks('beforeProcessingPut')
+    await runHooks('beforeProcessing')
+    await runHooks('beforeProcessingPut')
 
     // Sanitise parameters
     params.queryParams = params.queryParams || {}
@@ -1245,12 +1328,16 @@ export const RestApiPlugin = {
       
       // Make the method available to all hooks
       context.method = 'patch'
+      
+      // Move HTTP objects from params to context
+      moveHttpObjectsToContext(params, context);
+      
       context.scopeName = scopeName
       context.params = params
       
       // Run early hooks for pre-processing (e.g., file handling)
-      runHooks('beforeProcessing')
-      runHooks('beforeProcessingPatch')
+      await runHooks('beforeProcessing')
+      await runHooks('beforeProcessingPatch')
 
       // Sanitise parameters
       params.queryParams = params.queryParams || {}
@@ -1425,6 +1512,9 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'delete'
       
+      // Move HTTP objects from params to context
+      moveHttpObjectsToContext(params, context);
+      
       // Set the ID in context
       context.id = params.id
       
@@ -1466,70 +1556,84 @@ export const RestApiPlugin = {
         // Define default storage helpers that throw errors
     helpers.dataExists = async function({ scopeName, id, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for exists. Install a storage plugin.`);
     };
 
     helpers.dataGet = async function({ scopeName, id, queryParams, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for get. Install a storage plugin.`);
     };
     
     helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for query. Install a storage plugin.`);
     };
     
     helpers.dataPost = async function({ scopeName, inputRecord, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for post. Install a storage plugin.`);
     };
 
     helpers.dataPatch = async function({ scopeName, id, inputRecord, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for patch. Install a storage plugin.`);
     };
 
     helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schemaDefinition = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schemaDefinition.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schemaDefinition = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for put. Install a storage plugin.`);
     };
     
     helpers.dataDelete = async function({ scopeName, id, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
-      const scope = this.scopes[scopeName];
-      const schema = scope.schema;
-      const relationships = scope.relationships;
-      const tableName = schema.tableName || scopeName;
+      const scope = api.scopes[scopeName];
+      if (scope && scope._scopeOptions) {
+        const schema = scope._scopeOptions.schema;
+        const relationships = scope._scopeOptions.relationships;
+        const tableName = scope._scopeOptions.tableName || scopeName;
+      }
       
       throw new Error(`No storage implementation for delete. Install a storage plugin.`);
     };

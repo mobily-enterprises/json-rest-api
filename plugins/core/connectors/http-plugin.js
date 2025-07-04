@@ -145,11 +145,17 @@ export const HttpPlugin = {
       if (detector) {
         vars.rest.registerFileDetector({
           name: `http-${detector.name}`,
-          detect: (params) => {
-            if (!params._httpReq) return false;
-            return detector.detect(params);
+          detect: (params, context) => {
+            if (!context || !context.httpReq) return false;
+            // Pass params with the HTTP request for the detector
+            const detectParams = { ...params, _httpReq: context.httpReq };
+            return detector.detect(detectParams);
           },
-          parse: detector.parse
+          parse: (params, context) => {
+            // Pass params with the HTTP request for the parser
+            const parseParams = { ...params, _httpReq: context.httpReq, _httpRes: context.httpRes };
+            return detector.parse(parseParams);
+          }
         });
         log.info(`HTTP plugin registered file detector: ${detector.name}`);
       }
@@ -376,9 +382,15 @@ export const HttpPlugin = {
           }
         }
         
-        // Store HTTP request/response in params for plugins that need it
-        params._httpReq = req;
-        params._httpRes = res;
+        // Store HTTP request/response temporarily in a WeakMap keyed by a unique request ID
+        const requestId = Symbol('http-request');
+        if (!api._httpRequests) {
+          api._httpRequests = new WeakMap();
+        }
+        api._httpRequests.set(requestId, { httpReq: req, httpRes: res });
+        
+        // Pass the request ID in params so plugins can retrieve the req/res if needed
+        params._requestId = requestId;
         
         log.debug(`HTTP ${req.method} ${pathname}`, { scopeName, methodName, params });
         

@@ -109,7 +109,7 @@ export const FileHandlingPlugin = {
     /**
      * Process files for a scope if it has file fields
      */
-    const processFiles = async (scopeName, params) => {
+    const processFiles = async (scopeName, params, context) => {
       const fileFields = fileScopes.get(scopeName);
       if (!fileFields || fileFields.length === 0) {
         return; // This scope doesn't have file fields
@@ -121,9 +121,9 @@ export const FileHandlingPlugin = {
       
       for (const detector of detectorRegistry) {
         try {
-          if (await detector.detect(params)) {
+          if (await detector.detect(params, context)) {
             log.debug(`Detector '${detector.name}' matched for scope '${scopeName}'`);
-            parsed = await detector.parse(params);
+            parsed = await detector.parse(params, context);
             detectorUsed = detector.name;
             break;
           }
@@ -290,7 +290,7 @@ export const FileHandlingPlugin = {
       }
       
       // Process files if this scope has file fields
-      await processFiles(scopeName, params);
+      await processFiles(scopeName, params, actualContext);
       
       // Also ensure we update the params in both possible locations
       if (hookContext.methodParams) {

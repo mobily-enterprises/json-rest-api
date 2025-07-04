@@ -15,7 +15,7 @@ This tutorial will guide you through building a REST API using the `jsonrestapi`
 
 ## Getting Started
 
-First, let's install the required packages:
+First, install the required packages:
 
 ```bash
 npm install hooked-api json-rest-api

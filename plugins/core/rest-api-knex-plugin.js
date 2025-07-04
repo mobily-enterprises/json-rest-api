@@ -1,4 +1,6 @@
 
+import { createCrossTableSearchHelpers } from './lib/cross-table-search.js';
+
 /**
  * REST API Knex Plugin - SQL Storage Implementation
  * 
@@ -435,7 +437,7 @@ export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, runHooks }) {
+  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook }) {
     
     // Get Knex configuration from plugin options
     const knexOptions = pluginOptions.knex || pluginOptions['rest-api-knex'];
@@ -449,265 +451,203 @@ export const RestApiKnexPlugin = {
     api.knex = knex;
     
     // Helper to get table name for a scope
-    const getTableName = (scopeName) => {
-      const scopeOptions = scopes[scopeName]?.options || {};
-      return scopeOptions.tableName || scopeName;
+    const getTableName = async (scopeName) => {
+      const schema = await scopes[scopeName].getSchema();
+      return schema?.tableName || scopeName;
     };
     
-    // Cross-table search helper functions
-    const crossTableSearchHelpers = {
-      // Validates that a field reference is allowed for cross-table search
-      validateCrossTableField: (targetScopeName, fieldName, searchedScopes = new Set()) => {
-        // Prevent circular references
-        if (searchedScopes.has(targetScopeName)) {
-          throw new Error(`Circular reference detected: ${targetScopeName} -> ${Array.from(searchedScopes).join(' -> ')}`);
-        }
-        
-        const targetScope = scopes[targetScopeName];
-        if (!targetScope) {
-          throw new Error(`Target scope '${targetScopeName}' not found`);
-        }
-        
-        const targetSchema = targetScope.options.schema;
-        if (!targetSchema) {
-          throw new Error(`Target scope '${targetScopeName}' has no schema`);
-        }
-        
-        const fieldDef = targetSchema[fieldName];
-        if (!fieldDef) {
-          throw new Error(`Field '${fieldName}' not found in scope '${targetScopeName}'`);
-        }
-        
-        // Check if field is marked as indexed (required for cross-table search)
-        if (!fieldDef.indexed) {
-          throw new Error(`Field '${targetScopeName}.${fieldName}' is not indexed. Add 'indexed: true' to allow cross-table search`);
-        }
-        
-        return { targetScope, fieldDef };
-      },
-      
-      // Builds join chain for cross-table search with proper aliasing
-      buildJoinChain: (fromScopeName, targetPath, searchedScopes = new Set()) => {
-        const pathParts = targetPath.split('.');
-        if (pathParts.length !== 2) {
-          throw new Error(`Invalid cross-table path '${targetPath}'. Use format: 'targetScope.fieldName'`);
-        }
-        
-        const [targetScopeName, targetFieldName] = pathParts;
-        
-        // Validate the target field
-        crossTableSearchHelpers.validateCrossTableField(targetScopeName, targetFieldName, searchedScopes);
-        
-        // Find the relationship path from source to target
-        const sourceScopeOptions = scopes[fromScopeName]?.options;
-        if (!sourceScopeOptions) {
-          throw new Error(`Source scope '${fromScopeName}' not found`);
-        }
-        
-        const sourceSchema = sourceScopeOptions.schema;
-        if (!sourceSchema) {
-          throw new Error(`Source scope '${fromScopeName}' has no schema`);
-        }
-        
-        // Look for a belongsTo relationship to the target scope (many-to-one)
-        let relationshipField = null;
-        let relationshipConfig = null;
-        let isOneToMany = false;
-        
-        for (const [fieldName, fieldDef] of Object.entries(sourceSchema)) {
-          if (fieldDef.belongsTo === targetScopeName) {
-            // Check if this relationship allows side search
-            if (fieldDef.sideSearch !== true) {
-              throw new Error(`Relationship '${fromScopeName}.${fieldName}' to '${targetScopeName}' does not allow side search. Add 'sideSearch: true' to enable`);
-            }
-            relationshipField = fieldName;
-            relationshipConfig = fieldDef;
-            break;
-          }
-        }
-        
-        // If no belongsTo found, look for hasMany relationship (one-to-many)
-        if (!relationshipField) {
-          const relationships = sourceScopeOptions.relationships || {};
-          
-          for (const [relName, relDef] of Object.entries(relationships)) {
-            if (relDef.hasMany === targetScopeName && relDef.sideSearch === true) {
-              // For hasMany, the foreign key is in the target table pointing to source
-              relationshipField = relDef.foreignKey || `${fromScopeName.slice(0, -1)}_id`;
-              relationshipConfig = relDef;
-              isOneToMany = true;
-              break;
-            }
-          }
-        }
-        
-        if (!relationshipField) {
-          throw new Error(
-            `No searchable relationship found from '${fromScopeName}' to '${targetScopeName}'. ` +
-            `Add either:\n` +
-            `  1. A belongsTo relationship with 'sideSearch: true' in schema, or\n` +
-            `  2. A hasMany relationship with 'sideSearch: true' in relationships config`
-          );
-        }
-        
-        // Generate unique alias for this join to prevent conflicts
-        const pathId = `${fromScopeName}_to_${targetScopeName}`;
-        const joinAlias = `${pathId}_${targetScopeName}`;
-        
-        // Get table names
-        const sourceTableName = sourceSchema.tableName || fromScopeName;
-        const targetTableName = scopes[targetScopeName].options.schema.tableName || targetScopeName;
-        
-        // Build join condition based on relationship direction
-        let joinCondition;
-        if (isOneToMany) {
-          // One-to-many: source.id = target.foreign_key
-          joinCondition = `${sourceTableName}.id = ${joinAlias}.${relationshipField}`;
-        } else {
-          // Many-to-one: source.foreign_key = target.id
-          joinCondition = `${sourceTableName}.${relationshipField} = ${joinAlias}.id`;
-        }
-        
-        return {
-          joinAlias,
-          targetTableName,
-          sourceField: relationshipField,
-          targetField: targetFieldName,
-          joinCondition,
-          isOneToMany
-        };
-      },
-      
-      // Creates index analysis for required database indexes
-      analyzeRequiredIndexes: (scopeName, searchSchema) => {
-        const requiredIndexes = [];
-        
-        if (!searchSchema) return requiredIndexes;
-        
-        Object.entries(searchSchema).forEach(([filterKey, fieldDef]) => {
-          // Check for cross-table references
-          if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
-            const [targetScopeName, targetFieldName] = fieldDef.actualField.split('.');
-            requiredIndexes.push({
-              scope: targetScopeName,
-              field: targetFieldName,
-              reason: `Cross-table search from ${scopeName}.${filterKey}`
-            });
-          }
-          
-          // Check for likeOneOf cross-table references
-          if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-            fieldDef.likeOneOf.forEach(field => {
-              if (field.includes('.')) {
-                const [targetScopeName, targetFieldName] = field.split('.');
-                requiredIndexes.push({
-                  scope: targetScopeName,
-                  field: targetFieldName,
-                  reason: `Cross-table likeOneOf search from ${scopeName}.${filterKey}`
-                });
-              }
-            });
-          }
-        });
-        
-        return requiredIndexes;
-      },
-      
-      // Auto-generates database indexes for cross-table search fields
-      createRequiredIndexes: async (requiredIndexes) => {
-        const createdIndexes = [];
-        
-        for (const indexInfo of requiredIndexes) {
-          const { scope, field } = indexInfo;
-          const tableName = scopes[scope]?.options?.schema?.tableName || scope;
-          const indexName = `idx_${tableName}_${field}_search`;
-          
-          try {
-            // Check if index already exists
-            const hasIndex = await knex.schema.hasIndex(tableName, [field]);
-            if (!hasIndex) {
-              await knex.schema.table(tableName, table => {
-                table.index([field], indexName);
-              });
-              createdIndexes.push({ tableName, field, indexName });
-              log.info(`Created index: ${indexName} on ${tableName}.${field}`);
-            }
-          } catch (error) {
-            log.warn(`Failed to create index on ${tableName}.${field}:`, error.message);
-          }
-        }
-        
-        return createdIndexes;
-      }
-    };
+    // Initialize cross-table search helpers
+    const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
     
     // Register the enhanced searchSchema filter hook with cross-table search support
     addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
-      async ({ query, filters, searchSchema, scopeName }) => {
-        if (!filters || !searchSchema) return;
+      async (hookParams) => {
+        log.trace('[CROSS-TABLE-SEARCH] Hook inspection', { scopeName: hookParams.scopeName, hasMethodParams: !!hookParams.methodParams, hasContext: !!hookParams.context });
+        
+        // Try to access the searchSchema from scopeOptions
+        log.trace('[CROSS-TABLE-SEARCH] Checking scopeOptions', { hasSearchSchema: !!hookParams.scopeOptions?.searchSchema });
+        
+        // Extract the data from the context we actually receive
+        const scopeName = hookParams.scopeName;
+        
+        log.trace('[CROSS-TABLE-SEARCH] Method params inspection', { hasFilter: !!hookParams.methodParams?.queryParams?.filter });
+        
+        const filters = hookParams.methodParams?.queryParams?.filter;
+        const searchSchema = hookParams.scopeOptions?.searchSchema;
+        const query = hookParams.context?.knexQuery?.query;
+        const tableName = hookParams.context?.knexQuery?.tableName;
+        
+        log.trace('[CROSS-TABLE-SEARCH] Extracted from hook context', { scopeName, hasFilters: !!filters, hasSearchSchema: !!searchSchema });
+        
+        if (!filters || !searchSchema) {
+          log.trace('[CROSS-TABLE-SEARCH] Early return - missing filters or searchSchema');
+          return;
+        }
+        
+        // We need to get the query object somehow - let's see if we can access it through helpers
+        log.trace('[CROSS-TABLE-SEARCH] Looking for query object in context');
+        log.trace('[CROSS-TABLE-SEARCH] Available in hookParams', { hasKnexQuery: !!hookParams.context?.knexQuery });
         
         // Analyze and optionally create required indexes
         const requiredIndexes = crossTableSearchHelpers.analyzeRequiredIndexes(scopeName, searchSchema);
         if (requiredIndexes.length > 0) {
           log.debug(`Cross-table search requires indexes:`, requiredIndexes);
           // Uncomment to auto-create indexes:
-          // await crossTableSearchHelpers.createRequiredIndexes(requiredIndexes);
+          // await crossTableSearchHelpers.createRequiredIndexes(requiredIndexes, knex);
         }
         
-        // Build join map for cross-table searches
+        // Build join map and field path lookup for cross-table searches
         const joinMap = new Map();
+        const fieldPathMap = new Map(); // Maps 'scope.field' to join alias and field
         
-        // Pre-process searchSchema to identify required joins
-        Object.entries(searchSchema).forEach(([filterKey, fieldDef]) => {
+        // Pre-process searchSchema to identify required joins (async)
+        log.trace('[SCHEMA-PROCESS] Processing searchSchema entries', { count: Object.keys(searchSchema).length });
+        for (const [filterKey, fieldDef] of Object.entries(searchSchema)) {
+          log.trace('[SCHEMA-ENTRY] Processing', { filterKey });
+          
           // Check actualField for cross-table references
           if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
-            const joinInfo = crossTableSearchHelpers.buildJoinChain(scopeName, fieldDef.actualField);
-            joinMap.set(joinInfo.joinAlias, joinInfo);
+            log.trace('[JOIN-DETECTION] Cross-table actualField found', { filterKey, actualField: fieldDef.actualField, scopeName });
+            const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, fieldDef.actualField);
+            log.trace('[JOIN-INFO] Built join chain for actualField', { joinAlias: joinInfo.joinAlias });
+            // Check if this exact join already exists
+            if (!joinMap.has(joinInfo.joinAlias)) {
+              joinMap.set(joinInfo.joinAlias, joinInfo);
+              log.trace('[JOIN-MAP] Added new join', { joinAlias: joinInfo.joinAlias });
+            } else {
+              log.trace('[JOIN-MAP] Join already exists, skipping', { joinAlias: joinInfo.joinAlias });
+            }
+            fieldPathMap.set(fieldDef.actualField, `${joinInfo.joinAlias}.${joinInfo.targetField}`);
+            log.trace('[MAP-SET] Added to fieldPathMap', { key: fieldDef.actualField, value: `${joinInfo.joinAlias}.${joinInfo.targetField}` });
           }
           
           // Check likeOneOf for cross-table references
           if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-            fieldDef.likeOneOf.forEach(field => {
+            log.trace('[LIKE-ONE-OF] Processing likeOneOf fields', { count: fieldDef.likeOneOf.length });
+            for (const field of fieldDef.likeOneOf) {
               if (field.includes('.')) {
-                const joinInfo = crossTableSearchHelpers.buildJoinChain(scopeName, field);
-                joinMap.set(joinInfo.joinAlias, joinInfo);
+                log.trace('[JOIN-DETECTION] Cross-table likeOneOf field found', { filterKey, field, scopeName });
+                const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, field);
+                log.trace('[JOIN-INFO] Built join chain for likeOneOf field', { joinAlias: joinInfo.joinAlias });
+                // Check if this exact join already exists
+                if (!joinMap.has(joinInfo.joinAlias)) {
+                  joinMap.set(joinInfo.joinAlias, joinInfo);
+                  log.trace('[JOIN-MAP] Added new join', { joinAlias: joinInfo.joinAlias });
+                } else {
+                  log.trace('[JOIN-MAP] Join already exists, skipping', { joinAlias: joinInfo.joinAlias });
+                }
+                fieldPathMap.set(field, `${joinInfo.joinAlias}.${joinInfo.targetField}`);
+                log.trace('[MAP-SET] Added to fieldPathMap', { key: field, value: `${joinInfo.joinAlias}.${joinInfo.targetField}` });
+              }
+            }
+          }
+        }
+        
+        log.trace('[MAPS] Final join structures', { joinMapSize: joinMap.size, fieldPathMapSize: fieldPathMap.size });
+        
+        // Apply all required joins (track applied joins to avoid duplicates)
+        log.trace('[JOIN-APPLY] Applying JOINs');
+        const appliedJoins = new Set();
+        
+        joinMap.forEach((joinInfo) => {
+          if (joinInfo.isMultiLevel && joinInfo.joinChain) {
+            log.trace('[JOIN-APPLY] Processing multi-level JOIN chain', { chainLength: joinInfo.joinChain.length });
+            // Apply each join in the chain
+            joinInfo.joinChain.forEach((join, index) => {
+              const joinKey = `${join.joinAlias}:${join.joinCondition}`;
+              if (!appliedJoins.has(joinKey)) {
+                log.trace('[JOIN-APPLY] Applying JOIN', { index: index + 1, total: joinInfo.joinChain.length, alias: join.joinAlias });
+                // Parse the join condition into left and right parts
+                const [leftSide, rightSide] = join.joinCondition.split(' = ');
+                query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
+                  this.on(leftSide, rightSide);
+                });
+                appliedJoins.add(joinKey);
+              } else {
+                log.trace('[JOIN-APPLY] Skipping already applied JOIN', { joinAlias: join.joinAlias });
+              }
+            });
+          } else {
+            const joinKey = `${joinInfo.joinAlias}:${joinInfo.joinCondition}`;
+            if (!appliedJoins.has(joinKey)) {
+              log.trace('[JOIN-APPLY] Applying single-level JOIN', { alias: joinInfo.joinAlias });
+              const [leftSide, rightSide] = joinInfo.joinCondition.split(' = ');
+              query.leftJoin(`${joinInfo.targetTableName} as ${joinInfo.joinAlias}`, function() {
+                this.on(leftSide, rightSide);
+              });
+              appliedJoins.add(joinKey);
+            } else {
+              log.trace('[JOIN-APPLY] Skipping already applied JOIN', { joinAlias: joinInfo.joinAlias });
+            }
+          }
+        });
+        
+        // Add DISTINCT only when we have one-to-many JOINs to avoid duplicates
+        let hasOneToManyJoins = false;
+        joinMap.forEach((joinInfo) => {
+          if (joinInfo.isOneToMany) {
+            hasOneToManyJoins = true;
+          } else if (joinInfo.isMultiLevel && joinInfo.joinChain) {
+            // Check if any join in the chain is one-to-many
+            joinInfo.joinChain.forEach(join => {
+              if (join.isOneToMany) {
+                hasOneToManyJoins = true;
               }
             });
           }
         });
         
-        // Apply all required joins
-        joinMap.forEach((joinInfo) => {
-          query.leftJoin(`${joinInfo.targetTableName} as ${joinInfo.joinAlias}`, 
-            joinInfo.joinCondition);
-        });
+        if (hasOneToManyJoins) {
+          log.trace('[DISTINCT] Adding DISTINCT to query due to one-to-many JOINs');
+          query.distinct();
+        } else if (joinMap.size > 0) {
+          log.trace('[DISTINCT] Not adding DISTINCT - only many-to-one JOINs present');
+        }
         
         // Wrap all searchSchema filters in a group for safety
         // This prevents any OR conditions from escaping and affecting other filters
+        log.trace('[FILTER-START] Starting filter processing', { filterCount: Object.keys(filters).length });
         query.where(function() {
+          log.trace('[WHERE-GROUP] Entered main WHERE group');
           Object.entries(filters).forEach(([filterKey, filterValue]) => {
+            log.trace('[FILTER-ENTRY] Processing filter', { filterKey });
             const fieldDef = searchSchema[filterKey];
-            if (!fieldDef) return; // Ignore unknown filters
+            log.trace('[FIELD-DEF] Field definition found', { filterKey });
+            if (!fieldDef) {
+              log.trace('[FILTER-SKIP] No fieldDef found', { filterKey });
+              return; // Ignore unknown filters
+            }
             
             // Use switch-case for clean filter logic
+            log.trace('[SWITCH] Determining filter type', { filterKey });
             switch (true) {
               // Handle multi-field OR search via likeOneOf
               case fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf):
+                log.trace('[SWITCH] Using likeOneOf case', { filterKey });
+                log.trace('[LIKE-ONE-OF] Processing fields', { count: fieldDef.likeOneOf.length });
                 // This creates a sub-group within our main group
                 this.where(function() {
+                  log.trace('[WHERE-SUB-GROUP] Entered likeOneOf sub-group');
                   fieldDef.likeOneOf.forEach((field, index) => {
-                    let dbField = field;
+                    // Use pre-computed field mapping for cross-table references
+                    const originalField = field;
+                    let dbField = fieldPathMap.get(field) || field;
                     
-                    // Handle cross-table field references
-                    if (field.includes('.')) {
-                      const joinInfo = crossTableSearchHelpers.buildJoinChain(scopeName, field);
-                      dbField = `${joinInfo.joinAlias}.${joinInfo.targetField}`;
+                    // If it's a local field (no dot) and we have joins, qualify it with the table name
+                    if (!field.includes('.') && joinMap.size > 0) {
+                      dbField = `${tableName}.${field}`;
+                      log.trace('[QUALIFY] Qualifying local field with table name', { originalField: field, qualifiedField: dbField });
                     }
                     
+                    log.trace('[FIELD-MAP] likeOneOf field mapping', { originalField, mappedField: dbField, index });
+                    
+                    const condition = `%${filterValue}%`;
                     if (index === 0) {
-                      this.where(dbField, 'like', `%${filterValue}%`);
+                      log.trace('[WHERE-APPLY] Adding first LIKE condition', { field: dbField });
+                      this.where(dbField, 'like', condition);
                     } else {
-                      this.orWhere(dbField, 'like', `%${filterValue}%`);
+                      log.trace('[WHERE-APPLY] Adding OR LIKE condition', { field: dbField });
+                      this.orWhere(dbField, 'like', condition);
                     }
                   });
                 });
@@ -715,27 +655,36 @@ export const RestApiKnexPlugin = {
                 
               // Handle custom filter function
               case fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function':
+                log.trace('[SWITCH] Using custom applyFilter case', { filterKey });
+                log.trace('[CUSTOM-FILTER] Calling custom applyFilter function');
                 // Pass 'this' context to applyFilter so it operates within our group
                 fieldDef.applyFilter.call(this, this, filterValue);
                 break;
                 
               // Standard filtering with operators (including cross-table)
               default:
+                log.trace('[SWITCH] Using standard filtering case', { filterKey });
                 let dbField = fieldDef.actualField || filterKey;
+                log.trace('[FIELD-RESOLVE] Initial dbField', { actualField: fieldDef.actualField, filterKey, resolvedField: dbField });
                 
-                // Handle cross-table field references
+                // Handle cross-table field references using pre-computed mapping
                 if (dbField.includes('.')) {
-                  const joinInfo = crossTableSearchHelpers.buildJoinChain(scopeName, dbField);
-                  dbField = `${joinInfo.joinAlias}.${joinInfo.targetField}`;
+                  const originalDbField = dbField;
+                  dbField = fieldPathMap.get(dbField) || dbField;
+                  log.trace('[FIELD-MAP] actualField mapping', { originalField: originalDbField, mappedField: dbField });
                 }
                 
                 const operator = fieldDef.filterUsing || '=';
+                log.trace('[OPERATOR] Using operator', { operator, dbField });
                 
                 switch (operator) {
                   case 'like':
-                    this.where(dbField, 'like', `%${filterValue}%`);
+                    const likeValue = `%${filterValue}%`;
+                    log.trace('[WHERE-APPLY] Adding LIKE condition', { field: dbField });
+                    this.where(dbField, 'like', likeValue);
                     break;
                   case 'in':
+                    log.trace('[WHERE-APPLY] Adding IN condition', { field: dbField, isArray: Array.isArray(filterValue) });
                     if (Array.isArray(filterValue)) {
                       this.whereIn(dbField, filterValue);
                     } else {
@@ -743,6 +692,7 @@ export const RestApiKnexPlugin = {
                     }
                     break;
                   case 'between':
+                    log.trace('[WHERE-APPLY] Adding BETWEEN condition', { field: dbField, isValidArray: Array.isArray(filterValue) && filterValue.length === 2 });
                     if (Array.isArray(filterValue) && filterValue.length === 2) {
                       this.whereBetween(dbField, filterValue);
                     } else {
@@ -750,13 +700,17 @@ export const RestApiKnexPlugin = {
                     }
                     break;
                   default:
+                    log.trace('[WHERE-APPLY] Adding default condition', { field: dbField, operator });
                     this.where(dbField, operator, filterValue);
                     break;
                 }
                 break;
             }
+            log.trace('[FILTER-COMPLETE] Finished processing filter', { filterKey });
           });
+          log.trace('[WHERE-GROUP] Exiting main WHERE group');
         });
+        log.trace('[FILTER-END] Completed all filter processing');
       }
     );
     
@@ -779,7 +733,7 @@ export const RestApiKnexPlugin = {
 
     // EXISTS - check if a record exists by ID
     helpers.dataExists = async ({ scopeName, id, idProperty, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
@@ -794,7 +748,7 @@ export const RestApiKnexPlugin = {
 
     // GET - retrieve a single record by ID
     helpers.dataGet = async ({ scopeName, id, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
@@ -816,28 +770,44 @@ export const RestApiKnexPlugin = {
     };
     
     // QUERY - retrieve multiple records
-    helpers.dataQuery = async function({ scopeName, queryParams = {}, searchSchema, runHooks }) {
-      const tableName = getTableName(scopeName);
-      const scope = scopes[scopeName];
-      const scopeOptions = scope?.options || {};
-      const sortableFields = scopeOptions.sortableFields || vars.sortableFields;
+    helpers.dataQuery = async ({ scopeName, queryParams = {}, searchSchema, runHooks, context }) => {
+      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
+      
+      const tableName = await getTableName(scopeName);
+      const schema = await scopes[scopeName].getSchema();
+      const sortableFields = schema?.sortableFields || vars.sortableFields;
       
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
       // Start building the query
-      let query = knex(tableName);
+      let query = knex(tableName).select(`${tableName}.*`);
       
       // Run filtering hooks
       // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
       // to ensure proper grouping and prevent accidental filter bypass.
       // See plugin documentation for examples and best practices.
-      await runHooks('knexQueryFiltering', {
-        query,
-        filters: queryParams.filter,
-        searchSchema,
-        scopeName,
-        tableName
-      });
+      log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filter, scopeName, tableName });
+      
+      log.trace('[DATA-QUERY] About to call runHooks', { hookName: 'knexQueryFiltering' });
+      
+      log.trace('[DATA-QUERY] Storing query data in context before calling runHooks');
+      
+      // Store the query data in context where hooks can access it
+      // This is the proper way to share data between methods and hooks
+      if (context) {
+        context.knexQuery = { query, filters: queryParams.filter, searchSchema, scopeName, tableName };
+        
+        log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery });
+      }
+      
+      await runHooks('knexQueryFiltering');
+      
+      // Clean up after hook execution
+      if (context && context.knexQuery) {
+        delete context.knexQuery;
+      }
+      
+      log.trace('[DATA-QUERY] Finished knexQueryFiltering hook');
       
       // Apply sorting directly (no hooks)
       if (queryParams.sort && queryParams.sort.length > 0) {
@@ -878,7 +848,7 @@ export const RestApiKnexPlugin = {
     
     // POST - create a new record
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
@@ -901,7 +871,7 @@ export const RestApiKnexPlugin = {
     
     // PUT - replace an entire record or create if it doesn't exist
     helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`, inputRecord);
@@ -957,7 +927,7 @@ export const RestApiKnexPlugin = {
     
     // PATCH - partially update a record
     helpers.dataPatch = async ({ scopeName, id, inputRecord, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`, inputRecord);
@@ -994,7 +964,7 @@ export const RestApiKnexPlugin = {
     
     // DELETE - remove a record
     helpers.dataDelete = async ({ scopeName, id, runHooks }) => {
-      const tableName = getTableName(scopeName);
+      const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
       log.debug(`[Knex] DELETE ${tableName}/${id}`);

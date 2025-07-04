@@ -141,12 +141,18 @@ export const ExpressPlugin = {
       if (detector) {
         vars.rest.registerFileDetector({
           name: `express-${detector.name}`,
-          detect: (params) => {
+          detect: (params, context) => {
             // Only detect for Express requests
-            if (!params._expressReq) return false;
-            return detector.detect(params);
+            if (!context || !context.expressReq) return false;
+            // Pass params with the Express request for the detector
+            const detectParams = { ...params, _expressReq: context.expressReq };
+            return detector.detect(detectParams);
           },
-          parse: detector.parse
+          parse: (params, context) => {
+            // Pass params with the Express request for the parser
+            const parseParams = { ...params, _expressReq: context.expressReq, _expressRes: context.expressRes };
+            return detector.parse(parseParams);
+          }
         });
         
         log.info(`Express plugin registered file detector: ${detector.name}`);
@@ -285,8 +291,7 @@ export const ExpressPlugin = {
             params.queryParams = parseQueryParams(req);
             // Debug fields parameter specifically
             if (req.url.includes('fields[')) {
-              console.log(`[DEBUG] Fields URL: ${req.url}`);
-              console.log(`[DEBUG] Parsed fields:`, JSON.stringify(params.queryParams.fields));
+              log.trace(`Fields URL: ${req.url}, parsed fields: ${JSON.stringify(params.queryParams.fields)}`);
             }
           }
           
@@ -300,9 +305,15 @@ export const ExpressPlugin = {
             }
           }
           
-          // Store Express request/response in params for plugins that need it
-          params._expressReq = req;
-          params._expressRes = res;
+          // Store Express request/response temporarily in a WeakMap keyed by a unique request ID
+          const requestId = Symbol('express-request');
+          if (!api._httpRequests) {
+            api._httpRequests = new WeakMap();
+          }
+          api._httpRequests.set(requestId, { req, res });
+          
+          // Pass the request ID in params so plugins can retrieve the req/res if needed
+          params._requestId = requestId;
           
           log.debug(`HTTP ${req.method} ${req.path}`, { scopeName, methodName, params });
           
@@ -332,6 +343,11 @@ export const ExpressPlugin = {
               res.json(result);
           }
         } catch (error) {
+          log.error('Request handler error:', { 
+            errorMessage: error.message,
+            errorStack: error.stack,
+            errorType: error.constructor.name 
+          });
           handleError(error, res);
         }
       };
