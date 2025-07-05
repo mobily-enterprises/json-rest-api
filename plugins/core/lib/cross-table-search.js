@@ -133,14 +133,14 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
   };
 
   /**
-   * Builds a JOIN chain for cross-table search, supporting multi-level relationships
+   * Builds a JOIN chain for cross-table search using explicit paths only
    * 
    * @async
    * @param {string} fromScopeName - The starting scope (e.g., 'articles')
-   * @param {string} targetPath - The target field path (e.g., 'companies.name')
+   * @param {string} targetPath - The target field path (e.g., 'comments.body' or 'comments.tags.name')
    * @param {Set<string>} [searchedScopes=new Set()] - Used internally to prevent circular references
    * @returns {Promise<Object>} JOIN information including alias, condition, and chain details
-   * @throws {Error} If path is invalid, relationship not found, or circular reference detected
+   * @throws {Error} If path is invalid or relationship not found
    * 
    * @property {string} returns.joinAlias - The alias to use for the joined table
    * @property {string} returns.targetTableName - The actual database table name
@@ -150,190 +150,152 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * @property {boolean} returns.isMultiLevel - Whether this requires multiple JOINs
    * @property {Array} [returns.joinChain] - Array of JOIN steps for multi-level paths
    * 
-   * @example <caption>Simple many-to-one JOIN</caption>
-   * // Build JOIN for searching articles by author name
-   * const joinInfo = await buildJoinChain('articles', 'people.name');
+   * @example <caption>Simple cross-table search</caption>
+   * // Build JOIN for searching articles by comment body
+   * const joinInfo = await buildJoinChain('articles', 'comments.body');
    * // Returns: {
-   * //   joinAlias: 'articles_to_people_people',
-   * //   targetTableName: 'people',
-   * //   joinCondition: 'articles.author_id = articles_to_people_people.id',
-   * //   targetField: 'name',
-   * //   isOneToMany: false
+   * //   joinAlias: 'articles_to_comments_comments',
+   * //   targetTableName: 'comments',
+   * //   joinCondition: 'articles.id = articles_to_comments_comments.article_id',
+   * //   targetField: 'body',
+   * //   isOneToMany: true
    * // }
    * 
-   * @example <caption>Multi-level JOIN chain</caption>
-   * // Build JOIN chain for searching articles by author's company name
-   * const joinInfo = await buildJoinChain('articles', 'companies.name');
+   * @example <caption>Multi-level explicit path</caption>
+   * // Build JOIN chain for searching articles by comment tags
+   * const joinInfo = await buildJoinChain('articles', 'comments.tags.name');
    * // Returns: {
-   * //   joinAlias: 'people_to_companies_companies',
-   * //   targetTableName: 'companies',
+   * //   joinAlias: 'comments_to_tags_tags',
+   * //   targetTableName: 'tags',
    * //   targetField: 'name',
-   * //   isOneToMany: false,
+   * //   isOneToMany: true,
    * //   isMultiLevel: true,
    * //   joinChain: [
-   * //     { targetTableName: 'people', joinAlias: 'articles_to_people_people', ... },
-   * //     { targetTableName: 'companies', joinAlias: 'people_to_companies_companies', ... }
+   * //     { targetTableName: 'comments', joinAlias: 'articles_to_comments_comments', ... },
+   * //     { targetTableName: 'tags', joinAlias: 'comments_to_tags_tags', ... }
    * //   ]
    * // }
    */
   const buildJoinChain = async (fromScopeName, targetPath, searchedScopes = new Set()) => {
     log.trace('[BUILD-JOIN] Starting buildJoinChain:', { fromScopeName, targetPath });
     
-    const pathParts = targetPath.split('.');
-    if (pathParts.length !== 2) {
-      throw new Error(`Invalid cross-table path '${targetPath}'. Use format: 'targetScope.fieldName'`);
+    // Parse the path into segments
+    const pathSegments = targetPath.split('.');
+    if (pathSegments.length < 2) {
+      throw new Error(`Invalid cross-table path '${targetPath}'. Must contain at least 'scope.field'`);
     }
     
-    const [targetScopeName, targetFieldName] = pathParts;
-    log.trace('[BUILD-JOIN] Parsed path:', { targetScopeName, targetFieldName });
+    // The last segment is always the field name
+    const targetFieldName = pathSegments[pathSegments.length - 1];
+    const relationshipPath = pathSegments.slice(0, -1);
     
-    // Validate the target field
-    log.trace('[BUILD-JOIN] Validating target field');
-    await validateCrossTableField(targetScopeName, targetFieldName, searchedScopes);
+    log.trace('[BUILD-JOIN] Parsed path:', { relationshipPath, targetFieldName });
     
-    // Helper function to find relationship path (potentially multi-level)
-    const findRelationshipPath = async (currentScope, targetScope, visited = new Set(), path = []) => {
-      log.trace('[PATH-FIND] Finding path:', { from: currentScope, to: targetScope, visitedCount: visited.size });
+    // Build the join chain by following each relationship in the path
+    const joinChain = [];
+    let currentScope = fromScopeName;
+    
+    for (let i = 0; i < relationshipPath.length; i++) {
+      const targetScope = relationshipPath[i];
       
-      if (currentScope === targetScope) {
-        log.trace('[PATH-FIND] Found direct path to target');
-        return path;
+      log.trace('[BUILD-JOIN] Looking for direct relationship:', { from: currentScope, to: targetScope });
+      
+      // Prevent circular references
+      if (searchedScopes.has(currentScope)) {
+        throw new Error(`Circular reference detected in path: ${Array.from(searchedScopes).join(' -> ')} -> ${currentScope}`);
+      }
+      searchedScopes.add(currentScope);
+      
+      // Get current scope's schema and relationships
+      const currentSchema = await scopes[currentScope].getSchema();
+      const currentRelationships = await scopes[currentScope].getRelationships();
+      
+      let foundRelationship = null;
+      let relationshipType = null;
+      let relationshipField = null;
+      let relationshipDef = null;
+      
+      // First check hasMany relationships (one-to-many)
+      if (currentRelationships) {
+        for (const [relName, relDef] of Object.entries(currentRelationships)) {
+          if (relDef.hasMany === targetScope && relDef.sideSearch === true) {
+            foundRelationship = targetScope;
+            relationshipType = 'hasMany';
+            relationshipField = relDef.foreignKey || `${currentScope.slice(0, -1)}_id`;
+            relationshipDef = relDef;
+            log.trace('[BUILD-JOIN] Found hasMany relationship:', { relName, targetScope, foreignKey: relationshipField });
+            break;
+          }
+        }
       }
       
-      if (visited.has(currentScope)) {
-        log.trace('[PATH-FIND] Already visited - avoiding cycle', { currentScope });
-        return null;
-      }
-      
-      visited.add(currentScope);
-      
-      try {
-        // Get current scope's schema and relationships
-        const currentSchema = await scopes[currentScope].getSchema();
-        const currentRelationships = await scopes[currentScope].getRelationships();
-        
-        log.trace('[PATH-FIND] Checking schema and relationships', { currentScope });
-        
-        // Check belongsTo relationships (many-to-one)
+      // If not found, check belongsTo relationships (many-to-one)
+      if (!foundRelationship) {
         for (const [fieldName, fieldDef] of Object.entries(currentSchema)) {
-          if (fieldDef.belongsTo && fieldDef.sideSearch === true) {
-            const nextScope = fieldDef.belongsTo;
-            log.trace('[PATH-FIND] Trying belongsTo', { fieldName, nextScope });
-            
-            if (!visited.has(nextScope)) {
-              const subPath = await findRelationshipPath(
-                nextScope, 
-                targetScope, 
-                new Set(visited), 
-                [...path, { 
-                  from: currentScope, 
-                  to: nextScope, 
-                  fieldName, 
-                  fieldDef, 
-                  type: 'belongsTo' 
-                }]
-              );
-              
-              if (subPath) {
-                log.trace('[PATH-FIND] Found path via belongsTo', { fieldName });
-                return subPath;
-              }
-            }
+          if (fieldDef.belongsTo === targetScope && fieldDef.sideSearch === true) {
+            foundRelationship = targetScope;
+            relationshipType = 'belongsTo';
+            relationshipField = fieldName;
+            relationshipDef = fieldDef;
+            log.trace('[BUILD-JOIN] Found belongsTo relationship:', { fieldName, targetScope });
+            break;
           }
         }
-        
-        // Check hasMany relationships (one-to-many)
-        if (currentRelationships) {
-          for (const [relName, relDef] of Object.entries(currentRelationships)) {
-            if (relDef.hasMany && relDef.sideSearch === true) {
-              const nextScope = relDef.hasMany;
-              log.trace('[PATH-FIND] Trying hasMany', { relName, nextScope });
-              
-              if (!visited.has(nextScope)) {
-                const subPath = await findRelationshipPath(
-                  nextScope, 
-                  targetScope, 
-                  new Set(visited), 
-                  [...path, { 
-                    from: currentScope, 
-                    to: nextScope, 
-                    relName, 
-                    relDef, 
-                    type: 'hasMany' 
-                  }]
-                );
-                
-                if (subPath) {
-                  log.trace('[PATH-FIND] Found path via hasMany', { relName });
-                  return subPath;
-                }
-              }
-            }
-          }
-        }
-      } catch (error) {
-        log.trace('[PATH-FIND] Error exploring from scope', { currentScope, error: error.message });
       }
       
-      return null;
-    };
-    
-    // Find the relationship path
-    log.trace('[PATH-FIND] Starting path discovery', { from: fromScopeName, to: targetScopeName });
-    const relationshipPath = await findRelationshipPath(fromScopeName, targetScopeName, searchedScopes);
-    
-    if (!relationshipPath || relationshipPath.length === 0) {
-      throw new Error(`No searchable relationship found from '${fromScopeName}' to '${targetScopeName}'. Ensure relationships have 'sideSearch: true'`);
+      if (!foundRelationship) {
+        throw new Error(
+          `No searchable relationship from '${currentScope}' to '${targetScope}'. ` +
+          `Ensure a direct relationship exists with 'sideSearch: true'`
+        );
+      }
+      
+      // Get table names
+      const sourceSchema = await scopes[currentScope].getSchema();
+      const sourceTableName = sourceSchema.tableName || currentScope;
+      const targetSchema = await scopes[targetScope].getSchema();
+      const targetTableName = targetSchema.tableName || targetScope;
+      
+      // Generate unique alias
+      const joinAlias = `${currentScope}_to_${targetScope}_${targetScope}`;
+      
+      // Build join condition
+      let joinCondition;
+      if (relationshipType === 'hasMany') {
+        // One-to-many: source.id = target.foreign_key
+        const previousAlias = i === 0 ? sourceTableName : joinChain[i-1].joinAlias;
+        joinCondition = `${previousAlias}.id = ${joinAlias}.${relationshipField}`;
+      } else {
+        // Many-to-one: source.foreign_key = target.id
+        const previousAlias = i === 0 ? sourceTableName : joinChain[i-1].joinAlias;
+        joinCondition = `${previousAlias}.${relationshipField} = ${joinAlias}.id`;
+      }
+      
+      joinChain.push({
+        targetTableName,
+        joinAlias,
+        joinCondition,
+        isOneToMany: relationshipType === 'hasMany',
+        relationshipField,
+        relationshipType
+      });
+      
+      currentScope = targetScope;
     }
     
-    log.trace('[BUILD-JOIN] Found relationship path', { steps: relationshipPath.length });
+    // Validate the final field exists and is indexed
+    const finalScope = relationshipPath[relationshipPath.length - 1];
+    await validateCrossTableField(finalScope, targetFieldName, searchedScopes);
     
-    // Handle multi-level paths
-    if (relationshipPath.length > 1) {
-      log.trace('[BUILD-JOIN] Implementing multi-level path', { steps: relationshipPath.length });
-      
-      const joinChain = [];
-      let currentFromScope = fromScopeName;
-      
-      for (let i = 0; i < relationshipPath.length; i++) {
-        const step = relationshipPath[i];
-        const stepTargetScope = step.to;
-        const isOneToMany = step.type === 'hasMany';
-        
-        // Generate unique alias for this step
-        const pathId = `${step.from}_to_${stepTargetScope}`;
-        const joinAlias = `${pathId}_${stepTargetScope}`;
-        
-        // Get table names
-        const fromSchema = await scopes[step.from].getSchema();
-        const fromTableName = fromSchema.tableName || step.from;
-        const targetSchema = await scopes[stepTargetScope].getSchema();
-        const targetTableName = targetSchema.tableName || stepTargetScope;
-        
-        // Build join condition
-        let joinCondition;
-        if (isOneToMany) {
-          const foreignKey = step.relDef.foreignKey || `${step.from.slice(0, -1)}_id`;
-          const previousAlias = i === 0 ? fromTableName : joinChain[i-1].joinAlias;
-          joinCondition = `${previousAlias}.id = ${joinAlias}.${foreignKey}`;
-        } else {
-          const relationshipField = step.fieldName || `${stepTargetScope.slice(0, -1)}_id`;
-          const previousAlias = i === 0 ? fromTableName : joinChain[i-1].joinAlias;
-          joinCondition = `${previousAlias}.${relationshipField} = ${joinAlias}.id`;
-        }
-        
-        joinChain.push({
-          targetTableName,
-          joinAlias,
-          joinCondition,
-          isOneToMany
-        });
-      }
-      
-      log.trace('[BUILD-JOIN] Multi-level join chain', { joinCount: joinChain.length });
-      
-      // Return the final join info with the complete chain
-      const lastJoin = joinChain[joinChain.length - 1];
+    // Return the complete join information
+    if (joinChain.length === 0) {
+      throw new Error(`Invalid path '${targetPath}': no relationships to traverse`);
+    }
+    
+    const lastJoin = joinChain[joinChain.length - 1];
+    
+    if (joinChain.length > 1) {
+      // Multi-level path
       return {
         targetTableName: lastJoin.targetTableName,
         joinAlias: lastJoin.joinAlias,
@@ -343,50 +305,17 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
         isMultiLevel: true,
         joinChain
       };
-    }
-    
-    // Handle single-step relationship
-    const step = relationshipPath[0];
-    const relationshipField = step.fieldName || step.relDef.foreignKey || `${step.from.slice(0, -1)}_id`;
-    const relationshipConfig = step.fieldDef || step.relDef;
-    const isOneToMany = step.type === 'hasMany';
-    
-    log.trace('[BUILD-JOIN] Found relationship:', { relationshipField, isOneToMany });
-    
-    // Generate unique alias for this join to prevent conflicts
-    const pathId = `${fromScopeName}_to_${targetScopeName}`;
-    const joinAlias = `${pathId}_${targetScopeName}`;
-    log.trace('[BUILD-JOIN] Generated alias:', { pathId, joinAlias });
-    
-    // Get source and target schemas for table names
-    const sourceSchema = await scopes[fromScopeName].getSchema();
-    const sourceTableName = sourceSchema.tableName || fromScopeName;
-    const targetSchema = await scopes[targetScopeName].getSchema();
-    const targetTableName = targetSchema.tableName || targetScopeName;
-    log.trace('[BUILD-JOIN] Table names:', { sourceTableName, targetTableName });
-    
-    // Build join condition based on relationship direction
-    let joinCondition;
-    if (isOneToMany) {
-      // One-to-many: source.id = target.foreign_key
-      joinCondition = `${sourceTableName}.id = ${joinAlias}.${relationshipField}`;
-      log.trace('[BUILD-JOIN] One-to-many join condition:', joinCondition);
     } else {
-      // Many-to-one: source.foreign_key = target.id
-      joinCondition = `${sourceTableName}.${relationshipField} = ${joinAlias}.id`;
-      log.trace('[BUILD-JOIN] Many-to-one join condition:', joinCondition);
+      // Single-level path
+      return {
+        joinAlias: lastJoin.joinAlias,
+        targetTableName: lastJoin.targetTableName,
+        sourceField: lastJoin.relationshipField,
+        targetField: targetFieldName,
+        joinCondition: lastJoin.joinCondition,
+        isOneToMany: lastJoin.isOneToMany
+      };
     }
-    
-    log.trace('[BUILD-JOIN] Final result:', { joinAlias, targetTableName, targetField: targetFieldName });
-    
-    return {
-      joinAlias,
-      targetTableName,
-      sourceField: relationshipField,
-      targetField: targetFieldName,
-      joinCondition,
-      isOneToMany
-    };
   };
 
   /**

@@ -506,10 +506,20 @@ export const RestApiKnexPlugin = {
         const joinMap = new Map();
         const fieldPathMap = new Map(); // Maps 'scope.field' to join alias and field
         
-        // Pre-process searchSchema to identify required joins (async)
-        log.trace('[SCHEMA-PROCESS] Processing searchSchema entries', { count: Object.keys(searchSchema).length });
+        // Only process searchSchema entries that are actually being used in filters
+        log.trace('[SCHEMA-PROCESS] Processing only used searchSchema entries', { 
+          searchSchemaCount: Object.keys(searchSchema).length,
+          filtersCount: Object.keys(filters).length 
+        });
+        
         for (const [filterKey, fieldDef] of Object.entries(searchSchema)) {
-          log.trace('[SCHEMA-ENTRY] Processing', { filterKey });
+          // Skip this searchSchema entry if it's not being used in the current query
+          if (filters[filterKey] === undefined) {
+            log.trace('[SCHEMA-ENTRY] Skipping unused filter', { filterKey });
+            continue;
+          }
+          
+          log.trace('[SCHEMA-ENTRY] Processing used filter', { filterKey, filterValue: filters[filterKey] });
           
           // Check actualField for cross-table references
           if (fieldDef.actualField && fieldDef.actualField.includes('.')) {

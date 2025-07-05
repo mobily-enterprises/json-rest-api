@@ -48,6 +48,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       table.increments('id');
       table.string('name');
       table.string('email');
+      table.string('role');
       table.integer('company_id').unsigned().references('companies.id');
       table.timestamps(true, true);
     });
@@ -84,6 +85,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     const authorResult = await db('people').insert({
       name: 'John Doe',
       email: 'john@techcorp.com',
+      role: 'author',
       company_id: companyId
     }).returning('id');
     const authorId = authorResult[0].id || authorResult[0];
@@ -91,6 +93,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     const author2Result = await db('people').insert({
       name: 'Jane Smith',
       email: 'jane@mediainc.com',
+      role: 'author',
       company_id: company2Id
     }).returning('id');
     const author2Id = author2Result[0].id || author2Result[0];
@@ -99,11 +102,13 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       {
         name: 'Bob Reader',
         email: 'bob@reader.com',
+        role: 'reader',
         company_id: null
       },
       {
         name: 'Alice Commenter',
-        email: 'alice@reader.com', 
+        email: 'alice@reader.com',
+        role: 'reader', 
         company_id: companyId
       }
     ]).returning('id');
@@ -148,13 +153,14 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     const companiesSchema = {
       id: { type: 'id' },
       name: { type: 'string', indexed: true },
-      industry: { type: 'string', indexed: true }
+      industry: { type: 'string', indexed: true, search: true }
     };
     
     const peopleSchema = {
       id: { type: 'id' },
       name: { type: 'string', indexed: true },
       email: { type: 'string', indexed: true },
+      role: { type: 'string', indexed: true, search: true },
       company_id: { 
         belongsTo: 'companies', 
         as: 'company',
@@ -215,7 +221,14 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       // Multi-level cross-table search (3 levels deep)
       companyName: {
         type: 'string',
-        actualField: 'companies.name',
+        actualField: 'people.companies.name',  // Explicit path: articles -> people -> companies
+        filterUsing: 'like'
+      },
+      
+      // One-to-many: search articles by comment body
+      commentBody: {
+        type: 'string',
+        actualField: 'comments.body',
         filterUsing: 'like'
       }
     };
@@ -244,12 +257,44 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
           'companies.name',
           'articles.title'
         ]
+      },
+      
+      // Multi-level one-to-many: search people by comments on their articles
+      articleCommentBody: {
+        type: 'string',
+        actualField: 'articles.comments.body',  // Explicit path: people -> articles -> comments
+        filterUsing: 'like'
+      }
+    };
+    
+    const companiesSearchSchema = {
+      // One-to-many: search companies by employee article titles
+      employeeArticleTitle: {
+        type: 'string',
+        actualField: 'people.articles.title',  // Explicit path: companies -> people -> articles
+        filterUsing: 'like'
+      },
+      
+      // Multi-level one-to-many: search companies by employee comments
+      employeeCommentBody: {
+        type: 'string',
+        actualField: 'people.comments.body',  // Explicit path: companies -> people -> comments
+        filterUsing: 'like'
       }
     };
     
     // Add resources to API
     api.addResource('companies', {
-      schema: companiesSchema
+      schema: companiesSchema,
+      searchSchema: companiesSearchSchema,
+      relationships: {
+        employees: {
+          hasMany: 'people',
+          foreignKey: 'company_id',
+          sideLoad: true,
+          sideSearch: true
+        }
+      }
     });
     
     api.addResource('people', {
@@ -463,6 +508,125 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       
       // Empty string should still perform search
       assert.ok(Array.isArray(result.data), 'Should return array even with empty filter');
+    });
+  });
+
+  describe('Multi-Level One-to-Many Cross-Table Search (1:n chains)', () => {
+    test('should search companies by employee article titles (companies -> people -> articles)', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { employeeArticleTitle: 'JavaScript' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 company whose employees wrote about JavaScript');
+      assert.strictEqual(result.data[0].attributes.name, 'Tech Corp', 'Should be Tech Corp');
+    });
+    
+    test('should search companies by employee article titles (React)', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { employeeArticleTitle: 'React' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 company whose employees wrote about React');
+      assert.strictEqual(result.data[0].attributes.name, 'Media Inc', 'Should be Media Inc');
+    });
+    
+    test('should search companies by employee comments (companies -> people -> comments)', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { employeeCommentBody: 'helpful tips' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 company whose employees made helpful tips comments');
+      assert.strictEqual(result.data[0].attributes.name, 'Tech Corp', 'Alice from Tech Corp made the helpful tips comment');
+    });
+    
+    test('should search people by comments on their articles (people -> articles -> comments)', async () => {
+      const result = await api.resources.people.query({
+        queryParams: {
+          filters: { articleCommentBody: 'Great article' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 person whose articles have "Great article" comments');
+      assert.strictEqual(result.data[0].attributes.name, 'John Doe', 'John\'s article got the "Great article" comment');
+    });
+    
+    test('should search people by comments containing "love" on their articles', async () => {
+      const result = await api.resources.people.query({
+        queryParams: {
+          filters: { articleCommentBody: 'love' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 person whose articles have comments with "love"');
+      assert.strictEqual(result.data[0].attributes.name, 'Jane Smith', 'Jane\'s React article got the "love" comment');
+    });
+    
+    test('should search articles by comment body (articles -> comments)', async () => {
+      const result = await api.resources.articles.query({
+        queryParams: {
+          filters: { commentBody: 'helpful tips' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 article with "helpful tips" comment');
+      assert.strictEqual(result.data[0].attributes.title, 'Node.js Performance Tips');
+    });
+    
+    test('should handle 3-level 1:n chain search with no results', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { employeeArticleTitle: 'Python' }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 0, 'Should find no companies - no articles about Python');
+    });
+    
+    test('should handle multiple filters including 1:n chains', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { 
+            industry: 'Technology',
+            employeeArticleTitle: 'JavaScript'
+          }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find Tech Corp');
+      assert.strictEqual(result.data[0].attributes.name, 'Tech Corp');
+    });
+    
+    test('should find all companies with employees who wrote articles', async () => {
+      const result = await api.resources.companies.query({
+        queryParams: {
+          filters: { employeeArticleTitle: '' } // Empty string matches any article
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 2, 'Should find both companies with article authors');
+      const names = result.data.map(c => c.attributes.name).sort();
+      assert.deepStrictEqual(names, ['Media Inc', 'Tech Corp']);
+    });
+    
+    test('should handle complex 1:n chains with specific filtering', async () => {
+      // Find people whose articles were commented on by Bob
+      const result = await api.resources.people.query({
+        queryParams: {
+          filters: { 
+            role: 'author',
+            articleCommentBody: 'Great' // Bob commented "Great article!"
+          }
+        }
+      });
+      
+      assert.strictEqual(result.data.length, 1, 'Should find 1 author with "Great" comments');
+      assert.strictEqual(result.data[0].attributes.name, 'John Doe');
     });
   });
 });
