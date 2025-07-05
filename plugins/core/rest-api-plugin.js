@@ -1214,6 +1214,7 @@ export const RestApiPlugin = {
       id: context.id,
       schema: context.schema,
       inputRecord: context.inputRecord,
+      queryParams: context.queryParams,
       isCreate: context.isCreate,  // Helper knows what to do
       idProperty: vars.idProperty,
       runHooks

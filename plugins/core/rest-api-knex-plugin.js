@@ -1033,7 +1033,7 @@ export const RestApiKnexPlugin = {
     };
     
     // PUT - replace an entire record or create if it doesn't exist
-    helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty, runHooks }) => {
+    helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
@@ -1041,25 +1041,34 @@ export const RestApiKnexPlugin = {
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`, inputRecord);
       
       // Extract attributes from JSON:API format
-      const attributes = inputRecord.data.attributes;
+      const attributes = inputRecord.data.attributes || {};
+      
+      // Process belongsTo relationships to extract foreign keys
+      const foreignKeyUpdates = {};
+      if (inputRecord.data.relationships) {
+        for (const [fieldName, fieldDef] of Object.entries(schema)) {
+          if (fieldDef.belongsTo && fieldDef.as) {
+            const relName = fieldDef.as;
+            if (inputRecord.data.relationships[relName]) {
+              const relData = inputRecord.data.relationships[relName];
+              foreignKeyUpdates[fieldName] = relData.data?.id || null;
+              log.debug(`[Knex] Processing belongsTo relationship ${relName}: ${fieldName} = ${foreignKeyUpdates[fieldName]}`);
+            }
+          }
+        }
+      }
+      
+      // Merge attributes with foreign key updates
+      const finalAttributes = { ...attributes, ...foreignKeyUpdates };
       
       if (isCreate) {
         // Create mode - insert new record with specified ID
         const recordData = {
-          ...attributes,
+          ...finalAttributes,
           [idProp]: id
         };
         
         await knex(tableName).insert(recordData);
-        
-        // Fetch the created record
-        const newRecord = await knex(tableName)
-          .where(idProp, id)
-          .first();
-        
-        return {
-          data: toJsonApi(scopeName, newRecord, schema)
-        };
       } else {
         // Update mode - check if record exists first
         const exists = await knex(tableName)
@@ -1074,19 +1083,31 @@ export const RestApiKnexPlugin = {
         }
         
         // Update the record (replace all fields)
-        await knex(tableName)
-          .where(idProp, id)
-          .update(attributes);
-        
-        // Fetch the updated record
-        const updatedRecord = await knex(tableName)
-          .where(idProp, id)
-          .first();
-        
-        return {
-          data: toJsonApi(scopeName, updatedRecord, schema)
-        };
+        if (Object.keys(finalAttributes).length > 0) {
+          await knex(tableName)
+            .where(idProp, id)
+            .update(finalAttributes);
+        }
       }
+      
+      // Return response with optional includes/sparse fieldsets
+      if (queryParams && Object.keys(queryParams).length > 0) {
+        return helpers.dataGet({
+          scopeName,
+          id: String(id),
+          queryParams,
+          runHooks
+        });
+      }
+      
+      // Simple response without includes
+      const record = await knex(tableName)
+        .where(idProp, id)
+        .first();
+      
+      return {
+        data: toJsonApi(scopeName, record, schema)
+      };
     };
     
     // PATCH - partially update a record
