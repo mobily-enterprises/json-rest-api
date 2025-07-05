@@ -460,8 +460,8 @@ export const RestApiKnexPlugin = {
     // Initialize cross-table search helpers
     const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
     
-    // Initialize relationship include helpers
-    const relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex);
+    // Initialize relationship include helpers (will get access to helper functions after they're defined)
+    let relationshipIncludeHelpers;
     
     // Register the enhanced searchSchema filter hook with cross-table search support
     addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
@@ -736,12 +736,69 @@ export const RestApiKnexPlugin = {
     // Expose relationship include helpers for advanced usage
     api.relationshipIncludes = relationshipIncludeHelpers;
     
-    // Helper to convert DB record to JSON:API format
-    const toJsonApi = (scopeName, record) => {
+    // Helper to identify foreign key fields in a schema
+    const getForeignKeyFields = (schema) => {
+      const foreignKeys = new Set();
+      if (!schema) return foreignKeys;
+      
+      Object.entries(schema).forEach(([field, def]) => {
+        if (def.belongsTo) {
+          foreignKeys.add(field);
+        }
+      });
+      return foreignKeys;
+    };
+    
+    // Helper to build field selection for sparse fieldsets
+    const buildFieldSelection = (scopeName, requestedFields, schema) => {
+      const dbFields = new Set(['id']); // Always need id
+      
+      // Always include ALL foreign keys (for relationships)
+      Object.entries(schema || {}).forEach(([field, def]) => {
+        if (def.belongsTo) {
+          dbFields.add(field); // e.g., author_id
+        }
+      });
+      
+      if (requestedFields === null || requestedFields === undefined) {
+        // No sparse fieldset - select all fields
+        return '*';
+      }
+      
+      // Add only the requested ATTRIBUTE fields (non-foreign keys)
+      const requested = requestedFields.split(',').map(f => f.trim()).filter(f => f);
+      requested.forEach(field => {
+        if (schema[field] && !schema[field].belongsTo) {
+          dbFields.add(field);
+        }
+      });
+      
+      // Add alwaysSelect fields
+      Object.entries(schema || {}).forEach(([field, def]) => {
+        if (def.alwaysSelect === true) {
+          dbFields.add(field);
+        }
+      });
+      
+      return Array.from(dbFields);
+    };
+    
+    // Helper to convert DB record to JSON:API format with foreign key filtering
+    const toJsonApi = (scopeName, record, schema) => {
       if (!record) return null;
       
       const idProperty = vars.idProperty || 'id';
-      const { [idProperty]: id, ...attributes } = record;
+      const { [idProperty]: id, ...allAttributes } = record;
+      
+      // Filter out foreign keys from attributes
+      const foreignKeys = getForeignKeyFields(schema);
+      const attributes = {};
+      
+      Object.entries(allAttributes).forEach(([key, value]) => {
+        if (!foreignKeys.has(key)) {
+          attributes[key] = value;
+        }
+      });
       
       return {
         type: scopeName,
@@ -749,6 +806,12 @@ export const RestApiKnexPlugin = {
         attributes
       };
     };
+
+    // Now initialize relationship include helpers with access to the helper functions
+    relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
+      getForeignKeyFields,
+      buildFieldSelection
+    });
 
     // EXISTS - check if a record exists by ID
     helpers.dataExists = async ({ scopeName, id, idProperty, runHooks }) => {
@@ -769,12 +832,24 @@ export const RestApiKnexPlugin = {
     helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
+      const schema = await scopes[scopeName].getSchema();
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
-      const record = await knex(tableName)
-        .where(idProperty, id)
-        .first();
+      // Build field selection for sparse fieldsets
+      const fieldsToSelect = buildFieldSelection(
+        scopeName,
+        queryParams.fields?.[scopeName],
+        schema
+      );
+      
+      // Build query with field selection
+      let query = knex(tableName).where(idProperty, id);
+      if (fieldsToSelect !== '*') {
+        query = query.select(fieldsToSelect);
+      }
+      
+      const record = await query.first();
       
       if (!record) {
         const error = new Error(`Record not found: ${scopeName}/${id}`);
@@ -793,7 +868,8 @@ export const RestApiKnexPlugin = {
         const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
           records,
           scopeName,
-          queryParams.include
+          queryParams.include,
+          queryParams.fields  // Pass fields for sparse fieldsets on included resources
         );
         
         included = includeResult.included;
@@ -803,7 +879,7 @@ export const RestApiKnexPlugin = {
       
       // Extract relationships from internal _relationships property
       const { _relationships, ...cleanRecord } = record;
-      const jsonApiRecord = toJsonApi(scopeName, cleanRecord);
+      const jsonApiRecord = toJsonApi(scopeName, cleanRecord, schema);
       
       // Add relationships if any were loaded
       if (_relationships) {
@@ -833,8 +909,21 @@ export const RestApiKnexPlugin = {
       
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
-      // Start building the query
-      let query = knex(tableName).select(`${tableName}.*`);
+      // Build field selection for sparse fieldsets
+      const fieldsToSelect = buildFieldSelection(
+        scopeName,
+        queryParams.fields?.[scopeName],
+        schema
+      );
+      
+      // Start building the query with field selection
+      let query = knex(tableName);
+      if (fieldsToSelect === '*') {
+        query = query.select(`${tableName}.*`);
+      } else {
+        // Select specific fields with table prefix to avoid ambiguity with JOINs
+        query = query.select(fieldsToSelect.map(field => `${tableName}.${field}`));
+      }
       
       // Run filtering hooks
       // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
@@ -903,7 +992,8 @@ export const RestApiKnexPlugin = {
         const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
           records,
           scopeName,
-          queryParams.include
+          queryParams.include,
+          queryParams.fields  // Pass fields for sparse fieldsets on included resources
         );
         
         included = includeResult.included;
@@ -915,7 +1005,7 @@ export const RestApiKnexPlugin = {
         data: records.map(record => {
           // Extract relationships from internal _relationships property
           const { _relationships, ...cleanRecord } = record;
-          const jsonApiRecord = toJsonApi(scopeName, cleanRecord);
+          const jsonApiRecord = toJsonApi(scopeName, cleanRecord, schema);
           
           // Add relationships if any were loaded
           if (_relationships) {

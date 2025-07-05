@@ -51,7 +51,7 @@
  *   'author,comments.author'
  * );
  */
-export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
+export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => {
   
   /**
    * Helper to get table name for a scope
@@ -66,15 +66,34 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * Helper to convert DB record to JSON:API format
    * @private
    */
-  const toJsonApi = (scopeName, record, idProperty = 'id') => {
+  const toJsonApi = (scopeName, record, schema, idProperty = 'id') => {
     if (!record) return null;
     
-    const { [idProperty]: id, ...attributes } = record;
+    const { [idProperty]: id, ...allAttributes } = record;
     
+    // Filter out foreign keys from attributes if we have schema
+    if (schema && helpers?.getForeignKeyFields) {
+      const foreignKeys = helpers.getForeignKeyFields(schema);
+      const attributes = {};
+      
+      Object.entries(allAttributes).forEach(([key, value]) => {
+        if (!foreignKeys.has(key)) {
+          attributes[key] = value;
+        }
+      });
+      
+      return {
+        type: scopeName,
+        id: String(id),
+        attributes
+      };
+    }
+    
+    // Fallback to original behavior if no schema or helpers
     return {
       type: scopeName,
       id: String(id),
-      attributes
+      attributes: allAttributes
     };
   };
   
@@ -155,7 +174,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * @param {string} currentPath - Current include path for tracking
    * @returns {Promise<void>}
    */
-  const loadBelongsTo = async (records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath) => {
+  const loadBelongsTo = async (records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields) => {
     log.trace('[INCLUDE] Loading belongsTo relationship:', { fieldName, includeName, recordCount: records.length });
     
     // Collect all unique foreign key values
@@ -177,9 +196,19 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     const targetScope = fieldDef.belongsTo;
     const targetTable = await getTableName(targetScope);
     
+    // Build field selection for sparse fieldsets
+    const targetSchema = await scopes[targetScope].getSchema();
+    const fieldsToSelect = helpers?.buildFieldSelection ? 
+      helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      '*';
+    
     // Single query to load all related records
-    log.debug(`[INCLUDE] Loading ${targetScope} records:`, { whereIn: foreignKeys });
-    const relatedRecords = await knex(targetTable).whereIn('id', foreignKeys);
+    log.debug(`[INCLUDE] Loading ${targetScope} records:`, { whereIn: foreignKeys, fields: fieldsToSelect });
+    let query = knex(targetTable).whereIn('id', foreignKeys);
+    if (fieldsToSelect !== '*') {
+      query = query.select(fieldsToSelect);
+    }
+    const relatedRecords = await query;
     
     log.trace('[INCLUDE] Loaded related records:', { count: relatedRecords.length });
     
@@ -222,7 +251,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     if (Object.keys(subIncludes).length > 0 && relatedRecords.length > 0) {
       const nextPath = `${currentPath}.${includeName}`;
       log.trace('[INCLUDE] Processing nested includes for belongsTo:', { path: nextPath });
-      await processIncludes(relatedRecords, targetScope, subIncludes, included, processedPaths, nextPath);
+      await processIncludes(relatedRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
     }
   };
   
@@ -241,7 +270,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * @param {string} currentPath - Current include path for tracking
    * @returns {Promise<void>}
    */
-  const loadHasMany = async (records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath) => {
+  const loadHasMany = async (records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields) => {
     log.trace('[INCLUDE] Loading hasMany relationship:', { scopeName, includeName, recordCount: records.length });
     
     // Collect all parent IDs
@@ -259,11 +288,19 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     
     log.trace('[INCLUDE] HasMany details:', { targetScope, targetTable, foreignKey, parentIds: mainIds.length });
     
+    // Build field selection for sparse fieldsets
+    const targetSchema = await scopes[targetScope].getSchema();
+    const fieldsToSelect = helpers?.buildFieldSelection ? 
+      helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      '*';
+    
     // Single query to load ALL related records
-    log.debug(`[INCLUDE] Loading ${targetScope} records for ${scopeName}:`, { whereIn: mainIds });
-    const relatedRecords = await knex(targetTable)
-      .whereIn(foreignKey, mainIds)
-      .orderBy('id'); // Consistent ordering
+    log.debug(`[INCLUDE] Loading ${targetScope} records for ${scopeName}:`, { whereIn: mainIds, fields: fieldsToSelect });
+    let query = knex(targetTable).whereIn(foreignKey, mainIds).orderBy('id'); // Consistent ordering
+    if (fieldsToSelect !== '*') {
+      query = query.select(fieldsToSelect);
+    }
+    const relatedRecords = await query;
     
     log.trace('[INCLUDE] Loaded hasMany records:', { count: relatedRecords.length });
     
@@ -306,7 +343,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     if (Object.keys(subIncludes).length > 0 && relatedRecords.length > 0) {
       const nextPath = `${currentPath}.${includeName}`;
       log.trace('[INCLUDE] Processing nested includes for hasMany:', { path: nextPath });
-      await processIncludes(relatedRecords, targetScope, subIncludes, included, processedPaths, nextPath);
+      await processIncludes(relatedRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
     }
   };
   
@@ -323,7 +360,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * @param {string} currentPath - Current include path for tracking
    * @returns {Promise<void>}
    */
-  const processIncludes = async (records, scopeName, includeTree, included, processedPaths, currentPath = '') => {
+  const processIncludes = async (records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}) => {
     log.trace('[INCLUDE] Processing includes:', { scopeName, includes: Object.keys(includeTree), currentPath });
     
     // Skip if no records or no includes
@@ -354,7 +391,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
       for (const [fieldName, fieldDef] of Object.entries(schema)) {
         if (fieldDef.as === includeName && fieldDef.belongsTo && fieldDef.sideLoad) {
           log.trace('[INCLUDE] Found belongsTo relationship:', { fieldName, target: fieldDef.belongsTo });
-          await loadBelongsTo(records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath);
+          await loadBelongsTo(records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields);
           processed = true;
           break;
         }
@@ -365,7 +402,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
         const rel = relationships[includeName];
         if (rel.hasMany && rel.sideLoad) {
           log.trace('[INCLUDE] Found hasMany relationship:', { includeName, target: rel.hasMany });
-          await loadHasMany(records, scopeName, includeName, rel, subIncludes, included, processedPaths, currentPath);
+          await loadHasMany(records, scopeName, includeName, rel, subIncludes, included, processedPaths, currentPath, fields);
           processed = true;
         }
       }
@@ -400,7 +437,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * 
    * // result.recordsWithRelationships = original records with _relationships added
    */
-  const buildIncludedResources = async (records, scopeName, includeParam) => {
+  const buildIncludedResources = async (records, scopeName, includeParam, fields) => {
     log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
     
     // Check if includes are empty or records are empty
@@ -426,22 +463,25 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     const processedPaths = new Set(); // Prevent infinite loops
     
     // Process all includes recursively
-    await processIncludes(records, scopeName, includeTree, included, processedPaths);
+    await processIncludes(records, scopeName, includeTree, included, processedPaths, '', fields);
     
     // Convert Map to array of JSON:API resources
-    const includedArray = Array.from(included.values()).map(entry => {
+    const includedArray = [];
+    for (const entry of included.values()) {
       const { raw, scope } = entry;
       // Extract relationships that were added during processing
       const { _relationships, ...cleanRecord } = raw;
-      const jsonApiRecord = toJsonApi(scope, cleanRecord);
+      // Get schema for foreign key filtering
+      const targetSchema = await scopes[scope].getSchema();
+      const jsonApiRecord = toJsonApi(scope, cleanRecord, targetSchema);
       
       // Add relationships if any were loaded
       if (_relationships) {
         jsonApiRecord.relationships = _relationships;
       }
       
-      return jsonApiRecord;
-    });
+      includedArray.push(jsonApiRecord);
+    }
     
     log.debug('[INCLUDE] Completed building included resources:', { 
       includedCount: includedArray.length,
