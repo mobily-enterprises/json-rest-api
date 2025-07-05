@@ -323,7 +323,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search articles by author name', async () => {
       const result = await api.resources.articles.query({
         queryParams: {
-          filter: { authorName: 'John' }
+          filters: { authorName: 'John' }
         }
       });
       
@@ -335,7 +335,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search people by company name', async () => {
       const result = await api.resources.people.query({
         queryParams: {
-          filter: { companyName: 'Tech' }
+          filters: { companyName: 'Tech' }
         }
       });
       
@@ -354,7 +354,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search people by their article titles', async () => {
       const result = await api.resources.people.query({
         queryParams: {
-          filter: { articleTitle: 'JavaScript' }
+          filters: { articleTitle: 'JavaScript' }
         }
       });
       
@@ -365,7 +365,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search people by article title (React)', async () => {
       const result = await api.resources.people.query({
         queryParams: {
-          filter: { articleTitle: 'React' }
+          filters: { articleTitle: 'React' }
         }
       });
       
@@ -378,7 +378,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search articles across multiple fields including cross-table', async () => {
       const result = await api.resources.articles.query({
         queryParams: {
-          filter: { search: 'john' }
+          filters: { search: 'john' }
         }
       });
       
@@ -388,7 +388,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search people across multiple fields', async () => {
       const result = await api.resources.people.query({
         queryParams: {
-          filter: { search: 'Tech' }
+          filters: { search: 'Tech' }
         }
       });
       
@@ -401,7 +401,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should search articles by company name (articles -> people -> companies)', async () => {
       const result = await api.resources.articles.query({
         queryParams: {
-          filter: { companyName: 'Tech' }
+          filters: { companyName: 'Tech' }
         }
       });
       
@@ -457,7 +457,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should handle empty filter values gracefully', async () => {
       const result = await api.resources.articles.query({
         queryParams: {
-          filter: { authorName: '' }
+          filters: { authorName: '' }
         }
       });
       

@@ -1,5 +1,6 @@
 
 import { createCrossTableSearchHelpers } from './lib/cross-table-search.js';
+import { createRelationshipIncludeHelpers } from './lib/relationship-includes.js';
 
 /**
  * REST API Knex Plugin - SQL Storage Implementation
@@ -459,6 +460,9 @@ export const RestApiKnexPlugin = {
     // Initialize cross-table search helpers
     const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
     
+    // Initialize relationship include helpers
+    const relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex);
+    
     // Register the enhanced searchSchema filter hook with cross-table search support
     addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
       async (hookParams) => {
@@ -719,6 +723,9 @@ export const RestApiKnexPlugin = {
     // Expose cross-table search helpers for advanced usage
     api.crossTableSearch = crossTableSearchHelpers;
     
+    // Expose relationship include helpers for advanced usage
+    api.relationshipIncludes = relationshipIncludeHelpers;
+    
     // Helper to convert DB record to JSON:API format
     const toJsonApi = (scopeName, record) => {
       if (!record) return null;
@@ -749,7 +756,7 @@ export const RestApiKnexPlugin = {
     };
 
     // GET - retrieve a single record by ID
-    helpers.dataGet = async ({ scopeName, id, runHooks }) => {
+    helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       
@@ -766,9 +773,44 @@ export const RestApiKnexPlugin = {
         throw error;
       }
       
-      return {
-        data: toJsonApi(scopeName, record)
+      // Process includes if requested
+      let included = [];
+      const records = [record]; // Wrap in array for processing
+      
+      if (queryParams.include) {
+        log.debug('[DATA-GET] Processing includes:', queryParams.include);
+        
+        const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
+          records,
+          scopeName,
+          queryParams.include
+        );
+        
+        included = includeResult.included;
+        log.debug('[DATA-GET] Include result:', { includedCount: included.length, hasRelationships: !!record._relationships });
+        // The record now has _relationships added
+      }
+      
+      // Extract relationships from internal _relationships property
+      const { _relationships, ...cleanRecord } = record;
+      const jsonApiRecord = toJsonApi(scopeName, cleanRecord);
+      
+      // Add relationships if any were loaded
+      if (_relationships) {
+        jsonApiRecord.relationships = _relationships;
+      }
+      
+      // Build the response
+      const response = {
+        data: jsonApiRecord
       };
+      
+      // Add included array if any resources were included
+      if (included.length > 0) {
+        response.included = included;
+      }
+      
+      return response;
     };
     
     // QUERY - retrieve multiple records
@@ -788,7 +830,7 @@ export const RestApiKnexPlugin = {
       // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
       // to ensure proper grouping and prevent accidental filter bypass.
       // See plugin documentation for examples and best practices.
-      log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filter, scopeName, tableName });
+      log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filters, scopeName, tableName });
       
       log.trace('[DATA-QUERY] About to call runHooks', { hookName: 'knexQueryFiltering' });
       
@@ -797,7 +839,7 @@ export const RestApiKnexPlugin = {
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filter, searchSchema, scopeName, tableName };
+        context.knexQuery = { query, filters: queryParams.filters, searchSchema, scopeName, tableName };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery });
       }
@@ -843,9 +885,43 @@ export const RestApiKnexPlugin = {
       // Execute the query
       const records = await query;
       
-      return {
-        data: records.map(record => toJsonApi(scopeName, record))
+      // Process includes if requested
+      let included = [];
+      if (queryParams.include) {
+        log.trace('[DATA-QUERY] Processing includes:', queryParams.include);
+        
+        const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
+          records,
+          scopeName,
+          queryParams.include
+        );
+        
+        included = includeResult.included;
+        // The records now have _relationships added
+      }
+      
+      // Build the response
+      const response = {
+        data: records.map(record => {
+          // Extract relationships from internal _relationships property
+          const { _relationships, ...cleanRecord } = record;
+          const jsonApiRecord = toJsonApi(scopeName, cleanRecord);
+          
+          // Add relationships if any were loaded
+          if (_relationships) {
+            jsonApiRecord.relationships = _relationships;
+          }
+          
+          return jsonApiRecord;
+        })
       };
+      
+      // Add included array if any resources were included
+      if (included.length > 0) {
+        response.included = included;
+      }
+      
+      return response;
     };
     
     // POST - create a new record

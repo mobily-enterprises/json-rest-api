@@ -93,7 +93,7 @@ export const ExpressPlugin = {
       queryParams.fields = {};
       
       // Parse filter (object)
-      queryParams.filter = {};
+      queryParams.filters = {};
       
       // Parse page (object)
       queryParams.page = {};
@@ -107,7 +107,7 @@ export const ExpressPlugin = {
         if ((match = key.match(/^fields\[(.+)\]$/))) {
           queryParams.fields[match[1]] = value;
         } else if ((match = key.match(/^filter\[(.+)\]$/))) {
-          queryParams.filter[match[1]] = value;
+          queryParams.filters[match[1]] = value;
         } else if ((match = key.match(/^page\[(.+)\]$/))) {
           queryParams.page[match[1]] = value;
         }
@@ -117,8 +117,8 @@ export const ExpressPlugin = {
       if (typeof query.fields === 'object' && !Array.isArray(query.fields)) {
         Object.assign(queryParams.fields, query.fields);
       }
-      if (typeof query.filter === 'object' && !Array.isArray(query.filter)) {
-        Object.assign(queryParams.filter, query.filter);
+      if (typeof query.filters === 'object' && !Array.isArray(query.filters)) {
+        Object.assign(queryParams.filters, query.filters);
       }
       if (typeof query.page === 'object' && !Array.isArray(query.page)) {
         Object.assign(queryParams.page, query.page);
@@ -131,7 +131,7 @@ export const ExpressPlugin = {
       
       // Clean up empty objects
       if (Object.keys(queryParams.fields).length === 0) delete queryParams.fields;
-      if (Object.keys(queryParams.filter).length === 0) delete queryParams.filter;
+      if (Object.keys(queryParams.filters).length === 0) delete queryParams.filters;
       if (Object.keys(queryParams.page).length === 0) delete queryParams.page;
       
       return queryParams;

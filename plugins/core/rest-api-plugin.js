@@ -12,6 +12,22 @@ import {
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
 
+/**
+ * Automatically marks searchSchema fields as indexed to support cross-table searches
+ * @param {Object} searchSchema - The searchSchema object to process
+ */
+function ensureSearchFieldsAreIndexed(searchSchema) {
+  if (!searchSchema) return;
+  
+  Object.keys(searchSchema).forEach(fieldName => {
+    const fieldDef = searchSchema[fieldName];
+    if (fieldDef && typeof fieldDef === 'object') {
+      // Mark the field as indexed for cross-table search support
+      fieldDef.indexed = true;
+    }
+  });
+}
+
 export const RestApiPlugin = {
   name: 'rest-api',
 
@@ -56,19 +72,38 @@ export const RestApiPlugin = {
       }
     };
 
-    // Helper function to generate searchSchema from schema fields with 'search' property
-    const generateSearchSchemaFromSchema = (schema) => {
-      if (!schema) return null;
+    // Helper function to generate complete searchSchema from schema and explicit searchSchema
+    const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => {
+      // Start with explicit searchSchema or empty object
+      const searchSchema = explicitSearchSchema ? {...explicitSearchSchema} : {};
       
-      const searchSchema = {};
+      if (!schema) {
+        return Object.keys(searchSchema).length > 0 ? searchSchema : null;
+      }
       
+      // Process schema fields with 'search' property
       Object.entries(schema).forEach(([fieldName, fieldDef]) => {
         if (fieldDef.search) {
           if (fieldDef.search === true) {
-            // Simple boolean - use field definition with default filter
+            // Check for conflicts with explicit searchSchema
+            if (searchSchema[fieldName]) {
+              throw new RestApiValidationError(
+                `Field '${fieldName}' is defined in both schema (with search: true) and explicit searchSchema. Remove one definition to avoid conflicts.`,
+                { 
+                  fields: [fieldName],
+                  violations: [{
+                    field: fieldName,
+                    rule: 'duplicate_search_field',
+                    message: 'Field cannot be defined in both schema and searchSchema'
+                  }]
+                }
+              );
+            }
+            
+            // Simple boolean - copy entire field definition (except search) and add filterUsing
+            const { search, ...fieldDefWithoutSearch } = fieldDef;
             searchSchema[fieldName] = {
-              type: fieldDef.type,
-              enum: fieldDef.enum,
+              ...fieldDefWithoutSearch,
               // Default filter behavior based on type
               filterUsing: fieldDef.type === 'string' ? '=' : '='
             };
@@ -81,6 +116,21 @@ export const RestApiPlugin = {
             if (hasNestedFilters) {
               // Multiple filters from one field (like published_after/before)
               Object.entries(fieldDef.search).forEach(([filterName, filterDef]) => {
+                // Check for conflicts
+                if (searchSchema[filterName]) {
+                  throw new RestApiValidationError(
+                    `Field '${filterName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
+                    { 
+                      fields: [filterName],
+                      violations: [{
+                        field: filterName,
+                        rule: 'duplicate_search_field',
+                        message: 'Field cannot be defined in both schema and searchSchema'
+                      }]
+                    }
+                  );
+                }
+                
                 searchSchema[filterName] = {
                   type: fieldDef.type,
                   actualField: fieldName,
@@ -88,6 +138,21 @@ export const RestApiPlugin = {
                 };
               });
             } else {
+              // Check for conflicts
+              if (searchSchema[fieldName]) {
+                throw new RestApiValidationError(
+                  `Field '${fieldName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
+                  { 
+                    fields: [fieldName],
+                    violations: [{
+                      field: fieldName,
+                      rule: 'duplicate_search_field',
+                      message: 'Field cannot be defined in both schema and searchSchema'
+                    }]
+                  }
+                );
+              }
+              
               // Single filter with config
               searchSchema[fieldName] = {
                 type: fieldDef.type,
@@ -101,6 +166,21 @@ export const RestApiPlugin = {
       // Handle _virtual search definitions
       if (schema._virtual?.search) {
         Object.entries(schema._virtual.search).forEach(([filterName, filterDef]) => {
+          // Check for conflicts
+          if (searchSchema[filterName]) {
+            throw new RestApiValidationError(
+              `Field '${filterName}' is defined in both schema (_virtual.search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
+              { 
+                fields: [filterName],
+                violations: [{
+                  field: filterName,
+                  rule: 'duplicate_search_field',
+                  message: 'Field cannot be defined in both schema and searchSchema'
+                }]
+              }
+            );
+          }
+          
           searchSchema[filterName] = filterDef;
         });
       }
@@ -174,7 +254,7 @@ export const RestApiPlugin = {
  * @param {object} [queryParams={}] - Optional. An object to customize the query for the collection.
  * @param {string[]} [queryParams.include=[]] - An optional array of relationship paths to sideload for each resource in the collection. These paths will be converted to a comma-separated string for the URL (e.g., `['author', 'comments.user']` becomes `author,comments.user`). Supports deep relationships (e.g., "publisher.country").
  * @param {object} [queryParams.fields] - An object to request only specific fields (sparse fieldsets) for each resource in the collection and its included relationships. Keys are resource types, values are comma-separated field names.
- * @param {object} [queryParams.filter] - An object to filter the collection. Keys are filter parameters (specific to your API's implementation, e.g., 'status', 'title'), values are the filter criteria.
+ * @param {object} [queryParams.filters] - An object to filter the collection. Keys are filter parameters (specific to your API's implementation, e.g., 'status', 'title'), values are the filter criteria.
  * @param {string[]} [queryParams.sort=[]] - An optional array of fields to sort the collection by. Each string represents a field; prefix with '-' for descending order (e.g., `['title', '-published-date']` becomes `title,-published-date`).
  * @param {object} [queryParams.page] - An object for pagination. Typically includes `number` (page number) and `size` (items per page). E.g., `{ number: 1, size: 10 }`.
  * @returns {Promise<object>} A Promise that resolves to the JSON:API response document containing the resource collection.
@@ -272,7 +352,7 @@ export const RestApiPlugin = {
  * @example
  * // Example 3: Get articles by a specific author, with comments and their users.
  * const authorArticles = await api.getCollection('articles', {
- *   filter: {
+ *   filters: {
  *     author_id: '456'
  *   },
  *   include: ['comments.user'],
@@ -283,7 +363,7 @@ export const RestApiPlugin = {
  *   },
  *   sort: ['created-at']
  * });
- * @see GET /api/articles?filter[author_id]=456&include=comments.user&fields[articles]=title&fields[comments]=body&fields[users]=username&sort=created-at
+ * @see GET /api/articles?filters[author_id]=456&include=comments.user&fields[articles]=title&fields[comments]=body&fields[users]=username&sort=created-at
  * // Example Return Value for authorArticles (truncated for brevity):
  * // {
  * //   "data": [
@@ -314,7 +394,7 @@ export const RestApiPlugin = {
       params.queryParams = params.queryParams || {}
       params.queryParams.include = params.queryParams.include || []
       params.queryParams.fields = params.queryParams.fields || {}
-      params.queryParams.filter = params.queryParams.filter || {} 
+      params.queryParams.filters = params.queryParams.filters || {} 
       params.queryParams.sort = params.queryParams.sort || []
       params.queryParams.page = params.queryParams.page || {}
       log.trace('[QUERY-METHOD] After sanitizing params:', params);
@@ -332,14 +412,14 @@ export const RestApiPlugin = {
       // Check payload with sortable fields validation
       validateQueryPayload(params, sortableFields);
 
-      // Generate searchSchema if not explicitly defined
-      let searchSchema = scopeOptions.searchSchema;
-      if (!searchSchema && scopeOptions.schema) {
-        searchSchema = generateSearchSchemaFromSchema(scopeOptions.schema);
-      }
+      // Generate complete searchSchema from both schema and explicit searchSchema
+      const searchSchema = generateSearchSchemaFromSchema(scopeOptions.schema, scopeOptions.searchSchema);
+      
+      // Ensure searchSchema fields are marked as indexed
+      ensureSearchFieldsAreIndexed(searchSchema);
 
       // Validate search/filter parameters against searchSchema
-      if (params.queryParams.filter && Object.keys(params.queryParams.filter).length > 0) {
+      if (params.queryParams.filters && Object.keys(params.queryParams.filters).length > 0) {
         // Use searchSchema (explicit or generated) for validation
         const schemaToValidate = searchSchema || scopeOptions.schema;
         
@@ -348,29 +428,30 @@ export const RestApiPlugin = {
           const filterSchema = CreateSchema(schemaToValidate);
           
           // Validate the filter parameters
-          const { validatedObject, errors } = await filterSchema.validate(params.queryParams.filter, { 
+          const { validatedObject, errors } = await filterSchema.validate(params.queryParams.filters, { 
             onlyObjectValues: true // Partial validation for filters
           });
           
           // If there are validation errors, throw an error
           if (Object.keys(errors).length > 0) {
             const violations = Object.entries(errors).map(([field, error]) => ({
-              field: `filter.${field}`,
+              field: `filters.${field}`,
               rule: error.code || 'invalid_value',
               message: error.message
             }));
             
+            debugger
             throw new RestApiValidationError(
               'Invalid filter parameters',
               { 
-                fields: Object.keys(errors).map(field => `filter.${field}`),
+                fields: Object.keys(errors).map(field => `filters.${field}`),
                 violations 
               }
             );
           }
           
           // Replace filter with validated/transformed values
-          params.queryParams.filter = validatedObject;
+          params.queryParams.filters = validatedObject;
         }
       }
     

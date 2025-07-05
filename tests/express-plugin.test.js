@@ -117,8 +117,8 @@ describe('ExpressPlugin', () => {
           }
           
           // Apply filters (values already type-converted by REST API validation)
-          if (queryParams.filter && Object.keys(queryParams.filter).length > 0) {
-            Object.entries(queryParams.filter).forEach(([key, value]) => {
+          if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
+            Object.entries(queryParams.filters).forEach(([key, value]) => {
               records = records.filter(record => {
                 return record[key] === value;
               });

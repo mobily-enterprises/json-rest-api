@@ -88,8 +88,8 @@ describe('RestApiPlugin', () => {
             let books = [...mockBooks];
             
             // Apply filters
-            if (queryParams.filter) {
-              Object.entries(queryParams.filter).forEach(([key, value]) => {
+            if (queryParams.filters) {
+              Object.entries(queryParams.filters).forEach(([key, value]) => {
                 books = books.filter(book => book[key] === value);
               });
             }
@@ -261,7 +261,7 @@ describe('RestApiPlugin', () => {
     test('should apply filters', async () => {
       const result = await api.resources.books.query({
         queryParams: {
-          filter: { published: true }
+          filters: { published: true }
         }
       });
       

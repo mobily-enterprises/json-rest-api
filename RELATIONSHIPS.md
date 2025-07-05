@@ -943,9 +943,9 @@ export const MySQLStoragePlugin = {
       const params = [];
       
       // Handle filters if searchSchema is defined
-      if (queryParams.filter && scope.searchSchema) {
+      if (queryParams.filters && scope.searchSchema) {
         const whereConditions = [];
-        for (const [field, value] of Object.entries(queryParams.filter)) {
+        for (const [field, value] of Object.entries(queryParams.filters)) {
           if (scope.searchSchema[field]) {
             whereConditions.push(`${field} = ?`);
             params.push(value);
