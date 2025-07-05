@@ -1,3 +1,48 @@
+TODO: Missing JSON:API Features
+
+Have an option to hide fields (hidden: yes, normallyHidden: yes)
+(Diffence being that normallyHidden CAN be made visible with field:...)
+Check that limit/default order is maintained in sub queries in dataQuery
+
+Many-to-many relationships
+
+  🟢 Easy (1-2 hours each)
+
+  1. Relationship Endpoints - Separate endpoints for relationship manipulation
+    - GET /articles/1/relationships/comments
+    - POST/DELETE for relationship updates
+  2. Calculated/Virtual Fields - Computed attributes
+    - Add type: 'virtual' with compute function
+    - Support in sparse fieldsets
+  3. Query Depth Protection - Prevent malicious deep includes
+    - Max depth limit for ?include=author.articles.author...
+
+  🟡 Medium (3-5 hours each)
+
+  4. Relationship Meta - Add metadata to relationships
+    - Count without loading all records
+    - Permission/state information
+  5. Field Type Handling - Better serialization
+    - Auto-format dates to ISO 8601
+    - Handle decimals/money properly
+    - Boolean coercion from SQLite
+
+  🔴 Complex (8+ hours)
+
+  6. Polymorphic Relationships - One relationship, multiple types
+    - Schema support for commentable_type/commentable_id
+    - Loading logic for mixed types
+    - Reverse relationship queries
+  7. Relationship Filtering - Filter/paginate included resources
+    - Allow ?include=comments&filter[comments_approved]=true
+    - Per-relationship limits and sorting
+
+  📝 Nice to Have
+
+  - Resource-level meta
+  - Compound document support
+  - Bulk operations / sideposting
+  - Pagination for included relationships
 
 
 

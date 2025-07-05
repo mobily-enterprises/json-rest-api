@@ -806,6 +806,63 @@ export const RestApiKnexPlugin = {
         attributes
       };
     };
+    
+    // Helper to build query selection with optional table prefix
+    const buildQuerySelection = (query, tableName, fieldsToSelect, useTablePrefix = false) => {
+      if (fieldsToSelect === '*') {
+        return useTablePrefix ? query.select(`${tableName}.*`) : query;
+      } else {
+        const fields = useTablePrefix 
+          ? fieldsToSelect.map(field => `${tableName}.${field}`)
+          : fieldsToSelect;
+        return query.select(fields);
+      }
+    };
+    
+    // Helper to process includes for both single and multiple records
+    const processIncludes = async (records, scopeName, queryParams) => {
+      if (!queryParams.include) {
+        return [];
+      }
+      
+      log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include);
+      
+      const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
+        records,
+        scopeName,
+        queryParams.include,
+        queryParams.fields
+      );
+      
+      return includeResult.included;
+    };
+    
+    // Helper to build JSON:API response with relationships and includes
+    const buildJsonApiResponse = (records, scopeName, schema, included = [], isSingle = false) => {
+      // Process records to JSON:API format
+      const processedRecords = records.map(record => {
+        const { _relationships, ...cleanRecord } = record;
+        const jsonApiRecord = toJsonApi(scopeName, cleanRecord, schema);
+        
+        if (_relationships) {
+          jsonApiRecord.relationships = _relationships;
+        }
+        
+        return jsonApiRecord;
+      });
+      
+      // Build response structure
+      const response = isSingle 
+        ? { data: processedRecords[0] }
+        : { data: processedRecords };
+      
+      // Add included resources if any
+      if (included.length > 0) {
+        response.included = included;
+      }
+      
+      return response;
+    };
 
     // Now initialize relationship include helpers with access to the helper functions
     relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
@@ -843,11 +900,9 @@ export const RestApiKnexPlugin = {
         schema
       );
       
-      // Build query with field selection
+      // Build and execute query
       let query = knex(tableName).where(idProperty, id);
-      if (fieldsToSelect !== '*') {
-        query = query.select(fieldsToSelect);
-      }
+      query = buildQuerySelection(query, tableName, fieldsToSelect, false);
       
       const record = await query.first();
       
@@ -858,45 +913,12 @@ export const RestApiKnexPlugin = {
         throw error;
       }
       
-      // Process includes if requested
-      let included = [];
+      // Process includes
       const records = [record]; // Wrap in array for processing
+      const included = await processIncludes(records, scopeName, queryParams);
       
-      if (queryParams.include) {
-        log.debug('[DATA-GET] Processing includes:', queryParams.include);
-        
-        const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
-          records,
-          scopeName,
-          queryParams.include,
-          queryParams.fields  // Pass fields for sparse fieldsets on included resources
-        );
-        
-        included = includeResult.included;
-        log.debug('[DATA-GET] Include result:', { includedCount: included.length, hasRelationships: !!record._relationships });
-        // The record now has _relationships added
-      }
-      
-      // Extract relationships from internal _relationships property
-      const { _relationships, ...cleanRecord } = record;
-      const jsonApiRecord = toJsonApi(scopeName, cleanRecord, schema);
-      
-      // Add relationships if any were loaded
-      if (_relationships) {
-        jsonApiRecord.relationships = _relationships;
-      }
-      
-      // Build the response
-      const response = {
-        data: jsonApiRecord
-      };
-      
-      // Add included array if any resources were included
-      if (included.length > 0) {
-        response.included = included;
-      }
-      
-      return response;
+      // Build and return response
+      return buildJsonApiResponse(records, scopeName, schema, included, true);
     };
     
     // QUERY - retrieve multiple records
@@ -916,14 +938,9 @@ export const RestApiKnexPlugin = {
         schema
       );
       
-      // Start building the query with field selection
+      // Start building query with table prefix (for JOIN support)
       let query = knex(tableName);
-      if (fieldsToSelect === '*') {
-        query = query.select(`${tableName}.*`);
-      } else {
-        // Select specific fields with table prefix to avoid ambiguity with JOINs
-        query = query.select(fieldsToSelect.map(field => `${tableName}.${field}`));
-      }
+      query = buildQuerySelection(query, tableName, fieldsToSelect, true);
       
       // Run filtering hooks
       // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
@@ -981,53 +998,21 @@ export const RestApiKnexPlugin = {
           .offset((pageNumber - 1) * pageSize);
       }
       
-      // Execute the query
+      // Execute query
       const records = await query;
       
-      // Process includes if requested
-      let included = [];
-      if (queryParams.include) {
-        log.trace('[DATA-QUERY] Processing includes:', queryParams.include);
-        
-        const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
-          records,
-          scopeName,
-          queryParams.include,
-          queryParams.fields  // Pass fields for sparse fieldsets on included resources
-        );
-        
-        included = includeResult.included;
-        // The records now have _relationships added
-      }
+      // Process includes
+      const included = await processIncludes(records, scopeName, queryParams);
       
-      // Build the response
-      const response = {
-        data: records.map(record => {
-          // Extract relationships from internal _relationships property
-          const { _relationships, ...cleanRecord } = record;
-          const jsonApiRecord = toJsonApi(scopeName, cleanRecord, schema);
-          
-          // Add relationships if any were loaded
-          if (_relationships) {
-            jsonApiRecord.relationships = _relationships;
-          }
-          
-          return jsonApiRecord;
-        })
-      };
-      
-      // Add included array if any resources were included
-      if (included.length > 0) {
-        response.included = included;
-      }
-      
-      return response;
+      // Build and return response
+      return buildJsonApiResponse(records, scopeName, schema, included, false);
     };
     
     // POST - create a new record
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
+      const schema = await scopes[scopeName].getSchema();
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
       
@@ -1043,7 +1028,7 @@ export const RestApiKnexPlugin = {
         .first();
       
       return {
-        data: toJsonApi(scopeName, newRecord)
+        data: toJsonApi(scopeName, newRecord, schema)
       };
     };
     
@@ -1051,6 +1036,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPut = async ({ scopeName, id, inputRecord, isCreate, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
+      const schema = await scopes[scopeName].getSchema();
       
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`, inputRecord);
       
@@ -1072,7 +1058,7 @@ export const RestApiKnexPlugin = {
           .first();
         
         return {
-          data: toJsonApi(scopeName, newRecord)
+          data: toJsonApi(scopeName, newRecord, schema)
         };
       } else {
         // Update mode - check if record exists first
@@ -1098,7 +1084,7 @@ export const RestApiKnexPlugin = {
           .first();
         
         return {
-          data: toJsonApi(scopeName, updatedRecord)
+          data: toJsonApi(scopeName, updatedRecord, schema)
         };
       }
     };
@@ -1107,6 +1093,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPatch = async ({ scopeName, id, inputRecord, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
+      const schema = await scopes[scopeName].getSchema();
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`, inputRecord);
       
@@ -1136,7 +1123,7 @@ export const RestApiKnexPlugin = {
         .first();
       
       return {
-        data: toJsonApi(scopeName, updatedRecord)
+        data: toJsonApi(scopeName, updatedRecord, schema)
       };
     };
     
