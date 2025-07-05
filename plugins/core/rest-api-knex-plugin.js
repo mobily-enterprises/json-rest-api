@@ -863,6 +863,53 @@ export const RestApiKnexPlugin = {
       
       return response;
     };
+    
+    // Helper to process belongsTo relationships from JSON:API input
+    const processBelongsToRelationships = (inputRecord, schema) => {
+      const foreignKeyUpdates = {};
+      
+      if (!inputRecord.data.relationships) {
+        return foreignKeyUpdates;
+      }
+      
+      // Schema might be a Schema object or plain object
+      const schemaStructure = schema.structure || schema;
+      
+      for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
+        if (fieldDef.belongsTo && fieldDef.as) {
+          const relName = fieldDef.as;
+          if (inputRecord.data.relationships[relName] !== undefined) {
+            const relData = inputRecord.data.relationships[relName];
+            foreignKeyUpdates[fieldName] = relData.data?.id || null;
+            log.debug(`[Knex] Processing belongsTo relationship ${relName}: ${fieldName} = ${foreignKeyUpdates[fieldName]}`);
+          }
+        }
+      }
+      
+      return foreignKeyUpdates;
+    };
+    
+    // Helper to build response with optional query parameters
+    const buildResponseWithQueryParams = async ({ scopeName, id, idProp, tableName, schema, queryParams, runHooks }) => {
+      // Return response with optional includes/sparse fieldsets
+      if (queryParams && Object.keys(queryParams).length > 0) {
+        return helpers.dataGet({
+          scopeName,
+          id: String(id),
+          queryParams,
+          runHooks
+        });
+      }
+      
+      // Simple response without includes
+      const record = await knex(tableName)
+        .where(idProp, id)
+        .first();
+      
+      return {
+        data: toJsonApi(scopeName, record, schema)
+      };
+    };
 
     // Now initialize relationship include helpers with access to the helper functions
     relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
@@ -1038,27 +1085,11 @@ export const RestApiKnexPlugin = {
       const idProp = idProperty || vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
       
-      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`, inputRecord);
+      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`);
       
-      // Extract attributes from JSON:API format
+      // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
-      
-      // Process belongsTo relationships to extract foreign keys
-      const foreignKeyUpdates = {};
-      if (inputRecord.data.relationships) {
-        for (const [fieldName, fieldDef] of Object.entries(schema)) {
-          if (fieldDef.belongsTo && fieldDef.as) {
-            const relName = fieldDef.as;
-            if (inputRecord.data.relationships[relName]) {
-              const relData = inputRecord.data.relationships[relName];
-              foreignKeyUpdates[fieldName] = relData.data?.id || null;
-              log.debug(`[Knex] Processing belongsTo relationship ${relName}: ${fieldName} = ${foreignKeyUpdates[fieldName]}`);
-            }
-          }
-        }
-      }
-      
-      // Merge attributes with foreign key updates
+      const foreignKeyUpdates = processBelongsToRelationships(inputRecord, schema);
       const finalAttributes = { ...attributes, ...foreignKeyUpdates };
       
       if (isCreate) {
@@ -1090,40 +1121,23 @@ export const RestApiKnexPlugin = {
         }
       }
       
-      // Return response with optional includes/sparse fieldsets
-      if (queryParams && Object.keys(queryParams).length > 0) {
-        return helpers.dataGet({
-          scopeName,
-          id: String(id),
-          queryParams,
-          runHooks
-        });
-      }
-      
-      // Simple response without includes
-      const record = await knex(tableName)
-        .where(idProp, id)
-        .first();
-      
-      return {
-        data: toJsonApi(scopeName, record, schema)
-      };
+      // Use common response builder
+      return buildResponseWithQueryParams({
+        scopeName, id, idProp, tableName, schema, queryParams, runHooks
+      });
     };
     
     // PATCH - partially update a record
-    helpers.dataPatch = async ({ scopeName, id, inputRecord, runHooks }) => {
+    helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
-      const idProperty = vars.idProperty || 'id';
-      const schema = await scopes[scopeName].getSchema();
+      const idProp = idProperty || vars.idProperty || 'id';
+      schema = schema || await scopes[scopeName].getSchema();
       
-      log.debug(`[Knex] PATCH ${tableName}/${id}`, inputRecord);
-      
-      // Extract attributes from JSON:API format
-      const attributes = inputRecord.data.attributes;
+      log.debug(`[Knex] PATCH ${tableName}/${id}`);
       
       // Check if record exists
       const exists = await knex(tableName)
-        .where(idProperty, id)
+        .where(idProp, id)
         .first();
       
       if (!exists) {
@@ -1133,19 +1147,24 @@ export const RestApiKnexPlugin = {
         throw error;
       }
       
-      // Update only provided fields
-      await knex(tableName)
-        .where(idProperty, id)
-        .update(attributes);
+      // Extract attributes and process relationships using helper
+      const attributes = inputRecord.data.attributes || {};
+      const foreignKeyUpdates = processBelongsToRelationships(inputRecord, schema);
+      const finalAttributes = { ...attributes, ...foreignKeyUpdates };
       
-      // Fetch the updated record
-      const updatedRecord = await knex(tableName)
-        .where(idProperty, id)
-        .first();
+      log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
       
-      return {
-        data: toJsonApi(scopeName, updatedRecord, schema)
-      };
+      // Update only if there are changes
+      if (Object.keys(finalAttributes).length > 0) {
+        await knex(tableName)
+          .where(idProp, id)
+          .update(finalAttributes);
+      }
+      
+      // Use common response builder
+      return buildResponseWithQueryParams({
+        scopeName, id, idProp, tableName, schema, queryParams, runHooks
+      });
     };
     
     // DELETE - remove a record

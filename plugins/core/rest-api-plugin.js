@@ -1524,7 +1524,9 @@ export const RestApiPlugin = {
       context.record = await helpers.dataPatch({
         scopeName,
         id: context.id,
+        schema: context.schema,
         inputRecord: context.inputRecord,
+        queryParams: context.queryParams,
         idProperty: vars.idProperty,
         runHooks
       });
@@ -1691,11 +1693,11 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for post. Install a storage plugin.`);
     };
 
-    helpers.dataPatch = async function({ scopeName, id, inputRecord, idProperty, runHooks }) {
+    helpers.dataPatch = async function({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
+        const _schema = scope._scopeOptions.schema;
         const relationships = scope._scopeOptions.relationships;
         const tableName = scope._scopeOptions.tableName || scopeName;
       }
