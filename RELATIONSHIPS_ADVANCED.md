@@ -367,4 +367,33 @@ json-rest-api/
     └── polymorphic-helpers.js       # Core polymorphic utilities
 ```
 
+## API Structure
+
+The REST API Knex plugin exposes its functionality in a well-organized structure:
+
+```javascript
+api.knex = {
+  instance: knex,  // The Knex instance for direct SQL queries
+  helpers: {
+    crossTableSearch: {
+      validateCrossTableField: async (targetScopeName, fieldName) => {...},
+      buildJoinChain: async (fromScopeName, targetPath) => {...},
+      analyzeRequiredIndexes: (scopeName, searchSchema) => {...},
+      createRequiredIndexes: async (requiredIndexes, knex) => {...}
+    },
+    relationshipIncludes: {
+      parseIncludeTree: (includeString) => {...},
+      buildIncludedResources: async (records, scopeName, queryParams) => {...}
+      // ... other internal methods
+    },
+    polymorphic: {
+      validatePolymorphicRelationship: (relDef, scopeName) => {...},
+      groupByPolymorphicType: (records, typeField, idField) => {...},
+      resolvePolymorphicTarget: (record, typeField, idField, allowedTypes) => {...},
+      buildPolymorphicSearchJoins: async (query, searchDef, scopeName, tableName, knex) => {...}
+    }
+  }
+};
+```
+
 This architecture provides a clean separation of concerns with modular helpers that can be tested and understood independently.

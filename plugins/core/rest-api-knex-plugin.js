@@ -408,29 +408,29 @@ import { createRelationshipIncludeHelpers } from './lib/relationship-includes.js
  * 
  * ## Direct Knex Access
  * 
- * The plugin exposes Knex directly via api.knex for advanced use cases:
+ * The plugin exposes Knex directly via api.knex.instance for advanced use cases:
  * 
- * const results = await api.knex('articles')
+ * const results = await api.knex.instance('articles')
  *   .join('users', 'articles.author_id', 'users.id')
  *   .where('status', 'published')
  *   .select('articles.*', 'users.name as author_name');
  * 
- * ## Cross-Table Search Helper Functions
+ * ## Helper Functions
  * 
- * The plugin exposes helper functions via api.crossTableSearch:
+ * The plugin exposes helper functions via api.knex.helpers:
  * 
  * ```javascript
- * // Validate a cross-table field reference
- * api.crossTableSearch.validateCrossTableField('people', 'name');
+ * // Cross-table search helpers
+ * api.knex.helpers.crossTableSearch.validateCrossTableField('people', 'name');
+ * const joinInfo = api.knex.helpers.crossTableSearch.buildJoinChain('articles', 'people.name');
+ * const indexes = api.knex.helpers.crossTableSearch.analyzeRequiredIndexes('articles', searchSchema);
+ * await api.knex.helpers.crossTableSearch.createRequiredIndexes(indexes);
  * 
- * // Build join chain for complex relationships
- * const joinInfo = api.crossTableSearch.buildJoinChain('articles', 'people.name');
+ * // Relationship include helpers  
+ * // (typically used internally, but available for advanced use)
  * 
- * // Analyze required indexes for a searchSchema
- * const indexes = api.crossTableSearch.analyzeRequiredIndexes('articles', searchSchema);
- * 
- * // Create required database indexes
- * await api.crossTableSearch.createRequiredIndexes(indexes);
+ * // Polymorphic helpers
+ * // (typically used internally, but available for advanced use)
  * ```
  */
 
@@ -448,8 +448,11 @@ export const RestApiKnexPlugin = {
     
     const knex = knexOptions.knex;
     
-    // Expose Knex directly for advanced use cases
-    api.knex = knex;
+    // Expose Knex instance and helpers in a structured way
+    api.knex = {
+      instance: knex,
+      helpers: {}
+    };
     
     // Helper to get table name for a scope
     const getTableName = async (scopeName) => {
@@ -938,11 +941,10 @@ export const RestApiKnexPlugin = {
       }
     );
     
-    // Expose cross-table search helpers for advanced usage
-    api.crossTableSearch = crossTableSearchHelpers;
-    
-    // Expose relationship include helpers for advanced usage
-    api.relationshipIncludes = relationshipIncludeHelpers;
+    // Expose helpers under api.knex.helpers
+    api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
+    api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
+    api.knex.helpers.polymorphic = api._polymorphicHelpers;
     
     // Helper to identify foreign key fields in a schema
     const getForeignKeyFields = (schema) => {

@@ -264,7 +264,7 @@ api.use({
 console.log('=== Direct Knex Access ===\n');
 
 // Example 9: Direct Knex access for complex queries
-const complexResults = await api.knex('articles')
+const complexResults = await api.knex.instance('articles')
   .select('articles.*')
   .count('* as total_by_status')
   .where('status', 'published')

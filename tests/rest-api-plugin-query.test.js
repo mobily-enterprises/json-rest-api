@@ -460,12 +460,12 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     test('should validate cross-table field successfully', async () => {
       // Should not throw for valid indexed field
       await assert.doesNotReject(async () => {
-        await api.crossTableSearch.validateCrossTableField('people', 'name');
+        await api.knex.helpers.crossTableSearch.validateCrossTableField('people', 'name');
       });
     });
     
     test('should build join chain for many-to-one relationship', async () => {
-      const joinInfo = await api.crossTableSearch.buildJoinChain('articles', 'people.name');
+      const joinInfo = await api.knex.helpers.crossTableSearch.buildJoinChain('articles', 'people.name');
       
       assert.ok(joinInfo.joinAlias, 'Should have join alias');
       assert.ok(joinInfo.targetTableName, 'Should have target table name');
@@ -474,7 +474,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
     });
     
     test('should build join chain for one-to-many relationship', async () => {
-      const joinInfo = await api.crossTableSearch.buildJoinChain('people', 'articles.title');
+      const joinInfo = await api.knex.helpers.crossTableSearch.buildJoinChain('people', 'articles.title');
       
       assert.ok(joinInfo.joinAlias, 'Should have join alias');
       assert.ok(joinInfo.targetTableName, 'Should have target table name');
@@ -485,7 +485,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
 
   describe('Index Analysis', () => {
     test('should analyze required indexes for cross-table search', async () => {
-      const requiredIndexes = api.crossTableSearch.analyzeRequiredIndexes('articles', {
+      const requiredIndexes = api.knex.helpers.crossTableSearch.analyzeRequiredIndexes('articles', {
         authorName: {
           type: 'string',
           actualField: 'people.name',
