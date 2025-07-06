@@ -11,6 +11,7 @@ import {
   RestApiResourceError, 
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
+import { createPolymorphicHelpers } from '../../lib/polymorphic-helpers.js';
 
 /**
  * Automatically marks searchSchema fields as indexed to support cross-table searches
@@ -31,10 +32,14 @@ function ensureSearchFieldsAreIndexed(searchSchema) {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes, log }) {
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
+    
+    // Initialize polymorphic helpers
+    const polymorphicHelpers = createPolymorphicHelpers(scopes, log);
+    api._polymorphicHelpers = polymorphicHelpers;
     
     // Helper function to move HTTP objects from params to context
     const moveHttpObjectsToContext = (params, context) => {
@@ -191,6 +196,22 @@ export const RestApiPlugin = {
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
 
+    // Add hook to validate polymorphic relationships when scopes are created
+    addHook('afterScopeCreate', 'validatePolymorphicRelationships', {}, ({ scopeName, scopeOptions }) => {
+      const relationships = scopeOptions.relationships || {};
+      
+      for (const [relName, relDef] of Object.entries(relationships)) {
+        if (relDef.belongsToPolymorphic) {
+          const validation = polymorphicHelpers.validatePolymorphicRelationship(relDef, scopeName);
+          if (!validation.valid) {
+            throw new Error(
+              `Invalid polymorphic relationship '${relName}' in scope '${scopeName}': ${validation.error}`
+            );
+          }
+        }
+      }
+    });
+
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
     
@@ -240,7 +261,7 @@ export const RestApiPlugin = {
       return null;
     })
 
-    addScopeMethod('getRelationships', async ({ scopeOptions }) => {
+    addScopeMethod('getRelationships', ({ scopeOptions }) => {
       return scopeOptions.relationships || {};
     })
 
@@ -862,6 +883,56 @@ export const RestApiPlugin = {
       runHooks('afterSchemaValidatePost')
       runHooks('afterSchemaValidate')
 
+      // Process polymorphic relationships
+      const relationships = scopes[scopeName].getRelationships();
+      const polymorphicUpdates = {};
+
+      if (context.inputRecord.data.relationships) {
+        for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
+          const relDef = relationships?.[relName];
+          
+          // Handle polymorphic belongsTo
+          if (relDef?.belongsToPolymorphic) {
+            if (relData.data === null) {
+              // Setting relationship to null
+              const { typeField, idField } = relDef.belongsToPolymorphic;
+              polymorphicUpdates[typeField] = null;
+              polymorphicUpdates[idField] = null;
+            } else if (relData.data) {
+              // Setting relationship
+              const { type, id } = relData.data;
+              const { types, typeField, idField } = relDef.belongsToPolymorphic;
+              
+              // Validate type is allowed
+              if (!types.includes(type)) {
+                throw new RestApiValidationError(
+                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
+                  { 
+                    fields: [`data.relationships.${relName}.data.type`],
+                    violations: [{
+                      field: `data.relationships.${relName}.data.type`,
+                      rule: 'polymorphic_type',
+                      message: `Type must be one of: ${types.join(', ')}`
+                    }]
+                  }
+                );
+              }
+              
+              polymorphicUpdates[typeField] = type;
+              polymorphicUpdates[idField] = id;
+            }
+          }
+        }
+      }
+
+      // Merge polymorphic updates with attributes
+      if (Object.keys(polymorphicUpdates).length > 0) {
+        context.inputRecord.data.attributes = {
+          ...context.inputRecord.data.attributes,
+          ...polymorphicUpdates
+        };
+      }
+
       runHooks('checkPermissions')
       runHooks('checkPermissionsPost')
       
@@ -1201,6 +1272,56 @@ export const RestApiPlugin = {
     runHooks('afterSchemaValidatePut')
     runHooks('afterSchemaValidate')
 
+    // Process polymorphic relationships for PUT
+    const relationships = scopes[scopeName].getRelationships();
+    const polymorphicUpdates = {};
+
+    if (context.inputRecord.data.relationships) {
+      for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
+        const relDef = relationships?.[relName];
+        
+        // Handle polymorphic belongsTo
+        if (relDef?.belongsToPolymorphic) {
+          if (relData.data === null) {
+            // Setting relationship to null
+            const { typeField, idField } = relDef.belongsToPolymorphic;
+            polymorphicUpdates[typeField] = null;
+            polymorphicUpdates[idField] = null;
+          } else if (relData.data) {
+            // Setting relationship
+            const { type, id } = relData.data;
+            const { types, typeField, idField } = relDef.belongsToPolymorphic;
+            
+            // Validate type is allowed
+            if (!types.includes(type)) {
+              throw new RestApiValidationError(
+                `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
+                { 
+                  fields: [`data.relationships.${relName}.data.type`],
+                  violations: [{
+                    field: `data.relationships.${relName}.data.type`,
+                    rule: 'polymorphic_type',
+                    message: `Type must be one of: ${types.join(', ')}`
+                  }]
+                }
+              );
+            }
+            
+            polymorphicUpdates[typeField] = type;
+            polymorphicUpdates[idField] = id;
+          }
+        }
+      }
+    }
+
+    // Merge polymorphic updates with attributes
+    if (Object.keys(polymorphicUpdates).length > 0) {
+      context.inputRecord.data.attributes = {
+        ...context.inputRecord.data.attributes,
+        ...polymorphicUpdates
+      };
+    }
+
     // Permissions can now check differently
     runHooks('checkPermissions')
     runHooks('checkPermissionsPut')
@@ -1512,6 +1633,56 @@ export const RestApiPlugin = {
 
       runHooks('afterSchemaValidatePatch')
       runHooks('afterSchemaValidate')
+
+      // Process polymorphic relationships for PATCH
+      const relationships = scopes[scopeName].getRelationships();
+      const polymorphicUpdates = {};
+
+      if (context.inputRecord.data.relationships) {
+        for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
+          const relDef = relationships?.[relName];
+          
+          // Handle polymorphic belongsTo
+          if (relDef?.belongsToPolymorphic) {
+            if (relData.data === null) {
+              // Setting relationship to null
+              const { typeField, idField } = relDef.belongsToPolymorphic;
+              polymorphicUpdates[typeField] = null;
+              polymorphicUpdates[idField] = null;
+            } else if (relData.data) {
+              // Setting relationship
+              const { type, id } = relData.data;
+              const { types, typeField, idField } = relDef.belongsToPolymorphic;
+              
+              // Validate type is allowed
+              if (!types.includes(type)) {
+                throw new RestApiValidationError(
+                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
+                  { 
+                    fields: [`data.relationships.${relName}.data.type`],
+                    violations: [{
+                      field: `data.relationships.${relName}.data.type`,
+                      rule: 'polymorphic_type',
+                      message: `Type must be one of: ${types.join(', ')}`
+                    }]
+                  }
+                );
+              }
+              
+              polymorphicUpdates[typeField] = type;
+              polymorphicUpdates[idField] = id;
+            }
+          }
+        }
+      }
+
+      // Merge polymorphic updates with attributes
+      if (Object.keys(polymorphicUpdates).length > 0) {
+        context.inputRecord.data.attributes = {
+          ...context.inputRecord.data.attributes,
+          ...polymorphicUpdates
+        };
+      }
 
       // Permissions check
       runHooks('checkPermissions')

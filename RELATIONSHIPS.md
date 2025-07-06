@@ -10,8 +10,10 @@ This guide provides a comprehensive explanation of how relationships work in the
 5. [Understanding hasMany Relationships](#understanding-hasmany-relationships)
 6. [Understanding hasOne Relationships](#understanding-hasone-relationships)
 7. [Many-to-Many Relationships Deep Dive](#many-to-many-relationships-deep-dive)
-8. [Complete API Request Examples](#complete-api-request-examples)
-9. [Storage Plugin Implementation](#storage-plugin-implementation)
+8. [Polymorphic Relationships](#polymorphic-relationships)
+9. [Enhanced Many-to-Many with Pivot Tables](#enhanced-many-to-many-with-pivot-tables)
+10. [Complete API Request Examples](#complete-api-request-examples)
+11. [Storage Plugin Implementation](#storage-plugin-implementation)
 
 ## Core Concepts
 
@@ -644,6 +646,516 @@ DELETE FROM article_tags WHERE article_id = 1;
 INSERT INTO article_tags (article_id, tag_id) VALUES (1, 2), (1, 5);
 ```
 
+## Polymorphic Relationships
+
+Polymorphic relationships allow a single foreign key to reference multiple different tables. This is useful when you have a common relationship pattern that applies to multiple models.
+
+### Example: Comments System
+
+Let's say you want comments that can be attached to articles, videos, or products. Instead of creating separate comment tables for each, you can use polymorphic relationships:
+
+#### Database Schema
+
+```sql
+-- comments table with polymorphic fields
+CREATE TABLE comments (
+  id INT PRIMARY KEY,
+  content TEXT,
+  user_id INT,
+  commentable_type VARCHAR(50),  -- Stores the type: 'articles', 'videos', 'products'
+  commentable_id INT,             -- Stores the ID of the related record
+  created_at TIMESTAMP
+);
+
+-- Example data
+INSERT INTO comments VALUES
+(1, 'Great article!', 5, 'articles', 1, '2024-01-16 08:30:00'),
+(2, 'Love this video', 3, 'videos', 12, '2024-01-16 09:00:00'),
+(3, 'Product works well', 2, 'products', 45, '2024-01-16 10:00:00'),
+(4, 'Thanks for sharing', 1, 'articles', 1, '2024-01-16 11:00:00');
+```
+
+### Schema Configuration
+
+```javascript
+const commentsSchema = {
+  id: { type: 'id' },
+  content: { type: 'string', required: true },
+  user_id: { belongsTo: 'users', as: 'author' },
+  // Type and ID fields for polymorphic relationship
+  commentable_type: { type: 'string' },
+  commentable_id: { type: 'integer' },
+  created_at: { type: 'timestamp' }
+};
+
+// Register scope with polymorphic relationship
+api.scope('comments', {
+  schema: commentsSchema,
+  relationships: {
+    // Polymorphic belongsTo relationship
+    commentable: {
+      belongsToPolymorphic: {
+        types: ['articles', 'videos', 'products'],  // Allowed types
+        typeField: 'commentable_type',              // Column storing the type
+        idField: 'commentable_id'                   // Column storing the ID
+      },
+      as: 'commentable',
+      sideLoad: true
+    }
+  }
+});
+```
+
+### Reverse Polymorphic Relationships
+
+The parent models can define reverse relationships using the `via` property:
+
+```javascript
+// Articles scope
+api.scope('articles', {
+  schema: articlesSchema,
+  relationships: {
+    // Get all comments where commentable_type = 'articles' 
+    // and commentable_id = this article's ID
+    comments: {
+      hasMany: 'comments',
+      via: 'commentable',     // References the polymorphic relationship name
+      as: 'comments',
+      sideLoad: true
+    }
+  }
+});
+
+// Videos scope
+api.scope('videos', {
+  schema: videosSchema,
+  relationships: {
+    comments: {
+      hasMany: 'comments',
+      via: 'commentable',
+      as: 'comments',
+      sideLoad: true
+    }
+  }
+});
+```
+
+### API Usage Examples
+
+#### Creating a Comment with Polymorphic Relationship
+
+```json
+POST /comments
+{
+  "data": {
+    "type": "comments",
+    "attributes": {
+      "content": "This article is very helpful!"
+    },
+    "relationships": {
+      "commentable": {
+        "data": { "type": "articles", "id": "1" }
+      },
+      "author": {
+        "data": { "type": "users", "id": "5" }
+      }
+    }
+  }
+}
+```
+
+The API automatically:
+1. Validates that 'articles' is an allowed type
+2. Sets `commentable_type` = 'articles'
+3. Sets `commentable_id` = 1
+
+#### Fetching Comments with Polymorphic Includes
+
+```http
+GET /comments?include=commentable,author
+```
+
+Response:
+```json
+{
+  "data": [
+    {
+      "type": "comments",
+      "id": "1",
+      "attributes": {
+        "content": "Great article!",
+        "created_at": "2024-01-16T08:30:00Z"
+      },
+      "relationships": {
+        "commentable": {
+          "data": { "type": "articles", "id": "1" }
+        },
+        "author": {
+          "data": { "type": "users", "id": "5" }
+        }
+      }
+    },
+    {
+      "type": "comments",
+      "id": "2",
+      "attributes": {
+        "content": "Love this video",
+        "created_at": "2024-01-16T09:00:00Z"
+      },
+      "relationships": {
+        "commentable": {
+          "data": { "type": "videos", "id": "12" }
+        },
+        "author": {
+          "data": { "type": "users", "id": "3" }
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "type": "articles",
+      "id": "1",
+      "attributes": {
+        "title": "Understanding JavaScript"
+      }
+    },
+    {
+      "type": "videos",
+      "id": "12",
+      "attributes": {
+        "title": "Advanced React Patterns"
+      }
+    },
+    // ... users data
+  ]
+}
+```
+
+### Polymorphic Search Support
+
+You can search across polymorphic relationships using the `searchSchema`:
+
+```javascript
+api.scope('comments', {
+  schema: commentsSchema,
+  searchSchema: {
+    // Search by the title of the commentable item
+    commentableTitle: {
+      type: 'string',
+      polymorphicField: 'commentable',
+      targetFields: {
+        articles: 'title',      // Search articles.title
+        videos: 'title',        // Search videos.title  
+        products: 'name'        // Search products.name (different field)
+      }
+    },
+    // Search by author name across different types
+    commentableAuthor: {
+      type: 'string',
+      polymorphicField: 'commentable',
+      targetFields: {
+        articles: 'author.name',     // Nested path
+        videos: 'creator.name',      // Different relationship name
+        products: 'vendor.company'   // Complex path
+      }
+    }
+  },
+  relationships: { /* ... */ }
+});
+```
+
+Usage:
+```http
+GET /comments?filter[commentableTitle]=JavaScript
+```
+
+This creates optimized SQL with conditional JOINs:
+```sql
+SELECT comments.* 
+FROM comments
+LEFT JOIN articles ON (
+  comments.commentable_type = 'articles' 
+  AND comments.commentable_id = articles.id
+)
+LEFT JOIN videos ON (
+  comments.commentable_type = 'videos' 
+  AND comments.commentable_id = videos.id
+)
+LEFT JOIN products ON (
+  comments.commentable_type = 'products' 
+  AND comments.commentable_id = products.id
+)
+WHERE 
+  (articles.title LIKE '%JavaScript%') OR
+  (videos.title LIKE '%JavaScript%') OR
+  (products.name LIKE '%JavaScript%')
+```
+
+### Multiple Polymorphic Fields
+
+A model can have multiple polymorphic relationships:
+
+```javascript
+const activitiesSchema = {
+  id: { type: 'id' },
+  action: { type: 'string' },
+  // First polymorphic relationship - what was acted upon
+  trackable_type: { type: 'string' },
+  trackable_id: { type: 'integer' },
+  // Second polymorphic relationship - who/what performed the action
+  performer_type: { type: 'string' },
+  performer_id: { type: 'integer' },
+  created_at: { type: 'timestamp' }
+};
+
+api.scope('activities', {
+  schema: activitiesSchema,
+  relationships: {
+    trackable: {
+      belongsToPolymorphic: {
+        types: ['articles', 'comments', 'users'],
+        typeField: 'trackable_type',
+        idField: 'trackable_id'
+      },
+      as: 'trackable',
+      sideLoad: true
+    },
+    performer: {
+      belongsToPolymorphic: {
+        types: ['users', 'systems', 'bots'],
+        typeField: 'performer_type',
+        idField: 'performer_id'
+      },
+      as: 'performer',
+      sideLoad: true
+    }
+  }
+});
+```
+
+## Enhanced Many-to-Many with Pivot Tables
+
+Traditional many-to-many relationships use simple join tables. Enhanced many-to-many treats the pivot table as a full resource with its own attributes, allowing you to store additional information about the relationship itself.
+
+### Example: Project Team Members
+
+Instead of a simple `project_users` join table, we create a full `project_members` resource:
+
+#### Database Schema
+
+```sql
+CREATE TABLE project_members (
+  id INT PRIMARY KEY,
+  project_id INT NOT NULL,
+  user_id INT NOT NULL,
+  role VARCHAR(50) NOT NULL,
+  hours_allocated DECIMAL(5,2),
+  joined_at DATE,
+  left_at DATE,
+  is_lead BOOLEAN DEFAULT FALSE,
+  notes TEXT,
+  UNIQUE KEY unique_member_role (project_id, user_id, role)
+);
+
+-- Example data
+INSERT INTO project_members VALUES
+(1, 1, 1, 'lead-developer', 40, '2024-01-01', NULL, TRUE, 'Technical lead'),
+(2, 1, 2, 'developer', 30, '2024-01-15', NULL, FALSE, NULL),
+(3, 1, 3, 'designer', 20, '2024-02-01', NULL, FALSE, 'UI/UX focus'),
+(4, 2, 2, 'architect', 15, '2024-01-10', NULL, TRUE, 'System design');
+```
+
+### Configuration as Full Resource
+
+```javascript
+// Define the pivot table as a full resource
+const projectMembersSchema = {
+  id: { type: 'id' },
+  project_id: { 
+    type: 'integer', 
+    required: true,
+    belongsTo: 'projects',
+    as: 'project',
+    sideLoad: true
+  },
+  user_id: { 
+    type: 'integer', 
+    required: true,
+    belongsTo: 'users',
+    as: 'user',
+    sideLoad: true
+  },
+  role: { type: 'string', required: true },
+  hours_allocated: { type: 'decimal' },
+  joined_at: { type: 'date' },
+  left_at: { type: 'date' },
+  is_lead: { type: 'boolean', default: false },
+  notes: { type: 'text' }
+};
+
+// Register as a full scope with search capabilities
+api.scope('project_members', { 
+  schema: projectMembersSchema,
+  searchSchema: {
+    role: { type: 'string' },
+    is_lead: { type: 'boolean' },
+    min_hours: { 
+      type: 'number',
+      applyFilter: (query, value) => {
+        query.where('hours_allocated', '>=', value);
+      }
+    },
+    active: {
+      type: 'boolean',
+      applyFilter: (query, value) => {
+        if (value) {
+          query.whereNull('left_at');
+        } else {
+          query.whereNotNull('left_at');
+        }
+      }
+    }
+  }
+});
+
+// Projects can reference members
+api.scope('projects', { 
+  schema: projectsSchema,
+  relationships: {
+    members: {
+      hasMany: 'project_members',
+      foreignKey: 'project_id',
+      as: 'members',
+      sideLoad: true
+    }
+  }
+});
+
+// Users can reference their memberships
+api.scope('users', { 
+  schema: usersSchema,
+  relationships: {
+    projectMemberships: {
+      hasMany: 'project_members',
+      foreignKey: 'user_id',
+      as: 'projectMemberships',
+      sideLoad: true
+    }
+  }
+});
+```
+
+### API Usage Examples
+
+#### Query Pivot Table Directly
+
+```http
+GET /project_members?filter[is_lead]=true&filter[min_hours]=30&include=project,user
+```
+
+Response includes full pivot table data:
+```json
+{
+  "data": [
+    {
+      "type": "project_members",
+      "id": "1",
+      "attributes": {
+        "role": "lead-developer",
+        "hours_allocated": "40.00",
+        "joined_at": "2024-01-01",
+        "left_at": null,
+        "is_lead": true,
+        "notes": "Technical lead"
+      },
+      "relationships": {
+        "project": {
+          "data": { "type": "projects", "id": "1" }
+        },
+        "user": {
+          "data": { "type": "users", "id": "1" }
+        }
+      }
+    }
+  ],
+  "included": [
+    {
+      "type": "projects",
+      "id": "1",
+      "attributes": {
+        "name": "E-commerce Platform"
+      }
+    },
+    {
+      "type": "users",
+      "id": "1",
+      "attributes": {
+        "name": "Alice Johnson"
+      }
+    }
+  ]
+}
+```
+
+#### Create Membership with Attributes
+
+```json
+POST /project_members
+{
+  "data": {
+    "type": "project_members",
+    "attributes": {
+      "role": "consultant",
+      "hours_allocated": 10,
+      "joined_at": "2024-04-01",
+      "notes": "Database optimization specialist"
+    },
+    "relationships": {
+      "project": { "data": { "type": "projects", "id": "1" } },
+      "user": { "data": { "type": "users", "id": "4" } }
+    }
+  }
+}
+```
+
+#### Update Membership Details
+
+```json
+PATCH /project_members/1
+{
+  "data": {
+    "type": "project_members",
+    "id": "1",
+    "attributes": {
+      "hours_allocated": 45,
+      "notes": "Increased hours due to sprint planning"
+    }
+  }
+}
+```
+
+#### Complex Queries Through Relationships
+
+Get all users with their project memberships and project details:
+```http
+GET /users?include=projectMemberships.project
+```
+
+Get project with filtered members:
+```http
+GET /projects/1?include=members&filter[members.is_lead]=true
+```
+
+### Benefits of Enhanced Many-to-Many
+
+1. **Rich Relationship Data**: Store metadata about the relationship itself
+2. **Direct Queries**: Query and filter the pivot table directly
+3. **Audit Trail**: Track when relationships were created/modified
+4. **Multiple Relationships**: Same user can have different roles in same project
+5. **Temporal Data**: Track relationship validity periods (joined_at, left_at)
+6. **Business Logic**: Implement complex rules (e.g., only one lead per project)
+
 ## Complete API Request Examples
 
 Let's walk through some complete examples showing the full data flow:
@@ -921,6 +1433,70 @@ if (count > 1) {
 }
 ```
 
+### For Polymorphic Relationships
+
+```javascript
+// Access polymorphic helpers from the API
+const polymorphicHelpers = this.api._polymorphicHelpers;
+
+// When processing a polymorphic belongsTo
+const relationship = scope.relationships.commentable;
+if (relationship.belongsToPolymorphic) {
+  const { types, typeField, idField } = relationship.belongsToPolymorphic;
+  
+  // Group records by type for efficient loading
+  const grouped = polymorphicHelpers.groupByPolymorphicType(
+    records, 
+    typeField, 
+    idField
+  );
+  
+  // Load each type separately
+  for (const [targetType, targetIds] of Object.entries(grouped)) {
+    const targetTable = this.scopes[targetType].schema.tableName || targetType;
+    const targetRecords = await db.query(
+      `SELECT * FROM ${targetTable} WHERE id IN (?)`,
+      [targetIds]
+    );
+    // Process records...
+  }
+}
+
+// For polymorphic search with conditional JOINs
+const searchDef = scope.searchSchema.commentableTitle;
+if (searchDef.polymorphicField) {
+  // Use the helper to build complex JOINs
+  const aliasMap = await polymorphicHelpers.buildPolymorphicSearchJoins(
+    knexQuery,
+    searchDef,
+    scopeName,
+    tableName,
+    knex
+  );
+  
+  // Add WHERE conditions using the aliases
+  knexQuery.where(function() {
+    for (const [type, { alias, field }] of Object.entries(aliasMap)) {
+      this.orWhere(`${alias}.${field}`, 'like', `%${searchValue}%`);
+    }
+  });
+}
+
+// For reverse polymorphic (hasMany with via)
+if (relationship.hasMany && relationship.via) {
+  const targetScope = relationship.hasMany;
+  const polymorphicField = relationship.via;
+  const typeField = `${polymorphicField}_type`;
+  const idField = `${polymorphicField}_id`;
+  
+  // Query for all related records of this type
+  const related = await db.query(
+    `SELECT * FROM ${targetScope} WHERE ${typeField} = ? AND ${idField} = ?`,
+    [scopeName, recordId]
+  );
+}
+```
+
 ### Complete Storage Plugin Example
 
 Here's a complete example of a storage plugin helper that uses all the configuration:
@@ -1000,14 +1576,52 @@ export const MySQLStoragePlugin = {
 6. **Document non-standard foreign keys** clearly in your schema
 7. **Use the tableName property** when your database table names don't match API scope names
 8. **Leverage the context object** (`this`) in storage plugins to access all scope configurations
+9. **For polymorphic relationships**:
+   - Use explicit field naming (e.g., `commentable_type`, `commentable_id`)
+   - Create indexes on both type and ID fields for performance
+   - Consider using CHECK constraints to validate allowed types
+10. **For enhanced many-to-many**:
+   - Add a primary key to pivot tables for direct manipulation
+   - Create composite unique indexes for business rules
+   - Use timestamps (created_at, updated_at) for audit trails
 
 ## Summary
 
-The Hooked API REST plugin's relationship system:
-- Keeps schemas focused on actual database columns
-- Makes relationships explicit and configurable
-- Supports all common relationship types
-- Maps cleanly to JSON:API output
-- Gives storage plugins all the information they need
+The Hooked API REST plugin's relationship system now includes:
 
-By separating table structure (schema) from relationships (configuration), we achieve a clean, maintainable system that accurately reflects your database while providing a powerful API.
+### Core Relationships
+- **belongsTo**: Foreign key in this table pointing to another
+- **hasMany**: Foreign key in another table pointing to this
+- **hasOne**: Like hasMany but expects single result
+- **Many-to-Many**: Through join tables with `through` property
+
+### Advanced Relationships (New)
+- **Polymorphic belongsTo**: Single foreign key can reference multiple tables
+  - Uses type and ID fields to track relationships
+  - Supports includes and complex queries
+  - Enables flexible, reusable patterns
+
+- **Reverse Polymorphic**: Parent models can query polymorphic children
+  - Uses `via` property to reference polymorphic field
+  - Automatically filters by correct type
+
+- **Polymorphic Search**: Search across different table types
+  - Conditional JOINs for optimal performance
+  - Support for nested paths and different field names
+  - Integrated with standard filter syntax
+
+- **Enhanced Many-to-Many**: Pivot tables as full resources
+  - Store metadata about relationships
+  - Query and filter pivot tables directly
+  - Support for temporal data and business logic
+  - Full CRUD operations on relationship data
+
+### Key Benefits
+- Keeps schemas focused on actual database columns
+- Makes all relationships explicit and configurable
+- Supports complex real-world scenarios
+- Maps cleanly to JSON:API specification
+- Provides storage plugins with complete relationship information
+- Enables efficient queries with proper indexing strategies
+
+By separating table structure (schema) from relationships (configuration), and adding support for polymorphic patterns and enhanced pivot tables, the system provides maximum flexibility while maintaining clarity and performance.

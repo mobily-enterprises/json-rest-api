@@ -1,0 +1,464 @@
+import { test, describe, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert';
+import createApi from '../test-utils/create-api.js';
+
+describe('Polymorphic Relationships - Basic CRUD', () => {
+  let api;
+  let knex;
+  
+  beforeEach(async () => {
+    const setup = await createApi();
+    api = setup.api;
+    knex = setup.knex;
+    
+    // Create test tables
+    await knex.schema.createTable('articles', table => {
+      table.increments('id');
+      table.string('title');
+      table.text('body');
+      table.integer('author_id');
+      table.timestamp('published_at');
+    });
+    
+    await knex.schema.createTable('books', table => {
+      table.increments('id');
+      table.string('title');
+      table.string('isbn');
+      table.integer('author_id');
+      table.integer('publisher_id');
+    });
+    
+    await knex.schema.createTable('products', table => {
+      table.increments('id');
+      table.string('name');
+      table.decimal('price');
+      table.integer('category_id');
+    });
+    
+    await knex.schema.createTable('users', table => {
+      table.increments('id');
+      table.string('name');
+      table.string('email');
+    });
+    
+    await knex.schema.createTable('comments', table => {
+      table.increments('id');
+      table.text('content');
+      table.string('commentable_type');
+      table.integer('commentable_id');
+      table.string('reviewable_type');
+      table.integer('reviewable_id');
+      table.integer('user_id');
+      table.integer('rating');
+      table.timestamp('created_at').defaultTo(knex.fn.now());
+    });
+    
+    // Insert test data
+    await knex('users').insert([
+      { id: 1, name: 'Alice', email: 'alice@example.com' },
+      { id: 2, name: 'Bob', email: 'bob@example.com' },
+      { id: 3, name: 'Charlie', email: 'charlie@example.com' }
+    ]);
+    
+    await knex('articles').insert([
+      { id: 1, title: 'JavaScript Tips', body: 'Some tips...', author_id: 1 },
+      { id: 2, title: 'REST API Design', body: 'API design...', author_id: 2 }
+    ]);
+    
+    await knex('books').insert([
+      { id: 1, title: 'Clean Code', isbn: '123456', author_id: 1 },
+      { id: 2, title: 'Refactoring', isbn: '789012', author_id: 2 }
+    ]);
+    
+    await knex('products').insert([
+      { id: 1, name: 'Laptop', price: 999.99, category_id: 1 },
+      { id: 2, name: 'Mouse', price: 29.99, category_id: 1 }
+    ]);
+    
+    // Define schemas
+    const usersSchema = {
+      id: { type: 'integer', primary: true },
+      name: { type: 'string', required: true },
+      email: { type: 'string', required: true }
+    };
+    
+    const articlesSchema = {
+      id: { type: 'integer', primary: true },
+      title: { type: 'string', required: true },
+      body: { type: 'text' },
+      author_id: { 
+        type: 'integer',
+        belongsTo: 'users',
+        as: 'author',
+        sideLoad: true
+      },
+      published_at: { type: 'timestamp' }
+    };
+    
+    const booksSchema = {
+      id: { type: 'integer', primary: true },
+      title: { type: 'string', required: true },
+      isbn: { type: 'string', required: true },
+      author_id: {
+        type: 'integer',
+        belongsTo: 'users',
+        as: 'author',
+        sideLoad: true
+      },
+      publisher_id: { type: 'integer' }
+    };
+    
+    const productsSchema = {
+      id: { type: 'integer', primary: true },
+      name: { type: 'string', required: true },
+      price: { type: 'decimal', required: true },
+      category_id: { type: 'integer' }
+    };
+    
+    const commentsSchema = {
+      id: { type: 'integer', primary: true },
+      content: { type: 'text', required: true },
+      commentable_type: { type: 'string' },
+      commentable_id: { type: 'integer' },
+      reviewable_type: { type: 'string' },
+      reviewable_id: { type: 'integer' },
+      user_id: {
+        type: 'integer',
+        belongsTo: 'users',
+        as: 'author',
+        sideLoad: true
+      },
+      rating: { type: 'integer', min: 1, max: 5 },
+      created_at: { type: 'timestamp' }
+    };
+    
+    // Register scopes
+    api.scope('users', { schema: usersSchema });
+    
+    api.scope('articles', {
+      schema: articlesSchema,
+      relationships: {
+        comments: {
+          hasMany: 'comments',
+          via: 'commentable',
+          as: 'comments',
+          sideLoad: true
+        },
+        reviews: {
+          hasMany: 'comments',
+          via: 'reviewable',
+          as: 'reviews',
+          sideLoad: true
+        }
+      }
+    });
+    
+    api.scope('books', {
+      schema: booksSchema,
+      relationships: {
+        comments: {
+          hasMany: 'comments',
+          via: 'commentable',
+          as: 'comments',
+          sideLoad: true
+        }
+      }
+    });
+    
+    api.scope('products', {
+      schema: productsSchema,
+      relationships: {
+        reviews: {
+          hasMany: 'comments',
+          via: 'reviewable',
+          as: 'reviews',
+          sideLoad: true
+        }
+      }
+    });
+    
+    api.scope('comments', {
+      schema: commentsSchema,
+      relationships: {
+        commentable: {
+          belongsToPolymorphic: {
+            types: ['articles', 'books'],
+            typeField: 'commentable_type',
+            idField: 'commentable_id'
+          },
+          as: 'commentable',
+          sideLoad: true
+        },
+        reviewable: {
+          belongsToPolymorphic: {
+            types: ['articles', 'products'],
+            typeField: 'reviewable_type',
+            idField: 'reviewable_id'
+          },
+          as: 'reviewable',
+          sideLoad: true
+        }
+      }
+    });
+  });
+  
+  afterEach(async () => {
+    // Clean up
+    await knex.schema.dropTableIfExists('comments');
+    await knex.schema.dropTableIfExists('products');
+    await knex.schema.dropTableIfExists('books');
+    await knex.schema.dropTableIfExists('articles');
+    await knex.schema.dropTableIfExists('users');
+    await knex.destroy();
+  });
+  
+  // Test 1: Create comment on article
+  test('should create comment with polymorphic relationship to article', async () => {
+    const response = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: {
+            content: 'Great article!'
+          },
+          relationships: {
+            commentable: {
+              data: { type: 'articles', id: '1' }
+            },
+            author: {
+              data: { type: 'users', id: '3' }
+            }
+          }
+        }
+      }
+    });
+    
+    expect(response.data.type).toBe('comments');
+    expect(response.data.attributes.content).toBe('Great article!');
+    expect(response.data.relationships).toBeDefined();
+    expect(response.data.relationships.commentable).toEqual({
+      data: { type: 'articles', id: '1' }
+    });
+    
+    // Verify in database
+    const dbRecord = await knex('comments').where('id', response.data.id).first();
+    expect(dbRecord.commentable_type).toBe('articles');
+    expect(dbRecord.commentable_id).toBe(1);
+    expect(dbRecord.user_id).toBe(3);
+  });
+  
+  // Test 2: Create comment on book
+  test('should create comment with polymorphic relationship to book', async () => {
+    const response = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: {
+            content: 'Excellent book!'
+          },
+          relationships: {
+            commentable: {
+              data: { type: 'books', id: '1' }
+            },
+            author: {
+              data: { type: 'users', id: '2' }
+            }
+          }
+        }
+      }
+    });
+    
+    expect(response.data.type).toBe('comments');
+    expect(response.data.relationships.commentable).toEqual({
+      data: { type: 'books', id: '1' }
+    });
+    
+    // Verify in database
+    const dbRecord = await knex('comments').where('id', response.data.id).first();
+    expect(dbRecord.commentable_type).toBe('books');
+    expect(dbRecord.commentable_id).toBe(1);
+  });
+  
+  // Test 3: Update polymorphic relationship
+  test('should update polymorphic relationship from article to book', async () => {
+    // First create a comment on an article
+    const created = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: { content: 'Test comment' },
+          relationships: {
+            commentable: { data: { type: 'articles', id: '1' } },
+            author: { data: { type: 'users', id: '1' } }
+          }
+        }
+      }
+    });
+    
+    // Update to point to a book
+    const updated = await api.comments.patch({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          id: created.data.id,
+          relationships: {
+            commentable: { data: { type: 'books', id: '2' } }
+          }
+        }
+      }
+    });
+    
+    expect(updated.data.relationships.commentable).toEqual({
+      data: { type: 'books', id: '2' }
+    });
+    
+    // Verify in database
+    const dbRecord = await knex('comments').where('id', created.data.id).first();
+    expect(dbRecord.commentable_type).toBe('books');
+    expect(dbRecord.commentable_id).toBe(2);
+  });
+  
+  // Test 4: Set polymorphic to null
+  test('should set polymorphic relationship to null', async () => {
+    // Create a comment
+    const created = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: { content: 'Test comment' },
+          relationships: {
+            commentable: { data: { type: 'articles', id: '1' } },
+            author: { data: { type: 'users', id: '1' } }
+          }
+        }
+      }
+    });
+    
+    // Set polymorphic to null
+    const updated = await api.comments.patch({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          id: created.data.id,
+          relationships: {
+            commentable: { data: null }
+          }
+        }
+      }
+    });
+    
+    expect(updated.data.relationships.commentable).toEqual({ data: null });
+    
+    // Verify in database
+    const dbRecord = await knex('comments').where('id', created.data.id).first();
+    expect(dbRecord.commentable_type).toBeNull();
+    expect(dbRecord.commentable_id).toBeNull();
+  });
+  
+  // Test 5: Invalid type validation
+  test('should reject invalid polymorphic type', async () => {
+    await expect(
+      api.comments.post({
+        inputRecord: {
+          data: {
+            type: 'comments',
+            attributes: { content: 'Test' },
+            relationships: {
+              commentable: { data: { type: 'invalid_type', id: '1' } },
+              author: { data: { type: 'users', id: '1' } }
+            }
+          }
+        }
+      })
+    ).rejects.toThrow(/Invalid type 'invalid_type' for polymorphic relationship/);
+  });
+  
+  // Test 6: Non-existent target (DB constraint)
+  test('should handle non-existent polymorphic target gracefully', async () => {
+    // This might succeed or fail depending on DB constraints
+    // The important thing is it should handle gracefully
+    try {
+      await api.comments.post({
+        inputRecord: {
+          data: {
+            type: 'comments',
+            attributes: { content: 'Test' },
+            relationships: {
+              commentable: { data: { type: 'articles', id: '99999' } },
+              author: { data: { type: 'users', id: '1' } }
+            }
+          }
+        }
+      });
+      
+      // If it succeeds, it's a valid orphaned reference
+      expect(true).toBe(true);
+    } catch (error) {
+      // If it fails, should be a meaningful error
+      expect(error.message).toMatch(/reference|exist|constraint/i);
+    }
+  });
+  
+  // Test 7: GET with polymorphic in response
+  test('should return polymorphic relationships in GET response', async () => {
+    // Create a comment
+    const created = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: { content: 'Test' },
+          relationships: {
+            commentable: { data: { type: 'articles', id: '2' } },
+            author: { data: { type: 'users', id: '1' } }
+          }
+        }
+      }
+    });
+    
+    // Fetch it back
+    const fetched = await api.comments.get({
+      id: created.data.id
+    });
+    
+    expect(fetched.data.relationships.commentable).toEqual({
+      data: { type: 'articles', id: '2' }
+    });
+    expect(fetched.data.relationships.author).toEqual({
+      data: { type: 'users', id: '1' }
+    });
+  });
+  
+  // Test 8: Multiple polymorphic fields
+  test('should handle multiple polymorphic fields on same model', async () => {
+    const response = await api.comments.post({
+      inputRecord: {
+        data: {
+          type: 'comments',
+          attributes: { 
+            content: 'This is both a comment and a review',
+            rating: 5
+          },
+          relationships: {
+            commentable: { data: { type: 'articles', id: '1' } },
+            reviewable: { data: { type: 'products', id: '1' } },
+            author: { data: { type: 'users', id: '2' } }
+          }
+        }
+      }
+    });
+    
+    expect(response.data.relationships.commentable).toEqual({
+      data: { type: 'articles', id: '1' }
+    });
+    expect(response.data.relationships.reviewable).toEqual({
+      data: { type: 'products', id: '1' }
+    });
+    
+    // Verify in database
+    const dbRecord = await knex('comments').where('id', response.data.id).first();
+    expect(dbRecord.commentable_type).toBe('articles');
+    expect(dbRecord.commentable_id).toBe(1);
+    expect(dbRecord.reviewable_type).toBe('products');
+    expect(dbRecord.reviewable_id).toBe(1);
+  });
+});

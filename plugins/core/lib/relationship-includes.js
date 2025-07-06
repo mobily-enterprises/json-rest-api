@@ -8,6 +8,8 @@
  * - Nested includes (e.g., "comments.author")  
  * - Many-to-one relationships (belongsTo with sideLoad: true)
  * - One-to-many relationships (hasMany with sideLoad: true)
+ * - Polymorphic relationships (belongsToPolymorphic)
+ * - Reverse polymorphic relationships (hasMany with via)
  * - Automatic deduplication of included resources
  * - Efficient batch loading to prevent N+1 queries
  * 
@@ -199,7 +201,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     // Build field selection for sparse fieldsets
     const targetSchema = await scopes[targetScope].getSchema();
     const fieldsToSelect = helpers?.buildFieldSelection ? 
-      helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
       '*';
     
     // Single query to load all related records
@@ -291,7 +293,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     // Build field selection for sparse fieldsets
     const targetSchema = await scopes[targetScope].getSchema();
     const fieldsToSelect = helpers?.buildFieldSelection ? 
-      helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
       '*';
     
     // Single query to load ALL related records
@@ -348,6 +350,284 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
   };
   
   /**
+   * Loads polymorphic belongsTo relationships
+   * 
+   * @async
+   * @private
+   * @param {Array} records - The parent records containing polymorphic fields
+   * @param {string} relName - The relationship name
+   * @param {Object} relDef - The relationship definition with belongsToPolymorphic
+   * @param {Object} subIncludes - Nested includes to process recursively
+   * @param {Map} included - Map of already included resources
+   * @param {Set} processedPaths - Set of already processed paths
+   * @param {string} currentPath - Current include path for tracking
+   * @param {Object} fields - Sparse fieldsets configuration
+   * @returns {Promise<void>}
+   */
+  const loadPolymorphicBelongsTo = async (
+    records, 
+    relName,
+    relDef,
+    subIncludes,
+    included,
+    processedPaths,
+    currentPath,
+    fields
+  ) => {
+    log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
+      relName, 
+      recordCount: records.length 
+    });
+    
+    const { typeField, idField, types } = relDef.belongsToPolymorphic;
+    
+    // Get polymorphic helpers from the passed helpers object
+    const polymorphicHelpers = helpers?.polymorphicHelpers;
+    if (!polymorphicHelpers) {
+      log.error('[INCLUDE] Polymorphic helpers not found');
+      return;
+    }
+    
+    // Group records by their target type using helper
+    const grouped = polymorphicHelpers.groupByPolymorphicType(
+      records, 
+      typeField, 
+      idField
+    );
+    
+    log.trace('[INCLUDE] Grouped by type:', { 
+      types: Object.keys(grouped),
+      counts: Object.entries(grouped).map(([t, ids]) => `${t}: ${ids.length}`)
+    });
+    
+    // Load each type separately
+    for (const [targetType, targetIds] of Object.entries(grouped)) {
+      // Skip if type not allowed (shouldn't happen with validation, but be safe)
+      if (!types.includes(targetType)) {
+        log.warn('[INCLUDE] Skipping non-allowed type:', targetType);
+        continue;
+      }
+      
+      if (targetIds.length === 0) continue;
+      
+      // Get target table information
+      const targetSchema = await scopes[targetType].getSchema();
+      const targetTable = targetSchema?.tableName || targetType;
+      
+      // Build field selection for sparse fieldsets
+      const fieldsToSelect = helpers?.buildFieldSelection ? 
+        await helpers.buildFieldSelection(targetType, fields?.[targetType], targetSchema) : 
+        '*';
+      
+      log.debug(`[INCLUDE] Loading ${targetType} records:`, { 
+        ids: targetIds,
+        fields: fieldsToSelect 
+      });
+      
+      // Query for this type
+      let query = knex(targetTable).whereIn('id', targetIds);
+      if (fieldsToSelect !== '*') {
+        query = query.select(fieldsToSelect);
+      }
+      
+      const targetRecords = await query;
+      log.trace('[INCLUDE] Loaded records:', { 
+        type: targetType, 
+        count: targetRecords.length 
+      });
+      
+      // Build lookup map
+      const targetById = {};
+      targetRecords.forEach(record => {
+        targetById[record.id] = record;
+        
+        // Add to included resources
+        const key = `${targetType}:${record.id}`;
+        if (!included.has(key)) {
+          included.set(key, { raw: record, scope: targetType });
+          log.trace('[INCLUDE] Added to included:', key);
+        }
+      });
+      
+      // Add relationships to source records
+      records.forEach(record => {
+        const recordType = record[typeField];
+        const recordId = record[idField];
+        
+        if (recordType === targetType && recordId) {
+          if (!record._relationships) record._relationships = {};
+          
+          if (targetById[recordId]) {
+            record._relationships[relName] = {
+              data: { type: targetType, id: String(recordId) }
+            };
+          } else {
+            // Target not found - orphaned reference
+            log.warn('[INCLUDE] Polymorphic target not found:', { 
+              type: targetType, 
+              id: recordId 
+            });
+            record._relationships[relName] = { data: null };
+          }
+        }
+      });
+      
+      // Process nested includes for this type
+      if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
+        const nextPath = `${currentPath}.${relName}[${targetType}]`;
+        log.trace('[INCLUDE] Processing nested includes:', { 
+          path: nextPath,
+          includes: Object.keys(subIncludes) 
+        });
+        
+        await processIncludes(
+          targetRecords, 
+          targetType, 
+          subIncludes, 
+          included, 
+          processedPaths, 
+          nextPath, 
+          fields
+        );
+      }
+    }
+    
+    // Ensure all records have the relationship set (null if not found)
+    records.forEach(record => {
+      if (!record._relationships?.[relName]) {
+        if (!record._relationships) record._relationships = {};
+        record._relationships[relName] = { data: null };
+      }
+    });
+  };
+
+  /**
+   * Loads reverse polymorphic relationships (hasMany via polymorphic field)
+   * 
+   * @async
+   * @private
+   * @param {Array} records - The parent records
+   * @param {string} scopeName - The scope name of parent records
+   * @param {string} relName - The relationship name
+   * @param {Object} relDef - The relationship definition with hasMany and via
+   * @param {Object} subIncludes - Nested includes to process recursively
+   * @param {Map} included - Map of already included resources
+   * @param {Set} processedPaths - Set of already processed paths
+   * @param {string} currentPath - Current include path for tracking
+   * @param {Object} fields - Sparse fieldsets configuration
+   * @returns {Promise<void>}
+   */
+  const loadReversePolymorphic = async (
+    records,
+    scopeName,
+    relName,
+    relDef,
+    subIncludes,
+    included,
+    processedPaths,
+    currentPath,
+    fields
+  ) => {
+    log.trace('[INCLUDE] Loading reverse polymorphic:', { 
+      scopeName, 
+      relName, 
+      via: relDef.via 
+    });
+    
+    const mainIds = records.map(r => r.id).filter(Boolean);
+    if (mainIds.length === 0) return;
+    
+    const targetScope = relDef.hasMany;
+    const targetSchema = await scopes[targetScope].getSchema();
+    const targetTable = targetSchema?.tableName || targetScope;
+    const polymorphicField = relDef.via;
+    
+    // Build the type and id field names
+    const typeField = `${polymorphicField}_type`;
+    const idField = `${polymorphicField}_id`;
+    
+    // Verify these fields exist in target schema
+    if (!targetSchema[typeField] || !targetSchema[idField]) {
+      throw new Error(
+        `Polymorphic fields '${typeField}' and '${idField}' not found in '${targetScope}' schema`
+      );
+    }
+    
+    // Build field selection
+    const fieldsToSelect = helpers?.buildFieldSelection ? 
+      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      '*';
+    
+    log.debug(`[INCLUDE] Loading reverse polymorphic ${targetScope}:`, {
+      whereType: scopeName,
+      whereIds: mainIds
+    });
+    
+    // Query with type constraint
+    let query = knex(targetTable)
+      .where(typeField, scopeName)
+      .whereIn(idField, mainIds)
+      .orderBy('id');
+      
+    if (fieldsToSelect !== '*') {
+      query = query.select(fieldsToSelect);
+    }
+    
+    const relatedRecords = await query;
+    log.trace('[INCLUDE] Loaded reverse polymorphic:', { 
+      count: relatedRecords.length 
+    });
+    
+    // Group by the polymorphic ID
+    const grouped = {};
+    relatedRecords.forEach(record => {
+      const parentId = record[idField];
+      if (!grouped[parentId]) {
+        grouped[parentId] = [];
+      }
+      grouped[parentId].push(record);
+      
+      // Add to included
+      const key = `${targetScope}:${record.id}`;
+      if (!included.has(key)) {
+        included.set(key, { raw: record, scope: targetScope });
+      }
+    });
+    
+    // Add relationships to parent records
+    records.forEach(record => {
+      if (!record._relationships) record._relationships = {};
+      
+      const relatedItems = grouped[record.id] || [];
+      record._relationships[relName] = {
+        data: relatedItems.map(r => ({
+          type: targetScope,
+          id: String(r.id)
+        }))
+      };
+      
+      log.trace('[INCLUDE] Added reverse relationship:', { 
+        parentId: record.id, 
+        relatedCount: relatedItems.length 
+      });
+    });
+    
+    // Process nested includes
+    if (Object.keys(subIncludes).length > 0 && relatedRecords.length > 0) {
+      const nextPath = `${currentPath}.${relName}`;
+      await processIncludes(
+        relatedRecords, 
+        targetScope, 
+        subIncludes, 
+        included, 
+        processedPaths, 
+        nextPath, 
+        fields
+      );
+    }
+  };
+  
+  /**
    * Recursively processes include tree to load all requested relationships
    * 
    * @async
@@ -397,10 +677,53 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
         }
       }
       
-      // If not found in schema, check relationships object for hasMany
+      // If not found in schema, check relationships object for hasMany and polymorphic
       if (!processed && relationships?.[includeName]) {
         const rel = relationships[includeName];
-        if (rel.hasMany && rel.sideLoad) {
+        
+        // Check for polymorphic belongsTo
+        if (rel.belongsToPolymorphic && rel.sideLoad) {
+          log.trace('[INCLUDE] Found polymorphic belongsTo:', { 
+            includeName, 
+            types: rel.belongsToPolymorphic.types 
+          });
+          
+          await loadPolymorphicBelongsTo(
+            records, 
+            includeName, 
+            rel, 
+            subIncludes, 
+            included, 
+            processedPaths, 
+            currentPath, 
+            fields
+          );
+          processed = true;
+        }
+        
+        // Check for reverse polymorphic (hasMany with via)
+        else if (rel.hasMany && rel.via && rel.sideLoad) {
+          log.trace('[INCLUDE] Found reverse polymorphic:', { 
+            includeName, 
+            via: rel.via 
+          });
+          
+          await loadReversePolymorphic(
+            records, 
+            scopeName, 
+            includeName, 
+            rel, 
+            subIncludes, 
+            included, 
+            processedPaths, 
+            currentPath, 
+            fields
+          );
+          processed = true;
+        }
+        
+        // Check for regular hasMany
+        else if (rel.hasMany && rel.sideLoad) {
           log.trace('[INCLUDE] Found hasMany relationship:', { includeName, target: rel.hasMany });
           await loadHasMany(records, scopeName, includeName, rel, subIncludes, included, processedPaths, currentPath, fields);
           processed = true;
