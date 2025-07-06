@@ -1330,7 +1330,6 @@ export const RestApiKnexPlugin = {
       }
       
       // Execute query
-      console.log('[DEBUG SQL]', query.toString());
       const records = await query;
       
       // Process includes
