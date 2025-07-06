@@ -1141,3 +1141,394 @@ These filters will be combined with AND, ensuring that security filters cannot b
 - `WHERE (tenant_id = 123 AND deleted_at IS NULL) AND (title LIKE '%search%' OR description LIKE '%search%' OR tags LIKE '%search%') AND (region = 'US' OR region = 'global' OR region IS NULL)`
 
 **Important**: Always wrap your filter conditions in `query.where(function() { ... })` to ensure proper grouping. This prevents OR conditions from accidentally bypassing other filters.
+
+## Many-to-Many Relationships
+
+Many-to-many relationships require a pivot table. In the JSON REST API system, the pivot table is treated as a full resource with its own schema and endpoints.
+
+### Books with Multiple Authors Example
+
+Let's update our books example to support multiple authors. Previously, books had a single `author` field. Now we'll create a many-to-many relationship between `books` and `people` (authors).
+
+#### Step 1: Define the Pivot Resource
+
+```javascript
+// Define the book_authors pivot table as a resource
+api.addResource('book_authors', {
+  schema: {
+    id: { type: 'id' },
+    book_id: { 
+      type: 'number',
+      belongsTo: 'books',
+      as: 'book',
+      sideLoad: true,
+      sideSearch: true
+    },
+    author_id: {
+      type: 'number', 
+      belongsTo: 'people',
+      as: 'author',
+      sideLoad: true,
+      sideSearch: true
+    },
+    author_order: { type: 'number' }, // Display order for multiple authors
+    contribution_type: { type: 'string' } // 'primary', 'co-author', 'contributor'
+  },
+  searchSchema: {
+    // Search by book title
+    bookTitle: {
+      type: 'string',
+      actualField: 'books.title',
+      filterUsing: 'like'
+    },
+    // Search by author name
+    authorName: {
+      type: 'string',
+      actualField: 'people.name',
+      filterUsing: 'like'
+    }
+  }
+});
+```
+
+#### Step 2: Update Books and People Resources
+
+```javascript
+// Update books resource (remove single author field)
+api.addResource('books', {
+  schema: {
+    id: { type: 'id' },
+    title: { type: 'string', required: true, indexed: true },
+    year: { type: 'number' },
+    isbn: { type: 'string' }
+    // Note: removed 'author' field - now using many-to-many
+  },
+  relationships: {
+    authors: {
+      hasMany: 'book_authors',
+      foreignKey: 'book_id',
+      as: 'authors',
+      sideLoad: true
+    }
+  }
+});
+
+// Define people resource
+api.addResource('people', {
+  schema: {
+    id: { type: 'id' },
+    name: { type: 'string', required: true, indexed: true },
+    email: { type: 'string' }
+  },
+  relationships: {
+    books: {
+      hasMany: 'book_authors',
+      foreignKey: 'author_id',
+      as: 'books',
+      sideLoad: true
+    }
+  }
+});
+```
+
+### Using Many-to-Many Relationships
+
+#### Creating Books with Multiple Authors
+
+```bash
+# First, create a book
+curl -X POST http://localhost:3000/api/books \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "books",
+      "attributes": {
+        "title": "Good Omens",
+        "year": 1990
+      }
+    }
+  }'
+
+# Then link authors to the book
+curl -X POST http://localhost:3000/api/book_authors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "book_authors",
+      "attributes": {
+        "author_order": 1,
+        "contribution_type": "co-author"
+      },
+      "relationships": {
+        "book": { "data": { "type": "books", "id": "1" } },
+        "author": { "data": { "type": "people", "id": "1" } }
+      }
+    }
+  }'
+```
+
+#### Querying Books with Authors
+
+```bash
+# Get a book with all its authors
+curl "http://localhost:3000/api/books/1?include=authors.author"
+
+# Search for books by author name
+curl "http://localhost:3000/api/book_authors?filter[authorName]=Fitzgerald&include=book"
+
+# Get all books by a specific author
+curl "http://localhost:3000/api/people/1?include=books.book"
+```
+
+#### Example Response
+
+```json
+{
+  "data": {
+    "type": "books",
+    "id": "1",
+    "attributes": {
+      "title": "Good Omens",
+      "year": 1990
+    },
+    "relationships": {
+      "authors": {
+        "data": [
+          { "type": "book_authors", "id": "1" },
+          { "type": "book_authors", "id": "2" }
+        ]
+      }
+    }
+  },
+  "included": [
+    {
+      "type": "book_authors",
+      "id": "1",
+      "attributes": {
+        "author_order": 1,
+        "contribution_type": "co-author"
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "10" } }
+      }
+    },
+    {
+      "type": "book_authors",
+      "id": "2",
+      "attributes": {
+        "author_order": 2,
+        "contribution_type": "co-author"
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "11" } }
+      }
+    },
+    {
+      "type": "people",
+      "id": "10",
+      "attributes": { "name": "Terry Pratchett" }
+    },
+    {
+      "type": "people",
+      "id": "11",
+      "attributes": { "name": "Neil Gaiman" }
+    }
+  ]
+}
+```
+
+## Polymorphic Relationships
+
+Polymorphic relationships allow a model to belong to multiple other models using a single association.
+
+### Comments Example
+
+Let's add a commenting system where comments can be attached to books or articles.
+
+#### Define Comments with Polymorphic Relationship
+
+```javascript
+api.addResource('comments', {
+  schema: {
+    id: { type: 'id' },
+    body: { type: 'string', required: true },
+    user_id: {
+      type: 'number',
+      belongsTo: 'people',
+      as: 'author',
+      sideLoad: true
+    }
+  },
+  relationships: {
+    commentable: {
+      belongsToPolymorphic: {
+        types: ['books', 'articles'],
+        typeField: 'commentable_type',
+        idField: 'commentable_id'
+      },
+      as: 'commentable',
+      sideLoad: true
+    }
+  },
+  searchSchema: {
+    // Search by title of the commented item
+    commentableTitle: {
+      type: 'string',
+      filterUsing: 'like',
+      polymorphicField: 'commentable',
+      targetFields: {
+        books: 'title',
+        articles: 'title'
+      }
+    }
+  }
+});
+
+// Add reverse relationship to books
+api.addResource('books', {
+  schema: {
+    // ... existing schema ...
+  },
+  relationships: {
+    // ... existing relationships ...
+    comments: {
+      hasMany: 'comments',
+      via: 'commentable',
+      as: 'comments',
+      sideLoad: true
+    }
+  }
+});
+
+// Define articles resource
+api.addResource('articles', {
+  schema: {
+    id: { type: 'id' },
+    title: { type: 'string', required: true, indexed: true },
+    content: { type: 'text' }
+  },
+  relationships: {
+    comments: {
+      hasMany: 'comments',
+      via: 'commentable',
+      as: 'comments',
+      sideLoad: true
+    }
+  }
+});
+```
+
+### Using Polymorphic Relationships
+
+#### Creating Comments
+
+```bash
+# Comment on a book
+curl -X POST http://localhost:3000/api/comments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "comments",
+      "attributes": {
+        "body": "This book changed my perspective!"
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "1" } },
+        "commentable": { "data": { "type": "books", "id": "1" } }
+      }
+    }
+  }'
+
+# Comment on an article
+curl -X POST http://localhost:3000/api/comments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "type": "comments",
+      "attributes": {
+        "body": "Great article!"
+      },
+      "relationships": {
+        "author": { "data": { "type": "people", "id": "1" } },
+        "commentable": { "data": { "type": "articles", "id": "5" } }
+      }
+    }
+  }'
+```
+
+#### Querying Polymorphic Relationships
+
+```bash
+# Get all comments with their parent (book or article)
+curl "http://localhost:3000/api/comments?include=commentable"
+
+# Search comments on items with "REST" in title
+curl "http://localhost:3000/api/comments?filter[commentableTitle]=REST"
+
+# Get all comments for a specific book
+curl "http://localhost:3000/api/books/1?include=comments.author"
+```
+
+#### Example Response
+
+```json
+{
+  "data": [
+    {
+      "type": "comments",
+      "id": "1",
+      "attributes": {
+        "body": "Great book!"
+      },
+      "relationships": {
+        "commentable": { "data": { "type": "books", "id": "1" } }
+      }
+    },
+    {
+      "type": "comments",
+      "id": "2",
+      "attributes": {
+        "body": "Interesting article!"
+      },
+      "relationships": {
+        "commentable": { "data": { "type": "articles", "id": "5" } }
+      }
+    }
+  ],
+  "included": [
+    {
+      "type": "books",
+      "id": "1",
+      "attributes": { "title": "The Great Gatsby" }
+    },
+    {
+      "type": "articles",
+      "id": "5",
+      "attributes": { "title": "Understanding REST APIs" }
+    }
+  ]
+}
+```
+
+### How Polymorphic Search Works
+
+The system generates conditional JOINs for polymorphic searches:
+
+```sql
+-- GET /comments?filter[commentableTitle]=gatsby
+SELECT comments.* 
+FROM comments 
+LEFT JOIN books AS comments_commentable_books 
+  ON comments.commentable_type = 'books' 
+  AND comments.commentable_id = comments_commentable_books.id
+LEFT JOIN articles AS comments_commentable_articles 
+  ON comments.commentable_type = 'articles' 
+  AND comments.commentable_id = comments_commentable_articles.id
+WHERE (
+  (comments.commentable_type = 'books' 
+   AND comments_commentable_books.title LIKE '%gatsby%')
+  OR 
+  (comments.commentable_type = 'articles' 
+   AND comments_commentable_articles.title LIKE '%gatsby%')
+)
+```

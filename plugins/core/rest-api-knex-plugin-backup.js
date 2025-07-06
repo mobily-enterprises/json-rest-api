@@ -454,49 +454,21 @@ export const RestApiKnexPlugin = {
       helpers: {}
     };
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                          HELPER FUNCTIONS                               ║
-     * ║  Small utility functions used throughout the plugin                     ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-
-    /**
-     * Gets the database table name for a given scope
-     * @param {string} scopeName - The name of the scope/resource
-     * @returns {Promise<string>} The table name (defaults to scopeName if not specified)
-     * @example
-     * const tableName = await getTableName('articles'); // Returns 'articles' or custom table name
-     */
+    // Helper to get table name for a scope
     const getTableName = async (scopeName) => {
       const schema = await scopes[scopeName].getSchema();
       return schema?.tableName || scopeName;
     };
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                     PLUGIN INITIALIZATION                               ║
-     * ║  Initialize helper modules and expose them via api.knex                 ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-
     // Initialize cross-table search helpers
     const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
     
     // Initialize relationship include helpers (will get access to helper functions after they're defined)
     let relationshipIncludeHelpers;
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                  MAIN QUERY FILTERING HOOK                              ║
-     * ║  This is the heart of the filtering system. It processes searchSchema   ║
-     * ║  filters and builds SQL WHERE conditions with proper JOINs              ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-    
     // Register the enhanced searchSchema filter hook with cross-table search support
     addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
       async (hookParams) => {
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 1: Extract Context Data
-         * The hook receives data via hookParams.context.knexQuery which was
-         * set by the dataQuery method before calling runHooks
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         log.trace('[CROSS-TABLE-SEARCH] Hook inspection', { scopeName: hookParams.scopeName, hasMethodParams: !!hookParams.methodParams, hasContext: !!hookParams.context });
         
         // Try to access the searchSchema from scopeOptions
@@ -524,12 +496,6 @@ export const RestApiKnexPlugin = {
         log.trace('[CROSS-TABLE-SEARCH] Looking for query object in context');
         log.trace('[CROSS-TABLE-SEARCH] Available in hookParams', { hasKnexQuery: !!hookParams.context?.knexQuery });
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 2: Analyze Required Indexes
-         * Check if cross-table search fields have proper indexes to prevent
-         * performance issues. This is a safety check, not enforcement.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // Analyze and optionally create required indexes
         const requiredIndexes = crossTableSearchHelpers.analyzeRequiredIndexes(scopeName, searchSchema);
         if (requiredIndexes.length > 0) {
@@ -538,15 +504,9 @@ export const RestApiKnexPlugin = {
           // await crossTableSearchHelpers.createRequiredIndexes(requiredIndexes, knex);
         }
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 3: Build JOIN Maps
-         * Process searchSchema to identify which tables need to be JOINed
-         * for cross-table searches. Only processes filters actually in use.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // Build join map and field path lookup for cross-table searches
-        const joinMap = new Map();        // Stores JOIN information keyed by alias
-        const fieldPathMap = new Map();   // Maps 'scope.field' to 'alias.field'
+        const joinMap = new Map();
+        const fieldPathMap = new Map(); // Maps 'scope.field' to join alias and field
         
         // Only process searchSchema entries that are actually being used in filters
         log.trace('[SCHEMA-PROCESS] Processing only used searchSchema entries', { 
@@ -603,15 +563,9 @@ export const RestApiKnexPlugin = {
         
         log.trace('[MAPS] Final join structures', { joinMapSize: joinMap.size, fieldPathMapSize: fieldPathMap.size });
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 5: Apply SQL JOINs
-         * Add all required LEFT JOINs to the query. Uses LEFT JOIN to ensure
-         * we don't exclude records that lack related data.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // Apply all required joins (track applied joins to avoid duplicates)
         log.trace('[JOIN-APPLY] Applying JOINs');
-        const appliedJoins = new Set();  // Track applied JOINs to prevent duplicates
+        const appliedJoins = new Set();
         
         joinMap.forEach((joinInfo) => {
           if (joinInfo.isMultiLevel && joinInfo.joinChain) {
@@ -646,12 +600,6 @@ export const RestApiKnexPlugin = {
           }
         });
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 6: Handle DISTINCT for One-to-Many JOINs
-         * When JOINing one-to-many relationships, we need DISTINCT to prevent
-         * duplicate rows in the result set
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // Add DISTINCT only when we have one-to-many JOINs to avoid duplicates
         let hasOneToManyJoins = false;
         joinMap.forEach((joinInfo) => {
@@ -674,15 +622,9 @@ export const RestApiKnexPlugin = {
           log.trace('[DISTINCT] Not adding DISTINCT - only many-to-one JOINs present');
         }
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 4: Process Polymorphic Searches
-         * Identify filters that target polymorphic relationships and prepare
-         * conditional JOINs for each possible type
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // First, identify and prepare all polymorphic searches
-        const polymorphicSearches = new Map();  // Stores polymorphic filter info
-        const polymorphicJoins = new Map();     // Stores polymorphic JOIN info
+        const polymorphicSearches = new Map();
+        const polymorphicJoins = new Map();
         
         // Pre-process to identify polymorphic searches
         for (const [filterKey, filterValue] of Object.entries(filters)) {
@@ -701,12 +643,6 @@ export const RestApiKnexPlugin = {
             });
           }
         }
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 7: Build Polymorphic JOINs
-         * Create conditional JOINs for polymorphic relationships. Each type
-         * gets its own JOIN with conditions to only match that type.
-         * ═══════════════════════════════════════════════════════════════════ */
         
         // Build all required JOINs for polymorphic searches
         if (polymorphicSearches.size > 0) {
@@ -840,13 +776,6 @@ export const RestApiKnexPlugin = {
           }
         }
         
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 8: Apply WHERE Conditions
-         * Process each filter and apply appropriate WHERE conditions.
-         * CRITICAL: All conditions are wrapped in a group to prevent SQL
-         * injection and ensure proper precedence.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
         // Wrap all searchSchema filters in a group for safety
         // This prevents any OR conditions from escaping and affecting other filters
         log.trace('[FILTER-START] Starting filter processing', { filterCount: Object.keys(filters).length });
@@ -863,11 +792,6 @@ export const RestApiKnexPlugin = {
             
             // Check if this is a polymorphic search
             if (polymorphicSearches.has(filterKey)) {
-              /* ═══════════════════════════════════════════════════════════════
-               * POLYMORPHIC FILTER PROCESSING
-               * Build OR conditions for each possible type in the polymorphic
-               * relationship. Each condition checks both type and field value.
-               * ═══════════════════════════════════════════════════════════════ */
               log.trace('[POLYMORPHIC-SEARCH] Processing polymorphic filter:', filterKey);
               
               const searchInfo = polymorphicSearches.get(filterKey);
@@ -920,14 +844,6 @@ export const RestApiKnexPlugin = {
               
               return; // Skip normal filter processing
             }
-            
-            /* ═══════════════════════════════════════════════════════════════════
-             * STANDARD FILTER PROCESSING
-             * Handle different filter types based on field definition:
-             * - likeOneOf: Search across multiple fields with OR
-             * - applyFilter: Custom filter function
-             * - default: Standard operators (=, like, >, <, etc.)
-             * ═══════════════════════════════════════════════════════════════════ */
             
             // Use switch-case for clean filter logic
             log.trace('[SWITCH] Determining filter type', { filterKey });
@@ -1025,29 +941,12 @@ export const RestApiKnexPlugin = {
       }
     );
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                    HELPER FUNCTION EXPORTS                              ║
-     * ║  Expose helper modules for external use via api.knex.helpers           ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-    
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
     api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
     api.knex.helpers.polymorphic = api._polymorphicHelpers;
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                  INTERNAL HELPER FUNCTIONS                              ║
-     * ║  Utility functions used by the data operation methods                  ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-    
-    /**
-     * Identifies all foreign key fields in a schema
-     * @param {Object} schema - The schema object containing field definitions
-     * @returns {Set<string>} A Set containing all foreign key field names
-     * @example
-     * const foreignKeys = getForeignKeyFields(schema);
-     * // Returns Set { 'author_id', 'category_id' }
-     */
+    // Helper to identify foreign key fields in a schema
     const getForeignKeyFields = (schema) => {
       const foreignKeys = new Set();
       if (!schema) return foreignKeys;
@@ -1060,22 +959,7 @@ export const RestApiKnexPlugin = {
       return foreignKeys;
     };
     
-    /**
-     * Builds the field selection list for database queries, handling sparse fieldsets
-     * @param {string} scopeName - The name of the scope/resource
-     * @param {string|null} requestedFields - Comma-separated list of requested fields or null for all
-     * @param {Object} schema - The schema object containing field definitions
-     * @returns {Promise<string|Array<string>>} Either '*' for all fields or array of field names
-     * @description
-     * - Always includes 'id' field
-     * - Always includes ALL foreign key fields (needed for relationships)
-     * - Always includes polymorphic type/id fields
-     * - Includes only requested attribute fields when sparse fieldsets are used
-     * - Includes fields marked with alwaysSelect: true
-     * @example
-     * const fields = await buildFieldSelection('articles', 'title,body', schema);
-     * // Returns ['id', 'title', 'body', 'author_id', 'category_id'] 
-     */
+    // Helper to build field selection for sparse fieldsets
     const buildFieldSelection = async (scopeName, requestedFields, schema) => {
       const dbFields = new Set(['id']); // Always need id
       
@@ -1125,21 +1009,7 @@ export const RestApiKnexPlugin = {
       return Array.from(dbFields);
     };
     
-    /**
-     * Converts a database record to JSON:API format
-     * @param {string} scopeName - The name of the scope/resource (becomes the 'type')
-     * @param {Object|null} record - The database record to convert
-     * @param {Object} schema - The schema object for field definitions
-     * @returns {Promise<Object|null>} JSON:API resource object or null
-     * @description
-     * - Extracts ID into separate field
-     * - Filters out foreign keys from attributes (they go in relationships)
-     * - Filters out polymorphic type/id fields
-     * - Returns null for null/undefined records
-     * @example
-     * const jsonApiRecord = await toJsonApi('articles', dbRecord, schema);
-     * // Returns: { type: 'articles', id: '123', attributes: { title: 'Hello', body: '...' } }
-     */
+    // Helper to convert DB record to JSON:API format with foreign key filtering
     const toJsonApi = async (scopeName, record, schema) => {
       if (!record) return null;
       
@@ -1178,17 +1048,7 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    /**
-     * Applies field selection to a Knex query with optional table prefixing
-     * @param {Object} query - The Knex query object
-     * @param {string} tableName - The table name for prefixing
-     * @param {string|Array<string>} fieldsToSelect - Either '*' or array of field names
-     * @param {boolean} useTablePrefix - Whether to prefix fields with table name (for JOINs)
-     * @returns {Object} The modified query object
-     * @example
-     * buildQuerySelection(query, 'articles', ['id', 'title'], true);
-     * // Adds SELECT articles.id, articles.title to query
-     */
+    // Helper to build query selection with optional table prefix
     const buildQuerySelection = (query, tableName, fieldsToSelect, useTablePrefix = false) => {
       if (fieldsToSelect === '*') {
         return useTablePrefix ? query.select(`${tableName}.*`) : query;
@@ -1200,19 +1060,7 @@ export const RestApiKnexPlugin = {
       }
     };
     
-    /**
-     * Processes the ?include= parameter to load related resources
-     * @param {Array<Object>} records - The primary records to load includes for
-     * @param {string} scopeName - The scope name of the primary records
-     * @param {Object} queryParams - Query parameters containing include and fields
-     * @returns {Promise<Array<Object>>} Array of included resources in JSON:API format
-     * @description
-     * Uses batch loading to prevent N+1 queries. All related records of the same
-     * type are loaded in a single query.
-     * @example
-     * const included = await processIncludes(articles, 'articles', { include: ['author', 'comments.user'] });
-     * // Returns array of author and user resources
-     */
+    // Helper to process includes for both single and multiple records
     const processIncludes = async (records, scopeName, queryParams) => {
       if (!queryParams.include) {
         return [];
@@ -1230,23 +1078,7 @@ export const RestApiKnexPlugin = {
       return includeResult.included;
     };
     
-    /**
-     * Builds a complete JSON:API response with data and included resources
-     * @param {Array<Object>} records - The primary records
-     * @param {string} scopeName - The scope name for the primary records
-     * @param {Object} schema - The schema for the primary records
-     * @param {Array<Object>} included - Array of included resources
-     * @param {boolean} isSingle - Whether this is a single resource response
-     * @returns {Promise<Object>} Complete JSON:API response object
-     * @description
-     * - Converts records to JSON:API format
-     * - Adds relationship links based on foreign keys
-     * - Adds polymorphic relationships
-     * - Includes related resources if any
-     * @example
-     * const response = await buildJsonApiResponse([article], 'articles', schema, [author], true);
-     * // Returns: { data: { type: 'articles', id: '1', attributes: {...}, relationships: {...} }, included: [...] }
-     */
+    // Helper to build JSON:API response with relationships and includes
     const buildJsonApiResponse = async (records, scopeName, schema, included = [], isSingle = false) => {
       // Get relationships configuration
       const relationships = await scopes[scopeName].getRelationships();
@@ -1317,20 +1149,7 @@ export const RestApiKnexPlugin = {
       return response;
     };
     
-    /**
-     * Extracts foreign key updates from JSON:API relationship data
-     * @param {Object} inputRecord - The JSON:API input document
-     * @param {Object} schema - The schema object or Schema instance
-     * @returns {Object} Object mapping foreign key fields to their values
-     * @description
-     * Converts JSON:API relationships to foreign key updates:
-     * - relationships.author.data.id → { author_id: '123' }
-     * - relationships.author.data: null → { author_id: null }
-     * @example
-     * const updates = processBelongsToRelationships(inputRecord, schema);
-     * // Input: { data: { relationships: { author: { data: { type: 'users', id: '5' } } } } }
-     * // Returns: { author_id: '5' }
-     */
+    // Helper to process belongsTo relationships from JSON:API input
     const processBelongsToRelationships = (inputRecord, schema) => {
       const foreignKeyUpdates = {};
       
@@ -1355,21 +1174,7 @@ export const RestApiKnexPlugin = {
       return foreignKeyUpdates;
     };
     
-    /**
-     * Builds a response with optional includes and sparse fieldsets
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope name
-     * @param {string|number} params.id - The record ID
-     * @param {string} params.idProp - The ID property name
-     * @param {string} params.tableName - The database table name
-     * @param {Object} params.schema - The schema object
-     * @param {Object} params.queryParams - Query parameters (include, fields)
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response
-     * @description
-     * If queryParams are provided, uses full dataGet to handle includes.
-     * Otherwise, does a simple query and conversion.
-     */
+    // Helper to build response with optional query parameters
     const buildResponseWithQueryParams = async ({ scopeName, id, idProp, tableName, schema, queryParams, runHooks }) => {
       // Return response with optional includes/sparse fieldsets
       if (queryParams && Object.keys(queryParams).length > 0) {
@@ -1398,22 +1203,7 @@ export const RestApiKnexPlugin = {
       polymorphicHelpers: api._polymorphicHelpers
     });
 
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                    DATA OPERATION METHODS                               ║
-     * ║  Implementation of the storage interface required by REST API plugin    ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-
-    /**
-     * EXISTS - Check if a record exists by ID
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {string|number} params.id - The record ID to check
-     * @param {string} params.idProperty - The ID column name (default: 'id')
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<boolean>} True if record exists, false otherwise
-     * @description
-     * Performs efficient existence check using SELECT with just the ID field
-     */
+    // EXISTS - check if a record exists by ID
     helpers.dataExists = async ({ scopeName, id, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
@@ -1428,25 +1218,7 @@ export const RestApiKnexPlugin = {
       return !!record;
     };
 
-    /**
-     * GET - Retrieve a single record by ID with optional includes and sparse fieldsets
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {string|number} params.id - The record ID to retrieve
-     * @param {Object} params.queryParams - Query parameters
-     * @param {Array<string>} params.queryParams.include - Related resources to include
-     * @param {Object} params.queryParams.fields - Sparse fieldsets by resource type
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response with data and optional included
-     * @throws {Error} With code 'REST_API_RESOURCE' if record not found
-     * @example
-     * const result = await dataGet({ 
-     *   scopeName: 'articles', 
-     *   id: '123',
-     *   queryParams: { include: ['author'], fields: { articles: 'title,body' } }
-     * });
-     * // Returns: { data: { type: 'articles', id: '123', attributes: {...}, relationships: {...} }, included: [...] }
-     */
+    // GET - retrieve a single record by ID
     helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
@@ -1482,39 +1254,7 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(records, scopeName, schema, included, true);
     };
     
-    /**
-     * QUERY - Retrieve multiple records with filtering, sorting, pagination, and includes
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {Object} params.queryParams - Query parameters
-     * @param {Object} params.queryParams.filters - Filter conditions
-     * @param {Array<string>} params.queryParams.sort - Sort fields (prefix with - for DESC)
-     * @param {Object} params.queryParams.page - Pagination { number, size }
-     * @param {Array<string>} params.queryParams.include - Related resources to include
-     * @param {Object} params.queryParams.fields - Sparse fieldsets by resource type
-     * @param {Object} params.searchSchema - Schema defining available filters
-     * @param {Function} params.runHooks - Hook runner function
-     * @param {Object} params.context - Context object for sharing data with hooks
-     * @returns {Promise<Object>} JSON:API response with data array and optional included
-     * @description
-     * This is the most complex method, handling:
-     * - Cross-table filtering with automatic JOINs
-     * - Polymorphic filtering
-     * - Sorting with validation
-     * - Pagination with limits
-     * - Batch loading of includes
-     * @example
-     * const result = await dataQuery({
-     *   scopeName: 'articles',
-     *   queryParams: {
-     *     filters: { title: 'JavaScript', 'author.name': 'John' },
-     *     sort: ['-createdAt', 'title'],
-     *     page: { number: 2, size: 20 },
-     *     include: ['author', 'comments']
-     *   },
-     *   searchSchema: { title: { filterUsing: 'like' }, 'author.name': { actualField: 'users.name' } }
-     * });
-     */
+    // QUERY - retrieve multiple records
     helpers.dataQuery = async ({ scopeName, queryParams = {}, searchSchema, runHooks, context }) => {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       
@@ -1535,16 +1275,10 @@ export const RestApiKnexPlugin = {
       let query = knex(tableName);
       query = buildQuerySelection(query, tableName, fieldsToSelect, true);
       
-      /* ═══════════════════════════════════════════════════════════════════
-       * FILTERING HOOKS
-       * This is where the magic happens. The knexQueryFiltering hook is called
-       * to apply all filter conditions. The searchSchemaFilter hook (registered
-       * above) will process the searchSchema and apply filters with JOINs.
-       * 
-       * IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
-       * to ensure proper grouping and prevent accidental filter bypass.
-       * ═══════════════════════════════════════════════════════════════════ */
-      
+      // Run filtering hooks
+      // IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
+      // to ensure proper grouping and prevent accidental filter bypass.
+      // See plugin documentation for examples and best practices.
       log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filters, scopeName, tableName });
       
       log.trace('[DATA-QUERY] About to call runHooks', { hookName: 'knexQueryFiltering' });
@@ -1607,25 +1341,7 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(records, scopeName, schema, included, false);
     };
     
-    /**
-     * POST - Create a new record
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {Object} params.inputRecord - JSON:API input document
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response with created resource
-     * @description
-     * - Extracts attributes from JSON:API format
-     * - Inserts into database
-     * - Returns the created record in JSON:API format
-     * Note: Relationship processing is handled by REST API plugin layer
-     * @example
-     * const result = await dataPost({
-     *   scopeName: 'articles',
-     *   inputRecord: { data: { type: 'articles', attributes: { title: 'New Article' } } }
-     * });
-     * // Returns: { data: { type: 'articles', id: '456', attributes: { title: 'New Article' } } }
-     */
+    // POST - create a new record
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
@@ -1649,31 +1365,7 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    /**
-     * PUT - Replace an entire record or create if it doesn't exist
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {string|number} params.id - The record ID
-     * @param {Object} params.inputRecord - JSON:API input document
-     * @param {Object} params.queryParams - Query parameters for response
-     * @param {boolean} params.isCreate - True if creating new record (from REST API layer)
-     * @param {string} params.idProperty - The ID column name
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response with updated/created resource
-     * @throws {Error} With code 'REST_API_RESOURCE' if record not found (update mode)
-     * @description
-     * PUT has dual behavior:
-     * - Create mode (isCreate=true): Insert with specified ID
-     * - Update mode (isCreate=false): Replace all fields
-     * Also processes belongsTo relationships to foreign key updates
-     * @example
-     * const result = await dataPut({
-     *   scopeName: 'articles',
-     *   id: '123',
-     *   inputRecord: { data: { type: 'articles', attributes: { title: 'Replaced' } } },
-     *   isCreate: false
-     * });
-     */
+    // PUT - replace an entire record or create if it doesn't exist
     helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
@@ -1721,30 +1413,7 @@ export const RestApiKnexPlugin = {
       });
     };
     
-    /**
-     * PATCH - Partially update a record (only specified fields)
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {string|number} params.id - The record ID to update
-     * @param {Object} params.inputRecord - JSON:API input document with partial data
-     * @param {Object} params.schema - Schema object (optional, will fetch if not provided)
-     * @param {Object} params.queryParams - Query parameters for response
-     * @param {string} params.idProperty - The ID column name
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response with updated resource
-     * @throws {Error} With code 'REST_API_RESOURCE' if record not found
-     * @description
-     * - Only updates provided fields, leaving others unchanged
-     * - Processes belongsTo relationships
-     * - Can return full record with includes based on queryParams
-     * @example
-     * const result = await dataPatch({
-     *   scopeName: 'articles',
-     *   id: '123',
-     *   inputRecord: { data: { type: 'articles', id: '123', attributes: { title: 'New Title' } } }
-     * });
-     * // Only updates title, other fields remain unchanged
-     */
+    // PATCH - partially update a record
     helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
@@ -1784,23 +1453,7 @@ export const RestApiKnexPlugin = {
       });
     };
     
-    /**
-     * DELETE - Remove a record from the database
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope/resource name
-     * @param {string|number} params.id - The record ID to delete
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} Success object { success: true }
-     * @throws {Error} With code 'REST_API_RESOURCE' if record not found
-     * @description
-     * - Checks existence before deletion
-     * - Performs hard delete (not soft delete)
-     * - Returns success indicator
-     * Note: Cascading deletes depend on database foreign key constraints
-     * @example
-     * await dataDelete({ scopeName: 'articles', id: '123' });
-     * // Returns: { success: true }
-     */
+    // DELETE - remove a record
     helpers.dataDelete = async ({ scopeName, id, runHooks }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
