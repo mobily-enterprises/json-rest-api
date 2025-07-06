@@ -791,7 +791,7 @@ export const RestApiKnexPlugin = {
             if (polymorphicSearches.has(filterKey)) {
               log.trace('[POLYMORPHIC-SEARCH] Processing polymorphic filter:', filterKey);
               
-              const { fieldDef, filterValue, polymorphicField } = polymorphicSearches.get(filterKey);
+              const searchInfo = polymorphicSearches.get(filterKey);
               const polyRel = polymorphicRelationships.get(filterKey);
               if (!polyRel) {
                 log.error('[POLYMORPHIC-SEARCH] Relationship not found for:', filterKey);
@@ -801,13 +801,13 @@ export const RestApiKnexPlugin = {
               
               // Build OR conditions for each possible type
               this.where(function() {
-                for (const [targetType, targetFieldPath] of Object.entries(fieldDef.targetFields)) {
+                for (const [targetType, targetFieldPath] of Object.entries(searchInfo.fieldDef.targetFields)) {
                   this.orWhere(function() {
                     // First check the type matches
                     this.where(`${tableName}.${typeField}`, targetType);
                     
                     // Then apply the field filter
-                    const baseAlias = `${tableName}_${polymorphicField}_${targetType}`;
+                    const baseAlias = `${tableName}_${searchInfo.polymorphicField}_${targetType}`;
                     
                     if (targetFieldPath.includes('.')) {
                       // Complex path - calculate final alias
@@ -820,19 +820,19 @@ export const RestApiKnexPlugin = {
                         finalAlias = `${finalAlias}_${pathParts[i]}`;
                       }
                       
-                      const operator = fieldDef.filterUsing || '=';
+                      const operator = searchInfo.fieldDef.filterUsing || '=';
                       if (operator === 'like') {
-                        this.where(`${finalAlias}.${fieldName}`, 'like', `%${filterValue}%`);
+                        this.where(`${finalAlias}.${fieldName}`, 'like', `%${searchInfo.filterValue}%`);
                       } else {
-                        this.where(`${finalAlias}.${fieldName}`, operator, filterValue);
+                        this.where(`${finalAlias}.${fieldName}`, operator, searchInfo.filterValue);
                       }
                     } else {
                       // Direct field on polymorphic target
-                      const operator = fieldDef.filterUsing || '=';
+                      const operator = searchInfo.fieldDef.filterUsing || '=';
                       if (operator === 'like') {
-                        this.where(`${baseAlias}.${targetFieldPath}`, 'like', `%${filterValue}%`);
+                        this.where(`${baseAlias}.${targetFieldPath}`, 'like', `%${searchInfo.filterValue}%`);
                       } else {
-                        this.where(`${baseAlias}.${targetFieldPath}`, operator, filterValue);
+                        this.where(`${baseAlias}.${targetFieldPath}`, operator, searchInfo.filterValue);
                       }
                     }
                   });
@@ -1330,6 +1330,7 @@ export const RestApiKnexPlugin = {
       }
       
       // Execute query
+      console.log('[DEBUG SQL]', query.toString());
       const records = await query;
       
       // Process includes

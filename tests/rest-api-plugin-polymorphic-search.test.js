@@ -260,6 +260,7 @@ describe('Polymorphic Relationships - Search Support', () => {
         // Search by content title across polymorphic types
         trackableTitle: {
           type: 'string',
+          filterUsing: 'like',
           polymorphicField: 'trackable',
           targetFields: {
             articles: 'title',
@@ -270,6 +271,7 @@ describe('Polymorphic Relationships - Search Support', () => {
         // Search by author/creator/instructor name
         trackableAuthor: {
           type: 'string',
+          filterUsing: 'like',
           polymorphicField: 'trackable',
           targetFields: {
             articles: 'author.name',
@@ -306,6 +308,7 @@ describe('Polymorphic Relationships - Search Support', () => {
         // Search by taggable content title
         taggableTitle: {
           type: 'string',
+          filterUsing: 'like',
           polymorphicField: 'taggable',
           targetFields: {
             articles: 'title',
@@ -347,14 +350,7 @@ describe('Polymorphic Relationships - Search Support', () => {
       }
     });
     
-    console.log('Polymorphic search response:', response.data.length, 'records');
-    console.log('Activities found:', response.data.map(a => ({
-      id: a.id,
-      type: a.attributes.trackable_type,
-      trackable_id: a.attributes.trackable_id,
-      activity_type: a.attributes.activity_type
-    })));
-    
+    console.log('Polymorphic search result:', response.data.length, 'records found');
     // Should find activities for "JavaScript Advanced Tips" article and "JavaScript Tutorial" video
     assert.ok(response.data.length >= 3);
     
