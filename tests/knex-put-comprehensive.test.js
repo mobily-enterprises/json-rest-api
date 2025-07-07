@@ -874,4 +874,365 @@ describe('Comprehensive dataPut Tests', () => {
       assert.strictEqual(author.attributes.name, 'Alice Author');
     });
   });
+  
+  describe('Many-to-Many Relationship Handling', () => {
+    beforeEach(async () => {
+      // Add tables for many-to-many testing
+      await knex.schema.createTable('tags', table => {
+        table.increments('id');
+        table.string('name');
+        table.string('slug');
+      });
+      
+      await knex.schema.createTable('article_tags', table => {
+        table.increments('id');
+        table.integer('article_id').references('id').inTable('articles').onDelete('CASCADE');
+        table.integer('tag_id').references('id').inTable('tags').onDelete('CASCADE');
+        table.string('relevance'); // Extra pivot field
+        table.unique(['article_id', 'tag_id']);
+      });
+      
+      // Insert test data
+      await knex('tags').insert([
+        { id: 1, name: 'JavaScript', slug: 'js' },
+        { id: 2, name: 'Node.js', slug: 'node' },
+        { id: 3, name: 'API', slug: 'api' },
+        { id: 4, name: 'Database', slug: 'db' }
+      ]);
+      
+      // Article 1 initially has tags 1 and 2
+      await knex('article_tags').insert([
+        { article_id: 1, tag_id: 1, relevance: 'high' },
+        { article_id: 1, tag_id: 2, relevance: 'medium' }
+      ]);
+      
+      // Define tag resource
+      api.addResource('tags', {
+        schema: {
+          id: { type: 'id' },
+          name: { type: 'string', required: true },
+          slug: { type: 'string' }
+        }
+      });
+      
+      // Define pivot resource
+      api.addResource('article_tags', {
+        schema: {
+          id: { type: 'id' },
+          article_id: { type: 'number', required: true },
+          tag_id: { type: 'number', required: true },
+          relevance: { type: 'string' }
+        }
+      });
+      
+      // Update articles resource to include tags relationship
+      api.addResource('articles', {
+        schema: {
+          id: { type: 'id' },
+          title: { type: 'string', required: true },
+          body: { type: 'string' },
+          summary: { type: 'string' },
+          author_id: { 
+            belongsTo: 'authors', 
+            as: 'author',
+            sideLoad: true
+          },
+          category_id: { 
+            belongsTo: 'categories', 
+            as: 'category',
+            sideLoad: true
+          },
+          status: { type: 'string' },
+          views: { type: 'number' },
+          featured: { type: 'boolean' },
+          published_date: { type: 'date' }
+        },
+        relationships: {
+          comments: {
+            hasMany: 'comments',
+            foreignKey: 'article_id',
+            sideLoad: true
+          },
+          tags: {
+            manyToMany: {
+              through: 'article_tags',
+              foreignKey: 'article_id',
+              otherKey: 'tag_id'
+            }
+          }
+        }
+      });
+    });
+    
+    test('should replace all many-to-many relationships', async () => {
+      // Verify initial tags
+      const initialTags = await knex('article_tags').where('article_id', 1).orderBy('tag_id');
+      assert.strictEqual(initialTags.length, 2);
+      assert.deepStrictEqual(initialTags.map(t => t.tag_id), [1, 2]);
+      
+      // PUT with new tags (should replace all)
+      const result = await api.scopes.articles.put({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              title: 'Updated with new tags'
+            },
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '3' },
+                  { type: 'tags', id: '4' }
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data);
+      
+      // Verify tags were replaced
+      const updatedTags = await knex('article_tags').where('article_id', 1).orderBy('tag_id');
+      assert.strictEqual(updatedTags.length, 2);
+      assert.deepStrictEqual(updatedTags.map(t => t.tag_id), [3, 4]);
+    });
+    
+    test('should clear all many-to-many relationships when empty array provided', async () => {
+      // PUT with empty tags array
+      const result = await api.scopes.articles.put({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              title: 'Article without tags'
+            },
+            relationships: {
+              tags: {
+                data: []
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data);
+      
+      // Verify all tags were removed
+      const remainingTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(remainingTags.length, 0);
+    });
+    
+    test('should handle PUT with both belongsTo and many-to-many relationships', async () => {
+      const result = await api.scopes.articles.put({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              title: 'Complete update',
+              status: 'published'
+            },
+            relationships: {
+              author: {
+                data: { type: 'authors', id: '3' }
+              },
+              category: {
+                data: { type: 'categories', id: '2' }
+              },
+              tags: {
+                data: [
+                  { type: 'tags', id: '1' },
+                  { type: 'tags', id: '3' },
+                  { type: 'tags', id: '4' }
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data);
+      
+      // Verify belongsTo updates
+      const article = await knex('articles').where('id', 1).first();
+      assert.strictEqual(article.author_id, 3);
+      assert.strictEqual(article.category_id, 2);
+      
+      // Verify many-to-many updates
+      const tags = await knex('article_tags').where('article_id', 1).orderBy('tag_id');
+      assert.strictEqual(tags.length, 3);
+      assert.deepStrictEqual(tags.map(t => t.tag_id), [1, 3, 4]);
+    });
+    
+    test('should clear many-to-many when relationship not provided', async () => {
+      // PUT with relationships object but no tags - should clear tags
+      const result = await api.scopes.articles.put({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              title: 'Update without mentioning tags'
+            },
+            relationships: {
+              author: {
+                data: { type: 'authors', id: '2' }
+              }
+              // tags not mentioned - should be cleared
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data);
+      
+      // Verify tags were cleared
+      const tags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(tags.length, 0);
+    });
+    
+    test('should preserve many-to-many when no relationships object provided', async () => {
+      // PUT without relationships object - should preserve existing relationships
+      const result = await api.scopes.articles.put({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              title: 'Update attributes only',
+              body: 'New body'
+            }
+            // No relationships object at all
+          }
+        }
+      });
+      
+      assert.ok(result.data);
+      
+      // Verify tags were preserved
+      const tags = await knex('article_tags').where('article_id', 1).orderBy('tag_id');
+      assert.strictEqual(tags.length, 2);
+      assert.deepStrictEqual(tags.map(t => t.tag_id), [1, 2]);
+    });
+    
+    test('should handle duplicate tags in request', async () => {
+      try {
+        await api.scopes.articles.put({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              attributes: {
+                title: 'Article with duplicate tags'
+              },
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '1' },
+                    { type: 'tags', id: '1' } // Duplicate
+                  ]
+                }
+              }
+            }
+          }
+        });
+        assert.fail('Should have thrown error for duplicate tags');
+      } catch (error) {
+        // Should fail due to unique constraint
+        assert.ok(error.message.includes('UNIQUE') || error.message.includes('duplicate'));
+      }
+    });
+    
+    test('should rollback on many-to-many failure', async () => {
+      // Count initial state
+      const initialArticle = await knex('articles').where('id', 1).first();
+      const initialTags = await knex('article_tags').where('article_id', 1).count('* as count');
+      
+      try {
+        await api.scopes.articles.put({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              attributes: {
+                title: 'This update will fail'
+              },
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '2' },
+                    { type: 'tags', id: '999' } // Non-existent tag
+                  ]
+                }
+              }
+            }
+          }
+        });
+        assert.fail('Should have thrown error');
+      } catch (error) {
+        // Expected to fail
+      }
+      
+      // Verify nothing changed
+      const finalArticle = await knex('articles').where('id', 1).first();
+      const finalTags = await knex('article_tags').where('article_id', 1).count('* as count');
+      
+      assert.strictEqual(finalArticle.title, initialArticle.title);
+      assert.strictEqual(finalTags[0].count, initialTags[0].count);
+    });
+    
+    test('should support external transaction for many-to-many updates', async () => {
+      const trx = await knex.transaction();
+      
+      try {
+        await api.scopes.articles.put({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              attributes: {
+                title: 'Transactional update'
+              },
+              relationships: {
+                tags: {
+                  data: [{ type: 'tags', id: '4' }]
+                }
+              }
+            }
+          },
+          transaction: trx
+        });
+        
+        // Check within transaction
+        const tagsInTrx = await trx('article_tags').where('article_id', 1);
+        assert.strictEqual(tagsInTrx.length, 1);
+        assert.strictEqual(tagsInTrx[0].tag_id, 4);
+        
+        // Check outside transaction - should still have original tags
+        const tagsOutside = await knex('article_tags').where('article_id', 1);
+        assert.strictEqual(tagsOutside.length, 2);
+        
+        // Rollback
+        await trx.rollback();
+        
+        // Verify original state restored
+        const finalTags = await knex('article_tags').where('article_id', 1);
+        assert.strictEqual(finalTags.length, 2);
+      } catch (error) {
+        await trx.rollback();
+        throw error;
+      }
+    });
+  });
 });

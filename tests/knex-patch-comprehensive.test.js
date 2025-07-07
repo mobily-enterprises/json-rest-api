@@ -70,6 +70,39 @@ describe('Comprehensive dataPatch Tests', () => {
       table.date('created_at');
     });
     
+    // Add tags table for many-to-many relationships
+    await knex.schema.createTable('tags', table => {
+      table.increments('id');
+      table.string('name');
+      table.string('color');
+    });
+    
+    // Pivot table for articles-tags many-to-many
+    await knex.schema.createTable('article_tags', table => {
+      table.increments('id');
+      table.integer('article_id').references('id').inTable('articles').onDelete('CASCADE');
+      table.integer('tag_id').references('id').inTable('tags').onDelete('CASCADE');
+      table.string('relevance'); // Extra pivot field
+      table.unique(['article_id', 'tag_id']);
+    });
+    
+    // Skills table for users many-to-many
+    await knex.schema.createTable('skills', table => {
+      table.increments('id');
+      table.string('name');
+      table.string('category');
+    });
+    
+    // Pivot table for users-skills many-to-many
+    await knex.schema.createTable('user_skills', table => {
+      table.increments('id');
+      table.integer('user_id').references('id').inTable('authors').onDelete('CASCADE');
+      table.integer('skill_id').references('id').inTable('skills').onDelete('CASCADE');
+      table.integer('proficiency_level'); // 1-5
+      table.date('acquired_date');
+      table.unique(['user_id', 'skill_id']);
+    });
+    
     // Insert test data
     await knex('companies').insert([
       { id: 1, name: 'Tech Corp', industry: 'Technology', country: 'USA', website: 'techcorp.com', founded_year: 2000 },
@@ -118,6 +151,36 @@ describe('Comprehensive dataPatch Tests', () => {
     await knex('comments').insert([
       { id: 1, content: 'Great article!', article_id: 1, author_id: 2, parent_comment_id: null, approved: true, created_at: '2023-01-02' },
       { id: 2, content: 'Thanks!', article_id: 1, author_id: 1, parent_comment_id: 1, approved: true, created_at: '2023-01-03' }
+    ]);
+    
+    // Insert tags
+    await knex('tags').insert([
+      { id: 1, name: 'JavaScript', color: 'yellow' },
+      { id: 2, name: 'Node.js', color: 'green' },
+      { id: 3, name: 'API', color: 'blue' },
+      { id: 4, name: 'Database', color: 'red' }
+    ]);
+    
+    // Insert existing article-tag relationships
+    await knex('article_tags').insert([
+      { article_id: 1, tag_id: 1, relevance: 'high' },
+      { article_id: 1, tag_id: 2, relevance: 'medium' },
+      { article_id: 2, tag_id: 3, relevance: 'high' }
+    ]);
+    
+    // Insert skills
+    await knex('skills').insert([
+      { id: 1, name: 'JavaScript', category: 'Programming' },
+      { id: 2, name: 'TypeScript', category: 'Programming' },
+      { id: 3, name: 'SQL', category: 'Database' },
+      { id: 4, name: 'GraphQL', category: 'API' }
+    ]);
+    
+    // Insert existing user-skill relationships
+    await knex('user_skills').insert([
+      { user_id: 1, skill_id: 1, proficiency_level: 5, acquired_date: '2020-01-01' },
+      { user_id: 1, skill_id: 2, proficiency_level: 4, acquired_date: '2021-06-01' },
+      { user_id: 2, skill_id: 3, proficiency_level: 3, acquired_date: '2019-03-15' }
     ]);
     
     // Create API instance
@@ -179,6 +242,13 @@ describe('Comprehensive dataPatch Tests', () => {
           hasMany: 'comments',
           foreignKey: 'author_id',
           sideLoad: true
+        },
+        skills: {
+          manyToMany: {
+            through: 'user_skills',
+            foreignKey: 'user_id',
+            otherKey: 'skill_id'
+          }
         }
       }
     });
@@ -225,6 +295,13 @@ describe('Comprehensive dataPatch Tests', () => {
           hasMany: 'comments',
           foreignKey: 'article_id',
           sideLoad: true
+        },
+        tags: {
+          manyToMany: {
+            through: 'article_tags',
+            foreignKey: 'article_id',
+            otherKey: 'tag_id'
+          }
         }
       }
     });
@@ -257,6 +334,44 @@ describe('Comprehensive dataPatch Tests', () => {
           foreignKey: 'parent_comment_id',
           sideLoad: true
         }
+      }
+    });
+    
+    // Add tags resource
+    api.addResource('tags', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true },
+        color: { type: 'string' }
+      }
+    });
+    
+    // Add skills resource
+    api.addResource('skills', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true },
+        category: { type: 'string' }
+      }
+    });
+    
+    // Add pivot resources
+    api.addResource('article_tags', {
+      schema: {
+        id: { type: 'id' },
+        article_id: { type: 'number', required: true },
+        tag_id: { type: 'number', required: true },
+        relevance: { type: 'string' }
+      }
+    });
+    
+    api.addResource('user_skills', {
+      schema: {
+        id: { type: 'id' },
+        user_id: { type: 'number', required: true },
+        skill_id: { type: 'number', required: true },
+        proficiency_level: { type: 'number' },
+        acquired_date: { type: 'string' }
       }
     });
   });
@@ -844,6 +959,534 @@ describe('Comprehensive dataPatch Tests', () => {
       
       // The UPDATE should only mention title and author_id (if relationships were updated)
       // This verifies partial update behavior
+    });
+  });
+  
+  describe('Many-to-Many Relationship Handling', () => {
+    test('should update many-to-many relationships by adding tags', async () => {
+      // Article 1 already has tags 1 and 2
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '1' }, // Keep existing
+                  { type: 'tags', id: '2' }, // Keep existing
+                  { type: 'tags', id: '3' }  // Add new
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify all tags in database
+      const tags = await knex('article_tags')
+        .where('article_id', 1)
+        .orderBy('tag_id');
+      
+      assert.strictEqual(tags.length, 3);
+      assert.deepStrictEqual(tags.map(t => t.tag_id), [1, 2, 3]);
+      
+      // Check that existing pivot data is preserved
+      const tag1 = tags.find(t => t.tag_id === 1);
+      assert.strictEqual(tag1.relevance, 'high', 'Should preserve existing pivot data');
+    });
+    
+    test('should update many-to-many by removing tags', async () => {
+      // Article 1 has tags 1 and 2, we'll keep only tag 1
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '1' } // Keep only tag 1
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify only tag 1 remains
+      const tags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(tags.length, 1);
+      assert.strictEqual(tags[0].tag_id, 1);
+      assert.strictEqual(tags[0].relevance, 'high', 'Should preserve pivot data');
+    });
+    
+    test('should clear all many-to-many relationships with empty array', async () => {
+      // Verify article 1 has tags initially
+      const beforeTags = await knex('article_tags').where('article_id', 1);
+      assert.ok(beforeTags.length > 0, 'Should have tags initially');
+      
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [] // Clear all tags
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify all tags removed
+      const afterTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(afterTags.length, 0, 'Should have no tags');
+    });
+    
+    test('should replace all many-to-many relationships', async () => {
+      // Article 1 has tags 1 and 2, replace with tags 3 and 4
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '3' },
+                  { type: 'tags', id: '4' }
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify tags were replaced
+      const tags = await knex('article_tags')
+        .where('article_id', 1)
+        .orderBy('tag_id');
+      
+      assert.strictEqual(tags.length, 2);
+      assert.deepStrictEqual(tags.map(t => t.tag_id), [3, 4]);
+      
+      // Old pivot data should be gone
+      assert.ok(!tags.some(t => t.relevance === 'high'));
+    });
+    
+    test('should update attributes and many-to-many relationships together', async () => {
+      const result = await api.resources.articles.patch({
+        id: '2',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '2',
+            attributes: {
+              title: 'Updated with new tags',
+              status: 'published'
+            },
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '1' },
+                  { type: 'tags', id: '2' },
+                  { type: 'tags', id: '4' }
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      assert.strictEqual(result.data.attributes.title, 'Updated with new tags');
+      assert.strictEqual(result.data.attributes.status, 'published');
+      
+      // Verify attributes updated
+      const article = await knex('articles').where('id', 2).first();
+      assert.strictEqual(article.title, 'Updated with new tags');
+      assert.strictEqual(article.status, 'published');
+      
+      // Verify tags updated (article 2 had only tag 3)
+      const tags = await knex('article_tags')
+        .where('article_id', 2)
+        .orderBy('tag_id');
+      
+      assert.strictEqual(tags.length, 3);
+      assert.deepStrictEqual(tags.map(t => t.tag_id), [1, 2, 4]);
+    });
+    
+    test('should handle many-to-many with users and skills', async () => {
+      // User 1 has skills 1 and 2, add skill 3
+      const result = await api.resources.authors.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'authors',
+            id: '1',
+            relationships: {
+              skills: {
+                data: [
+                  { type: 'skills', id: '1' },
+                  { type: 'skills', id: '2' },
+                  { type: 'skills', id: '3' } // Add SQL skill
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify skills
+      const skills = await knex('user_skills')
+        .where('user_id', 1)
+        .orderBy('skill_id');
+      
+      assert.strictEqual(skills.length, 3);
+      assert.deepStrictEqual(skills.map(s => s.skill_id), [1, 2, 3]);
+      
+      // Check that existing pivot data is preserved
+      const skill1 = skills.find(s => s.skill_id === 1);
+      assert.strictEqual(skill1.proficiency_level, 5);
+      assert.strictEqual(skill1.acquired_date, '2020-01-01');
+    });
+    
+    test('should handle multiple relationship updates (belongsTo + many-to-many)', async () => {
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              author: {
+                data: { type: 'authors', id: '3' } // Change author
+              },
+              category: {
+                data: { type: 'categories', id: '2' } // Change category
+              },
+              tags: {
+                data: [
+                  { type: 'tags', id: '4' } // Replace all tags with just tag 4
+                ]
+              }
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify all relationships updated
+      const article = await knex('articles').where('id', 1).first();
+      assert.strictEqual(article.author_id, 3);
+      assert.strictEqual(article.category_id, 2);
+      
+      const tags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(tags.length, 1);
+      assert.strictEqual(tags[0].tag_id, 4);
+    });
+    
+    test('should handle duplicate tags in request', async () => {
+      try {
+        await api.resources.articles.patch({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '1' },
+                    { type: 'tags', id: '1' } // Duplicate
+                  ]
+                }
+              }
+            }
+          }
+        });
+        assert.fail('Should have thrown error for duplicate tags');
+      } catch (error) {
+        // Should fail due to unique constraint
+        assert.ok(error.message.includes('UNIQUE') || error.message.includes('duplicate'));
+      }
+    });
+    
+    test('should fail with invalid tag reference', async () => {
+      try {
+        await api.resources.articles.patch({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '999' } // Non-existent tag
+                  ]
+                }
+              }
+            }
+          }
+        });
+        assert.fail('Should have thrown error for invalid tag');
+      } catch (error) {
+        assert.ok(error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
+      }
+    });
+    
+    test('should preserve unmentioned many-to-many when updating other relationships', async () => {
+      // Article 1 has tags 1 and 2
+      const beforeTags = await knex('article_tags')
+        .where('article_id', 1)
+        .orderBy('tag_id');
+      assert.strictEqual(beforeTags.length, 2);
+      
+      // Update only the author, not mentioning tags
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              author: {
+                data: { type: 'authors', id: '2' }
+              }
+              // tags not mentioned
+            }
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      
+      // Verify tags unchanged
+      const afterTags = await knex('article_tags')
+        .where('article_id', 1)
+        .orderBy('tag_id');
+      
+      assert.strictEqual(afterTags.length, 2);
+      assert.deepStrictEqual(
+        afterTags.map(t => ({ tag_id: t.tag_id, relevance: t.relevance })),
+        beforeTags.map(t => ({ tag_id: t.tag_id, relevance: t.relevance }))
+      );
+    });
+  });
+  
+  describe('Many-to-Many Transaction Support', () => {
+    test('should rollback many-to-many changes on error', async () => {
+      const initialTags = await knex('article_tags').where('article_id', 1);
+      const initialCount = initialTags.length;
+      
+      try {
+        // This should fail because tag 999 doesn't exist
+        await api.resources.articles.patch({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              attributes: {
+                title: 'This update should rollback'
+              },
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '1' },
+                    { type: 'tags', id: '999' } // Invalid - will cause rollback
+                  ]
+                }
+              }
+            }
+          }
+        });
+        assert.fail('Should have thrown error');
+      } catch (error) {
+        // Expected to fail
+      }
+      
+      // Verify nothing changed
+      const article = await knex('articles').where('id', 1).first();
+      assert.strictEqual(article.title, 'Original Article', 'Title should not change');
+      
+      const finalTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(finalTags.length, initialCount, 'Tag count should not change');
+    });
+    
+    test('should support external transaction for many-to-many updates', async () => {
+      const trx = await knex.transaction();
+      
+      try {
+        // Update in transaction
+        await api.resources.articles.patch({
+          id: '1',
+          inputRecord: {
+            data: {
+              type: 'articles',
+              id: '1',
+              attributes: {
+                title: 'Transaction update'
+              },
+              relationships: {
+                tags: {
+                  data: [
+                    { type: 'tags', id: '3' },
+                    { type: 'tags', id: '4' }
+                  ]
+                }
+              }
+            }
+          },
+          transaction: trx
+        });
+        
+        // Changes visible in transaction
+        const inTrxArticle = await trx('articles').where('id', 1).first();
+        assert.strictEqual(inTrxArticle.title, 'Transaction update');
+        
+        const inTrxTags = await trx('article_tags').where('article_id', 1);
+        assert.strictEqual(inTrxTags.length, 2);
+        
+        // But not outside transaction
+        const outsideArticle = await knex('articles').where('id', 1).first();
+        assert.strictEqual(outsideArticle.title, 'Original Article');
+        
+        const outsideTags = await knex('article_tags').where('article_id', 1);
+        assert.strictEqual(outsideTags.length, 2); // Original tags
+        
+        // Rollback
+        await trx.rollback();
+        
+        // Verify rollback worked
+        const afterRollback = await knex('articles').where('id', 1).first();
+        assert.strictEqual(afterRollback.title, 'Original Article');
+      } catch (error) {
+        await trx.rollback();
+        throw error;
+      }
+    });
+  });
+  
+  describe('Complex Many-to-Many Scenarios', () => {
+    test('should handle PATCH with includes for many-to-many relationships', async () => {
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '2' },
+                  { type: 'tags', id: '3' }
+                ]
+              }
+            }
+          }
+        },
+        queryParams: {
+          include: ['tags', 'author']
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      assert.ok(result.included, 'Should have included resources');
+      
+      // Check included tags
+      const includedTags = result.included.filter(r => r.type === 'tags');
+      assert.strictEqual(includedTags.length, 2);
+      
+      const tagIds = includedTags.map(t => parseInt(t.id)).sort();
+      assert.deepStrictEqual(tagIds, [2, 3]);
+    });
+    
+    test('should handle empty relationships object (no updates)', async () => {
+      // Get initial state
+      const beforeTags = await knex('article_tags').where('article_id', 1);
+      const beforeArticle = await knex('articles').where('id', 1).first();
+      
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            attributes: {
+              views: 200
+            },
+            relationships: {} // Empty relationships object
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      assert.strictEqual(result.data.attributes.views, 200);
+      
+      // Verify relationships unchanged
+      const afterTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(afterTags.length, beforeTags.length);
+      
+      const afterArticle = await knex('articles').where('id', 1).first();
+      assert.strictEqual(afterArticle.author_id, beforeArticle.author_id);
+      assert.strictEqual(afterArticle.category_id, beforeArticle.category_id);
+    });
+    
+    test('should handle sparse fieldsets with many-to-many includes', async () => {
+      const result = await api.resources.articles.patch({
+        id: '1',
+        inputRecord: {
+          data: {
+            type: 'articles',
+            id: '1',
+            relationships: {
+              tags: {
+                data: [
+                  { type: 'tags', id: '1' },
+                  { type: 'tags', id: '4' }
+                ]
+              }
+            }
+          }
+        },
+        queryParams: {
+          include: ['tags'],
+          fields: {
+            articles: 'title',
+            tags: 'name'
+          }
+        }
+      });
+      
+      assert.ok(result.data, 'Should have data');
+      assert.strictEqual(result.data.attributes.title, 'Original Article');
+      assert.strictEqual(Object.keys(result.data.attributes).length, 1, 'Should only have title');
+      
+      // Check included tags have only name field
+      const includedTags = result.included.filter(r => r.type === 'tags');
+      includedTags.forEach(tag => {
+        assert.ok(tag.attributes.name);
+        assert.strictEqual(Object.keys(tag.attributes).length, 1, 'Should only have name');
+      });
     });
   });
 });
