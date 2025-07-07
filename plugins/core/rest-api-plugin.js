@@ -1509,23 +1509,28 @@ export const RestApiPlugin = {
       }
     }
     
-    // Process missing relationships (PUT should null them out)
+    // Process missing relationships (PUT should null them out only if relationships object exists)
+    const hasRelationshipsObject = context.inputRecord.data.relationships !== undefined;
     const providedRelationships = new Set(Object.keys(context.inputRecord.data.relationships || {}));
-    for (const [relName, relInfo] of Object.entries(allRelationships)) {
-      if (!providedRelationships.has(relName)) {
-        if (relInfo.type === 'belongsTo') {
-          belongsToUpdates[relInfo.fieldName] = null;
-        } else if (relInfo.type === 'polymorphic') {
-          const { typeField, idField } = relInfo.fieldDef.belongsToPolymorphic;
-          belongsToUpdates[typeField] = null;
-          belongsToUpdates[idField] = null;
-        } else if (relInfo.type === 'manyToMany') {
-          // Add to manyToManyRelationships with empty array
-          manyToManyRelationships.push({
-            relName,
-            relDef: relInfo.relDef,
-            relData: []  // Empty array means delete all
-          });
+    
+    // Only null out missing relationships if a relationships object was provided
+    if (hasRelationshipsObject) {
+      for (const [relName, relInfo] of Object.entries(allRelationships)) {
+        if (!providedRelationships.has(relName)) {
+          if (relInfo.type === 'belongsTo') {
+            belongsToUpdates[relInfo.fieldName] = null;
+          } else if (relInfo.type === 'polymorphic') {
+            const { typeField, idField } = relInfo.fieldDef.belongsToPolymorphic;
+            belongsToUpdates[typeField] = null;
+            belongsToUpdates[idField] = null;
+          } else if (relInfo.type === 'manyToMany') {
+            // Add to manyToManyRelationships with empty array
+            manyToManyRelationships.push({
+              relName,
+              relDef: relInfo.relDef,
+              relData: []  // Empty array means delete all
+            });
+          }
         }
       }
     }

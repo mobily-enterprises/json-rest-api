@@ -529,7 +529,8 @@ describe('Comprehensive dataPut Tests', () => {
       // Check included resources
       const includedTypes = result.included.map(r => r.type);
       assert.ok(includedTypes.includes('authors'), 'Should include author');
-      assert.ok(includedTypes.includes('categories'), 'Should include category');
+      // Note: category was not provided in relationships, so it was cleared (PUT replaces all)
+      // Therefore, no category should be included
       assert.ok(includedTypes.includes('comments'), 'Should include comments');
       
       // Verify the author was updated
@@ -720,7 +721,7 @@ describe('Comprehensive dataPut Tests', () => {
       assert.strictEqual(result.data.attributes.title, 'Title with "quotes" and \'apostrophes\'');
     });
     
-    test('should preserve unmentioned relationships', async () => {
+    test('should clear unmentioned relationships when relationships object is provided', async () => {
       // Article 1 has author_id=1 and category_id=1
       const result = await api.resources.articles.put({
         id: '1',
@@ -735,7 +736,7 @@ describe('Comprehensive dataPut Tests', () => {
               category: {
                 data: { type: 'categories', id: '2' }
               }
-              // Note: author relationship not mentioned
+              // Note: author relationship not mentioned - should be cleared in PUT
             }
           }
         }
@@ -743,9 +744,9 @@ describe('Comprehensive dataPut Tests', () => {
       
       assert.ok(result.data, 'Should have data');
       
-      // Verify author wasn't changed
+      // Verify author was cleared (PUT replaces all relationships)
       const dbRecord = await knex('articles').where('id', 1).first();
-      assert.strictEqual(dbRecord.author_id, 1, 'Should preserve author');
+      assert.strictEqual(dbRecord.author_id, null, 'Should clear unmentioned relationships');
       assert.strictEqual(dbRecord.category_id, 2, 'Should update category');
     });
     
