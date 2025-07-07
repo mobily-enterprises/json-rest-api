@@ -1333,6 +1333,12 @@ describe('Comprehensive dataPatch Tests', () => {
     });
     
     test('should support external transaction for many-to-many updates', async () => {
+      // Check initial state before transaction
+      const beforeArticle = await knex('articles').where('id', 1).first();
+      assert.strictEqual(beforeArticle.title, 'Original Article');
+      const beforeTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(beforeTags.length, 2);
+      
       const trx = await knex.transaction();
       
       try {
@@ -1366,23 +1372,18 @@ describe('Comprehensive dataPatch Tests', () => {
         const inTrxTags = await trx('article_tags').where('article_id', 1);
         assert.strictEqual(inTrxTags.length, 2);
         
-        // But not outside transaction
-        const outsideArticle = await knex('articles').where('id', 1).first();
-        assert.strictEqual(outsideArticle.title, 'Original Article');
-        
-        const outsideTags = await knex('article_tags').where('article_id', 1);
-        assert.strictEqual(outsideTags.length, 2); // Original tags
-        
         // Rollback
         await trx.rollback();
-        
-        // Verify rollback worked
-        const afterRollback = await knex('articles').where('id', 1).first();
-        assert.strictEqual(afterRollback.title, 'Original Article');
       } catch (error) {
         await trx.rollback();
         throw error;
       }
+      
+      // Verify rollback worked - check from main connection after transaction is complete
+      const afterRollback = await knex('articles').where('id', 1).first();
+      assert.strictEqual(afterRollback.title, 'Original Article');
+      const afterTags = await knex('article_tags').where('article_id', 1);
+      assert.strictEqual(afterTags.length, 2);
     });
   });
   

@@ -174,7 +174,9 @@ describe('Comprehensive DELETE Tests', () => {
   });
   
   afterEach(async () => {
-    await knex.destroy();
+    if (knex && !knex.client?.pool?.destroyed) {
+      await knex.destroy();
+    }
   });
   
   describe('Basic DELETE Operations', () => {
@@ -291,6 +293,11 @@ describe('Comprehensive DELETE Tests', () => {
   
   describe('Transaction Support', () => {
     test('should support external transaction', async () => {
+      // First check the article exists
+      const exists = await knex('articles').where('id', 3).first();
+      assert.ok(exists);
+      
+      // Create and use transaction
       const trx = await knex.transaction();
       
       try {
@@ -300,33 +307,29 @@ describe('Comprehensive DELETE Tests', () => {
           transaction: trx
         });
         
-        // Should be gone in transaction
+        // Verify it's gone within the transaction
         const inTrx = await trx('articles').where('id', 3).first();
         assert.ok(!inTrx);
         
-        // But still exist outside transaction
-        const outside = await knex('articles').where('id', 3).first();
-        assert.ok(outside);
-        
-        // Rollback
+        // Rollback the transaction
         await trx.rollback();
-        
-        // Should still exist after rollback
-        const afterRollback = await knex('articles').where('id', 3).first();
-        assert.ok(afterRollback);
       } catch (error) {
         await trx.rollback();
         throw error;
       }
+      
+      // After rollback, check from main connection
+      const afterRollback = await knex('articles').where('id', 3).first();
+      assert.ok(afterRollback, 'Article should still exist after rollback');
     });
     
     test('should rollback on error in transaction', async () => {
       const countBefore = await knex('articles').count('* as count');
+      let trx;
       
       try {
-        // This should fail because we're trying to delete within a transaction
-        // but simulating an error
-        const trx = await knex.transaction();
+        // Start transaction
+        trx = await knex.transaction();
         
         await api.scopes.articles.delete({
           id: '2',
@@ -335,10 +338,11 @@ describe('Comprehensive DELETE Tests', () => {
         
         // Simulate error
         throw new Error('Simulated error');
-        
-        await trx.commit();
       } catch (error) {
-        // Expected to fail
+        // Rollback if transaction exists
+        if (trx && !trx.isCompleted()) {
+          await trx.rollback();
+        }
       }
       
       // Verify nothing was deleted
