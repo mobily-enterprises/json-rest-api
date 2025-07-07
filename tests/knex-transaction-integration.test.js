@@ -50,7 +50,7 @@ describe('Comprehensive Transaction Integration Tests', () => {
       table.increments('id');
       table.string('name');
       table.string('status');
-      table.integer('department_id').references('id').inTable('departments');
+      table.integer('department_id').references('id').inTable('departments').onDelete('CASCADE');
       table.date('start_date');
       table.date('end_date');
       table.integer('budget');
@@ -208,18 +208,18 @@ describe('Comprehensive Transaction Integration Tests', () => {
       },
       relationships: {
         projects: {
-          manyToMany: {
-            through: 'project_assignments',
-            foreignKey: 'employee_id',
-            otherKey: 'project_id'
-          }
+          hasMany: 'projects',
+          through: 'project_assignments',
+          foreignKey: 'employee_id',
+          otherKey: 'project_id',
+          sideLoad: true
         },
         skills: {
-          manyToMany: {
-            through: 'employee_skills',
-            foreignKey: 'employee_id',
-            otherKey: 'skill_id'
-          }
+          hasMany: 'skills',
+          through: 'employee_skills',
+          foreignKey: 'employee_id',
+          otherKey: 'skill_id',
+          sideLoad: true
         }
       }
     });
@@ -240,11 +240,11 @@ describe('Comprehensive Transaction Integration Tests', () => {
       },
       relationships: {
         employees: {
-          manyToMany: {
-            through: 'project_assignments',
-            foreignKey: 'project_id',
-            otherKey: 'employee_id'
-          }
+          hasMany: 'employees',
+          through: 'project_assignments',
+          foreignKey: 'project_id',
+          otherKey: 'employee_id',
+          sideLoad: true
         }
       }
     });
@@ -254,6 +254,42 @@ describe('Comprehensive Transaction Integration Tests', () => {
         id: { type: 'id' },
         name: { type: 'string', required: true },
         category: { type: 'string' }
+      },
+      relationships: {
+        employees: {
+          hasMany: 'employees',
+          through: 'employee_skills',
+          foreignKey: 'skill_id',
+          otherKey: 'employee_id',
+          sideLoad: true
+        }
+      }
+    });
+    
+    api.addResource('project_assignments', {
+      schema: {
+        id: { type: 'id' },
+        project_id: { type: 'number', required: true },
+        employee_id: { type: 'number', required: true },
+        role: { type: 'string' },
+        hours_allocated: { type: 'number' }
+      },
+      searchSchema: {
+        project_id: { type: 'number' },
+        employee_id: { type: 'number' }
+      }
+    });
+    
+    api.addResource('employee_skills', {
+      schema: {
+        id: { type: 'id' },
+        employee_id: { type: 'number', required: true },
+        skill_id: { type: 'number', required: true },
+        level: { type: 'number' }
+      },
+      searchSchema: {
+        employee_id: { type: 'number' },
+        skill_id: { type: 'number' }
       }
     });
     
