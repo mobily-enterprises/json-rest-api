@@ -268,6 +268,18 @@ export const RestApiPlugin = {
             relData: relData.data || []  // null means empty array for many-to-many
           });
         }
+        // Also check for hasMany with through (alternative many-to-many syntax)
+        else if (relDef?.hasMany && relDef?.through && relData.data !== undefined) {
+          manyToManyRelationships.push({
+            relName,
+            relDef: {
+              through: relDef.through,
+              foreignKey: relDef.foreignKey,
+              otherKey: relDef.otherKey
+            },
+            relData: relData.data || []  // null means empty array for many-to-many
+          });
+        }
       }
       
       return { belongsToUpdates, manyToManyRelationships };
@@ -275,21 +287,15 @@ export const RestApiPlugin = {
     
     // Helper function to update many-to-many relationships while preserving pivot data
     const updateManyToManyRelationship = async (resourceId, relDef, relData, trx) => {
-      console.log('[updateManyToManyRelationship] Starting with:', {
-        resourceId,
-        relDef,
-        relDataLength: relData.length,
-        pivotResource: relDef.through
-      });
       
       // Get existing pivot records
-      console.log('[updateManyToManyRelationship] Querying pivot table:', relDef.through);
       const existingPivotRecords = await api.resources[relDef.through].query({
         transaction: trx,
         queryParams: {
           filters: { [relDef.foreignKey]: resourceId }
         }
       });
+      
       
       
       // Create maps for easier lookup
@@ -1226,19 +1232,13 @@ export const RestApiPlugin = {
           await trx.commit();
         }
         
-        // Get the full record with relationships if requested
-        if (vars.returnFullRecord?.post !== false) {
-          context.returnRecord = await helpers.dataGet({
-            scopeName,
-            id: context.record.data.id,
-            queryParams: params.queryParams,
-            idProperty: vars.idProperty,
-            runHooks,
-            methodParams: { transaction: existingTrx } // Use original transaction for read
-          });
-        } else {
-          context.returnRecord = context.record;
-        }
+        // Always get the full record with relationships
+        // Use the API's own get method to ensure all hooks and transformations are applied
+        context.returnRecord = await api.resources[scopeName].get({
+          id: context.record.data.id,
+          queryParams: params.queryParams,
+          transaction: existingTrx // Use original transaction for read
+        });
         
         // Enrich the return record's attributes
         if (context.returnRecord?.data?.attributes) {
@@ -1590,6 +1590,17 @@ export const RestApiPlugin = {
       if (relDef.manyToMany) {
         allRelationships[relName] = { type: 'manyToMany', relDef };
       }
+      // Also recognize hasMany with through as many-to-many
+      else if (relDef.hasMany && relDef.through) {
+        allRelationships[relName] = { 
+          type: 'manyToMany', 
+          relDef: {
+            through: relDef.through,
+            foreignKey: relDef.foreignKey,
+            otherKey: relDef.otherKey
+          }
+        };
+      }
     }
     
     // Also check schema fields for belongsTo relationships
@@ -1699,19 +1710,13 @@ export const RestApiPlugin = {
       runHooks(`checkDataPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
     }
 
-    // Get return record if needed
-    if (vars.returnFullRecord?.put !== false) {
-      context.returnRecord = await helpers.dataGet({
-        scopeName,
-        id: context.id,
-        queryParams: params.queryParams,
-        idProperty: vars.idProperty,
-        runHooks,
-        methodParams: { transaction: existingTrx }  // Use original transaction for read
-      });
-    } else {
-      context.returnRecord = context.record;
-    }
+    // Always get the full record after all updates are complete
+    // The storage layer now only returns success status, not the full record
+    context.returnRecord = await api.resources[scopeName].get({
+      id: context.id,
+      queryParams: params.queryParams,
+      transaction: existingTrx  // Use original transaction for read
+    });
     
     // Enrich the return record's attributes
     if (context.returnRecord?.data?.attributes) {
@@ -2068,6 +2073,14 @@ export const RestApiPlugin = {
         await updateManyToManyRelationship(context.id, relDef, relData, trx);
       }
       
+      // Always get the full record after all updates are complete
+      // This ensures includes see the updated state after all operations
+      context.returnRecord = await api.resources[scopeName].get({
+        id: context.id,
+        queryParams: params.queryParams,
+        transaction: trx  // Use active transaction for read
+      });
+
       // Commit transaction if we created it
       if (shouldCommit) {
         await trx.commit();
@@ -2075,20 +2088,6 @@ export const RestApiPlugin = {
 
       runHooks('checkDataPermissions')
       runHooks('checkDataPermissionsPatch')
-
-      // Get return record if needed
-      if (vars.returnFullRecord?.patch !== false) {
-        context.returnRecord = await helpers.dataGet({
-          scopeName,
-          id: context.id,
-          queryParams: params.queryParams,
-          idProperty: vars.idProperty,
-          runHooks,
-          methodParams: { transaction: existingTrx }  // Use original transaction for read
-        });
-      } else {
-        context.returnRecord = context.record;
-      }
       
       // Enrich the return record's attributes
       if (context.returnRecord?.data?.attributes) {

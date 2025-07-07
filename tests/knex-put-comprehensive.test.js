@@ -922,6 +922,10 @@ describe('Comprehensive dataPut Tests', () => {
           article_id: { type: 'number', required: true },
           tag_id: { type: 'number', required: true },
           relevance: { type: 'string' }
+        },
+        searchSchema: {
+          article_id: { type: 'number' },
+          tag_id: { type: 'number' }
         }
       });
       
@@ -954,11 +958,11 @@ describe('Comprehensive dataPut Tests', () => {
             sideLoad: true
           },
           tags: {
-            manyToMany: {
-              through: 'article_tags',
-              foreignKey: 'article_id',
-              otherKey: 'tag_id'
-            }
+            hasMany: 'tags',
+            through: 'article_tags',
+            foreignKey: 'article_id',
+            otherKey: 'tag_id',
+            sideLoad: true
           }
         }
       });

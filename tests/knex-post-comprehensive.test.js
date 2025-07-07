@@ -132,11 +132,11 @@ describe('Comprehensive POST Tests with Relationships', () => {
       },
       relationships: {
         skills: {
-          manyToMany: {
-            through: 'user_skills',
-            foreignKey: 'user_id',
-            otherKey: 'skill_id'
-          }
+          hasMany: 'skills',
+          through: 'user_skills',
+          foreignKey: 'user_id',
+          otherKey: 'skill_id',
+          sideLoad: true
         }
       }
     });
@@ -177,11 +177,11 @@ describe('Comprehensive POST Tests with Relationships', () => {
       },
       relationships: {
         tags: {
-          manyToMany: {
-            through: 'article_tags',
-            foreignKey: 'article_id',
-            otherKey: 'tag_id'
-          }
+          hasMany: 'tags',
+          through: 'article_tags',
+          foreignKey: 'article_id',
+          otherKey: 'tag_id',
+          sideLoad: true
         }
       }
     });
@@ -201,6 +201,10 @@ describe('Comprehensive POST Tests with Relationships', () => {
         article_id: { type: 'number', required: true },
         tag_id: { type: 'number', required: true },
         relevance: { type: 'string' }
+      },
+      searchSchema: {
+        article_id: { type: 'number' },
+        tag_id: { type: 'number' }
       }
     });
     
@@ -211,6 +215,10 @@ describe('Comprehensive POST Tests with Relationships', () => {
         skill_id: { type: 'number', required: true },
         proficiency_level: { type: 'number' },
         acquired_date: { type: 'string' }
+      },
+      searchSchema: {
+        user_id: { type: 'number' },
+        skill_id: { type: 'number' }
       }
     });
   });

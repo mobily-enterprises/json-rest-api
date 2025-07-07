@@ -172,6 +172,10 @@ describe('Comprehensive DELETE Tests', () => {
         id: { type: 'id' },
         article_id: { type: 'number', required: true },
         tag_id: { type: 'number', required: true }
+      },
+      searchSchema: {
+        article_id: { type: 'number' },
+        tag_id: { type: 'number' }
       }
     });
   });

@@ -273,7 +273,12 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
    * @returns {Promise<void>}
    */
   const loadHasMany = async (records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields) => {
-    log.trace('[INCLUDE] Loading hasMany relationship:', { scopeName, includeName, recordCount: records.length });
+    log.trace('[INCLUDE] Loading hasMany relationship:', { 
+      scopeName, 
+      includeName, 
+      recordCount: records.length,
+      hasThrough: !!relDef.through 
+    });
     
     // Collect all parent IDs
     const mainIds = records.map(r => r.id).filter(Boolean);
@@ -283,7 +288,113 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       return;
     }
     
-    // Get target scope and foreign key information
+    // Check if this is a many-to-many relationship (has through property)
+    if (relDef.through) {
+      
+      // Handle many-to-many relationship
+      const pivotTable = await getTableName(relDef.through);
+      const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
+      const otherKey = relDef.otherKey || `${relDef.hasMany.slice(0, -1)}_id`;
+      const targetScope = relDef.hasMany;
+      const targetTable = await getTableName(targetScope);
+      
+      log.debug(`[INCLUDE] Loading pivot records from ${pivotTable}:`, { 
+        foreignKey,
+        whereIn: mainIds 
+      });
+      
+      // Step 1: Query the pivot table
+      const pivotRecords = await knex(pivotTable)
+        .whereIn(foreignKey, mainIds)
+        .orderBy(otherKey);
+      
+      
+      if (pivotRecords.length === 0) {
+        // No relationships found, set empty arrays for all records
+        records.forEach(record => {
+          if (!record._relationships) record._relationships = {};
+          record._relationships[includeName] = { data: [] };
+        });
+        return;
+      }
+      
+      // Step 2: Extract target IDs from pivot records
+      const targetIds = [...new Set(pivotRecords.map(p => p[otherKey]).filter(Boolean))];
+      
+      log.debug(`[INCLUDE] Loading ${targetScope} records:`, { 
+        whereIn: targetIds 
+      });
+      
+      // Step 3: Build field selection for sparse fieldsets
+      const targetSchema = await scopes[targetScope].getSchema();
+      const fieldsToSelect = helpers?.buildFieldSelection ? 
+        await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+        '*';
+      
+      // Step 4: Query the target table
+      let query = knex(targetTable).whereIn('id', targetIds);
+      if (fieldsToSelect !== '*') {
+        query = query.select(fieldsToSelect);
+      }
+      const targetRecords = await query;
+      
+      log.trace('[INCLUDE] Loaded target records:', { count: targetRecords.length });
+      
+      // Step 5: Create lookup map for target records
+      const targetById = {};
+      targetRecords.forEach(record => {
+        targetById[record.id] = record;
+        
+        // Add to included resources
+        const key = `${targetScope}:${record.id}`;
+        if (!included.has(key)) {
+          included.set(key, { raw: record, scope: targetScope });
+          log.trace('[INCLUDE] Added to included:', key);
+        }
+      });
+      
+      // Step 6: Group pivot records by parent ID
+      const pivotsByParent = {};
+      pivotRecords.forEach(pivot => {
+        const parentId = pivot[foreignKey];
+        if (!pivotsByParent[parentId]) {
+          pivotsByParent[parentId] = [];
+        }
+        // Only add if target record exists
+        if (targetById[pivot[otherKey]]) {
+          pivotsByParent[parentId].push(pivot[otherKey]);
+        }
+      });
+      
+      // Step 7: Add relationship data to parent records
+      records.forEach(record => {
+        if (!record._relationships) record._relationships = {};
+        
+        const relatedIds = pivotsByParent[record.id] || [];
+        record._relationships[includeName] = {
+          data: relatedIds.map(id => ({
+            type: targetScope,
+            id: String(id)
+          }))
+        };
+        
+        log.trace('[INCLUDE] Added many-to-many relationship:', { 
+          parentId: record.id, 
+          relatedCount: relatedIds.length 
+        });
+      });
+      
+      // Step 8: Process nested includes recursively
+      if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
+        const nextPath = `${currentPath}.${includeName}`;
+        log.trace('[INCLUDE] Processing nested includes for many-to-many:', { path: nextPath });
+        await processIncludes(targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+      }
+      
+      return; // Exit early for many-to-many
+    }
+    
+    // Regular hasMany logic (when no through property)
     const targetScope = relDef.hasMany;
     const targetTable = await getTableName(targetScope);
     const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;

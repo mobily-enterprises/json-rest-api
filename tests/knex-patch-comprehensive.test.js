@@ -318,11 +318,11 @@ describe('Comprehensive dataPatch Tests', () => {
           sideLoad: true
         },
         tags: {
-          manyToMany: {
-            through: 'article_tags',
-            foreignKey: 'article_id',
-            otherKey: 'tag_id'
-          }
+          hasMany: 'tags',
+          through: 'article_tags',
+          foreignKey: 'article_id',
+          otherKey: 'tag_id',
+          sideLoad: true
         }
       }
     });
@@ -1279,7 +1279,11 @@ describe('Comprehensive dataPatch Tests', () => {
         });
         assert.fail('Should have thrown error for invalid tag');
       } catch (error) {
-        assert.ok(error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
+        // The library validates existence before creating pivot records
+        assert.ok(error.message.includes('Related tags with id 999 not found') || 
+                  error.message.includes('FOREIGN KEY') || 
+                  error.message.includes('constraint'),
+                  `Unexpected error message: ${error.message}`);
       }
     });
     

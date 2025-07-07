@@ -1744,10 +1744,8 @@ export const RestApiKnexPlugin = {
         }
       }
       
-      // Use common response builder
-      return buildResponseWithQueryParams({
-        scopeName, id, idProp: idProperty, tableName, schema, queryParams, runHooks, methodParams
-      });
+      // Storage layer should only perform the operation, not build responses
+      return { success: true, created: isCreate };
     };
     
     /**
@@ -1809,10 +1807,8 @@ export const RestApiKnexPlugin = {
           .update(finalAttributes);
       }
       
-      // Use common response builder
-      return buildResponseWithQueryParams({
-        scopeName, id, idProp: idProperty, tableName, schema, queryParams, runHooks, methodParams
-      });
+      // Storage layer should only perform the operation, not build responses
+      return { success: true };
     };
     
     /**
