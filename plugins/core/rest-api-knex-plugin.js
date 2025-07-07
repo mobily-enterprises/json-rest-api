@@ -512,6 +512,7 @@ export const RestApiKnexPlugin = {
         const searchSchema = hookParams.context?.knexQuery?.searchSchema;
         const query = hookParams.context?.knexQuery?.query;
         const tableName = hookParams.context?.knexQuery?.tableName;
+        const db = hookParams.context?.knexQuery?.db || knex;
 
         log.trace('[CROSS-TABLE-SEARCH] Extracted from hook context', { scopeName, hasFilters: !!filters, hasSearchSchema: !!searchSchema });
         
@@ -750,7 +751,7 @@ export const RestApiKnexPlugin = {
                 
                 // Conditional JOIN - only matches when type is correct
                 query.leftJoin(`${targetTable} as ${baseAlias}`, function() {
-                  this.on(`${tableName}.${typeField}`, knex.raw('?', [targetType]))
+                  this.on(`${tableName}.${typeField}`, db.raw('?', [targetType]))
                       .andOn(`${tableName}.${idField}`, `${baseAlias}.id`);
                 });
                 
@@ -1213,14 +1214,26 @@ export const RestApiKnexPlugin = {
      * const included = await processIncludes(articles, 'articles', { include: ['author', 'comments.user'] });
      * // Returns array of author and user resources
      */
-    const processIncludes = async (records, scopeName, queryParams) => {
+    const processIncludes = async (records, scopeName, queryParams, transaction) => {
       if (!queryParams.include) {
         return [];
       }
       
       log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include);
       
-      const includeResult = await relationshipIncludeHelpers.buildIncludedResources(
+      // If we have a transaction, we need to create a modified version of the helpers
+      // that uses the transaction instead of the base knex instance
+      let helpers = relationshipIncludeHelpers;
+      if (transaction) {
+        // Create a new instance of the helpers with the transaction
+        helpers = createRelationshipIncludeHelpers(scopes, log, transaction, {
+          getForeignKeyFields,
+          buildFieldSelection,
+          polymorphicHelpers: api._polymorphicHelpers
+        });
+      }
+      
+      const includeResult = await helpers.buildIncludedResources(
         records,
         scopeName,
         queryParams.include,
@@ -1370,19 +1383,22 @@ export const RestApiKnexPlugin = {
      * If queryParams are provided, uses full dataGet to handle includes.
      * Otherwise, does a simple query and conversion.
      */
-    const buildResponseWithQueryParams = async ({ scopeName, id, idProp, tableName, schema, queryParams, runHooks }) => {
+    const buildResponseWithQueryParams = async ({ scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams }) => {
       // Return response with optional includes/sparse fieldsets
       if (queryParams && Object.keys(queryParams).length > 0) {
         return helpers.dataGet({
           scopeName,
           id: String(id),
           queryParams,
-          runHooks
+          runHooks,
+          methodParams
         });
       }
       
       // Simple response without includes
-      const record = await knex(tableName)
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
+      const record = await db(tableName)
         .where(idProp, id)
         .first();
       
@@ -1414,13 +1430,15 @@ export const RestApiKnexPlugin = {
      * @description
      * Performs efficient existence check using SELECT with just the ID field
      */
-    helpers.dataExists = async ({ scopeName, id, idProperty, runHooks }) => {
+    helpers.dataExists = async ({ scopeName, id, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
-      const record = await knex(tableName)
+      const record = await db(tableName)
         .where(idProp, id)
         .select(idProp)
         .first();
@@ -1447,10 +1465,12 @@ export const RestApiKnexPlugin = {
      * });
      * // Returns: { data: { type: 'articles', id: '123', attributes: {...}, relationships: {...} }, included: [...] }
      */
-    helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks }) => {
+    helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
@@ -1462,7 +1482,7 @@ export const RestApiKnexPlugin = {
       );
       
       // Build and execute query
-      let query = knex(tableName).where(idProperty, id);
+      let query = db(tableName).where(idProperty, id);
       query = buildQuerySelection(query, tableName, fieldsToSelect, false);
       
       const record = await query.first();
@@ -1476,7 +1496,7 @@ export const RestApiKnexPlugin = {
       
       // Process includes
       const records = [record]; // Wrap in array for processing
-      const included = await processIncludes(records, scopeName, queryParams);
+      const included = await processIncludes(records, scopeName, queryParams, db);
       
       // Build and return response
       return buildJsonApiResponse(records, scopeName, schema, included, true);
@@ -1515,12 +1535,14 @@ export const RestApiKnexPlugin = {
      *   searchSchema: { title: { filterUsing: 'like' }, 'author.name': { actualField: 'users.name' } }
      * });
      */
-    helpers.dataQuery = async ({ scopeName, queryParams = {}, searchSchema, runHooks, context }) => {
+    helpers.dataQuery = async ({ scopeName, queryParams = {}, searchSchema, runHooks, context, methodParams }) => {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       
       const tableName = await getTableName(scopeName);
       const schema = await scopes[scopeName].getSchema();
       const sortableFields = schema?.sortableFields || vars.sortableFields;
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
@@ -1532,7 +1554,7 @@ export const RestApiKnexPlugin = {
       );
       
       // Start building query with table prefix (for JOIN support)
-      let query = knex(tableName);
+      let query = db(tableName);
       query = buildQuerySelection(query, tableName, fieldsToSelect, true);
       
       /* ═══════════════════════════════════════════════════════════════════
@@ -1554,7 +1576,7 @@ export const RestApiKnexPlugin = {
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filters, searchSchema, scopeName, tableName };
+        context.knexQuery = { query, filters: queryParams.filters, searchSchema, scopeName, tableName, db };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
       }
@@ -1601,7 +1623,7 @@ export const RestApiKnexPlugin = {
       const records = await query;
       
       // Process includes
-      const included = await processIncludes(records, scopeName, queryParams);
+      const included = await processIncludes(records, scopeName, queryParams, db);
       
       // Build and return response
       return buildJsonApiResponse(records, scopeName, schema, included, false);
@@ -1626,10 +1648,12 @@ export const RestApiKnexPlugin = {
      * });
      * // Returns: { data: { type: 'articles', id: '456', attributes: { title: 'New Article' } } }
      */
-    helpers.dataPost = async ({ scopeName, inputRecord, runHooks }) => {
+    helpers.dataPost = async ({ scopeName, inputRecord, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
       
@@ -1637,10 +1661,10 @@ export const RestApiKnexPlugin = {
       const attributes = inputRecord.data.attributes;
       
       // Insert and get the new ID
-      const [id] = await knex(tableName).insert(attributes).returning(idProperty);
+      const [id] = await db(tableName).insert(attributes).returning(idProperty);
       
       // Fetch the created record
-      const newRecord = await knex(tableName)
+      const newRecord = await db(tableName)
         .where(idProperty, id)
         .first();
       
@@ -1674,10 +1698,12 @@ export const RestApiKnexPlugin = {
      *   isCreate: false
      * });
      */
-    helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks }) => {
+    helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`);
       
@@ -1693,10 +1719,10 @@ export const RestApiKnexPlugin = {
           [idProp]: id
         };
         
-        await knex(tableName).insert(recordData);
+        await db(tableName).insert(recordData);
       } else {
         // Update mode - check if record exists first
-        const exists = await knex(tableName)
+        const exists = await db(tableName)
           .where(idProp, id)
           .first();
         
@@ -1709,7 +1735,7 @@ export const RestApiKnexPlugin = {
         
         // Update the record (replace all fields)
         if (Object.keys(finalAttributes).length > 0) {
-          await knex(tableName)
+          await db(tableName)
             .where(idProp, id)
             .update(finalAttributes);
         }
@@ -1717,7 +1743,7 @@ export const RestApiKnexPlugin = {
       
       // Use common response builder
       return buildResponseWithQueryParams({
-        scopeName, id, idProp, tableName, schema, queryParams, runHooks
+        scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams
       });
     };
     
@@ -1745,15 +1771,17 @@ export const RestApiKnexPlugin = {
      * });
      * // Only updates title, other fields remain unchanged
      */
-    helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks }) => {
+    helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProp = idProperty || vars.idProperty || 'id';
       schema = schema || await scopes[scopeName].getSchema();
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`);
       
       // Check if record exists
-      const exists = await knex(tableName)
+      const exists = await db(tableName)
         .where(idProp, id)
         .first();
       
@@ -1773,14 +1801,14 @@ export const RestApiKnexPlugin = {
       
       // Update only if there are changes
       if (Object.keys(finalAttributes).length > 0) {
-        await knex(tableName)
+        await db(tableName)
           .where(idProp, id)
           .update(finalAttributes);
       }
       
       // Use common response builder
       return buildResponseWithQueryParams({
-        scopeName, id, idProp, tableName, schema, queryParams, runHooks
+        scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams
       });
     };
     
@@ -1801,14 +1829,16 @@ export const RestApiKnexPlugin = {
      * await dataDelete({ scopeName: 'articles', id: '123' });
      * // Returns: { success: true }
      */
-    helpers.dataDelete = async ({ scopeName, id, runHooks }) => {
+    helpers.dataDelete = async ({ scopeName, id, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
+      const { transaction } = methodParams || {};
+      const db = transaction || knex;
       
       log.debug(`[Knex] DELETE ${tableName}/${id}`);
       
       // Check if record exists
-      const exists = await knex(tableName)
+      const exists = await db(tableName)
         .where(idProperty, id)
         .first();
       
@@ -1820,7 +1850,7 @@ export const RestApiKnexPlugin = {
       }
       
       // Delete the record
-      await knex(tableName)
+      await db(tableName)
         .where(idProperty, id)
         .delete();
       

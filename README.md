@@ -732,6 +732,282 @@ const s3Storage = new S3Storage({
 
 > **Looking for a complete example with multiple files?** Check out our [Complete File Upload Guide](docs/mini-guides/file-uploads-complete.md) that shows multiple file fields, HTML forms, and static file serving.
 
+## Transactions
+
+The JSON REST API supports database transactions for atomic operations across multiple resources. This is essential for maintaining data consistency when creating or updating related resources.
+
+### Basic Transaction Usage
+
+```javascript
+// Manual transaction management
+const trx = await api.knex.instance.transaction();
+try {
+  // All operations share the same transaction
+  const author = await api.resources.people.post({
+    transaction: trx,
+    inputRecord: {
+      data: {
+        type: 'people',
+        attributes: { name: 'New Author' }
+      }
+    }
+  });
+  
+  const book = await api.resources.books.post({
+    transaction: trx,
+    inputRecord: {
+      data: {
+        type: 'books',
+        attributes: { title: 'New Book' },
+        relationships: {
+          author: { data: { type: 'people', id: author.data.id } }
+        }
+      }
+    }
+  });
+  
+  // Commit if everything succeeds
+  await trx.commit();
+  return { author, book };
+  
+} catch (error) {
+  // Rollback on any error
+  await trx.rollback();
+  throw error;
+}
+```
+
+### Automatic Transaction Handling
+
+POST operations automatically use transactions when creating resources with many-to-many relationships:
+
+```javascript
+// This single POST will use a transaction internally
+const book = await api.resources.books.post({
+  inputRecord: {
+    data: {
+      type: 'books',
+      attributes: { title: 'Tagged Book' },
+      relationships: {
+        tags: {
+          data: [
+            { type: 'tags', id: '1' },
+            { type: 'tags', id: '2' }
+          ]
+        }
+      }
+    }
+  }
+});
+// The book and pivot table entries are created atomically
+```
+
+### Nested Transactions
+
+The system intelligently handles nested transactions by reusing existing ones:
+
+```javascript
+const trx = await api.knex.instance.transaction();
+try {
+  // This POST will use the existing transaction
+  const book = await api.resources.books.post({
+    transaction: trx,
+    inputRecord: {
+      data: {
+        type: 'books',
+        attributes: { title: 'Book with Tags' },
+        relationships: {
+          tags: { data: [{ type: 'tags', id: '1' }] }
+        }
+      }
+    }
+  });
+  // Even though POST creates its own transaction for many-to-many,
+  // it detects and uses the existing one
+  
+  await trx.commit();
+} catch (error) {
+  await trx.rollback();
+}
+```
+
+### Transaction Support Across Methods
+
+All REST API methods support transactions:
+
+```javascript
+const trx = await api.knex.instance.transaction();
+try {
+  // Query with transaction
+  const books = await api.resources.books.query({ 
+    transaction: trx,
+    queryParams: { filters: { status: 'draft' } }
+  });
+  
+  // Update with transaction
+  await api.resources.books.patch({
+    transaction: trx,
+    id: '123',
+    inputRecord: {
+      data: {
+        type: 'books',
+        id: '123',
+        attributes: { status: 'published' }
+      }
+    }
+  });
+  
+  // Delete with transaction
+  await api.resources.drafts.delete({
+    transaction: trx,
+    id: '456'
+  });
+  
+  await trx.commit();
+} catch (error) {
+  await trx.rollback();
+}
+```
+
+## Updating Resources with Relationships
+
+The REST API plugin now fully supports updating relationships in PUT and PATCH operations according to JSON:API specifications.
+
+### PUT - Complete Replacement
+
+PUT replaces the entire resource, including all relationships. Any relationships not provided in the request will be removed.
+
+```javascript
+// Example: Update an article with new author and categories
+const updatedArticle = await api.resources.articles.put({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',
+      attributes: {
+        title: 'Updated Title',
+        body: 'New content'
+      },
+      relationships: {
+        // 1:1 relationship - will update author_id in the database
+        author: {
+          data: { type: 'users', id: '42' }
+        },
+        // n:n relationship - will replace ALL category associations
+        categories: {
+          data: [
+            { type: 'categories', id: '1' },
+            { type: 'categories', id: '3' }
+          ]
+        }
+        // Note: any other relationships not listed here will be cleared!
+      }
+    }
+  }
+});
+```
+
+### PATCH - Partial Update
+
+PATCH only updates the fields and relationships explicitly provided, leaving everything else unchanged.
+
+```javascript
+// Example: Update only the author, keeping categories unchanged
+const patchedArticle = await api.resources.articles.patch({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',
+      relationships: {
+        // Only update the author relationship
+        author: {
+          data: { type: 'users', id: '99' }
+        }
+        // categories relationship remains untouched
+      }
+    }
+  }
+});
+
+// Example: Clear a relationship by setting it to null
+const clearedRelationship = await api.resources.articles.patch({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',
+      relationships: {
+        reviewer: {
+          data: null  // Removes the reviewer
+        }
+      }
+    }
+  }
+});
+
+// Example: Update many-to-many relationship
+const updatedCategories = await api.resources.articles.patch({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',
+      relationships: {
+        // This will replace the categories for this article
+        categories: {
+          data: [
+            { type: 'categories', id: '5' },
+            { type: 'categories', id: '7' },
+            { type: 'categories', id: '9' }
+          ]
+        }
+      }
+    }
+  }
+});
+```
+
+### Transaction Support for Relationship Updates
+
+All relationship updates are performed within the same transaction as the main record update, ensuring data consistency:
+
+```javascript
+// This entire operation is atomic
+const result = await api.resources.articles.put({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',
+      attributes: {
+        title: 'New Title',
+        status: 'published'
+      },
+      relationships: {
+        author: {
+          data: { type: 'users', id: '10' }
+        },
+        categories: {
+          data: [
+            { type: 'categories', id: '1' },
+            { type: 'categories', id: '2' }
+          ]
+        },
+        tags: {
+          data: [
+            { type: 'tags', id: '100' },
+            { type: 'tags', id: '101' }
+          ]
+        }
+      }
+    }
+  }
+});
+// If any part fails, everything is rolled back
+```
+
 ## Database Configuration with MySQL
 
 The REST API Knex Plugin supports MySQL databases out of the box. Here's how to configure your API to use MySQL:
@@ -1233,7 +1509,59 @@ api.addResource('people', {
 
 ### Using Many-to-Many Relationships
 
-#### Creating Books with Multiple Authors
+#### NEW: Creating Books with Authors in One Request
+
+With the enhanced POST implementation, you can now create a book and establish many-to-many relationships in a single atomic request:
+
+```javascript
+// First, define the many-to-many relationship in your resource
+api.addResource('books', {
+  schema: {
+    id: { type: 'id' },
+    title: { type: 'string', required: true },
+    year: { type: 'number' }
+  },
+  relationships: {
+    tags: {
+      manyToMany: true,
+      through: 'book_tags',      // Pivot table resource
+      foreignKey: 'book_id',     // Key for this resource
+      otherKey: 'tag_id',        // Key for related resource
+      validateExists: true       // Validate tags exist (default: true)
+    }
+  }
+});
+
+// Create book with tags in one request
+const response = await api.resources.books.post({
+  inputRecord: {
+    "data": {
+      "type": "books",
+      "attributes": {
+        "title": "Good Omens",
+        "year": 1990
+      },
+      "relationships": {
+        "tags": {
+          "data": [
+            { "type": "tags", "id": "1" },  // Must be existing tags
+            { "type": "tags", "id": "2" }
+          ]
+        }
+      }
+    }
+  }
+});
+```
+
+This will atomically:
+1. Create the book
+2. Create entries in the `book_tags` pivot table
+3. Return the book with its relationships
+
+#### Traditional Method: Creating Relationships Separately
+
+Alternatively, you can still use the traditional approach:
 
 ```bash
 # First, create a book
@@ -1249,7 +1577,7 @@ curl -X POST http://localhost:3000/api/books \
     }
   }'
 
-# Then link authors to the book
+# Then link authors to the book via pivot table
 curl -X POST http://localhost:3000/api/book_authors \
   -H "Content-Type: application/json" \
   -d '{

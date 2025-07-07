@@ -2,6 +2,7 @@ TODO: Missing JSON:API Features
 
 Have an option to hide fields (hidden: yes, normallyHidden: yes)
 (Diffence being that normallyHidden CAN be made visible with field:...)
+
 Check that limit/default order is maintained in sub queries in dataQuery
 
 Many-to-many relationships
@@ -19,23 +20,12 @@ Many-to-many relationships
 
   🟡 Medium (3-5 hours each)
 
-  4. Relationship Meta - Add metadata to relationships
-    - Count without loading all records
-    - Permission/state information
-  5. Field Type Handling - Better serialization
+  4  5. Field Type Handling - Better serialization
     - Auto-format dates to ISO 8601
     - Handle decimals/money properly
     - Boolean coercion from SQLite
 
   🔴 Complex (8+ hours)
-
-  6. Polymorphic Relationships - One relationship, multiple types
-    - Schema support for commentable_type/commentable_id
-    - Loading logic for mixed types
-    - Reverse relationship queries
-  7. Relationship Filtering - Filter/paginate included resources
-    - Allow ?include=comments&filter[comments_approved]=true
-    - Per-relationship limits and sorting
 
   📝 Nice to Have
 

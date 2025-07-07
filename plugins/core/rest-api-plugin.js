@@ -75,6 +75,11 @@ export const RestApiPlugin = {
         delete params._httpReq;
         delete params._httpRes;
       }
+      
+      // Preserve transaction if present
+      if (params.transaction) {
+        context.transaction = params.transaction;
+      }
     };
 
     // Helper function to generate complete searchSchema from schema and explicit searchSchema
@@ -195,6 +200,135 @@ export const RestApiPlugin = {
 
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
+    
+    // Helper function to process relationships from input
+    const processRelationships = (inputRecord, schemaFields, relationships) => {
+      const belongsToUpdates = {};
+      const manyToManyRelationships = [];
+      
+      if (!inputRecord.data.relationships) {
+        return { belongsToUpdates, manyToManyRelationships };
+      }
+      
+      for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
+        const relDef = relationships?.[relName];
+        
+        // Find the schema field that defines this relationship
+        const schemaField = Object.entries(schemaFields).find(([fieldName, fieldDef]) => 
+          fieldDef.as === relName
+        );
+        
+        if (schemaField) {
+          const [fieldName, fieldDef] = schemaField;
+          
+          // Handle regular belongsTo (1:1)
+          if (fieldDef.belongsTo && !fieldDef.belongsToPolymorphic) {
+            if (relData.data === null) {
+              belongsToUpdates[fieldName] = null;
+            } else if (relData.data?.id) {
+              belongsToUpdates[fieldName] = relData.data.id;
+            }
+          }
+          // Handle polymorphic belongsTo
+          else if (fieldDef.belongsToPolymorphic) {
+            if (relData.data === null) {
+              const { typeField, idField } = fieldDef.belongsToPolymorphic;
+              belongsToUpdates[typeField] = null;
+              belongsToUpdates[idField] = null;
+            } else if (relData.data) {
+              const { type, id } = relData.data;
+              const { types, typeField, idField } = fieldDef.belongsToPolymorphic;
+              
+              // Validate type is allowed
+              if (!types.includes(type)) {
+                throw new RestApiValidationError(
+                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
+                  { 
+                    fields: [`data.relationships.${relName}.data.type`],
+                    violations: [{
+                      field: `data.relationships.${relName}.data.type`,
+                      rule: 'polymorphic_type',
+                      message: `Type must be one of: ${types.join(', ')}`
+                    }]
+                  }
+                );
+              }
+              
+              belongsToUpdates[typeField] = type;
+              belongsToUpdates[idField] = id;
+            }
+          }
+        }
+        
+        // Check for many-to-many relationships defined in relationships object
+        if (relDef?.manyToMany && relData.data !== undefined) {
+          manyToManyRelationships.push({
+            relName,
+            relDef,
+            relData: relData.data || []  // null means empty array for many-to-many
+          });
+        }
+      }
+      
+      return { belongsToUpdates, manyToManyRelationships };
+    };
+    
+    // Helper function to delete existing pivot records
+    const deleteExistingPivotRecords = async (resourceId, relDef, trx) => {
+      // Query for all existing pivot records
+      const existingPivotRecords = await api.resources[relDef.through].query({
+        transaction: trx,
+        queryParams: {
+          filters: { [relDef.foreignKey]: resourceId }
+        }
+      });
+      
+      // Delete each found record
+      for (const record of existingPivotRecords.data || []) {
+        await api.resources[relDef.through].delete({
+          transaction: trx,
+          id: record.id
+        });
+      }
+    };
+    
+    // Helper function to create pivot records
+    const createPivotRecords = async (resourceId, relDef, relData, trx) => {
+      for (const related of relData) {
+        // Optionally validate related resource exists
+        if (relDef.validateExists !== false) {
+          try {
+            await api.resources[related.type].get({
+              id: related.id,
+              transaction: trx
+            });
+          } catch (error) {
+            throw new RestApiResourceError(
+              `Related ${related.type} with id ${related.id} not found`,
+              { 
+                subtype: 'not_found',
+                resourceType: related.type, 
+                resourceId: related.id 
+              }
+            );
+          }
+        }
+        
+        // Create pivot record
+        await api.resources[relDef.through].post({
+          transaction: trx,
+          inputRecord: {
+            data: {
+              type: relDef.through,
+              attributes: {
+                [relDef.foreignKey]: resourceId,
+                [relDef.otherKey]: related.id
+              }
+            }
+          }
+        });
+      }
+    };
 
     // Add hook to validate polymorphic relationships when scopes are created
     addHook('afterScopeCreate', 'validatePolymorphicRelationships', {}, ({ scopeName, scopeOptions }) => {
@@ -494,7 +628,8 @@ export const RestApiPlugin = {
         idProperty: vars.idProperty,
         searchSchema,  // Pass the searchSchema (explicit or generated)
         runHooks,
-        context  // Pass context so it can be shared with hooks
+        context,  // Pass context so it can be shared with hooks
+        methodParams: { transaction: context.transaction }
       })
     
       // Make a backup
@@ -619,7 +754,8 @@ export const RestApiPlugin = {
         id: params.id, 
         queryParams: params.queryParams,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: context.transaction }
       })
     
       // Check if record was found
@@ -857,207 +993,203 @@ export const RestApiPlugin = {
       context.scopeName = scopeName
       context.params = params
       
-      // Run early hooks for pre-processing (e.g., file handling)
-      await runHooks('beforeProcessing')
-      await runHooks('beforeProcessingPost')
-
-      // Sanitise parameters and payload
-      params.queryParams = params.queryParams  || {}
-      params.queryParams.fields = params.queryParams.fields  || {}
-      params.queryParams.include = params.queryParams.include  || []
-
-      // Place the record in the context
-      context.inputRecord = params.inputRecord
-      context.queryParams = params.queryParams
-
-      // Check payload with scope validation
-      validatePostPayload(params.inputRecord, scopes)
+      // Extract transaction from params if provided
+      const existingTrx = params.transaction;
+      const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
+      const shouldCommit = trx && !existingTrx;
       
-      // Validate that the resource type matches the current scope
-      if (params.inputRecord.data.type !== scopeName) {
-        throw new RestApiValidationError(
-          `Resource type mismatch. Expected '${scopeName}' but got '${params.inputRecord.data.type}'`,
-          { 
-            fields: ['data.type'], 
-            violations: [{ 
-              field: 'data.type', 
-              rule: 'resource_type_match', 
-              message: `Resource type must be '${scopeName}'` 
-            }] 
-          }
-        );
-      }
-
-      // Create schema for validation
-      context.schema = CreateSchema(scopeOptions.insertSchema || scopeOptions.schema || {})
-
-      // Apply schema to the main attributes and to ALL of the included ones
-      runHooks('beforeSchemaValidate')
-      runHooks('beforeSchemaValidatePost')
-      // Validate main resource attributes
-      const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(context.inputRecord.data.attributes || {});
-      if (Object.keys(mainErrors).length > 0) {
-        const violations = Object.entries(mainErrors).map(([field, error]) => ({
-          field: `data.attributes.${field}`,
-          rule: error.code || 'invalid_value',
-          message: error.message
-        }));
+      try {
+        // Update context with transaction
+        context.transaction = trx;
         
-        throw new RestApiValidationError(
-          'Schema validation failed for resource attributes',
-          { 
-            fields: Object.keys(mainErrors).map(field => `data.attributes.${field}`),
-            violations 
-          }
-        );
-      }
-      context.inputRecord.data.attributes = validatedAttrs;
-      
-      // Validate included resources
-      context.schemas = {}
-      const includedResources = context.inputRecord.included || [];
-      for (let i = 0; i < includedResources.length; i++) {
-        const subInputRecord = includedResources[i];
-        const scopeConfig = scopes[subInputRecord.type];
-        // The validator already checked that the type exists, so scopeConfig should be valid
-        const schemaFromOptions = scopeConfig?.options?.insertSchema || scopeConfig?.options?.schema || {};
-        const schema = context.schemas[subInputRecord.type] = context.schemas[subInputRecord.type] || CreateSchema(schemaFromOptions);
+        // Run early hooks for pre-processing (e.g., file handling)
+        await runHooks('beforeProcessing')
+        await runHooks('beforeProcessingPost')
+
+        // Sanitise parameters and payload
+        params.queryParams = params.queryParams  || {}
+        params.queryParams.fields = params.queryParams.fields  || {}
+        params.queryParams.include = params.queryParams.include  || []
+
+        // Place the record in the context
+        context.inputRecord = params.inputRecord
+        context.queryParams = params.queryParams
+
+        // Check payload with scope validation
+        validatePostPayload(params.inputRecord, scopes)
         
-        const { validatedObject: subValidatedAttrs, errors: subErrors } = await schema.validate(subInputRecord.attributes || {});
-        if (Object.keys(subErrors).length > 0) {
-          const violations = Object.entries(subErrors).map(([field, error]) => ({
-            field: `included[${i}].attributes.${field}`,
+        // Validate that the resource type matches the current scope
+        if (params.inputRecord.data.type !== scopeName) {
+          throw new RestApiValidationError(
+            `Resource type mismatch. Expected '${scopeName}' but got '${params.inputRecord.data.type}'`,
+            { 
+              fields: ['data.type'], 
+              violations: [{ 
+                field: 'data.type', 
+                rule: 'resource_type_match', 
+                message: `Resource type must be '${scopeName}'` 
+              }] 
+            }
+          );
+        }
+
+        // Create schema for validation
+        context.schema = CreateSchema(scopeOptions.insertSchema || scopeOptions.schema || {})
+
+        // Apply schema to the main attributes
+        runHooks('beforeSchemaValidate')
+        runHooks('beforeSchemaValidatePost')
+        // Validate main resource attributes
+        const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(context.inputRecord.data.attributes || {});
+        if (Object.keys(mainErrors).length > 0) {
+          const violations = Object.entries(mainErrors).map(([field, error]) => ({
+            field: `data.attributes.${field}`,
             rule: error.code || 'invalid_value',
             message: error.message
           }));
           
           throw new RestApiValidationError(
-            `Schema validation failed for included resource of type '${subInputRecord.type}'`,
+            'Schema validation failed for resource attributes',
             { 
-              fields: Object.keys(subErrors).map(field => `included[${i}].attributes.${field}`),
+              fields: Object.keys(mainErrors).map(field => `data.attributes.${field}`),
               violations 
             }
           );
         }
-        subInputRecord.attributes = subValidatedAttrs;
-      }
-      runHooks('afterSchemaValidatePost')
-      runHooks('afterSchemaValidate')
-
-      // Process polymorphic relationships
-      const relationships = scopes[scopeName].getRelationships();
-      const polymorphicUpdates = {};
-
-      if (context.inputRecord.data.relationships) {
-        for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
-          const relDef = relationships?.[relName];
-          
-          // Handle polymorphic belongsTo
-          if (relDef?.belongsToPolymorphic) {
-            if (relData.data === null) {
-              // Setting relationship to null
-              const { typeField, idField } = relDef.belongsToPolymorphic;
-              polymorphicUpdates[typeField] = null;
-              polymorphicUpdates[idField] = null;
-            } else if (relData.data) {
-              // Setting relationship
-              const { type, id } = relData.data;
-              const { types, typeField, idField } = relDef.belongsToPolymorphic;
-              
-              // Validate type is allowed
-              if (!types.includes(type)) {
-                throw new RestApiValidationError(
-                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-                  { 
-                    fields: [`data.relationships.${relName}.data.type`],
-                    violations: [{
-                      field: `data.relationships.${relName}.data.type`,
-                      rule: 'polymorphic_type',
-                      message: `Type must be one of: ${types.join(', ')}`
-                    }]
-                  }
-                );
-              }
-              
-              polymorphicUpdates[typeField] = type;
-              polymorphicUpdates[idField] = id;
-            }
-          }
+        context.inputRecord.data.attributes = validatedAttrs;
+        
+        // Remove included validation since JSON:API doesn't support it
+        if (context.inputRecord.included) {
+          throw new RestApiPayloadError(
+            'POST requests cannot include an "included" array. JSON:API does not support creating multiple resources in a single request.',
+            { path: 'included', expected: 'undefined', received: 'array' }
+          );
         }
-      }
+        
+        runHooks('afterSchemaValidatePost')
+        runHooks('afterSchemaValidate')
 
-      // Merge polymorphic updates with attributes
-      if (Object.keys(polymorphicUpdates).length > 0) {
-        context.inputRecord.data.attributes = {
-          ...context.inputRecord.data.attributes,
-          ...polymorphicUpdates
-        };
-      }
+        // Get relationships definition
+        const relationships = scopes[scopeName].getRelationships();
+        const schemaFields = scopeOptions.schema || {};
+        
+        // Process relationships using helper
+        const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+          context.inputRecord,
+          schemaFields,
+          relationships
+        );
 
-      runHooks('checkPermissions')
-      runHooks('checkPermissionsPost')
-      
-      runHooks('beforeDataCall')
-      runHooks('beforeDataCallPost')
-      
-      // Create the record - storage helper should return the created record with its ID
-      context.record = await helpers.dataPost({
-        scopeName,
-        inputRecord: context.inputRecord,
-        idProperty: vars.idProperty,
-        runHooks
-      });
-      
-      runHooks('afterDataCallPost')
-      runHooks('afterDataCall')
-      
-      // Get the full record with relationships if requested
-      if (vars.returnFullRecord?.post !== false) {
-        context.returnRecord = await helpers.dataGet({
+        // Merge belongsTo updates with attributes
+        if (Object.keys(belongsToUpdates).length > 0) {
+          context.inputRecord.data.attributes = {
+            ...context.inputRecord.data.attributes,
+            ...belongsToUpdates
+          };
+        }
+
+        runHooks('checkPermissions')
+        runHooks('checkPermissionsPost')
+        
+        runHooks('beforeDataCall')
+        runHooks('beforeDataCallPost')
+        
+        // Create the main record - storage helper should return the created record with its ID
+        context.record = await helpers.dataPost({
           scopeName,
-          id: context.record.data.id,
-          queryParams: params.queryParams,
+          inputRecord: context.inputRecord,
           idProperty: vars.idProperty,
-          runHooks
+          runHooks,
+          methodParams: { transaction: trx }
         });
-      } else {
-        context.returnRecord = context.record;
+        
+        runHooks('afterDataCallPost')
+        runHooks('afterDataCall')
+        
+        // Process many-to-many relationships after main record creation
+        for (const { relName, relDef, relData } of manyToManyRelationships) {
+          // Validate pivot resource exists
+          if (!scopes[relDef.through]) {
+            throw new RestApiValidationError(
+              `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
+              { 
+                fields: [`relationships.${relName}`],
+                violations: [{
+                  field: `relationships.${relName}`,
+                  rule: 'missing_pivot_resource',
+                  message: `Pivot resource '${relDef.through}' must be defined`
+                }]
+              }
+            );
+          }
+          
+          // Create pivot records using helper
+          await createPivotRecords(context.record.data.id, relDef, relData, trx);
+        }
+        
+        // Commit transaction if we created it
+        if (shouldCommit) {
+          await trx.commit();
+        }
+        
+        // Get the full record with relationships if requested
+        if (vars.returnFullRecord?.post !== false) {
+          context.returnRecord = await helpers.dataGet({
+            scopeName,
+            id: context.record.data.id,
+            queryParams: params.queryParams,
+            idProperty: vars.idProperty,
+            runHooks,
+            methodParams: { transaction: existingTrx } // Use original transaction for read
+          });
+        } else {
+          context.returnRecord = context.record;
+        }
+        
+        // Enrich the return record's attributes
+        if (context.returnRecord?.data?.attributes) {
+          context.returnRecord.data.attributes = await scope.enrichAttributes({
+            attributes: context.returnRecord.data.attributes, 
+            parentContext: context
+          });
+        }
+        
+        // Enrich included resources if any
+        for (const entry of (context.returnRecord?.included || [])) {
+          entry.attributes = await scopes[entry.type].enrichAttributes({
+            attributes: entry.attributes, 
+            parentContext: context
+          });
+        }
+        
+        runHooks('finish')
+        runHooks('finishPost')
+        return context.returnRecord
+        
+      } catch (error) {
+        // Rollback transaction if we created it
+        if (shouldCommit) {
+          await trx.rollback();
+        }
+        throw error;
       }
-      
-      // Enrich the return record's attributes
-      if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context
-        });
-      }
-      
-      // Enrich included resources if any
-      for (const entry of (context.returnRecord?.included || [])) {
-        entry.attributes = await scopes[entry.type].enrichAttributes({
-          attributes: entry.attributes, 
-          parentContext: context
-        });
-      }
-      
-      runHooks('finish')
-      runHooks('finishPost')
-      return context.returnRecord
     })
 
    /**
    * PUT
    * Updates an existing top-level resource by completely replacing it.
+   * This method supports updating both attributes and relationships (1:1 and n:n).
+   * PUT is a complete replacement - any relationships not provided will be removed/nulled.
    * This method does NOT support creating new related resources via an `included` array.
    *
    * @param {string} id - The ID of the resource to update.
    * @param {object} inputRecord - The JSON:API document for the request. It must contain a `data` object for the primary resource. 
-  It CANNOT include an `included` array - all relationships must reference existing resources.
+   * It CANNOT include an `included` array - all relationships must reference existing resources.
    * @param {object} [queryParams={}] - Optional. An object to customize the query for the returned document.
    * @param {string[]} [queryParams.include=[]] - An optional array of relationship paths to sideload in the response. These paths 
-  will be converted to a comma-separated string (e.g., `['author', 'comments.user']`).
+   * will be converted to a comma-separated string (e.g., `['author', 'comments.user']`).
    * @param {object} [queryParams.fields] - An object to request only specific fields (sparse fieldsets). Keys are resource types, 
-  values are comma-separated field names.
+   * values are comma-separated field names.
    * @returns {Promise<object>} A Promise that resolves to the JSON:API document containing the updated resource.
    *
    * @example
@@ -1227,9 +1359,18 @@ export const RestApiPlugin = {
     context.scopeName = scopeName
     context.params = params
     
-    // Run early hooks for pre-processing (e.g., file handling)
-    await runHooks('beforeProcessing')
-    await runHooks('beforeProcessingPut')
+    // Extract transaction from params if provided
+    const existingTrx = params.transaction;
+    const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
+    const shouldCommit = trx && !existingTrx;
+    
+    try {
+      // Update context with transaction
+      context.transaction = trx;
+      
+      // Run early hooks for pre-processing (e.g., file handling)
+      await runHooks('beforeProcessing')
+      await runHooks('beforeProcessingPut')
 
     // Sanitise parameters
     params.queryParams = params.queryParams || {}
@@ -1288,7 +1429,8 @@ export const RestApiPlugin = {
         scopeName,
         id: context.id,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: context.transaction }
       });
 
       context.exists = !!context.recordBefore
@@ -1298,7 +1440,8 @@ export const RestApiPlugin = {
         scopeName,
         id: context.id,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: context.transaction }
       });
     }
     context.isCreate = !context.exists;
@@ -1333,53 +1476,65 @@ export const RestApiPlugin = {
     runHooks('afterSchemaValidatePut')
     runHooks('afterSchemaValidate')
 
-    // Process polymorphic relationships for PUT
+    // Get relationships definition
     const relationships = scopes[scopeName].getRelationships();
-    const polymorphicUpdates = {};
-
-    if (context.inputRecord.data.relationships) {
-      for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
-        const relDef = relationships?.[relName];
-        
-        // Handle polymorphic belongsTo
-        if (relDef?.belongsToPolymorphic) {
-          if (relData.data === null) {
-            // Setting relationship to null
-            const { typeField, idField } = relDef.belongsToPolymorphic;
-            polymorphicUpdates[typeField] = null;
-            polymorphicUpdates[idField] = null;
-          } else if (relData.data) {
-            // Setting relationship
-            const { type, id } = relData.data;
-            const { types, typeField, idField } = relDef.belongsToPolymorphic;
-            
-            // Validate type is allowed
-            if (!types.includes(type)) {
-              throw new RestApiValidationError(
-                `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-                { 
-                  fields: [`data.relationships.${relName}.data.type`],
-                  violations: [{
-                    field: `data.relationships.${relName}.data.type`,
-                    rule: 'polymorphic_type',
-                    message: `Type must be one of: ${types.join(', ')}`
-                  }]
-                }
-              );
-            }
-            
-            polymorphicUpdates[typeField] = type;
-            polymorphicUpdates[idField] = id;
-          }
+    const schemaFields = scopeOptions.schema || {};
+    
+    // Process relationships using helper
+    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+      context.inputRecord,
+      schemaFields,
+      relationships
+    );
+    
+    // For PUT, we also need to handle relationships that are NOT provided
+    // (they should be set to null/empty as PUT is a complete replacement)
+    const allRelationships = {};
+    
+    // Collect all defined relationships for this resource
+    for (const [relName, relDef] of Object.entries(relationships || {})) {
+      if (relDef.manyToMany) {
+        allRelationships[relName] = { type: 'manyToMany', relDef };
+      }
+    }
+    
+    // Also check schema fields for belongsTo relationships
+    for (const [fieldName, fieldDef] of Object.entries(schemaFields)) {
+      if (fieldDef.as && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic)) {
+        allRelationships[fieldDef.as] = { 
+          type: fieldDef.belongsToPolymorphic ? 'polymorphic' : 'belongsTo',
+          fieldName,
+          fieldDef 
+        };
+      }
+    }
+    
+    // Process missing relationships (PUT should null them out)
+    const providedRelationships = new Set(Object.keys(context.inputRecord.data.relationships || {}));
+    for (const [relName, relInfo] of Object.entries(allRelationships)) {
+      if (!providedRelationships.has(relName)) {
+        if (relInfo.type === 'belongsTo') {
+          belongsToUpdates[relInfo.fieldName] = null;
+        } else if (relInfo.type === 'polymorphic') {
+          const { typeField, idField } = relInfo.fieldDef.belongsToPolymorphic;
+          belongsToUpdates[typeField] = null;
+          belongsToUpdates[idField] = null;
+        } else if (relInfo.type === 'manyToMany') {
+          // Add to manyToManyRelationships with empty array
+          manyToManyRelationships.push({
+            relName,
+            relDef: relInfo.relDef,
+            relData: []  // Empty array means delete all
+          });
         }
       }
     }
 
-    // Merge polymorphic updates with attributes
-    if (Object.keys(polymorphicUpdates).length > 0) {
+    // Merge belongsTo updates with attributes
+    if (Object.keys(belongsToUpdates).length > 0) {
       context.inputRecord.data.attributes = {
         ...context.inputRecord.data.attributes,
-        ...polymorphicUpdates
+        ...belongsToUpdates
       };
     }
 
@@ -1399,10 +1554,44 @@ export const RestApiPlugin = {
       queryParams: context.queryParams,
       isCreate: context.isCreate,  // Helper knows what to do
       idProperty: vars.idProperty,
-      runHooks
+      runHooks,
+      methodParams: { transaction: context.transaction }
     });
     runHooks('afterDataCallPut')
     runHooks('afterDataCall')
+
+    // Process many-to-many relationships after main record update (only if update succeeded)
+    if (context.isUpdate) {
+      for (const { relName, relDef, relData } of manyToManyRelationships) {
+        // Validate pivot resource exists
+        if (!scopes[relDef.through]) {
+          throw new RestApiValidationError(
+            `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
+            { 
+              fields: [`relationships.${relName}`],
+              violations: [{
+                field: `relationships.${relName}`,
+                rule: 'missing_pivot_resource',
+                message: `Pivot resource '${relDef.through}' must be defined`
+              }]
+            }
+          );
+        }
+        
+        // Delete existing pivot records
+        await deleteExistingPivotRecords(context.id, relDef, trx);
+        
+        // Create new pivot records
+        if (relData.length > 0) {
+          await createPivotRecords(context.id, relDef, relData, trx);
+        }
+      }
+    }
+    
+    // Commit transaction if we created it
+    if (shouldCommit) {
+      await trx.commit();
+    }
 
     // If there was previous data, run a data permission check
     if (context.recordBefore) {      
@@ -1418,7 +1607,8 @@ export const RestApiPlugin = {
         id: context.id,
         queryParams: params.queryParams,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: existingTrx }  // Use original transaction for read
       });
     } else {
       context.returnRecord = context.record;
@@ -1443,13 +1633,23 @@ export const RestApiPlugin = {
     runHooks('finish')
     runHooks('finishPut')
     return context.returnRecord
+    
+    } catch (error) {
+      // Rollback transaction if we created it
+      if (shouldCommit) {
+        await trx.rollback();
+      }
+      throw error;
+    }
   })
 
     /**
      * PATCH
      * Performs a partial update on an existing resource's attributes or relationships.
      * Unlike PUT, PATCH only updates the fields provided, leaving other fields unchanged.
-     * Just like PUT, It CANNOT have the `included` in data
+     * This method supports updating both attributes and relationships (1:1 and n:n).
+     * For relationships, only the ones explicitly provided will be updated.
+     * Just like PUT, it CANNOT have the `included` array in data.
      *
      * @param {string} id - The ID of the resource to update.
      * @param {object} inputRecord - The JSON:API document for the request. It must contain a `data` object with partial updates. It CANNOT include an `included` array.
@@ -1606,9 +1806,18 @@ export const RestApiPlugin = {
       context.scopeName = scopeName
       context.params = params
       
-      // Run early hooks for pre-processing (e.g., file handling)
-      await runHooks('beforeProcessing')
-      await runHooks('beforeProcessingPatch')
+      // Extract transaction from params if provided
+      const existingTrx = params.transaction;
+      const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
+      const shouldCommit = trx && !existingTrx;
+      
+      try {
+        // Update context with transaction
+        context.transaction = trx;
+        
+        // Run early hooks for pre-processing (e.g., file handling)
+        await runHooks('beforeProcessing')
+        await runHooks('beforeProcessingPatch')
 
       // Sanitise parameters
       params.queryParams = params.queryParams || {}
@@ -1695,53 +1904,22 @@ export const RestApiPlugin = {
       runHooks('afterSchemaValidatePatch')
       runHooks('afterSchemaValidate')
 
-      // Process polymorphic relationships for PATCH
+      // Get relationships definition
       const relationships = scopes[scopeName].getRelationships();
-      const polymorphicUpdates = {};
+      const schemaFields = scopeOptions.schema || {};
+      
+      // Process relationships using helper (only for provided relationships in PATCH)
+      const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+        context.inputRecord,
+        schemaFields,
+        relationships
+      );
 
-      if (context.inputRecord.data.relationships) {
-        for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
-          const relDef = relationships?.[relName];
-          
-          // Handle polymorphic belongsTo
-          if (relDef?.belongsToPolymorphic) {
-            if (relData.data === null) {
-              // Setting relationship to null
-              const { typeField, idField } = relDef.belongsToPolymorphic;
-              polymorphicUpdates[typeField] = null;
-              polymorphicUpdates[idField] = null;
-            } else if (relData.data) {
-              // Setting relationship
-              const { type, id } = relData.data;
-              const { types, typeField, idField } = relDef.belongsToPolymorphic;
-              
-              // Validate type is allowed
-              if (!types.includes(type)) {
-                throw new RestApiValidationError(
-                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-                  { 
-                    fields: [`data.relationships.${relName}.data.type`],
-                    violations: [{
-                      field: `data.relationships.${relName}.data.type`,
-                      rule: 'polymorphic_type',
-                      message: `Type must be one of: ${types.join(', ')}`
-                    }]
-                  }
-                );
-              }
-              
-              polymorphicUpdates[typeField] = type;
-              polymorphicUpdates[idField] = id;
-            }
-          }
-        }
-      }
-
-      // Merge polymorphic updates with attributes
-      if (Object.keys(polymorphicUpdates).length > 0) {
+      // Merge belongsTo updates with attributes
+      if (Object.keys(belongsToUpdates).length > 0) {
         context.inputRecord.data.attributes = {
           ...context.inputRecord.data.attributes,
-          ...polymorphicUpdates
+          ...belongsToUpdates
         };
       }
 
@@ -1760,11 +1938,44 @@ export const RestApiPlugin = {
         inputRecord: context.inputRecord,
         queryParams: context.queryParams,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: context.transaction }
       });
 
       runHooks('afterDataCallPatch')
       runHooks('afterDataCall')
+
+      // Process many-to-many relationships after main record update
+      // For PATCH, we only update the relationships that were explicitly provided
+      for (const { relName, relDef, relData } of manyToManyRelationships) {
+        // Validate pivot resource exists
+        if (!scopes[relDef.through]) {
+          throw new RestApiValidationError(
+            `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
+            { 
+              fields: [`relationships.${relName}`],
+              violations: [{
+                field: `relationships.${relName}`,
+                rule: 'missing_pivot_resource',
+                message: `Pivot resource '${relDef.through}' must be defined`
+              }]
+            }
+          );
+        }
+        
+        // Delete existing pivot records for this relationship
+        await deleteExistingPivotRecords(context.id, relDef, trx);
+        
+        // Create new pivot records if any
+        if (relData.length > 0) {
+          await createPivotRecords(context.id, relDef, relData, trx);
+        }
+      }
+      
+      // Commit transaction if we created it
+      if (shouldCommit) {
+        await trx.commit();
+      }
 
       runHooks('checkDataPermissions')
       runHooks('checkDataPermissionsPatch')
@@ -1776,7 +1987,8 @@ export const RestApiPlugin = {
           id: context.id,
           queryParams: params.queryParams,
           idProperty: vars.idProperty,
-          runHooks
+          runHooks,
+          methodParams: { transaction: existingTrx }  // Use original transaction for read
         });
       } else {
         context.returnRecord = context.record;
@@ -1801,6 +2013,14 @@ export const RestApiPlugin = {
       runHooks('finish')
       runHooks('finishPatch')
       return context.returnRecord
+      
+      } catch (error) {
+        // Rollback transaction if we created it
+        if (shouldCommit) {
+          await trx.rollback();
+        }
+        throw error;
+      }
     })
 
     /**
@@ -1860,7 +2080,8 @@ export const RestApiPlugin = {
         scopeName,
         id: context.id,
         idProperty: vars.idProperty,
-        runHooks
+        runHooks,
+        methodParams: { transaction: context.transaction }
       });
       
       runHooks('afterDataCallDelete')
@@ -1877,7 +2098,7 @@ export const RestApiPlugin = {
 
 
         // Define default storage helpers that throw errors
-    helpers.dataExists = async function({ scopeName, id, idProperty, runHooks }) {
+    helpers.dataExists = async function({ scopeName, id, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1889,7 +2110,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for exists. Install a storage plugin.`);
     };
 
-    helpers.dataGet = async function({ scopeName, id, queryParams, idProperty, runHooks }) {
+    helpers.dataGet = async function({ scopeName, id, queryParams, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1901,7 +2122,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for get. Install a storage plugin.`);
     };
     
-    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema, runHooks }) {
+    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema, runHooks, context, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1913,7 +2134,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for query. Install a storage plugin.`);
     };
     
-    helpers.dataPost = async function({ scopeName, inputRecord, idProperty, runHooks }) {
+    helpers.dataPost = async function({ scopeName, inputRecord, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1925,7 +2146,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for post. Install a storage plugin.`);
     };
 
-    helpers.dataPatch = async function({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks }) {
+    helpers.dataPatch = async function({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1937,7 +2158,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for patch. Install a storage plugin.`);
     };
 
-    helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty, runHooks }) {
+    helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
@@ -1949,7 +2170,7 @@ export const RestApiPlugin = {
       throw new Error(`No storage implementation for put. Install a storage plugin.`);
     };
     
-    helpers.dataDelete = async function({ scopeName, id, idProperty, runHooks }) {
+    helpers.dataDelete = async function({ scopeName, id, idProperty, runHooks, transaction }) {
       // Access scope configuration (example for storage plugin developers)
       const scope = api.scopes[scopeName];
       if (scope && scope._scopeOptions) {
