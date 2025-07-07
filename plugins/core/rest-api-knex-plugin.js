@@ -1432,15 +1432,15 @@ export const RestApiKnexPlugin = {
      */
     helpers.dataExists = async ({ scopeName, id, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
-      const idProp = idProperty || vars.idProperty || 'id';
+      idProperty = idProperty || vars.idProperty || 'id';
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
       const record = await db(tableName)
-        .where(idProp, id)
-        .select(idProp)
+        .where(idProperty, id)
+        .select(idProperty)
         .first();
       
       return !!record;
@@ -1700,7 +1700,7 @@ export const RestApiKnexPlugin = {
      */
     helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
-      const idProp = idProperty || vars.idProperty || 'id';
+      idProperty = idProperty || vars.idProperty || 'id';
       const schema = await scopes[scopeName].getSchema();
       const { transaction } = methodParams || {};
       const db = transaction || knex;
@@ -1716,14 +1716,14 @@ export const RestApiKnexPlugin = {
         // Create mode - insert new record with specified ID
         const recordData = {
           ...finalAttributes,
-          [idProp]: id
+          [idProperty]: id
         };
         
         await db(tableName).insert(recordData);
       } else {
         // Update mode - check if record exists first
         const exists = await db(tableName)
-          .where(idProp, id)
+          .where(idProperty, id)
           .first();
         
         if (!exists) {
@@ -1736,14 +1736,14 @@ export const RestApiKnexPlugin = {
         // Update the record (replace all fields)
         if (Object.keys(finalAttributes).length > 0) {
           await db(tableName)
-            .where(idProp, id)
+            .where(idProperty, id)
             .update(finalAttributes);
         }
       }
       
       // Use common response builder
       return buildResponseWithQueryParams({
-        scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams
+        scopeName, id, idProp: idProperty, tableName, schema, queryParams, runHooks, methodParams
       });
     };
     
@@ -1773,7 +1773,7 @@ export const RestApiKnexPlugin = {
      */
     helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
-      const idProp = idProperty || vars.idProperty || 'id';
+      idProperty = idProperty || vars.idProperty || 'id';
       schema = schema || await scopes[scopeName].getSchema();
       const { transaction } = methodParams || {};
       const db = transaction || knex;
@@ -1782,7 +1782,7 @@ export const RestApiKnexPlugin = {
       
       // Check if record exists
       const exists = await db(tableName)
-        .where(idProp, id)
+        .where(idProperty, id)
         .first();
       
       if (!exists) {
@@ -1802,13 +1802,13 @@ export const RestApiKnexPlugin = {
       // Update only if there are changes
       if (Object.keys(finalAttributes).length > 0) {
         await db(tableName)
-          .where(idProp, id)
+          .where(idProperty, id)
           .update(finalAttributes);
       }
       
       // Use common response builder
       return buildResponseWithQueryParams({
-        scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams
+        scopeName, id, idProp: idProperty, tableName, schema, queryParams, runHooks, methodParams
       });
     };
     
@@ -1829,9 +1829,9 @@ export const RestApiKnexPlugin = {
      * await dataDelete({ scopeName: 'articles', id: '123' });
      * // Returns: { success: true }
      */
-    helpers.dataDelete = async ({ scopeName, id, runHooks, methodParams }) => {
+    helpers.dataDelete = async ({ scopeName, id, runHooks, methodParams, idProperty }) => {
       const tableName = await getTableName(scopeName);
-      const idProperty = vars.idProperty || 'id';
+      idProperty = idProperty || vars.idProperty || 'id';
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
