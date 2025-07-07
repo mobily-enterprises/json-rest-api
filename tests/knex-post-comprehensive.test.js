@@ -20,6 +20,9 @@ describe('Comprehensive POST Tests with Relationships', () => {
       useNullAsDefault: true
     });
     
+    // Enable foreign keys for SQLite
+    await knex.raw('PRAGMA foreign_keys = ON');
+    
     // Create test tables
     await knex.schema.createTable('users', table => {
       table.increments('id');
@@ -272,7 +275,11 @@ describe('Comprehensive POST Tests with Relationships', () => {
         });
         assert.fail('Should have thrown validation error');
       } catch (error) {
-        assert.ok(error.message.includes('required'));
+        assert.strictEqual(error.code, 'REST_API_VALIDATION');
+        assert.strictEqual(error.message, 'Schema validation failed for resource attributes');
+        // Check that violations mention the missing required field
+        assert.ok(error.violations && error.violations.length > 0);
+        assert.ok(error.violations.some(v => v.field === 'data.attributes.title'));
       }
     });
   });
@@ -391,6 +398,7 @@ describe('Comprehensive POST Tests with Relationships', () => {
         });
         assert.fail('Should have thrown error for invalid reference');
       } catch (error) {
+        console.log('Foreign key error:', error.message, 'code:', error.code);
         // Foreign key constraint should fail
         assert.ok(error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
       }
@@ -550,7 +558,9 @@ describe('Comprehensive POST Tests with Relationships', () => {
         });
         assert.fail('Should have thrown error for invalid tag reference');
       } catch (error) {
-        assert.ok(error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
+        // The library validates related records exist before attempting to create pivot records
+        assert.ok(error.code === 'REST_API_RESOURCE' || error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
+        assert.ok(error.message.includes('not found') || error.message.includes('FOREIGN KEY') || error.message.includes('constraint'));
       }
     });
   });
@@ -705,8 +715,8 @@ describe('Comprehensive POST Tests with Relationships', () => {
       
       // And pivot records should also not exist
       const pivotCount = await knex('article_tags').count('* as count');
-      // Should still have the original 3 pivot records from setup
-      assert.strictEqual(pivotCount[0].count, 3);
+      // Should have 0 pivot records since we don't create any initially
+      assert.strictEqual(pivotCount[0].count, 0);
     });
   });
   

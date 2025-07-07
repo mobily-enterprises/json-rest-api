@@ -1670,9 +1670,8 @@ export const RestApiPlugin = {
     runHooks('afterDataCallPut')
     runHooks('afterDataCall')
 
-    // Process many-to-many relationships after main record update (only if update succeeded)
-    if (context.isUpdate) {
-      for (const { relName, relDef, relData } of manyToManyRelationships) {
+    // Process many-to-many relationships after main record update/creation
+    for (const { relName, relDef, relData } of manyToManyRelationships) {
         // Validate pivot resource exists
         if (!scopes[relDef.through]) {
           throw new RestApiValidationError(
@@ -1688,15 +1687,16 @@ export const RestApiPlugin = {
           );
         }
         
-        // Delete existing pivot records
-        await deleteExistingPivotRecords(context.id, relDef, trx);
+        // Delete existing pivot records (only for updates, not creates)
+        if (context.isUpdate) {
+          await deleteExistingPivotRecords(context.id, relDef, trx);
+        }
         
         // Create new pivot records
         if (relData.length > 0) {
           await createPivotRecords(context.id, relDef, relData, trx);
         }
       }
-    }
     
     // Commit transaction if we created it
     if (shouldCommit) {

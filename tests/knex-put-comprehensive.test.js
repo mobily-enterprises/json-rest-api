@@ -929,7 +929,10 @@ describe('Comprehensive dataPut Tests', () => {
         }
       });
       
-      // Update articles resource to include tags relationship
+      // Remove existing articles scope and re-add with tags relationship
+      if (api.scopes.articles) {
+        delete api.scopes.articles;
+      }
       api.addResource('articles', {
         schema: {
           id: { type: 'id' },
