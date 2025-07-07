@@ -20,6 +20,9 @@ describe('Comprehensive Transaction Integration Tests', () => {
       useNullAsDefault: true
     });
     
+    // Enable foreign key constraints in SQLite
+    await knex.raw('PRAGMA foreign_keys = ON');
+    
     // Create comprehensive test schema
     await knex.schema.createTable('organizations', table => {
       table.increments('id');

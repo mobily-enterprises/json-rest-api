@@ -647,6 +647,10 @@ describe('Comprehensive POST Tests with Relationships', () => {
     });
     
     test('should support external transaction', async () => {
+      // First check the article doesn't exist
+      const beforeTrx = await knex('articles').where('title', 'Transactional Article').first();
+      assert.ok(!beforeTrx);
+      
       const trx = await knex.transaction();
       
       try {
@@ -673,20 +677,28 @@ describe('Comprehensive POST Tests with Relationships', () => {
         const inTrx = await trx('articles').where('title', 'Transactional Article').first();
         assert.ok(inTrx);
         
-        // But not outside transaction yet
-        const outside = await knex('articles').where('title', 'Transactional Article').first();
-        assert.ok(!outside);
-        
+        // Also check the many-to-many was created in transaction
+        const pivotInTrx = await trx('article_tags')
+          .where('article_id', inTrx.id)
+          .first();
+        assert.ok(pivotInTrx);
+        assert.strictEqual(pivotInTrx.tag_id, 1);
+
         // Rollback
         await trx.rollback();
-        
-        // Should not exist after rollback
-        const afterRollback = await knex('articles').where('title', 'Transactional Article').first();
-        assert.ok(!afterRollback);
       } catch (error) {
         await trx.rollback();
         throw error;
       }
+      
+      // After rollback, article should not exist
+      const afterRollback = await knex('articles').where('title', 'Transactional Article').first();
+      assert.ok(!afterRollback);
+      
+      // And pivot records should also not exist
+      const pivotCount = await knex('article_tags').count('* as count');
+      // Should still have the original 3 pivot records from setup
+      assert.strictEqual(pivotCount[0].count, 3);
     });
   });
   

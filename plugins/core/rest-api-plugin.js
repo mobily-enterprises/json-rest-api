@@ -264,7 +264,7 @@ export const RestApiPlugin = {
         if (relDef?.manyToMany && relData.data !== undefined) {
           manyToManyRelationships.push({
             relName,
-            relDef,
+            relDef: relDef.manyToMany,  // Pass the manyToMany object, not the whole relationship
             relData: relData.data || []  // null means empty array for many-to-many
           });
         }
@@ -273,7 +273,89 @@ export const RestApiPlugin = {
       return { belongsToUpdates, manyToManyRelationships };
     };
     
-    // Helper function to delete existing pivot records
+    // Helper function to update many-to-many relationships while preserving pivot data
+    const updateManyToManyRelationship = async (resourceId, relDef, relData, trx) => {
+      console.log('[updateManyToManyRelationship] Starting with:', {
+        resourceId,
+        relDef,
+        relDataLength: relData.length,
+        pivotResource: relDef.through
+      });
+      
+      // Get existing pivot records
+      console.log('[updateManyToManyRelationship] Querying pivot table:', relDef.through);
+      const existingPivotRecords = await api.resources[relDef.through].query({
+        transaction: trx,
+        queryParams: {
+          filters: { [relDef.foreignKey]: resourceId }
+        }
+      });
+      
+      
+      // Create maps for easier lookup
+      const existingMap = new Map();
+      for (const record of existingPivotRecords.data || []) {
+        const otherKeyValue = record.attributes[relDef.otherKey];
+        existingMap.set(String(otherKeyValue), record);
+      }
+      
+      const newMap = new Map();
+      for (const related of relData) {
+        newMap.set(String(related.id), related);
+      }
+      
+      // Delete records that are no longer in the relationship
+      for (const [otherId, record] of existingMap) {
+        if (!newMap.has(otherId)) {
+          await api.resources[relDef.through].delete({
+            transaction: trx,
+            id: record.id
+          });
+        }
+      }
+      
+      // Add new records (those not in existing)
+      for (const [otherId, related] of newMap) {
+        if (!existingMap.has(otherId)) {
+          // Validate related resource exists if needed
+          if (relDef.validateExists !== false) {
+            try {
+              await api.resources[related.type].get({
+                id: related.id,
+                transaction: trx
+              });
+            } catch (error) {
+              throw new RestApiResourceError(
+                `Related ${related.type} with id ${related.id} not found`,
+                { 
+                  subtype: 'not_found',
+                  resourceType: related.type, 
+                  resourceId: related.id 
+                }
+              );
+            }
+          }
+          
+          // Create new pivot record
+          await api.resources[relDef.through].post({
+            transaction: trx,
+            inputRecord: {
+              data: {
+                type: relDef.through,
+                attributes: {
+                  [relDef.foreignKey]: resourceId,
+                  [relDef.otherKey]: related.id
+                }
+              }
+            }
+          });
+        }
+      }
+      
+      // Records that exist in both are automatically preserved with their pivot data
+    };
+    
+    // Keep the old helper for backward compatibility (used in POST)
     const deleteExistingPivotRecords = async (resourceId, relDef, trx) => {
       // Query for all existing pivot records
       const existingPivotRecords = await api.resources[relDef.through].query({
@@ -575,12 +657,24 @@ export const RestApiPlugin = {
 
       // Validate search/filter parameters against searchSchema
       if (params.queryParams.filters && Object.keys(params.queryParams.filters).length > 0) {
-        // Use searchSchema (explicit or generated) for validation
-        const schemaToValidate = searchSchema || scopeOptions.schema;
+        // Only allow filtering if searchSchema is defined
+        if (!searchSchema) {
+          throw new RestApiValidationError(
+            `Filtering is not enabled for resource '${scopeName}'. To enable filtering, add 'search: true' to schema fields or define a searchSchema.`,
+            { 
+              fields: Object.keys(params.queryParams.filters).map(field => `filters.${field}`),
+              violations: [{
+                field: 'filters',
+                rule: 'filtering_not_enabled',
+                message: 'Resource does not have searchable fields defined'
+              }]
+            }
+          );
+        }
         
-        if (schemaToValidate) {
+        if (searchSchema) {
           // Create a schema instance for validation
-          const filterSchema = CreateSchema(schemaToValidate);
+          const filterSchema = CreateSchema(searchSchema);
           
           // Validate the filter parameters
           const { validatedObject, errors } = await filterSchema.validate(params.queryParams.filters, { 
@@ -1070,7 +1164,7 @@ export const RestApiPlugin = {
         runHooks('afterSchemaValidate')
 
         // Get relationships definition
-        const relationships = scopes[scopeName].getRelationships();
+        const relationships = await scopes[scopeName].getRelationships();
         const schemaFields = scopeOptions.schema || {};
         
         // Process relationships using helper
@@ -1477,7 +1571,7 @@ export const RestApiPlugin = {
     runHooks('afterSchemaValidate')
 
     // Get relationships definition
-    const relationships = scopes[scopeName].getRelationships();
+    const relationships = await scopes[scopeName].getRelationships();
     const schemaFields = scopeOptions.schema || {};
     
     // Process relationships using helper
@@ -1910,8 +2004,9 @@ export const RestApiPlugin = {
       runHooks('afterSchemaValidate')
 
       // Get relationships definition
-      const relationships = scopes[scopeName].getRelationships();
+      const relationships = await scopes[scopeName].getRelationships();
       const schemaFields = scopeOptions.schema || {};
+      
       
       // Process relationships using helper (only for provided relationships in PATCH)
       const { belongsToUpdates, manyToManyRelationships } = processRelationships(
@@ -1953,6 +2048,7 @@ export const RestApiPlugin = {
       // Process many-to-many relationships after main record update
       // For PATCH, we only update the relationships that were explicitly provided
       for (const { relName, relDef, relData } of manyToManyRelationships) {
+        
         // Validate pivot resource exists
         if (!scopes[relDef.through]) {
           throw new RestApiValidationError(
@@ -1968,13 +2064,8 @@ export const RestApiPlugin = {
           );
         }
         
-        // Delete existing pivot records for this relationship
-        await deleteExistingPivotRecords(context.id, relDef, trx);
-        
-        // Create new pivot records if any
-        if (relData.length > 0) {
-          await createPivotRecords(context.id, relDef, relData, trx);
-        }
+        // Update many-to-many relationship while preserving pivot data
+        await updateManyToManyRelationship(context.id, relDef, relData, trx);
       }
       
       // Commit transaction if we created it

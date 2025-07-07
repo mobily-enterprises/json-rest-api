@@ -10,15 +10,26 @@ describe('Comprehensive dataPatch Tests', () => {
   let knex;
   
   beforeEach(async () => {
+    // Clean up any existing knex instance
+    if (knex && !knex.client?.pool?.destroyed) {
+      await knex.destroy();
+    }
+    
     // Reset the global registry
     resetGlobalRegistryForTesting();
     
-    // Create in-memory SQLite database
+    // Reset api to null
+    api = null;
+    
+    // Create NEW in-memory SQLite database
     knex = knexConfig({
       client: 'sqlite3',
       connection: ':memory:',
       useNullAsDefault: true
     });
+    
+    // Enable foreign key constraints in SQLite
+    await knex.raw('PRAGMA foreign_keys = ON');
     
     // Create test tables with relationships
     await knex.schema.createTable('companies', table => {
@@ -167,6 +178,16 @@ describe('Comprehensive dataPatch Tests', () => {
       { article_id: 1, tag_id: 2, relevance: 'medium' },
       { article_id: 2, tag_id: 3, relevance: 'high' }
     ]);
+    
+    // Verify exact initial state
+    const initialArticleTags = await knex('article_tags').select('*').orderBy('id');
+    if (initialArticleTags.length !== 3) {
+      throw new Error(`Expected 3 article_tags, got ${initialArticleTags.length}`);
+    }
+    const article1Tags = await knex('article_tags').where('article_id', 1).count('* as count');
+    if (article1Tags[0].count !== 2) {
+      throw new Error(`Expected 2 tags for article 1, got ${article1Tags[0].count}`);
+    }
     
     // Insert skills
     await knex('skills').insert([
@@ -362,6 +383,10 @@ describe('Comprehensive dataPatch Tests', () => {
         article_id: { type: 'number', required: true },
         tag_id: { type: 'number', required: true },
         relevance: { type: 'string' }
+      },
+      searchSchema: {
+        article_id: { type: 'number' },
+        tag_id: { type: 'number' }
       }
     });
     
@@ -372,6 +397,10 @@ describe('Comprehensive dataPatch Tests', () => {
         skill_id: { type: 'number', required: true },
         proficiency_level: { type: 'number' },
         acquired_date: { type: 'string' }
+      },
+      searchSchema: {
+        user_id: { type: 'number' },
+        skill_id: { type: 'number' }
       }
     });
   });
@@ -964,6 +993,7 @@ describe('Comprehensive dataPatch Tests', () => {
   
   describe('Many-to-Many Relationship Handling', () => {
     test('should update many-to-many relationships by adding tags', async () => {
+      
       // Article 1 already has tags 1 and 2
       const result = await api.resources.articles.patch({
         id: '1',

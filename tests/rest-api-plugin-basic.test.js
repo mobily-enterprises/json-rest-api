@@ -40,7 +40,7 @@ describe('RestApiPlugin', () => {
         author: { type: 'string', required: true },
         year: { type: 'number', min: 1000, max: 3000 },
         isbn: { type: 'string' },
-        published: { type: 'boolean', default: false }
+        published: { type: 'boolean', default: false, search: true }
       }
     });
     

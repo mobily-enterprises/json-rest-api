@@ -856,10 +856,10 @@ export const RestApiKnexPlugin = {
           for (const [filterKey, filterValue] of Object.entries(filters)) {
             log.trace('[FILTER-ENTRY] Processing filter', { filterKey });
             const fieldDef = searchSchema[filterKey];
-            log.trace('[FIELD-DEF] Field definition found', { filterKey });
+            log.trace('[FIELD-DEF] Field definition found', { filterKey, hasFieldDef: !!fieldDef });
             if (!fieldDef) {
               log.trace('[FILTER-SKIP] No fieldDef found', { filterKey });
-              continue; // Ignore unknown filters
+              continue; // Ignore unknown filters - they should have been caught by REST API validation
             }
             
             // Check if this is a polymorphic search
@@ -1661,7 +1661,10 @@ export const RestApiKnexPlugin = {
       const attributes = inputRecord.data.attributes;
       
       // Insert and get the new ID
-      const [id] = await db(tableName).insert(attributes).returning(idProperty);
+      const result = await db(tableName).insert(attributes).returning(idProperty);
+      
+      // Extract the ID value (SQLite returns array of objects)
+      const id = result[0]?.[idProperty] || result[0];
       
       // Fetch the created record
       const newRecord = await db(tableName)

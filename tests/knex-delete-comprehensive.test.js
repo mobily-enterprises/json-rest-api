@@ -20,6 +20,9 @@ describe('Comprehensive DELETE Tests', () => {
       useNullAsDefault: true
     });
     
+    // Enable foreign key constraints in SQLite
+    await knex.raw('PRAGMA foreign_keys = ON');
+    
     // Create test tables with relationships
     await knex.schema.createTable('authors', table => {
       table.increments('id');
