@@ -1,38 +1,40 @@
 TODO: Missing JSON:API Features
 
+(1)
+processBelongsToRelationships: why this? const schemaStructure = schema.structure || schema;
+
+(2) Place the detectors under plugin/connectors and not in lib 
+
+(3)
 Have an option to hide fields (hidden: yes, normallyHidden: yes)
 (Diffence being that normallyHidden CAN be made visible with field:...)
 
+(4)
+Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
+  
+(5)
 Check that limit/default order is maintained in sub queries in dataQuery
 
-Many-to-many relationships
+(6)
+1. Relationship Endpoints - Separate endpoints for relationship manipulation
+- GET /articles/1/relationships/comments
+- POST/DELETE for relationship updates
 
-  🟢 Easy (1-2 hours each)
+(7)
+Query Depth Protection - Prevent malicious deep includes
+  - Max depth limit for ?include=author.articles.author...
 
-  1. Relationship Endpoints - Separate endpoints for relationship manipulation
-    - GET /articles/1/relationships/comments
-    - POST/DELETE for relationship updates
-  2. Calculated/Virtual Fields - Computed attributes
-    - Add type: 'virtual' with compute function
-    - Support in sparse fieldsets
-  3. Query Depth Protection - Prevent malicious deep includes
-    - Max depth limit for ?include=author.articles.author...
+(8)
+- Auto-format dates to ISO 8601
 
-  🟡 Medium (3-5 hours each)
+(9)
+- Boolean coercion from SQLite
 
-  4  5. Field Type Handling - Better serialization
-    - Auto-format dates to ISO 8601
-    - Handle decimals/money properly
-    - Boolean coercion from SQLite
+(10) 
+Link and meta info in returned document
 
-  🔴 Complex (8+ hours)
-
-  📝 Nice to Have
-
-  - Resource-level meta
-  - Compound document support
-  - Bulk operations / sideposting
-  - Pagination for included relationships
+(11)
+Bulk operations
 
 
 
