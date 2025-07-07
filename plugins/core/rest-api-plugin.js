@@ -655,135 +655,196 @@ export const RestApiPlugin = {
 
     /**
      * POST
-     * Creates a new top-level resource. Can also create related resources in the same request, via data.included
+     * Creates a new resource with optional relationships to existing resources.
+     * 
+     * This method follows the JSON:API specification for resource creation. It supports:
+     * - Creating a resource with attributes only
+     * - Creating a resource with one-to-one relationships (belongsTo) to existing resources
+     * - Creating a resource with many-to-many relationships to existing resources
+     * 
+     * NOTE: This method does NOT support creating multiple resources in a single request.
+     * The JSON:API specification does not define 'included' for POST requests.
      *
-     * @param {object} inputRecord - The JSON:API document for the request. It must contain a `data` object for the primary resource. It can also include an `included` array for compound document creation.
+     * @param {object} inputRecord - The JSON:API document for the request. It must contain a `data` object for the primary resource.
      * @param {object} [queryParams={}] - Optional. An object to customize the query for the returned document.
-     * @param {string[]} [queryParams.include=[]] - An optional array of relationship paths to sideload in the response. These paths will be converted to a comma-separated string (e.g., `['author', 'comments.user']`).
+     * @param {string[]} [queryParams.include=[]] - An optional array of relationship paths to sideload in the response. These paths will be converted to a comma-separated string (e.g., `['author', 'tags']`).
      * @param {object} [queryParams.fields] - An object to request only specific fields (sparse fieldsets). Keys are resource types, values are comma-separated field names.
+     * @param {object} [transaction] - Optional. An existing database transaction to use for this operation.
      * @returns {Promise<object>} A Promise that resolves to the JSON:API document containing the newly created resource.
      *
      * @example
-     * // Case 1: Create a simple resource with only attributes.
-     * const simpleArticle = await api.post('articles', {
-     *   "data": {
-     *     "type": "articles",
-     *     "attributes": {
-     *       "title": "Standalone Post",
-     *       "body": "This article has no relationships."
+     * // Case 1: Create a simple resource with only attributes
+     * const article = await api.resources.articles.post({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "attributes": {
+     *         "title": "My Article",
+     *         "body": "This article has no relationships.",
+     *         "status": "draft"
+     *       }
      *     }
      *   }
      * });
      * @see POST /api/articles
-     * // Example Return Value for simpleArticle:
+     * // Returns:
      * // {
      * //   "data": {
      * //     "type": "articles",
      * //     "id": "123",
      * //     "attributes": {
-     * //       "title": "Standalone Post",
-     * //       "body": "This article has no relationships."
+     * //       "title": "My Article",
+     * //       "body": "This article has no relationships.",
+     * //       "status": "draft"
      * //     }
      * //   }
      * // }
      *
      * @example
-     * // Case 2: Create a resource and link it to MULTIPLE EXISTING relationships.
-     * const linkedArticle = await api.post('articles', {
-     *   "data": {
-     *     "type": "articles",
-     *     "attributes": {
-     *       "title": "Post by an Existing Team"
-     *     },
-     *     "relationships": {
-     *       "authors": {
-     *         "data": [
-     *           { "type": "people", "id": "9" },
-     *           { "type": "people", "id": "10" }
-     *         ]
+     * // Case 2: Create a resource with a one-to-one relationship (belongsTo)
+     * const article = await api.resources.articles.post({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "attributes": {
+     *         "title": "Article with Author",
+     *         "body": "Content here"
      *       },
-     *       "publisher": {
-     *         "data": { "type": "publishers", "id": "pub-1" }
+     *       "relationships": {
+     *         "author": {
+     *           "data": { "type": "people", "id": "42" }  // Must be existing person
+     *         }
      *       }
      *     }
      *   }
      * });
      * @see POST /api/articles
-     * // Example Return Value for linkedArticle:
+     * // Returns:
      * // {
      * //   "data": {
      * //     "type": "articles",
      * //     "id": "124",
-     * //     "attributes": { "title": "Post by an Existing Team" },
-     * //     "relationships": { ... }
+     * //     "attributes": {
+     * //       "title": "Article with Author",
+     * //       "body": "Content here"
+     * //     },
+     * //     "relationships": {
+     * //       "author": {
+     * //         "data": { "type": "people", "id": "42" }
+     * //       }
+     * //     }
      * //   }
      * // }
-     * // There is NO 'included' in the response because all related resources already existed.
      *
      * @example
-     * // Case 3: Create a resource AND MULTIPLE NEW related resources (compound document).
-     * const compoundArticle = await api.post('articles', {
-     *   "data": {
-     *     "type": "articles",
-     *     "attributes": {
-     *       "title": "A New Team's First Post"
-     *     },
-     *     "relationships": {
-     *       "authors": {
-     *         "data": [
-     *           { "type": "people", "id": "temp-author-1" },
-     *           { "type": "people", "id": "temp-author-2" }
-     *         ]
+     * // Case 3: Create a resource with many-to-many relationships
+     * const article = await api.resources.articles.post({
+     *   inputRecord: {
+     *     "data": {
+     *       "type": "articles",
+     *       "attributes": {
+     *         "title": "Tagged Article",
+     *         "body": "Article with multiple tags"
      *       },
-     *       "publisher": {
-     *         "data": { "type": "publishers", "id": "temp-pub-xyz" }
+     *       "relationships": {
+     *         "author": {
+     *           "data": { "type": "people", "id": "42" }  // One-to-one
+     *         },
+     *         "tags": {
+     *           "data": [                                 // Many-to-many
+     *             { "type": "tags", "id": "1" },         // Must be existing tags
+     *             { "type": "tags", "id": "2" },
+     *             { "type": "tags", "id": "3" }
+     *           ]
+     *         }
      *       }
      *     }
      *   },
-     *   "included": [
-     *     { "type": "people", "id": "temp-author-1", "attributes": { "name": "Jane Doe" } },
-     *     { "type": "people", "id": "temp-author-2", "attributes": { "name": "Richard Roe" } },
-     *     { "type": "publishers", "id": "temp-pub-xyz", "attributes": { "name": "Awesome Books Inc." } }
-     *   ]
+     *   queryParams: {
+     *     include: ['author', 'tags']  // Include related resources in response
+     *   }
      * });
-     * @see POST /api/articles
-     * // Example Return Value for compoundArticle:
+     * @see POST /api/articles?include=author,tags
+     * // Returns:
      * // {
      * //   "data": {
      * //     "type": "articles",
      * //     "id": "125",
-     * //     "attributes": { ... },
-     * //     "relationships": { ... }
+     * //     "attributes": {
+     * //       "title": "Tagged Article",
+     * //       "body": "Article with multiple tags"
+     * //     },
+     * //     "relationships": {
+     * //       "author": {
+     * //         "data": { "type": "people", "id": "42" }
+     * //       },
+     * //       "tags": {
+     * //         "data": [
+     * //           { "type": "tags", "id": "1" },
+     * //           { "type": "tags", "id": "2" },
+     * //           { "type": "tags", "id": "3" }
+     * //         ]
+     * //       }
+     * //     }
      * //   },
      * //   "included": [
-     * //     { "type": "people", "id": "11", ... },
-     * //     { "type": "people", "id": "12", ... },
-     * //     { "type": "publishers", "id": "55", ... }
+     * //     {
+     * //       "type": "people",
+     * //       "id": "42",
+     * //       "attributes": { "name": "John Doe", "email": "john@example.com" }
+     * //     },
+     * //     {
+     * //       "type": "tags",
+     * //       "id": "1",
+     * //       "attributes": { "name": "javascript", "slug": "javascript" }
+     * //     },
+     * //     {
+     * //       "type": "tags",
+     * //       "id": "2",
+     * //       "attributes": { "name": "api", "slug": "api" }
+     * //     },
+     * //     {
+     * //       "type": "tags",
+     * //       "id": "3",
+     * //       "attributes": { "name": "rest", "slug": "rest" }
+     * //     }
      * //   ]
      * // }
      *
      * @example
-     * // Case 4: Create a resource linking to both NEW and EXISTING resources (mixed).
-     * const mixedArticle = await api.post('articles', {
-     *   "data": {
-     *     "type": "articles",
-     *     "attributes": {
-     *       "title": "A New Member Joins the Team"
-     *     },
-     *     "relationships": {
-     *       "authors": {
-     *         "data": [
-     *           { "type": "people", "id": "9" },             // Existing author
-     *           { "type": "people", "id": "temp-author-3" }  // New author
-     *         ]
+     * // Case 4: Using transactions for atomic operations
+     * const trx = await api.knex.instance.transaction();
+     * try {
+     *   const author = await api.resources.people.post({
+     *     transaction: trx,
+     *     inputRecord: {
+     *       "data": {
+     *         "type": "people",
+     *         "attributes": { "name": "Jane Author" }
      *       }
      *     }
-     *   },
-     *   "included": [
-     *     { "type": "people", "id": "temp-author-3", "attributes": { "name": "Sam Smith" } }
-     *   ]
-     * });
-     * @see POST /api/articles
+     *   });
+     *   
+     *   const article = await api.resources.articles.post({
+     *     transaction: trx,
+     *     inputRecord: {
+     *       "data": {
+     *         "type": "articles",
+     *         "attributes": { "title": "Jane's First Article" },
+     *         "relationships": {
+     *           "author": {
+     *             "data": { "type": "people", "id": author.data.id }
+     *           }
+     *         }
+     *       }
+     *     }
+     *   });
+     *   
+     *   await trx.commit();
+     * } catch (error) {
+     *   await trx.rollback();
+     *   throw error;
+     * }
      */
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
