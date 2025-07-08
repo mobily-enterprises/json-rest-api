@@ -1437,7 +1437,6 @@ api.addResource('book_authors', {
       type: 'number',
       belongsTo: 'books',
       as: 'book',
-      sideLoad: true,
       sideSearch: true
     },
     author_id: {
@@ -1514,7 +1513,29 @@ api.addResource('people', {
 With the enhanced POST implementation, you can now create a book and establish many-to-many relationships in a single atomic request:
 
 ```javascript
-// First, define the many-to-many relationship in your resource
+// First, define the pivot table resource (with searchable fields for updates)
+api.addResource('book_tags', {
+  schema: {
+    id: { type: 'id' },
+    book_id: { type: 'number', required: true, search: true },
+    tag_id: { type: 'number', required: true, search: true }
+  }
+  // Note: You can also define these in a separate searchSchema instead:
+  // searchSchema: {
+  //   book_id: { type: 'number' },
+  //   tag_id: { type: 'number' }
+  // }
+});
+
+// Then define the tags resource
+api.addResource('tags', {
+  schema: {
+    id: { type: 'id' },
+    name: { type: 'string', required: true }
+  }
+});
+
+// Finally, define the books resource with the many-to-many relationship
 api.addResource('books', {
   schema: {
     id: { type: 'id' },
@@ -1523,11 +1544,10 @@ api.addResource('books', {
   },
   relationships: {
     tags: {
-      manyToMany: true,
+      hasMany: 'tags',
       through: 'book_tags',      // Pivot table resource
       foreignKey: 'book_id',     // Key for this resource
-      otherKey: 'tag_id',        // Key for related resource
-      validateExists: true       // Validate tags exist (default: true)
+      otherKey: 'tag_id'         // Key for related resource
     }
   }
 });
@@ -1685,9 +1705,8 @@ api.addResource('comments', {
       belongsTo: 'people',
       as: 'author',
       sideLoad: true
-    }
-  },
-  relationships: {
+    },
+    // Polymorphic relationship - defines both the relationship and the fields
     commentable: {
       belongsToPolymorphic: {
         types: ['books', 'articles'],
