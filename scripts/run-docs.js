@@ -22,8 +22,9 @@ const projectRoot = path.join(__dirname, '..');
 // Delay before opening browser (milliseconds)
 const BROWSER_DELAY = 3000;
 
-// Site URL
-const SITE_URL = 'http://localhost:4000/json-rest-api/';
+// Site URLs
+const LOCAL_URL = 'http://localhost:4000/json-rest-api/';
+const GITHUB_PAGES_URL = 'https://mobily-enterprises.github.io/json-rest-api/';
 
 async function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
@@ -99,7 +100,7 @@ async function main() {
             
             // Open browser when server is ready
             if (output.includes('Server running') || output.includes('Server address:')) {
-                setTimeout(() => openBrowser(SITE_URL), 1000);
+                setTimeout(() => openBrowser(LOCAL_URL), 1000);
             }
         });
         
@@ -127,7 +128,7 @@ async function main() {
         });
         
         // Wait a bit then try to open browser anyway (in case we missed the server ready message)
-        setTimeout(() => openBrowser(SITE_URL), BROWSER_DELAY);
+        setTimeout(() => openBrowser(LOCAL_URL), BROWSER_DELAY);
         
     } catch (error) {
         console.error('❌ Error:', error.message);

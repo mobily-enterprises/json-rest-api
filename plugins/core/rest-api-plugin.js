@@ -1142,6 +1142,10 @@ export const RestApiPlugin = {
         // Apply schema to the main attributes
         runHooks('beforeSchemaValidate')
         runHooks('beforeSchemaValidatePost')
+        
+        // Store original input attributes before validation adds defaults
+        context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) };
+        
         // Validate main resource attributes
         const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(context.inputRecord.data.attributes || {});
         if (Object.keys(mainErrors).length > 0) {
@@ -1267,16 +1271,17 @@ export const RestApiPlugin = {
             });
           }
         } else {
-          // Return minimal record (just what was created)
-          context.returnRecord = context.record;
+          // Return minimal record (just what was provided in original input, plus ID)
+          context.returnRecord = {
+            data: {
+              type: scopeName,
+              id: context.record.data.id,
+              attributes: { ...context.originalInputAttributes }
+            }
+          };
           
-          // Still enrich the attributes
-          if (context.returnRecord?.data?.attributes) {
-            context.returnRecord.data.attributes = await scope.enrichAttributes({
-              attributes: context.returnRecord.data.attributes, 
-              parentContext: context
-            });
-          }
+          // Don't enrich attributes when returning minimal record
+          // This ensures we only return exactly what was provided, no defaults
         }
         
         runHooks('finish')

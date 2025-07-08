@@ -105,7 +105,7 @@ describe('RestApiPlugin - Return Full Record & Strict ID Handling', () => {
       
       // Create table
       await knex.schema.createTable('articles', (table) => {
-        table.string('id').primary();
+        table.increments('id');
         table.string('title');
         table.string('body');
       });
@@ -167,7 +167,7 @@ describe('RestApiPlugin - Return Full Record & Strict ID Handling', () => {
       
       // Create tables
       await knex.schema.createTable('articles', (table) => {
-        table.string('id').primary();
+        table.increments('id');
         table.string('title');
         table.string('status');
       });
@@ -225,9 +225,9 @@ describe('RestApiPlugin - Return Full Record & Strict ID Handling', () => {
       
       // Create table
       await knex.schema.createTable('articles', (table) => {
-        table.string('id').primary();
+        table.increments('id');
         table.string('title');
-        table.string('status');
+        table.string('status').defaultTo('draft');
       });
       
       // Test POST with returnFullRecord: false
@@ -602,7 +602,7 @@ describe('RestApiPlugin - Return Full Record & Strict ID Handling', () => {
       assert.equal(putResult.data.attributes.title, 'Updated');
       
       // Verify the record was updated with correct ID
-      const record = await knex('articles').where('id', 'correct-id').first();
+      const record = await knex('articles').where('id', articleId).first();
       assert.equal(record.title, 'Updated');
     });
   });
@@ -699,7 +699,7 @@ describe('RestApiPlugin - Return Full Record & Strict ID Handling', () => {
       
       // Create tables
       await knex.schema.createTable('articles', (table) => {
-        table.string('id').primary();
+        table.increments('id');
         table.string('title');
         table.string('authorId');
       });
