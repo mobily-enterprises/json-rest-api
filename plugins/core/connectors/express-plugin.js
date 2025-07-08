@@ -303,6 +303,26 @@ export const ExpressPlugin = {
             if (['put', 'patch'].includes(methodName)) {
               params.queryParams = parseQueryParams(req);
             }
+            
+            // For POST, parse query params for includes/fields
+            if (methodName === 'post') {
+              params.queryParams = parseQueryParams(req);
+            }
+            
+            // Check for returnFullRecord query parameter
+            if (req.query.returnFullRecord !== undefined) {
+              // Check if remote override is allowed
+              const scopeConfig = api.scopes[scopeName]?.scopeOptions?.returnFullRecord;
+              const allowRemoteOverride = 
+                scopeConfig?.allowRemoteOverride !== undefined ? 
+                scopeConfig.allowRemoteOverride : 
+                vars.returnFullRecord.allowRemoteOverride;
+              
+              if (allowRemoteOverride) {
+                // Parse the boolean value
+                params.returnFullRecord = req.query.returnFullRecord === 'true';
+              }
+            }
           }
           
           // Store Express request/response temporarily in a WeakMap keyed by a unique request ID

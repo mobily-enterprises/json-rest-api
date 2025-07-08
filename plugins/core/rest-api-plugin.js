@@ -448,9 +448,10 @@ export const RestApiPlugin = {
     
     // Return full record configuration
     vars.returnFullRecord = {
-      post: restApiOptions.returnFullRecord?.post ?? false,
-      put: restApiOptions.returnFullRecord?.put ?? false,
-      patch: restApiOptions.returnFullRecord?.patch ?? false
+      post: restApiOptions.returnFullRecord?.post ?? true,
+      put: restApiOptions.returnFullRecord?.put ?? true,
+      patch: restApiOptions.returnFullRecord?.patch ?? true,
+      allowRemoteOverride: restApiOptions.returnFullRecord?.allowRemoteOverride ?? false
     };
 
     addScopeMethod('enrichAttributes', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
@@ -1234,28 +1235,48 @@ export const RestApiPlugin = {
           await trx.commit();
         }
         
-        // Always get the full record with relationships
-        // Use the API's own get method to ensure all hooks and transformations are applied
-        context.returnRecord = await api.resources[scopeName].get({
-          id: context.record.data.id,
-          queryParams: params.queryParams,
-          transaction: existingTrx // Use original transaction for read
-        });
+        // Determine if we should return the full record
+        const shouldReturnFullRecord = 
+          params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
+          scopeOptions.returnFullRecord?.post !== undefined ? 
+            scopeOptions.returnFullRecord.post :                             // Resource config
+          vars.returnFullRecord.post;                                        // API default
         
-        // Enrich the return record's attributes
-        if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await scope.enrichAttributes({
-            attributes: context.returnRecord.data.attributes, 
-            parentContext: context
+        if (shouldReturnFullRecord) {
+          // Get the full record with relationships
+          // Use the API's own get method to ensure all hooks and transformations are applied
+          context.returnRecord = await api.resources[scopeName].get({
+            id: context.record.data.id,
+            queryParams: params.queryParams,
+            transaction: existingTrx // Use original transaction for read
           });
-        }
-        
-        // Enrich included resources if any
-        for (const entry of (context.returnRecord?.included || [])) {
-          entry.attributes = await scopes[entry.type].enrichAttributes({
-            attributes: entry.attributes, 
-            parentContext: context
-          });
+          
+          // Enrich the return record's attributes
+          if (context.returnRecord?.data?.attributes) {
+            context.returnRecord.data.attributes = await scope.enrichAttributes({
+              attributes: context.returnRecord.data.attributes, 
+              parentContext: context
+            });
+          }
+          
+          // Enrich included resources if any
+          for (const entry of (context.returnRecord?.included || [])) {
+            entry.attributes = await scopes[entry.type].enrichAttributes({
+              attributes: entry.attributes, 
+              parentContext: context
+            });
+          }
+        } else {
+          // Return minimal record (just what was created)
+          context.returnRecord = context.record;
+          
+          // Still enrich the attributes
+          if (context.returnRecord?.data?.attributes) {
+            context.returnRecord.data.attributes = await scope.enrichAttributes({
+              attributes: context.returnRecord.data.attributes, 
+              parentContext: context
+            });
+          }
         }
         
         runHooks('finish')
@@ -1476,11 +1497,21 @@ export const RestApiPlugin = {
     context.inputRecord = params.inputRecord
     context.queryParams = params.queryParams
     
+    // Check strictIdHandling (default true for backward compatibility)
+    const strictIdHandling = params.strictIdHandling !== false;
+    
     // Extract ID from request body as per JSON:API spec
     context.id = params.inputRecord.data.id
     
-    // If both URL path ID and request body ID are provided, they must match
-    if (params.id && params.id !== context.id) {
+    // Handle ID based on strictIdHandling setting
+    if (!strictIdHandling && !context.id) {
+      // In relaxed mode, use the URL parameter ID if body ID is missing
+      context.id = params.id;
+      params.inputRecord.data.id = params.id;
+    }
+    
+    // If both URL path ID and request body ID are provided, they must match (in strict mode)
+    if (strictIdHandling && params.id && params.id !== context.id) {
       throw new RestApiValidationError(
         `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
         { 
@@ -1492,6 +1523,10 @@ export const RestApiPlugin = {
           }] 
         }
       );
+    } else if (!strictIdHandling && params.id && context.id && params.id !== context.id) {
+      // In relaxed mode, URL parameter takes precedence
+      context.id = params.id;
+      params.inputRecord.data.id = params.id;
     }
 
     // Validate - PUT cannot have included
@@ -1712,28 +1747,59 @@ export const RestApiPlugin = {
       runHooks(`checkDataPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
     }
 
-    // Always get the full record after all updates are complete
-    // The storage layer now only returns success status, not the full record
-    context.returnRecord = await api.resources[scopeName].get({
-      id: context.id,
-      queryParams: params.queryParams,
-      transaction: existingTrx  // Use original transaction for read
-    });
+    // Determine if we should return the full record
+    const shouldReturnFullRecord = 
+      params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
+      scopeOptions.returnFullRecord?.put !== undefined ? 
+        scopeOptions.returnFullRecord.put :                              // Resource config
+      vars.returnFullRecord.put;                                         // API default
     
-    // Enrich the return record's attributes
-    if (context.returnRecord?.data?.attributes) {
-      context.returnRecord.data.attributes = await scope.enrichAttributes({
-        attributes: context.returnRecord.data.attributes, 
-        parentContext: context
+    if (shouldReturnFullRecord) {
+      // Get the full record after all updates are complete
+      // The storage layer now only returns success status, not the full record
+      context.returnRecord = await api.resources[scopeName].get({
+        id: context.id,
+        queryParams: params.queryParams,
+        transaction: existingTrx  // Use original transaction for read
       });
-    }
-    
-    // Enrich included resources if any
-    for (const entry of (context.returnRecord?.included || [])) {
-      entry.attributes = await scopes[entry.type].enrichAttributes({
-        attributes: entry.attributes, 
-        parentContext: context
-      });
+      
+      // Enrich the return record's attributes
+      if (context.returnRecord?.data?.attributes) {
+        context.returnRecord.data.attributes = await scope.enrichAttributes({
+          attributes: context.returnRecord.data.attributes, 
+          parentContext: context
+        });
+      }
+      
+      // Enrich included resources if any
+      for (const entry of (context.returnRecord?.included || [])) {
+        entry.attributes = await scopes[entry.type].enrichAttributes({
+          attributes: entry.attributes, 
+          parentContext: context
+        });
+      }
+    } else {
+      // Return minimal record - just the updated data
+      context.returnRecord = {
+        data: {
+          type: scopeName,
+          id: context.id,
+          attributes: context.finalAttributes || params.inputRecord.data.attributes
+        }
+      };
+      
+      // Add relationships if they were in the input
+      if (params.inputRecord.data.relationships) {
+        context.returnRecord.data.relationships = params.inputRecord.data.relationships;
+      }
+      
+      // Still enrich the attributes
+      if (context.returnRecord?.data?.attributes) {
+        context.returnRecord.data.attributes = await scope.enrichAttributes({
+          attributes: context.returnRecord.data.attributes, 
+          parentContext: context
+        });
+      }
     }
 
     runHooks('finish')
@@ -1933,11 +1999,21 @@ export const RestApiPlugin = {
       context.inputRecord = params.inputRecord
       context.queryParams = params.queryParams
       
+      // Check strictIdHandling (default true for backward compatibility)
+      const strictIdHandling = params.strictIdHandling !== false;
+      
       // Extract ID from request body as per JSON:API spec
       context.id = params.inputRecord.data.id
       
-      // If both URL path ID and request body ID are provided, they must match
-      if (params.id && params.id !== context.id) {
+      // Handle ID based on strictIdHandling setting
+      if (!strictIdHandling && !context.id) {
+        // In relaxed mode, use the URL parameter ID if body ID is missing
+        context.id = params.id;
+        params.inputRecord.data.id = params.id;
+      }
+      
+      // If both URL path ID and request body ID are provided, they must match (in strict mode)
+      if (strictIdHandling && params.id && params.id !== context.id) {
         throw new RestApiValidationError(
           `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
           { 
@@ -1949,6 +2025,10 @@ export const RestApiPlugin = {
             }] 
           }
         );
+      } else if (!strictIdHandling && params.id && context.id && params.id !== context.id) {
+        // In relaxed mode, URL parameter takes precedence
+        context.id = params.id;
+        params.inputRecord.data.id = params.id;
       }
 
       // Validate - PATCH cannot have included
@@ -2075,13 +2155,33 @@ export const RestApiPlugin = {
         await updateManyToManyRelationship(context.id, relDef, relData, trx);
       }
       
-      // Always get the full record after all updates are complete
-      // This ensures includes see the updated state after all operations
-      context.returnRecord = await api.resources[scopeName].get({
-        id: context.id,
-        queryParams: params.queryParams,
-        transaction: trx  // Use active transaction for read
-      });
+      // Determine if we should return the full record
+      const shouldReturnFullRecord = 
+        params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
+        scopeOptions.returnFullRecord?.patch !== undefined ? 
+          scopeOptions.returnFullRecord.patch :                            // Resource config
+        vars.returnFullRecord.patch;                                       // API default
+      
+      if (shouldReturnFullRecord) {
+        // Get the full record after all updates are complete
+        // This ensures includes see the updated state after all operations
+        context.returnRecord = await api.resources[scopeName].get({
+          id: context.id,
+          queryParams: params.queryParams,
+          transaction: trx  // Use active transaction for read
+        });
+      } else {
+        // Return minimal record - use the record returned from dataPatch
+        context.returnRecord = context.record;
+        
+        // Still enrich the attributes if present
+        if (context.returnRecord?.data?.attributes) {
+          context.returnRecord.data.attributes = await scope.enrichAttributes({
+            attributes: context.returnRecord.data.attributes, 
+            parentContext: context
+          });
+        }
+      }
 
       // Commit transaction if we created it
       if (shouldCommit) {
@@ -2091,20 +2191,23 @@ export const RestApiPlugin = {
       runHooks('checkDataPermissions')
       runHooks('checkDataPermissionsPatch')
       
-      // Enrich the return record's attributes
-      if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context
-        });
-      }
-      
-      // Enrich included resources if any
-      for (const entry of (context.returnRecord?.included || [])) {
-        entry.attributes = await scopes[entry.type].enrichAttributes({
-          attributes: entry.attributes, 
-          parentContext: context
-        });
+      // Enrich included resources if any (only if we fetched full record)
+      if (shouldReturnFullRecord) {
+        // Enrich the return record's attributes
+        if (context.returnRecord?.data?.attributes) {
+          context.returnRecord.data.attributes = await scope.enrichAttributes({
+            attributes: context.returnRecord.data.attributes, 
+            parentContext: context
+          });
+        }
+        
+        // Enrich included resources
+        for (const entry of (context.returnRecord?.included || [])) {
+          entry.attributes = await scopes[entry.type].enrichAttributes({
+            attributes: entry.attributes, 
+            parentContext: context
+          });
+        }
       }
 
       runHooks('finish')

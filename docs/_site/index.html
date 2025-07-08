@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Build REST APIs in Minutes, Not Days - JSON REST API</title>
+  <meta name="description" content="A lightweight, plugin-based REST API framework for Node.js">
+  <link rel="icon" type="image/svg+xml" href="/json-rest-api/favicon.svg">
+  <link rel="apple-touch-icon" href="/json-rest-api/apple-touch-icon.svg">
+  <link rel="stylesheet" href="/json-rest-api/assets/css/style.css">
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Build REST APIs in Minutes, Not Days | JSON REST API</title>
+<meta name="generator" content="Jekyll v3.9.5" />
+<meta property="og:title" content="Build REST APIs in Minutes, Not Days" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="A lightweight, plugin-based REST API framework for Node.js" />
+<meta property="og:description" content="A lightweight, plugin-based REST API framework for Node.js" />
+<link rel="canonical" href="http://localhost:4000/json-rest-api/" />
+<meta property="og:url" content="http://localhost:4000/json-rest-api/" />
+<meta property="og:site_name" content="JSON REST API" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Build REST APIs in Minutes, Not Days" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","description":"A lightweight, plugin-based REST API framework for Node.js","headline":"Build REST APIs in Minutes, Not Days","name":"JSON REST API","url":"http://localhost:4000/json-rest-api/"}</script>
+<!-- End Jekyll SEO tag -->
+
+  <style>
+    .highlight {
+      position: relative;
+    }
+    pre {
+      position: relative;
+    }
+    .copy-button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #333;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .copy-button:hover {
+      background: rgba(255, 255, 255, 1);
+      border-color: rgba(0, 0, 0, 0.2);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .copy-button:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+    .copy-button.copied {
+      background: #10b981;
+      color: white;
+      border-color: #10b981;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrapper">
+      <h1><a href="/json-rest-api/">JSON REST API</a></h1>
+      <nav>
+        <a href="/json-rest-api/QUICKSTART">Quick Start</a>
+        <a href="/json-rest-api/GUIDE">Guide</a>
+        <a href="/json-rest-api/API">API Reference</a>
+        <a href="/json-rest-api/ONBOARDING">Contribute</a>
+        <a href="/json-rest-api/COMPARISON">Why json-rest-api</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-content">
+      <h1 id="build-rest-apis-in-minutes-not-days">Build REST APIs in Minutes, Not Days</h1>
+
+<p>JSON REST API is a lightweight, plugin-based framework that makes building REST APIs incredibly simple. With automatic validation, smart relationships, and native JSON:API support, you can focus on your business logic instead of boilerplate.</p>
+
+<div style="display: flex; gap: 24px; margin: 32px 0; align-items: flex-start;">
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <a href="/json-rest-api/QUICKSTART" class="button">Get Started</a>
+    <a href="/json-rest-api/GUIDE" class="button secondary">Read the Guide</a>
+  </div>
+  
+  <div style="background: #f8f9fa; border-radius: 8px; padding: 16px 20px; font-style: italic; color: #555; flex: 1; margin-left: 24px;">
+    A heartfelt thank you to Dario and Daniela Amodei and the entire Anthropic team for creating transformative AI technology that opens endless possibilities for developers worldwide. Your vision, combined with incredibly accessible pricing, has democratized access to cutting-edge AI and empowered countless innovators to build the future. (No, we weren't asked nor paid in any way for this message - we're just genuinely grateful!)
+  </div>
+</div>
+
+<h2 id="why-json-rest-api">Why JSON REST API?</h2>
+
+<div class="feature-grid">
+  <div class="feature-card">
+    <h3>🚀 Zero Configuration</h3>
+    <p>Get a fully functional API running in under 5 minutes. No complex setup or configuration files needed.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🔌 Plugin Architecture</h3>
+    <p>Extend your API with powerful plugins. Authentication, validation, CORS, and more - just plug and play.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🔗 Smart Relationships</h3>
+    <p>Define relationships once and get automatic joins, nested queries, and eager loading out of the box.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>✅ Built-in Validation</h3>
+    <p>Schema-based validation ensures your data is always clean. No more manual validation code.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>📦 Multiple Storage Options</h3>
+    <p>Start with in-memory storage for development, switch to MySQL for production. Same API, no code changes.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🎯 JSON:API Compliant</h3>
+    <p>Follow industry standards with native JSON:API support. Compatible with any JSON:API client library.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🌐 Microservices Ready</h3>
+    <p>Build distributed systems with native microservices support. Multiple transports, service discovery, and more.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🎭 CQRS Support</h3>
+    <p>Implement Command Query Responsibility Segregation with event sourcing, projections, and sagas.</p>
+  </div>
+  
+  <div class="feature-card">
+    <h3>🔄 API Gateway</h3>
+    <p>Transform into an API gateway to orchestrate external services with circuit breakers and saga support.</p>
+  </div>
+</div>
+
+<h2 id="quick-example">Quick Example</h2>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span> <span class="p">{</span> <span class="nx">createApi</span><span class="p">,</span> <span class="nx">Schema</span> <span class="p">}</span> <span class="k">from</span> <span class="dl">'</span><span class="s1">json-rest-api</span><span class="dl">'</span>
+<span class="k">import</span> <span class="nx">express</span> <span class="k">from</span> <span class="dl">'</span><span class="s1">express</span><span class="dl">'</span>
+
+<span class="kd">const</span> <span class="nx">app</span> <span class="o">=</span> <span class="nx">express</span><span class="p">()</span>
+<span class="kd">const</span> <span class="nx">api</span> <span class="o">=</span> <span class="nx">createApi</span><span class="p">({</span> 
+  <span class="na">storage</span><span class="p">:</span> <span class="dl">'</span><span class="s1">memory</span><span class="dl">'</span><span class="p">,</span>
+  <span class="na">http</span><span class="p">:</span> <span class="p">{</span> <span class="nx">app</span> <span class="p">}</span>
+<span class="p">})</span>
+
+<span class="nx">api</span><span class="p">.</span><span class="nx">addResource</span><span class="p">(</span><span class="dl">'</span><span class="s1">users</span><span class="dl">'</span><span class="p">,</span> <span class="k">new</span> <span class="nx">Schema</span><span class="p">({</span>
+  <span class="na">name</span><span class="p">:</span> <span class="p">{</span> <span class="na">type</span><span class="p">:</span> <span class="dl">'</span><span class="s1">string</span><span class="dl">'</span><span class="p">,</span> <span class="na">required</span><span class="p">:</span> <span class="kc">true</span> <span class="p">},</span>
+  <span class="na">email</span><span class="p">:</span> <span class="p">{</span> <span class="na">type</span><span class="p">:</span> <span class="dl">'</span><span class="s1">string</span><span class="dl">'</span><span class="p">,</span> <span class="na">format</span><span class="p">:</span> <span class="dl">'</span><span class="s1">email</span><span class="dl">'</span> <span class="p">},</span>
+  <span class="na">age</span><span class="p">:</span> <span class="p">{</span> <span class="na">type</span><span class="p">:</span> <span class="dl">'</span><span class="s1">number</span><span class="dl">'</span><span class="p">,</span> <span class="na">min</span><span class="p">:</span> <span class="mi">0</span> <span class="p">}</span>
+<span class="p">}))</span>
+
+<span class="nx">app</span><span class="p">.</span><span class="nx">listen</span><span class="p">(</span><span class="mi">3000</span><span class="p">,</span> <span class="p">()</span> <span class="o">=&gt;</span> <span class="p">{</span>
+  <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">API running at http://localhost:3000/api/users</span><span class="dl">'</span><span class="p">)</span>
+<span class="p">})</span>
+</code></pre></div></div>
+
+<p>That’s it! You now have a fully functional REST API with:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">GET /api/users</code> - List all users</li>
+  <li><code class="language-plaintext highlighter-rouge">GET /api/users/:id</code> - Get a specific user</li>
+  <li><code class="language-plaintext highlighter-rouge">POST /api/users</code> - Create a new user</li>
+  <li><code class="language-plaintext highlighter-rouge">PATCH /api/users/:id</code> - Update a user</li>
+  <li><code class="language-plaintext highlighter-rouge">DELETE /api/users/:id</code> - Delete a user</li>
+</ul>
+
+<h2 id="try-it-out">Try It Out</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Create a user</span>
+curl <span class="nt">-X</span> POST http://localhost:3000/api/users <span class="se">\</span>
+  <span class="nt">-H</span> <span class="s2">"Content-Type: application/json"</span> <span class="se">\</span>
+  <span class="nt">-d</span> <span class="s1">'{"data":{"attributes":{"name":"Alice","email":"alice@example.com","age":28}}}'</span>
+
+<span class="c"># List all users</span>
+curl http://localhost:3000/api/users
+
+<span class="c"># Get a specific user</span>
+curl http://localhost:3000/api/users/1
+
+<span class="c"># Update a user</span>
+curl <span class="nt">-X</span> PATCH http://localhost:3000/api/users/1 <span class="se">\</span>
+  <span class="nt">-H</span> <span class="s2">"Content-Type: application/json"</span> <span class="se">\</span>
+  <span class="nt">-d</span> <span class="s1">'{"data":{"attributes":{"age":29}}}'</span>
+
+<span class="c"># Delete a user</span>
+curl <span class="nt">-X</span> DELETE http://localhost:3000/api/users/1
+</code></pre></div></div>
+
+<h2 id="ready-to-start">Ready to Start?</h2>
+
+<div style="margin: 32px 0;">
+  <a href="/json-rest-api/QUICKSTART" class="button">Get Started in 5 Minutes →</a>
+</div>
+
+<h2 id="installation">Installation</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm <span class="nb">install </span>json-rest-api
+</code></pre></div></div>
+
+<h2 id="learn-more">Learn More</h2>
+
+<ul>
+  <li><a href="/json-rest-api/GUIDE">Complete Guide</a> - Everything you need to know</li>
+  <li><a href="/json-rest-api/API">API Reference</a> - Detailed API documentation</li>
+  <li><a href="/json-rest-api/ONBOARDING">Tutorial</a> - Step-by-step walkthrough</li>
+  <li><a href="https://github.com/mobily-enterprises/json-rest-api">GitHub</a> - Source code and issues</li>
+</ul>
+
+<h3 id="advanced-topics">Advanced Topics</h3>
+
+<ul>
+  <li><a href="/json-rest-api/GUIDE_8_API_Gateway">API Gateway</a> - Orchestrate external services</li>
+  <li><a href="/json-rest-api/GUIDE_9_CLI_Interface">CLI Interface</a> - Command-line interface for your API</li>
+</ul>
+
+<h3 id="enterprise-features">Enterprise Features</h3>
+
+<ul>
+  <li><a href="/json-rest-api/enterprise/ENTERPRISE_GUIDE">Enterprise Guide</a> - Complete guide for enterprise teams</li>
+  <li><a href="/json-rest-api/enterprise/GUIDE_8_Microservices">Microservices Architecture</a> - Build distributed systems</li>
+  <li><a href="/json-rest-api/enterprise/GUIDE_9_CQRS">CQRS Pattern</a> - Command Query Responsibility Segregation</li>
+  <li><a href="/json-rest-api/enterprise/GUIDE_11_Domain_Driven_Design">Domain-Driven Design</a> - DDD patterns and implementation</li>
+</ul>
+
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrapper">
+      <p>JSON REST API &copy; 2025 - MIT License</p>
+    </div>
+  </footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Add copy buttons to all code blocks
+      document.querySelectorAll('pre').forEach(function(pre) {
+        // Skip if button already exists
+        if (pre.querySelector('.copy-button')) return;
+        
+        const button = document.createElement('button');
+        button.className = 'copy-button';
+        button.textContent = 'Copy';
+        button.addEventListener('click', function() {
+          const code = pre.querySelector('code') ? 
+            pre.querySelector('code').textContent : 
+            pre.textContent;
+          
+          navigator.clipboard.writeText(code).then(function() {
+            button.textContent = '✓ Copied!';
+            button.classList.add('copied');
+            setTimeout(() => {
+              button.textContent = 'Copy';
+              button.classList.remove('copied');
+            }, 2000);
+          }).catch(function() {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = code;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            
+            button.textContent = '✓ Copied!';
+            button.classList.add('copied');
+            setTimeout(() => {
+              button.textContent = 'Copy';
+              button.classList.remove('copied');
+            }, 2000);
+          });
+        });
+        pre.appendChild(button);
+      });
+    });
+  </script>
+</body>
+</html>

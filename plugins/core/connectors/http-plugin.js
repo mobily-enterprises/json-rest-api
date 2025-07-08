@@ -380,6 +380,22 @@ export const HttpPlugin = {
             }));
             return;
           }
+          
+          // Check for returnFullRecord query parameter
+          const url = parseUrl(req.url, true);
+          if (url.query.returnFullRecord !== undefined) {
+            // Check if remote override is allowed
+            const scopeConfig = api.scopes[scopeName]?.scopeOptions?.returnFullRecord;
+            const allowRemoteOverride = 
+              scopeConfig?.allowRemoteOverride !== undefined ? 
+              scopeConfig.allowRemoteOverride : 
+              vars.returnFullRecord.allowRemoteOverride;
+            
+            if (allowRemoteOverride) {
+              // Parse the boolean value
+              params.returnFullRecord = url.query.returnFullRecord === 'true';
+            }
+          }
         }
         
         // Store HTTP request/response temporarily in a WeakMap keyed by a unique request ID

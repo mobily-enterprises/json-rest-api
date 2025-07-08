@@ -1,0 +1,36 @@
+title: JSON REST API
+description: A lightweight, plugin-based REST API framework for Node.js
+baseurl: "/json-rest-api"
+url: "https://mobily-enterprises.github.io"
+
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: true
+
+include:
+  - README.md
+
+exclude:
+  - vendor/
+  - Gemfile
+  - Gemfile.lock
+
+highlighter: rouge
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"

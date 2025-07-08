@@ -4,7 +4,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "docs:dev": "cd docs && bundle exec jekyll serve",
+    "docs:sync": "node scripts/sync-docs.js",
+    "docs": "node scripts/run-docs.js"
   },
   "repository": {
     "type": "git",

@@ -1807,8 +1807,14 @@ export const RestApiKnexPlugin = {
           .update(finalAttributes);
       }
       
-      // Storage layer should only perform the operation, not build responses
-      return { success: true };
+      // Fetch and return the updated record
+      const updatedRecord = await db(tableName)
+        .where(idProperty, id)
+        .first();
+      
+      return {
+        data: await toJsonApi(scopeName, updatedRecord, schema)
+      };
     };
     
     /**
