@@ -52,7 +52,24 @@ async function syncDocs() {
         // Copy each file that exists
         for (const file of allFiles) {
             const source = path.join(projectRoot, file);
-            const dest = path.join(docsDir, file);
+            let dest = path.join(docsDir, file);
+            
+            // Special case: README.md becomes GUIDE.md
+            if (file === 'README.md') {
+                dest = path.join(docsDir, 'GUIDE.md');
+                try {
+                    await fs.access(source);
+                    console.log(`📄 Copying README.md as GUIDE.md...`);
+                    await fs.copyFile(source, dest);
+                    
+                    // Also copy as README.md for GitHub
+                    console.log(`📄 Copying README.md...`);
+                    await fs.copyFile(source, path.join(docsDir, 'README.md'));
+                } catch (err) {
+                    console.log(`⚠️  Skipping README.md (not found)`);
+                }
+                continue;
+            }
             
             try {
                 await fs.access(source);

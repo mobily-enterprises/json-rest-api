@@ -160,10 +160,13 @@ console.log('API running at http://localhost:3000/api');
 
 1. [Getting Started](#getting-started)
 2. [Basic REST API Plugin](#basic-rest-api-plugin)
-3. [Connector Plugins](#connector-plugins)
+3. [Response Control and ID Handling](#response-control-and-id-handling)
+   - [Return Full Record Configuration](#return-full-record-configuration)
+   - [Strict ID Handling](#strict-id-handling)
+4. [Connector Plugins](#connector-plugins)
    - [Express Plugin](#express-plugin)
    - [HTTP Plugin](#http-plugin)
-4. [File Storage](#file-storage)
+5. [File Storage](#file-storage)
    - [File Uploads with Express](#file-uploads-with-express)
    - [Storage Adapters](#storage-adapters)
 
@@ -291,6 +294,283 @@ const patchedBook = await api.resources.books.patch({
 // Delete a book
 await api.resources.books.delete({ id: '1' });
 ```
+
+## Response Control and ID Handling
+
+The REST API plugin provides advanced configuration options for controlling response payloads and ID validation behavior.
+
+### Return Full Record Configuration
+
+By default, POST, PUT, and PATCH operations return the complete record including all fields, defaults, and relationships. You can configure this behavior to return minimal responses containing only the data that was sent in the request.
+
+#### Configuration Levels
+
+The `returnFullRecord` option can be configured at three levels (from lowest to highest priority):
+
+1. **API-level** (default for all resources)
+2. **Resource-level** (override for specific resources)
+3. **Method parameter** (override for individual calls)
+
+#### Basic Configuration
+
+```javascript
+// API-level configuration
+await api.use(RestApiPlugin, {
+  returnFullRecord: {
+    post: false,   // Don't return full record for POST
+    put: false,    // Don't return full record for PUT
+    patch: false,  // Don't return full record for PATCH
+    allowRemoteOverride: true  // Allow clients to override via query param
+  }
+});
+
+// Resource-level override
+api.addResource('articles', {
+  schema: {
+    title: { type: 'string', required: true },
+    body: { type: 'string' },
+    status: { type: 'string', default: 'draft' }
+  },
+  returnFullRecord: {
+    post: true,  // Always return full record for articles POST
+    allowRemoteOverride: false  // Don't allow client override for articles
+  }
+});
+
+// Method-level override
+const result = await api.resources.articles.post({
+  inputRecord: { 
+    data: { 
+      type: 'articles', 
+      attributes: { title: 'New Article' } 
+    } 
+  },
+  returnFullRecord: false  // Override for this specific call
+});
+```
+
+#### Behavior Differences
+
+**Full Record (default, `returnFullRecord: true`):**
+- Returns the complete record after creation/update
+- Includes all fields with their current database values
+- Includes default values applied by schema or database
+- Can include relationships if requested via `include` parameter
+- Equivalent to performing a GET request after the operation
+
+**Minimal Record (`returnFullRecord: false`):**
+- Returns only the fields that were provided in the request
+- Includes the generated/updated ID
+- Does not include default values or unchanged fields
+- More efficient for large records or when defaults aren't needed
+- Useful for bandwidth-constrained environments
+
+#### Example Responses
+
+```javascript
+// Input
+const input = {
+  data: {
+    type: 'articles',
+    attributes: {
+      title: 'My Article'
+    }
+  }
+};
+
+// With returnFullRecord: true (default)
+{
+  "data": {
+    "type": "articles",
+    "id": "123",
+    "attributes": {
+      "title": "My Article",
+      "status": "draft",      // Default value included
+      "createdAt": "2024-01-01T00:00:00Z",  // Database-generated
+      "updatedAt": "2024-01-01T00:00:00Z"   // Database-generated
+    }
+  }
+}
+
+// With returnFullRecord: false
+{
+  "data": {
+    "type": "articles", 
+    "id": "123",
+    "attributes": {
+      "title": "My Article"   // Only what was provided
+    }
+  }
+}
+```
+
+#### Remote Override via Query Parameters
+
+When `allowRemoteOverride` is enabled, clients can control the response format using query parameters:
+
+```bash
+# Request minimal response
+POST /api/articles?returnFullRecord=false
+
+# Request full response (when API default is false)
+POST /api/articles?returnFullRecord=true
+```
+
+### Strict ID Handling
+
+By default, PUT and PATCH operations validate that the ID in the URL matches the ID in the request body (if provided). The `strictIdHandling` option allows you to relax this validation.
+
+#### Configuration
+
+```javascript
+// Programmatic usage - relaxed ID handling
+await api.resources.articles.put({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      // ID can be omitted or different when strictIdHandling: false
+      attributes: { 
+        title: 'Updated Title' 
+      }
+    }
+  },
+  strictIdHandling: false  // Default is true
+});
+
+// With strict handling (default)
+await api.resources.articles.put({
+  id: '123',
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '123',  // Must match URL parameter
+      attributes: { 
+        title: 'Updated Title' 
+      }
+    }
+  }
+});
+```
+
+#### Behavior
+
+**Strict ID Handling (`strictIdHandling: true`, default):**
+- ID in request body must match ID in URL (for PUT/PATCH)
+- Throws validation error if IDs don't match
+- Follows standard JSON:API specification
+- Recommended for public APIs
+
+**Relaxed ID Handling (`strictIdHandling: false`):**
+- ID in request body is optional
+- If both URL and body have IDs, URL parameter takes precedence
+- Body ID is ignored if it differs from URL
+- Useful for internal APIs or migration scenarios
+
+#### Network vs Programmatic Usage
+
+The HTTP and Express connector plugins automatically set `strictIdHandling: true` for all network requests to ensure security and compliance with JSON:API specification. When using the API programmatically, it defaults to `false` for convenience.
+
+### Complete Example
+
+Here's a complete example demonstrating both features:
+
+```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, ExpressPlugin, RestApiKnexPlugin } from 'json-rest-api';
+import express from 'express';
+
+const api = new Api({ name: 'my-api' });
+
+// Configure REST API with custom settings
+await api.use(RestApiPlugin, {
+  returnFullRecord: {
+    post: false,
+    put: false,
+    patch: true,  // Only PATCH returns full record by default
+    allowRemoteOverride: true
+  }
+});
+
+// Add Express connector
+await api.use(ExpressPlugin, { basePath: '/api' });
+
+// Add your database plugin
+await api.use(RestApiKnexPlugin, { /* your config */ });
+
+// Define resources with overrides
+api.addResource('users', {
+  schema: {
+    name: { type: 'string', required: true },
+    email: { type: 'string', required: true },
+    role: { type: 'string', default: 'user' },
+    createdAt: { type: 'string', default: () => new Date().toISOString() }
+  },
+  // Users always return full record for audit purposes
+  returnFullRecord: {
+    post: true,
+    put: true,
+    patch: true,
+    allowRemoteOverride: false  // Don't allow clients to change this
+  }
+});
+
+api.addResource('posts', {
+  schema: {
+    title: { type: 'string', required: true },
+    content: { type: 'string' },
+    status: { type: 'string', default: 'draft' }
+  }
+  // Uses API defaults (minimal response)
+});
+
+// Start server
+const app = express();
+app.use(api.expressRouter);
+app.listen(3000);
+
+// Client examples:
+
+// 1. Create post with minimal response (API default)
+// POST /api/posts
+// Returns: { "data": { "type": "posts", "id": "1", "attributes": { "title": "Hello" } } }
+
+// 2. Create post with full response (query override)  
+// POST /api/posts?returnFullRecord=true
+// Returns: { "data": { "type": "posts", "id": "1", "attributes": { "title": "Hello", "status": "draft" } } }
+
+// 3. Create user (always returns full record)
+// POST /api/users?returnFullRecord=false  // Ignored due to allowRemoteOverride: false
+// Returns: { "data": { "type": "users", "id": "2", "attributes": { "name": "John", "email": "john@example.com", "role": "user", "createdAt": "2024-01-01T00:00:00Z" } } }
+
+// 4. Update with relaxed ID handling (programmatic)
+await api.resources.posts.patch({
+  id: '1',
+  inputRecord: { 
+    data: { 
+      type: 'posts',
+      // No ID required in body
+      attributes: { status: 'published' } 
+    } 
+  },
+  strictIdHandling: false,
+  returnFullRecord: false  // Override to get minimal response
+});
+```
+
+### Use Cases
+
+**When to use minimal responses (`returnFullRecord: false`):**
+- High-volume APIs where bandwidth is a concern
+- When clients already have the full record and only need confirmation
+- Mobile applications with limited data plans
+- When default values are computed client-side
+
+**When to use relaxed ID handling (`strictIdHandling: false`):**
+- Internal microservice communication
+- Data migration or synchronization scripts  
+- Legacy system integration
+- Bulk update operations where IDs are in the URL path
 
 The connector plugins allow you to expose the API in several ways. The core plugins expose the API to Express or to pure Node.
 
