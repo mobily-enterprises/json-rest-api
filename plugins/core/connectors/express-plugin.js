@@ -111,7 +111,7 @@ export const ExpressPlugin = {
     const routesCreated = new Set();
     
     // Register file detector if file handling is enabled
-    if (expressOptions.enableFileUploads !== false && vars.rest?.registerFileDetector) {
+    if (expressOptions.enableFileUploads !== false && api.rest?.registerFileDetector) {
       // Determine which parser to use
       const parserLib = expressOptions.fileParser || 'busboy';
       const parserOptions = expressOptions.fileParserOptions || {};
@@ -139,7 +139,7 @@ export const ExpressPlugin = {
       
       // Register the detector
       if (detector) {
-        vars.rest.registerFileDetector({
+        api.rest.registerFileDetector({
           name: `express-${detector.name}`,
           detect: (params, context) => {
             // Only detect for Express requests

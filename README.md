@@ -1,6 +1,160 @@
 # JSON REST API Tutorial
 
-This tutorial will guide you through building a REST API using the `jsonrestapi` package and `hooked-api`. We'll start with the basics and gradually add more features.
+This tutorial will guide you through building a REST API using `jsonrestapi`. We'll start with the basics and gradually add more features.
+
+## Quick Start
+
+Here's a complete working example to get you started:
+
+```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, HttpPlugin, FileHandlingPlugin } from 'json-rest-api';
+
+// Create API
+const api = new Api({ name: 'my-api' });
+
+// Create a reusable in-memory storage plugin
+// (In production, you'd use RestApiKnexPlugin or another database plugin)
+const inMemoryStoragePlugin = {
+  name: 'in-memory-storage',
+  install({ helpers }) {
+    const storage = new Map();
+    
+    // Seed with some initial data
+    storage.set('books', [
+      { id: '1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', year: 1925 },
+      { id: '2', title: '1984', author: 'George Orwell', year: 1949 },
+      { id: '3', title: 'To Kill a Mockingbird', author: 'Harper Lee', year: 1960 }
+    ]);
+
+    helpers.dataQuery = async ({ scopeName }) => {
+      const records = storage.get(scopeName) || [];
+      return { 
+        data: records.map(record => ({
+          type: scopeName,
+          id: record.id,
+          attributes: record
+        }))
+      };
+    };
+
+    helpers.dataGet = async ({ scopeName, id }) => {
+      const records = storage.get(scopeName) || [];
+      const record = records.find(r => r.id === id);
+      
+      if (!record) {
+        return { data: null };
+      }
+      
+      return {
+        data: {
+          type: scopeName,
+          id: record.id,
+          attributes: record
+        }
+      };
+    };
+
+    helpers.dataPost = async ({ scopeName, inputRecord }) => {
+      const records = storage.get(scopeName) || [];
+      const newRecord = {
+        id: Date.now().toString(),
+        ...inputRecord.data.attributes
+      };
+      
+      records.push(newRecord);
+      storage.set(scopeName, records);
+      
+      return {
+        data: {
+          type: scopeName,
+          id: newRecord.id,
+          attributes: newRecord
+        }
+      };
+    };
+
+    helpers.dataPut = async ({ scopeName, id, inputRecord }) => {
+      const records = storage.get(scopeName) || [];
+      const index = records.findIndex(r => r.id === id);
+      
+      if (index === -1) {
+        throw new Error('Record not found');
+      }
+      
+      records[index] = {
+        id,
+        ...inputRecord.data.attributes
+      };
+      
+      return {
+        data: {
+          type: scopeName,
+          id: id,
+          attributes: records[index]
+        }
+      };
+    };
+
+    helpers.dataPatch = async ({ scopeName, id, inputRecord }) => {
+      const records = storage.get(scopeName) || [];
+      const index = records.findIndex(r => r.id === id);
+      
+      if (index === -1) {
+        throw new Error('Record not found');
+      }
+      
+      records[index] = {
+        ...records[index],
+        ...inputRecord.data.attributes
+      };
+      
+      return {
+        data: {
+          type: scopeName,
+          id: id,
+          attributes: records[index]
+        }
+      };
+    };
+
+    helpers.dataDelete = async ({ scopeName, id }) => {
+      const records = storage.get(scopeName) || [];
+      const filtered = records.filter(r => r.id !== id);
+      storage.set(scopeName, filtered);
+      return { success: true };
+    };
+
+    helpers.dataExists = async ({ scopeName, id }) => {
+      const records = storage.get(scopeName) || [];
+      return records.some(r => r.id === id);
+    };
+  }
+};
+
+// Install plugins (order matters!)
+await api.use(RestApiPlugin);
+await api.use(inMemoryStoragePlugin);
+await api.use(HttpPlugin);
+
+// Define a resource
+api.addResource('books', {
+  schema: {
+    title: { type: 'string', required: true },
+    author: { type: 'string', required: true },
+    year: { type: 'number' }
+  }
+});
+
+// Start the server
+api.http.startServer(3000);
+console.log('API running at http://localhost:3000/api');
+
+// Your API is now ready!
+// GET http://localhost:3000/api/books
+// POST http://localhost:3000/api/books
+// etc.
+```
 
 ## Table of Contents
 
@@ -19,6 +173,8 @@ First, install the required packages:
 
 ```bash
 npm install hooked-api json-rest-api
+# If you get peer dependency conflicts, use:
+# npm install hooked-api json-rest-api --legacy-peer-deps
 ```
 
 Create a new file called `api.js`:
@@ -32,6 +188,8 @@ const api = new Api({
   version: '1.0.0'
 });
 ```
+
+This is a pure Hooked API with no plugins. So, it doesn't do anything.
 
 ## Basic REST API Plugin
 
@@ -67,102 +225,14 @@ api.addResource('books', {
   }
 });
 
-// Add simple data helpers (in real apps, these would connect to a database)
-api.vars.helpers.dataQuery = async ({ scopeName, queryParams }) => {
-  // For now, just return some fake books
-  const fakeBooks = [
-    { id: '1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', year: 1925 },
-    { id: '2', title: '1984', author: 'George Orwell', year: 1949 },
-    { id: '3', title: 'To Kill a Mockingbird', author: 'Harper Lee', year: 1960 }
-  ];
-  
-  return {
-    data: fakeBooks.map(book => ({
-      type: 'books',
-      id: book.id,
-      attributes: {
-        title: book.title,
-        author: book.author,
-        year: book.year
-      }
-    }))
-  };
-};
-
-api.vars.helpers.dataGet = async ({ scopeName, id }) => {
-  // Return a single fake book
-  const book = { id, title: 'Example Book', author: 'Example Author', year: 2024 };
-  
-  return {
-    data: {
-      type: 'books',
-      id: book.id,
-      attributes: {
-        title: book.title,
-        author: book.author,
-        year: book.year
-      }
-    }
-  };
-};
-
-api.vars.helpers.dataPost = async ({ scopeName, inputRecord }) => {
-  // Pretend to create a book and return it
-  const newBook = {
-    id: String(Date.now()), // Simple ID generation
-    ...inputRecord.data.attributes
-  };
-  
-  return {
-    data: {
-      type: 'books',
-      id: newBook.id,
-      attributes: {
-        title: newBook.title,
-        author: newBook.author,
-        year: newBook.year
-      }
-    }
-  };
-};
-
-api.vars.helpers.dataPut = async ({ scopeName, id, inputRecord }) => {
-  // Pretend to replace a book
-  return {
-    data: {
-      type: 'books',
-      id: id,
-      attributes: inputRecord.data.attributes
-    }
-  };
-};
-
-api.vars.helpers.dataPatch = async ({ scopeName, id, inputRecord }) => {
-  // Pretend to update a book
-  return {
-    data: {
-      type: 'books',
-      id: id,
-      attributes: inputRecord.data.attributes
-    }
-  };
-};
-
-api.vars.helpers.dataDelete = async ({ scopeName, id }) => {
-  // Just return success
-  return { success: true };
-};
-
-api.vars.helpers.dataExists = async ({ scopeName, id }) => {
-  // For demo purposes, check if record exists
-  // In real apps, this would check your database
-  return id === '1' || id === '2' || id === '3'; // Our fake books exist
-};
+// To actually use the REST API methods, you need a storage plugin
+// Use the same inMemoryStoragePlugin from the Quick Start example above
+await api.use(inMemoryStoragePlugin);
 ```
 
 ### Using the API Programmatically
 
-With just the REST API plugin, you can only use the API programmatically:
+With the REST API plugin and a storage plugin, you can now use the API programmatically:
 
 ```javascript
 // Query all books
@@ -290,7 +360,7 @@ await api.use(ExpressPlugin, {
   basePath: '/api',  // Optional, defaults to '/api'
 });
 
-// Add your books resource and helpers here (same as before)
+// Add your books resource (you'll need a storage plugin for it to work)
 // ...
 
 // Create Express app
@@ -347,7 +417,7 @@ await api.use(HttpPlugin, {
   requestSizeLimit: '10mb'   // Max request body size (default: '1mb')
 });
 
-// Add your books resource and helpers here (same as before)
+// Add your books resource (you'll need a storage plugin for it to work)
 // ...
 
 // Start the HTTP server - multiple options:
@@ -512,6 +582,13 @@ Both the Express and HTTP plugins provide support for the FileHandlingPlugin by:
 
 ##### Express Plugin
 ```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, ExpressPlugin } from 'json-rest-api';
+
+const api = new Api({ name: 'my-api' });
+await api.use(RestApiPlugin);
+
+// Configure Express plugin with file upload options
 await api.use(ExpressPlugin, {
   enableFileUploads: true,   // Enable file upload support (default: true)
   fileParser: 'busboy',      // Parser: 'busboy' or 'formidable'
@@ -526,6 +603,13 @@ await api.use(ExpressPlugin, {
 
 ##### HTTP Plugin
 ```javascript
+import { Api } from 'hooked-api';
+import { RestApiPlugin, HttpPlugin } from 'json-rest-api';
+
+const api = new Api({ name: 'my-api' });
+await api.use(RestApiPlugin);
+
+// Configure HTTP plugin with file upload options
 await api.use(HttpPlugin, {
   enableFileUploads: true,   // Enable file upload support (default: true)
   fileParser: 'busboy',      // Parser: 'busboy' or 'formidable'
@@ -544,6 +628,15 @@ Both plugins support the same file parsers:
 
 - **busboy**: Streaming parser, memory efficient, good for large files
 - **formidable**: Saves to temp files, includes progress tracking
+
+**Installation**: File parsers must be installed separately:
+```bash
+# For busboy (recommended)
+npm install busboy
+
+# For formidable
+npm install formidable
+```
 
 **Note**: File parsing requires the FileHandlingPlugin to be loaded. The connector plugins only provide the detection and parsing capabilities; the actual file handling logic is implemented by the FileHandlingPlugin.
 
@@ -597,31 +690,9 @@ api.addResource('books', {
   }
 });
 
-// Update dataPost to handle the cover URL
-api.vars.helpers.dataPost = async ({ scopeName, inputRecord }) => {
-  const newBook = {
-    id: String(Date.now()),
-    ...inputRecord.data.attributes
-  };
-  
-  // The file has already been uploaded and replaced with a URL
-  console.log('Book cover URL:', newBook.cover);
-  
-  return {
-    data: {
-      type: 'books',
-      id: newBook.id,
-      attributes: {
-        title: newBook.title,
-        author: newBook.author,
-        year: newBook.year,
-        cover: newBook.cover  // This is now a URL!
-      }
-    }
-  };
-};
-
-// Add other helpers...
+// You'll need a storage plugin to handle the data
+// Use the same inMemoryStoragePlugin from the Quick Start example
+await api.use(inMemoryStoragePlugin);
 
 // Create Express app
 const app = express();

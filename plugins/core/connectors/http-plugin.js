@@ -120,7 +120,7 @@ export const HttpPlugin = {
     };
     
     // Register file detector if file handling is enabled
-    if (httpOptions.enableFileUploads !== false && vars.rest?.registerFileDetector) {
+    if (httpOptions.enableFileUploads !== false && api.rest?.registerFileDetector) {
       const parserLib = httpOptions.fileParser || 'busboy';
       const parserOptions = httpOptions.fileParserOptions || {};
       
@@ -143,7 +143,7 @@ export const HttpPlugin = {
       }
       
       if (detector) {
-        vars.rest.registerFileDetector({
+        api.rest.registerFileDetector({
           name: `http-${detector.name}`,
           detect: (params, context) => {
             if (!context || !context.httpReq) return false;
