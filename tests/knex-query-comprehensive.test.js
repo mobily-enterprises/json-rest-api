@@ -164,8 +164,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       company_id: { 
         belongsTo: 'companies', 
         as: 'company',
-        sideLoad: true,
-        sideSearch: true
+        sideSearchSingle: true
       }
     };
     
@@ -176,8 +175,7 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       author_id: { 
         belongsTo: 'people', 
         as: 'author',
-        sideLoad: true,
-        sideSearch: true
+        sideSearchSingle: true
       }
     };
     
@@ -187,14 +185,12 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
       article_id: { 
         belongsTo: 'articles', 
         as: 'article',
-        sideLoad: true,
-        sideSearch: true
+        sideSearchSingle: true
       },
       user_id: { 
         belongsTo: 'people', 
         as: 'user',
-        sideLoad: true,
-        sideSearch: true
+        sideSearchSingle: true
       }
     };
     
@@ -291,8 +287,8 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
         employees: {
           hasMany: 'people',
           foreignKey: 'company_id',
-          sideLoad: true,
-          sideSearch: true
+          sideLoadMany: true,
+          sideSearchMany: true
         }
       }
     });
@@ -304,14 +300,14 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
         articles: { 
           hasMany: 'articles', 
           foreignKey: 'author_id',
-          sideLoad: true,
-          sideSearch: true
+          sideLoadMany: true,
+          sideSearchMany: true
         },
         comments: {
           hasMany: 'comments',
           foreignKey: 'user_id',
-          sideLoad: true,
-          sideSearch: true
+          sideLoadMany: true,
+          sideSearchMany: true
         }
       }
     });
@@ -323,8 +319,8 @@ describe('REST API Plugin - Query and Cross-Table Search', () => {
         comments: {
           hasMany: 'comments',
           foreignKey: 'article_id',
-          sideLoad: true,
-          sideSearch: true
+          sideLoadMany: true,
+          sideSearchMany: true
         }
       }
     });

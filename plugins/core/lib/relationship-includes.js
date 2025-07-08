@@ -780,7 +780,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       let processed = false;
       
       for (const [fieldName, fieldDef] of Object.entries(schema)) {
-        if (fieldDef.as === includeName && fieldDef.belongsTo && fieldDef.sideLoad) {
+        if (fieldDef.as === includeName && fieldDef.belongsTo && (fieldDef.sideLoadSingle !== false)) {
           log.trace('[INCLUDE] Found belongsTo relationship:', { fieldName, target: fieldDef.belongsTo });
           await loadBelongsTo(records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields);
           processed = true;
@@ -793,7 +793,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
         const rel = relationships[includeName];
         
         // Check for polymorphic belongsTo
-        if (rel.belongsToPolymorphic && rel.sideLoad) {
+        if (rel.belongsToPolymorphic && (rel.sideLoadSingle !== false)) {
           log.trace('[INCLUDE] Found polymorphic belongsTo:', { 
             includeName, 
             types: rel.belongsToPolymorphic.types 
@@ -813,7 +813,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
         }
         
         // Check for reverse polymorphic (hasMany with via)
-        else if (rel.hasMany && rel.via && rel.sideLoad) {
+        else if (rel.hasMany && rel.via && (rel.sideLoadMany === true)) {
           log.trace('[INCLUDE] Found reverse polymorphic:', { 
             includeName, 
             via: rel.via 
@@ -834,7 +834,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
         }
         
         // Check for regular hasMany
-        else if (rel.hasMany && rel.sideLoad) {
+        else if (rel.hasMany && (rel.sideLoadMany === true)) {
           log.trace('[INCLUDE] Found hasMany relationship:', { includeName, target: rel.hasMany });
           await loadHasMany(records, scopeName, includeName, rel, subIncludes, included, processedPaths, currentPath, fields);
           processed = true;
@@ -842,7 +842,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       }
       
       if (!processed) {
-        log.warn('[INCLUDE] Relationship not found or not configured for sideLoad:', { scopeName, includeName });
+        log.warn('[INCLUDE] Relationship not found or not configured for sideLoadSingle/sideLoadMany:', { scopeName, includeName });
       }
     }
   };

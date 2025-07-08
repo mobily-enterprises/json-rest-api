@@ -218,7 +218,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       // First check hasMany relationships (one-to-many)
       if (currentRelationships) {
         for (const [relName, relDef] of Object.entries(currentRelationships)) {
-          if (relDef.hasMany === targetScope && relDef.sideSearch === true) {
+          if (relDef.hasMany === targetScope && (relDef.sideSearchMany === true)) {
             foundRelationship = targetScope;
             relationshipType = 'hasMany';
             relationshipField = relDef.foreignKey || `${currentScope.slice(0, -1)}_id`;
@@ -232,7 +232,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       // If not found, check belongsTo relationships (many-to-one)
       if (!foundRelationship) {
         for (const [fieldName, fieldDef] of Object.entries(currentSchema)) {
-          if (fieldDef.belongsTo === targetScope && fieldDef.sideSearch === true) {
+          if (fieldDef.belongsTo === targetScope && (fieldDef.sideSearchSingle !== false)) {
             foundRelationship = targetScope;
             relationshipType = 'belongsTo';
             relationshipField = fieldName;
@@ -246,7 +246,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       if (!foundRelationship) {
         throw new Error(
           `No searchable relationship from '${currentScope}' to '${targetScope}'. ` +
-          `Ensure a direct relationship exists with 'sideSearch: true'`
+          `Ensure a direct relationship exists with 'sideSearchSingle: true' or 'sideSearchMany: true'`
         );
       }
       

@@ -176,7 +176,7 @@ describe('Comprehensive dataGet Tests', () => {
         authors: {
           hasMany: 'authors',
           foreignKey: 'publisher_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -189,8 +189,7 @@ describe('Comprehensive dataGet Tests', () => {
         biography: { type: 'text' },
         publisher_id: { 
           belongsTo: 'publishers', 
-          as: 'publisher',
-          sideLoad: true
+          as: 'publisher'
         },
         nationality: { type: 'string' },
         birth_date: { type: 'date' },
@@ -201,12 +200,12 @@ describe('Comprehensive dataGet Tests', () => {
         books: {
           hasMany: 'books',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         reviews: {
           hasMany: 'reviews',
           foreignKey: 'reviewer_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -219,8 +218,7 @@ describe('Comprehensive dataGet Tests', () => {
         description: { type: 'text' },
         author_id: { 
           belongsTo: 'authors', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         pages: { type: 'number' },
         price: { type: 'decimal' },
@@ -233,7 +231,7 @@ describe('Comprehensive dataGet Tests', () => {
         reviews: {
           hasMany: 'reviews',
           foreignKey: 'book_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -243,13 +241,11 @@ describe('Comprehensive dataGet Tests', () => {
         id: { type: 'id' },
         book_id: { 
           belongsTo: 'books', 
-          as: 'book',
-          sideLoad: true
+          as: 'book'
         },
         reviewer_id: { 
           belongsTo: 'authors', 
-          as: 'reviewer',
-          sideLoad: true
+          as: 'reviewer'
         },
         rating: { type: 'number' },
         content: { type: 'text' },
@@ -262,7 +258,7 @@ describe('Comprehensive dataGet Tests', () => {
         responses: {
           hasMany: 'responses',
           foreignKey: 'review_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -272,13 +268,11 @@ describe('Comprehensive dataGet Tests', () => {
         id: { type: 'id' },
         review_id: { 
           belongsTo: 'reviews', 
-          as: 'review',
-          sideLoad: true
+          as: 'review'
         },
         responder_id: { 
           belongsTo: 'authors', 
-          as: 'responder',
-          sideLoad: true
+          as: 'responder'
         },
         message: { type: 'text' },
         response_date: { type: 'date' },

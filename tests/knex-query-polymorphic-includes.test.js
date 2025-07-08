@@ -138,8 +138,7 @@ describe('Polymorphic Relationships - Include Support', () => {
       author_id: { 
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       },
       published_at: { type: 'string' }
     };
@@ -151,8 +150,7 @@ describe('Polymorphic Relationships - Include Support', () => {
       creator_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'creator',
-        sideLoad: true
+        as: 'creator'
       },
       duration: { type: 'number' }
     };
@@ -164,8 +162,7 @@ describe('Polymorphic Relationships - Include Support', () => {
       vendor_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'vendor',
-        sideLoad: true
+        as: 'vendor'
       }
     };
     
@@ -177,8 +174,7 @@ describe('Polymorphic Relationships - Include Support', () => {
       user_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       },
       created_at: { type: 'string' }
     };
@@ -192,8 +188,7 @@ describe('Polymorphic Relationships - Include Support', () => {
       author_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       },
       created_at: { type: 'string' }
     };
@@ -208,7 +203,7 @@ describe('Polymorphic Relationships - Include Support', () => {
           hasMany: 'comments',
           via: 'commentable',
           as: 'comments',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -220,7 +215,7 @@ describe('Polymorphic Relationships - Include Support', () => {
           hasMany: 'comments',
           via: 'commentable',
           as: 'comments',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -232,7 +227,7 @@ describe('Polymorphic Relationships - Include Support', () => {
           hasMany: 'reviews',
           via: 'reviewable',
           as: 'reviews',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -246,8 +241,7 @@ describe('Polymorphic Relationships - Include Support', () => {
             typeField: 'commentable_type',
             idField: 'commentable_id'
           },
-          as: 'commentable',
-          sideLoad: true
+          as: 'commentable'
         }
       }
     });
@@ -261,8 +255,7 @@ describe('Polymorphic Relationships - Include Support', () => {
             typeField: 'reviewable_type',
             idField: 'reviewable_id'
           },
-          as: 'reviewable',
-          sideLoad: true
+          as: 'reviewable'
         }
       }
     });

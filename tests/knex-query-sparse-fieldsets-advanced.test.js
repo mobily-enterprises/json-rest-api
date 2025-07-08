@@ -172,7 +172,7 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         employees: {
           hasMany: 'people',
           foreignKey: 'company_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -185,8 +185,7 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         phone: { type: 'string' },
         company_id: { 
           belongsTo: 'companies', 
-          as: 'company',
-          sideLoad: true
+          as: 'company'
         },
         department: { type: 'string' },
         ssn: { type: 'string' } // Sensitive, should not be selected unless requested
@@ -195,12 +194,12 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         articles: {
           hasMany: 'articles',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         comments: {
           hasMany: 'comments',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -213,8 +212,7 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         summary: { type: 'text' },
         author_id: { 
           belongsTo: 'people', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         status: { type: 'string' },
         category: { type: 'string' },
@@ -229,12 +227,12 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         comments: {
           hasMany: 'comments',
           foreignKey: 'article_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         tags: {
           manyToMany: 'tags',
-          through: 'article_tags',
-          sideLoad: true
+          through: 'article_tags'
+          // sideLoad not supported for many-to-many
         }
       }
     });
@@ -245,13 +243,11 @@ describe('Advanced Sparse Fieldsets Tests', () => {
         content: { type: 'text', required: true },
         article_id: { 
           belongsTo: 'articles', 
-          as: 'article',
-          sideLoad: true
+          as: 'article'
         },
         author_id: { 
           belongsTo: 'people', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         sentiment: { type: 'string' },
         likes: { type: 'number' },

@@ -175,7 +175,7 @@ describe('Comprehensive dataPut Tests', () => {
         employees: {
           hasMany: 'authors',
           foreignKey: 'company_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -188,8 +188,7 @@ describe('Comprehensive dataPut Tests', () => {
         biography: { type: 'string' },
         company_id: { 
           belongsTo: 'companies', 
-          as: 'company',
-          sideLoad: true
+          as: 'company'
         },
         nationality: { type: 'string' },
         active: { type: 'boolean' }
@@ -198,12 +197,12 @@ describe('Comprehensive dataPut Tests', () => {
         articles: {
           hasMany: 'articles',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         comments: {
           hasMany: 'comments',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -219,7 +218,7 @@ describe('Comprehensive dataPut Tests', () => {
         articles: {
           hasMany: 'articles',
           foreignKey: 'category_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -253,13 +252,11 @@ describe('Comprehensive dataPut Tests', () => {
         summary: { type: 'string' },
         author_id: { 
           belongsTo: 'authors', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         category_id: { 
           belongsTo: 'categories', 
-          as: 'category',
-          sideLoad: true
+          as: 'category'
         },
         status: { type: 'string' },
         views: { type: 'number' },
@@ -270,14 +267,14 @@ describe('Comprehensive dataPut Tests', () => {
         comments: {
           hasMany: 'comments',
           foreignKey: 'article_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         tags: {
           hasMany: 'tags',
           through: 'article_tags',
           foreignKey: 'article_id',
-          otherKey: 'tag_id',
-          sideLoad: true
+          otherKey: 'tag_id'
+          // sideLoad not supported for many-to-many
         }
       }
     });
@@ -288,18 +285,15 @@ describe('Comprehensive dataPut Tests', () => {
         content: { type: 'string', required: true },
         article_id: { 
           belongsTo: 'articles', 
-          as: 'article',
-          sideLoad: true
+          as: 'article'
         },
         author_id: { 
           belongsTo: 'authors', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         parent_comment_id: { 
           belongsTo: 'comments', 
-          as: 'parentComment',
-          sideLoad: true
+          as: 'parentComment'
         },
         approved: { type: 'boolean' },
         created_at: { type: 'date' }
@@ -308,7 +302,7 @@ describe('Comprehensive dataPut Tests', () => {
         replies: {
           hasMany: 'comments',
           foreignKey: 'parent_comment_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });

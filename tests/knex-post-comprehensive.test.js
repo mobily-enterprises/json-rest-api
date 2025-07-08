@@ -138,8 +138,8 @@ describe('Comprehensive POST Tests with Relationships', () => {
           hasMany: 'skills',
           through: 'user_skills',
           foreignKey: 'user_id',
-          otherKey: 'skill_id',
-          sideLoad: true
+          otherKey: 'skill_id'
+          // sideLoad not supported for many-to-many
         }
       }
     });
@@ -183,8 +183,8 @@ describe('Comprehensive POST Tests with Relationships', () => {
           hasMany: 'tags',
           through: 'article_tags',
           foreignKey: 'article_id',
-          otherKey: 'tag_id',
-          sideLoad: true
+          otherKey: 'tag_id'
+          // sideLoad not supported for many-to-many
         }
       }
     });

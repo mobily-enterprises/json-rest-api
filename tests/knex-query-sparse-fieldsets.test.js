@@ -90,8 +90,7 @@ describe('Sparse Fieldsets and Foreign Key Filtering', () => {
         body: { type: 'text' },
         author_id: { 
           belongsTo: 'people', 
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         status: { type: 'string' },
         secret_field: { type: 'string' },
@@ -117,7 +116,7 @@ describe('Sparse Fieldsets and Foreign Key Filtering', () => {
         articles: {
           hasMany: 'articles',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });

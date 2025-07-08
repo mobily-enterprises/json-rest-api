@@ -199,15 +199,13 @@ describe('Enhanced Many-to-Many Relationships', () => {
         type: 'number', 
         required: true,
         belongsTo: 'projects',
-        as: 'project',
-        sideLoad: true
+        as: 'project'
       },
       user_id: { 
         type: 'number', 
         required: true,
         belongsTo: 'users',
-        as: 'user',
-        sideLoad: true
+        as: 'user'
       },
       role: { type: 'string', required: true },
       hours_allocated: { type: 'decimal' },
@@ -223,15 +221,13 @@ describe('Enhanced Many-to-Many Relationships', () => {
         type: 'number', 
         required: true,
         belongsTo: 'users',
-        as: 'user',
-        sideLoad: true
+        as: 'user'
       },
       skill_id: { 
         type: 'number', 
         required: true,
         belongsTo: 'skills',
-        as: 'skill',
-        sideLoad: true
+        as: 'skill'
       },
       proficiency_level: { type: 'number', required: true, min: 1, max: 5 },
       years_experience: { type: 'number' },
@@ -246,15 +242,13 @@ describe('Enhanced Many-to-Many Relationships', () => {
         type: 'number', 
         required: true,
         belongsTo: 'teams',
-        as: 'team',
-        sideLoad: true
+        as: 'team'
       },
       user_id: { 
         type: 'number', 
         required: true,
         belongsTo: 'users',
-        as: 'user',
-        sideLoad: true
+        as: 'user'
       },
       joined_at: { type: 'string', required: true },
       left_at: { type: 'string' },
@@ -270,19 +264,19 @@ describe('Enhanced Many-to-Many Relationships', () => {
           hasMany: 'project_members',
           foreignKey: 'user_id',
           as: 'projectMemberships',
-          sideLoad: true
+          sideLoadMany: true
         },
         skills: {
           hasMany: 'user_skills',
           foreignKey: 'user_id',
           as: 'skills',
-          sideLoad: true
+          sideLoadMany: true
         },
         teamMemberships: {
           hasMany: 'team_members',
           foreignKey: 'user_id',
           as: 'teamMemberships',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -294,7 +288,7 @@ describe('Enhanced Many-to-Many Relationships', () => {
           hasMany: 'project_members',
           foreignKey: 'project_id',
           as: 'members',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -306,7 +300,7 @@ describe('Enhanced Many-to-Many Relationships', () => {
           hasMany: 'user_skills',
           foreignKey: 'skill_id',
           as: 'users',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -318,7 +312,7 @@ describe('Enhanced Many-to-Many Relationships', () => {
           hasMany: 'team_members',
           foreignKey: 'team_id',
           as: 'members',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });

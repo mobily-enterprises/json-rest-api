@@ -145,8 +145,7 @@ describe('Polymorphic Relationships - Search Support', () => {
       author_id: { 
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       },
       status: { type: 'string' }
     };
@@ -158,8 +157,7 @@ describe('Polymorphic Relationships - Search Support', () => {
       creator_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'creator',
-        sideLoad: true
+        as: 'creator'
       },
       status: { type: 'string' }
     };
@@ -171,8 +169,7 @@ describe('Polymorphic Relationships - Search Support', () => {
       instructor_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'instructor',
-        sideLoad: true
+        as: 'instructor'
       },
       level: { type: 'string' }
     };
@@ -185,8 +182,7 @@ describe('Polymorphic Relationships - Search Support', () => {
       user_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'user',
-        sideLoad: true
+        as: 'user'
       },
       created_at: { type: 'string' }
     };

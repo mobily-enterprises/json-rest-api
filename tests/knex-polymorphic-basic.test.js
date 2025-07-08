@@ -136,8 +136,7 @@ describe('Polymorphic Relationships - Basic Operations', () => {
       author_id: { 
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       }
     };
     
@@ -148,8 +147,7 @@ describe('Polymorphic Relationships - Basic Operations', () => {
       creator_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'creator',
-        sideLoad: true
+        as: 'creator'
       }
     };
     
@@ -160,8 +158,7 @@ describe('Polymorphic Relationships - Basic Operations', () => {
       vendor_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'vendor',
-        sideLoad: true
+        as: 'vendor'
       }
     };
     
@@ -173,8 +170,7 @@ describe('Polymorphic Relationships - Basic Operations', () => {
       user_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'author',
-        sideLoad: true
+        as: 'author'
       },
       created_at: { type: 'string' }
     };
@@ -187,8 +183,7 @@ describe('Polymorphic Relationships - Basic Operations', () => {
       user_id: {
         type: 'number',
         belongsTo: 'users',
-        as: 'user',
-        sideLoad: true
+        as: 'user'
       }
     };
     

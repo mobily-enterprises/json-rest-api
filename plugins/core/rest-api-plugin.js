@@ -93,8 +93,10 @@ export const RestApiPlugin = {
       
       // Process schema fields with 'search' property
       Object.entries(schema).forEach(([fieldName, fieldDef]) => {
-        if (fieldDef.search) {
-          if (fieldDef.search === true) {
+        const effectiveSearch = fieldDef.search;
+        
+        if (effectiveSearch) {
+          if (effectiveSearch === true) {
             // Check for conflicts with explicit searchSchema
             if (searchSchema[fieldName]) {
               throw new RestApiValidationError(
@@ -117,15 +119,15 @@ export const RestApiPlugin = {
               // Default filter behavior based on type
               filterUsing: fieldDef.type === 'string' ? '=' : '='
             };
-          } else if (typeof fieldDef.search === 'object') {
+          } else if (typeof effectiveSearch === 'object') {
             // Check if search defines multiple filter fields
-            const hasNestedFilters = Object.values(fieldDef.search).some(
+            const hasNestedFilters = Object.values(effectiveSearch).some(
               v => typeof v === 'object' && v.filterUsing
             );
             
             if (hasNestedFilters) {
               // Multiple filters from one field (like published_after/before)
-              Object.entries(fieldDef.search).forEach(([filterName, filterDef]) => {
+              Object.entries(effectiveSearch).forEach(([filterName, filterDef]) => {
                 // Check for conflicts
                 if (searchSchema[filterName]) {
                   throw new RestApiValidationError(
@@ -166,7 +168,7 @@ export const RestApiPlugin = {
               // Single filter with config
               searchSchema[fieldName] = {
                 type: fieldDef.type,
-                ...fieldDef.search
+                ...effectiveSearch
               };
             }
           }

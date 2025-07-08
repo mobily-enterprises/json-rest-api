@@ -1422,6 +1422,135 @@ These filters will be combined with AND, ensuring that security filters cannot b
 
 Many-to-many relationships require a pivot table. In the JSON REST API system, the pivot table is treated as a full resource with its own schema and endpoints.
 
+### Understanding Relationships and Side-Loading
+
+Before diving into many-to-many relationships, it's important to understand how relationships work in the JSON REST API system and the side-loading functionality.
+
+#### Relationship Types
+
+The system supports three types of relationships:
+
+1. **belongsTo** (Many-to-One) - A foreign key relationship where a resource belongs to another resource
+2. **hasMany** (One-to-Many) - The inverse of belongsTo, where a resource has many related resources
+3. **hasMany with through** (Many-to-Many) - A relationship through a pivot/junction table
+
+#### Side-Loading with Include Parameter
+
+Side-loading allows you to fetch related resources in a single request using the `include` query parameter. This follows the JSON:API specification and helps prevent N+1 query problems.
+
+```javascript
+// Example: Get a book with its author included
+GET /api/books/1?include=author
+
+// Example: Get a book with nested includes
+GET /api/books/1?include=author.company,reviews.reviewer
+```
+
+#### Configuring Side-Load Behavior
+
+The side-loading functionality is controlled by the following properties in your relationship definitions:
+
+##### For belongsTo Relationships
+
+- **`sideLoadSingle`** (default: `true`) - Controls whether the related resource can be included via the `include` parameter
+- **`sideSearchSingle`** (default: `true`) - Controls whether you can filter parent resources by fields in the related resource
+
+```javascript
+api.addResource('books', {
+  schema: {
+    author_id: {
+      belongsTo: 'authors',
+      as: 'author',
+      // sideLoadSingle: true,  // Default - can be omitted
+      // sideSearchSingle: true  // Default - can be omitted
+    }
+  }
+});
+
+// This allows:
+// GET /api/books?include=author
+// GET /api/books?filter[authorName]=Tolkien (with appropriate searchSchema)
+```
+
+##### For hasMany Relationships
+
+- **`sideLoadMany`** (default: `false`) - Controls whether related resources can be included
+- **`sideSearchMany`** (default: `false`) - Controls whether you can filter by related resources
+
+```javascript
+api.addResource('authors', {
+  schema: {
+    id: { type: 'id' },
+    name: { type: 'string' }
+  },
+  relationships: {
+    books: {
+      hasMany: 'books',
+      foreignKey: 'author_id',
+      sideLoadMany: true,    // Must be explicitly enabled
+      sideSearchMany: true   // Must be explicitly enabled
+    }
+  }
+});
+
+// This allows:
+// GET /api/authors/1?include=books
+// GET /api/authors?filter[bookTitle]=Hobbit (with appropriate searchSchema)
+```
+
+##### For Many-to-Many Relationships
+
+Many-to-many relationships using `hasMany` with `through` also use `sideLoadMany`:
+
+```javascript
+api.addResource('books', {
+  schema: {
+    id: { type: 'id' },
+    title: { type: 'string' }
+  },
+  relationships: {
+    tags: {
+      hasMany: 'tags',
+      through: 'book_tags',    // Pivot table
+      foreignKey: 'book_id',
+      otherKey: 'tag_id',
+      sideLoadMany: true       // Enable including tags
+    }
+  }
+});
+
+// This allows:
+// GET /api/books/1?include=tags
+```
+
+#### Important Notes on Side-Loading
+
+1. **Performance Consideration**: hasMany relationships have `sideLoadMany` disabled by default because including many related resources can impact performance. Enable it only when needed.
+
+2. **Nested Includes**: You can include nested relationships using dot notation:
+   ```
+   GET /api/books/1?include=author.company,reviews.reviewer.department
+   ```
+
+3. **Sparse Fieldsets**: Combine includes with sparse fieldsets to fetch only needed fields:
+   ```
+   GET /api/books/1?include=author&fields[authors]=name,email
+   ```
+
+4. **Cross-Table Search**: When `sideSearchSingle` or `sideSearchMany` is enabled, you can define searchSchema fields that reference related tables:
+   ```javascript
+   api.addResource('books', {
+     schema: { /* ... */ },
+     searchSchema: {
+       authorName: {
+         type: 'string',
+         actualField: 'authors.name',  // Reference field in related table
+         filterUsing: 'like'
+       }
+     }
+   });
+   ```
+
 ### Books with Multiple Authors Example
 
 Let's update our books example to support multiple authors. Previously, books had a single `author` field. Now we'll create a many-to-many relationship between `books` and `people` (authors).
@@ -1437,14 +1566,14 @@ api.addResource('book_authors', {
       type: 'number',
       belongsTo: 'books',
       as: 'book',
-      sideSearch: true
+      sideSearchSingle: true
     },
     author_id: {
       type: 'number', 
       belongsTo: 'people',
       as: 'author',
-      sideLoad: true,
-      sideSearch: true
+      // sideLoadSingle: true,  // Default for belongsTo - can be omitted
+      sideSearchSingle: true
     },
     author_order: { type: 'number' }, // Display order for multiple authors
     contribution_type: { type: 'string' } // 'primary', 'co-author', 'contributor'
@@ -1483,7 +1612,7 @@ api.addResource('books', {
       hasMany: 'book_authors',
       foreignKey: 'book_id',
       as: 'authors',
-      sideLoad: true
+      sideLoadMany: true
     }
   }
 });
@@ -1500,7 +1629,7 @@ api.addResource('people', {
       hasMany: 'book_authors',
       foreignKey: 'author_id',
       as: 'books',
-      sideLoad: true
+      sideLoadMany: true
     }
   }
 });
@@ -1703,8 +1832,8 @@ api.addResource('comments', {
     user_id: {
       type: 'number',
       belongsTo: 'people',
-      as: 'author',
-      sideLoad: true
+      as: 'author'
+      // sideLoadSingle: true  // Default for belongsTo - can be omitted
     },
     // Polymorphic relationship - defines both the relationship and the fields
     commentable: {
@@ -1713,8 +1842,8 @@ api.addResource('comments', {
         typeField: 'commentable_type',
         idField: 'commentable_id'
       },
-      as: 'commentable',
-      sideLoad: true
+      as: 'commentable'
+      // sideLoadSingle: true  // Default for belongsToPolymorphic - can be omitted
     }
   },
   searchSchema: {
@@ -1742,7 +1871,7 @@ api.addResource('books', {
       hasMany: 'comments',
       via: 'commentable',
       as: 'comments',
-      sideLoad: true
+      sideLoadMany: true
     }
   }
 });
@@ -1759,7 +1888,7 @@ api.addResource('articles', {
       hasMany: 'comments',
       via: 'commentable',
       as: 'comments',
-      sideLoad: true
+      sideLoadMany: true
     }
   }
 });

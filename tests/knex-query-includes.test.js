@@ -330,7 +330,7 @@ describe('REST API Plugin - Relationship Includes', () => {
         departments: {
           hasMany: 'departments',
           foreignKey: 'organization_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -341,25 +341,23 @@ describe('REST API Plugin - Relationship Includes', () => {
         name: { type: 'string', indexed: true, search: true },
         organization_id: {
           belongsTo: 'organizations',
-          as: 'organization',
-          sideLoad: true
+          as: 'organization'
         },
         parent_department_id: {
           belongsTo: 'departments',
-          as: 'parentDepartment',
-          sideLoad: true
+          as: 'parentDepartment'
         }
       },
       relationships: {
         people: {
           hasMany: 'people',
           foreignKey: 'department_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         subDepartments: {
           hasMany: 'departments',
           foreignKey: 'parent_department_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -374,35 +372,33 @@ describe('REST API Plugin - Relationship Includes', () => {
         department_id: {
           belongsTo: 'departments',
           as: 'department',
-          sideLoad: true,
-          sideSearch: true
+          sideSearchSingle: true
         },
         manager_id: {
           belongsTo: 'people',
-          as: 'manager',
-          sideLoad: true
+          as: 'manager'
         }
       },
       relationships: {
         authoredArticles: {
           hasMany: 'articles',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         editedArticles: {
           hasMany: 'articles',
           foreignKey: 'editor_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         comments: {
           hasMany: 'comments',
           foreignKey: 'author_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         subordinates: {
           hasMany: 'people',
           foreignKey: 'manager_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       },
       searchSchema: {
@@ -421,20 +417,19 @@ describe('REST API Plugin - Relationship Includes', () => {
         slug: { type: 'string' },
         parent_id: {
           belongsTo: 'categories',
-          as: 'parent',
-          sideLoad: true
+          as: 'parent'
         }
       },
       relationships: {
         subcategories: {
           hasMany: 'categories',
           foreignKey: 'parent_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         articles: {
           hasMany: 'articles',
           foreignKey: 'category_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
@@ -450,26 +445,23 @@ describe('REST API Plugin - Relationship Includes', () => {
         author_id: {
           belongsTo: 'people',
           as: 'author',
-          sideLoad: true,
-          sideSearch: true
+          sideSearchSingle: true
         },
         editor_id: {
           belongsTo: 'people',
-          as: 'editor',
-          sideLoad: true
+          as: 'editor'
         },
         category_id: {
           belongsTo: 'categories',
           as: 'category',
-          sideLoad: true,
-          sideSearch: true
+          sideSearchSingle: true
         }
       },
       relationships: {
         comments: {
           hasMany: 'comments',
           foreignKey: 'article_id',
-          sideLoad: true
+          sideLoadMany: true
         },
         tags: {
           hasMany: 'tags',
@@ -498,25 +490,22 @@ describe('REST API Plugin - Relationship Includes', () => {
         approved: { type: 'boolean' },
         article_id: {
           belongsTo: 'articles',
-          as: 'article',
-          sideLoad: true
+          as: 'article'
         },
         author_id: {
           belongsTo: 'people',
-          as: 'author',
-          sideLoad: true
+          as: 'author'
         },
         parent_comment_id: {
           belongsTo: 'comments',
-          as: 'parentComment',
-          sideLoad: true
+          as: 'parentComment'
         }
       },
       relationships: {
         replies: {
           hasMany: 'comments',
           foreignKey: 'parent_comment_id',
-          sideLoad: true
+          sideLoadMany: true
         }
       }
     });
