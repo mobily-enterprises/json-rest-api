@@ -90,12 +90,13 @@
 // Import Express as a regular dependency
 import express from 'express';
 import { parseJsonApiQuery } from '../../../lib/query-parser.js';
+import { createContext } from './lib/request-helpers.js';
 
 export const ExpressPlugin = {
   name: 'express',
   dependencies: ['rest-api'],
   
-  async install({ on, vars, helpers, pluginOptions, log, scopes, addApiMethod, api }) {
+  async install({ on, vars, helpers, pluginOptions, log, scopes, addApiMethod, api, runHooks }) {
     // Initialize express namespace under api.http
     if (!api.http) {
       api.http = {};
@@ -143,14 +144,14 @@ export const ExpressPlugin = {
           name: `express-${detector.name}`,
           detect: (params, context) => {
             // Only detect for Express requests
-            if (!context || !context.expressReq) return false;
+            if (!context || !context.raw || !context.raw.req) return false;
             // Pass params with the Express request for the detector
-            const detectParams = { ...params, _expressReq: context.expressReq };
+            const detectParams = { ...params, _expressReq: context.raw.req };
             return detector.detect(detectParams);
           },
           parse: (params, context) => {
             // Pass params with the Express request for the parser
-            const parseParams = { ...params, _expressReq: context.expressReq, _expressRes: context.expressRes };
+            const parseParams = { ...params, _expressReq: context.raw.req, _expressRes: context.raw.res };
             return detector.parse(parseParams);
           }
         });
@@ -167,6 +168,35 @@ export const ExpressPlugin = {
       limit: requestSizeLimit,
       type: ['application/json', 'application/vnd.api+json']
     }));
+    
+    // Add hook middleware to intercept all requests
+    router.use(async (req, res, next) => {
+      // Create context for this request
+      const context = createContext(req, res, 'express');
+      
+      // Run transport:request hook to allow plugins to intercept or enrich context
+      const hookParams = { req, res, url: req.url, method: req.method };
+      const shouldContinue = await runHooks('transport:request', context, hookParams);
+      
+      // Check if request was handled by a hook
+      if (!shouldContinue || context.handled) {
+        // If there's a rejection, send the appropriate error response
+        if (context.rejection) {
+          return res.status(context.rejection.status || 500).json({
+            errors: [{
+              status: String(context.rejection.status || 500),
+              title: context.rejection.title || 'Request Rejected',
+              detail: context.rejection.message
+            }]
+          });
+        }
+        return; // Request was intercepted, don't call next()
+      }
+      
+      // Store context on request for later use
+      req.context = context;
+      next();
+    });
     
     // Content type validation middleware
     if (strictContentType) {
@@ -325,15 +355,8 @@ export const ExpressPlugin = {
             }
           }
           
-          // Store Express request/response temporarily in a WeakMap keyed by a unique request ID
-          const requestId = Symbol('express-request');
-          if (!api._httpRequests) {
-            api._httpRequests = new WeakMap();
-          }
-          api._httpRequests.set(requestId, { req, res });
-          
-          // Pass the request ID in params so plugins can retrieve the req/res if needed
-          params._requestId = requestId;
+          // Use context from middleware or create new one
+          const context = req.context || createContext(req, res, 'express');
           
           log.debug(`HTTP ${req.method} ${req.path}`, { scopeName, methodName, params });
           
@@ -347,7 +370,7 @@ export const ExpressPlugin = {
             }, res);
           }
           
-          const result = await scope[methodName](params);
+          const result = await scope[methodName](params, context);
           
           // Send response
           res.set('Content-Type', 'application/vnd.api+json');

@@ -1,5 +1,6 @@
 import { createServer } from 'http';
 import { parse as parseUrl } from 'url';
+import { createContext } from './lib/request-helpers.js';
 
 /**
  * HTTP Plugin for Hooked API
@@ -80,7 +81,7 @@ export const HttpPlugin = {
   name: 'http',
   dependencies: ['rest-api'],
   
-  async install({ on, vars, helpers, pluginOptions, log, scopes, api }) {
+  async install({ on, vars, helpers, pluginOptions, log, scopes, api, runHooks }) {
     // Initialize http namespace
     api.http = {};
     
@@ -146,14 +147,14 @@ export const HttpPlugin = {
         api.rest.registerFileDetector({
           name: `http-${detector.name}`,
           detect: (params, context) => {
-            if (!context || !context.httpReq) return false;
+            if (!context || !context.raw || !context.raw.req) return false;
             // Pass params with the HTTP request for the detector
-            const detectParams = { ...params, _httpReq: context.httpReq };
+            const detectParams = { ...params, _httpReq: context.raw.req };
             return detector.detect(detectParams);
           },
           parse: (params, context) => {
             // Pass params with the HTTP request for the parser
-            const parseParams = { ...params, _httpReq: context.httpReq, _httpRes: context.httpRes };
+            const parseParams = { ...params, _httpReq: context.raw.req, _httpRes: context.raw.res };
             return detector.parse(parseParams);
           }
         });
@@ -249,6 +250,31 @@ export const HttpPlugin = {
      */
     const handleRequest = async (req, res) => {
       const { pathname } = parseUrl(req.url);
+      
+      // Create context early for hooks
+      const context = createContext(req, res, 'http');
+      
+      // Run transport:request hook to allow plugins to intercept or enrich context
+      const hookParams = { req, res, url: req.url, method: req.method };
+      const shouldContinue = await runHooks('transport:request', context, hookParams);
+      
+      // Check if request was handled by a hook
+      if (!shouldContinue || context.handled) {
+        // If there's a rejection, send the appropriate error response
+        if (context.rejection) {
+          res.writeHead(context.rejection.status || 500, { 
+            'Content-Type': 'application/vnd.api+json' 
+          });
+          res.end(JSON.stringify({
+            errors: [{
+              status: String(context.rejection.status || 500),
+              title: context.rejection.title || 'Request Rejected',
+              detail: context.rejection.message
+            }]
+          }));
+        }
+        return; // Request was intercepted
+      }
       
       // Check if path starts with basePath
       if (!pathname.startsWith(basePath)) {
@@ -403,21 +429,11 @@ export const HttpPlugin = {
           }
         }
         
-        // Store HTTP request/response temporarily in a WeakMap keyed by a unique request ID
-        const requestId = Symbol('http-request');
-        if (!api._httpRequests) {
-          api._httpRequests = new WeakMap();
-        }
-        api._httpRequests.set(requestId, { httpReq: req, httpRes: res });
-        
-        // Pass the request ID in params so plugins can retrieve the req/res if needed
-        params._requestId = requestId;
-        
         log.debug(`HTTP ${req.method} ${pathname}`, { scopeName, methodName, params });
         
-        // Call the API method
+        // Call the API method with context
         const scope = api.scopes[scopeName];
-        const result = await scope[methodName](params);
+        const result = await scope[methodName](params, context);
         
         // Send response
         res.setHeader('Content-Type', 'application/vnd.api+json');
