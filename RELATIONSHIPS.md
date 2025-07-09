@@ -1436,8 +1436,8 @@ if (count > 1) {
 ### For Polymorphic Relationships
 
 ```javascript
-// Access polymorphic helpers from the API
-const polymorphicHelpers = this.api._polymorphicHelpers;
+// Import polymorphic helpers directly
+import { groupByPolymorphicType, resolvePolymorphicTarget, buildPolymorphicSearchJoins } from './lib/polymorphic-helpers.js';
 
 // When processing a polymorphic belongsTo
 const relationship = scope.relationships.commentable;
@@ -1445,7 +1445,7 @@ if (relationship.belongsToPolymorphic) {
   const { types, typeField, idField } = relationship.belongsToPolymorphic;
   
   // Group records by type for efficient loading
-  const grouped = polymorphicHelpers.groupByPolymorphicType(
+  const grouped = groupByPolymorphicType(
     records, 
     typeField, 
     idField
@@ -1466,12 +1466,13 @@ if (relationship.belongsToPolymorphic) {
 const searchDef = scope.searchSchema.commentableTitle;
 if (searchDef.polymorphicField) {
   // Use the helper to build complex JOINs
-  const aliasMap = await polymorphicHelpers.buildPolymorphicSearchJoins(
+  const aliasMap = await buildPolymorphicSearchJoins(
     knexQuery,
     searchDef,
     scopeName,
     tableName,
-    knex
+    knex,
+    scopes
   );
   
   // Add WHERE conditions using the aliases

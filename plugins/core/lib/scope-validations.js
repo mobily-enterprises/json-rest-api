@@ -3,7 +3,7 @@
  * These validations run when scopes are added to ensure proper configuration
  */
 
-import { createPolymorphicHelpers } from './polymorphic-helpers.js';
+import { validatePolymorphicRelationship } from './polymorphic-helpers.js';
 
 /**
  * Validates that all belongsTo relationship fields have an explicit type defined in the schema.
@@ -176,12 +176,9 @@ export function validatePolymorphicRelationships({ eventData, api }) {
   const { scopeName, scopeOptions } = eventData;
   const relationships = scopeOptions.relationships || {};
   
-  // Create polymorphic helpers with access to scopes and logger
-  const polymorphicHelpers = createPolymorphicHelpers(api.scopes, api.log);
-  
   for (const [relName, relDef] of Object.entries(relationships)) {
     if (relDef.belongsToPolymorphic) {
-      const validation = polymorphicHelpers.validatePolymorphicRelationship(relDef, scopeName);
+      const validation = validatePolymorphicRelationship(relDef, scopeName, api.scopes);
       if (!validation.valid) {
         throw new Error(
           `Invalid polymorphic relationship '${relName}' in scope '${scopeName}': ${validation.error}`

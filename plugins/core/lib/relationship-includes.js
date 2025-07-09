@@ -1,3 +1,5 @@
+import { groupByPolymorphicType } from './polymorphic-helpers.js';
+
 /**
  * @module relationship-includes
  * @description JSON:API relationship inclusion helpers for REST API Knex Plugin
@@ -60,7 +62,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
    * @private
    */
   const getTableName = async (scopeName) => {
-    const schema = await scopes[scopeName].getSchema();
+    const schema = (await scopes[scopeName].getSchemaInfo()).schema;
     return schema?.tableName || scopeName;
   };
   
@@ -199,7 +201,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     const targetTable = await getTableName(targetScope);
     
     // Build field selection for sparse fieldsets
-    const targetSchema = await scopes[targetScope].getSchema();
+    const targetSchema = (await scopes[targetScope].getSchemaInfo()).schema;
     const fieldsToSelect = helpers?.buildFieldSelection ? 
       await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
       '*';
@@ -326,7 +328,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       });
       
       // Step 3: Build field selection for sparse fieldsets
-      const targetSchema = await scopes[targetScope].getSchema();
+      const targetSchema = (await scopes[targetScope].getSchemaInfo()).schema;
       const fieldsToSelect = helpers?.buildFieldSelection ? 
         await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
         '*';
@@ -402,7 +404,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     log.trace('[INCLUDE] HasMany details:', { targetScope, targetTable, foreignKey, parentIds: mainIds.length });
     
     // Build field selection for sparse fieldsets
-    const targetSchema = await scopes[targetScope].getSchema();
+    const targetSchema = (await scopes[targetScope].getSchemaInfo()).schema;
     const fieldsToSelect = helpers?.buildFieldSelection ? 
       await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
       '*';
@@ -492,15 +494,8 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     
     const { typeField, idField, types } = relDef.belongsToPolymorphic;
     
-    // Get polymorphic helpers from the passed helpers object
-    const polymorphicHelpers = helpers?.polymorphicHelpers;
-    if (!polymorphicHelpers) {
-      log.error('[INCLUDE] Polymorphic helpers not found');
-      return;
-    }
-    
     // Group records by their target type using helper
-    const grouped = polymorphicHelpers.groupByPolymorphicType(
+    const grouped = groupByPolymorphicType(
       records, 
       typeField, 
       idField
@@ -522,7 +517,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       if (targetIds.length === 0) continue;
       
       // Get target table information
-      const targetSchema = await scopes[targetType].getSchema();
+      const targetSchema = (await scopes[targetType].getSchemaInfo()).schema;
       const targetTable = targetSchema?.tableName || targetType;
       
       // Build field selection for sparse fieldsets
@@ -649,7 +644,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     if (mainIds.length === 0) return;
     
     const targetScope = relDef.hasMany;
-    const targetSchema = await scopes[targetScope].getSchema();
+    const targetSchema = (await scopes[targetScope].getSchemaInfo()).schema;
     const targetTable = targetSchema?.tableName || targetScope;
     const polymorphicField = relDef.via;
     
@@ -769,8 +764,9 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     processedPaths.add(pathKey);
     
     // Get scope schema and relationships
-    const schema = await scopes[scopeName].getSchema();
-    const relationships = await scopes[scopeName].getRelationships();
+    const schemaInfo = await scopes[scopeName].getSchemaInfo();
+    const schema = schemaInfo.schema;
+    const relationships = schemaInfo.relationships;
     
     // Process each include
     for (const [includeName, subIncludes] of Object.entries(includeTree)) {
@@ -906,7 +902,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       // Extract relationships that were added during processing
       const { _relationships, ...cleanRecord } = raw;
       // Get schema for foreign key filtering
-      const targetSchema = await scopes[scope].getSchema();
+      const targetSchema = (await scopes[scope].getSchemaInfo()).schema;
       const jsonApiRecord = toJsonApi(scope, cleanRecord, targetSchema);
       
       // Add relationships if any were loaded

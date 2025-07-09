@@ -11,14 +11,33 @@ import {
   RestApiResourceError, 
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
-import { createPolymorphicHelpers } from './lib/polymorphic-helpers.js';
 import { validateBelongsToTypes, validatePolymorphicRelationships } from './lib/scope-validations.js';
 import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './lib/schemaHelpers.js';
 import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplifiedHelpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
 import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
 import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
+import { moveHttpObjectsToContext } from './lib/http-helpers.js';
 
+
+/**
+ * Internal helper to enrich attributes by running the enrichAttributes hook
+ * @param {Object} attributes - The attributes to enrich
+ * @param {Object} parentContext - The parent context from the calling method
+ * @param {Object} scope - The scope instance
+ * @param {Function} runHooks - The runHooks function from the scope
+ * @returns {Object} The enriched attributes
+ */
+const enrichAttributes = async (attributes, parentContext, scope, runHooks) => {
+  const context = {
+    parentContext,
+    attributes
+  };
+  
+  await runHooks('enrichAttributes', { context });
+  
+  return context.attributes;
+};
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -27,119 +46,7 @@ export const RestApiPlugin = {
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
-    
-    // Initialize polymorphic helpers
-    const polymorphicHelpers = createPolymorphicHelpers(scopes, log);
-    api._polymorphicHelpers = polymorphicHelpers;
         
-    /**
-     * Moves HTTP request/response objects from params to context for cleaner method signatures.
-     * 
-     * This helper function is essential for maintaining clean separation between business logic
-     * parameters and transport-layer concerns. HTTP plugins (Express, HTTP, WebSocket) need to
-     * pass request/response objects through the API methods for things like:
-     * - File upload handling
-     * - Custom headers access
-     * - Real-time response streaming
-     * - Authentication tokens
-     * 
-     * However, these HTTP objects shouldn't pollute the params object that contains business
-     * data. This function extracts them from params and places them in the context where
-     * they belong, supporting both the modern WeakMap approach and legacy direct passing.
-     * 
-     * The function handles three scenarios:
-     * 1. Modern approach: HTTP objects stored in WeakMap with _requestId reference
-     * 2. Legacy Express: _expressReq/_expressRes passed directly in params  
-     * 3. Legacy HTTP: _httpReq/_httpRes passed directly in params
-     * 
-     * @param {Object} params - The method parameters that may contain HTTP objects
-     * @param {Object} context - The context object to receive the HTTP objects
-     * 
-     * @example
-     * // Modern approach using WeakMap (preferred):
-     * // In Express plugin:
-     * const requestId = Symbol('request');
-     * api._httpRequests.set(requestId, { req, res });
-     * const result = await scope.post({ 
-     *   inputRecord: data,
-     *   _requestId: requestId  // Clean reference
-     * });
-     * 
-     * // In REST API method:
-     * moveHttpObjectsToContext(params, context);
-     * // Now context.expressReq and context.expressRes are available
-     * // But params is clean of HTTP concerns
-     * 
-     * @example
-     * // What gets moved:
-     * // Before:
-     * params = {
-     *   inputRecord: { data: {...} },
-     *   _requestId: Symbol(request),
-     *   transaction: dbTransaction  // Preserved
-     * }
-     * context = {}
-     * 
-     * // After moveHttpObjectsToContext:
-     * params = {
-     *   inputRecord: { data: {...} },
-     *   transaction: dbTransaction  // Still there
-     * }
-     * context = {
-     *   expressReq: [Express Request],
-     *   expressRes: [Express Response],
-     *   transaction: dbTransaction  // Also copied here
-     * }
-     * 
-     * @example
-     * // Legacy support (still works but not recommended):
-     * const result = await scope.post({
-     *   inputRecord: data,
-     *   _expressReq: req,  // Direct passing
-     *   _expressRes: res
-     * });
-     * // These get moved to context.expressReq/expressRes
-     */
-    // Helper function to move HTTP objects from params to context
-    const moveHttpObjectsToContext = (params, context) => {
-      // Check for request ID from Express/HTTP plugins
-      if (params._requestId && api._httpRequests) {
-        const httpData = api._httpRequests.get(params._requestId);
-        if (httpData) {
-          if (httpData.req && httpData.res) {
-            // Express request
-            context.expressReq = httpData.req;
-            context.expressRes = httpData.res;
-          } else if (httpData.httpReq && httpData.httpRes) {
-            // HTTP request
-            context.httpReq = httpData.httpReq;
-            context.httpRes = httpData.httpRes;
-          }
-          // Clean up the WeakMap entry
-          api._httpRequests.delete(params._requestId);
-        }
-        delete params._requestId;
-      }
-      
-      // Legacy support - remove if present
-      if (params._expressReq) {
-        context.expressReq = params._expressReq;
-        context.expressRes = params._expressRes;
-        delete params._expressReq;
-        delete params._expressRes;
-      }
-      if (params._httpReq) {
-        context.httpReq = params._httpReq;
-        context.httpRes = params._httpRes;
-        delete params._httpReq;
-        delete params._httpRes;
-      }
-      
-      // Preserve transaction if present
-      if (params.transaction) {
-        context.transaction = params.transaction;
-      }
-    };
 
 
     // Set up REST-friendly aliases
@@ -188,40 +95,24 @@ export const RestApiPlugin = {
       allowRemoteOverride: restApiOptions.returnFullRecord?.allowRemoteOverride ?? false
     };
 
-    addScopeMethod('enrichAttributes', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
+
+    // Helper scope method to get all schema-related information
+    addScopeMethod('getSchemaInfo', async ({ scopeOptions }) => {
+      const schema = scopeOptions.schema || null;
       
-      // This will make sure that when this method calls "runHooks", the hooks will have the same context as api.post()
-      // although it will be a COPY 
-      context.parentContext = params.parentContext
-      context.attributes = params.attributes
-
-      // Hooks will receive enrichRecord's context as context, and their jobs is to change context.record
-      runHooks('enrichAttributes')
-
-      return context.attributes
-    })
-
-    // Helper scope methods for cross-table search functionality
-    addScopeMethod('getSchema', async ({ scopeOptions }) => {
-      return scopeOptions.schema || null;
-    })
-
-    addScopeMethod('getSearchSchema', async ({ scopeOptions }) => {
-      // Return explicit searchSchema if defined, otherwise generate from schema
+      // Determine searchSchema
+      let searchSchema = null;
       if (scopeOptions.searchSchema) {
-        return scopeOptions.searchSchema;
+        searchSchema = scopeOptions.searchSchema;
+      } else if (schema) {
+        searchSchema = generateSearchSchemaFromSchema(schema);
       }
       
-      // Generate searchSchema from schema fields with 'search' property
-      if (scopeOptions.schema) {
-        return generateSearchSchemaFromSchema(scopeOptions.schema);
-      }
-      
-      return null;
-    })
-
-    addScopeMethod('getRelationships', ({ scopeOptions }) => {
-      return scopeOptions.relationships || {};
+      return {
+        schema,
+        searchSchema,
+        relationships: scopeOptions.relationships || {}
+      };
     })
 
 
@@ -368,7 +259,7 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context for cleaner separation
       // Extracts request/response objects so params only contains business data
-      moveHttpObjectsToContext(params, context);
+      moveHttpObjectsToContext(params, context, api);
 
       const simplified = 
         params.simplified !== undefined ? params.simplified :  // Direct param override
@@ -495,10 +386,11 @@ export const RestApiPlugin = {
 
       // Run enrichAttributes for every single set of attribute, calling it from the right API
       for (const entry of context.record.data) {
-        entry.attributes = await scope.enrichAttributes({attributes: entry.attributes, parentContext: context})
+        entry.attributes = await enrichAttributes(entry.attributes, context, scope, runHooks)
       }
       for (const entry of (context.record.included || [])) {
-        entry.attributes = await scopes[entry.type].enrichAttributes({attributes: entry.attributes, parentContext: context})
+        const entryScope = scopes[entry.type];
+        entry.attributes = await enrichAttributes(entry.attributes, context, entryScope, runHooks)
       }
 
       // The called hooks should NOT change context.record
@@ -508,7 +400,7 @@ export const RestApiPlugin = {
       // Transform output if in simplified mode
       if (simplified) {
         // Transform the return value
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         if (context.record) {
           // Convert JSON:API response back to simplified format
           // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
@@ -598,7 +490,7 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context for cleaner separation
       // Extracts request/response objects so params only contains business data
-      moveHttpObjectsToContext(params, context);
+      moveHttpObjectsToContext(params, context, api);
 
       // Determine mode early
       const simplified = 
@@ -649,9 +541,10 @@ export const RestApiPlugin = {
 
       // This will enhance record, which is the WHOLE JSON:API record
       runHooks('enrichRecord')
-      context.record.data.attributes = await scope.enrichAttributes({attributes: context.record.data.attributes, parentContext: context})
+      context.record.data.attributes = await enrichAttributes(context.record.data.attributes, context, scope, runHooks)
       for (const entry of (context.record.included || [])) {
-        entry.attributes = await scopes[entry.type].enrichAttributes({attributes: entry.attributes, parentContext: context})
+        const entryScope = scopes[entry.type];
+        entry.attributes = await enrichAttributes(entry.attributes, context, entryScope, runHooks)
       }
       
       // The called hooks should NOT change context.record
@@ -661,7 +554,7 @@ export const RestApiPlugin = {
       // Transform output if in simplified mode
       if (simplified) {
         // Transform the return value
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         if (context.record) {
           // Convert JSON:API response back to simplified format
           // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
@@ -878,7 +771,7 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context for cleaner separation
       // Extracts request/response objects so params only contains business data
-      moveHttpObjectsToContext(params, context);
+      moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
       const simplified = 
@@ -891,7 +784,7 @@ export const RestApiPlugin = {
       if (simplified) {
         // Auto-detect format
         if (!params.inputRecord?.data?.type) {
-          const relationships = await scopes[scopeName].getRelationships();
+          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           // Convert simplified object format to JSON:API format
           // Example: { title: 'My Post', author_id: 123 } becomes
           // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
@@ -962,7 +855,7 @@ export const RestApiPlugin = {
         context.schema = CreateSchema(scopeOptions.insertSchema || scopeOptions.schema || {})
 
         // Get relationships definition BEFORE validation
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         const schemaFields = scopeOptions.schema || {};
         
         // Process relationships FIRST to extract foreign keys from JSON:API relationships block
@@ -1081,18 +974,23 @@ export const RestApiPlugin = {
           
           // Enrich the return record's attributes
           if (context.returnRecord?.data?.attributes) {
-            context.returnRecord.data.attributes = await scope.enrichAttributes({
-              attributes: context.returnRecord.data.attributes, 
-              parentContext: context
-            });
+            context.returnRecord.data.attributes = await enrichAttributes(
+              context.returnRecord.data.attributes, 
+              context,
+              scope,
+              runHooks
+            );
           }
           
           // Enrich included resources if any
           for (const entry of (context.returnRecord?.included || [])) {
-            entry.attributes = await scopes[entry.type].enrichAttributes({
-              attributes: entry.attributes, 
-              parentContext: context
-            });
+            const entryScope = scopes[entry.type];
+            entry.attributes = await enrichAttributes(
+              entry.attributes, 
+              context,
+              entryScope,
+              runHooks
+            );
           }
         } else {
           // Return minimal record (just what was provided in original input, plus ID)
@@ -1114,7 +1012,7 @@ export const RestApiPlugin = {
         // Transform output if in simplified mode
         if (simplified) {
           // Transform the return value
-          const relationships = await scopes[scopeName].getRelationships();
+          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           const finalRecord = context.returnRecord || context.record;
           if (finalRecord) {
             return transformJsonApiToSimplified(
@@ -1315,7 +1213,7 @@ export const RestApiPlugin = {
     context.method = 'put'
     
     // Move HTTP objects from params to context
-    moveHttpObjectsToContext(params, context);
+    moveHttpObjectsToContext(params, context, api);
     
     // Determine mode early
       const simplified = 
@@ -1329,7 +1227,7 @@ export const RestApiPlugin = {
     if (simplified) {
       // Auto-detect format
       if (!params.inputRecord?.data?.type) {
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         params.inputRecord = transformSimplifiedToJsonApi(
           params.inputRecord || params, // Support both styles
           scopeName,
@@ -1452,7 +1350,7 @@ export const RestApiPlugin = {
     context.schema = CreateSchema((context.isCreate ? scopeOptions.insertSchema : scopeOptions.updateSchema) || scopeOptions.schema || {})
 
     // Get relationships definition BEFORE validation
-    const relationships = await scopes[scopeName].getRelationships();
+    const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
     const schemaFields = scopeOptions.schema || {};
     
     // Process relationships FIRST to extract foreign keys
@@ -1647,18 +1545,23 @@ export const RestApiPlugin = {
       
       // Enrich the return record's attributes
       if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context
-        });
+        context.returnRecord.data.attributes = await enrichAttributes(
+          context.returnRecord.data.attributes, 
+          context,
+          scope,
+          runHooks
+        );
       }
       
       // Enrich included resources if any
       for (const entry of (context.returnRecord?.included || [])) {
-        entry.attributes = await scopes[entry.type].enrichAttributes({
-          attributes: entry.attributes, 
-          parentContext: context
-        });
+        const entryScope = scopes[entry.type];
+        entry.attributes = await enrichAttributes(
+          entry.attributes, 
+          context,
+          entryScope,
+          runHooks
+        );
       }
     } else {
       // Return minimal record - just the updated data
@@ -1677,10 +1580,12 @@ export const RestApiPlugin = {
       
       // Still enrich the attributes
       if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context
-        });
+        context.returnRecord.data.attributes = await enrichAttributes(
+          context.returnRecord.data.attributes, 
+          context,
+          scope,
+          runHooks
+        );
       }
     }
 
@@ -1690,7 +1595,7 @@ export const RestApiPlugin = {
     // Transform output if in simplified mode
     if (simplified && context.returnRecord) {
       // Transform the return value
-      const relationships = await scopes[scopeName].getRelationships();
+      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
       return transformJsonApiToSimplified(
         context.returnRecord,
         scopeOptions.schema || {},
@@ -1868,7 +1773,7 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context for cleaner separation
       // Extracts request/response objects so params only contains business data
-      moveHttpObjectsToContext(params, context);
+      moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
       const simplified = 
@@ -1881,7 +1786,7 @@ export const RestApiPlugin = {
       if (simplified) {
         // Auto-detect format
         if (!params.inputRecord?.data?.type) {
-          const relationships = await scopes[scopeName].getRelationships();
+          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           // Convert simplified object format to JSON:API format
           // Example: { title: 'My Post', author_id: 123 } becomes
           // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
@@ -1981,7 +1886,7 @@ export const RestApiPlugin = {
       context.schema = CreateSchema(scopeOptions.updateSchema || scopeOptions.schema || {})
 
       // Get relationships definition BEFORE validation
-      const relationships = await scopes[scopeName].getRelationships();
+      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
       const schemaFields = scopeOptions.schema || {};
       
       // Process relationships FIRST to extract foreign keys (only for provided relationships in PATCH)
@@ -2096,10 +2001,12 @@ export const RestApiPlugin = {
         
         // Still enrich the attributes if present
         if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await scope.enrichAttributes({
-            attributes: context.returnRecord.data.attributes, 
-            parentContext: context
-          });
+          context.returnRecord.data.attributes = await enrichAttributes(
+            context.returnRecord.data.attributes, 
+            context,
+            scope,
+            runHooks
+          );
         }
       }
 
@@ -2115,18 +2022,23 @@ export const RestApiPlugin = {
       if (shouldReturnFullRecord) {
         // Enrich the return record's attributes
         if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await scope.enrichAttributes({
-            attributes: context.returnRecord.data.attributes, 
-            parentContext: context
-          });
+          context.returnRecord.data.attributes = await enrichAttributes(
+            context.returnRecord.data.attributes, 
+            context,
+            scope,
+            runHooks
+          );
         }
         
         // Enrich included resources
         for (const entry of (context.returnRecord?.included || [])) {
-          entry.attributes = await scopes[entry.type].enrichAttributes({
-            attributes: entry.attributes, 
-            parentContext: context
-          });
+          const entryScope = scopes[entry.type];
+          entry.attributes = await enrichAttributes(
+            entry.attributes, 
+            context,
+            entryScope,
+            runHooks
+          );
         }
       }
 
@@ -2136,7 +2048,7 @@ export const RestApiPlugin = {
       // Transform output if in simplified mode
       if (simplified && context.returnRecord) {
         // Transform the return value
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         return transformJsonApiToSimplified(
           context.returnRecord,
           scopeOptions.schema || {},
@@ -2189,7 +2101,7 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context for cleaner separation
       // Extracts request/response objects so params only contains business data
-      moveHttpObjectsToContext(params, context);
+      moveHttpObjectsToContext(params, context, api);
       
       // Set the ID in context
       context.id = params.id

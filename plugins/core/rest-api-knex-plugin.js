@@ -1,6 +1,7 @@
 
 import { createCrossTableSearchHelpers } from './lib/cross-table-search.js';
 import { createRelationshipIncludeHelpers } from './lib/relationship-includes.js';
+import * as polymorphicHelpers from './lib/polymorphic-helpers.js';
 
 /**
  * REST API Knex Plugin - SQL Storage Implementation
@@ -467,7 +468,7 @@ export const RestApiKnexPlugin = {
      * const tableName = await getTableName('articles'); // Returns 'articles' or custom table name
      */
     const getTableName = async (scopeName) => {
-      const schema = await scopes[scopeName].getSchema();
+      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       return schema?.tableName || scopeName;
     };
     
@@ -713,18 +714,13 @@ export const RestApiKnexPlugin = {
         if (polymorphicSearches.size > 0) {
           log.trace('[POLYMORPHIC-SEARCH] Building JOINs for polymorphic searches');
           
-          // Get polymorphic helpers
-          const polymorphicHelpers = api._polymorphicHelpers;
-          if (!polymorphicHelpers) {
-            log.error('[POLYMORPHIC-SEARCH] Polymorphic helpers not found');
-            throw new Error('Polymorphic helpers not initialized');
-          }
+          // Polymorphic helpers are imported directly now
           
           for (const [filterKey, searchInfo] of polymorphicSearches) {
             const { fieldDef, polymorphicField } = searchInfo;
             
             // Get the relationship definition
-            const relationships = await scopes[scopeName].getRelationships();
+            const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
             const polyRel = relationships[polymorphicField];
             
             if (!polyRel?.belongsToPolymorphic) {
@@ -741,7 +737,7 @@ export const RestApiKnexPlugin = {
               
               // Skip if we already added this JOIN
               if (!polymorphicJoins.has(baseAlias)) {
-                const targetSchema = await scopes[targetType].getSchema();
+                const targetSchema = (await scopes[targetType].getSchemaInfo()).schema;
                 const targetTable = targetSchema?.tableName || targetType;
                 
                 log.trace('[POLYMORPHIC-SEARCH] Adding conditional JOIN:', { 
@@ -774,7 +770,7 @@ export const RestApiKnexPlugin = {
                     const relationshipName = pathParts[i];
                     
                     // Find the foreign key for this relationship
-                    const currentSchema = await scopes[currentScope].getSchema();
+                    const currentSchema = (await scopes[currentScope].getSchemaInfo()).schema;
                     let foreignKeyField = null;
                     let nextScope = null;
                     
@@ -789,7 +785,7 @@ export const RestApiKnexPlugin = {
                     
                     if (!foreignKeyField) {
                       // Check relationships for hasOne
-                      const currentRelationships = await scopes[currentScope].getRelationships();
+                      const currentRelationships = (await scopes[currentScope].getSchemaInfo()).relationships;
                       const rel = currentRelationships?.[relationshipName];
                       if (rel?.hasOne) {
                         // Handle hasOne - more complex
@@ -805,7 +801,7 @@ export const RestApiKnexPlugin = {
                     
                     // Build next JOIN
                     const nextAlias = `${currentAlias}_${relationshipName}`;
-                    const nextSchema = await scopes[nextScope].getSchema();
+                    const nextSchema = (await scopes[nextScope].getSchemaInfo()).schema;
                     const nextTable = nextSchema?.tableName || nextScope;
                     
                     log.trace('[POLYMORPHIC-SEARCH] Adding cross-table JOIN:', { 
@@ -831,7 +827,7 @@ export const RestApiKnexPlugin = {
         // Pre-fetch relationships for polymorphic searches
         const polymorphicRelationships = new Map();
         if (polymorphicSearches.size > 0) {
-          const relationships = await scopes[scopeName].getRelationships();
+          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           for (const [filterKey, searchInfo] of polymorphicSearches) {
             const { polymorphicField } = searchInfo;
             const polyRel = relationships[polymorphicField];
@@ -1034,7 +1030,7 @@ export const RestApiKnexPlugin = {
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
     api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
-    api.knex.helpers.polymorphic = api._polymorphicHelpers;
+    api.knex.helpers.polymorphic = polymorphicHelpers;
     
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                  INTERNAL HELPER FUNCTIONS                              ║
@@ -1090,7 +1086,7 @@ export const RestApiKnexPlugin = {
       // Always include polymorphic type and id fields from relationships
       if (scopes[scopeName]) {
         try {
-          const relationships = await scopes[scopeName].getRelationships();
+          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           Object.entries(relationships || {}).forEach(([relName, relDef]) => {
             if (relDef.belongsToPolymorphic) {
               const { typeField, idField } = relDef.belongsToPolymorphic;
@@ -1154,7 +1150,7 @@ export const RestApiKnexPlugin = {
       // Also filter out polymorphic type and id fields
       const polymorphicFields = new Set();
       try {
-        const relationships = await scopes[scopeName].getRelationships();
+        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         Object.entries(relationships || {}).forEach(([relName, relDef]) => {
           if (relDef.belongsToPolymorphic) {
             const { typeField, idField } = relDef.belongsToPolymorphic;
@@ -1229,7 +1225,7 @@ export const RestApiKnexPlugin = {
         helpers = createRelationshipIncludeHelpers(scopes, log, transaction, {
           getForeignKeyFields,
           buildFieldSelection,
-          polymorphicHelpers: api._polymorphicHelpers
+          polymorphicHelpers
         });
       }
       
@@ -1262,7 +1258,7 @@ export const RestApiKnexPlugin = {
      */
     const buildJsonApiResponse = async (records, scopeName, schema, included = [], isSingle = false) => {
       // Get relationships configuration
-      const relationships = await scopes[scopeName].getRelationships();
+      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
       
       // Process records to JSON:API format
       const processedRecords = await Promise.all(records.map(async record => {
@@ -1410,8 +1406,7 @@ export const RestApiKnexPlugin = {
     // Now initialize relationship include helpers with access to the helper functions
     relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
       getForeignKeyFields,
-      buildFieldSelection,
-      polymorphicHelpers: api._polymorphicHelpers
+      buildFieldSelection
     });
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
@@ -1468,7 +1463,7 @@ export const RestApiKnexPlugin = {
     helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
-      const schema = await scopes[scopeName].getSchema();
+      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -1539,7 +1534,7 @@ export const RestApiKnexPlugin = {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       
       const tableName = await getTableName(scopeName);
-      const schema = await scopes[scopeName].getSchema();
+      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const sortableFields = schema?.sortableFields || vars.sortableFields;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
@@ -1651,7 +1646,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       const idProperty = vars.idProperty || 'id';
-      const schema = await scopes[scopeName].getSchema();
+      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -1704,7 +1699,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       idProperty = idProperty || vars.idProperty || 'id';
-      const schema = await scopes[scopeName].getSchema();
+      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -1781,7 +1776,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName);
       idProperty = idProperty || vars.idProperty || 'id';
-      schema = schema || await scopes[scopeName].getSchema();
+      schema = schema || (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
