@@ -360,26 +360,31 @@ export const HttpPlugin = {
         // Parse body for mutations
         if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
           const ct = parseContentType(req);
-          const rawBody = await getRawBody(req, {
-            length: req.headers['content-length'],
-            limit: requestSizeLimit,
-            encoding: ct.parameters.charset || 'utf-8'
-          });
           
-          try {
-            params.inputRecord = JSON.parse(rawBody);
-          } catch (jsonError) {
-            // Handle JSON parsing errors as 400 Bad Request
-            res.writeHead(400, { 'Content-Type': 'application/vnd.api+json' });
-            res.end(JSON.stringify({
-              errors: [{
-                status: '400',
-                title: 'Bad Request',
-                detail: 'Invalid JSON in request body'
-              }]
-            }));
-            return;
+          // Only parse the body if the content type is JSON
+          if (ct.type === 'application/json' || ct.type === 'application/vnd.api+json') {
+            const rawBody = await getRawBody(req, {
+              length: req.headers['content-length'],
+              limit: requestSizeLimit,
+              encoding: ct.parameters.charset || 'utf-8'
+            });
+            
+            try {
+              params.inputRecord = JSON.parse(rawBody);
+            } catch (jsonError) {
+              // Handle JSON parsing errors as 400 Bad Request
+              res.writeHead(400, { 'Content-Type': 'application/vnd.api+json' });
+              res.end(JSON.stringify({
+                errors: [{
+                  status: '400',
+                  title: 'Bad Request',
+                  detail: 'Invalid JSON in request body'
+                }]
+              }));
+              return;
+            }
           }
+          // If not JSON (e.g., multipart/form-data), we do nothing and let the FileHandlingPlugin deal with it.
           
           // Check for returnFullRecord query parameter
           const url = parseUrl(req.url, true);
