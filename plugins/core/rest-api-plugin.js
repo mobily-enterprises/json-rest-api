@@ -12,6 +12,7 @@ import {
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
 import { createPolymorphicHelpers } from '../../lib/polymorphic-helpers.js';
+import { validateBelongsToTypes, validatePolymorphicRelationships } from '../../lib/scope-validations.js';
 
 /**
  * Automatically marks searchSchema fields as indexed to support cross-table searches
@@ -554,39 +555,13 @@ export const RestApiPlugin = {
       }
     };
 
-    // Add hook to validate polymorphic relationships when scopes are created
-    addHook('afterScopeCreate', 'validatePolymorphicRelationships', {}, ({ scopeName, scopeOptions }) => {
-      const relationships = scopeOptions.relationships || {};
-      
-      for (const [relName, relDef] of Object.entries(relationships)) {
-        if (relDef.belongsToPolymorphic) {
-          const validation = polymorphicHelpers.validatePolymorphicRelationship(relDef, scopeName);
-          if (!validation.valid) {
-            throw new Error(
-              `Invalid polymorphic relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-            );
-          }
-        }
-      }
-    });
+    // Listen for scope creation to validate polymorphic relationships
+    on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
 
 
 
     // Listen for scope creation to validate belongsTo fields
-      on('scope:added', 'validateBelongsToTypes', ({ eventData }) => {
-        const { scopeName, scopeOptions } = eventData;
-        const schema = scopeOptions.schema || {};
-        
-        for (const [fieldName, fieldDef] of Object.entries(schema)) {
-          if (fieldDef.belongsTo && !fieldDef.type) {
-            throw new Error(
-              `Schema error in '${scopeName}': Field '${fieldName}' has belongsTo ` +
-              `but no type. All belongsTo fields must have an explicit type for validation. ` +
-              `Example: ${fieldName}: { type: 'number', belongsTo: '${fieldDef.belongsTo}', as: '${fieldDef.as || fieldName}' }`
-            );
-          }
-        }
-      });
+    on('scope:added', 'validateBelongsToTypes', validateBelongsToTypes);
     
 
     // Initialize default vars for the plugin from pluginOptions
