@@ -89,7 +89,7 @@
 
 // Import Express as a regular dependency
 import express from 'express';
-import { parseJsonApiQuery } from '../../../lib/query-parser.js';
+import { parseJsonApiQuery } from '../lib/query-parser.js';
 import { createContext } from './lib/request-helpers.js';
 
 export const ExpressPlugin = {

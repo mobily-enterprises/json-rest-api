@@ -1,34 +1,24 @@
 import CreateSchema from 'json-rest-schema'
 import { 
-  validateGetPayload, 
+ validateGetPayload, 
   validateQueryPayload, 
   validatePostPayload, 
   validatePutPayload, 
   validatePatchPayload 
-} from '../../lib/payload-validators.js';
+} from './lib/payload-validators.js';
 import { 
   RestApiValidationError, 
   RestApiResourceError, 
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
-import { createPolymorphicHelpers } from '../../lib/polymorphic-helpers.js';
-import { validateBelongsToTypes, validatePolymorphicRelationships } from '../../lib/scope-validations.js';
+import { createPolymorphicHelpers } from './lib/polymorphic-helpers.js';
+import { validateBelongsToTypes, validatePolymorphicRelationships } from './lib/scope-validations.js';
+import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './lib/schemaHelpers.js';
+import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplifiedHelpers.js';
+import { processRelationships } from './lib/relationship-processor.js';
+import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
+import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 
-/**
- * Automatically marks searchSchema fields as indexed to support cross-table searches
- * @param {Object} searchSchema - The searchSchema object to process
- */
-function ensureSearchFieldsAreIndexed(searchSchema) {
-  if (!searchSchema) return;
-  
-  Object.keys(searchSchema).forEach(fieldName => {
-    const fieldDef = searchSchema[fieldName];
-    if (fieldDef && typeof fieldDef === 'object') {
-      // Mark the field as indexed for cross-table search support
-      fieldDef.indexed = true;
-    }
-  });
-}
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -41,7 +31,75 @@ export const RestApiPlugin = {
     // Initialize polymorphic helpers
     const polymorphicHelpers = createPolymorphicHelpers(scopes, log);
     api._polymorphicHelpers = polymorphicHelpers;
-    
+        
+    /**
+     * Moves HTTP request/response objects from params to context for cleaner method signatures.
+     * 
+     * This helper function is essential for maintaining clean separation between business logic
+     * parameters and transport-layer concerns. HTTP plugins (Express, HTTP, WebSocket) need to
+     * pass request/response objects through the API methods for things like:
+     * - File upload handling
+     * - Custom headers access
+     * - Real-time response streaming
+     * - Authentication tokens
+     * 
+     * However, these HTTP objects shouldn't pollute the params object that contains business
+     * data. This function extracts them from params and places them in the context where
+     * they belong, supporting both the modern WeakMap approach and legacy direct passing.
+     * 
+     * The function handles three scenarios:
+     * 1. Modern approach: HTTP objects stored in WeakMap with _requestId reference
+     * 2. Legacy Express: _expressReq/_expressRes passed directly in params  
+     * 3. Legacy HTTP: _httpReq/_httpRes passed directly in params
+     * 
+     * @param {Object} params - The method parameters that may contain HTTP objects
+     * @param {Object} context - The context object to receive the HTTP objects
+     * 
+     * @example
+     * // Modern approach using WeakMap (preferred):
+     * // In Express plugin:
+     * const requestId = Symbol('request');
+     * api._httpRequests.set(requestId, { req, res });
+     * const result = await scope.post({ 
+     *   inputRecord: data,
+     *   _requestId: requestId  // Clean reference
+     * });
+     * 
+     * // In REST API method:
+     * moveHttpObjectsToContext(params, context);
+     * // Now context.expressReq and context.expressRes are available
+     * // But params is clean of HTTP concerns
+     * 
+     * @example
+     * // What gets moved:
+     * // Before:
+     * params = {
+     *   inputRecord: { data: {...} },
+     *   _requestId: Symbol(request),
+     *   transaction: dbTransaction  // Preserved
+     * }
+     * context = {}
+     * 
+     * // After moveHttpObjectsToContext:
+     * params = {
+     *   inputRecord: { data: {...} },
+     *   transaction: dbTransaction  // Still there
+     * }
+     * context = {
+     *   expressReq: [Express Request],
+     *   expressRes: [Express Response],
+     *   transaction: dbTransaction  // Also copied here
+     * }
+     * 
+     * @example
+     * // Legacy support (still works but not recommended):
+     * const result = await scope.post({
+     *   inputRecord: data,
+     *   _expressReq: req,  // Direct passing
+     *   _expressRes: res
+     * });
+     * // These get moved to context.expressReq/expressRes
+     */
     // Helper function to move HTTP objects from params to context
     const moveHttpObjectsToContext = (params, context) => {
       // Check for request ID from Express/HTTP plugins
@@ -83,484 +141,27 @@ export const RestApiPlugin = {
       }
     };
 
-    // Helper function to generate complete searchSchema from schema and explicit searchSchema
-    const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => {
-      // Start with explicit searchSchema or empty object
-      const searchSchema = explicitSearchSchema ? {...explicitSearchSchema} : {};
-      
-      if (!schema) {
-        return Object.keys(searchSchema).length > 0 ? searchSchema : null;
-      }
-      
-      // Process schema fields with 'search' property
-      Object.entries(schema).forEach(([fieldName, fieldDef]) => {
-        const effectiveSearch = fieldDef.search;
-        
-        if (effectiveSearch) {
-          if (effectiveSearch === true) {
-            // Check for conflicts with explicit searchSchema
-            if (searchSchema[fieldName]) {
-              throw new RestApiValidationError(
-                `Field '${fieldName}' is defined in both schema (with search: true) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-                { 
-                  fields: [fieldName],
-                  violations: [{
-                    field: fieldName,
-                    rule: 'duplicate_search_field',
-                    message: 'Field cannot be defined in both schema and searchSchema'
-                  }]
-                }
-              );
-            }
-            
-            // Simple boolean - copy entire field definition (except search) and add filterUsing
-            const { search, ...fieldDefWithoutSearch } = fieldDef;
-            searchSchema[fieldName] = {
-              ...fieldDefWithoutSearch,
-              // Default filter behavior based on type
-              filterUsing: fieldDef.type === 'string' ? '=' : '='
-            };
-          } else if (typeof effectiveSearch === 'object') {
-            // Check if search defines multiple filter fields
-            const hasNestedFilters = Object.values(effectiveSearch).some(
-              v => typeof v === 'object' && v.filterUsing
-            );
-            
-            if (hasNestedFilters) {
-              // Multiple filters from one field (like published_after/before)
-              Object.entries(effectiveSearch).forEach(([filterName, filterDef]) => {
-                // Check for conflicts
-                if (searchSchema[filterName]) {
-                  throw new RestApiValidationError(
-                    `Field '${filterName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-                    { 
-                      fields: [filterName],
-                      violations: [{
-                        field: filterName,
-                        rule: 'duplicate_search_field',
-                        message: 'Field cannot be defined in both schema and searchSchema'
-                      }]
-                    }
-                  );
-                }
-                
-                searchSchema[filterName] = {
-                  type: fieldDef.type,
-                  actualField: fieldName,
-                  ...filterDef
-                };
-              });
-            } else {
-              // Check for conflicts
-              if (searchSchema[fieldName]) {
-                throw new RestApiValidationError(
-                  `Field '${fieldName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-                  { 
-                    fields: [fieldName],
-                    violations: [{
-                      field: fieldName,
-                      rule: 'duplicate_search_field',
-                      message: 'Field cannot be defined in both schema and searchSchema'
-                    }]
-                  }
-                );
-              }
-              
-              // Single filter with config
-              searchSchema[fieldName] = {
-                type: fieldDef.type,
-                ...effectiveSearch
-              };
-            }
-          }
-        }
-      });
-      
-      // Handle _virtual search definitions
-      if (schema._virtual?.search) {
-        Object.entries(schema._virtual.search).forEach(([filterName, filterDef]) => {
-          // Check for conflicts
-          if (searchSchema[filterName]) {
-            throw new RestApiValidationError(
-              `Field '${filterName}' is defined in both schema (_virtual.search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-              { 
-                fields: [filterName],
-                violations: [{
-                  field: filterName,
-                  rule: 'duplicate_search_field',
-                  message: 'Field cannot be defined in both schema and searchSchema'
-                }]
-              }
-            );
-          }
-          
-          searchSchema[filterName] = filterDef;
-        });
-      }
-      
-      return Object.keys(searchSchema).length > 0 ? searchSchema : null;
-    };
 
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
     
-    // Helper function to process relationships from input
-    const processRelationships = (inputRecord, schemaFields, relationships) => {
-      const belongsToUpdates = {};
-      const manyToManyRelationships = [];
-      
-      if (!inputRecord.data.relationships) {
-        return { belongsToUpdates, manyToManyRelationships };
-      }
-      
-      for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
-        const relDef = relationships?.[relName];
-        
-        // Find the schema field that defines this relationship
-        const schemaField = Object.entries(schemaFields).find(([fieldName, fieldDef]) => 
-          fieldDef.as === relName
-        );
-        
-        if (schemaField) {
-          const [fieldName, fieldDef] = schemaField;
-          
-          // Handle regular belongsTo (1:1)
-          if (fieldDef.belongsTo && !fieldDef.belongsToPolymorphic) {
-            if (relData.data === null) {
-              belongsToUpdates[fieldName] = null;
-            } else if (relData.data?.id) {
-              belongsToUpdates[fieldName] = relData.data.id;
-            }
-          }
-          // Handle polymorphic belongsTo
-          else if (fieldDef.belongsToPolymorphic) {
-            if (relData.data === null) {
-              const { typeField, idField } = fieldDef.belongsToPolymorphic;
-              belongsToUpdates[typeField] = null;
-              belongsToUpdates[idField] = null;
-            } else if (relData.data) {
-              const { type, id } = relData.data;
-              const { types, typeField, idField } = fieldDef.belongsToPolymorphic;
-              
-              // Validate type is allowed
-              if (!types.includes(type)) {
-                throw new RestApiValidationError(
-                  `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-                  { 
-                    fields: [`data.relationships.${relName}.data.type`],
-                    violations: [{
-                      field: `data.relationships.${relName}.data.type`,
-                      rule: 'polymorphic_type',
-                      message: `Type must be one of: ${types.join(', ')}`
-                    }]
-                  }
-                );
-              }
-              
-              belongsToUpdates[typeField] = type;
-              belongsToUpdates[idField] = id;
-            }
-          }
-        }
-        
-        // Check for many-to-many relationships defined in relationships object
-        if (relDef?.manyToMany && relData.data !== undefined) {
-          manyToManyRelationships.push({
-            relName,
-            relDef: relDef.manyToMany,  // Pass the manyToMany object, not the whole relationship
-            relData: relData.data || []  // null means empty array for many-to-many
-          });
-        }
-        // Also check for hasMany with through (alternative many-to-many syntax)
-        else if (relDef?.hasMany && relDef?.through && relData.data !== undefined) {
-          manyToManyRelationships.push({
-            relName,
-            relDef: {
-              through: relDef.through,
-              foreignKey: relDef.foreignKey,
-              otherKey: relDef.otherKey
-            },
-            relData: relData.data || []  // null means empty array for many-to-many
-          });
-        }
-      }
-      
-      return { belongsToUpdates, manyToManyRelationships };
-    };
     
-    /**
-     * Transform simplified object to JSON:API format
-     * @param {Object} input - Plain object or JSON:API object
-     * @param {string} scopeName - Resource type
-     * @param {Object} schema - Resource schema
-     * @param {Object} relationships - Resource relationships
-     * @returns {Object} JSON:API formatted object
-     */
-    const transformSimplifiedToJsonApi = (input, scopeName, schema, relationships) => {
-      // If already JSON:API format, return as-is
-      if (input?.data?.type) {
-        return input;
-      }
 
-      const attributes = {};
-      const relationshipsData = {};
-      const { id, ...fields } = input;
 
-      for (const [key, value] of Object.entries(fields)) {
-        const schemaField = schema[key];
-
-        // Check if it's a belongsTo field in schema
-        if (schemaField?.belongsTo && schemaField?.as) {
-          relationshipsData[schemaField.as] = {
-            data: value ? { type: schemaField.belongsTo, id: String(value) } : null
-          };
-        }
-        // Check if it's a relationship name (for many-to-many)
-        else if (relationships?.[key]) {
-          const rel = relationships[key];
-
-          // Handle hasMany/manyToMany
-          if ((rel.hasMany || rel.manyToMany) && Array.isArray(value)) {
-            // Determine target type
-            const targetType = rel.hasMany || rel.manyToMany?.otherType || rel.through;
-            relationshipsData[key] = {
-              data: value.map(id => ({ type: targetType, id: String(id) }))
-            };
-          }
-        }
-        // Regular attribute
-        else {
-          attributes[key] = value;
-        }
-      }
-
-      return {
-        data: {
-          type: scopeName,
-          ...(id && { id: String(id) }),
-          ...(Object.keys(attributes).length > 0 && { attributes }),
-          ...(Object.keys(relationshipsData).length > 0 && { relationships: relationshipsData })
-        }
-      };
-    };
-
-    /**
-     * Transform JSON:API response to simplified format
-     */
-    const transformJsonApiToSimplified = (jsonApi, schema, relationships) => {
-      if (!jsonApi?.data) return jsonApi;
-
-      // Handle array response (QUERY)
-      if (Array.isArray(jsonApi.data)) {
-        return jsonApi.data.map(item =>
-          transformSingleJsonApiToSimplified(item, jsonApi.included, schema, relationships)
-        );
-      }
-
-      // Handle single response
-      return transformSingleJsonApiToSimplified(jsonApi.data, jsonApi.included, schema, relationships);
-    };
-
-    const transformSingleJsonApiToSimplified = (data, included, schema, relationships) => {
-      const simplified = {};
-
-      // Add ID
-      if (data.id) {
-        simplified.id = data.id;
-      }
-
-      // Add attributes
-      Object.assign(simplified, data.attributes || {});
-
-      // Extract foreign keys from relationships
-      if (data.relationships) {
-        for (const [relName, relData] of Object.entries(data.relationships)) {
-          // Find schema field for this belongsTo relationship
-          const schemaEntry = Object.entries(schema).find(([_, def]) => def.as === relName);
-
-          if (schemaEntry) {
-            const [fieldName, fieldDef] = schemaEntry;
-            if (fieldDef.belongsTo && relData.data) {
-              simplified[fieldName] = relData.data.id;
-            }
-          }
-
-          // Handle many-to-many (just IDs, not nested)
-          const rel = relationships?.[relName];
-          if (rel?.hasMany || rel?.manyToMany) {
-            if (relData.data && Array.isArray(relData.data)) {
-              simplified[`${relName}_ids`] = relData.data.map(item => item.id);
-            }
-          }
-
-          // Handle includes (nested objects)
-          if (included && relData.data) {
-            const findIncluded = (ref) =>
-              included.find(inc => inc.type === ref.type && inc.id === ref.id);
-
-            if (Array.isArray(relData.data)) {
-              const nestedData = relData.data.map(findIncluded).filter(Boolean);
-              if (nestedData.length > 0) {
-                simplified[relName] = nestedData.map(item => ({
-                  id: item.id,
-                  ...item.attributes
-                }));
-              }
-            } else {
-              const nestedData = findIncluded(relData.data);
-              if (nestedData) {
-                simplified[relName] = {
-                  id: nestedData.id,
-                  ...nestedData.attributes
-                };
-              }
-            }
-          }
-        }
-      }
-
-      return simplified;
-    };
     
-    // Helper function to update many-to-many relationships while preserving pivot data
-    const updateManyToManyRelationship = async (resourceId, relDef, relData, trx) => {
-      
-      // Get existing pivot records
-      const existingPivotRecords = await api.resources[relDef.through].query({
-        transaction: trx,
-        queryParams: {
-          filters: { [relDef.foreignKey]: resourceId }
-        }
-      });
-      
-      
-      
-      // Create maps for easier lookup
-      const existingMap = new Map();
-      for (const record of existingPivotRecords.data || []) {
-        const otherKeyValue = record.attributes[relDef.otherKey];
-        existingMap.set(String(otherKeyValue), record);
-      }
-      
-      const newMap = new Map();
-      for (const related of relData) {
-        newMap.set(String(related.id), related);
-      }
-      
-      // Delete records that are no longer in the relationship
-      for (const [otherId, record] of existingMap) {
-        if (!newMap.has(otherId)) {
-          await api.resources[relDef.through].delete({
-            transaction: trx,
-            id: record.id
-          });
-        }
-      }
-      
-      // Add new records (those not in existing)
-      for (const [otherId, related] of newMap) {
-        if (!existingMap.has(otherId)) {
-          // Validate related resource exists if needed
-          if (relDef.validateExists !== false) {
-            try {
-              await api.resources[related.type].get({
-                id: related.id,
-                transaction: trx
-              });
-            } catch (error) {
-              throw new RestApiResourceError(
-                `Related ${related.type} with id ${related.id} not found`,
-                { 
-                  subtype: 'not_found',
-                  resourceType: related.type, 
-                  resourceId: related.id 
-                }
-              );
-            }
-          }
-          
-          // Create new pivot record
-          await api.resources[relDef.through].post({
-            transaction: trx,
-            inputRecord: {
-              data: {
-                type: relDef.through,
-                attributes: {
-                  [relDef.foreignKey]: resourceId,
-                  [relDef.otherKey]: related.id
-                }
-              }
-            }
-          });
-        }
-      }
-      
-      // Records that exist in both are automatically preserved with their pivot data
-    };
     
-    // Keep the old helper for backward compatibility (used in POST)
-    const deleteExistingPivotRecords = async (resourceId, relDef, trx) => {
-      // Query for all existing pivot records
-      const existingPivotRecords = await api.resources[relDef.through].query({
-        transaction: trx,
-        queryParams: {
-          filters: { [relDef.foreignKey]: resourceId }
-        }
-      });
-      
-      // Delete each found record
-      for (const record of existingPivotRecords.data || []) {
-        await api.resources[relDef.through].delete({
-          transaction: trx,
-          id: record.id
-        });
-      }
-    };
     
-    // Helper function to create pivot records
-    const createPivotRecords = async (resourceId, relDef, relData, trx) => {
-      for (const related of relData) {
-        // Optionally validate related resource exists
-        if (relDef.validateExists !== false) {
-          try {
-            await api.resources[related.type].get({
-              id: related.id,
-              transaction: trx
-            });
-          } catch (error) {
-            throw new RestApiResourceError(
-              `Related ${related.type} with id ${related.id} not found`,
-              { 
-                subtype: 'not_found',
-                resourceType: related.type, 
-                resourceId: related.id 
-              }
-            );
-          }
-        }
-        
-        // Create pivot record
-        await api.resources[relDef.through].post({
-          transaction: trx,
-          inputRecord: {
-            data: {
-              type: relDef.through,
-              attributes: {
-                [relDef.foreignKey]: resourceId,
-                [relDef.otherKey]: related.id
-              }
-            }
-          }
-        });
-      }
-    };
 
     // Listen for scope creation to validate polymorphic relationships
+    // Ensures all polymorphic relationships reference valid types and have required fields
+    // Example: Validates that commentable: { belongsToPolymorphic: { types: ['posts', 'videos'] } } has valid config
     on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
 
 
 
     // Listen for scope creation to validate belongsTo fields
+    // Ensures all foreign key fields have explicit types for proper validation
+    // Example: author_id: { belongsTo: 'users' } must also have type: 'number'
     on('scope:added', 'validateBelongsToTypes', validateBelongsToTypes);
     
 
@@ -765,7 +366,8 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'query'
       
-      // Move HTTP objects from params to context
+      // Move HTTP objects from params to context for cleaner separation
+      // Extracts request/response objects so params only contains business data
       moveHttpObjectsToContext(params, context);
 
       const simplified = 
@@ -797,10 +399,12 @@ export const RestApiPlugin = {
       // Check payload with sortable fields validation
       validateQueryPayload(params, sortableFields);
 
-      // Generate complete searchSchema from both schema and explicit searchSchema
+      // Generate complete searchSchema by merging schema fields marked with 'search' property
+      // and any explicitly defined searchSchema. Example: title: { search: true } becomes searchable
       const searchSchema = generateSearchSchemaFromSchema(scopeOptions.schema, scopeOptions.searchSchema);
       
-      // Ensure searchSchema fields are marked as indexed
+      // Mark all search fields as indexed to enable efficient database queries and cross-table joins
+      // Example: searchSchema.title gets { indexed: true } added for optimal performance
       ensureSearchFieldsAreIndexed(searchSchema);
 
       // Validate search/filter parameters against searchSchema
@@ -906,6 +510,9 @@ export const RestApiPlugin = {
         // Transform the return value
         const relationships = await scopes[scopeName].getRelationships();
         if (context.record) {
+          // Convert JSON:API response back to simplified format
+          // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
+          // becomes: { id: '1', title: 'My Post', author_id: '123' }
           return transformJsonApiToSimplified(
             context.record,
             scopeOptions.schema || {},
@@ -989,7 +596,8 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'get'
       
-      // Move HTTP objects from params to context
+      // Move HTTP objects from params to context for cleaner separation
+      // Extracts request/response objects so params only contains business data
       moveHttpObjectsToContext(params, context);
 
       // Determine mode early
@@ -1055,6 +663,9 @@ export const RestApiPlugin = {
         // Transform the return value
         const relationships = await scopes[scopeName].getRelationships();
         if (context.record) {
+          // Convert JSON:API response back to simplified format
+          // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
+          // becomes: { id: '1', title: 'My Post', author_id: '123' }
           return transformJsonApiToSimplified(
             context.record,
             scopeOptions.schema || {},
@@ -1265,7 +876,8 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'post'
       
-      // Move HTTP objects from params to context
+      // Move HTTP objects from params to context for cleaner separation
+      // Extracts request/response objects so params only contains business data
       moveHttpObjectsToContext(params, context);
       
       // Determine mode early
@@ -1280,6 +892,9 @@ export const RestApiPlugin = {
         // Auto-detect format
         if (!params.inputRecord?.data?.type) {
           const relationships = await scopes[scopeName].getRelationships();
+          // Convert simplified object format to JSON:API format
+          // Example: { title: 'My Post', author_id: 123 } becomes
+          // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
           params.inputRecord = transformSimplifiedToJsonApi(
             params.inputRecord || params, // Support both styles
             scopeName,
@@ -1350,7 +965,9 @@ export const RestApiPlugin = {
         const relationships = await scopes[scopeName].getRelationships();
         const schemaFields = scopeOptions.schema || {};
         
-        // Process relationships FIRST to extract foreign keys
+        // Process relationships FIRST to extract foreign keys from JSON:API relationships block
+        // Example: relationships: { author: { data: { type: 'users', id: '123' } } } 
+        // becomes: belongsToUpdates: { author_id: '123' }
         const { belongsToUpdates, manyToManyRelationships } = processRelationships(
           context.inputRecord,
           schemaFields,
@@ -1435,8 +1052,9 @@ export const RestApiPlugin = {
             );
           }
           
-          // Create pivot records using helper
-          await createPivotRecords(context.record.data.id, relDef, relData, trx);
+          // Create pivot records in the through table to link resources
+          // Example: For tags: ['1', '2', '3'], creates 3 records in article_tags table
+          await createPivotRecords(api, context.record.data.id, relDef, relData, trx);
         }
         
         // Commit transaction if we created it
@@ -1985,12 +1603,16 @@ export const RestApiPlugin = {
         
         // Delete existing pivot records (only for updates, not creates)
         if (context.isUpdate) {
-          await deleteExistingPivotRecords(context.id, relDef, trx);
+          // Clear all existing relationships for this resource from the pivot table
+          // Example: Deletes all records from article_tags where article_id = 100
+          await deleteExistingPivotRecords(api, context.id, relDef, trx);
         }
         
         // Create new pivot records
         if (relData.length > 0) {
-          await createPivotRecords(context.id, relDef, relData, trx);
+          // Create fresh pivot records for the new relationships
+          // Example: Creates new article_tags records for the provided tag IDs
+          await createPivotRecords(api, context.id, relDef, relData, trx);
         }
       }
     
@@ -2244,7 +1866,8 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'patch'
       
-      // Move HTTP objects from params to context
+      // Move HTTP objects from params to context for cleaner separation
+      // Extracts request/response objects so params only contains business data
       moveHttpObjectsToContext(params, context);
       
       // Determine mode early
@@ -2259,6 +1882,9 @@ export const RestApiPlugin = {
         // Auto-detect format
         if (!params.inputRecord?.data?.type) {
           const relationships = await scopes[scopeName].getRelationships();
+          // Convert simplified object format to JSON:API format
+          // Example: { title: 'My Post', author_id: 123 } becomes
+          // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
           params.inputRecord = transformSimplifiedToJsonApi(
             params.inputRecord || params, // Support both styles
             scopeName,
@@ -2444,7 +2070,9 @@ export const RestApiPlugin = {
         }
         
         // Update many-to-many relationship while preserving pivot data
-        await updateManyToManyRelationship(context.id, relDef, relData, trx);
+        // Intelligently syncs relationships: adds new, removes old, keeps existing with their metadata
+        // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
+        await updateManyToManyRelationship(api, context.id, relDef, relData, trx);
       }
       
       // Determine if we should return the full record
@@ -2559,7 +2187,8 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'delete'
       
-      // Move HTTP objects from params to context
+      // Move HTTP objects from params to context for cleaner separation
+      // Extracts request/response objects so params only contains business data
       moveHttpObjectsToContext(params, context);
       
       // Set the ID in context
@@ -2601,90 +2230,11 @@ export const RestApiPlugin = {
     })
 
 
-        // Define default storage helpers that throw errors
-    helpers.dataExists = async function({ scopeName, id, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for exists. Install a storage plugin.`);
-    };
-
-    helpers.dataGet = async function({ scopeName, id, queryParams, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for get. Install a storage plugin.`);
-    };
-    
-    helpers.dataQuery = async function({ scopeName, queryParams, idProperty, searchSchema, runHooks, context, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for query. Install a storage plugin.`);
-    };
-    
-    helpers.dataPost = async function({ scopeName, inputRecord, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for post. Install a storage plugin.`);
-    };
-
-    helpers.dataPatch = async function({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const _schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for patch. Install a storage plugin.`);
-    };
-
-    helpers.dataPut = async function({ scopeName, id, schema, inputRecord, isCreate, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schemaDefinition = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for put. Install a storage plugin.`);
-    };
-    
-    helpers.dataDelete = async function({ scopeName, id, idProperty, runHooks, transaction }) {
-      // Access scope configuration (example for storage plugin developers)
-      const scope = api.scopes[scopeName];
-      if (scope && scope._scopeOptions) {
-        const schema = scope._scopeOptions.schema;
-        const relationships = scope._scopeOptions.relationships;
-        const tableName = scope._scopeOptions.tableName || scopeName;
-      }
-      
-      throw new Error(`No storage implementation for delete. Install a storage plugin.`);
-    };
+    // Initialize default data helpers that throw errors until a storage plugin is installed
+    // These placeholders show storage plugin developers what methods to implement
+    // Example: helpers.dataGet, helpers.dataPost, etc. will throw "No storage implementation" errors
+    const defaultHelpers = createDefaultDataHelpers(api);
+    Object.assign(helpers, defaultHelpers);
 
 
 
