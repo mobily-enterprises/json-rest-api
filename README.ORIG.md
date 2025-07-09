@@ -416,7 +416,6 @@ POST /api/articles?returnFullRecord=false
 POST /api/articles?returnFullRecord=true
 ```
 
-
 #### Network vs Programmatic Usage
 
 ### Complete Example
@@ -497,7 +496,7 @@ await api.resources.posts.patch({
   inputRecord: { 
     data: { 
       type: 'posts',
-      // No ID required in body
+      id: 1,
       attributes: { status: 'published' } 
     } 
   },

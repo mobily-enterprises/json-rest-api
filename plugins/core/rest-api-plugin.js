@@ -32,7 +32,7 @@ function ensureSearchFieldsAreIndexed(searchSchema) {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes, log }) {
+  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes, log, on }) {
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
@@ -287,6 +287,140 @@ export const RestApiPlugin = {
       return { belongsToUpdates, manyToManyRelationships };
     };
     
+    /**
+     * Transform simplified object to JSON:API format
+     * @param {Object} input - Plain object or JSON:API object
+     * @param {string} scopeName - Resource type
+     * @param {Object} schema - Resource schema
+     * @param {Object} relationships - Resource relationships
+     * @returns {Object} JSON:API formatted object
+     */
+    const transformSimplifiedToJsonApi = (input, scopeName, schema, relationships) => {
+      // If already JSON:API format, return as-is
+      if (input?.data?.type) {
+        return input;
+      }
+
+      const attributes = {};
+      const relationshipsData = {};
+      const { id, ...fields } = input;
+
+      for (const [key, value] of Object.entries(fields)) {
+        const schemaField = schema[key];
+
+        // Check if it's a belongsTo field in schema
+        if (schemaField?.belongsTo && schemaField?.as) {
+          relationshipsData[schemaField.as] = {
+            data: value ? { type: schemaField.belongsTo, id: String(value) } : null
+          };
+        }
+        // Check if it's a relationship name (for many-to-many)
+        else if (relationships?.[key]) {
+          const rel = relationships[key];
+
+          // Handle hasMany/manyToMany
+          if ((rel.hasMany || rel.manyToMany) && Array.isArray(value)) {
+            // Determine target type
+            const targetType = rel.hasMany || rel.manyToMany?.otherType || rel.through;
+            relationshipsData[key] = {
+              data: value.map(id => ({ type: targetType, id: String(id) }))
+            };
+          }
+        }
+        // Regular attribute
+        else {
+          attributes[key] = value;
+        }
+      }
+
+      return {
+        data: {
+          type: scopeName,
+          ...(id && { id: String(id) }),
+          ...(Object.keys(attributes).length > 0 && { attributes }),
+          ...(Object.keys(relationshipsData).length > 0 && { relationships: relationshipsData })
+        }
+      };
+    };
+
+    /**
+     * Transform JSON:API response to simplified format
+     */
+    const transformJsonApiToSimplified = (jsonApi, schema, relationships) => {
+      if (!jsonApi?.data) return jsonApi;
+
+      // Handle array response (QUERY)
+      if (Array.isArray(jsonApi.data)) {
+        return jsonApi.data.map(item =>
+          transformSingleJsonApiToSimplified(item, jsonApi.included, schema, relationships)
+        );
+      }
+
+      // Handle single response
+      return transformSingleJsonApiToSimplified(jsonApi.data, jsonApi.included, schema, relationships);
+    };
+
+    const transformSingleJsonApiToSimplified = (data, included, schema, relationships) => {
+      const simplified = {};
+
+      // Add ID
+      if (data.id) {
+        simplified.id = data.id;
+      }
+
+      // Add attributes
+      Object.assign(simplified, data.attributes || {});
+
+      // Extract foreign keys from relationships
+      if (data.relationships) {
+        for (const [relName, relData] of Object.entries(data.relationships)) {
+          // Find schema field for this belongsTo relationship
+          const schemaEntry = Object.entries(schema).find(([_, def]) => def.as === relName);
+
+          if (schemaEntry) {
+            const [fieldName, fieldDef] = schemaEntry;
+            if (fieldDef.belongsTo && relData.data) {
+              simplified[fieldName] = relData.data.id;
+            }
+          }
+
+          // Handle many-to-many (just IDs, not nested)
+          const rel = relationships?.[relName];
+          if (rel?.hasMany || rel?.manyToMany) {
+            if (relData.data && Array.isArray(relData.data)) {
+              simplified[`${relName}_ids`] = relData.data.map(item => item.id);
+            }
+          }
+
+          // Handle includes (nested objects)
+          if (included && relData.data) {
+            const findIncluded = (ref) =>
+              included.find(inc => inc.type === ref.type && inc.id === ref.id);
+
+            if (Array.isArray(relData.data)) {
+              const nestedData = relData.data.map(findIncluded).filter(Boolean);
+              if (nestedData.length > 0) {
+                simplified[relName] = nestedData.map(item => ({
+                  id: item.id,
+                  ...item.attributes
+                }));
+              }
+            } else {
+              const nestedData = findIncluded(relData.data);
+              if (nestedData) {
+                simplified[relName] = {
+                  id: nestedData.id,
+                  ...nestedData.attributes
+                };
+              }
+            }
+          }
+        }
+      }
+
+      return simplified;
+    };
+    
     // Helper function to update many-to-many relationships while preserving pivot data
     const updateManyToManyRelationship = async (resourceId, relDef, relData, trx) => {
       
@@ -436,15 +570,39 @@ export const RestApiPlugin = {
       }
     });
 
+
+
+    // Listen for scope creation to validate belongsTo fields
+      on('scope:added', 'validateBelongsToTypes', ({ eventData }) => {
+        const { scopeName, scopeOptions } = eventData;
+        const schema = scopeOptions.schema || {};
+        
+        for (const [fieldName, fieldDef] of Object.entries(schema)) {
+          if (fieldDef.belongsTo && !fieldDef.type) {
+            throw new Error(
+              `Schema error in '${scopeName}': Field '${fieldName}' has belongsTo ` +
+              `but no type. All belongsTo fields must have an explicit type for validation. ` +
+              `Example: ${fieldName}: { type: 'number', belongsTo: '${fieldDef.belongsTo}', as: '${fieldDef.as || fieldName}' }`
+            );
+          }
+        }
+      });
+    
+
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
     
-    vars.sortableFields = restApiOptions.sortableFields || [];
-    vars.defaultSort = restApiOptions.defaultSort || null;
-    vars.idProperty = restApiOptions.idProperty || 'id';
-    vars.pageSize = restApiOptions.pageSize || 20;
-    vars.maxPageSize = restApiOptions.maxPageSize || 100;
-    vars.loadRecordOnPut = !!restApiOptions.loadRecordOnPut;
+    vars.sortableFields = restApiOptions.sortableFields || []
+    vars.defaultSort = restApiOptions.defaultSort || null
+    vars.idProperty = restApiOptions.idProperty || 'id'
+    vars.pageSize = restApiOptions.pageSize || 20
+    vars.maxPageSize = restApiOptions.maxPageSize || 100
+    vars.loadRecordOnPut = !!restApiOptions.loadRecordOnPut
+
+    // These options are special since they have a lot of granularity:
+    // vars.simplified first, then scope.vars.simplified, then scopeOptions.simplified
+    // and then options.simplified
+    vars.simplified = false
     
     // Return full record configuration
     vars.returnFullRecord = {
@@ -635,6 +793,12 @@ export const RestApiPlugin = {
       // Move HTTP objects from params to context
       moveHttpObjectsToContext(params, context);
 
+      const simplified = 
+        params.simplified !== undefined ? params.simplified :  // Direct param override
+        scopeOptions.simplified !== undefined ? 
+          scopeOptions.simplified :                             // Resource config
+          vars.simplified 
+
       // Sanitise parameters
       log.trace('[QUERY-METHOD] Before sanitizing params:', params);
       params.queryParams = params.queryParams || {}
@@ -761,6 +925,20 @@ export const RestApiPlugin = {
       // The called hooks should NOT change context.record
       runHooks('finish')
       runHooks('finishQuery')
+      
+      // Transform output if in simplified mode
+      if (simplified) {
+        // Transform the return value
+        const relationships = await scopes[scopeName].getRelationships();
+        if (context.record) {
+          return transformJsonApiToSimplified(
+            context.record,
+            scopeOptions.schema || {},
+            relationships
+          );
+        }
+      }
+      
       return context.record
     })
 
@@ -839,6 +1017,13 @@ export const RestApiPlugin = {
       // Move HTTP objects from params to context
       moveHttpObjectsToContext(params, context);
 
+      // Determine mode early
+      const simplified = 
+        params.simplified !== undefined ? params.simplified :  // Direct param override
+        scopeOptions.simplified !== undefined ? 
+          scopeOptions.simplified :                             // Resource config
+          vars.simplified 
+
       // Sanitise parameters
       params.queryParams = params.queryParams || {}
       params.queryParams.include = params.queryParams.include || []
@@ -889,6 +1074,20 @@ export const RestApiPlugin = {
       // The called hooks should NOT change context.record
       runHooks('finish')
       runHooks('finishGet')
+      
+      // Transform output if in simplified mode
+      if (simplified) {
+        // Transform the return value
+        const relationships = await scopes[scopeName].getRelationships();
+        if (context.record) {
+          return transformJsonApiToSimplified(
+            context.record,
+            scopeOptions.schema || {},
+            relationships
+          );
+        }
+      }
+      
       return context.record
     })
 
@@ -1093,6 +1292,39 @@ export const RestApiPlugin = {
       
       // Move HTTP objects from params to context
       moveHttpObjectsToContext(params, context);
+      
+      // Determine mode early
+      const simplified = 
+        params.simplified !== undefined ? params.simplified :  // Direct param override
+        scopeOptions.simplified !== undefined ? 
+          scopeOptions.simplified :                             // Resource config
+          vars.simplified 
+      
+      // Transform input if in simplified mode
+      if (simplified) {
+        // Auto-detect format
+        if (!params.inputRecord?.data?.type) {
+          const relationships = await scopes[scopeName].getRelationships();
+          params.inputRecord = transformSimplifiedToJsonApi(
+            params.inputRecord || params, // Support both styles
+            scopeName,
+            scopeOptions.schema || {},
+            relationships
+          );
+        }
+      } else {
+        // Strict mode: validate no belongsTo fields in attributes
+        if (params.inputRecord?.data?.attributes) {
+          for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+            if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+              throw new RestApiValidationError(
+                `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
+                { fields: [`data.attributes.${key}`] }
+              );
+            }
+          }
+        }
+      }
       context.scopeName = scopeName
       context.params = params
       
@@ -1139,6 +1371,17 @@ export const RestApiPlugin = {
         // Create schema for validation
         context.schema = CreateSchema(scopeOptions.insertSchema || scopeOptions.schema || {})
 
+        // Get relationships definition BEFORE validation
+        const relationships = await scopes[scopeName].getRelationships();
+        const schemaFields = scopeOptions.schema || {};
+        
+        // Process relationships FIRST to extract foreign keys
+        const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+          context.inputRecord,
+          schemaFields,
+          relationships
+        );
+
         // Apply schema to the main attributes
         runHooks('beforeSchemaValidate')
         runHooks('beforeSchemaValidatePost')
@@ -1146,8 +1389,14 @@ export const RestApiPlugin = {
         // Store original input attributes before validation adds defaults
         context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) };
         
-        // Validate main resource attributes
-        const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(context.inputRecord.data.attributes || {});
+        // Merge belongsTo updates with attributes BEFORE validation
+        const attributesToValidate = {
+          ...(context.inputRecord.data.attributes || {}),
+          ...belongsToUpdates
+        };
+        
+        // Validate main resource attributes INCLUDING foreign keys
+        const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(attributesToValidate);
         if (Object.keys(mainErrors).length > 0) {
           const violations = Object.entries(mainErrors).map(([field, error]) => ({
             field: `data.attributes.${field}`,
@@ -1175,25 +1424,6 @@ export const RestApiPlugin = {
         
         runHooks('afterSchemaValidatePost')
         runHooks('afterSchemaValidate')
-
-        // Get relationships definition
-        const relationships = await scopes[scopeName].getRelationships();
-        const schemaFields = scopeOptions.schema || {};
-        
-        // Process relationships using helper
-        const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-          context.inputRecord,
-          schemaFields,
-          relationships
-        );
-
-        // Merge belongsTo updates with attributes
-        if (Object.keys(belongsToUpdates).length > 0) {
-          context.inputRecord.data.attributes = {
-            ...context.inputRecord.data.attributes,
-            ...belongsToUpdates
-          };
-        }
 
         runHooks('checkPermissions')
         runHooks('checkPermissionsPost')
@@ -1252,7 +1482,8 @@ export const RestApiPlugin = {
           context.returnRecord = await api.resources[scopeName].get({
             id: context.record.data.id,
             queryParams: params.queryParams,
-            transaction: existingTrx // Use original transaction for read
+            transaction: existingTrx, // Use original transaction for read
+            simplified: false
           });
           
           // Enrich the return record's attributes
@@ -1286,6 +1517,21 @@ export const RestApiPlugin = {
         
         runHooks('finish')
         runHooks('finishPost')
+        
+        // Transform output if in simplified mode
+        if (simplified) {
+          // Transform the return value
+          const relationships = await scopes[scopeName].getRelationships();
+          const finalRecord = context.returnRecord || context.record;
+          if (finalRecord) {
+            return transformJsonApiToSimplified(
+              finalRecord,
+              scopeOptions.schema || {},
+              relationships
+            );
+          }
+        }
+        
         return context.returnRecord
         
       } catch (error) {
@@ -1478,6 +1724,40 @@ export const RestApiPlugin = {
     // Move HTTP objects from params to context
     moveHttpObjectsToContext(params, context);
     
+    // Determine mode early
+      const simplified = 
+        params.simplified !== undefined ? params.simplified :  // Direct param override
+        scopeOptions.simplified !== undefined ? 
+          scopeOptions.simplified :                             // Resource config
+          vars.simplified 
+    
+    
+    // Transform input if in simplified mode
+    if (simplified) {
+      // Auto-detect format
+      if (!params.inputRecord?.data?.type) {
+        const relationships = await scopes[scopeName].getRelationships();
+        params.inputRecord = transformSimplifiedToJsonApi(
+          params.inputRecord || params, // Support both styles
+          scopeName,
+          scopeOptions.schema || {},
+          relationships
+        );
+      }
+    } else {
+      // Strict mode: validate no belongsTo fields in attributes
+      if (params.inputRecord?.data?.attributes) {
+        for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+          if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+            throw new RestApiValidationError(
+              `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
+              { fields: [`data.attributes.${key}`] }
+            );
+          }
+        }
+      }
+    }
+    
     context.scopeName = scopeName
     context.params = params
     
@@ -1502,21 +1782,11 @@ export const RestApiPlugin = {
     context.inputRecord = params.inputRecord
     context.queryParams = params.queryParams
     
-    // Check strictIdHandling (default true for backward compatibility)
-    const strictIdHandling = params.strictIdHandling !== false;
-    
     // Extract ID from request body as per JSON:API spec
     context.id = params.inputRecord.data.id
     
-    // Handle ID based on strictIdHandling setting
-    if (!strictIdHandling && !context.id) {
-      // In relaxed mode, use the URL parameter ID if body ID is missing
-      context.id = params.id;
-      params.inputRecord.data.id = params.id;
-    }
-    
     // If both URL path ID and request body ID are provided, they must match (in strict mode)
-    if (strictIdHandling && params.id && params.id !== context.id) {
+    if (params.id && params.id !== context.id) {
       throw new RestApiValidationError(
         `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
         { 
@@ -1528,7 +1798,7 @@ export const RestApiPlugin = {
           }] 
         }
       );
-    } else if (!strictIdHandling && params.id && context.id && params.id !== context.id) {
+    } else if (params.id && context.id && params.id !== context.id) {
       // In relaxed mode, URL parameter takes precedence
       context.id = params.id;
       params.inputRecord.data.id = params.id;
@@ -1566,7 +1836,9 @@ export const RestApiPlugin = {
         id: context.id,
         idProperty: vars.idProperty,
         runHooks,
-        methodParams: { transaction: context.transaction }
+        methodParams: { transaction: context.transaction },
+        simplified: false
+
       });
 
       context.exists = !!context.recordBefore
@@ -1586,12 +1858,30 @@ export const RestApiPlugin = {
     // Create schema based on operation type
     context.schema = CreateSchema((context.isCreate ? scopeOptions.insertSchema : scopeOptions.updateSchema) || scopeOptions.schema || {})
 
+    // Get relationships definition BEFORE validation
+    const relationships = await scopes[scopeName].getRelationships();
+    const schemaFields = scopeOptions.schema || {};
+    
+    // Process relationships FIRST to extract foreign keys
+    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+      context.inputRecord,
+      schemaFields,
+      relationships
+    );
+
     // Schema validation can now be different for create vs update
     runHooks('beforeSchemaValidate')
     runHooks('beforeSchemaValidatePut')
     runHooks(`beforeSchemaValidatePut${context.isCreate ? 'Create' : 'Update'}`)
   
-    const { validatedObject, errors } = await context.schema.validate(context.inputRecord.data.attributes || {});
+    // Merge belongsTo updates with attributes BEFORE validation
+    const attributesToValidate = {
+      ...(context.inputRecord.data.attributes || {}),
+      ...belongsToUpdates
+    };
+    
+    
+    const { validatedObject, errors } = await context.schema.validate(attributesToValidate);
     if (Object.keys(errors).length > 0) {
       const violations = Object.entries(errors).map(([field, error]) => ({
         field: `data.attributes.${field}`,
@@ -1611,17 +1901,6 @@ export const RestApiPlugin = {
 
     runHooks('afterSchemaValidatePut')
     runHooks('afterSchemaValidate')
-
-    // Get relationships definition
-    const relationships = await scopes[scopeName].getRelationships();
-    const schemaFields = scopeOptions.schema || {};
-    
-    // Process relationships using helper
-    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-      context.inputRecord,
-      schemaFields,
-      relationships
-    );
     
     // For PUT, we also need to handle relationships that are NOT provided
     // (they should be set to null/empty as PUT is a complete replacement)
@@ -1630,7 +1909,7 @@ export const RestApiPlugin = {
     // Collect all defined relationships for this resource
     for (const [relName, relDef] of Object.entries(relationships || {})) {
       if (relDef.manyToMany) {
-        allRelationships[relName] = { type: 'manyToMany', relDef };
+        allRelationships[relName] = { type: 'manyToMany', relDef: relDef.manyToMany };
       }
       // Also recognize hasMany with through as many-to-many
       else if (relDef.hasMany && relDef.through) {
@@ -1765,7 +2044,8 @@ export const RestApiPlugin = {
       context.returnRecord = await api.resources[scopeName].get({
         id: context.id,
         queryParams: params.queryParams,
-        transaction: existingTrx  // Use original transaction for read
+        transaction: existingTrx,  // Use original transaction for read
+        simplified: false  // Always get JSON:API format for internal processing
       });
       
       // Enrich the return record's attributes
@@ -1809,6 +2089,18 @@ export const RestApiPlugin = {
 
     runHooks('finish')
     runHooks('finishPut')
+    
+    // Transform output if in simplified mode
+    if (simplified && context.returnRecord) {
+      // Transform the return value
+      const relationships = await scopes[scopeName].getRelationships();
+      return transformJsonApiToSimplified(
+        context.returnRecord,
+        scopeOptions.schema || {},
+        relationships
+      );
+    }
+    
     return context.returnRecord
     
     } catch (error) {
@@ -1980,6 +2272,39 @@ export const RestApiPlugin = {
       // Move HTTP objects from params to context
       moveHttpObjectsToContext(params, context);
       
+      // Determine mode early
+      const simplified = 
+        params.simplified !== undefined ? params.simplified :  // Direct param override
+        scopeOptions.simplified !== undefined ? 
+          scopeOptions.simplified :                             // Resource config
+          vars.simplified 
+      
+      // Transform input if in simplified mode
+      if (simplified) {
+        // Auto-detect format
+        if (!params.inputRecord?.data?.type) {
+          const relationships = await scopes[scopeName].getRelationships();
+          params.inputRecord = transformSimplifiedToJsonApi(
+            params.inputRecord || params, // Support both styles
+            scopeName,
+            scopeOptions.schema || {},
+            relationships
+          );
+        }
+      } else {
+        // Strict mode: validate no belongsTo fields in attributes
+        if (params.inputRecord?.data?.attributes) {
+          for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+            if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+              throw new RestApiValidationError(
+                `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
+                { fields: [`data.attributes.${key}`] }
+              );
+            }
+          }
+        }
+      }
+      
       context.scopeName = scopeName
       context.params = params
       
@@ -2004,21 +2329,11 @@ export const RestApiPlugin = {
       context.inputRecord = params.inputRecord
       context.queryParams = params.queryParams
       
-      // Check strictIdHandling (default true for backward compatibility)
-      const strictIdHandling = params.strictIdHandling !== false;
-      
       // Extract ID from request body as per JSON:API spec
       context.id = params.inputRecord.data.id
-      
-      // Handle ID based on strictIdHandling setting
-      if (!strictIdHandling && !context.id) {
-        // In relaxed mode, use the URL parameter ID if body ID is missing
-        context.id = params.id;
-        params.inputRecord.data.id = params.id;
-      }
-      
+            
       // If both URL path ID and request body ID are provided, they must match (in strict mode)
-      if (strictIdHandling && params.id && params.id !== context.id) {
+      if (params.id && params.id !== context.id) {
         throw new RestApiValidationError(
           `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
           { 
@@ -2030,7 +2345,7 @@ export const RestApiPlugin = {
             }] 
           }
         );
-      } else if (!strictIdHandling && params.id && context.id && params.id !== context.id) {
+      } else if (params.id && context.id && params.id !== context.id) {
         // In relaxed mode, URL parameter takes precedence
         context.id = params.id;
         params.inputRecord.data.id = params.id;
@@ -2064,14 +2379,31 @@ export const RestApiPlugin = {
       // Create schema for validation
       context.schema = CreateSchema(scopeOptions.updateSchema || scopeOptions.schema || {})
 
+      // Get relationships definition BEFORE validation
+      const relationships = await scopes[scopeName].getRelationships();
+      const schemaFields = scopeOptions.schema || {};
+      
+      // Process relationships FIRST to extract foreign keys (only for provided relationships in PATCH)
+      const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+        context.inputRecord,
+        schemaFields,
+        relationships
+      );
+
       // Schema validation for partial updates
       runHooks('beforeSchemaValidate')
       runHooks('beforeSchemaValidatePatch')
       
+      // Merge belongsTo updates with attributes BEFORE validation
+      const attributesToValidate = {
+        ...(context.inputRecord.data.attributes || {}),
+        ...belongsToUpdates
+      };
+      
       // Validate only the provided attributes (partial validation)
-      if (context.inputRecord.data.attributes) {
+      if (Object.keys(attributesToValidate).length > 0) {
         const { validatedObject, errors } = await context.schema.validate(
-          context.inputRecord.data.attributes, 
+          attributesToValidate, 
           { onlyObjectValues: true }
         );
         if (Object.keys(errors).length > 0) {
@@ -2094,26 +2426,6 @@ export const RestApiPlugin = {
 
       runHooks('afterSchemaValidatePatch')
       runHooks('afterSchemaValidate')
-
-      // Get relationships definition
-      const relationships = await scopes[scopeName].getRelationships();
-      const schemaFields = scopeOptions.schema || {};
-      
-      
-      // Process relationships using helper (only for provided relationships in PATCH)
-      const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-        context.inputRecord,
-        schemaFields,
-        relationships
-      );
-
-      // Merge belongsTo updates with attributes
-      if (Object.keys(belongsToUpdates).length > 0) {
-        context.inputRecord.data.attributes = {
-          ...context.inputRecord.data.attributes,
-          ...belongsToUpdates
-        };
-      }
 
       // Permissions check
       runHooks('checkPermissions')
@@ -2173,7 +2485,7 @@ export const RestApiPlugin = {
         context.returnRecord = await api.resources[scopeName].get({
           id: context.id,
           queryParams: params.queryParams,
-          transaction: trx  // Use active transaction for read
+          transaction: trx,  // Use active transaction for read
         });
       } else {
         // Return minimal record - use the record returned from dataPatch
@@ -2217,6 +2529,18 @@ export const RestApiPlugin = {
 
       runHooks('finish')
       runHooks('finishPatch')
+      
+      // Transform output if in simplified mode
+      if (simplified && context.returnRecord) {
+        // Transform the return value
+        const relationships = await scopes[scopeName].getRelationships();
+        return transformJsonApiToSimplified(
+          context.returnRecord,
+          scopeOptions.schema || {},
+          relationships
+        );
+      }
+      
       return context.returnRecord
       
       } catch (error) {

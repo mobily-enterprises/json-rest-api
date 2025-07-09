@@ -416,60 +416,7 @@ POST /api/articles?returnFullRecord=false
 POST /api/articles?returnFullRecord=true
 ```
 
-### Strict ID Handling
-
-By default, PUT and PATCH operations validate that the ID in the URL matches the ID in the request body (if provided). The `strictIdHandling` option allows you to relax this validation.
-
-#### Configuration
-
-```javascript
-// Programmatic usage - relaxed ID handling
-await api.resources.articles.put({
-  id: '123',
-  inputRecord: {
-    data: {
-      type: 'articles',
-      // ID can be omitted or different when strictIdHandling: false
-      attributes: { 
-        title: 'Updated Title' 
-      }
-    }
-  },
-  strictIdHandling: false  // Default is true
-});
-
-// With strict handling (default)
-await api.resources.articles.put({
-  id: '123',
-  inputRecord: {
-    data: {
-      type: 'articles',
-      id: '123',  // Must match URL parameter
-      attributes: { 
-        title: 'Updated Title' 
-      }
-    }
-  }
-});
-```
-
-#### Behavior
-
-**Strict ID Handling (`strictIdHandling: true`, default):**
-- ID in request body must match ID in URL (for PUT/PATCH)
-- Throws validation error if IDs don't match
-- Follows standard JSON:API specification
-- Recommended for public APIs
-
-**Relaxed ID Handling (`strictIdHandling: false`):**
-- ID in request body is optional
-- If both URL and body have IDs, URL parameter takes precedence
-- Body ID is ignored if it differs from URL
-- Useful for internal APIs or migration scenarios
-
 #### Network vs Programmatic Usage
-
-The HTTP and Express connector plugins automatically set `strictIdHandling: true` for all network requests to ensure security and compliance with JSON:API specification. When using the API programmatically, it defaults to `false` for convenience.
 
 ### Complete Example
 
@@ -553,7 +500,6 @@ await api.resources.posts.patch({
       attributes: { status: 'published' } 
     } 
   },
-  strictIdHandling: false,
   returnFullRecord: false  // Override to get minimal response
 });
 ```
@@ -565,12 +511,6 @@ await api.resources.posts.patch({
 - When clients already have the full record and only need confirmation
 - Mobile applications with limited data plans
 - When default values are computed client-side
-
-**When to use relaxed ID handling (`strictIdHandling: false`):**
-- Internal microservice communication
-- Data migration or synchronization scripts  
-- Legacy system integration
-- Bulk update operations where IDs are in the URL path
 
 The connector plugins allow you to expose the API in several ways. The core plugins expose the API to Express or to pure Node.
 

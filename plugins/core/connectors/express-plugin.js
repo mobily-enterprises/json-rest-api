@@ -319,6 +319,7 @@ export const ExpressPlugin = {
           // Add query parameters
           if (['query', 'get'].includes(methodName)) {
             params.queryParams = parseQueryParams(req);
+            params.simplified = false; // Force JSON:API mode for HTTP
             // Debug fields parameter specifically
             if (req.url.includes('fields[')) {
               log.trace(`Fields URL: ${req.url}, parsed fields: ${JSON.stringify(params.queryParams.fields)}`);
@@ -328,6 +329,7 @@ export const ExpressPlugin = {
           // Add body for mutations
           if (['post', 'put', 'patch'].includes(methodName)) {
             params.inputRecord = req.body;
+            params.simplified = false; // Force JSON:API mode for HTTP
             
             // For PUT and PATCH, also parse query params
             if (['put', 'patch'].includes(methodName)) {
