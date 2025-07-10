@@ -370,7 +370,7 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  *   }
  * };
  * const relationships = {
- *   tags: { manyToMany: { /* config */ } }
+ *   tags: { manyToMany: { via: 'article_tags' } }
  * };
  * const result = transformSingleJsonApiToSimplified(data, null, {}, relationships);
  * // Returns:

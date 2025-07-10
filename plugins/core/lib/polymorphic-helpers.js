@@ -405,7 +405,7 @@ export const buildPolymorphicSearchJoins = async (query, searchDef, scopeName, t
         let nextScope = null;
         
         // Look for belongsTo relationship in schema
-        for (const [fieldName, fieldDef] of Object.entries(currentSchema)) {
+        for (const [fieldName, fieldDef] of Object.entries(currentSchema.structure)) {
           if (fieldDef.as === relationshipName && fieldDef.belongsTo) {
             foreignKeyField = fieldName;
             nextScope = fieldDef.belongsTo;

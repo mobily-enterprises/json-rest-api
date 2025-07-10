@@ -115,7 +115,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       throw new Error(`Target scope '${targetScopeName}' has no schema`);
     }
     
-    const fieldDef = targetSchema[fieldName];
+    const fieldDef = targetSchema.structure[fieldName];
     log.trace('[VALIDATE] Field lookup result:', { fieldName, fieldExists: !!fieldDef });
     if (!fieldDef) {
       throw new Error(`Field '${fieldName}' not found in scope '${targetScopeName}'`);
@@ -232,7 +232,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       
       // If not found, check belongsTo relationships (many-to-one)
       if (!foundRelationship) {
-        for (const [fieldName, fieldDef] of Object.entries(currentSchema)) {
+        for (const [fieldName, fieldDef] of Object.entries(currentSchema.structure)) {
           if (fieldDef.belongsTo === targetScope && (fieldDef.sideSearchSingle !== false)) {
             foundRelationship = targetScope;
             relationshipType = 'belongsTo';
@@ -346,7 +346,10 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
   const analyzeRequiredIndexes = (scopeName, searchSchema) => {
     const requiredIndexes = [];
     
-    Object.entries(searchSchema).forEach(([filterKey, fieldDef]) => {
+    // Handle both raw schema and schema object
+    const schemaToAnalyze = searchSchema.structure || searchSchema;
+    
+    Object.entries(schemaToAnalyze).forEach(([filterKey, fieldDef]) => {
       // Check actualField for cross-table references
       if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
         const [targetScopeName, targetFieldName] = fieldDef.actualField.split('.');

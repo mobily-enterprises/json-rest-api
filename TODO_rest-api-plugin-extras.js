@@ -1,9 +1,5 @@
 TODO: Missing JSON:API Features
 
-(1)
-processBelongsToRelationships: why this? const schemaStructure = schema.structure || schema;
-
-(2) Place the detectors under plugin/connectors and not in lib 
 
 (3)
 Have an option to hide fields (hidden: yes, normallyHidden: yes)

@@ -11,33 +11,15 @@ import {
   RestApiResourceError, 
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
-import { validateBelongsToTypes, validatePolymorphicRelationships } from './lib/scope-validations.js';
+import { validatePolymorphicRelationships } from './lib/scope-validations.js';
 import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './lib/schemaHelpers.js';
 import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplifiedHelpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
 import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
 import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 import { moveHttpObjectsToContext } from './lib/http-helpers.js';
+import { compileSchemas } from './lib/compileSchemas.js';
 
-
-/**
- * Internal helper to enrich attributes by running the enrichAttributes hook
- * @param {Object} attributes - The attributes to enrich
- * @param {Object} parentContext - The parent context from the calling method
- * @param {Object} scope - The scope instance
- * @param {Function} runHooks - The runHooks function from the scope
- * @returns {Object} The enriched attributes
- */
-const enrichAttributes = async (attributes, parentContext, scope, runHooks) => {
-  const context = {
-    parentContext,
-    attributes
-  };
-  
-  await runHooks('enrichAttributes', { context });
-  
-  return context.attributes;
-};
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -46,31 +28,14 @@ export const RestApiPlugin = {
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
-        
-
 
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
-    
-    
-
-
-    
-    
-    
 
     // Listen for scope creation to validate polymorphic relationships
     // Ensures all polymorphic relationships reference valid types and have required fields
     // Example: Validates that commentable: { belongsToPolymorphic: { types: ['posts', 'videos'] } } has valid config
     on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
-
-
-
-    // Listen for scope creation to validate belongsTo fields
-    // Ensures all foreign key fields have explicit types for proper validation
-    // Example: author_id: { belongsTo: 'users' } must also have type: 'number'
-    on('scope:added', 'validateBelongsToTypes', validateBelongsToTypes);
-    
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
@@ -95,24 +60,17 @@ export const RestApiPlugin = {
       allowRemoteOverride: restApiOptions.returnFullRecord?.allowRemoteOverride ?? false
     };
 
+    // Schema cache vars
+    vars.schemaProcessed = false;
+    vars.schema = null;
 
     // Helper scope method to get all schema-related information
-    addScopeMethod('getSchemaInfo', async ({ scopeOptions }) => {
-      const schema = scopeOptions.schema || null;
-      
-      // Determine searchSchema
-      let searchSchema = null;
-      if (scopeOptions.searchSchema) {
-        searchSchema = scopeOptions.searchSchema;
-      } else if (schema) {
-        searchSchema = generateSearchSchemaFromSchema(schema);
+    addScopeMethod('getSchemaInfo', async ({ vars }) => {
+      // Schemas should already be compiled by compileSchemas()
+      if (!vars.schema) {
+        throw new Error('Schemas not compiled. Call compileSchemas() at the beginning of your method.');
       }
-      
-      return {
-        schema,
-        searchSchema,
-        relationships: scopeOptions.relationships || {}
-      };
+      return vars.schema;
     })
 
 
@@ -254,6 +212,9 @@ export const RestApiPlugin = {
  * // }
  */
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
+      // Compile schemas at the beginning of the method
+      await compileSchemas(scope);
+      
       // Make the method available to all hooks
       context.method = 'query'
       
@@ -290,13 +251,14 @@ export const RestApiPlugin = {
       // Check payload with sortable fields validation
       validateQueryPayload(params, sortableFields);
 
-      // Generate complete searchSchema by merging schema fields marked with 'search' property
-      // and any explicitly defined searchSchema. Example: title: { search: true } becomes searchable
-      const searchSchema = generateSearchSchemaFromSchema(scopeOptions.schema, scopeOptions.searchSchema);
+      // Get cached schema info including searchSchema
+      // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
+      // This enriches both schema and searchSchema via hooks
+      const schemaInfo = await scopes[scopeName].getSchemaInfo();
+      const searchSchema = schemaInfo.searchSchema;
       
-      // Mark all search fields as indexed to enable efficient database queries and cross-table joins
-      // Example: searchSchema.title gets { indexed: true } added for optimal performance
-      ensureSearchFieldsAreIndexed(searchSchema);
+      // Note: ensureSearchFieldsAreIndexed is no longer needed here because
+      // the searchSchema hook can handle indexing during enrichment
 
       // Validate search/filter parameters against searchSchema
       if (params.queryParams.filters && Object.keys(params.queryParams.filters).length > 0) {
@@ -316,11 +278,8 @@ export const RestApiPlugin = {
         }
         
         if (searchSchema) {
-          // Create a schema instance for validation
-          const filterSchema = CreateSchema(searchSchema);
-          
-          // Validate the filter parameters
-          const { validatedObject, errors } = await filterSchema.validate(params.queryParams.filters, { 
+          // Validate the filter parameters using the cached searchSchema object
+          const { validatedObject, errors } = await searchSchema.validate(params.queryParams.filters, { 
             onlyObjectValues: true // Partial validation for filters
           });
           
@@ -384,13 +343,19 @@ export const RestApiPlugin = {
       // This will enhance record, which is the WHOLE JSON:API record
       runHooks('enrichRecord')
 
-      // Run enrichAttributes for every single set of attribute, calling it from the right API
+      // Run enrichAttributes for every single set of attribute, calling it from the right scope
       for (const entry of context.record.data) {
-        entry.attributes = await enrichAttributes(entry.attributes, context, scope, runHooks)
+        entry.attributes = await scope.enrichAttributes({ 
+          attributes: entry.attributes, 
+          parentContext: context 
+        })
       }
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
-        entry.attributes = await enrichAttributes(entry.attributes, context, entryScope, runHooks)
+        entry.attributes = await entryScope.enrichAttributes({ 
+          attributes: entry.attributes, 
+          parentContext: context 
+        })
       }
 
       // The called hooks should NOT change context.record
@@ -484,7 +449,9 @@ export const RestApiPlugin = {
   * // }
   */
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-
+      // Compile schemas at the beginning of the method
+      await compileSchemas(scope);
+      
       // Make the method available to all hooks
       context.method = 'get'
       
@@ -541,10 +508,16 @@ export const RestApiPlugin = {
 
       // This will enhance record, which is the WHOLE JSON:API record
       runHooks('enrichRecord')
-      context.record.data.attributes = await enrichAttributes(context.record.data.attributes, context, scope, runHooks)
+      context.record.data.attributes = await scope.enrichAttributes({ 
+        attributes: context.record.data.attributes, 
+        parentContext: context 
+      })
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
-        entry.attributes = await enrichAttributes(entry.attributes, context, entryScope, runHooks)
+        entry.attributes = await entryScope.enrichAttributes({ 
+          attributes: entry.attributes, 
+          parentContext: context 
+        })
       }
       
       // The called hooks should NOT change context.record
@@ -765,7 +738,9 @@ export const RestApiPlugin = {
      */
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-
+      // Compile schemas at the beginning of the method
+      await compileSchemas(scope);
+      
       // Make the method available to all hooks
       context.method = 'post'
       
@@ -851,11 +826,12 @@ export const RestApiPlugin = {
           );
         }
 
-        // Create schema for validation
-        context.schema = CreateSchema(scopeOptions.insertSchema || scopeOptions.schema || {})
-
-        // Get relationships definition BEFORE validation
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+        // Get schema info including cached schema and relationships
+        // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
+        // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
+        const schemaInfo = await scopes[scopeName].getSchemaInfo();
+        context.schema = schemaInfo.schema;
+        const relationships = schemaInfo.relationships;
         const schemaFields = scopeOptions.schema || {};
         
         // Process relationships FIRST to extract foreign keys from JSON:API relationships block
@@ -974,23 +950,19 @@ export const RestApiPlugin = {
           
           // Enrich the return record's attributes
           if (context.returnRecord?.data?.attributes) {
-            context.returnRecord.data.attributes = await enrichAttributes(
-              context.returnRecord.data.attributes, 
-              context,
-              scope,
-              runHooks
-            );
+            context.returnRecord.data.attributes = await scope.enrichAttributes({ 
+              attributes: context.returnRecord.data.attributes, 
+              parentContext: context 
+            });
           }
           
           // Enrich included resources if any
           for (const entry of (context.returnRecord?.included || [])) {
             const entryScope = scopes[entry.type];
-            entry.attributes = await enrichAttributes(
-              entry.attributes, 
-              context,
-              entryScope,
-              runHooks
-            );
+            entry.attributes = await entryScope.enrichAttributes({ 
+              attributes: entry.attributes, 
+              parentContext: context 
+            });
           }
         } else {
           // Return minimal record (just what was provided in original input, plus ID)
@@ -1209,6 +1181,8 @@ export const RestApiPlugin = {
    */
    addScopeMethod('put', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions,
   scopeName }) => {
+    // Compile schemas at the beginning of the method
+    await compileSchemas(scope);
     
     context.method = 'put'
     
@@ -1346,11 +1320,12 @@ export const RestApiPlugin = {
     context.isCreate = !context.exists;
     context.isUpdate = context.exists;
 
-    // Create schema based on operation type
-    context.schema = CreateSchema((context.isCreate ? scopeOptions.insertSchema : scopeOptions.updateSchema) || scopeOptions.schema || {})
-
-    // Get relationships definition BEFORE validation
-    const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+    // Get schema info including cached schema and relationships
+    // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
+    // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
+    const schemaInfo = await scopes[scopeName].getSchemaInfo();
+    context.schema = schemaInfo.schema;
+    const relationships = schemaInfo.relationships;
     const schemaFields = scopeOptions.schema || {};
     
     // Process relationships FIRST to extract foreign keys
@@ -1545,23 +1520,19 @@ export const RestApiPlugin = {
       
       // Enrich the return record's attributes
       if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await enrichAttributes(
-          context.returnRecord.data.attributes, 
-          context,
-          scope,
-          runHooks
-        );
+        context.returnRecord.data.attributes = await scope.enrichAttributes({ 
+          attributes: context.returnRecord.data.attributes, 
+          parentContext: context 
+        });
       }
       
       // Enrich included resources if any
       for (const entry of (context.returnRecord?.included || [])) {
         const entryScope = scopes[entry.type];
-        entry.attributes = await enrichAttributes(
-          entry.attributes, 
-          context,
-          entryScope,
-          runHooks
-        );
+        entry.attributes = await entryScope.enrichAttributes({ 
+          attributes: entry.attributes, 
+          parentContext: context 
+        });
       }
     } else {
       // Return minimal record - just the updated data
@@ -1580,12 +1551,10 @@ export const RestApiPlugin = {
       
       // Still enrich the attributes
       if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await enrichAttributes(
-          context.returnRecord.data.attributes, 
-          context,
-          scope,
-          runHooks
-        );
+        context.returnRecord.data.attributes = await scope.enrichAttributes({ 
+          attributes: context.returnRecord.data.attributes, 
+          parentContext: context 
+        });
       }
     }
 
@@ -1767,6 +1736,8 @@ export const RestApiPlugin = {
      * // }
      */
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
+      // Compile schemas at the beginning of the method
+      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'patch'
@@ -1882,11 +1853,12 @@ export const RestApiPlugin = {
         );
       }
 
-      // Create schema for validation
-      context.schema = CreateSchema(scopeOptions.updateSchema || scopeOptions.schema || {})
-
-      // Get relationships definition BEFORE validation
-      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+      // Get schema info including cached schema and relationships
+      // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
+      // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
+      const schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.schema = schemaInfo.schema;
+      const relationships = schemaInfo.relationships;
       const schemaFields = scopeOptions.schema || {};
       
       // Process relationships FIRST to extract foreign keys (only for provided relationships in PATCH)
@@ -2001,12 +1973,10 @@ export const RestApiPlugin = {
         
         // Still enrich the attributes if present
         if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await enrichAttributes(
-            context.returnRecord.data.attributes, 
-            context,
-            scope,
-            runHooks
-          );
+          context.returnRecord.data.attributes = await scope.enrichAttributes({ 
+            attributes: context.returnRecord.data.attributes, 
+            parentContext: context 
+          });
         }
       }
 
@@ -2022,23 +1992,19 @@ export const RestApiPlugin = {
       if (shouldReturnFullRecord) {
         // Enrich the return record's attributes
         if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await enrichAttributes(
-            context.returnRecord.data.attributes, 
-            context,
-            scope,
-            runHooks
-          );
+          context.returnRecord.data.attributes = await scope.enrichAttributes({ 
+            attributes: context.returnRecord.data.attributes, 
+            parentContext: context 
+          });
         }
         
         // Enrich included resources
         for (const entry of (context.returnRecord?.included || [])) {
           const entryScope = scopes[entry.type];
-          entry.attributes = await enrichAttributes(
-            entry.attributes, 
-            context,
-            entryScope,
-            runHooks
-          );
+          entry.attributes = await entryScope.enrichAttributes({ 
+            attributes: entry.attributes, 
+            parentContext: context 
+          });
         }
       }
 
@@ -2096,6 +2062,9 @@ export const RestApiPlugin = {
      * }
      */
     addScopeMethod('delete', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
+      // Compile schemas at the beginning of the method
+      await compileSchemas(scope);
+      
       // Make the method available to all hooks
       context.method = 'delete'
       
@@ -2141,6 +2110,50 @@ export const RestApiPlugin = {
       return;
     })
 
+    /**
+     * enrichAttributes
+     * Runs the enrichAttributes hook for a specific scope to allow plugins to modify attributes
+     * before they are returned to the client. This is a scope method so each resource type
+     * can have its own attribute enrichment logic.
+     * 
+     * @param {Object} attributes - The attributes to enrich
+     * @param {Object} parentContext - The parent context from the calling method
+     * @returns {Promise<Object>} The enriched attributes
+     * 
+     * @example
+     * // Enrich attributes for the main resource
+     * const enrichedAttrs = await scope.enrichAttributes({ 
+     *   attributes: record.data.attributes,
+     *   parentContext: context 
+     * });
+     * 
+     * @example
+     * // Enrich attributes for included resources
+     * for (const entry of included) {
+     *   const entryScope = scopes[entry.type];
+     *   entry.attributes = await entryScope.enrichAttributes({
+     *     attributes: entry.attributes,
+     *     parentContext: context
+     *   });
+     * }
+     */
+    addScopeMethod('enrichAttributes', async ({ params, runHooks }) => {
+      const { attributes, parentContext } = params || {};
+      
+      // Return empty object if no attributes provided
+      if (!attributes) {
+        return {};
+      }
+      
+      const context = {
+        parentContext,
+        attributes  // Pass attributes directly so hooks can modify them
+      };
+      
+      await runHooks('enrichAttributes', context);
+      
+      return context.attributes;
+    });
 
     // Initialize default data helpers that throw errors until a storage plugin is installed
     // These placeholders show storage plugin developers what methods to implement

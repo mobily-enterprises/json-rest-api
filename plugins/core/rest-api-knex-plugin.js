@@ -552,11 +552,11 @@ export const RestApiKnexPlugin = {
         
         // Only process searchSchema entries that are actually being used in filters
         log.trace('[SCHEMA-PROCESS] Processing only used searchSchema entries', { 
-          searchSchemaCount: Object.keys(searchSchema).length,
+          searchSchemaCount: Object.keys(searchSchema.structure).length,
           filtersCount: Object.keys(filters).length 
         });
         
-        for (const [filterKey, fieldDef] of Object.entries(searchSchema)) {
+        for (const [filterKey, fieldDef] of Object.entries(searchSchema.structure)) {
           // Skip this searchSchema entry if it's not being used in the current query
           if (filters[filterKey] === undefined) {
             log.trace('[SCHEMA-ENTRY] Skipping unused filter', { filterKey });
@@ -775,7 +775,7 @@ export const RestApiKnexPlugin = {
                     let nextScope = null;
                     
                     // Search schema for matching belongsTo
-                    for (const [fieldName, fieldDef] of Object.entries(currentSchema)) {
+                    for (const [fieldName, fieldDef] of Object.entries(currentSchema.structure)) {
                       if (fieldDef.as === relationshipName && fieldDef.belongsTo) {
                         foreignKeyField = fieldName;
                         nextScope = fieldDef.belongsTo;
@@ -1271,7 +1271,8 @@ export const RestApiKnexPlugin = {
         }
         
         // Add regular belongsTo relationships (only if not already loaded)
-        for (const [fieldName, fieldDef] of Object.entries(schema || {})) {
+        const schemaStructure = schema?.structure || schema || {};
+        for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
           if (fieldDef.belongsTo && fieldDef.as) {
             const relName = fieldDef.as;
             const targetType = fieldDef.belongsTo;
