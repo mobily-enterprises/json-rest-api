@@ -75,7 +75,7 @@ import { createContext } from './lib/request-helpers.js';
  * ```
  */
 
-import { parseJsonApiQuery } from '../lib/query-parser.js';
+import { parseJsonApiQuery } from '../lib/connectors-query-parser.js';
 
 export const HttpPlugin = {
   name: 'http',

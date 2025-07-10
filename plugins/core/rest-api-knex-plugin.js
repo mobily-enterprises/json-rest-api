@@ -1,7 +1,6 @@
 
-import { createCrossTableSearchHelpers } from './lib/cross-table-search.js';
-import { createRelationshipIncludeHelpers } from './lib/relationship-includes.js';
-import * as polymorphicHelpers from './lib/knex-polymorphic-helpers.js';
+import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
+import { createRelationshipIncludeHelpers } from './lib/knex-relationship-includes.js';
 import {
   getTableName,
   getForeignKeyFields,
@@ -531,14 +530,12 @@ export const RestApiKnexPlugin = {
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
     api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
-    api.knex.helpers.polymorphic = polymorphicHelpers;
     
 
     // Now initialize relationship include helpers with access to the helper functions
     relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
       getForeignKeyFields,
-      buildFieldSelection,
-      polymorphicHelpers
+      buildFieldSelection
     });
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
@@ -629,8 +626,7 @@ export const RestApiKnexPlugin = {
         log,
         relationshipIncludeHelpers,
         createRelationshipIncludeHelpers,
-        scopes,
-        polymorphicHelpers
+        scopes
       });
       
       // Build and return response
@@ -764,8 +760,7 @@ export const RestApiKnexPlugin = {
         log,
         relationshipIncludeHelpers,
         createRelationshipIncludeHelpers,
-        scopes,
-        polymorphicHelpers
+        scopes
       });
       
       // Build and return response

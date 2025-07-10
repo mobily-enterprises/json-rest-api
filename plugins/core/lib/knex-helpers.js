@@ -204,8 +204,7 @@ export const processIncludes = async (records, scopeName, queryParams, transacti
     // Create a new instance of the helpers with the transaction
     helpers = createRelationshipIncludeHelpers(dependencies.scopes, log, transaction, {
       getForeignKeyFields,
-      buildFieldSelection,
-      polymorphicHelpers: dependencies.polymorphicHelpers
+      buildFieldSelection
     });
   }
   
