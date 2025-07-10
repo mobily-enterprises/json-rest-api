@@ -1,5 +1,11 @@
 /**
- * Transformation functions for converting between simplified and JSON:API formats
+ * @module simplifiedHelpers
+ * @description Transformation functions for converting between simplified and JSON:API formats
+ * 
+ * This module enables the REST API's "simplified mode" feature, which provides a more
+ * developer-friendly alternative to the verbose JSON:API format. It allows APIs to
+ * accept and return plain JavaScript objects while still maintaining JSON:API
+ * compliance internally.
  */
 
 /**
@@ -115,6 +121,14 @@
  * };
  * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
  * // Returns the same object unchanged
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Accept familiar plain objects from API consumers (better DX)
+ * // 2. Automatically convert foreign keys to proper relationships
+ * // 3. Support both simple and JSON:API formats in the same endpoint
+ * // 4. Reduce boilerplate in client applications
+ * // 5. Maintain JSON:API compliance internally for consistency
  */
 export const transformSimplifiedToJsonApi = (input, scopeName, schema, relationships) => {
   // If already JSON:API format, return as-is
@@ -285,6 +299,14 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  * //     email: 'john@example.com'
  * //   }
  * // }
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Provide a simpler response format for client applications
+ * // 2. Reduce nesting and verbosity in API responses
+ * // 3. Make related data easily accessible (author object vs just ID)
+ * // 4. Support gradual migration from legacy APIs to JSON:API
+ * // 5. Improve developer experience while maintaining standards compliance
  */
 export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => {
   if (!jsonApi?.data) return jsonApi;
@@ -432,6 +454,8 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  * //     { id: '1002', number: 2, title: 'Basics' }
  * //   ]
  * // }
+ * 
+ * @private
  */
 export const transformSingleJsonApiToSimplified = (data, included, schema, relationships) => {
   const simplified = {};

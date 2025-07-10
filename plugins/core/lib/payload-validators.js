@@ -2,11 +2,43 @@ import { RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-a
 
 /**
  * Validates a JSON:API resource identifier object
+ * 
+ * Ensures that a resource identifier follows JSON:API spec with proper type and id.
+ * Used internally to validate relationship data and included resources.
+ * 
  * @param {Object} identifier - The resource identifier to validate
- * @param {string} context - Context for error messages
+ * @param {string} context - Context for error messages (e.g., "Relationship 'author'")
  * @param {Object} scopes - The scopes proxy object to check if type exists
  * @returns {boolean} True if valid
  * @throws {RestApiPayloadError|RestApiValidationError} If validation fails
+ * 
+ * @example <caption>Valid resource identifier</caption>
+ * // This passes validation:
+ * validateResourceIdentifier(
+ *   { type: 'articles', id: '123' },
+ *   "Relationship 'author'",
+ *   scopes
+ * );
+ * 
+ * @example <caption>Invalid - missing type</caption>
+ * // This throws RestApiPayloadError:
+ * validateResourceIdentifier(
+ *   { id: '123' },  // Missing 'type'
+ *   "Relationship 'comments'",
+ *   scopes
+ * );
+ * // Error: "Relationship 'comments': Resource identifier must have a non-empty 'type' string"
+ * 
+ * @example <caption>Invalid - unknown resource type</caption>
+ * // This throws RestApiValidationError if 'unknown' scope doesn't exist:
+ * validateResourceIdentifier(
+ *   { type: 'unknown', id: '456' },
+ *   "Included resource",
+ *   scopes
+ * );
+ * // Error: "Included resource: Unknown resource type 'unknown'. No scope with this name exists."
+ * 
+ * @private
  */
 function validateResourceIdentifier(identifier, context, scopes = null) {
   if (!identifier || typeof identifier !== 'object') {
@@ -52,12 +84,56 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
 }
 
 /**
- * Validates a relationship object
+ * Validates a relationship object in JSON:API format
+ * 
+ * Ensures relationships have proper structure with 'data' property containing
+ * either null, a single resource identifier, or an array of resource identifiers.
+ * Used to validate relationships in POST, PUT, and PATCH payloads.
+ * 
  * @param {Object} relationship - The relationship to validate
  * @param {string} relationshipName - Name of the relationship for error context
  * @param {Object} scopes - The scopes proxy object to check if type exists
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>Valid to-one relationship</caption>
+ * // Setting an article's author:
+ * validateRelationship(
+ *   { data: { type: 'users', id: '42' } },
+ *   'author',
+ *   scopes
+ * );
+ * 
+ * @example <caption>Valid to-many relationship</caption>
+ * // Setting an article's tags:
+ * validateRelationship(
+ *   { 
+ *     data: [
+ *       { type: 'tags', id: '1' },
+ *       { type: 'tags', id: '2' }
+ *     ] 
+ *   },
+ *   'tags',
+ *   scopes
+ * );
+ * 
+ * @example <caption>Valid null relationship (removing association)</caption>
+ * // Removing an article's featured image:
+ * validateRelationship(
+ *   { data: null },
+ *   'featuredImage',
+ *   scopes
+ * );
+ * 
+ * @example <caption>Valid empty to-many relationship</caption>
+ * // Clearing all comments:
+ * validateRelationship(
+ *   { data: [] },
+ *   'comments',
+ *   scopes
+ * );
+ * 
+ * @private
  */
 function validateRelationship(relationship, relationshipName, scopes = null) {
   if (!relationship || typeof relationship !== 'object') {
@@ -100,10 +176,67 @@ function validateRelationship(relationship, relationshipName, scopes = null) {
 }
 
 /**
- * Validates query parameters for GET requests
+ * Validates query parameters for GET requests (single resource retrieval)
+ * 
+ * Ensures GET requests have required 'id' parameter and validates optional
+ * query parameters like 'include' and 'fields' for sparse fieldsets.
+ * This is called by the REST API plugin before executing a GET request.
+ * 
  * @param {Object} params - The parameters object containing id and queryParams
+ * @param {string|number} params.id - The resource ID to fetch
+ * @param {Object} [params.queryParams] - Optional query parameters
+ * @param {string[]} [params.queryParams.include] - Related resources to include
+ * @param {Object} [params.queryParams.fields] - Sparse fieldsets by resource type
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiValidationError|RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>Basic GET validation</caption>
+ * // Fetch article 123:
+ * validateGetPayload({
+ *   id: '123'
+ * });
+ * 
+ * @example <caption>GET with includes</caption>
+ * // Fetch article with author and comments:
+ * validateGetPayload({
+ *   id: '123',
+ *   queryParams: {
+ *     include: ['author', 'comments.author']
+ *   }
+ * });
+ * 
+ * @example <caption>GET with sparse fieldsets</caption>
+ * // Fetch only specific fields:
+ * validateGetPayload({
+ *   id: '123',
+ *   queryParams: {
+ *     include: ['author'],
+ *     fields: {
+ *       articles: 'title,body',
+ *       users: 'name,email'
+ *     }
+ *   }
+ * });
+ * 
+ * @example <caption>Invalid - missing ID</caption>
+ * // This throws RestApiValidationError:
+ * validateGetPayload({
+ *   queryParams: { include: ['author'] }
+ * });
+ * // Error: "GET request must include an id parameter"
+ * 
+ * @example <caption>Invalid - null ID</caption>
+ * // This throws RestApiValidationError:
+ * validateGetPayload({
+ *   id: null
+ * });
+ * // Error: "GET request id cannot be null, undefined, or empty"
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to ensure requests are valid before
+ * // passing them to the storage layer (e.g., Knex plugin), preventing
+ * // invalid queries from reaching the database and providing consistent
+ * // error messages across all storage implementations.
  */
 export function validateGetPayload(params) {
   if (!params || typeof params !== 'object') {
@@ -182,11 +315,88 @@ export function validateGetPayload(params) {
 }
 
 /**
- * Validates query parameters for collection requests
+ * Validates query parameters for collection requests (query/list operations)
+ * 
+ * Ensures collection queries have valid filters, sorting, pagination, includes,
+ * and sparse fieldsets. Validates that sort fields are in the allowed list.
+ * This is called by the REST API plugin before executing a query request.
+ * 
  * @param {Object} params - The parameters object
+ * @param {Object} [params.queryParams] - Query parameters for the collection
+ * @param {string[]} [params.queryParams.include] - Related resources to include
+ * @param {Object} [params.queryParams.fields] - Sparse fieldsets by resource type
+ * @param {Object} [params.queryParams.filters] - Filter conditions
+ * @param {string[]} [params.queryParams.sort] - Sort fields (prefix with - for DESC)
+ * @param {Object} [params.queryParams.page] - Pagination parameters
  * @param {string[]} sortableFields - Array of fields that can be sorted
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiValidationError|RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>Basic query validation</caption>
+ * // Simple query with no parameters:
+ * validateQueryPayload({}, ['title', 'createdAt']);
+ * 
+ * @example <caption>Query with filters and sorting</caption>
+ * // Find published articles sorted by date:
+ * validateQueryPayload({
+ *   queryParams: {
+ *     filters: {
+ *       status: 'published',
+ *       'author.name': 'John Doe'  // Cross-table filter
+ *     },
+ *     sort: ['-publishedAt', 'title'],  // DESC by date, then ASC by title
+ *   }
+ * }, ['publishedAt', 'title', 'createdAt']);
+ * 
+ * @example <caption>Query with pagination</caption>
+ * // Page-based pagination:
+ * validateQueryPayload({
+ *   queryParams: {
+ *     page: { number: 2, size: 20 }
+ *   }
+ * }, []);
+ * 
+ * // Offset-based pagination:
+ * validateQueryPayload({
+ *   queryParams: {
+ *     page: { offset: 40, limit: 20 }
+ *   }
+ * }, []);
+ * 
+ * @example <caption>Complex query with all features</caption>
+ * // Full-featured query:
+ * validateQueryPayload({
+ *   queryParams: {
+ *     include: ['author', 'tags', 'comments.author'],
+ *     fields: {
+ *       articles: 'title,summary,publishedAt',
+ *       users: 'name,avatar',
+ *       tags: 'name'
+ *     },
+ *     filters: {
+ *       status: 'published',
+ *       'tags.name': 'javascript'
+ *     },
+ *     sort: ['-publishedAt'],
+ *     page: { number: 1, size: 10 }
+ *   }
+ * }, ['publishedAt', 'title', 'updatedAt']);
+ * 
+ * @example <caption>Invalid - non-sortable field</caption>
+ * // This throws RestApiValidationError:
+ * validateQueryPayload({
+ *   queryParams: {
+ *     sort: ['secretField']  // Not in sortableFields
+ *   }
+ * }, ['title', 'createdAt']);
+ * // Error: "Field 'secretField' is not sortable. Sortable fields are: title, createdAt"
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Prevent SQL injection by validating filter keys
+ * // 2. Ensure consistent pagination across storage backends
+ * // 3. Prevent sorting on non-indexed fields that could slow queries
+ * // 4. Provide clear error messages before hitting the database
  */
 export function validateQueryPayload(params, sortableFields = []) {
   if (!params || typeof params !== 'object') {
@@ -327,11 +537,120 @@ export function validateQueryPayload(params, sortableFields = []) {
 }
 
 /**
- * Validates a JSON:API document for POST requests
+ * Validates a JSON:API document for POST requests (resource creation)
+ * 
+ * Ensures POST payloads follow JSON:API spec with proper data structure,
+ * validates relationships reference existing resources, and checks that
+ * included resources have required IDs. This is the main validation gateway
+ * for creating new resources through the REST API.
+ * 
  * @param {Object} inputRecord - The JSON:API document to validate
+ * @param {Object} inputRecord.data - The primary resource to create
+ * @param {string} inputRecord.data.type - Resource type (must match a scope)
+ * @param {string|number} [inputRecord.data.id] - Optional client-generated ID
+ * @param {Object} [inputRecord.data.attributes] - Resource attributes
+ * @param {Object} [inputRecord.data.relationships] - Resource relationships
+ * @param {Object[]} [inputRecord.included] - Related resources for compound documents
  * @param {Object} scopes - The scopes proxy object to check if type exists
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiValidationError|RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>Basic POST validation</caption>
+ * // Create a simple article:
+ * validatePostPayload({
+ *   data: {
+ *     type: 'articles',
+ *     attributes: {
+ *       title: 'Hello World',
+ *       body: 'Welcome to my blog...'
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>POST with relationships</caption>
+ * // Create article with author and tags:
+ * validatePostPayload({
+ *   data: {
+ *     type: 'articles',
+ *     attributes: {
+ *       title: 'REST API Design'
+ *     },
+ *     relationships: {
+ *       author: {
+ *         data: { type: 'users', id: '42' }
+ *       },
+ *       tags: {
+ *         data: [
+ *           { type: 'tags', id: '1' },
+ *           { type: 'tags', id: '2' }
+ *         ]
+ *       }
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>POST with client-generated ID</caption>
+ * // Some APIs allow client-generated IDs:
+ * validatePostPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: 'article-2023-11-15-hello-world',  // Client-provided ID
+ *     attributes: {
+ *       title: 'Hello World'
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>POST with included resources (compound document)</caption>
+ * // Create article with embedded author data for client convenience:
+ * validatePostPayload({
+ *   data: {
+ *     type: 'articles',
+ *     attributes: { title: 'My Article' },
+ *     relationships: {
+ *       author: {
+ *         data: { type: 'users', id: '42' }
+ *       }
+ *     }
+ *   },
+ *   included: [
+ *     {
+ *       type: 'users',
+ *       id: '42',
+ *       attributes: {
+ *         name: 'John Doe',
+ *         email: 'john@example.com'
+ *       }
+ *     }
+ *   ]
+ * }, scopes);
+ * 
+ * @example <caption>Invalid - missing type</caption>
+ * // This throws RestApiPayloadError:
+ * validatePostPayload({
+ *   data: {
+ *     attributes: { title: 'Missing Type' }
+ *   }
+ * }, scopes);
+ * // Error: 'POST request "data" must have a non-empty "type" string'
+ * 
+ * @example <caption>Invalid - unknown resource type</caption>
+ * // This throws RestApiValidationError:
+ * validatePostPayload({
+ *   data: {
+ *     type: 'unicorns',  // Not a registered scope
+ *     attributes: { name: 'Sparkles' }
+ *   }
+ * }, scopes);
+ * // Error: 'POST request "data.type" 'unicorns' is not a valid resource type'
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Ensure data integrity before hitting the database
+ * // 2. Validate relationships exist before creating foreign key references
+ * // 3. Provide consistent API behavior across different storage backends
+ * // 4. Enable compound document creation while maintaining data consistency
+ * // 5. Catch errors early with meaningful messages for API consumers
  */
 export function validatePostPayload(inputRecord, scopes = null) {
   if (!inputRecord || typeof inputRecord !== 'object') {
@@ -467,11 +786,96 @@ export function validatePostPayload(inputRecord, scopes = null) {
 }
 
 /**
- * Validates a JSON:API document for PUT requests
+ * Validates a JSON:API document for PUT requests (full resource replacement)
+ * 
+ * Ensures PUT payloads follow JSON:API spec for complete resource replacement.
+ * Unlike PATCH, PUT requires the complete resource representation and doesn't
+ * allow 'included' arrays (as PUT shouldn't create new related resources).
+ * The ID is required and must match the URL parameter.
+ * 
  * @param {Object} inputRecord - The JSON:API document to validate
+ * @param {Object} inputRecord.data - The complete resource representation
+ * @param {string} inputRecord.data.type - Resource type (must match existing)
+ * @param {string|number} inputRecord.data.id - Resource ID (required)
+ * @param {Object} [inputRecord.data.attributes] - Complete attributes
+ * @param {Object} [inputRecord.data.relationships] - Complete relationships
  * @param {Object} scopes - The scopes proxy object to check if type exists
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiValidationError|RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>Basic PUT validation</caption>
+ * // Replace entire article:
+ * validatePutPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: {
+ *       title: 'Updated Title',
+ *       body: 'Completely new body text',
+ *       status: 'published'
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>PUT with relationship replacement</caption>
+ * // Replace article with new author and tags:
+ * validatePutPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: {
+ *       title: 'REST API Best Practices',
+ *       body: 'Here are some tips...'
+ *     },
+ *     relationships: {
+ *       author: {
+ *         data: { type: 'users', id: '99' }  // Changed author
+ *       },
+ *       tags: {
+ *         data: [  // Completely new set of tags
+ *           { type: 'tags', id: '5' },
+ *           { type: 'tags', id: '6' },
+ *           { type: 'tags', id: '7' }
+ *         ]
+ *       },
+ *       featuredImage: {
+ *         data: null  // Remove featured image
+ *       }
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>Invalid - missing ID</caption>
+ * // This throws RestApiPayloadError:
+ * validatePutPayload({
+ *   data: {
+ *     type: 'articles',
+ *     attributes: { title: 'No ID' }
+ *   }
+ * }, scopes);
+ * // Error: 'PUT request "data" must have an "id" property'
+ * 
+ * @example <caption>Invalid - includes not allowed</caption>
+ * // This throws RestApiPayloadError:
+ * validatePutPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: { title: 'Updated' }
+ *   },
+ *   included: [  // Not allowed in PUT
+ *     { type: 'users', id: '1', attributes: { name: 'John' } }
+ *   ]
+ * }, scopes);
+ * // Error: 'PUT requests cannot include an "included" array'
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses PUT validation to:
+ * // 1. Ensure idempotent operations (same PUT = same result)
+ * // 2. Prevent accidental partial updates (use PATCH for that)
+ * // 3. Maintain clear semantics: PUT = replace, PATCH = modify
+ * // 4. Prevent side effects like creating related resources
+ * // 5. Ensure the ID in payload matches the URL parameter
  */
 export function validatePutPayload(inputRecord, scopes = null) {
   if (!inputRecord || typeof inputRecord !== 'object') {
@@ -572,11 +976,118 @@ export function validatePutPayload(inputRecord, scopes = null) {
 }
 
 /**
- * Validates a JSON:API document for PATCH requests
+ * Validates a JSON:API document for PATCH requests (partial resource updates)
+ * 
+ * Ensures PATCH payloads follow JSON:API spec for partial updates. Unlike PUT,
+ * PATCH allows sending only the fields/relationships that need updating.
+ * Requires at least one of 'attributes' or 'relationships' to be present.
+ * Like PUT, doesn't allow 'included' arrays.
+ * 
  * @param {Object} inputRecord - The JSON:API document to validate
+ * @param {Object} inputRecord.data - The partial resource representation
+ * @param {string} inputRecord.data.type - Resource type (must match existing)
+ * @param {string|number} inputRecord.data.id - Resource ID (required)
+ * @param {Object} [inputRecord.data.attributes] - Attributes to update
+ * @param {Object} [inputRecord.data.relationships] - Relationships to update
  * @param {Object} scopes - The scopes proxy object to check if type exists
  * @returns {boolean} True if valid
- * @throws {Error} If validation fails
+ * @throws {RestApiValidationError|RestApiPayloadError} If validation fails
+ * 
+ * @example <caption>PATCH single attribute</caption>
+ * // Just update the title:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: {
+ *       title: 'New Title Only'
+ *       // Other attributes remain unchanged
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>PATCH multiple attributes</caption>
+ * // Update status and timestamp:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: {
+ *       status: 'published',
+ *       publishedAt: '2023-11-15T10:00:00Z'
+ *       // title, body, etc. remain unchanged
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>PATCH relationships only</caption>
+ * // Just change the author:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     relationships: {
+ *       author: {
+ *         data: { type: 'users', id: '456' }
+ *       }
+ *       // tags, comments, etc. remain unchanged
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>PATCH to clear relationships</caption>
+ * // Remove featured image, clear all tags:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     relationships: {
+ *       featuredImage: {
+ *         data: null  // Remove to-one relationship
+ *       },
+ *       tags: {
+ *         data: []  // Clear to-many relationship
+ *       }
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>PATCH both attributes and relationships</caption>
+ * // Complex update:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123',
+ *     attributes: {
+ *       status: 'archived',
+ *       archivedAt: '2023-11-15T15:30:00Z'
+ *     },
+ *     relationships: {
+ *       archivedBy: {
+ *         data: { type: 'users', id: '789' }
+ *       }
+ *     }
+ *   }
+ * }, scopes);
+ * 
+ * @example <caption>Invalid - no changes specified</caption>
+ * // This throws RestApiValidationError:
+ * validatePatchPayload({
+ *   data: {
+ *     type: 'articles',
+ *     id: '123'
+ *     // No attributes or relationships!
+ *   }
+ * }, scopes);
+ * // Error: 'PATCH request "data" must have at least one of "attributes" or "relationships"'
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses PATCH validation to:
+ * // 1. Enable efficient partial updates (only send what changes)
+ * // 2. Reduce bandwidth for large resources
+ * // 3. Prevent race conditions (don't overwrite fields you didn't intend to)
+ * // 4. Support field-level permissions (some fields might be read-only)
+ * // 5. Maintain clear semantics vs PUT (PATCH = modify, PUT = replace)
  */
 export function validatePatchPayload(inputRecord, scopes = null) {
   if (!inputRecord || typeof inputRecord !== 'object') {

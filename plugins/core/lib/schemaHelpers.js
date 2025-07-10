@@ -1,5 +1,11 @@
 /**
- * Schema helper functions for REST API plugin
+ * @module schemaHelpers
+ * @description Schema helper functions for REST API plugin
+ * 
+ * This module provides utilities for processing and enhancing schemas,
+ * particularly for search functionality. It ensures search fields are
+ * properly indexed and generates comprehensive search schemas from
+ * various configuration sources.
  */
 
 import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
@@ -71,6 +77,14 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * ensureSearchFieldsAreIndexed(null);      // No error, returns immediately
  * ensureSearchFieldsAreIndexed(undefined); // No error, returns immediately
  * ensureSearchFieldsAreIndexed({});        // Empty object remains empty
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Signal to storage plugins (like Knex) which fields need database indexes
+ * // 2. Enable efficient filtering on search fields without full table scans
+ * // 3. Support cross-table searches by ensuring join fields are indexed
+ * // 4. Improve API response times for filtered queries
+ * // 5. Allow storage plugins to create indexes automatically during migrations
  */
 export function ensureSearchFieldsAreIndexed(searchSchema) {
   if (!searchSchema) return;
@@ -201,6 +215,15 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * //     virtualField: { ... }  // Virtual field config for cross-table search
  * //   }
  * // }
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Provide flexible search configuration without duplicating field definitions
+ * // 2. Enable virtual fields that don't exist in the database (like category_name)
+ * // 3. Support complex search patterns (date ranges, cross-table searches)
+ * // 4. Validate search configuration at startup to catch errors early
+ * // 5. Allow storage plugins to optimize queries based on search patterns
+ * // 6. Enable API consumers to filter by related data without complex joins
  */
 export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => {
   // Start with explicit searchSchema or empty object

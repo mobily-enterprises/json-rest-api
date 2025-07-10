@@ -1,6 +1,11 @@
 /**
- * Scope validation functions for REST API plugin
- * These validations run when scopes are added to ensure proper configuration
+ * @module scope-validations
+ * @description Scope validation functions for REST API plugin
+ * 
+ * These validations run when scopes are added to ensure proper configuration,
+ * particularly for complex features like polymorphic relationships. By validating
+ * at scope registration time, we catch configuration errors early before any
+ * API requests are made.
  */
 
 /**
@@ -8,6 +13,7 @@
  * 
  * Called during scope registration to ensure configuration is correct.
  * Performs comprehensive validation of polymorphic relationship setup.
+ * This is a private helper used by validatePolymorphicRelationships.
  * 
  * @param {Object} relDef - The relationship definition object
  * @param {Object} relDef.belongsToPolymorphic - Polymorphic configuration
@@ -39,11 +45,26 @@
  *   belongsToPolymorphic: {
  *     typeField: 'commentable_type',
  *     idField: 'commentable_id'
+ *     // Missing: types array!
  *   }
  * };
  * 
  * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);
  * // Returns: { valid: false, error: 'belongsToPolymorphic.types must be a non-empty array' }
+ * 
+ * @example <caption>Invalid configuration (unknown scope type)</caption>
+ * const relDef = {
+ *   belongsToPolymorphic: {
+ *     types: ['articles', 'unicorns'],  // 'unicorns' scope doesn't exist
+ *     typeField: 'attachable_type',
+ *     idField: 'attachable_id'
+ *   }
+ * };
+ * 
+ * const result = validatePolymorphicRelationship(relDef, 'attachments', scopes);
+ * // Returns: { valid: false, error: "Polymorphic type 'unicorns' is not a registered scope" }
+ * 
+ * @private
  */
 const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
   // Validation logic:
@@ -106,8 +127,8 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * 2. The referenced types actually exist as registered scopes
  * 3. The configuration follows the expected structure
  * 
- * This function runs automatically when a scope is added and uses the polymorphicHelpers
- * to perform detailed validation of each polymorphic relationship definition.
+ * This function runs automatically when a scope is added via the 'scope:added' event hook.
+ * It prevents runtime errors by catching misconfigurations at startup.
  * 
  * @param {Object} params - Parameters object
  * @param {Object} params.eventData - The scope:added event data  
@@ -116,68 +137,104 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * @param {Object} params.api - The API instance for accessing scopes and logging
  * @throws {Error} If any polymorphic relationship is invalid
  * 
- * @example
- * // Valid polymorphic relationship configuration:
- * const relationships = {
- *   commentable: {
- *     belongsToPolymorphic: {
- *       types: ['posts', 'videos'],     // Both types must exist as scopes
- *       typeField: 'commentable_type',  // Field storing the type
- *       idField: 'commentable_id'       // Field storing the ID
- *     }
- *   }
- * };
- * // This will pass validation if 'posts' and 'videos' scopes exist
- * 
- * @example
- * // Invalid configuration - missing required field:
- * const relationships = {
- *   attachable: {
- *     belongsToPolymorphic: {
- *       types: ['documents', 'images'],
- *       typeField: 'attachable_type'
- *       // Missing idField!
- *     }
- *   }
- * };
- * // Throws: "Invalid polymorphic relationship 'attachable' in scope 'attachments':
- * // Missing required field: idField"
- * 
- * @example  
- * // Invalid configuration - referencing non-existent type:
- * const relationships = {
- *   taggable: {
- *     belongsToPolymorphic: {
- *       types: ['posts', 'nonexistent'],  // 'nonexistent' scope not registered
- *       typeField: 'taggable_type',
- *       idField: 'taggable_id'
- *     }
- *   }
- * };
- * // Throws: "Invalid polymorphic relationship 'taggable' in scope 'tags':
- * // Type 'nonexistent' does not exist as a scope"
- * 
- * @example
- * // Complex example with multiple polymorphic relationships:
- * const relationships = {
- *   // A notification can be about different things
- *   notifiable: {
- *     belongsToPolymorphic: {
- *       types: ['users', 'posts', 'comments'],
- *       typeField: 'notifiable_type',
- *       idField: 'notifiable_id'
- *     }
+ * @example <caption>Valid polymorphic relationship - Comments on multiple types</caption>
+ * // In your comments scope configuration:
+ * api.addScope('comments', {
+ *   schema: {
+ *     id: { type: 'id' },
+ *     body: { type: 'text' },
+ *     commentable_type: { type: 'string' },  // Stores 'posts' or 'videos'
+ *     commentable_id: { type: 'integer' }     // Stores the ID
  *   },
- *   // And triggered by different actors
- *   actor: {
- *     belongsToPolymorphic: {
- *       types: ['users', 'systems'],  // Users or automated systems
- *       typeField: 'actor_type',
- *       idField: 'actor_id'
+ *   relationships: {
+ *     commentable: {
+ *       belongsToPolymorphic: {
+ *         types: ['posts', 'videos'],     // Both scopes must already exist
+ *         typeField: 'commentable_type',  // Which field stores the type
+ *         idField: 'commentable_id'       // Which field stores the ID
+ *       },
+ *       sideLoad: true  // Allow including via ?include=commentable
  *     }
  *   }
- * };
- * // Both relationships will be validated independently
+ * });
+ * // This configuration allows: comment.commentable_type='posts', comment.commentable_id=123
+ * 
+ * @example <caption>Invalid - missing required field</caption>
+ * // This will throw an error:
+ * api.addScope('attachments', {
+ *   relationships: {
+ *     attachable: {
+ *       belongsToPolymorphic: {
+ *         types: ['documents', 'images'],
+ *         typeField: 'attachable_type'
+ *         // ERROR: Missing idField!
+ *       }
+ *     }
+ *   }
+ * });
+ * // Throws: "Invalid polymorphic relationship 'attachable' in scope 'attachments':
+ * // belongsToPolymorphic.idField must be specified"
+ * 
+ * @example <caption>Invalid - referencing non-existent scope</caption>
+ * // This will throw if 'unicorns' scope doesn't exist:
+ * api.addScope('likes', {
+ *   relationships: {
+ *     likeable: {
+ *       belongsToPolymorphic: {
+ *         types: ['posts', 'unicorns'],  // ERROR: 'unicorns' not registered
+ *         typeField: 'likeable_type',
+ *         idField: 'likeable_id'
+ *       }
+ *     }
+ *   }
+ * });
+ * // Throws: "Invalid polymorphic relationship 'likeable' in scope 'likes':
+ * // Polymorphic type 'unicorns' is not a registered scope"
+ * 
+ * @example <caption>Complex use case - Activity feed with multiple polymorphic relationships</caption>
+ * // An activity log that tracks different types of events:
+ * api.addScope('activities', {
+ *   schema: {
+ *     id: { type: 'id' },
+ *     action: { type: 'string' },  // 'created', 'updated', 'deleted'
+ *     // What was acted upon
+ *     trackable_type: { type: 'string' },
+ *     trackable_id: { type: 'integer' },
+ *     // Who performed the action
+ *     actor_type: { type: 'string' },
+ *     actor_id: { type: 'integer' },
+ *     created_at: { type: 'datetime' }
+ *   },
+ *   relationships: {
+ *     // The resource that was changed
+ *     trackable: {
+ *       belongsToPolymorphic: {
+ *         types: ['posts', 'comments', 'users', 'products'],
+ *         typeField: 'trackable_type',
+ *         idField: 'trackable_id'
+ *       },
+ *       sideLoad: true
+ *     },
+ *     // The user or system that made the change
+ *     actor: {
+ *       belongsToPolymorphic: {
+ *         types: ['users', 'api_clients', 'cron_jobs'],
+ *         typeField: 'actor_type',
+ *         idField: 'actor_id'
+ *       },
+ *       sideLoad: true
+ *     }
+ *   }
+ * });
+ * // Both polymorphic relationships are validated independently
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // This validation prevents:
+ * // 1. Runtime errors when trying to resolve non-existent scope types
+ * // 2. Database foreign key violations from invalid type values
+ * // 3. Confusion from typos in scope names (caught at startup)
+ * // 4. API inconsistencies from incomplete polymorphic configurations
+ * // 5. Complex debugging sessions from misconfigured relationships
  */
 export function validatePolymorphicRelationships({ eventData, api }) {
   const { scopeName, scopeOptions } = eventData;

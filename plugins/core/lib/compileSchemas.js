@@ -59,12 +59,14 @@ export async function compileSchemas(scope) {
   // Create schema object
   const schemaObject = CreateSchema(schemaContext.schema);
   
-  // Generate searchSchema
+  // Generate searchSchema by merging explicit searchSchema with fields marked search:true
+  // Example: title: {search: true} becomes searchable, or explicit searchSchema takes precedence
   let rawSearchSchema = scope.scopeOptions.searchSchema ||
   generateSearchSchemaFromSchema(schemaContext.schema);
   
   if (rawSearchSchema) {
-    // Ensure all search fields are indexed
+    // Mark all search fields as indexed for database optimization
+    // Example: status field gets indexed: true, enabling efficient WHERE clauses
     ensureSearchFieldsAreIndexed(rawSearchSchema);
     
     // Hook: searchSchema:enrich

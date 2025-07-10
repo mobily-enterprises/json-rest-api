@@ -32,9 +32,9 @@ export const RestApiPlugin = {
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
 
-    // Listen for scope creation to validate polymorphic relationships
-    // Ensures all polymorphic relationships reference valid types and have required fields
-    // Example: Validates that commentable: { belongsToPolymorphic: { types: ['posts', 'videos'] } } has valid config
+    // Listen for scope creation to validate polymorphic relationships at startup
+    // Example: Ensures comments.commentable_type can only contain 'posts' or 'videos' if those are the defined types
+    // Catches config errors early: missing typeField/idField, non-existent scope types, etc.
     on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
 
     // Initialize default vars for the plugin from pluginOptions
@@ -248,7 +248,8 @@ export const RestApiPlugin = {
         params.queryParams.sort = Array.isArray(defaultSort) ? defaultSort : [defaultSort];
       }
 
-      // Check payload with sortable fields validation
+      // Validate query parameters - ensures filters, sort fields, pagination are properly formatted
+      // Example: validates sort: ['-createdAt', 'title'] only allows fields in sortableFields array
       validateQueryPayload(params, sortableFields);
 
       // Get cached schema info including searchSchema
@@ -368,8 +369,8 @@ export const RestApiPlugin = {
         const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         if (context.record) {
           // Convert JSON:API response back to simplified format
-          // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
-          // becomes: { id: '1', title: 'My Post', author_id: '123' }
+          // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
+          // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
           return transformJsonApiToSimplified(
             context.record,
             scopeOptions.schema || {},
@@ -471,7 +472,8 @@ export const RestApiPlugin = {
       params.queryParams.include = params.queryParams.include || []
       params.queryParams.fields = params.queryParams.fields || {}
       
-      // Check payload
+      // Validate GET request - ensures ID is present and queryParams.include/fields are valid
+      // Example: validates id: '123' is not null/empty, include: ['author'] is string array
       validateGetPayload(params);
 
       runHooks('checkPermissions')
@@ -530,8 +532,8 @@ export const RestApiPlugin = {
         const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         if (context.record) {
           // Convert JSON:API response back to simplified format
-          // Example: { data: { type: 'posts', id: '1', attributes: { title: 'My Post' } } }
-          // becomes: { id: '1', title: 'My Post', author_id: '123' }
+          // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
+          // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
           return transformJsonApiToSimplified(
             context.record,
             scopeOptions.schema || {},
@@ -808,7 +810,8 @@ export const RestApiPlugin = {
         context.inputRecord = params.inputRecord
         context.queryParams = params.queryParams
 
-        // Check payload with scope validation
+        // Validate POST payload - ensures JSON:API structure, validates resource types exist
+        // Example: validates data.type: 'articles' exists as scope, relationships reference valid types
         validatePostPayload(params.inputRecord, scopes)
         
         // Validate that the resource type matches the current scope
@@ -1277,7 +1280,8 @@ export const RestApiPlugin = {
       );
     }
 
-    // Validate payload with scope validation
+    // Validate PUT payload - ensures complete resource replacement with required ID
+    // Example: validates data.id exists, prevents 'included' array, checks relationships
     validatePutPayload(context.inputRecord, scopes)
     
     // Validate that the resource type matches the current scope
@@ -1836,6 +1840,8 @@ export const RestApiPlugin = {
         );
       }
 
+      // Validate PATCH payload - ensures partial update has attributes or relationships
+      // Example: validates at least one of data.attributes or data.relationships exists
       validatePatchPayload(params.inputRecord, scopes)
       
       // Validate that the resource type matches the current scope
