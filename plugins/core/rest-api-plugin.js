@@ -31,9 +31,16 @@ import { compileSchemas } from './lib/compileSchemas.js';
 async function compileResourceSchemas({ eventData }) {
   const { scope, scopeName } = eventData;
   // Compile schemas for this scope using the full context
-  // Add scopeName to the scope object since compileSchemas expects it
-  await compileSchemas({ ...scope, scopeName });
+  // The scope object from eventData already has the necessary properties
+  await compileSchemas(scope);
 }
+
+const scopeSetting = (settingName, params, scopeOptions, vars, defaultValue) => 
+  params[settingName] !== undefined ? params[settingName] :  // Direct param override
+  scopeOptions[settingName] !== undefined ? 
+    scopeOptions[settingName] :                             // Resource config
+    vars[settingName] !== undefined ? vars[settingName]:
+      defaultValue
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -68,11 +75,7 @@ export const RestApiPlugin = {
     vars.pageSize = restApiOptions.pageSize || 20
     vars.maxPageSize = restApiOptions.maxPageSize || 100
     vars.loadRecordOnPut = !!restApiOptions.loadRecordOnPut
-
-    // These options are special since they have a lot of granularity:
-    // vars.simplified first, then scope.vars.simplified, then scopeOptions.simplified
-    // and then options.simplified
-    vars.simplified = false
+    vars.simplified = restApiOptions.simplified === undefined ? true : restApiOptions.simplified;
     
     // Return full record configuration
     vars.returnFullRecord = {
@@ -87,10 +90,15 @@ export const RestApiPlugin = {
     vars.schema = null;
 
     // Helper scope method to get all schema-related information
-    addScopeMethod('getSchemaInfo', async ({ vars }) => {
-      // Schemas should already be compiled by compileSchemas()
+    addScopeMethod('getSchemaInfo', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+      // Compile schemas lazily if not already done
+      if (!vars.schemaProcessed) {
+        await compileSchemas({ vars, scopeOptions, scopeName, runHooks });
+      }
+      
+      // Return the compiled schema info
       if (!vars.schema) {
-        throw new Error('Schemas not compiled. Call compileSchemas() at the beginning of your method.');
+        throw new Error('Schema compilation failed');
       }
       return vars.schema;
     })
