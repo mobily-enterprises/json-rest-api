@@ -16,7 +16,7 @@ async function setupDatabase() {
   await knex.schema.createTable('countries', (table) => {
     table.increments('id').primary();
     table.string('name', 100).notNullable();
-    table.string('code', 2).notNullable().unique();
+    table.string('code', 2).unique();
   });
   console.log('✓ Created countries table');
 
@@ -24,7 +24,7 @@ async function setupDatabase() {
   await knex.schema.createTable('publishers', (table) => {
     table.increments('id').primary();
     table.string('name', 200).notNullable();
-    table.integer('country_id').notNullable().references('id').inTable('countries');
+    table.integer('country_id').references('id').inTable('countries');
   });
   console.log('✓ Created publishers table');
 

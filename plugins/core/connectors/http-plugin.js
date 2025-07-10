@@ -194,8 +194,8 @@ export const HttpPlugin = {
               detail: error.message,
               source: error.details
             }];
-            if (error.violations) {
-              errorResponse.errors = error.violations.map(v => ({
+            if (error.details?.violations) {
+              errorResponse.errors = error.details.violations.map(v => ({
                 status: '422',
                 title: 'Validation Error',
                 detail: v.message,

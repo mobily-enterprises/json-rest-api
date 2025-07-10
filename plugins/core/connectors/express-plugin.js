@@ -91,12 +91,19 @@
 import express from 'express';
 import { parseJsonApiQuery } from '../lib/connectors-query-parser.js';
 import { createContext } from './lib/request-helpers.js';
+import { createEnhancedLogger } from '../../../lib/enhanced-logger.js';
 
 export const ExpressPlugin = {
   name: 'express',
   dependencies: ['rest-api'],
   
   async install({ on, vars, helpers, pluginOptions, log, scopes, addApiMethod, api, runHooks }) {
+    // Enhance the logger to show full error details
+    const enhancedLog = createEnhancedLogger(log, { 
+      logFullErrors: true, 
+      includeStack: true 
+    });
+    
     // Initialize express namespace under api.http
     if (!api.http) {
       api.http = {};
@@ -233,6 +240,13 @@ export const ExpressPlugin = {
      * Error handler - maps API errors to HTTP responses
      */
     const handleError = (error, res) => {
+      // Log full error details
+      enhancedLog.logError('HTTP request error', error, {
+        method: res.req?.method,
+        path: res.req?.path,
+        url: res.req?.url
+      });
+      
       let status = 500;
       let errorResponse = {
         errors: [{
@@ -253,8 +267,8 @@ export const ExpressPlugin = {
               detail: error.message,
               source: error.details
             }];
-            if (error.violations) {
-              errorResponse.errors = error.violations.map(v => ({
+            if (error.details?.violations) {
+              errorResponse.errors = error.details.violations.map(v => ({
                 status: '422',
                 title: 'Validation Error',
                 detail: v.message,

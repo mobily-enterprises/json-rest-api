@@ -17,8 +17,8 @@ import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSi
 import { processRelationships } from './lib/relationship-processor.js';
 import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
 import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
-import { moveHttpObjectsToContext } from './lib/http-helpers.js';
 import { compileSchemas } from './lib/compileSchemas.js';
+import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 
 /**
  * Event handler to compile schemas when a scope is added
@@ -42,10 +42,19 @@ const scopeSetting = (settingName, params, scopeOptions, vars, defaultValue) =>
     vars[settingName] !== undefined ? vars[settingName]:
       defaultValue
 
+const cascadeConfig = (settingName, sources, defaultValue) =>
+  sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
+
 export const RestApiPlugin = {
   name: 'rest-api',
 
   install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes, log, on }) {
+
+    // Enhance the logger to show full error details
+    const enhancedLog = createEnhancedLogger(log, { 
+      logFullErrors: true, 
+      includeStack: true 
+    });
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {};
@@ -246,32 +255,23 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'query'
       
-      // Move HTTP objects from params to context for cleaner separation of concerns.
-      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
-      // and places them in context where they belong. This keeps params clean for business data only
-      // while still allowing access to HTTP objects for things like file uploads or custom headers.
-      moveHttpObjectsToContext(params, context, api);
 
-      const simplified = 
-        params.simplified !== undefined ? params.simplified :  // Direct param override
-        scopeOptions.simplified !== undefined ? 
-          scopeOptions.simplified :                             // Resource config
-          vars.simplified 
+      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
 
       // Sanitise parameters
       log.trace('[QUERY-METHOD] Before sanitizing params:', params);
       params.queryParams = params.queryParams || {}
-      params.queryParams.include = params.queryParams.include || []
-      params.queryParams.fields = params.queryParams.fields || {}
-      params.queryParams.filters = params.queryParams.filters || {} 
-      params.queryParams.sort = params.queryParams.sort || []
-      params.queryParams.page = params.queryParams.page || {}
+      params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
+      params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+      params.queryParams.filters = cascadeConfig('filters', [params.queryParams], {})
+      params.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
+      params.queryParams.page = cascadeConfig('page', [params.queryParams], {})
       log.trace('[QUERY-METHOD] After sanitizing params:', params);
 
       // Get scope-specific or global configuration
-      const sortableFields = scopeOptions.sortableFields || vars.sortableFields;
-      const defaultSort = scopeOptions.defaultSort || vars.defaultSort;
-      const idProperty = scopeOptions.idProperty || vars.idProperty;
+      const sortableFields = cascadeConfig('sortableFields', [scopeOptions, vars], [])
+      const defaultSort = cascadeConfig('defaultSort', [scopeOptions, vars], null)
+      const idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
 
       // Apply default sort if no sort specified
       if (params.queryParams.sort.length === 0 && defaultSort) {
@@ -369,7 +369,7 @@ export const RestApiPlugin = {
         log.error('Failed to clone record:', {
           error: e.message,
           recordKeys: Object.keys(context.record || {}),
-          hasExpressReq: !!context.expressReq
+          hasHttpRequest: !!context.raw?.req
         });
         throw e;
       }
@@ -398,15 +398,18 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (simplified) {
-        // Transform the return value
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+        // Get compiled schema info for transformation
+        const schemaInfo = await scopes[scopeName].getSchemaInfo();
+        const schemaStructure = schemaInfo.schema.structure;
+        const relationships = schemaInfo.relationships;
+        
         if (context.record) {
           // Convert JSON:API response back to simplified format
           // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
           // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
           return transformJsonApiToSimplified(
             context.record,
-            scopeOptions.schema || {},
+            schemaStructure,
             relationships
           );
         }
@@ -487,23 +490,14 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'get'
       
-      // Move HTTP objects from params to context for cleaner separation of concerns.
-      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
-      // and places them in context where they belong. This keeps params clean for business data only
-      // while still allowing access to HTTP objects for things like file uploads or custom headers.
-      moveHttpObjectsToContext(params, context, api);
 
       // Determine mode early
-      const simplified = 
-        params.simplified !== undefined ? params.simplified :  // Direct param override
-        scopeOptions.simplified !== undefined ? 
-          scopeOptions.simplified :                             // Resource config
-          vars.simplified 
+      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
 
       // Sanitise parameters
       params.queryParams = params.queryParams || {}
-      params.queryParams.include = params.queryParams.include || []
-      params.queryParams.fields = params.queryParams.fields || {}
+      params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
+      params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
       
       // Validate GET request to ensure required parameters are present and properly formatted.
       // This checks that 'id' parameter exists and is not empty (you can't GET without an ID),
@@ -565,15 +559,18 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (simplified) {
-        // Transform the return value
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+        // Get compiled schema info for transformation
+        const schemaInfo = await scopes[scopeName].getSchemaInfo();
+        const schemaStructure = schemaInfo.schema.structure;
+        const relationships = schemaInfo.relationships;
+        
         if (context.record) {
           // Convert JSON:API response back to simplified format
           // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
           // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
           return transformJsonApiToSimplified(
             context.record,
-            scopeOptions.schema || {},
+            schemaStructure,
             relationships
           );
         }
@@ -781,38 +778,30 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'post'
       
-      // Move HTTP objects from params to context for cleaner separation of concerns.
-      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
-      // and places them in context where they belong. This keeps params clean for business data only
-      // while still allowing access to HTTP objects for things like file uploads or custom headers.
-      moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
-      const simplified = 
-        params.simplified !== undefined ? params.simplified :  // Direct param override
-        scopeOptions.simplified !== undefined ? 
-          scopeOptions.simplified :                             // Resource config
-          vars.simplified 
+      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
+      
+      // Get compiled schema info early for both modes
+      const schemaInfo = await scopes[scopeName].getSchemaInfo();
+      const schemaStructure = schemaInfo.schema.structure;
+      const relationships = schemaInfo.relationships;
       
       // Transform input if in simplified mode
       if (simplified) {
-        // Auto-detect format
-        if (!params.inputRecord?.data?.type) {
-          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-          // Convert simplified object format to JSON:API format
-          // Example: { title: 'My Post', author_id: 123 } becomes
-          // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-          params.inputRecord = transformSimplifiedToJsonApi(
-            params.inputRecord || params, // Support both styles
-            scopeName,
-            scopeOptions.schema || {},
-            relationships
-          );
-        }
+        // Always transform in simplified mode - no format detection needed
+        // Example: { title: 'My Post', author_id: 123 } becomes
+        // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
+        params.inputRecord = transformSimplifiedToJsonApi(
+          params.inputRecord || params, // Support both styles
+          scopeName,
+          schemaStructure,
+          relationships
+        );
       } else {
         // Strict mode: validate no belongsTo fields in attributes
         if (params.inputRecord?.data?.attributes) {
-          for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+          for (const [key, fieldDef] of Object.entries(schemaStructure)) {
             if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
               throw new RestApiValidationError(
                 `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
@@ -839,9 +828,9 @@ export const RestApiPlugin = {
         await runHooks('beforeProcessingPost')
 
         // Sanitise parameters and payload
-        params.queryParams = params.queryParams  || {}
-        params.queryParams.fields = params.queryParams.fields  || {}
-        params.queryParams.include = params.queryParams.include  || []
+        params.queryParams = params.queryParams || {}
+        params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+        params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
 
         // Place the record in the context
         context.inputRecord = params.inputRecord
@@ -869,23 +858,15 @@ export const RestApiPlugin = {
           );
         }
 
-        // Get schema info including cached schema and relationships
-        // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
-        // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
-        const schemaInfo = await scopes[scopeName].getSchemaInfo();
+        // Use the schema info we already fetched
         context.schema = schemaInfo.schema;
-        const relationships = schemaInfo.relationships;
-        const schemaFields = scopeOptions.schema || {};
         
-        // Extract foreign keys and many-to-many operations from JSON:API relationships block.
-        // This converts JSON:API relationship format into database-ready foreign keys and identifies
-        // which relationships need pivot table operations. For belongsTo relationships, it extracts
-        // the ID and maps it to the foreign key field. For many-to-many, it prepares bulk operations.
-        // Example: relationships.author: {data: {type: 'users', id: '123'}} becomes author_id: '123' in the database.
-        // Also handles polymorphic (commentable_type/id) and collects many-to-many for later processing
+        // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
+        // Example: relationships.author -> author_id: '123' for storage
+        // Example: relationships.tags -> array of pivot records to create later
         const { belongsToUpdates, manyToManyRelationships } = processRelationships(
           context.inputRecord,
-          schemaFields,
+          schemaStructure,
           relationships
         );
 
@@ -983,11 +964,9 @@ export const RestApiPlugin = {
         }
         
         // Determine if we should return the full record
-        const shouldReturnFullRecord = 
-          params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
-          scopeOptions.returnFullRecord?.post !== undefined ? 
-            scopeOptions.returnFullRecord.post :                             // Resource config
-          vars.returnFullRecord.post;                                        // API default
+        const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
+          params.returnFullRecord : 
+          cascadeConfig('post', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
         
         if (shouldReturnFullRecord) {
           // Get the full record with relationships
@@ -1034,13 +1013,11 @@ export const RestApiPlugin = {
         
         // Transform output if in simplified mode
         if (simplified) {
-          // Transform the return value
-          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
           const finalRecord = context.returnRecord || context.record;
           if (finalRecord) {
             return transformJsonApiToSimplified(
               finalRecord,
-              scopeOptions.schema || {},
+              schemaStructure,
               relationships
             );
           }
@@ -1053,6 +1030,14 @@ export const RestApiPlugin = {
         if (shouldCommit) {
           await trx.rollback();
         }
+        
+        // Log the full error details
+        enhancedLog.logError('Error in POST method', error, {
+          scopeName,
+          method: 'post',
+          inputRecord: params.inputRecord
+        });
+        
         throw error;
       }
     })
@@ -1235,33 +1220,28 @@ export const RestApiPlugin = {
     
     context.method = 'put'
     
-    // Move HTTP objects from params to context
-    moveHttpObjectsToContext(params, context, api);
     
     // Determine mode early
-      const simplified = 
-        params.simplified !== undefined ? params.simplified :  // Direct param override
-        scopeOptions.simplified !== undefined ? 
-          scopeOptions.simplified :                             // Resource config
-          vars.simplified 
+      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
     
+    // Get compiled schema info early for both modes
+    const schemaInfo = await scopes[scopeName].getSchemaInfo();
+    const schemaStructure = schemaInfo.schema.structure;
+    const relationships = schemaInfo.relationships;
     
     // Transform input if in simplified mode
     if (simplified) {
-      // Auto-detect format
-      if (!params.inputRecord?.data?.type) {
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-        params.inputRecord = transformSimplifiedToJsonApi(
-          params.inputRecord || params, // Support both styles
-          scopeName,
-          scopeOptions.schema || {},
-          relationships
-        );
-      }
+      // Always transform in simplified mode - no format detection needed
+      params.inputRecord = transformSimplifiedToJsonApi(
+        params.inputRecord || params, // Support both styles
+        scopeName,
+        schemaStructure,
+        relationships
+      );
     } else {
       // Strict mode: validate no belongsTo fields in attributes
       if (params.inputRecord?.data?.attributes) {
-        for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+        for (const [key, fieldDef] of Object.entries(schemaStructure)) {
           if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
             throw new RestApiValidationError(
               `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
@@ -1290,8 +1270,8 @@ export const RestApiPlugin = {
 
     // Sanitise parameters
     params.queryParams = params.queryParams || {}
-    params.queryParams.fields = params.queryParams.fields || {}
-    params.queryParams.include = params.queryParams.include || []
+    params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+    params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
 
     context.inputRecord = params.inputRecord
     context.queryParams = params.queryParams
@@ -1374,18 +1354,15 @@ export const RestApiPlugin = {
     context.isCreate = !context.exists;
     context.isUpdate = context.exists;
 
-    // Get schema info including cached schema and relationships
-    // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
-    // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
-    const schemaInfo = await scopes[scopeName].getSchemaInfo();
+    // Use the schema info we already fetched
     context.schema = schemaInfo.schema;
-    const relationships = schemaInfo.relationships;
-    const schemaFields = scopeOptions.schema || {};
     
-    // Process relationships FIRST to extract foreign keys
+    // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
+    // Example: relationships.author -> author_id: '123' for storage
+    // Example: relationships.tags -> array of pivot records to create later
     const { belongsToUpdates, manyToManyRelationships } = processRelationships(
       context.inputRecord,
-      schemaFields,
+      schemaStructure,
       relationships
     );
 
@@ -1556,11 +1533,9 @@ export const RestApiPlugin = {
     }
 
     // Determine if we should return the full record
-    const shouldReturnFullRecord = 
-      params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
-      scopeOptions.returnFullRecord?.put !== undefined ? 
-        scopeOptions.returnFullRecord.put :                              // Resource config
-      vars.returnFullRecord.put;                                         // API default
+    const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
+      params.returnFullRecord : 
+      cascadeConfig('put', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
     
     if (shouldReturnFullRecord) {
       // Get the full record after all updates are complete
@@ -1617,11 +1592,9 @@ export const RestApiPlugin = {
     
     // Transform output if in simplified mode
     if (simplified && context.returnRecord) {
-      // Transform the return value
-      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
       return transformJsonApiToSimplified(
         context.returnRecord,
-        scopeOptions.schema || {},
+        schemaStructure,
         relationships
       );
     }
@@ -1633,6 +1606,14 @@ export const RestApiPlugin = {
       if (shouldCommit) {
         await trx.rollback();
       }
+      
+      // Log the full error details
+      enhancedLog.logError('Error in PUT method', error, {
+        scopeName,
+        method: 'put',
+        inputRecord: params.inputRecord
+      });
+      
       throw error;
     }
   })
@@ -1794,38 +1775,30 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'patch'
       
-      // Move HTTP objects from params to context for cleaner separation of concerns.
-      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
-      // and places them in context where they belong. This keeps params clean for business data only
-      // while still allowing access to HTTP objects for things like file uploads or custom headers.
-      moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
-      const simplified = 
-        params.simplified !== undefined ? params.simplified :  // Direct param override
-        scopeOptions.simplified !== undefined ? 
-          scopeOptions.simplified :                             // Resource config
-          vars.simplified 
+      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
+      
+      // Get compiled schema info early for both modes
+      const schemaInfo = await scopes[scopeName].getSchemaInfo();
+      const schemaStructure = schemaInfo.schema.structure;
+      const relationships = schemaInfo.relationships;
       
       // Transform input if in simplified mode
       if (simplified) {
-        // Auto-detect format
-        if (!params.inputRecord?.data?.type) {
-          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-          // Convert simplified object format to JSON:API format
-          // Example: { title: 'My Post', author_id: 123 } becomes
-          // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-          params.inputRecord = transformSimplifiedToJsonApi(
-            params.inputRecord || params, // Support both styles
-            scopeName,
-            scopeOptions.schema || {},
-            relationships
-          );
-        }
+        // Always transform in simplified mode - no format detection needed
+        // Example: { title: 'My Post', author_id: 123 } becomes
+        // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
+        params.inputRecord = transformSimplifiedToJsonApi(
+          params.inputRecord || params, // Support both styles
+          scopeName,
+          schemaStructure,
+          relationships
+        );
       } else {
         // Strict mode: validate no belongsTo fields in attributes
         if (params.inputRecord?.data?.attributes) {
-          for (const [key, fieldDef] of Object.entries(scopeOptions.schema || {})) {
+          for (const [key, fieldDef] of Object.entries(schemaStructure)) {
             if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
               throw new RestApiValidationError(
                 `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
@@ -1913,18 +1886,15 @@ export const RestApiPlugin = {
         );
       }
 
-      // Get schema info including cached schema and relationships
-      // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
-      // This enriches the schema via hooks (e.g., adds type: 'id' to belongsTo fields)
-      const schemaInfo = await scopes[scopeName].getSchemaInfo();
+      // Use the schema info we already fetched
       context.schema = schemaInfo.schema;
-      const relationships = schemaInfo.relationships;
-      const schemaFields = scopeOptions.schema || {};
       
-      // Process relationships FIRST to extract foreign keys (only for provided relationships in PATCH)
+      // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
+      // Example: relationships.author -> author_id: '123' for storage
+      // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
       const { belongsToUpdates, manyToManyRelationships } = processRelationships(
         context.inputRecord,
-        schemaFields,
+        schemaStructure,
         relationships
       );
 
@@ -2018,11 +1988,9 @@ export const RestApiPlugin = {
       }
       
       // Determine if we should return the full record
-      const shouldReturnFullRecord = 
-        params.returnFullRecord !== undefined ? params.returnFullRecord :  // Direct param override
-        scopeOptions.returnFullRecord?.patch !== undefined ? 
-          scopeOptions.returnFullRecord.patch :                            // Resource config
-        vars.returnFullRecord.patch;                                       // API default
+      const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
+        params.returnFullRecord : 
+        cascadeConfig('patch', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
       
       if (shouldReturnFullRecord) {
         // Get the full record after all updates are complete
@@ -2078,11 +2046,9 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (simplified && context.returnRecord) {
-        // Transform the return value
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
         return transformJsonApiToSimplified(
           context.returnRecord,
-          scopeOptions.schema || {},
+          schemaStructure,
           relationships
         );
       }
@@ -2094,6 +2060,14 @@ export const RestApiPlugin = {
         if (shouldCommit) {
           await trx.rollback();
         }
+        
+        // Log the full error details
+        enhancedLog.logError('Error in PATCH method', error, {
+          scopeName,
+          method: 'patch',
+          inputRecord: params.inputRecord
+        });
+        
         throw error;
       }
     })
@@ -2131,11 +2105,6 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'delete'
       
-      // Move HTTP objects from params to context for cleaner separation of concerns.
-      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
-      // and places them in context where they belong. This keeps params clean for business data only
-      // while still allowing access to HTTP objects for things like file uploads or custom headers.
-      moveHttpObjectsToContext(params, context, api);
       
       // Set the ID in context
       context.id = params.id

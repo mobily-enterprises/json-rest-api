@@ -22,7 +22,7 @@ await api.addResource('countries', {
   schema: {
     id: { type: 'id' },
     name: { type: 'string', required: true, max: 100 },
-    code: { type: 'string', required: true, max: 2, unique: true }, // ISO country code
+    code: { type: 'string', max: 2, unique: true }, // ISO country code
   },
   relationships: {
     publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
@@ -35,7 +35,7 @@ await api.addResource('publishers', {
   schema: {
     id: { type: 'id' },
     name: { type: 'string', required: true, max: 200 },
-    country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
+    country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
   relationships: {
     books: { hasMany: 'books', foreignKey: 'publisher_id' }
@@ -85,22 +85,51 @@ try {
 
 
   // Create a country
-  const countryResult = await api.resources.countries.post({
-          name: 'United States',
-          code: 'US'
+  const countryResult1 = await api.resources.countries.post({
+    name: 'United States',
+    code: 'US'
   });
-  console.log('Created country:', countryResult);
+  console.log('Created country:', countryResult1);
 
   // Create another country
-  const ukResult = await api.resources.countries.post({
+  const countryResult2 = await api.resources.countries.post({
     name: 'United Kingdom',
-    code: 'UK'
   });
-  console.log('Created country:', ukResult);
+  console.log('Created country:', countryResult2);
+
+  // Create another publisher
+  const publisher1Result = await api.resources.publishers.post({
+     name: 'Penguin Random House',
+      country_id: null
+
+  });
+  console.log('Created publisher1:', publisher1Result);
+
+    // Create another publisher. NOT the simplified version
+  const publisher2Result = await api.resources.publishers.post({
+    inputRecord: {
+      data: {
+        type: 'publishers',
+        attributes: {
+          name: 'Apress'
+        },
+        relationships: {
+          country: {
+            data: { type: 'countries', id: countryResult1.id }
+          }
+        }
+      }
+    },
+    simplified: false
+  });
+  console.log('Created publisher:', publisher2Result);
+
 
   // Clean up database connection
   await knex.destroy();
   console.log('\nExample completed successfully!');
+
+
 
   /*
 
@@ -189,7 +218,8 @@ try {
 */
 
 } catch (error) {
-  console.error('Error:', error.message);
+  console.error('Error:', error.message, error.details);
+  console.error('Stack trace:', error.stack);
   await knex.destroy();
   process.exit(1);
 }
