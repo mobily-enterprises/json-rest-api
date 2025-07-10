@@ -1,5 +1,3 @@
-import { groupByPolymorphicType } from './polymorphic-helpers.js';
-
 /**
  * @module relationship-includes
  * @description JSON:API relationship inclusion helpers for REST API Knex Plugin
@@ -99,6 +97,66 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       id: String(id),
       attributes: allAttributes
     };
+  };
+  
+  /**
+   * Groups records by their polymorphic type for efficient batch loading
+   * 
+   * Used when loading includes to minimize database queries. Instead of making
+   * N queries (one per record), this groups records by type so we can make
+   * one query per type.
+   * 
+   * @param {Array<Object>} records - Records containing polymorphic fields
+   * @param {string} typeField - Name of the type field (e.g., 'commentable_type')
+   * @param {string} idField - Name of the ID field (e.g., 'commentable_id')
+   * @returns {Object<string, Array<number|string>>} Map of type to array of unique IDs
+   * 
+   * @example <caption>Basic grouping</caption>
+   * const comments = [
+   *   { id: 1, commentable_type: 'articles', commentable_id: 123 },
+   *   { id: 2, commentable_type: 'videos', commentable_id: 456 },
+   *   { id: 3, commentable_type: 'articles', commentable_id: 789 },
+   *   { id: 4, commentable_type: 'articles', commentable_id: 123 }  // Duplicate
+   * ];
+   * 
+   * const grouped = groupByPolymorphicType(comments, 'commentable_type', 'commentable_id');
+   * // Returns: {
+   * //   articles: [123, 789],  // Note: duplicates removed
+   * //   videos: [456]
+   * // }
+   * 
+   * @example <caption>Handling null values</caption>
+   * const comments = [
+   *   { id: 1, commentable_type: 'articles', commentable_id: 123 },
+   *   { id: 2, commentable_type: null, commentable_id: 456 },        // Ignored
+   *   { id: 3, commentable_type: 'videos', commentable_id: null }    // Ignored
+   * ];
+   * 
+   * const grouped = groupByPolymorphicType(comments, 'commentable_type', 'commentable_id');
+   * // Returns: { articles: [123] }
+   * // Records with null type or ID are excluded
+   */
+  const groupByPolymorphicType = (records, typeField, idField) => {
+    const grouped = {};
+    
+    records.forEach(record => {
+      const type = record[typeField];
+      const id = record[idField];
+      
+      if (type && id) {
+        if (!grouped[type]) {
+          grouped[type] = new Set();
+        }
+        grouped[type].add(id);
+      }
+    });
+    
+    // Convert Sets to Arrays for SQL IN queries
+    Object.keys(grouped).forEach(type => {
+      grouped[type] = Array.from(grouped[type]);
+    });
+    
+    return grouped;
   };
   
   /**

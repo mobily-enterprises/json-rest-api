@@ -1,7 +1,22 @@
 
 import { createCrossTableSearchHelpers } from './lib/cross-table-search.js';
 import { createRelationshipIncludeHelpers } from './lib/relationship-includes.js';
-import * as polymorphicHelpers from './lib/polymorphic-helpers.js';
+import * as polymorphicHelpers from './lib/knex-polymorphic-helpers.js';
+import {
+  getTableName,
+  getForeignKeyFields,
+  buildFieldSelection,
+  toJsonApi,
+  buildQuerySelection,
+  processIncludes,
+  buildJsonApiResponse,
+  processBelongsToRelationships
+} from './lib/knex-helpers.js';
+import {
+  polymorphicFiltersHook,
+  crossTableFiltersHook,
+  basicFiltersHook
+} from './lib/knex-query-helpers.js';
 
 /**
  * REST API Knex Plugin - SQL Storage Implementation
@@ -460,17 +475,7 @@ export const RestApiKnexPlugin = {
      * ║  Small utility functions used throughout the plugin                     ║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
 
-    /**
-     * Gets the database table name for a given scope
-     * @param {string} scopeName - The name of the scope/resource
-     * @returns {Promise<string>} The table name (defaults to scopeName if not specified)
-     * @example
-     * const tableName = await getTableName('articles'); // Returns 'articles' or custom table name
-     */
-    const getTableName = async (scopeName) => {
-      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
-      return schema?.tableName || scopeName;
-    };
+    // Helper functions are imported from './lib/knex-helpers.js'
     
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                     PLUGIN INITIALIZATION                               ║
@@ -489,538 +494,34 @@ export const RestApiKnexPlugin = {
      * ║  filters and builds SQL WHERE conditions with proper JOINs              ║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
     
-    // Register the enhanced searchSchema filter hook with cross-table search support
-    addHook('knexQueryFiltering', 'searchSchemaFilter', {}, 
-      async (hookParams) => {
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 1: Extract Context Data
-         * The hook receives data via hookParams.context.knexQuery which was
-         * set by the dataQuery method before calling runHooks
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        log.trace('[CROSS-TABLE-SEARCH] Hook inspection', { scopeName: hookParams.scopeName, hasMethodParams: !!hookParams.methodParams, hasContext: !!hookParams.context });
-        
-        // Try to access the searchSchema from scopeOptions
-        log.trace('[CROSS-TABLE-SEARCH] Checking scopeOptions', { hasSearchSchema: !!hookParams.scopeOptions?.searchSchema });
-        
-        // Extract the data from the context we actually receive
-        const scopeName = hookParams.context?.knexQuery?.scopeName
-        // const scopeName = hookParams.scopeName; // this would be identical
-        
-        log.trace('[CROSS-TABLE-SEARCH] Method params inspection', { hasFilter: !!hookParams.methodParams?.queryParams?.filter });
-
-        const filters = hookParams.context?.knexQuery?.filters;
-        const searchSchema = hookParams.context?.knexQuery?.searchSchema;
-        const query = hookParams.context?.knexQuery?.query;
-        const tableName = hookParams.context?.knexQuery?.tableName;
-        const db = hookParams.context?.knexQuery?.db || knex;
-
-        log.trace('[CROSS-TABLE-SEARCH] Extracted from hook context', { scopeName, hasFilters: !!filters, hasSearchSchema: !!searchSchema });
-        
-        if (!filters || !searchSchema) {
-          log.trace('[CROSS-TABLE-SEARCH] Early return - missing filters or searchSchema');
-          return;
-        }
-        
-        // We need to get the query object somehow - let's see if we can access it through helpers
-        log.trace('[CROSS-TABLE-SEARCH] Looking for query object in context');
-        log.trace('[CROSS-TABLE-SEARCH] Available in hookParams', { hasKnexQuery: !!hookParams.context?.knexQuery });
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 2: Analyze Required Indexes
-         * Check if cross-table search fields have proper indexes to prevent
-         * performance issues. This is a safety check, not enforcement.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Analyze and optionally create required indexes
-        const requiredIndexes = crossTableSearchHelpers.analyzeRequiredIndexes(scopeName, searchSchema);
-        if (requiredIndexes.length > 0) {
-          log.debug(`Cross-table search requires indexes:`, requiredIndexes);
-          // Uncomment to auto-create indexes:
-          // await crossTableSearchHelpers.createRequiredIndexes(requiredIndexes, knex);
-        }
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 3: Build JOIN Maps
-         * Process searchSchema to identify which tables need to be JOINed
-         * for cross-table searches. Only processes filters actually in use.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Build join map and field path lookup for cross-table searches
-        const joinMap = new Map();        // Stores JOIN information keyed by alias
-        const fieldPathMap = new Map();   // Maps 'scope.field' to 'alias.field'
-        
-        // Only process searchSchema entries that are actually being used in filters
-        log.trace('[SCHEMA-PROCESS] Processing only used searchSchema entries', { 
-          searchSchemaCount: Object.keys(searchSchema.structure).length,
-          filtersCount: Object.keys(filters).length 
-        });
-        
-        for (const [filterKey, fieldDef] of Object.entries(searchSchema.structure)) {
-          // Skip this searchSchema entry if it's not being used in the current query
-          if (filters[filterKey] === undefined) {
-            log.trace('[SCHEMA-ENTRY] Skipping unused filter', { filterKey });
-            continue;
-          }
-          
-          log.trace('[SCHEMA-ENTRY] Processing used filter', { filterKey, filterValue: filters[filterKey] });
-          
-          // Check actualField for cross-table references
-          if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
-            log.trace('[JOIN-DETECTION] Cross-table actualField found', { filterKey, actualField: fieldDef.actualField, scopeName });
-            const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, fieldDef.actualField);
-            log.trace('[JOIN-INFO] Built join chain for actualField', { joinAlias: joinInfo.joinAlias });
-            // Check if this exact join already exists
-            if (!joinMap.has(joinInfo.joinAlias)) {
-              joinMap.set(joinInfo.joinAlias, joinInfo);
-              log.trace('[JOIN-MAP] Added new join', { joinAlias: joinInfo.joinAlias });
-            } else {
-              log.trace('[JOIN-MAP] Join already exists, skipping', { joinAlias: joinInfo.joinAlias });
-            }
-            fieldPathMap.set(fieldDef.actualField, `${joinInfo.joinAlias}.${joinInfo.targetField}`);
-            log.trace('[MAP-SET] Added to fieldPathMap', { key: fieldDef.actualField, value: `${joinInfo.joinAlias}.${joinInfo.targetField}` });
-          }
-          
-          // Check likeOneOf for cross-table references
-          if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-            log.trace('[LIKE-ONE-OF] Processing likeOneOf fields', { count: fieldDef.likeOneOf.length });
-            for (const field of fieldDef.likeOneOf) {
-              if (field.includes('.')) {
-                log.trace('[JOIN-DETECTION] Cross-table likeOneOf field found', { filterKey, field, scopeName });
-                const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, field);
-                log.trace('[JOIN-INFO] Built join chain for likeOneOf field', { joinAlias: joinInfo.joinAlias });
-                // Check if this exact join already exists
-                if (!joinMap.has(joinInfo.joinAlias)) {
-                  joinMap.set(joinInfo.joinAlias, joinInfo);
-                  log.trace('[JOIN-MAP] Added new join', { joinAlias: joinInfo.joinAlias });
-                } else {
-                  log.trace('[JOIN-MAP] Join already exists, skipping', { joinAlias: joinInfo.joinAlias });
-                }
-                fieldPathMap.set(field, `${joinInfo.joinAlias}.${joinInfo.targetField}`);
-                log.trace('[MAP-SET] Added to fieldPathMap', { key: field, value: `${joinInfo.joinAlias}.${joinInfo.targetField}` });
-              }
-            }
-          }
-        }
-        
-        log.trace('[MAPS] Final join structures', { joinMapSize: joinMap.size, fieldPathMapSize: fieldPathMap.size });
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 5: Apply SQL JOINs
-         * Add all required LEFT JOINs to the query. Uses LEFT JOIN to ensure
-         * we don't exclude records that lack related data.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Apply all required joins (track applied joins to avoid duplicates)
-        log.trace('[JOIN-APPLY] Applying JOINs');
-        const appliedJoins = new Set();  // Track applied JOINs to prevent duplicates
-        
-        joinMap.forEach((joinInfo) => {
-          if (joinInfo.isMultiLevel && joinInfo.joinChain) {
-            log.trace('[JOIN-APPLY] Processing multi-level JOIN chain', { chainLength: joinInfo.joinChain.length });
-            // Apply each join in the chain
-            joinInfo.joinChain.forEach((join, index) => {
-              const joinKey = `${join.joinAlias}:${join.joinCondition}`;
-              if (!appliedJoins.has(joinKey)) {
-                log.trace('[JOIN-APPLY] Applying JOIN', { index: index + 1, total: joinInfo.joinChain.length, alias: join.joinAlias });
-                // Parse the join condition into left and right parts
-                const [leftSide, rightSide] = join.joinCondition.split(' = ');
-                query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
-                  this.on(leftSide, rightSide);
-                });
-                appliedJoins.add(joinKey);
-              } else {
-                log.trace('[JOIN-APPLY] Skipping already applied JOIN', { joinAlias: join.joinAlias });
-              }
-            });
-          } else {
-            const joinKey = `${joinInfo.joinAlias}:${joinInfo.joinCondition}`;
-            if (!appliedJoins.has(joinKey)) {
-              log.trace('[JOIN-APPLY] Applying single-level JOIN', { alias: joinInfo.joinAlias });
-              const [leftSide, rightSide] = joinInfo.joinCondition.split(' = ');
-              query.leftJoin(`${joinInfo.targetTableName} as ${joinInfo.joinAlias}`, function() {
-                this.on(leftSide, rightSide);
-              });
-              appliedJoins.add(joinKey);
-            } else {
-              log.trace('[JOIN-APPLY] Skipping already applied JOIN', { joinAlias: joinInfo.joinAlias });
-            }
-          }
-        });
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 6: Handle DISTINCT for One-to-Many JOINs
-         * When JOINing one-to-many relationships, we need DISTINCT to prevent
-         * duplicate rows in the result set
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Add DISTINCT only when we have one-to-many JOINs to avoid duplicates
-        let hasOneToManyJoins = false;
-        joinMap.forEach((joinInfo) => {
-          if (joinInfo.isOneToMany) {
-            hasOneToManyJoins = true;
-          } else if (joinInfo.isMultiLevel && joinInfo.joinChain) {
-            // Check if any join in the chain is one-to-many
-            joinInfo.joinChain.forEach(join => {
-              if (join.isOneToMany) {
-                hasOneToManyJoins = true;
-              }
-            });
-          }
-        });
-        
-        if (hasOneToManyJoins) {
-          log.trace('[DISTINCT] Adding DISTINCT to query due to one-to-many JOINs');
-          query.distinct();
-        } else if (joinMap.size > 0) {
-          log.trace('[DISTINCT] Not adding DISTINCT - only many-to-one JOINs present');
-        }
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 4: Process Polymorphic Searches
-         * Identify filters that target polymorphic relationships and prepare
-         * conditional JOINs for each possible type
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // First, identify and prepare all polymorphic searches
-        const polymorphicSearches = new Map();  // Stores polymorphic filter info
-        const polymorphicJoins = new Map();     // Stores polymorphic JOIN info
-        
-        // Pre-process to identify polymorphic searches
-        for (const [filterKey, filterValue] of Object.entries(filters)) {
-          const fieldDef = searchSchema[filterKey];
-          
-          if (fieldDef?.polymorphicField && fieldDef?.targetFields && filterValue !== undefined) {
-            log.trace('[POLYMORPHIC-SEARCH] Found polymorphic search:', { 
-              filterKey, 
-              polymorphicField: fieldDef.polymorphicField 
-            });
-            
-            polymorphicSearches.set(filterKey, {
-              fieldDef,
-              filterValue,
-              polymorphicField: fieldDef.polymorphicField
-            });
-          }
-        }
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 7: Build Polymorphic JOINs
-         * Create conditional JOINs for polymorphic relationships. Each type
-         * gets its own JOIN with conditions to only match that type.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Build all required JOINs for polymorphic searches
-        if (polymorphicSearches.size > 0) {
-          log.trace('[POLYMORPHIC-SEARCH] Building JOINs for polymorphic searches');
-          
-          // Polymorphic helpers are imported directly now
-          
-          for (const [filterKey, searchInfo] of polymorphicSearches) {
-            const { fieldDef, polymorphicField } = searchInfo;
-            
-            // Get the relationship definition
-            const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-            const polyRel = relationships[polymorphicField];
-            
-            if (!polyRel?.belongsToPolymorphic) {
-              throw new Error(
-                `Polymorphic field '${polymorphicField}' not found in relationships for scope '${scopeName}'`
-              );
-            }
-            
-            const { typeField, idField } = polyRel.belongsToPolymorphic;
-            
-            // Build JOINs for each target type
-            for (const [targetType, targetFieldPath] of Object.entries(fieldDef.targetFields)) {
-              const baseAlias = `${tableName}_${polymorphicField}_${targetType}`;
-              
-              // Skip if we already added this JOIN
-              if (!polymorphicJoins.has(baseAlias)) {
-                const targetSchema = (await scopes[targetType].getSchemaInfo()).schema;
-                const targetTable = targetSchema?.tableName || targetType;
-                
-                log.trace('[POLYMORPHIC-SEARCH] Adding conditional JOIN:', { 
-                  targetType, 
-                  alias: baseAlias 
-                });
-                
-                // Conditional JOIN - only matches when type is correct
-                query.leftJoin(`${targetTable} as ${baseAlias}`, function() {
-                  this.on(`${tableName}.${typeField}`, db.raw('?', [targetType]))
-                      .andOn(`${tableName}.${idField}`, `${baseAlias}.id`);
-                });
-                
-                polymorphicJoins.set(baseAlias, {
-                  targetType,
-                  targetTable,
-                  targetFieldPath
-                });
-                
-                // Handle cross-table paths
-                if (targetFieldPath.includes('.')) {
-                  log.trace('[POLYMORPHIC-SEARCH] Building cross-table JOINs for path:', targetFieldPath);
-                  
-                  const pathParts = targetFieldPath.split('.');
-                  let currentAlias = baseAlias;
-                  let currentScope = targetType;
-                  
-                  // Build JOIN for each segment except the last
-                  for (let i = 0; i < pathParts.length - 1; i++) {
-                    const relationshipName = pathParts[i];
-                    
-                    // Find the foreign key for this relationship
-                    const currentSchema = (await scopes[currentScope].getSchemaInfo()).schema;
-                    let foreignKeyField = null;
-                    let nextScope = null;
-                    
-                    // Search schema for matching belongsTo
-                    for (const [fieldName, fieldDef] of Object.entries(currentSchema.structure)) {
-                      if (fieldDef.as === relationshipName && fieldDef.belongsTo) {
-                        foreignKeyField = fieldName;
-                        nextScope = fieldDef.belongsTo;
-                        break;
-                      }
-                    }
-                    
-                    if (!foreignKeyField) {
-                      // Check relationships for hasOne
-                      const currentRelationships = (await scopes[currentScope].getSchemaInfo()).relationships;
-                      const rel = currentRelationships?.[relationshipName];
-                      if (rel?.hasOne) {
-                        // Handle hasOne - more complex
-                        throw new Error(
-                          `Cross-table polymorphic search through hasOne relationships not yet supported`
-                        );
-                      }
-                      
-                      throw new Error(
-                        `Cannot resolve relationship '${relationshipName}' in path '${targetFieldPath}' for scope '${currentScope}'`
-                      );
-                    }
-                    
-                    // Build next JOIN
-                    const nextAlias = `${currentAlias}_${relationshipName}`;
-                    const nextSchema = (await scopes[nextScope].getSchemaInfo()).schema;
-                    const nextTable = nextSchema?.tableName || nextScope;
-                    
-                    log.trace('[POLYMORPHIC-SEARCH] Adding cross-table JOIN:', { 
-                      from: currentAlias, 
-                      to: nextAlias,
-                      table: nextTable 
-                    });
-                    
-                    query.leftJoin(`${nextTable} as ${nextAlias}`, 
-                      `${currentAlias}.${foreignKeyField}`, 
-                      `${nextAlias}.id`
-                    );
-                    
-                    currentAlias = nextAlias;
-                    currentScope = nextScope;
-                  }
-                }
-              }
-            }
-          }
-        }
-        
-        // Pre-fetch relationships for polymorphic searches
-        const polymorphicRelationships = new Map();
-        if (polymorphicSearches.size > 0) {
-          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-          for (const [filterKey, searchInfo] of polymorphicSearches) {
-            const { polymorphicField } = searchInfo;
-            const polyRel = relationships[polymorphicField];
-            if (polyRel?.belongsToPolymorphic) {
-              polymorphicRelationships.set(filterKey, polyRel);
-            }
-          }
-        }
-        
-        /* ═══════════════════════════════════════════════════════════════════
-         * STEP 8: Apply WHERE Conditions
-         * Process each filter and apply appropriate WHERE conditions.
-         * CRITICAL: All conditions are wrapped in a group to prevent SQL
-         * injection and ensure proper precedence.
-         * ═══════════════════════════════════════════════════════════════════ */
-        
-        // Wrap all searchSchema filters in a group for safety
-        // This prevents any OR conditions from escaping and affecting other filters
-        log.trace('[FILTER-START] Starting filter processing', { filterCount: Object.keys(filters).length });
-        query.where(function() {
-          log.trace('[WHERE-GROUP] Entered main WHERE group');
-          for (const [filterKey, filterValue] of Object.entries(filters)) {
-            log.trace('[FILTER-ENTRY] Processing filter', { filterKey });
-            const fieldDef = searchSchema[filterKey];
-            log.trace('[FIELD-DEF] Field definition found', { filterKey, hasFieldDef: !!fieldDef });
-            if (!fieldDef) {
-              log.trace('[FILTER-SKIP] No fieldDef found', { filterKey });
-              continue; // Ignore unknown filters - they should have been caught by REST API validation
-            }
-            
-            // Check if this is a polymorphic search
-            if (polymorphicSearches.has(filterKey)) {
-              /* ═══════════════════════════════════════════════════════════════
-               * POLYMORPHIC FILTER PROCESSING
-               * Build OR conditions for each possible type in the polymorphic
-               * relationship. Each condition checks both type and field value.
-               * ═══════════════════════════════════════════════════════════════ */
-              log.trace('[POLYMORPHIC-SEARCH] Processing polymorphic filter:', filterKey);
-              
-              const searchInfo = polymorphicSearches.get(filterKey);
-              const polyRel = polymorphicRelationships.get(filterKey);
-              if (!polyRel) {
-                log.error('[POLYMORPHIC-SEARCH] Relationship not found for:', filterKey);
-                continue;
-              }
-              const { typeField } = polyRel.belongsToPolymorphic;
-              
-              // Build OR conditions for each possible type
-              this.where(function() {
-                for (const [targetType, targetFieldPath] of Object.entries(searchInfo.fieldDef.targetFields)) {
-                  this.orWhere(function() {
-                    // First check the type matches
-                    this.where(`${tableName}.${typeField}`, targetType);
-                    
-                    // Then apply the field filter
-                    const baseAlias = `${tableName}_${searchInfo.polymorphicField}_${targetType}`;
-                    
-                    if (targetFieldPath.includes('.')) {
-                      // Complex path - calculate final alias
-                      const pathParts = targetFieldPath.split('.');
-                      const fieldName = pathParts[pathParts.length - 1];
-                      
-                      // Build the final alias from the path
-                      let finalAlias = baseAlias;
-                      for (let i = 0; i < pathParts.length - 1; i++) {
-                        finalAlias = `${finalAlias}_${pathParts[i]}`;
-                      }
-                      
-                      const operator = searchInfo.fieldDef.filterUsing || '=';
-                      if (operator === 'like') {
-                        this.where(`${finalAlias}.${fieldName}`, 'like', `%${searchInfo.filterValue}%`);
-                      } else {
-                        this.where(`${finalAlias}.${fieldName}`, operator, searchInfo.filterValue);
-                      }
-                    } else {
-                      // Direct field on polymorphic target
-                      const operator = searchInfo.fieldDef.filterUsing || '=';
-                      if (operator === 'like') {
-                        this.where(`${baseAlias}.${targetFieldPath}`, 'like', `%${searchInfo.filterValue}%`);
-                      } else {
-                        this.where(`${baseAlias}.${targetFieldPath}`, operator, searchInfo.filterValue);
-                      }
-                    }
-                  });
-                }
-              });
-              
-              return; // Skip normal filter processing
-            }
-            
-            /* ═══════════════════════════════════════════════════════════════════
-             * STANDARD FILTER PROCESSING
-             * Handle different filter types based on field definition:
-             * - likeOneOf: Search across multiple fields with OR
-             * - applyFilter: Custom filter function
-             * - default: Standard operators (=, like, >, <, etc.)
-             * ═══════════════════════════════════════════════════════════════════ */
-            
-            // Use switch-case for clean filter logic
-            log.trace('[SWITCH] Determining filter type', { filterKey });
-            switch (true) {
-              // Handle multi-field OR search via likeOneOf
-              case fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf):
-                log.trace('[SWITCH] Using likeOneOf case', { filterKey });
-                log.trace('[LIKE-ONE-OF] Processing fields', { count: fieldDef.likeOneOf.length });
-                // This creates a sub-group within our main group
-                this.where(function() {
-                  log.trace('[WHERE-SUB-GROUP] Entered likeOneOf sub-group');
-                  fieldDef.likeOneOf.forEach((field, index) => {
-                    // Use pre-computed field mapping for cross-table references
-                    const originalField = field;
-                    let dbField = fieldPathMap.get(field) || field;
-                    
-                    // If it's a local field (no dot) and we have joins, qualify it with the table name
-                    if (!field.includes('.') && joinMap.size > 0) {
-                      dbField = `${tableName}.${field}`;
-                      log.trace('[QUALIFY] Qualifying local field with table name', { originalField: field, qualifiedField: dbField });
-                    }
-                    
-                    log.trace('[FIELD-MAP] likeOneOf field mapping', { originalField, mappedField: dbField, index });
-                    
-                    const condition = `%${filterValue}%`;
-                    if (index === 0) {
-                      log.trace('[WHERE-APPLY] Adding first LIKE condition', { field: dbField });
-                      this.where(dbField, 'like', condition);
-                    } else {
-                      log.trace('[WHERE-APPLY] Adding OR LIKE condition', { field: dbField });
-                      this.orWhere(dbField, 'like', condition);
-                    }
-                  });
-                });
-                break;
-                
-              // Handle custom filter function
-              case fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function':
-                log.trace('[SWITCH] Using custom applyFilter case', { filterKey });
-                log.trace('[CUSTOM-FILTER] Calling custom applyFilter function');
-                // Pass 'this' context to applyFilter so it operates within our group
-                fieldDef.applyFilter.call(this, this, filterValue);
-                break;
-                
-              // Standard filtering with operators (including cross-table)
-              default:
-                log.trace('[SWITCH] Using standard filtering case', { filterKey });
-                let dbField = fieldDef.actualField || filterKey;
-                log.trace('[FIELD-RESOLVE] Initial dbField', { actualField: fieldDef.actualField, filterKey, resolvedField: dbField });
-                
-                // Handle cross-table field references using pre-computed mapping
-                if (dbField.includes('.')) {
-                  const originalDbField = dbField;
-                  dbField = fieldPathMap.get(dbField) || dbField;
-                  log.trace('[FIELD-MAP] actualField mapping', { originalField: originalDbField, mappedField: dbField });
-                }
-                
-                const operator = fieldDef.filterUsing || '=';
-                log.trace('[OPERATOR] Using operator', { operator, dbField });
-                
-                switch (operator) {
-                  case 'like':
-                    const likeValue = `%${filterValue}%`;
-                    log.trace('[WHERE-APPLY] Adding LIKE condition', { field: dbField });
-                    this.where(dbField, 'like', likeValue);
-                    break;
-                  case 'in':
-                    log.trace('[WHERE-APPLY] Adding IN condition', { field: dbField, isArray: Array.isArray(filterValue) });
-                    if (Array.isArray(filterValue)) {
-                      this.whereIn(dbField, filterValue);
-                    } else {
-                      this.where(dbField, operator, filterValue);
-                    }
-                    break;
-                  case 'between':
-                    log.trace('[WHERE-APPLY] Adding BETWEEN condition', { field: dbField, isValidArray: Array.isArray(filterValue) && filterValue.length === 2 });
-                    if (Array.isArray(filterValue) && filterValue.length === 2) {
-                      this.whereBetween(dbField, filterValue);
-                    } else {
-                      this.where(dbField, operator, filterValue);
-                    }
-                    break;
-                  default:
-                    log.trace('[WHERE-APPLY] Adding default condition', { field: dbField, operator });
-                    this.where(dbField, operator, filterValue);
-                    break;
-                }
-                break;
-            }
-            log.trace('[FILTER-COMPLETE] Finished processing filter', { filterKey });
-          }
-          log.trace('[WHERE-GROUP] Exiting main WHERE group');
-        });
-        log.trace('[FILTER-END] Completed all filter processing');
-      }
+    // Register the three separate filter hooks
+    // Dependencies object for the hooks
+    const hookDependencies = {
+      log,
+      scopes,
+      knex,
+      crossTableSearchHelpers
+    };
+    
+    // Register in specific order: polymorphic → cross-table → basic
+    // This ensures proper field qualification when JOINs are present
+    
+    // 1. Polymorphic filters (adds JOINs for polymorphic relationships)
+    addHook('knexQueryFiltering', 'polymorphicFiltersHook', {}, 
+      async (hookParams) => polymorphicFiltersHook(hookParams, hookDependencies)
     );
+    
+    // 2. Cross-table filters (adds JOINs for cross-table fields)
+    addHook('knexQueryFiltering', 'crossTableFiltersHook', {}, 
+      async (hookParams) => crossTableFiltersHook(hookParams, hookDependencies)
+    );
+    
+    // 3. Basic filters (processes simple main table filters)
+    addHook('knexQueryFiltering', 'basicFiltersHook', {}, 
+      async (hookParams) => basicFiltersHook(hookParams, hookDependencies)
+    );
+    
+    // OLD MONOLITHIC HOOK REMOVED - The functionality is now split into the three hooks above
     
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                    HELPER FUNCTION EXPORTS                              ║
@@ -1032,382 +533,12 @@ export const RestApiKnexPlugin = {
     api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
     api.knex.helpers.polymorphic = polymorphicHelpers;
     
-    /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                  INTERNAL HELPER FUNCTIONS                              ║
-     * ║  Utility functions used by the data operation methods                  ║
-     * ╚═════════════════════════════════════════════════════════════════════╝ */
-    
-    /**
-     * Identifies all foreign key fields in a schema
-     * @param {Object} schema - The schema object containing field definitions
-     * @returns {Set<string>} A Set containing all foreign key field names
-     * @example
-     * const foreignKeys = getForeignKeyFields(schema);
-     * // Returns Set { 'author_id', 'category_id' }
-     */
-    const getForeignKeyFields = (schema) => {
-      const foreignKeys = new Set();
-      if (!schema) return foreignKeys;
-      
-      Object.entries(schema).forEach(([field, def]) => {
-        if (def.belongsTo) {
-          foreignKeys.add(field);
-        }
-      });
-      return foreignKeys;
-    };
-    
-    /**
-     * Builds the field selection list for database queries, handling sparse fieldsets
-     * @param {string} scopeName - The name of the scope/resource
-     * @param {string|null} requestedFields - Comma-separated list of requested fields or null for all
-     * @param {Object} schema - The schema object containing field definitions
-     * @returns {Promise<string|Array<string>>} Either '*' for all fields or array of field names
-     * @description
-     * - Always includes 'id' field
-     * - Always includes ALL foreign key fields (needed for relationships)
-     * - Always includes polymorphic type/id fields
-     * - Includes only requested attribute fields when sparse fieldsets are used
-     * - Includes fields marked with alwaysSelect: true
-     * @example
-     * const fields = await buildFieldSelection('articles', 'title,body', schema);
-     * // Returns ['id', 'title', 'body', 'author_id', 'category_id'] 
-     */
-    const buildFieldSelection = async (scopeName, requestedFields, schema) => {
-      const dbFields = new Set(['id']); // Always need id
-      
-      // Always include ALL foreign keys (for relationships)
-      Object.entries(schema || {}).forEach(([field, def]) => {
-        if (def.belongsTo) {
-          dbFields.add(field); // e.g., author_id
-        }
-      });
-      
-      // Always include polymorphic type and id fields from relationships
-      if (scopes[scopeName]) {
-        try {
-          const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-          Object.entries(relationships || {}).forEach(([relName, relDef]) => {
-            if (relDef.belongsToPolymorphic) {
-              const { typeField, idField } = relDef.belongsToPolymorphic;
-              dbFields.add(typeField);
-              dbFields.add(idField);
-            }
-          });
-        } catch (error) {
-          // Ignore errors, we tried our best
-        }
-      }
-      
-      if (requestedFields === null || requestedFields === undefined) {
-        // No sparse fieldset - select all fields
-        return '*';
-      }
-      
-      // Add only the requested ATTRIBUTE fields (non-foreign keys)
-      const requested = requestedFields.split(',').map(f => f.trim()).filter(f => f);
-      requested.forEach(field => {
-        if (schema[field] && !schema[field].belongsTo) {
-          dbFields.add(field);
-        }
-      });
-      
-      // Add alwaysSelect fields
-      Object.entries(schema || {}).forEach(([field, def]) => {
-        if (def.alwaysSelect === true) {
-          dbFields.add(field);
-        }
-      });
-      
-      return Array.from(dbFields);
-    };
-    
-    /**
-     * Converts a database record to JSON:API format
-     * @param {string} scopeName - The name of the scope/resource (becomes the 'type')
-     * @param {Object|null} record - The database record to convert
-     * @param {Object} schema - The schema object for field definitions
-     * @returns {Promise<Object|null>} JSON:API resource object or null
-     * @description
-     * - Extracts ID into separate field
-     * - Filters out foreign keys from attributes (they go in relationships)
-     * - Filters out polymorphic type/id fields
-     * - Returns null for null/undefined records
-     * @example
-     * const jsonApiRecord = await toJsonApi('articles', dbRecord, schema);
-     * // Returns: { type: 'articles', id: '123', attributes: { title: 'Hello', body: '...' } }
-     */
-    const toJsonApi = async (scopeName, record, schema) => {
-      if (!record) return null;
-      
-      const idProperty = vars.idProperty || 'id';
-      const { [idProperty]: id, ...allAttributes } = record;
-      
-      // Filter out foreign keys from attributes
-      const foreignKeys = getForeignKeyFields(schema);
-      const attributes = {};
-      
-      // Also filter out polymorphic type and id fields
-      const polymorphicFields = new Set();
-      try {
-        const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-        Object.entries(relationships || {}).forEach(([relName, relDef]) => {
-          if (relDef.belongsToPolymorphic) {
-            const { typeField, idField } = relDef.belongsToPolymorphic;
-            polymorphicFields.add(typeField);
-            polymorphicFields.add(idField);
-          }
-        });
-      } catch (e) {
-        // Ignore errors
-      }
-      
-      Object.entries(allAttributes).forEach(([key, value]) => {
-        if (!foreignKeys.has(key) && !polymorphicFields.has(key)) {
-          attributes[key] = value;
-        }
-      });
-      
-      return {
-        type: scopeName,
-        id: String(id),
-        attributes
-      };
-    };
-    
-    /**
-     * Applies field selection to a Knex query with optional table prefixing
-     * @param {Object} query - The Knex query object
-     * @param {string} tableName - The table name for prefixing
-     * @param {string|Array<string>} fieldsToSelect - Either '*' or array of field names
-     * @param {boolean} useTablePrefix - Whether to prefix fields with table name (for JOINs)
-     * @returns {Object} The modified query object
-     * @example
-     * buildQuerySelection(query, 'articles', ['id', 'title'], true);
-     * // Adds SELECT articles.id, articles.title to query
-     */
-    const buildQuerySelection = (query, tableName, fieldsToSelect, useTablePrefix = false) => {
-      if (fieldsToSelect === '*') {
-        return useTablePrefix ? query.select(`${tableName}.*`) : query;
-      } else {
-        const fields = useTablePrefix 
-          ? fieldsToSelect.map(field => `${tableName}.${field}`)
-          : fieldsToSelect;
-        return query.select(fields);
-      }
-    };
-    
-    /**
-     * Processes the ?include= parameter to load related resources
-     * @param {Array<Object>} records - The primary records to load includes for
-     * @param {string} scopeName - The scope name of the primary records
-     * @param {Object} queryParams - Query parameters containing include and fields
-     * @returns {Promise<Array<Object>>} Array of included resources in JSON:API format
-     * @description
-     * Uses batch loading to prevent N+1 queries. All related records of the same
-     * type are loaded in a single query.
-     * @example
-     * const included = await processIncludes(articles, 'articles', { include: ['author', 'comments.user'] });
-     * // Returns array of author and user resources
-     */
-    const processIncludes = async (records, scopeName, queryParams, transaction) => {
-      if (!queryParams.include) {
-        return [];
-      }
-      
-      log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include);
-      
-      // If we have a transaction, we need to create a modified version of the helpers
-      // that uses the transaction instead of the base knex instance
-      let helpers = relationshipIncludeHelpers;
-      if (transaction) {
-        // Create a new instance of the helpers with the transaction
-        helpers = createRelationshipIncludeHelpers(scopes, log, transaction, {
-          getForeignKeyFields,
-          buildFieldSelection,
-          polymorphicHelpers
-        });
-      }
-      
-      const includeResult = await helpers.buildIncludedResources(
-        records,
-        scopeName,
-        queryParams.include,
-        queryParams.fields
-      );
-      
-      return includeResult.included;
-    };
-    
-    /**
-     * Builds a complete JSON:API response with data and included resources
-     * @param {Array<Object>} records - The primary records
-     * @param {string} scopeName - The scope name for the primary records
-     * @param {Object} schema - The schema for the primary records
-     * @param {Array<Object>} included - Array of included resources
-     * @param {boolean} isSingle - Whether this is a single resource response
-     * @returns {Promise<Object>} Complete JSON:API response object
-     * @description
-     * - Converts records to JSON:API format
-     * - Adds relationship links based on foreign keys
-     * - Adds polymorphic relationships
-     * - Includes related resources if any
-     * @example
-     * const response = await buildJsonApiResponse([article], 'articles', schema, [author], true);
-     * // Returns: { data: { type: 'articles', id: '1', attributes: {...}, relationships: {...} }, included: [...] }
-     */
-    const buildJsonApiResponse = async (records, scopeName, schema, included = [], isSingle = false) => {
-      // Get relationships configuration
-      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
-      
-      // Process records to JSON:API format
-      const processedRecords = await Promise.all(records.map(async record => {
-        const { _relationships, ...cleanRecord } = record;
-        const jsonApiRecord = await toJsonApi(scopeName, cleanRecord, schema);
-        
-        // Add any loaded relationships
-        if (_relationships) {
-          jsonApiRecord.relationships = _relationships;
-        }
-        
-        // Add regular belongsTo relationships (only if not already loaded)
-        const schemaStructure = schema?.structure || schema || {};
-        for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-          if (fieldDef.belongsTo && fieldDef.as) {
-            const relName = fieldDef.as;
-            const targetType = fieldDef.belongsTo;
-            const foreignKeyValue = cleanRecord[fieldName];
-            
-            if (!jsonApiRecord.relationships) {
-              jsonApiRecord.relationships = {};
-            }
-            
-            // Only add if not already present (from includes processing)
-            if (!jsonApiRecord.relationships[relName]) {
-              jsonApiRecord.relationships[relName] = {
-                data: foreignKeyValue ? { type: targetType, id: String(foreignKeyValue) } : null
-              };
-            }
-          }
-        }
-        
-        // Add polymorphic relationships (only if not already loaded)
-        for (const [relName, relDef] of Object.entries(relationships || {})) {
-          if (relDef.belongsToPolymorphic) {
-            const { typeField, idField } = relDef.belongsToPolymorphic;
-            const type = cleanRecord[typeField];
-            const id = cleanRecord[idField];
-            
-            if (!jsonApiRecord.relationships) {
-              jsonApiRecord.relationships = {};
-            }
-            
-            // Only add if not already present (from includes processing)
-            if (!jsonApiRecord.relationships[relName]) {
-              jsonApiRecord.relationships[relName] = {
-                data: type && id ? { type, id: String(id) } : null
-              };
-            }
-          }
-        }
-        
-        return jsonApiRecord;
-      }));
-      
-      // Build response structure
-      const response = isSingle 
-        ? { data: processedRecords[0] }
-        : { data: processedRecords };
-      
-      // Add included resources if any
-      if (included.length > 0) {
-        response.included = included;
-      }
-      
-      return response;
-    };
-    
-    /**
-     * Extracts foreign key updates from JSON:API relationship data
-     * @param {Object} inputRecord - The JSON:API input document
-     * @param {Object} schema - The schema object or Schema instance
-     * @returns {Object} Object mapping foreign key fields to their values
-     * @description
-     * Converts JSON:API relationships to foreign key updates:
-     * - relationships.author.data.id → { author_id: '123' }
-     * - relationships.author.data: null → { author_id: null }
-     * @example
-     * const updates = processBelongsToRelationships(inputRecord, schema);
-     * // Input: { data: { relationships: { author: { data: { type: 'users', id: '5' } } } } }
-     * // Returns: { author_id: '5' }
-     */
-    const processBelongsToRelationships = (inputRecord, schema) => {
-      const foreignKeyUpdates = {};
-      
-      if (!inputRecord.data.relationships) {
-        return foreignKeyUpdates;
-      }
-      
-      // Schema might be a Schema object or plain object
-      const schemaStructure = schema.structure || schema;
-      
-      for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-        if (fieldDef.belongsTo && fieldDef.as) {
-          const relName = fieldDef.as;
-          if (inputRecord.data.relationships[relName] !== undefined) {
-            const relData = inputRecord.data.relationships[relName];
-            foreignKeyUpdates[fieldName] = relData.data?.id || null;
-            log.debug(`[Knex] Processing belongsTo relationship ${relName}: ${fieldName} = ${foreignKeyUpdates[fieldName]}`);
-          }
-        }
-      }
-      
-      return foreignKeyUpdates;
-    };
-    
-    /**
-     * Builds a response with optional includes and sparse fieldsets
-     * @param {Object} params - Parameters object
-     * @param {string} params.scopeName - The scope name
-     * @param {string|number} params.id - The record ID
-     * @param {string} params.idProp - The ID property name
-     * @param {string} params.tableName - The database table name
-     * @param {Object} params.schema - The schema object
-     * @param {Object} params.queryParams - Query parameters (include, fields)
-     * @param {Function} params.runHooks - Hook runner function
-     * @returns {Promise<Object>} JSON:API response
-     * @description
-     * If queryParams are provided, uses full dataGet to handle includes.
-     * Otherwise, does a simple query and conversion.
-     */
-    const buildResponseWithQueryParams = async ({ scopeName, id, idProp, tableName, schema, queryParams, runHooks, methodParams }) => {
-      // Return response with optional includes/sparse fieldsets
-      if (queryParams && Object.keys(queryParams).length > 0) {
-        return helpers.dataGet({
-          scopeName,
-          id: String(id),
-          queryParams,
-          runHooks,
-          methodParams
-        });
-      }
-      
-      // Simple response without includes
-      const { transaction } = methodParams || {};
-      const db = transaction || knex;
-      const record = await db(tableName)
-        .where(idProp, id)
-        .first();
-      
-      return {
-        data: await toJsonApi(scopeName, record, schema)
-      };
-    };
 
     // Now initialize relationship include helpers with access to the helper functions
     relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
       getForeignKeyFields,
-      buildFieldSelection
+      buildFieldSelection,
+      polymorphicHelpers
     });
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
@@ -1427,7 +558,7 @@ export const RestApiKnexPlugin = {
      * Performs efficient existence check using SELECT with just the ID field
      */
     helpers.dataExists = async ({ scopeName, id, idProperty, runHooks, methodParams }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
       const { transaction } = methodParams || {};
       const db = transaction || knex;
@@ -1462,7 +593,7 @@ export const RestApiKnexPlugin = {
      * // Returns: { data: { type: 'articles', id: '123', attributes: {...}, relationships: {...} }, included: [...] }
      */
     helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks, methodParams }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       const idProperty = vars.idProperty || 'id';
       const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
@@ -1474,7 +605,9 @@ export const RestApiKnexPlugin = {
       const fieldsToSelect = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
-        schema
+        schema,
+        scopes,
+        vars
       );
       
       // Build and execute query
@@ -1492,10 +625,16 @@ export const RestApiKnexPlugin = {
       
       // Process includes
       const records = [record]; // Wrap in array for processing
-      const included = await processIncludes(records, scopeName, queryParams, db);
+      const included = await processIncludes(records, scopeName, queryParams, db, {
+        log,
+        relationshipIncludeHelpers,
+        createRelationshipIncludeHelpers,
+        scopes,
+        polymorphicHelpers
+      });
       
       // Build and return response
-      return buildJsonApiResponse(records, scopeName, schema, included, true);
+      return buildJsonApiResponse(records, scopeName, schema, included, true, scopes, vars);
     };
     
     /**
@@ -1534,7 +673,7 @@ export const RestApiKnexPlugin = {
     helpers.dataQuery = async ({ scopeName, queryParams = {}, searchSchema, runHooks, context, methodParams }) => {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const sortableFields = schema?.sortableFields || vars.sortableFields;
       const { transaction } = methodParams || {};
@@ -1546,7 +685,9 @@ export const RestApiKnexPlugin = {
       const fieldsToSelect = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
-        schema
+        schema,
+        scopes,
+        vars
       );
       
       // Start building query with table prefix (for JOIN support)
@@ -1619,10 +760,16 @@ export const RestApiKnexPlugin = {
       const records = await query;
       
       // Process includes
-      const included = await processIncludes(records, scopeName, queryParams, db);
+      const included = await processIncludes(records, scopeName, queryParams, db, {
+        log,
+        relationshipIncludeHelpers,
+        createRelationshipIncludeHelpers,
+        scopes,
+        polymorphicHelpers
+      });
       
       // Build and return response
-      return buildJsonApiResponse(records, scopeName, schema, included, false);
+      return buildJsonApiResponse(records, scopeName, schema, included, false, scopes, vars);
     };
     
     /**
@@ -1645,7 +792,7 @@ export const RestApiKnexPlugin = {
      * // Returns: { data: { type: 'articles', id: '456', attributes: { title: 'New Article' } } }
      */
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks, methodParams }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       const idProperty = vars.idProperty || 'id';
       const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
@@ -1668,7 +815,7 @@ export const RestApiKnexPlugin = {
         .first();
       
       return {
-        data: await toJsonApi(scopeName, newRecord, schema)
+        data: await toJsonApi(scopeName, newRecord, schema, scopes, vars)
       };
     };
     
@@ -1698,7 +845,7 @@ export const RestApiKnexPlugin = {
      * });
      */
     helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks, methodParams }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
       const schema = (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
@@ -1746,7 +893,7 @@ export const RestApiKnexPlugin = {
         .first();
       
       return {
-        data: await toJsonApi(scopeName, updatedRecord, schema)
+        data: await toJsonApi(scopeName, updatedRecord, schema, scopes, vars)
       };
     };
     
@@ -1775,7 +922,7 @@ export const RestApiKnexPlugin = {
      * // Only updates title, other fields remain unchanged
      */
     helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, methodParams }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
       schema = schema || (await scopes[scopeName].getSchemaInfo()).schema;
       const { transaction } = methodParams || {};
@@ -1815,7 +962,7 @@ export const RestApiKnexPlugin = {
         .first();
       
       return {
-        data: await toJsonApi(scopeName, updatedRecord, schema)
+        data: await toJsonApi(scopeName, updatedRecord, schema, scopes, vars)
       };
     };
     
@@ -1837,7 +984,7 @@ export const RestApiKnexPlugin = {
      * // Returns: { success: true }
      */
     helpers.dataDelete = async ({ scopeName, id, runHooks, methodParams, idProperty }) => {
-      const tableName = await getTableName(scopeName);
+      const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
       const { transaction } = methodParams || {};
       const db = transaction || knex;
