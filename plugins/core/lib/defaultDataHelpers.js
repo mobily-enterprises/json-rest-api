@@ -1,6 +1,14 @@
 /**
- * Default data helper functions for REST API plugin
- * These are placeholder functions that throw errors when no storage plugin is installed
+ * @module defaultDataHelpers
+ * @description Default data helper functions for REST API plugin
+ * 
+ * These are placeholder functions that throw errors when no storage plugin is installed.
+ * They serve two critical purposes:
+ * 1. Define the contract that storage plugins must implement
+ * 2. Provide helpful error messages guiding users to install a storage plugin
+ * 
+ * Storage plugins like rest-api-knex-plugin override these methods with actual
+ * database operations, allowing the REST API to work with different backends.
  */
 
 /**
@@ -34,6 +42,15 @@
  *     .first();
  *   return formatAsJsonApi(result);
  * };
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this factory to:
+ * // 1. Provide a clear contract for storage plugin developers
+ * // 2. Enable storage-agnostic REST API operations
+ * // 3. Support multiple storage backends (SQL, NoSQL, in-memory, etc.)
+ * // 4. Give helpful errors when no storage is configured
+ * // 5. Show storage developers how to access scope configuration
+ * // 6. Enable testing REST API logic without a real database
  */
 export const createDefaultDataHelpers = (api) => {
   return {

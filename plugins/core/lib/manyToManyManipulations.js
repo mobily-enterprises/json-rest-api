@@ -1,5 +1,11 @@
 /**
- * Many-to-many relationship manipulation functions for REST API plugin
+ * @module manyToManyManipulations
+ * @description Many-to-many relationship manipulation functions for REST API plugin
+ * 
+ * This module provides sophisticated handling of many-to-many relationships through
+ * pivot tables. It implements intelligent syncing that preserves pivot table metadata
+ * while efficiently updating relationships. This is crucial for maintaining data
+ * integrity and audit trails in complex relational systems.
  */
 
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
@@ -79,6 +85,15 @@ import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
  * };
  * await updateManyToManyRelationship(api, userId, relDef, roleData, trx);
  * // Faster execution, but could create orphaned relationships if roles don't exist
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Intelligently sync many-to-many relationships without data loss
+ * // 2. Preserve pivot table metadata (timestamps, extra fields)
+ * // 3. Minimize database operations (only delete/create what changed)
+ * // 4. Maintain audit trails by preserving original created_at times
+ * // 5. Support complex pivot tables with additional attributes
+ * // 6. Provide atomic updates within transactions
  */
 export const updateManyToManyRelationship = async (api, resourceId, relDef, relData, trx) => {
   
@@ -203,6 +218,14 @@ export const updateManyToManyRelationship = async (api, resourceId, relDef, relD
  * // Remove all roles from user 50
  * await deleteExistingPivotRecords(api, '50', userRoleDef, trx);
  * // User 50 now has no roles assigned
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Ensure clean slate before creating new relationships
+ * // 2. Handle "replace all" operations in POST requests
+ * // 3. Clear relationships when a resource is being reset
+ * // 4. Prevent duplicate pivot records
+ * // 5. Support explicit relationship clearing operations
  */
 export const deleteExistingPivotRecords = async (api, resourceId, relDef, trx) => {
   // Query for all existing pivot records
@@ -305,6 +328,15 @@ export const deleteExistingPivotRecords = async (api, resourceId, relDef, trx) =
  * // Example 5: Empty relData creates no records
  * await createPivotRecords(api, '100', relDef, [], trx);
  * // No operations performed, no errors thrown
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Create pivot records after relationship validation
+ * // 2. Ensure referential integrity by validating resources exist
+ * // 3. Support bulk relationship creation in POST operations
+ * // 4. Work within transactions for atomic operations
+ * // 5. Provide clear error messages when relationships are invalid
+ * // 6. Allow performance optimization by skipping validation when safe
  */
 export const createPivotRecords = async (api, resourceId, relDef, relData, trx) => {
   for (const related of relData) {

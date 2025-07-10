@@ -32,7 +32,7 @@
  * ```
  */
 
-import { RestApiValidationError } from './lib/rest-api-errors.js';
+import { RestApiValidationError } from '../../lib/rest-api-errors.js';
 
 export const FileHandlingPlugin = {
   name: 'file-handling',

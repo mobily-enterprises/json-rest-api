@@ -1,3 +1,20 @@
+/**
+ * @module compileSchemas
+ * @description Schema compilation and enrichment for REST API resources
+ * 
+ * This module handles the lazy compilation of JSON schemas for resources,
+ * including enrichment through hooks, search schema generation, and caching.
+ * It ensures schemas are processed only once per resource for performance.
+ * 
+ * Why this is useful upstream:
+ * - Provides lazy compilation to avoid processing unused schemas
+ * - Enables schema enrichment through hooks for dynamic behavior
+ * - Automatically generates search schemas from field definitions
+ * - Ensures database indexes are created for searchable fields
+ * - Caches compiled schemas for performance
+ * - Supports both explicit and implicit search field definitions
+ */
+
 import CreateSchema from 'json-rest-schema';
 import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './schemaHelpers.js';
 
@@ -17,15 +34,59 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * @param {Object} scope - The scope object containing vars, runHooks, scopeOptions, etc.
  * @returns {Promise<void>} Resolves when schemas are compiled
  * 
- * @example
+ * @example <caption>Basic usage in REST method</caption>
  * // At the beginning of a REST method:
  * import { compileSchemas } from './lib/compileSchemas.js';
  * 
  * addScopeMethod('query', async (scope, params) => {
  *   await compileSchemas(scope);
  *   const schemaInfo = await scope.getSchemaInfo();
- *   // ... rest of the method
+ *   // Now schema, searchSchema, and relationships are available
  * });
+ * 
+ * @example <caption>Schema enrichment through hooks</caption>
+ * // A plugin can enrich schemas dynamically:
+ * api.on('schema:enrich', ({ schema, scopeName }) => {
+ *   if (scopeName === 'articles') {
+ *     // Add computed field
+ *     schema.wordCount = {
+ *       type: 'number',
+ *       compute: (article) => article.content.split(' ').length
+ *     };
+ *     // Make title required
+ *     schema.title.required = true;
+ *   }
+ * });
+ * 
+ * @example <caption>Search schema generation</caption>
+ * // Original schema:
+ * const schema = {
+ *   title: { type: 'string', search: true },  // Marked searchable
+ *   content: { type: 'string' },              // Not searchable
+ *   status: { type: 'string' }                // Not searchable by default
+ * };
+ * 
+ * // Explicit searchSchema can override:
+ * const searchSchema = {
+ *   title: { type: 'string', filterUsing: 'contains' },
+ *   status: { type: 'string', filterUsing: '=' },
+ *   author_name: {  // Virtual field for joins
+ *     type: 'string',
+ *     filterUsing: 'contains',
+ *     actualTable: 'users',
+ *     actualField: 'name'
+ *   }
+ * };
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Lazy-load schemas only when needed (performance optimization)
+ * // 2. Allow dynamic schema modifications through hooks
+ * // 3. Automatically set up database indexes for searchable fields
+ * // 4. Generate search schemas from field definitions (DRY principle)
+ * // 5. Cache compiled schemas to avoid reprocessing
+ * // 6. Support virtual search fields that join to other tables
+ * // 7. Ensure belongsTo fields have proper type definitions
  */
 export async function compileSchemas(scope) {
   if (scope.vars.schemaProcessed) {
@@ -33,7 +94,7 @@ export async function compileSchemas(scope) {
   }
   
   // Get raw schema
-  const rawSchema = scope.scopeOptions.schema || {};
+  const rawSchema = scope.scopeOptions?.schema || {};
   
   // Deep clone schema while preserving functions
   const enrichedSchema = {};
@@ -59,14 +120,22 @@ export async function compileSchemas(scope) {
   // Create schema object
   const schemaObject = CreateSchema(schemaContext.schema);
   
-  // Generate searchSchema by merging explicit searchSchema with fields marked search:true
-  // Example: title: {search: true} becomes searchable, or explicit searchSchema takes precedence
+  // Generate searchSchema by merging explicit searchSchema with fields marked search:true.
+  // This allows two ways to define searchable fields: either mark fields with search:true
+  // in the main schema, or provide an explicit searchSchema with more control over filtering.
+  // The explicit searchSchema takes precedence and can define virtual fields for joins.
+  // Example: title: {search: true} auto-generates a searchable field with sensible defaults,
+  // while searchSchema can specify filterUsing: 'contains' or complex join configurations.
   let rawSearchSchema = scope.scopeOptions.searchSchema ||
   generateSearchSchemaFromSchema(schemaContext.schema);
   
   if (rawSearchSchema) {
-    // Mark all search fields as indexed for database optimization
-    // Example: status field gets indexed: true, enabling efficient WHERE clauses
+    // Mark all search fields as indexed for database optimization.
+    // This ensures that any field used for filtering will have a database index created,
+    // dramatically improving query performance. Without indexes, filtering large tables
+    // would require full table scans. The storage plugin uses these hints to create indexes.
+    // Example: A status field marked for search gets indexed: true, enabling efficient
+    // WHERE status = 'published' queries that can use index lookups instead of scanning all rows.
     ensureSearchFieldsAreIndexed(rawSearchSchema);
     
     // Hook: searchSchema:enrich

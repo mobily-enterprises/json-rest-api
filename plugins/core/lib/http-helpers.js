@@ -4,7 +4,15 @@
  * 
  * This module provides utilities for handling HTTP request/response objects
  * in a clean, maintainable way that keeps transport-layer concerns separate
- * from business logic.
+ * from business logic. The primary goal is to prevent HTTP-specific objects
+ * from polluting the params object that flows through the API methods.
+ * 
+ * Why this is useful upstream:
+ * - Maintains clean separation between transport layer (HTTP) and business logic
+ * - Supports multiple HTTP adapters (Express, raw HTTP, WebSocket) uniformly
+ * - Enables file upload handling without polluting method signatures
+ * - Allows access to authentication headers while keeping params clean
+ * - Facilitates testing by isolating HTTP concerns in context
  */
 
 /**
@@ -75,6 +83,16 @@
  *   _expressRes: res
  * });
  * // These get moved to context.expressReq/expressRes
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Keep params object focused on business data (inputRecord, queryParams, etc.)
+ * // 2. Enable HTTP plugins to pass request/response without polluting the API
+ * // 3. Support file uploads via multipart forms (accessed through context.expressReq)
+ * // 4. Allow custom authentication headers inspection (context.expressReq.headers)
+ * // 5. Enable response streaming for large datasets (context.expressRes.write)
+ * // 6. Maintain backward compatibility with legacy direct passing approach
+ * // 7. Clean up WeakMap entries to prevent memory leaks
  */
 export const moveHttpObjectsToContext = (params, context, api) => {
   // Check for request ID from Express/HTTP plugins

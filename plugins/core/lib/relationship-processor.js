@@ -1,5 +1,11 @@
 /**
- * Relationship processing functions for REST API plugin
+ * @module relationship-processor
+ * @description Relationship processing functions for REST API plugin
+ * 
+ * This module handles the complex task of extracting relationship data from
+ * JSON:API payloads and converting them into database operations. It bridges
+ * the gap between JSON:API's relationship format and actual database foreign
+ * keys and pivot tables.
  */
 
 import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
@@ -168,6 +174,15 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * };
  * // Throws RestApiValidationError:
  * // "Invalid type 'invalid_type' for polymorphic relationship 'commentable'. Allowed types: posts, videos"
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API plugin uses this to:
+ * // 1. Convert JSON:API relationships to database-ready foreign keys
+ * // 2. Validate polymorphic relationships against allowed types
+ * // 3. Prepare many-to-many operations for pivot table updates
+ * // 4. Support both setting and clearing relationships (null/empty array)
+ * // 5. Maintain data integrity by validating relationships before database writes
+ * // 6. Abstract the complexity of different relationship types from storage plugins
  */
 export const processRelationships = (inputRecord, schemaFields, relationships) => {
   const belongsToUpdates = {};

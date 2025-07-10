@@ -28,6 +28,18 @@
  * @example <caption>Complex nested includes</caption>
  * // GET /articles?include=author,comments.author,comments.article
  * // Handles circular references automatically through deduplication
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API Knex plugin uses this module to:
+ * // 1. Implement JSON:API compound documents (main data + included resources)
+ * // 2. Prevent N+1 query problems through batch loading strategies
+ * // 3. Support arbitrarily deep relationship nesting (e.g., article.author.company.country)
+ * // 4. Handle polymorphic relationships that can point to multiple types
+ * // 5. Deduplicate included resources automatically (no duplicate authors if multiple articles have same author)
+ * // 6. Apply sparse fieldsets to included resources for bandwidth optimization
+ * // 7. Maintain referential integrity by only loading existing relationships
+ * // 8. Use mutual recursion for elegant handling of complex include trees
+ * // 9. Support both forward (belongsTo/hasMany) and reverse (via) relationships
  */
 
 /**

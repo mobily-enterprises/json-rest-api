@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
+import { RestApiPlugin, RestApiKnexPlugin } from './index.js';
 import Knex from 'knex';
 
 // Create API instance
@@ -77,3 +77,49 @@ api.addResource('book_authors', {
     author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
   }
 });
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// Now you can use the API directly in your code
+// Create a country
+const countryResult = await api.resources.countries.post({
+  inputRecord: {
+    data: {
+      type: 'countries',
+      attributes: {
+        name: 'United States',
+        code: 'US'
+      }
+    }
+  }
+});
+console.log('Created country:', countryResult.data.id);
+
+// Create a publisher
+const publisherResult = await api.resources.publishers.post({
+  inputRecord: {
+    data: {
+      type: 'publishers',
+      attributes: {
+        name: 'Penguin Random House',
+      },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: countryResult.data.id }
+        }
+      }
+    }
+  }
+});
+console.log('Created publisher:', publisherResult.data.id);
+
+// Query all publishers
+const publishers = await api.resources.publishers.query({
+  queryParams: {
+    include: ['country'],
+    sort: ['name']
+  }
+});
+console.log('Found', publishers.data.length, 'publishers');

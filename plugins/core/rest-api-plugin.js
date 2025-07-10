@@ -20,6 +20,20 @@ import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 import { moveHttpObjectsToContext } from './lib/http-helpers.js';
 import { compileSchemas } from './lib/compileSchemas.js';
 
+/**
+ * Event handler to compile schemas when a scope is added
+ * This ensures schemas are ready before any scope methods are called
+ * 
+ * @param {Object} params - Event parameters
+ * @param {Object} params.eventData - Data from the scope:added event
+ * @param {Object} params.eventData.scope - Full scope context with vars, helpers, runHooks, etc.
+ */
+async function compileResourceSchemas({ eventData }) {
+  const { scope, scopeName } = eventData;
+  // Compile schemas for this scope using the full context
+  // Add scopeName to the scope object since compileSchemas expects it
+  await compileSchemas({ ...scope, scopeName });
+}
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -32,10 +46,18 @@ export const RestApiPlugin = {
     // Set up REST-friendly aliases
     setScopeAlias('resources', 'addResource');
 
-    // Listen for scope creation to validate polymorphic relationships at startup
-    // Example: Ensures comments.commentable_type can only contain 'posts' or 'videos' if those are the defined types
-    // Catches config errors early: missing typeField/idField, non-existent scope types, etc.
+    // Listen for scope creation to validate polymorphic relationships at startup.
+    // This validates that polymorphic relationships are properly configured with valid types,
+    // typeField/idField definitions, and that all referenced scope types actually exist.
+    // Example: For comments that can belong to posts or videos, it ensures commentable_type field
+    // exists, commentable_id field exists, and that 'posts' and 'videos' are registered scopes.
+    // Catches config errors early before any requests are made.
     on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
+    
+    // Listen for scope creation to compile schemas immediately.
+    // This ensures schemas are compiled and cached before any scope methods are called,
+    // making them available for queries and other operations that need schema information.
+    on('scope:added', 'compileResourceSchemas', compileResourceSchemas);
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
@@ -212,14 +234,14 @@ export const RestApiPlugin = {
  * // }
  */
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
-      // Compile schemas at the beginning of the method
-      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'query'
       
-      // Move HTTP objects from params to context for cleaner separation
-      // Extracts request/response objects so params only contains business data
+      // Move HTTP objects from params to context for cleaner separation of concerns.
+      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
+      // and places them in context where they belong. This keeps params clean for business data only
+      // while still allowing access to HTTP objects for things like file uploads or custom headers.
       moveHttpObjectsToContext(params, context, api);
 
       const simplified = 
@@ -248,8 +270,11 @@ export const RestApiPlugin = {
         params.queryParams.sort = Array.isArray(defaultSort) ? defaultSort : [defaultSort];
       }
 
-      // Validate query parameters - ensures filters, sort fields, pagination are properly formatted
-      // Example: validates sort: ['-createdAt', 'title'] only allows fields in sortableFields array
+      // Validate query parameters to ensure they follow JSON:API specification and security rules.
+      // This checks that filters are valid field names, sort fields exist in sortableFields array
+      // (preventing SQL injection), pagination uses valid page[size]/page[number] format, and include
+      // paths reference real relationships. Example: sort: ['-createdAt', 'title'] is checked against
+      // sortableFields to ensure users can't sort by sensitive fields like 'password_hash'.
       validateQueryPayload(params, sortableFields);
 
       // Get cached schema info including searchSchema
@@ -450,14 +475,14 @@ export const RestApiPlugin = {
   * // }
   */
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      // Compile schemas at the beginning of the method
-      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'get'
       
-      // Move HTTP objects from params to context for cleaner separation
-      // Extracts request/response objects so params only contains business data
+      // Move HTTP objects from params to context for cleaner separation of concerns.
+      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
+      // and places them in context where they belong. This keeps params clean for business data only
+      // while still allowing access to HTTP objects for things like file uploads or custom headers.
       moveHttpObjectsToContext(params, context, api);
 
       // Determine mode early
@@ -472,8 +497,11 @@ export const RestApiPlugin = {
       params.queryParams.include = params.queryParams.include || []
       params.queryParams.fields = params.queryParams.fields || {}
       
-      // Validate GET request - ensures ID is present and queryParams.include/fields are valid
-      // Example: validates id: '123' is not null/empty, include: ['author'] is string array
+      // Validate GET request to ensure required parameters are present and properly formatted.
+      // This checks that 'id' parameter exists and is not empty (you can't GET without an ID),
+      // validates 'include' contains valid relationship names (not arbitrary fields), and ensures
+      // 'fields' for sparse fieldsets follow the format fields[type]=comma,separated,list.
+      // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
       validateGetPayload(params);
 
       runHooks('checkPermissions')
@@ -490,7 +518,8 @@ export const RestApiPlugin = {
         methodParams: { transaction: context.transaction }
       })
     
-      // Check if record was found
+      // Check if record was found - storage layer returns null/undefined for non-existent records.
+      // This generates a proper 404 error with JSON:API error format instead of returning empty data.
       if (!context.record || !context.record.data) {
         throw new RestApiResourceError(
           `Resource not found`,
@@ -740,14 +769,14 @@ export const RestApiPlugin = {
      */
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      // Compile schemas at the beginning of the method
-      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'post'
       
-      // Move HTTP objects from params to context for cleaner separation
-      // Extracts request/response objects so params only contains business data
+      // Move HTTP objects from params to context for cleaner separation of concerns.
+      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
+      // and places them in context where they belong. This keeps params clean for business data only
+      // while still allowing access to HTTP objects for things like file uploads or custom headers.
       moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
@@ -810,8 +839,11 @@ export const RestApiPlugin = {
         context.inputRecord = params.inputRecord
         context.queryParams = params.queryParams
 
-        // Validate POST payload - ensures JSON:API structure, validates resource types exist
-        // Example: validates data.type: 'articles' exists as scope, relationships reference valid types
+        // Validate POST payload to ensure it follows JSON:API format and references valid resources.
+        // This checks the payload has required 'data' object with 'type' and 'attributes', validates
+        // that data.type matches a real resource type (preventing creation of non-existent resources),
+        // and ensures any relationships reference valid resource types with proper ID format.
+        // Example: data.type: 'articles' must be a registered scope, relationships.author must reference 'users'.
         validatePostPayload(params.inputRecord, scopes)
         
         // Validate that the resource type matches the current scope
@@ -837,9 +869,12 @@ export const RestApiPlugin = {
         const relationships = schemaInfo.relationships;
         const schemaFields = scopeOptions.schema || {};
         
-        // Process relationships FIRST to extract foreign keys from JSON:API relationships block
-        // Example: relationships: { author: { data: { type: 'users', id: '123' } } } 
-        // becomes: belongsToUpdates: { author_id: '123' }
+        // Extract foreign keys and many-to-many operations from JSON:API relationships block.
+        // This converts JSON:API relationship format into database-ready foreign keys and identifies
+        // which relationships need pivot table operations. For belongsTo relationships, it extracts
+        // the ID and maps it to the foreign key field. For many-to-many, it prepares bulk operations.
+        // Example: relationships.author: {data: {type: 'users', id: '123'}} becomes author_id: '123' in the database.
+        // Also handles polymorphic (commentable_type/id) and collects many-to-many for later processing
         const { belongsToUpdates, manyToManyRelationships } = processRelationships(
           context.inputRecord,
           schemaFields,
@@ -924,8 +959,13 @@ export const RestApiPlugin = {
             );
           }
           
-          // Create pivot records in the through table to link resources
-          // Example: For tags: ['1', '2', '3'], creates 3 records in article_tags table
+          // Create pivot records in the through table to establish many-to-many relationships.
+          // This creates records in the intermediary table (like 'article_tags') that link the main
+          // resource to each related resource. Before creating each pivot record, it validates that
+          // the related resource actually exists (preventing orphaned relationships). If validateExists
+          // is false, it skips validation for performance in bulk operations.
+          // Example: article.tags: [{id: '1'}, {id: '2'}] creates two article_tags records:
+          // {article_id: 100, tag_id: 1} and {article_id: 100, tag_id: 2}
           await createPivotRecords(api, context.record.data.id, relDef, relData, trx);
         }
         
@@ -1184,8 +1224,6 @@ export const RestApiPlugin = {
    */
    addScopeMethod('put', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions,
   scopeName }) => {
-    // Compile schemas at the beginning of the method
-    await compileSchemas(scope);
     
     context.method = 'put'
     
@@ -1280,8 +1318,12 @@ export const RestApiPlugin = {
       );
     }
 
-    // Validate PUT payload - ensures complete resource replacement with required ID
-    // Example: validates data.id exists, prevents 'included' array, checks relationships
+    // Validate PUT payload to ensure it's a complete resource replacement operation.
+    // PUT requires the full resource representation including ID (unlike POST which generates ID).
+    // It validates that data.id matches the URL parameter, prevents 'included' array (which is
+    // read-only), and ensures the payload represents a complete replacement. Any fields not
+    // provided will be removed or reset to defaults - this is the key difference from PATCH.
+    // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
     validatePutPayload(context.inputRecord, scopes)
     
     // Validate that the resource type matches the current scope
@@ -1740,14 +1782,14 @@ export const RestApiPlugin = {
      * // }
      */
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      // Compile schemas at the beginning of the method
-      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'patch'
       
-      // Move HTTP objects from params to context for cleaner separation
-      // Extracts request/response objects so params only contains business data
+      // Move HTTP objects from params to context for cleaner separation of concerns.
+      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
+      // and places them in context where they belong. This keeps params clean for business data only
+      // while still allowing access to HTTP objects for things like file uploads or custom headers.
       moveHttpObjectsToContext(params, context, api);
       
       // Determine mode early
@@ -1840,8 +1882,12 @@ export const RestApiPlugin = {
         );
       }
 
-      // Validate PATCH payload - ensures partial update has attributes or relationships
-      // Example: validates at least one of data.attributes or data.relationships exists
+      // Validate PATCH payload to ensure the partial update actually contains changes.
+      // PATCH requests must include either attributes to update or relationships to modify -
+      // an empty PATCH is invalid. This prevents accidental no-op requests and ensures clients
+      // are explicit about what they want to change. Unlike PUT, PATCH preserves all fields
+      // not mentioned in the request.
+      // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
       validatePatchPayload(params.inputRecord, scopes)
       
       // Validate that the resource type matches the current scope
@@ -1952,8 +1998,13 @@ export const RestApiPlugin = {
           );
         }
         
-        // Update many-to-many relationship while preserving pivot data
-        // Intelligently syncs relationships: adds new, removes old, keeps existing with their metadata
+        // Update many-to-many relationships using intelligent synchronization that preserves pivot data.
+        // This compares current relationships with desired state: removes records no longer needed,
+        // adds new relationships, and crucially preserves existing pivot records with their metadata
+        // (like created_at timestamps or extra pivot fields). This is superior to delete-all-recreate
+        // because it maintains audit trails and custom pivot data.
+        // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
+        // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
         // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
         await updateManyToManyRelationship(api, context.id, relDef, relData, trx);
       }
@@ -2068,14 +2119,14 @@ export const RestApiPlugin = {
      * }
      */
     addScopeMethod('delete', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      // Compile schemas at the beginning of the method
-      await compileSchemas(scope);
       
       // Make the method available to all hooks
       context.method = 'delete'
       
-      // Move HTTP objects from params to context for cleaner separation
-      // Extracts request/response objects so params only contains business data
+      // Move HTTP objects from params to context for cleaner separation of concerns.
+      // This extracts Express/HTTP request/response objects (like _expressReq, _expressRes) from params 
+      // and places them in context where they belong. This keeps params clean for business data only
+      // while still allowing access to HTTP objects for things like file uploads or custom headers.
       moveHttpObjectsToContext(params, context, api);
       
       // Set the ID in context

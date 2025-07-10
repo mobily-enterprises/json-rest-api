@@ -50,6 +50,17 @@
  *     filterUsing: 'like'
  *   }
  * };
+ * 
+ * @example <caption>Why this is useful upstream</caption>
+ * // The REST API Knex plugin uses this module to:
+ * // 1. Enable powerful cross-table filtering without exposing SQL complexity
+ * // 2. Automatically build optimal JOIN chains based on relationship definitions
+ * // 3. Prevent N+1 queries by using efficient SQL JOINs
+ * // 4. Support deep relationship traversal (e.g., article.author.company.country)
+ * // 5. Validate that cross-table fields are properly indexed for performance
+ * // 6. Generate unique aliases to prevent JOIN conflicts
+ * // 7. Handle both many-to-one and one-to-many relationships seamlessly
+ * // 8. Provide clear error messages when relationships are misconfigured
  */
 
 /**
