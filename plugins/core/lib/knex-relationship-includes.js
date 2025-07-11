@@ -42,8 +42,10 @@
  * // 9. Support both forward (belongsTo/hasMany) and reverse (via) relationships
  */
 
+import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
+
 /**
- * Creates relationship include helper functions with injected dependencies
+ * Creates relationship include helper functions
  * 
  * @param {Object} scopes - The hooked-api scopes object containing all registered scopes
  * @param {Object} log - The logging instance for debug/trace output
@@ -65,7 +67,7 @@
  *   'author,comments.author'
  * );
  */
-export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => {
+export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     
   /**
    * Helper to convert DB record to JSON:API format
@@ -77,8 +79,8 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     const { [idProperty]: id, ...allAttributes } = record;
     
     // Filter out foreign keys from attributes if we have schema
-    if (schema && helpers?.getForeignKeyFields) {
-      const foreignKeys = helpers.getForeignKeyFields(schema);
+    if (schema) {
+      const foreignKeys = getForeignKeyFields(schema);
       const attributes = {};
       
       Object.entries(allAttributes).forEach(([key, value]) => {
@@ -94,7 +96,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
       };
     }
     
-    // Fallback to original behavior if no schema or helpers
+    // Fallback to original behavior if no schema
     return {
       type: scopeName,
       id: String(id),
@@ -263,9 +265,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const fieldsToSelect = helpers?.buildFieldSelection ? 
-      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
-      '*';
+    const fieldsToSelect = await buildFieldSelection(targetScope, fields?.[targetScope], targetSchema, scopes, scopes[targetScope].vars);
     
     // Single query to load all related records
     log.debug(`[INCLUDE] Loading ${targetScope} records:`, { whereIn: foreignKeys, fields: fieldsToSelect });
@@ -466,9 +466,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const fieldsToSelect = helpers?.buildFieldSelection ? 
-      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
-      '*';
+    const fieldsToSelect = await buildFieldSelection(targetScope, fields?.[targetScope], targetSchema, scopes, scopes[targetScope].vars);
     
     // Single query to load ALL related records
     log.debug(`[INCLUDE] Loading ${targetScope} records for ${scopeName}:`, { whereIn: mainIds, fields: fieldsToSelect });
@@ -721,9 +719,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     }
     
     // Build field selection
-    const fieldsToSelect = helpers?.buildFieldSelection ? 
-      await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
-      '*';
+    const fieldsToSelect = await buildFieldSelection(targetScope, fields?.[targetScope], targetSchema, scopes, scopes[targetScope].vars);
     
     log.debug(`[INCLUDE] Loading reverse polymorphic ${targetScope}:`, {
       whereType: scopeName,

@@ -1,15 +1,10 @@
 import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { createRelationshipIncludeHelpers } from './lib/knex-relationship-includes.js';
-import {
-  getForeignKeyFields,
-  buildFieldSelection,
-  toJsonApi,
-  buildQuerySelection,
-  processIncludes,
-  buildJsonApiResponse,
-  processBelongsToRelationships
-} from './lib/knex-helpers.js';
+import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
+import { buildQuerySelection } from './lib/knex-query-helpers-base.js';
+import { toJsonApi, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
+import { processIncludes } from './lib/knex-process-includes.js';
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
@@ -76,11 +71,8 @@ export const RestApiKnexPlugin = {
     api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
     
 
-    // Now initialize relationship include helpers with access to the helper functions
-    relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex, {
-      getForeignKeyFields,
-      buildFieldSelection
-    });
+    // Now initialize relationship include helpers
+    relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex);
 
     // Helper scope method to get all schema-related information
       addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {   
@@ -147,9 +139,9 @@ export const RestApiKnexPlugin = {
       const records = [record]; // Wrap in array for processing
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
-        relationshipIncludeHelpers,
-        createRelationshipIncludeHelpers,
-        scopes
+        scopes,
+        knex,
+        relationshipIncludeHelpers
       });
       
       // Build and return response
@@ -248,9 +240,9 @@ export const RestApiKnexPlugin = {
       // Process includes
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
-        relationshipIncludeHelpers,
-        createRelationshipIncludeHelpers,
-        scopes
+        scopes,
+        knex,
+        relationshipIncludeHelpers
       });
       
       // Build and return response
