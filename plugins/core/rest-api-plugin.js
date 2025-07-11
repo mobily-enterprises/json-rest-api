@@ -11,7 +11,6 @@ import {
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
 import { validatePolymorphicRelationships } from './lib/scope-validations.js';
-import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './lib/schemaHelpers.js';
 import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplifiedHelpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
 import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
@@ -216,28 +215,33 @@ export const RestApiPlugin = {
  * // }
  */
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
-      
-      // Make the method available to all hooks
       context.method = 'query'
       
+      
       // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.sortableFields = cascadeConfig('sortableFields', [scopeOptions, vars], [])
-      context.defaultSort = cascadeConfig('defaultSort', [scopeOptions, vars], null)
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
 
-      // Move queryParams to context and sanitize
-      log.trace('[QUERY-METHOD] Before sanitizing params:', params);
-      context.queryParams = params.queryParams || {}
-      context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-      context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-      context.queryParams.filters = cascadeConfig('filters', [params.queryParams], {})
+      // Assign common context properties
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo;
+      context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
+      context.queryParams = params.queryParams || {};
+      context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
+      context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
       context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
       context.queryParams.page = cascadeConfig('page', [params.queryParams], {})
-      log.trace('[QUERY-METHOD] After setting context.queryParams:', context.queryParams);
+  
+      context.scopeName = scopeName;
 
+      // These are just shortcuts used in this function and will be returned
+      const schema = context.schemaInfo.schema;
+      const schemaStructure = context.schemaInfo.schema.structure;
+      const schemaRelationships = context.schemaInfo.schemaRelationships;
+
+      // Sortable fields and sort (mab)
+      context.sortableFields = vars.sortableFields
       // Apply default sort if no sort specified
-      if (context.queryParams.sort.length === 0 && context.defaultSort) {
-        context.queryParams.sort = Array.isArray(context.defaultSort) ? context.defaultSort : [context.defaultSort];
+      if (context.queryParams.sort.length === 0 && vars.defaultSort) {
+        context.queryParams.sort = Array.isArray(vars.defaultSort) ? vars.defaultSort : [vars.defaultSort];
       }
 
       // Validate query parameters to ensure they follow JSON:API specification and security rules.
@@ -246,15 +250,6 @@ export const RestApiPlugin = {
       // paths reference real relationships. Example: sort: ['-createdAt', 'title'] is checked against
       // sortableFields to ensure users can't sort by sensitive fields like 'password_hash'.
       validateQueryPayload({ queryParams: context.queryParams }, context.sortableFields);
-
-      // Get cached schema info including searchSchema
-      // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
-      // This enriches both schema and searchSchema via hooks
-      context.schemaInfo = scopes[scopeName].vars.schemaInfo
-      const searchSchema = context.schemaInfo.searchSchema;
-      
-      // Note: ensureSearchFieldsAreIndexed is no longer needed here because
-      // the searchSchema hook can handle indexing during enrichment
 
       // Validate search/filter parameters against searchSchema
       if (context.queryParams.filters && Object.keys(context.queryParams.filters).length > 0) {
@@ -272,42 +267,33 @@ export const RestApiPlugin = {
             }
           );
         }
+      
+        // Validate the filter parameters searchSchema
+        const { validatedObject, errors } = await searchSchema.validate(context.queryParams.filters, { 
+          onlyObjectValues: true // Partial validation for filters
+        });
         
-        if (searchSchema) {
-          // Validate the filter parameters using the cached searchSchema object
-          const { validatedObject, errors } = await searchSchema.validate(context.queryParams.filters, { 
-            onlyObjectValues: true // Partial validation for filters
-          });
+        // If there are validation errors, throw an error
+        if (Object.keys(errors).length > 0) {
+          const violations = Object.entries(errors).map(([field, error]) => ({
+            field: `filters.${field}`,
+            rule: error.code || 'invalid_value',
+            message: error.message
+          }));
           
-          // If there are validation errors, throw an error
-          if (Object.keys(errors).length > 0) {
-            const violations = Object.entries(errors).map(([field, error]) => ({
-              field: `filters.${field}`,
-              rule: error.code || 'invalid_value',
-              message: error.message
-            }));
-            
-            throw new RestApiValidationError(
-              'Invalid filter parameters',
-              { 
-                fields: Object.keys(errors).map(field => `filters.${field}`),
-                violations 
-              }
-            );
-          }
-          
-          // Replace filter with validated/transformed values
-          context.queryParams.filters = validatedObject;
+          throw new RestApiValidationError(
+            'Invalid filter parameters',
+            { 
+              fields: Object.keys(errors).map(field => `filters.${field}`),
+              violations 
+            }
+          );
         }
+        
+        // Replace filter with validated/transformed values
+        context.queryParams.filters = validatedObject;
       }
     
-      /*
-      TODO: Make them general context fields
-      const filters = hookParams.context?.knexQuery?.filters;
-      const searchSchema = hookParams.context?.knexQuery?.searchSchema;
-      const tableName = hookParams.context?.knexQuery?.tableName; 
-      */
-
       runHooks('checkPermissions')
       runHooks('checkPermissionsQuery')
       
@@ -316,7 +302,7 @@ export const RestApiPlugin = {
       context.record = await helpers.dataQuery({
         scopeName,
         context,
-        trx
+        transaction: context.transaction
       })
     
       // Make a backup
@@ -356,8 +342,6 @@ export const RestApiPlugin = {
       // Transform output if in simplified mode
       if (context.simplified) {
         // Use schema info already in context
-        const schemaStructure = context.schemaInfo.schema.structure;
-        const schemaRelationships = context.schemaInfo.schemaRelationships;
         
         if (context.record) {
           // Convert JSON:API response back to simplified format
@@ -442,25 +426,26 @@ export const RestApiPlugin = {
   * // }
   */
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      
-      // Make the method available to all hooks
       context.method = 'get'
-      
-      // Move id to context
-      context.id = params.id
-      
-      // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
 
-      context.schemaInfo = scopes[scopeName].vars.schemaInfo
+      // Get configuration values
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
+
+      // Assign common context properties
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo;
+      context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
+      context.queryParams = params.queryParams || {};
+      context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
+      context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+      context.scopeName = scopeName;
+
+      // These are just shortcuts used in this function and will be returned
+      const schema = context.schemaInfo.schema;
       const schemaStructure = context.schemaInfo.schema.structure;
       const schemaRelationships = context.schemaInfo.schemaRelationships;
 
-      // Move queryParams to context and sanitize
-      context.queryParams = params.queryParams || {}
-      context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-      context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-      
+      context.id = params.id;
+  
       // Validate GET request to ensure required parameters are present and properly formatted.
       // This checks that 'id' parameter exists and is not empty (you can't GET without an ID),
       // validates 'include' contains valid relationship names (not arbitrary fields), and ensures
@@ -520,9 +505,7 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (context.simplified) {
-        const schemaStructure = context.schemaInfo.schema.structure;
-        const schemaRelationships = context.schemaInfo.schemaRelationships;
-        
+   
         if (context.record) {
           // Convert JSON:API response back to simplified format
           // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
@@ -537,6 +520,111 @@ export const RestApiPlugin = {
       
       return context.record
     })
+
+
+    /**
+     * Performs common initial setup for POST, PUT, and PATCH methods.
+     * This includes setting up context, handling simplified mode,
+     * and extracting schema-related information.
+     *
+     * @param {object} args - The arguments object passed to the addScopeMethod function.
+     * @param {object} args.params - Request parameters.
+     * @param {object} args.context - The operation context object.
+     * @param {object} args.vars - Variables accessible to the scope.
+     * @param {object} args.scopes - All available scopes/resource definitions.
+     * @param {object} args.scopeOptions - Options specific to the current scope.
+     * @param {string} args.scopeName - The name of the current scope.
+     * @returns {object} An object containing schema-related shortcuts.
+     */
+    async function setupCommonRequest({ params, context, vars, scopes, scopeOptions, scopeName }) {
+        // Get configuration values
+        context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
+
+        // Params is totally bypassed in simplified mode
+        if (context.simplified) {
+            if (params.inputRecord) {
+                context.inputRecord = params.inputRecord;
+            } else {
+                context.inputRecord = params;
+                context.params = {}; // Ensure params is an empty object if simplified
+            }
+        } else {
+            context.inputRecord = params.inputRecord;
+        }
+
+        // Assign common context properties
+        context.schemaInfo = scopes[scopeName].vars.schemaInfo;
+        context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
+        context.queryParams = params.queryParams || {};
+        context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
+        context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+        context.scopeName = scopeName;
+
+        debugger 
+        // Extract transaction from params if provided
+        
+        if (!helpers.newTransaction) {
+          context.transaction = trx;
+          context.shouldCommit = trx && !existingTrx;
+        } else {
+          const existingTrx = params.transaction;
+          const trx = existingTrx || (await helpers.newTransaction())
+          context.transaction = trx;
+          context.shouldCommit = trx && !existingTrx;
+        }
+          
+        // These are just shortcuts used in this function and will be returned
+        const schema = context.schemaInfo.schema;
+        const schemaStructure = context.schemaInfo.schema.structure;
+        const schemaRelationships = context.schemaInfo.schemaRelationships;
+
+        // Transform input if in simplified mode
+        if (context.simplified) {
+            context.inputRecord = transformSimplifiedToJsonApi(
+                context.inputRecord,
+                scopeName,
+                schemaStructure,
+                schemaRelationships
+            );
+        } else {
+            // Strict mode: validate no belongsTo fields in attributes
+            if (context.inputRecord?.data?.attributes) {
+                for (const [key, fieldDef] of Object.entries(schemaStructure)) {
+                    if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
+                        throw new RestApiValidationError(
+                            `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
+                            { fields: [`data.attributes.${key}`] }
+                        );
+                    }
+                }
+            }
+        }
+
+        if (context.inputRecord.data.type !== scopeName) {
+          throw new RestApiValidationError(
+            `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
+            { 
+              fields: ['data.type'], 
+              violations: [{ 
+                field: 'data.type', 
+                rule: 'resource_type_match', 
+                message: `Resource type must be '${scopeName}'` 
+              }] 
+            }
+          );
+        }
+
+         // Remove included validation since JSON:API doesn't support it
+        if (context.inputRecord.included) {
+          throw new RestApiPayloadError(
+            context.method + ' requests cannot include an "included" array. JSON:API does not support creating multiple resources in a single request.',
+            { path: 'included', expected: 'undefined', received: 'array' }
+          );
+        }
+
+        // Return key schema-related objects for direct use in the main methods
+        return { schema, schemaStructure, schemaRelationships };
+    }
 
     /**
      * POST
@@ -733,66 +821,18 @@ export const RestApiPlugin = {
      */
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      
-      // Make the method available to all hooks
       context.method = 'post'
       
-      // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.returnFullRecord = params.returnFullRecord
+      const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+          params, context, vars, scopes, scopeOptions, scopeName
+      });
       
-      // Get compiled schema info early for both modes
-      context.schemaInfo = scopes[scopeName].vars.schemaInfo
-      const schemaStructure = context.schemaInfo.schema.structure;
-      const schemaRelationships = context.schemaInfo.schemaRelationships;
-      
-      // Transform input if in simplified mode
-      if (context.simplified) {
-        // Always transform in simplified mode - no format detection needed
-        // Example: { title: 'My Post', author_id: 123 } becomes
-        // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-        context.inputRecord = transformSimplifiedToJsonApi(
-          params.inputRecord || params, // Support both styles
-          scopeName,
-          schemaStructure,
-          schemaRelationships
-        );
-      } else {
-        // Move inputRecord to context in strict mode
-        context.inputRecord = params.inputRecord;
-        
-        // Strict mode: validate no belongsTo fields in attributes
-        if (context.inputRecord?.data?.attributes) {
-          for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-            if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
-              throw new RestApiValidationError(
-                `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
-                { fields: [`data.attributes.${key}`] }
-              );
-            }
-          }
-        }
-      }
-      context.scopeName = scopeName
-      
-      // Extract transaction from params if provided
-      const existingTrx = params.transaction;
-      const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
-      const shouldCommit = trx && !existingTrx;
-
-      // Update context with transaction
-      context.transaction = trx;
-
       try {
         
+        debugger
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPost')
-
-        // Move queryParams to context and sanitize
-        context.queryParams = params.queryParams || {}
-        context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-        context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
 
         // Validate POST payload to ensure it follows JSON:API format and references valid resources.
         // This checks the payload has required 'data' object with 'type' and 'attributes', validates
@@ -801,28 +841,10 @@ export const RestApiPlugin = {
         // Example: data.type: 'articles' must be a registered scope, relationships.author must reference 'users'.
         validatePostPayload(context.inputRecord, scopes)
         
-        // Validate that the resource type matches the current scope
-        if (context.inputRecord.data.type !== scopeName) {
-          throw new RestApiValidationError(
-            `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
-            { 
-              fields: ['data.type'], 
-              violations: [{ 
-                field: 'data.type', 
-                rule: 'resource_type_match', 
-                message: `Resource type must be '${scopeName}'` 
-              }] 
-            }
-          );
-        }
-
-        // Use the schema info we already fetched
-        context.schema = context.schemaInfo.schema;
-        
         // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
         // Example: relationships.author -> author_id: '123' for storage
         // Example: relationships.tags -> array of pivot records to create later
-        const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+        const { belongsToUpdates, manyToManyRelationships } = await processRelationships(
           context.inputRecord,
           schemaStructure,
           schemaRelationships
@@ -842,7 +864,7 @@ export const RestApiPlugin = {
         };
         
         // Validate main resource attributes INCLUDING foreign keys
-        const { validatedObject: validatedAttrs, errors: mainErrors } = await context.schema.validate(attributesToValidate);
+        const { validatedObject: validatedAttrs, errors: mainErrors } = await schema.validate(attributesToValidate);
         if (Object.keys(mainErrors).length > 0) {
           const violations = Object.entries(mainErrors).map(([field, error]) => ({
             field: `data.attributes.${field}`,
@@ -860,14 +882,7 @@ export const RestApiPlugin = {
         }
         context.inputRecord.data.attributes = validatedAttrs;
         
-        // Remove included validation since JSON:API doesn't support it
-        if (context.inputRecord.included) {
-          throw new RestApiPayloadError(
-            'POST requests cannot include an "included" array. JSON:API does not support creating multiple resources in a single request.',
-            { path: 'included', expected: 'undefined', received: 'array' }
-          );
-        }
-        
+               
         runHooks('afterSchemaValidatePost')
         runHooks('afterSchemaValidate')
 
@@ -881,7 +896,7 @@ export const RestApiPlugin = {
         context.record = await helpers.dataPost({
           scopeName,
           context,
-          trx
+          transaction: context.transaction,
         });
         
         runHooks('afterDataCallPost')
@@ -911,27 +926,26 @@ export const RestApiPlugin = {
           // is false, it skips validation for performance in bulk operations.
           // Example: article.tags: [{id: '1'}, {id: '2'}] creates two article_tags records:
           // {article_id: 100, tag_id: 1} and {article_id: 100, tag_id: 2}
-          await createPivotRecords(api, context.record.data.id, relDef, relData, trx);
+          await createPivotRecords(api, context.record.data.id, relDef, relData, context.transaction);
         }
         
         // Commit transaction if we created it
-        if (shouldCommit) {
-          await trx.commit();
+        if (context.shouldCommit) {
+          await context.transaction.commit();
         }
         
         // Determine if we should return the full record
-        const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
-          context.returnFullRecord : 
-          cascadeConfig('post', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
+        const shouldReturnRecord = context.returnFullRecord !== undefined 
+          ? context.returnFullRecord 
+          : cascadeConfig('post', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
         
-        if (shouldReturnFullRecord) {
+        if (shouldReturnRecord) {
           // Get the full record with relationships
           // Use the API's own get method to ensure all hooks and transformations are applied
-          debugger
           context.returnRecord = await api.resources[scopeName].get({
             id: context.record.data.id,
-            queryParams: params.queryParams,
-            transaction: existingTrx, // Use original transaction for read
+            queryParams: context.queryParams,
+            transaction: context.transaction, // Use original transaction for read
             simplified: false
           });
           
@@ -984,20 +998,21 @@ export const RestApiPlugin = {
         
       } catch (error) {
         // Rollback transaction if we created it
-        if (shouldCommit) {
-          await trx.rollback();
+        if (context.shouldCommit) {
+          await context.transaction.rollback();
         }
         
         // Log the full error details
         enhancedLog.logError('Error in POST method', error, {
           scopeName,
           method: 'post',
-          inputRecord: params.inputRecord
+          inputRecord: context.inputRecord
         });
         
         throw error;
       }
     })
+
 
    /**
    * PUT
@@ -1174,72 +1189,18 @@ export const RestApiPlugin = {
    */
    addScopeMethod('put', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions,
   scopeName }) => {
-    
     context.method = 'put'
     
-    // Move id to context
-    context.id = params.id
-    
-    // Get configuration values
-    context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-    context.returnFullRecord = params.returnFullRecord
-    
-    // Get compiled schema info early for both modes
-    context.schemaInfo = scopes[scopeName].vars.schemaInfo
-    const schemaStructure = context.schemaInfo.schema.structure;
-    const schemaRelationships = context.schemaInfo.schemaRelationships;
-    
-    // Transform input if in simplified mode
-    if (context.simplified) {
-      // Always transform in simplified mode - no format detection needed
-      context.inputRecord = transformSimplifiedToJsonApi(
-        params.inputRecord || params, // Support both styles
-        scopeName,
-        schemaStructure,
-        schemaRelationships
-      );
-    } else {
-      // Move inputRecord to context in strict mode
-      context.inputRecord = params.inputRecord;
-      
-      // Strict mode: validate no belongsTo fields in attributes
-      if (context.inputRecord?.data?.attributes) {
-        for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-          if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
-            throw new RestApiValidationError(
-              `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
-              { fields: [`data.attributes.${key}`] }
-            );
-          }
-        }
-      }
-    }
-    
-    context.scopeName = scopeName
-    
-    // Extract transaction from params if provided
-    const existingTrx = params.transaction;
-    const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
-    const shouldCommit = trx && !existingTrx;
-    
+    const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
+        params, context, vars, scopes, scopeOptions, scopeName
+    });
+    context.id = context.inputRecord.id;
+
     try {
-      // Update context with transaction
-      context.transaction = trx;
-      
       // Run early hooks for pre-processing (e.g., file handling)
       await runHooks('beforeProcessing')
       await runHooks('beforeProcessingPut')
-
-    // Move queryParams to context and sanitize
-    context.queryParams = params.queryParams || {}
-    context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-    context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-    
-    // Extract ID from request body as per JSON:API spec if not already set
-    if (!context.id) {
-      context.id = context.inputRecord.data.id
-    }
-    
+  
     // If both URL path ID and request body ID are provided, they must match
     if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
       throw new RestApiValidationError(
@@ -1255,14 +1216,6 @@ export const RestApiPlugin = {
       );
     }
 
-    // Validate - PUT cannot have included
-    if (context.inputRecord.included) {
-      throw new RestApiPayloadError(
-        'PUT requests cannot include an "included" array for creating new resources',
-        { path: 'included', expected: 'undefined', received: 'array' }
-      );
-    }
-
     // Validate PUT payload to ensure it's a complete resource replacement operation.
     // PUT requires the full resource representation including ID (unlike POST which generates ID).
     // It validates that data.id matches the URL parameter, prevents 'included' array (which is
@@ -1271,26 +1224,12 @@ export const RestApiPlugin = {
     // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
     validatePutPayload(context.inputRecord, scopes)
     
-    // Validate that the resource type matches the current scope
-    if (context.inputRecord.data.type !== scopeName) {
-      throw new RestApiValidationError(
-        `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
-        { 
-          fields: ['data.type'], 
-          violations: [{ 
-            field: 'data.type', 
-            rule: 'resource_type_match', 
-            message: `Resource type must be '${scopeName}'` 
-          }] 
-        }
-      );
-    }
 
     if (vars.loadRecordOnPut) {
       context.recordBefore = await helpers.dataGet({
         scopeName,
         context,
-        trx
+        transaction: context.transaction
       });
 
       context.exists = !!context.recordBefore
@@ -1299,15 +1238,12 @@ export const RestApiPlugin = {
       context.exists = await helpers.dataExists({
         scopeName,
         context,
-        trx
+        transaction: context.transaction
       });
     }
     context.isCreate = !context.exists;
     context.isUpdate = context.exists;
 
-    // Use the schema info we already fetched
-    context.schema = context.schemaInfo.schema;
-    
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later
@@ -1329,7 +1265,7 @@ export const RestApiPlugin = {
     };
     
     
-    const { validatedObject, errors } = await context.schema.validate(attributesToValidate);
+    const { validatedObject, errors } = await schema.validate(attributesToValidate);
     if (Object.keys(errors).length > 0) {
       const violations = Object.entries(errors).map(([field, error]) => ({
         field: `data.attributes.${field}`,
@@ -1428,7 +1364,7 @@ export const RestApiPlugin = {
     context.record = await helpers.dataPut({
       scopeName,
       context,
-      trx
+      transaction: context.transaction
     });
     runHooks('afterDataCallPut')
     runHooks('afterDataCall')
@@ -1454,20 +1390,20 @@ export const RestApiPlugin = {
         if (context.isUpdate) {
           // Clear all existing relationships for this resource from the pivot table
           // Example: Deletes all records from article_tags where article_id = 100
-          await deleteExistingPivotRecords(api, context.id, relDef, trx);
+          await deleteExistingPivotRecords(api, context.id, relDef, context.transaction);
         }
         
         // Create new pivot records
         if (relData.length > 0) {
           // Create fresh pivot records for the new relationships
           // Example: Creates new article_tags records for the provided tag IDs
-          await createPivotRecords(api, context.id, relDef, relData, trx);
+          await createPivotRecords(api, context.id, relDef, relData, context.transaction);
         }
       }
     
     // Commit transaction if we created it
-    if (shouldCommit) {
-      await trx.commit();
+    if (context.shouldCommit) {
+      await context.transaction.commit();
     }
 
     // If there was previous data, run a data permission check
@@ -1478,17 +1414,17 @@ export const RestApiPlugin = {
     }
 
     // Determine if we should return the full record
-    const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
+    const shouldReturnRecord = context.returnFullRecord !== undefined ? 
       context.returnFullRecord : 
       cascadeConfig('put', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
     
-    if (shouldReturnFullRecord) {
+    if (shouldReturnRecord) {
       // Get the full record after all updates are complete
       // The storage layer now only returns success status, not the full record
       context.returnRecord = await api.resources[scopeName].get({
         id: context.id,
-        queryParams: params.queryParams,
-        transaction: existingTrx,  // Use original transaction for read
+        queryParams: context.queryParams,
+        transaction: context.transaction,  // Use original transaction for read
         simplified: false  // Always get JSON:API format for internal processing
       });
       
@@ -1519,7 +1455,7 @@ export const RestApiPlugin = {
       };
       
       // Add relationships if they were in the input
-      if (params.inputRecord.data.relationships) {
+      if (context.inputRecord.data.relationships) {
         context.returnRecord.data.relationships = params.inputRecord.data.relationships;
       }
       
@@ -1548,15 +1484,15 @@ export const RestApiPlugin = {
     
     } catch (error) {
       // Rollback transaction if we created it
-      if (shouldCommit) {
-        await trx.rollback();
+      if (context.shouldCommit) {
+        await context.transaction.rollback();
       }
       
       // Log the full error details
       enhancedLog.logError('Error in PUT method', error, {
         scopeName,
         method: 'put',
-        inputRecord: params.inputRecord
+        inputRecord: context.inputRecord
       });
       
       throw error;
@@ -1716,74 +1652,21 @@ export const RestApiPlugin = {
      * // }
      */
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
-      
-      // Make the method available to all hooks
       context.method = 'patch'
-      
-      // Move id to context
-      context.id = params.id
-      
-      // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.returnFullRecord = params.returnFullRecord
-      
-      // Get compiled schema info early for both modes
-      context.schemaInfo = scopes[scopeName].vars.schemaInfo
-      const schemaStructure = context.schemaInfo.schema.structure;
-      const schemaRelationships = context.schemaInfo.schemaRelationships;
-      
-      // Transform input if in simplified mode
-      if (context.simplified) {
-        // Always transform in simplified mode - no format detection needed
-        // Example: { title: 'My Post', author_id: 123 } becomes
-        // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-        context.inputRecord = transformSimplifiedToJsonApi(
-          params.inputRecord || params, // Support both styles
-          scopeName,
-          schemaStructure,
-          schemaRelationships
-        );
-      } else {
-        // Move inputRecord to context in strict mode
-        context.inputRecord = params.inputRecord;
         
-        // Strict mode: validate no belongsTo fields in attributes
-        if (context.inputRecord?.data?.attributes) {
-          for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-            if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
-              throw new RestApiValidationError(
-                `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
-                { fields: [`data.attributes.${key}`] }
-              );
-            }
-          }
-        }
-      }
+      const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
+          params, context, vars, scopes, scopeOptions, scopeName
+      });
+      context.id = context.inputRecord.id;
       
-      context.scopeName = scopeName
+      // ====================================================================================
+      // END OF VERY SIMILAR BETWEEN POST, PUT AND PATCH.
+      // ====================================================================================
       
-      // Extract transaction from params if provided
-      const existingTrx = params.transaction;
-      const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
-      const shouldCommit = trx && !existingTrx;
-      
-      try {
-        // Update context with transaction
-        context.transaction = trx;
-        
+      try {        
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPatch')
-
-      // Move queryParams to context and sanitize
-      context.queryParams = params.queryParams || {}
-      context.queryParams.fields = params.queryParams.fields || {}
-      context.queryParams.include = params.queryParams.include || []
-      
-      // Extract ID from request body as per JSON:API spec if not already set
-      if (!context.id && context.inputRecord.data.id) {
-        context.id = context.inputRecord.data.id
-      }
             
       // If both URL path ID and request body ID are provided, they must match
       if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
@@ -1800,14 +1683,6 @@ export const RestApiPlugin = {
         );
       }
 
-      // Validate - PATCH cannot have included
-      if (context.inputRecord.included) {
-        throw new RestApiPayloadError(
-          'PATCH requests cannot include an "included" array for creating new resources',
-          { path: 'included', expected: 'undefined', received: 'array' }
-        );
-      }
-
       // Validate PATCH payload to ensure the partial update actually contains changes.
       // PATCH requests must include either attributes to update or relationships to modify -
       // an empty PATCH is invalid. This prevents accidental no-op requests and ensures clients
@@ -1816,24 +1691,7 @@ export const RestApiPlugin = {
       // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
       validatePatchPayload(context.inputRecord, scopes)
       
-      // Validate that the resource type matches the current scope
-      if (context.inputRecord.data.type !== scopeName) {
-        throw new RestApiValidationError(
-          `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
-          { 
-            fields: ['data.type'], 
-            violations: [{ 
-              field: 'data.type', 
-              rule: 'resource_type_match', 
-              message: `Resource type must be '${scopeName}'` 
-            }] 
-          }
-        );
-      }
 
-      // Use the schema info we already fetched
-      context.schema = context.schemaInfo.schema;
-      
       // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
       // Example: relationships.author -> author_id: '123' for storage
       // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
@@ -1855,7 +1713,7 @@ export const RestApiPlugin = {
       
       // Validate only the provided attributes (partial validation)
       if (Object.keys(attributesToValidate).length > 0) {
-        const { validatedObject, errors } = await context.schema.validate(
+        const { validatedObject, errors } = await schema.validate(
           attributesToValidate, 
           { onlyObjectValues: true }
         );
@@ -1891,7 +1749,7 @@ export const RestApiPlugin = {
       context.record = await helpers.dataPatch({
         scopeName,
         context,
-        trx
+        transaction: context.transaction
       });
 
       runHooks('afterDataCallPatch')
@@ -1924,21 +1782,21 @@ export const RestApiPlugin = {
         // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
         // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
         // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
-        await updateManyToManyRelationship(api, context.id, relDef, relData, trx);
+        await updateManyToManyRelationship(api, context.id, relDef, relData, context.transaction);
       }
       
       // Determine if we should return the full record
-      const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
+      const shouldReturnRecord = context.returnFullRecord !== undefined ? 
         context.returnFullRecord : 
         cascadeConfig('patch', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
       
-      if (shouldReturnFullRecord) {
+      if (shouldReturnRecord) {
         // Get the full record after all updates are complete
         // This ensures includes see the updated state after all operations
         context.returnRecord = await api.resources[scopeName].get({
           id: context.id,
-          queryParams: params.queryParams,
-          transaction: trx,  // Use active transaction for read
+          queryParams: context.queryParams,
+          transaction: context.transaction,  // Use active transaction for read
         });
       } else {
         // Return minimal record - use the record returned from dataPatch
@@ -1954,15 +1812,15 @@ export const RestApiPlugin = {
       }
 
       // Commit transaction if we created it
-      if (shouldCommit) {
-        await trx.commit();
+      if (context.shouldCommit) {
+        await context.transaction.commit();
       }
 
       runHooks('checkDataPermissions')
       runHooks('checkDataPermissionsPatch')
       
       // Enrich included resources if any (only if we fetched full record)
-      if (shouldReturnFullRecord) {
+      if (shouldReturnRecord) {
         // Enrich the return record's attributes
         if (context.returnRecord?.data?.attributes) {
           context.returnRecord.data.attributes = await scope.enrichAttributes({ 
@@ -1997,15 +1855,15 @@ export const RestApiPlugin = {
       
       } catch (error) {
         // Rollback transaction if we created it
-        if (shouldCommit) {
-          await trx.rollback();
+        if (context.shouldCommit) {
+          await context.transaction.rollback();
         }
         
         // Log the full error details
         enhancedLog.logError('Error in PATCH method', error, {
           scopeName,
           method: 'patch',
-          inputRecord: params.inputRecord
+          inputRecord: context.inputRecord
         });
         
         throw error;
@@ -2067,7 +1925,7 @@ export const RestApiPlugin = {
       await helpers.dataDelete({
         scopeName,
         context,
-        trx
+        transaction: context.transaction
       });
       
       runHooks('afterDataCallDelete')

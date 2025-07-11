@@ -79,19 +79,23 @@ export const RestApiKnexPlugin = {
         await createKnexTable(api.knex.instance, scopeName, vars.schemaInfo.schema)
       })
     
+      helpers.newTransaction = async () => {
+        debugger
+        return knex.transaction()
+      }
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                    DATA OPERATION METHODS                           ║
      * ║  Implementation of the storage interface required by REST API plugin║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
 
-    helpers.dataExists = async ({ scopeName, context, trx }) => {
+    helpers.dataExists = async ({ scopeName, context, transaction }) => {
       const id = context.id;
       const scope = api.resources[scopeName];
 
       const tableName = context.schemaInfo.tableName
       const idProperty = context.schemaInfo.idProperty
-      const db = trx || knex;
+      const db = transaction || knex;
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
@@ -103,13 +107,13 @@ export const RestApiKnexPlugin = {
       return !!record;
     };
 
-    helpers.dataGet = async ({ scopeName, context, trx }) => {
+    helpers.dataGet = async ({ scopeName, context, transaction }) => {
       const id = context.id;      
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
       const queryParams = context.queryParams
-      const db = trx || knex;
+      const db = transaction || knex;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
@@ -148,12 +152,12 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(records, scopeName, schema, included, true, scopes, vars);
     };
 
-    helpers.dataQuery = async ({ scopeName, context, trx }) => {    
+    helpers.dataQuery = async ({ scopeName, context, transaction }) => {    
       const tableName = context.schemaInfo.tableName;
       const schema =  context.schemaInfo.schema;
       const searchSchema =  context.schemaInfo.schema;
       const queryParams = context.queryParams
-      const db = trx || knex;
+      const db = transaction || knex;
       const sortableFields = context.sortableFields
 
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
@@ -249,11 +253,11 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(records, scopeName, schema, included, false, scopes, vars);
     };
     
-    helpers.dataPost = async ({ scopeName, context, trx }) => {
+    helpers.dataPost = async ({ scopeName, context, transaction }) => {
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = trx || knex;
+      const db = transaction || knex;
       const inputRecord = context.inputRecord      
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
@@ -277,12 +281,12 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    helpers.dataPut = async ({ scopeName, context, trx }) => {
+    helpers.dataPut = async ({ scopeName, context, transaction }) => {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = trx || knex;
+      const db = transaction || knex;
       const inputRecord = context.inputRecord      
     
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`);
@@ -331,12 +335,12 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    helpers.dataPatch = async ({ scopeName, context, trx }) => {
+    helpers.dataPatch = async ({ scopeName, context, transaction }) => {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = trx || knex;
+      const db = transaction || knex;
       const inputRecord = context.inputRecord      
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`);
@@ -377,12 +381,12 @@ export const RestApiKnexPlugin = {
       };
     };
     
-    helpers.dataDelete = async ({ scopeName, context, trx }) => {
+    helpers.dataDelete = async ({ scopeName, context, transaction }) => {
       const id = context.id;
 
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const db = trx || knex;
+      const db = transaction || knex;
       
       log.debug(`[Knex] DELETE ${tableName}/${id}`);
       

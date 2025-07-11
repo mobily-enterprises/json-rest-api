@@ -97,8 +97,8 @@ await api.resources.book_authors.createKnexTable()
 // Now you can use the API directly in your code
 try {
 
-
   // Create a country
+  debugger
   const countryResult1 = await api.resources.countries.post({
     name: 'United States',
     code: 'US'
@@ -120,6 +120,7 @@ try {
   console.log('Created publisher1:', publisher1Result);
 
     // Create another publisher. NOT the simplified version
+    debugger
   const publisher2Result = await api.resources.publishers.post({
     inputRecord: {
       data: {
