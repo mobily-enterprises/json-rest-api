@@ -59,7 +59,6 @@ export const RestApiPlugin = {
     vars.defaultSort = restApiOptions.defaultSort || null
     vars.pageSize = restApiOptions.pageSize || 20
     vars.maxPageSize = restApiOptions.maxPageSize || 100
-    vars.loadRecordOnPut = !!restApiOptions.loadRecordOnPut
     
     // Sane defaults
     vars.simplified = restApiOptions.simplified === undefined ? true : restApiOptions.simplified;
@@ -216,15 +215,16 @@ export const RestApiPlugin = {
  */
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
       context.method = 'query'
-      
-      
+            
       // Get configuration values
       context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
 
       // Assign common context properties
-      context.schemaInfo = scopes[scopeName].vars.schemaInfo;
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
       context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
       context.queryParams = params.queryParams || {};
+
+      // These onlu make sense as parameter per query
       context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
       context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
       context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
@@ -234,6 +234,7 @@ export const RestApiPlugin = {
 
       // These are just shortcuts used in this function and will be returned
       const schema = context.schemaInfo.schema;
+      const searchSchema = context.schemaInfo.searchSchema;
       const schemaStructure = context.schemaInfo.schema.structure;
       const schemaRelationships = context.schemaInfo.schemaRelationships;
 
@@ -341,18 +342,14 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (context.simplified) {
-        // Use schema info already in context
-        
-        if (context.record) {
-          // Convert JSON:API response back to simplified format
-          // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
-          // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
-          return transformJsonApiToSimplified(
-            context.record,
-            schemaStructure,
-            schemaRelationships
-          );
-        }
+        // Convert JSON:API response back to simplified format
+        // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
+        // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
+        return transformJsonApiToSimplified(
+          context.record,
+          schemaStructure,
+          schemaRelationships
+        );
       }
       
       return context.record
@@ -435,8 +432,11 @@ export const RestApiPlugin = {
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
       context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
       context.queryParams = params.queryParams || {};
+    
+      // These only make sense as parameter per query
       context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
       context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+
       context.scopeName = scopeName;
 
       // These are just shortcuts used in this function and will be returned
@@ -496,6 +496,8 @@ export const RestApiPlugin = {
         })
       }
       
+      runHooks('enrichRecordWithRelationships')
+
       // The called hooks should NOT change context.record
       runHooks('finish')
       runHooks('finishGet')
@@ -505,17 +507,14 @@ export const RestApiPlugin = {
       
       // Transform output if in simplified mode
       if (context.simplified) {
-   
-        if (context.record) {
-          // Convert JSON:API response back to simplified format
-          // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
-          // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
-          return transformJsonApiToSimplified(
-            context.record,
-            schemaStructure,
-            schemaRelationships
-          );
-        }
+        // Convert JSON:API response back to simplified format
+        // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
+        // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
+        return transformJsonApiToSimplified(
+          context.record,
+          schemaStructure,
+          schemaRelationships
+        );
       }
       
       return context.record
@@ -554,25 +553,41 @@ export const RestApiPlugin = {
 
         // Assign common context properties
         context.schemaInfo = scopes[scopeName].vars.schemaInfo;
-        context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
+        context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, vars], false);
+
+        // These only make sense as parameter per query, not in vars etc.
         context.queryParams = params.queryParams || {};
         context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
         context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+
         context.scopeName = scopeName;
 
-        debugger 
-        // Extract transaction from params if provided
-        
-        if (!helpers.newTransaction) {
-          context.transaction = trx;
-          context.shouldCommit = trx && !existingTrx;
-        } else {
-          const existingTrx = params.transaction;
-          const trx = existingTrx || (await helpers.newTransaction())
-          context.transaction = trx;
-          context.shouldCommit = trx && !existingTrx;
+        // Transaction handling
+        let currentTransaction = params.transaction;
+        let shouldCommitTransaction = false;
+
+        if (helpers.newTransaction) {
+            // If newTransaction helper exists, it means we can create transactions
+            if (!currentTransaction) {
+                // No existing transaction provided, so create a new one
+                currentTransaction = await helpers.newTransaction();
+                shouldCommitTransaction = true; // We created it, so we should commit/rollback
+            }
+        } else if (currentTransaction === undefined) {
+            // If newTransaction helper is NOT available AND no transaction was provided,
+            // then we're in a scenario where transactions aren't supported or weren't used.
+            // We should ensure context.transaction is explicitly null or undefined,
+            // and shouldCommit is false.
+            currentTransaction = null; 
+            shouldCommitTransaction = false;
         }
-          
+        // If currentTransaction was provided AND helpers.newTransaction does NOT exist,
+        // we assume it's an external transaction that we shouldn't manage (i.e., not commit/rollback).
+        // shouldCommitTransaction remains false in this case.
+
+        context.transaction = currentTransaction;
+        context.shouldCommit = shouldCommitTransaction;
+
         // These are just shortcuts used in this function and will be returned
         const schema = context.schemaInfo.schema;
         const schemaStructure = context.schemaInfo.schema.structure;
@@ -622,9 +637,169 @@ export const RestApiPlugin = {
           );
         }
 
+        // If both URL path ID and request body ID are provided, they must match
+        if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
+          throw new RestApiValidationError(
+            `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
+            { 
+              fields: ['data.id'], 
+              violations: [{ 
+                field: 'data.id', 
+                rule: 'id_consistency', 
+                message: `Request body ID must match URL path ID when both are provided` 
+              }] 
+            }
+          );
+        }
+
+
+
         // Return key schema-related objects for direct use in the main methods
         return { schema, schemaStructure, schemaRelationships };
     }
+
+    const getMethodHookSuffix = (method) => {
+      if (!method) {
+        return ''; // Or throw an error, depending on desired strictness
+      }
+      return method.charAt(0).toUpperCase() + method.slice(1);
+    };
+
+    /**
+     * Handles common schema validation logic for POST, PUT, and PATCH methods.
+     *
+     * @param {object} params - The params object from addScopeMethod.
+     * @param {object} context - The context object from addScopeMethod.
+     * @param {object} schema - The validation schema.
+     * @param {object} belongsToUpdates - Object containing belongsTo foreign key updates.
+     * @param {boolean} [isPartialValidation=false] - Whether to perform partial validation (for PATCH).
+     * @returns {Promise<void>}
+     * @throws {RestApiValidationError} If schema validation fails.
+     */
+
+    const validateResourceAttributesBeforeWrite = async ({ 
+        context, 
+        schema, 
+        belongsToUpdates, 
+        runHooks, 
+        isPartialValidation = false 
+    }) => {
+      // Dynamically get the method suffix
+      const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
+
+      runHooks('beforeSchemaValidate');
+      runHooks(`beforeSchemaValidate${methodSpecificHookSuffix}`);
+
+      // Store original input attributes before validation adds defaults (primarily for POST)
+      // Only if it's not already set and the current method is POST
+      if (!context.originalInputAttributes && context.method === 'post') {
+          context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) };
+      }
+      
+      // Merge belongsTo updates with attributes BEFORE validation
+      const attributesToValidate = {
+          ...(context.inputRecord.data.attributes || {}),
+          ...belongsToUpdates
+      };
+
+      const validationOptions = isPartialValidation ? { onlyObjectValues: true } : {};
+
+      const { validatedObject, errors } = await schema.validate(attributesToValidate, validationOptions);
+
+      if (Object.keys(errors).length > 0) {
+          const violations = Object.entries(errors).map(([field, error]) => ({
+              field: `data.attributes.${field}`,
+              rule: error.code || 'invalid_value',
+              message: error.message
+          }));
+
+          throw new RestApiValidationError(
+              'Schema validation failed for resource attributes',
+              { 
+                  fields: Object.keys(errors).map(field => `data.attributes.${field}`),
+                  violations 
+              }
+          );
+      }
+      context.inputRecord.data.attributes = validatedObject;
+
+      runHooks(`afterSchemaValidate${methodSpecificHookSuffix}`);
+      runHooks('afterSchemaValidate');
+    };
+
+
+    // Function: handleRecordReturn
+    // Location: You should place this in a common utility file that can be imported
+    //           by your API scope methods (post, put, patch).
+    //           A good place might be in './lib/commonResponseHelpers.js' or similar,
+    //           and then import it into the main plugin file where your addScopeMethods are defined.
+
+    async function handleRecordReturnAfterWrite({
+        context,
+        scopeName,
+        api,
+        scopes, // Required because api.resources[scopeName].get() uses 'scopes' internally.
+        schemaStructure,
+        schemaRelationships,
+        scopeOptions, // Used for cascadeConfig
+        vars,         // Used for cascadeConfig
+        runHooks      // Used to run finish hooks
+    }) {
+        const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
+
+        // Determine if we should return the full record based on configurations.
+        const shouldReturnRecord = context.returnFullRecord !== undefined 
+          ? context.returnFullRecord 
+          : cascadeConfig(context.method, [scopeOptions.returnFullRecord, vars.returnFullRecord], true);
+
+        if (shouldReturnRecord) {
+            // If a full record is requested, use the API's own 'get' method.
+            // The 'get' method itself is responsible for fetching the data,
+            // applying its own enrichment hooks, and formatting to JSON:API.
+            // Therefore, NO further enrichment is needed here.
+            context.returnRecord = await api.resources[scopeName].get({
+                id: context.id, // context.id is now reliably set by POST, PUT, and PATCH
+                queryParams: context.queryParams,
+                transaction: null, // Ensure no transaction is passed if it was committed already
+                simplified: false // Request the full JSON:API format from GET for internal processing
+            });
+            
+            // If the 'get' method returns null/undefined (e.g., resource was deleted between write and read),
+            // we might still need to handle a potential 404 or just return undefined.
+            // For this specific flow (POST/PUT/PATCH response), the record *should* exist.
+            // If it doesn't, it implies a deeper issue or a race condition.
+            if (!context.returnRecord) {
+                // Decide how to handle this edge case. Returning undefined is consistent with
+                // the 'else' branch if nothing is supposed to be returned.
+                // Or you could throw an error if a record *must* be returned.
+                context.returnRecord = undefined;
+            }
+
+        } else {
+            // If 'shouldReturnRecord' is false, the explicit requirement is to return nothing.
+            context.returnRecord = undefined;
+        }
+
+        // Run common finish hooks.
+        await runHooks('finish');
+        // Dynamically call method-specific finish hooks (e.g., 'finishPost', 'finishPut', 'finishPatch').
+        await runHooks(`finish${methodSpecificHookSuffix}`);
+
+        // Transform output if in simplified mode and there is a record to transform.
+        if (context.simplified && context.returnRecord) {
+            // Ensure we are transforming the 'returnRecord' which comes from the 'get' call,
+            // as it contains the fully enriched and structured JSON:API data.
+            return transformJsonApiToSimplified(
+                context.returnRecord,
+                schemaStructure,
+                schemaRelationships
+            );
+        }
+        
+        // Return the final record (will be undefined if shouldReturnRecord was false).
+        return context.returnRecord;
+    }
+
 
     /**
      * POST
@@ -824,12 +999,11 @@ export const RestApiPlugin = {
       context.method = 'post'
       
       const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
-          params, context, vars, scopes, scopeOptions, scopeName
+          params, context, vars, scopes, scopeOptions, scopeName, helpers
       });
       
       try {
-        
-        debugger
+
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPost')
@@ -850,42 +1024,14 @@ export const RestApiPlugin = {
           schemaRelationships
         );
 
-        // Apply schema to the main attributes
-        runHooks('beforeSchemaValidate')
-        runHooks('beforeSchemaValidatePost')
-        
-        // Store original input attributes before validation adds defaults
-        context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) };
-        
-        // Merge belongsTo updates with attributes BEFORE validation
-        const attributesToValidate = {
-          ...(context.inputRecord.data.attributes || {}),
-          ...belongsToUpdates
-        };
-        
-        // Validate main resource attributes INCLUDING foreign keys
-        const { validatedObject: validatedAttrs, errors: mainErrors } = await schema.validate(attributesToValidate);
-        if (Object.keys(mainErrors).length > 0) {
-          const violations = Object.entries(mainErrors).map(([field, error]) => ({
-            field: `data.attributes.${field}`,
-            rule: error.code || 'invalid_value',
-            message: error.message
-          }));
-          
-          throw new RestApiValidationError(
-            'Schema validation failed for resource attributes',
-            { 
-              fields: Object.keys(mainErrors).map(field => `data.attributes.${field}`),
-              violations 
-            }
-          );
-        }
-        context.inputRecord.data.attributes = validatedAttrs;
-        
-               
-        runHooks('afterSchemaValidatePost')
-        runHooks('afterSchemaValidate')
+        await validateResourceAttributesBeforeWrite({ 
+            context, 
+            schema, 
+            belongsToUpdates, 
+            runHooks, 
+        });
 
+        
         runHooks('checkPermissions')
         runHooks('checkPermissionsPost')
         
@@ -893,7 +1039,7 @@ export const RestApiPlugin = {
         runHooks('beforeDataCallPost')
         
         // Create the main record - storage helper should return the created record with its ID
-        context.record = await helpers.dataPost({
+        context.id = await helpers.dataPost({
           scopeName,
           context,
           transaction: context.transaction,
@@ -926,7 +1072,7 @@ export const RestApiPlugin = {
           // is false, it skips validation for performance in bulk operations.
           // Example: article.tags: [{id: '1'}, {id: '2'}] creates two article_tags records:
           // {article_id: 100, tag_id: 1} and {article_id: 100, tag_id: 2}
-          await createPivotRecords(api, context.record.data.id, relDef, relData, context.transaction);
+          await createPivotRecords(api, context.id, relDef, relData, context.transaction);
         }
         
         // Commit transaction if we created it
@@ -934,67 +1080,17 @@ export const RestApiPlugin = {
           await context.transaction.commit();
         }
         
-        // Determine if we should return the full record
-        const shouldReturnRecord = context.returnFullRecord !== undefined 
-          ? context.returnFullRecord 
-          : cascadeConfig('post', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
-        
-        if (shouldReturnRecord) {
-          // Get the full record with relationships
-          // Use the API's own get method to ensure all hooks and transformations are applied
-          context.returnRecord = await api.resources[scopeName].get({
-            id: context.record.data.id,
-            queryParams: context.queryParams,
-            transaction: context.transaction, // Use original transaction for read
-            simplified: false
-          });
-          
-          // Enrich the return record's attributes
-          if (context.returnRecord?.data?.attributes) {
-            context.returnRecord.data.attributes = await scope.enrichAttributes({ 
-              attributes: context.returnRecord.data.attributes, 
-              parentContext: context 
-            });
-          }
-          
-          // Enrich included resources if any
-          for (const entry of (context.returnRecord?.included || [])) {
-            const entryScope = scopes[entry.type];
-            entry.attributes = await entryScope.enrichAttributes({ 
-              attributes: entry.attributes, 
-              parentContext: context 
-            });
-          }
-        } else {
-          // Return minimal record (just what was provided in original input, plus ID)
-          context.returnRecord = {
-            data: {
-              type: scopeName,
-              id: context.record.data.id,
-              attributes: { ...context.originalInputAttributes }
-            }
-          };
-          
-          // Don't enrich attributes when returning minimal record
-          // This ensures we only return exactly what was provided, no defaults
-        }
-        
-        runHooks('finish')
-        runHooks('finishPost')
-        
-        // Transform output if in simplified mode
-        if (context.simplified) {
-          const finalRecord = context.returnRecord || context.record;
-          if (finalRecord) {
-            return transformJsonApiToSimplified(
-              finalRecord,
-              schemaStructure,
-              schemaRelationships
-            );
-          }
-        }
-        
-        return context.returnRecord
+        return handleRecordReturnAfterWrite({
+            context,
+            scopeName,
+            api,
+            scopes,
+            schemaStructure,      // These variables need to be available in the context/scope
+            schemaRelationships, // Or passed explicitly if they are not part of context/scope
+            scopeOptions,
+            vars,
+            runHooks
+        });
         
       } catch (error) {
         // Rollback transaction if we created it
@@ -1192,7 +1288,7 @@ export const RestApiPlugin = {
     context.method = 'put'
     
     const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
-        params, context, vars, scopes, scopeOptions, scopeName
+        params, context, vars, scopes, scopeOptions, scopeName, helpers
     });
     context.id = context.inputRecord.id;
 
@@ -1201,21 +1297,6 @@ export const RestApiPlugin = {
       await runHooks('beforeProcessing')
       await runHooks('beforeProcessingPut')
   
-    // If both URL path ID and request body ID are provided, they must match
-    if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
-      throw new RestApiValidationError(
-        `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
-        { 
-          fields: ['data.id'], 
-          violations: [{ 
-            field: 'data.id', 
-            rule: 'id_consistency', 
-            message: `Request body ID must match URL path ID when both are provided` 
-          }] 
-        }
-      );
-    }
-
     // Validate PUT payload to ensure it's a complete resource replacement operation.
     // PUT requires the full resource representation including ID (unlike POST which generates ID).
     // It validates that data.id matches the URL parameter, prevents 'included' array (which is
@@ -1224,23 +1305,13 @@ export const RestApiPlugin = {
     // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
     validatePutPayload(context.inputRecord, scopes)
     
-
-    if (vars.loadRecordOnPut) {
-      context.recordBefore = await helpers.dataGet({
-        scopeName,
-        context,
-        transaction: context.transaction
-      });
-
-      context.exists = !!context.recordBefore
-    } else {
-      // CHECK EXISTENCE FIRST - hooks need to know!
-      context.exists = await helpers.dataExists({
-        scopeName,
-        context,
-        transaction: context.transaction
-      });
-    }
+    // Check existence first
+    context.exists = await helpers.dataExists({
+      scopeName,
+      context,
+      transaction: context.transaction
+    });
+  
     context.isCreate = !context.exists;
     context.isUpdate = context.exists;
 
@@ -1253,45 +1324,20 @@ export const RestApiPlugin = {
       schemaRelationships
     );
 
-    // Schema validation can now be different for create vs update
-    runHooks('beforeSchemaValidate')
-    runHooks('beforeSchemaValidatePut')
-    runHooks(`beforeSchemaValidatePut${context.isCreate ? 'Create' : 'Update'}`)
-  
-    // Merge belongsTo updates with attributes BEFORE validation
-    const attributesToValidate = {
-      ...(context.inputRecord.data.attributes || {}),
-      ...belongsToUpdates
-    };
-    
-    
-    const { validatedObject, errors } = await schema.validate(attributesToValidate);
-    if (Object.keys(errors).length > 0) {
-      const violations = Object.entries(errors).map(([field, error]) => ({
-        field: `data.attributes.${field}`,
-        rule: error.code || 'invalid_value',
-        message: error.message
-      }));
-      
-      throw new RestApiValidationError(
-        'Schema validation failed for resource attributes',
-        { 
-          fields: Object.keys(errors).map(field => `data.attributes.${field}`),
-          violations 
-        }
-      );
-    }
-    context.inputRecord.data.attributes = validatedObject;
+    await validateResourceAttributesBeforeWrite({ 
+            context, 
+            schema, 
+            belongsToUpdates, 
+            runHooks, 
+        });
 
-    runHooks('afterSchemaValidatePut')
-    runHooks('afterSchemaValidate')
-    
+
     // For PUT, we also need to handle relationships that are NOT provided
     // (they should be set to null/empty as PUT is a complete replacement)
     const allRelationships = {};
     
     // Collect all defined relationships for this resource
-    for (const [relName, relDef] of Object.entries(relationships || {})) {
+    for (const [relName, relDef] of Object.entries(schemaRelationships || {})) {
       if (relDef.manyToMany) {
         allRelationships[relName] = { type: 'manyToMany', relDef: relDef.manyToMany };
       }
@@ -1309,7 +1355,7 @@ export const RestApiPlugin = {
     }
     
     // Also check schema fields for belongsTo relationships
-    for (const [fieldName, fieldDef] of Object.entries(schemaFields)) {
+    for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
       if (fieldDef.as && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic)) {
         allRelationships[fieldDef.as] = { 
           type: fieldDef.belongsToPolymorphic ? 'polymorphic' : 'belongsTo',
@@ -1353,7 +1399,6 @@ export const RestApiPlugin = {
       };
     }
 
-    // Permissions can now check differently
     runHooks('checkPermissions')
     runHooks('checkPermissionsPut')
     runHooks(`checkPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
@@ -1361,7 +1406,7 @@ export const RestApiPlugin = {
     runHooks('beforeDataCall')
     runHooks('beforeDataCallPut')
     // Pass the operation type to the helper
-    context.record = await helpers.dataPut({
+    await helpers.dataPut({
       scopeName,
       context,
       transaction: context.transaction
@@ -1406,82 +1451,18 @@ export const RestApiPlugin = {
       await context.transaction.commit();
     }
 
-    // If there was previous data, run a data permission check
-    if (context.recordBefore) {      
-      runHooks('checkDataPermissions')
-      runHooks('checkDataPermissionsPut')
-      runHooks(`checkDataPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
-    }
-
-    // Determine if we should return the full record
-    const shouldReturnRecord = context.returnFullRecord !== undefined ? 
-      context.returnFullRecord : 
-      cascadeConfig('put', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
-    
-    if (shouldReturnRecord) {
-      // Get the full record after all updates are complete
-      // The storage layer now only returns success status, not the full record
-      context.returnRecord = await api.resources[scopeName].get({
-        id: context.id,
-        queryParams: context.queryParams,
-        transaction: context.transaction,  // Use original transaction for read
-        simplified: false  // Always get JSON:API format for internal processing
-      });
-      
-      // Enrich the return record's attributes
-      if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({ 
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context 
-        });
-      }
-      
-      // Enrich included resources if any
-      for (const entry of (context.returnRecord?.included || [])) {
-        const entryScope = scopes[entry.type];
-        entry.attributes = await entryScope.enrichAttributes({ 
-          attributes: entry.attributes, 
-          parentContext: context 
-        });
-      }
-    } else {
-      // Return minimal record - just the updated data
-      context.returnRecord = {
-        data: {
-          type: scopeName,
-          id: context.id,
-          attributes: context.finalAttributes || params.inputRecord.data.attributes
-        }
-      };
-      
-      // Add relationships if they were in the input
-      if (context.inputRecord.data.relationships) {
-        context.returnRecord.data.relationships = params.inputRecord.data.relationships;
-      }
-      
-      // Still enrich the attributes
-      if (context.returnRecord?.data?.attributes) {
-        context.returnRecord.data.attributes = await scope.enrichAttributes({ 
-          attributes: context.returnRecord.data.attributes, 
-          parentContext: context 
-        });
-      }
-    }
-
-    runHooks('finish')
-    runHooks('finishPut')
-    
-    // Transform output if in simplified mode
-    if (context.simplified && context.returnRecord) {
-      return transformJsonApiToSimplified(
-        context.returnRecord,
+    return handleRecordReturnAfterWrite({
+        context,
+        scopeName,
+        api,
+        scopes,
         schemaStructure,
-        schemaRelationships
-      );
-    }
-    
-    return context.returnRecord
-    
+        schemaRelationships,
+        scopeOptions,
+        vars,
+        runHooks
+    });
+
     } catch (error) {
       // Rollback transaction if we created it
       if (context.shouldCommit) {
@@ -1655,203 +1636,100 @@ export const RestApiPlugin = {
       context.method = 'patch'
         
       const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
-          params, context, vars, scopes, scopeOptions, scopeName
+          params, context, vars, scopes, scopeOptions, scopeName, helpers
       });
       context.id = context.inputRecord.id;
-      
-      // ====================================================================================
-      // END OF VERY SIMILAR BETWEEN POST, PUT AND PATCH.
-      // ====================================================================================
       
       try {        
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPatch')
-            
-      // If both URL path ID and request body ID are provided, they must match
-      if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
-        throw new RestApiValidationError(
-          `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
-          { 
-            fields: ['data.id'], 
-            violations: [{ 
-              field: 'data.id', 
-              rule: 'id_consistency', 
-              message: `Request body ID must match URL path ID when both are provided` 
-            }] 
-          }
-        );
-      }
 
-      // Validate PATCH payload to ensure the partial update actually contains changes.
-      // PATCH requests must include either attributes to update or relationships to modify -
-      // an empty PATCH is invalid. This prevents accidental no-op requests and ensures clients
-      // are explicit about what they want to change. Unlike PUT, PATCH preserves all fields
-      // not mentioned in the request.
-      // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
-      validatePatchPayload(context.inputRecord, scopes)
-      
-
-      // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
-      // Example: relationships.author -> author_id: '123' for storage
-      // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
-      const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-        context.inputRecord,
-        schemaStructure,
-        schemaRelationships
-      );
-
-      // Schema validation for partial updates
-      runHooks('beforeSchemaValidate')
-      runHooks('beforeSchemaValidatePatch')
-      
-      // Merge belongsTo updates with attributes BEFORE validation
-      const attributesToValidate = {
-        ...(context.inputRecord.data.attributes || {}),
-        ...belongsToUpdates
-      };
-      
-      // Validate only the provided attributes (partial validation)
-      if (Object.keys(attributesToValidate).length > 0) {
-        const { validatedObject, errors } = await schema.validate(
-          attributesToValidate, 
-          { onlyObjectValues: true }
-        );
-        if (Object.keys(errors).length > 0) {
-          const violations = Object.entries(errors).map(([field, error]) => ({
-            field: `data.attributes.${field}`,
-            rule: error.code || 'invalid_value',
-            message: error.message
-          }));
-          
-          throw new RestApiValidationError(
-            'Schema validation failed for resource attributes',
-            { 
-              fields: Object.keys(errors).map(field => `data.attributes.${field}`),
-              violations 
-            }
-          );
-        }
-        context.inputRecord.data.attributes = validatedObject;
-      }
-
-      runHooks('afterSchemaValidatePatch')
-      runHooks('afterSchemaValidate')
-
-      // Permissions check
-      runHooks('checkPermissions')
-      runHooks('checkPermissionsPatch')
-      
-      runHooks('beforeDataCall')
-      runHooks('beforeDataCallPatch')
-
-      // Call the storage helper - should return the patched record
-      context.record = await helpers.dataPatch({
-        scopeName,
-        context,
-        transaction: context.transaction
-      });
-
-      runHooks('afterDataCallPatch')
-      runHooks('afterDataCall')
-
-      // Process many-to-many relationships after main record update
-      // For PATCH, we only update the relationships that were explicitly provided
-      for (const { relName, relDef, relData } of manyToManyRelationships) {
+        // Validate PATCH payload to ensure the partial update actually contains changes.
+        // PATCH requests must include either attributes to update or relationships to modify -
+        // an empty PATCH is invalid. This prevents accidental no-op requests and ensures clients
+        // are explicit about what they want to change. Unlike PUT, PATCH preserves all fields
+        // not mentioned in the request.
+        // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
+        validatePatchPayload(context.inputRecord, scopes)
         
-        // Validate pivot resource exists
-        if (!scopes[relDef.through]) {
-          throw new RestApiValidationError(
-            `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
-            { 
-              fields: [`relationships.${relName}`],
-              violations: [{
-                field: `relationships.${relName}`,
-                rule: 'missing_pivot_resource',
-                message: `Pivot resource '${relDef.through}' must be defined`
-              }]
-            }
-          );
-        }
-        
-        // Update many-to-many relationships using intelligent synchronization that preserves pivot data.
-        // This compares current relationships with desired state: removes records no longer needed,
-        // adds new relationships, and crucially preserves existing pivot records with their metadata
-        // (like created_at timestamps or extra pivot fields). This is superior to delete-all-recreate
-        // because it maintains audit trails and custom pivot data.
-        // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
-        // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
-        // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
-        await updateManyToManyRelationship(api, context.id, relDef, relData, context.transaction);
-      }
-      
-      // Determine if we should return the full record
-      const shouldReturnRecord = context.returnFullRecord !== undefined ? 
-        context.returnFullRecord : 
-        cascadeConfig('patch', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
-      
-      if (shouldReturnRecord) {
-        // Get the full record after all updates are complete
-        // This ensures includes see the updated state after all operations
-        context.returnRecord = await api.resources[scopeName].get({
-          id: context.id,
-          queryParams: context.queryParams,
-          transaction: context.transaction,  // Use active transaction for read
-        });
-      } else {
-        // Return minimal record - use the record returned from dataPatch
-        context.returnRecord = context.record;
-        
-        // Still enrich the attributes if present
-        if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await scope.enrichAttributes({ 
-            attributes: context.returnRecord.data.attributes, 
-            parentContext: context 
-          });
-        }
-      }
 
-      // Commit transaction if we created it
-      if (context.shouldCommit) {
-        await context.transaction.commit();
-      }
-
-      runHooks('checkDataPermissions')
-      runHooks('checkDataPermissionsPatch')
-      
-      // Enrich included resources if any (only if we fetched full record)
-      if (shouldReturnRecord) {
-        // Enrich the return record's attributes
-        if (context.returnRecord?.data?.attributes) {
-          context.returnRecord.data.attributes = await scope.enrichAttributes({ 
-            attributes: context.returnRecord.data.attributes, 
-            parentContext: context 
-          });
-        }
-        
-        // Enrich included resources
-        for (const entry of (context.returnRecord?.included || [])) {
-          const entryScope = scopes[entry.type];
-          entry.attributes = await entryScope.enrichAttributes({ 
-            attributes: entry.attributes, 
-            parentContext: context 
-          });
-        }
-      }
-
-      runHooks('finish')
-      runHooks('finishPatch')
-      
-      // Transform output if in simplified mode
-      if (simplified && context.returnRecord) {
-        return transformJsonApiToSimplified(
-          context.returnRecord,
+        // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
+        // Example: relationships.author -> author_id: '123' for storage
+        // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
+        const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+          context.inputRecord,
           schemaStructure,
           schemaRelationships
         );
-      }
-      
-      return context.returnRecord
+
+        await validateResourceAttributesBeforeWrite({ 
+            context, 
+            schema, 
+            belongsToUpdates, 
+            runHooks,
+            isPartialValidation: true 
+        });
+
+    
+        // Permissions check
+        runHooks('checkPermissions')
+        runHooks('checkPermissionsPatch')
+        
+        runHooks('beforeDataCall')
+        runHooks('beforeDataCallPatch')
+
+        // Call the storage helper - should return the patched record
+        await helpers.dataPatch({
+          scopeName,
+          context,
+          transaction: context.transaction
+        });
+
+        runHooks('afterDataCallPatch')
+        runHooks('afterDataCall')
+
+        // Process many-to-many relationships after main record update
+        // For PATCH, we only update the relationships that were explicitly provided
+        for (const { relName, relDef, relData } of manyToManyRelationships) {
+          
+          // Validate pivot resource exists
+          if (!scopes[relDef.through]) {
+            throw new RestApiValidationError(
+              `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
+              { 
+                fields: [`relationships.${relName}`],
+                violations: [{
+                  field: `relationships.${relName}`,
+                  rule: 'missing_pivot_resource',
+                  message: `Pivot resource '${relDef.through}' must be defined`
+                }]
+              }
+            );
+          }
+          
+          // Update many-to-many relationships using intelligent synchronization that preserves pivot data.
+          // This compares current relationships with desired state: removes records no longer needed,
+          // adds new relationships, and crucially preserves existing pivot records with their metadata
+          // (like created_at timestamps or extra pivot fields). This is superior to delete-all-recreate
+          // because it maintains audit trails and custom pivot data.
+          // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
+          // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
+          // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
+          await updateManyToManyRelationship(api, context.id, relDef, relData, context.transaction);
+        }
+        
+        return handleRecordReturnAfterWrite({
+          context,
+          scopeName,
+          api,
+          scopes,
+          schemaStructure,      // These variables need to be available in the context/scope
+          schemaRelationships, // Or passed explicitly if they are not part of context/scope
+          scopeOptions,
+          vars,
+          runHooks
+        });
       
       } catch (error) {
         // Rollback transaction if we created it

@@ -80,7 +80,6 @@ export const RestApiKnexPlugin = {
       })
     
       helpers.newTransaction = async () => {
-        debugger
         return knex.transaction()
       }
 
@@ -249,6 +248,7 @@ export const RestApiKnexPlugin = {
         relationshipIncludeHelpers
       });
       
+
       // Build and return response
       return buildJsonApiResponse(records, scopeName, schema, included, false, scopes, vars);
     };
@@ -270,15 +270,7 @@ export const RestApiKnexPlugin = {
       
       // Extract the ID value (SQLite returns array of objects)
       const id = result[0]?.[idProperty] || result[0];
-      
-      // Fetch the created record
-      const newRecord = await db(tableName)
-        .where(idProperty, id)
-        .first();
-      
-      return {
-        data: await toJsonApi(scopeName, newRecord, schema, scopes, vars)
-      };
+      return id
     };
     
     helpers.dataPut = async ({ scopeName, context, transaction }) => {
@@ -325,14 +317,7 @@ export const RestApiKnexPlugin = {
         }
       }
       
-      // Fetch and return the updated record
-      const updatedRecord = await db(tableName)
-        .where(idProperty, id)
-        .first();
-      
-      return {
-        data: await toJsonApi(scopeName, updatedRecord, schema, scopes, vars)
-      };
+      return 
     };
     
     helpers.dataPatch = async ({ scopeName, context, transaction }) => {
@@ -371,14 +356,7 @@ export const RestApiKnexPlugin = {
           .update(finalAttributes);
       }
       
-      // Fetch and return the updated record
-      const updatedRecord = await db(tableName)
-        .where(idProperty, id)
-        .first();
-      
-      return {
-        data: await toJsonApi(scopeName, updatedRecord, schema, scopes, vars)
-      };
+      return
     };
     
     helpers.dataDelete = async ({ scopeName, context, transaction }) => {
