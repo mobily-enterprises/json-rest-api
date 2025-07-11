@@ -8,113 +8,6 @@
  * API requests are made.
  */
 
-/**
- * Validates a polymorphic relationship definition
- * 
- * Called during scope registration to ensure configuration is correct.
- * Performs comprehensive validation of polymorphic relationship setup.
- * This is a private helper used by validatePolymorphicRelationships.
- * 
- * @param {Object} relDef - The relationship definition object
- * @param {Object} relDef.belongsToPolymorphic - Polymorphic configuration
- * @param {Array<string>} relDef.belongsToPolymorphic.types - Allowed target types
- * @param {string} relDef.belongsToPolymorphic.typeField - Field storing the type
- * @param {string} relDef.belongsToPolymorphic.idField - Field storing the ID
- * @param {string} scopeName - The scope being registered (for error messages)
- * @param {Object} scopes - The hooked-api scopes object containing all registered scopes
- * @returns {Object} Validation result
- * @returns {boolean} returns.valid - Whether the configuration is valid
- * @returns {string} [returns.error] - Error message if invalid
- * 
- * @example <caption>Valid polymorphic configuration</caption>
- * const relDef = {
- *   belongsToPolymorphic: {
- *     types: ['articles', 'videos', 'products'],
- *     typeField: 'commentable_type',
- *     idField: 'commentable_id'
- *   },
- *   as: 'commentable',
- *   sideLoad: true
- * };
- * 
- * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);
- * // Returns: { valid: true }
- * 
- * @example <caption>Invalid configuration (missing types)</caption>
- * const relDef = {
- *   belongsToPolymorphic: {
- *     typeField: 'commentable_type',
- *     idField: 'commentable_id'
- *     // Missing: types array!
- *   }
- * };
- * 
- * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);
- * // Returns: { valid: false, error: 'belongsToPolymorphic.types must be a non-empty array' }
- * 
- * @example <caption>Invalid configuration (unknown scope type)</caption>
- * const relDef = {
- *   belongsToPolymorphic: {
- *     types: ['articles', 'unicorns'],  // 'unicorns' scope doesn't exist
- *     typeField: 'attachable_type',
- *     idField: 'attachable_id'
- *   }
- * };
- * 
- * const result = validatePolymorphicRelationship(relDef, 'attachments', scopes);
- * // Returns: { valid: false, error: "Polymorphic type 'unicorns' is not a registered scope" }
- * 
- * @private
- */
-const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
-  // Validation logic:
-  // 1. Check relDef.belongsToPolymorphic exists
-  // 2. Validate required properties: types, typeField, idField
-  // 3. Ensure types is non-empty array
-  // 4. Verify all types are registered scopes
-  // 5. Check that typeField and idField exist in the schema
-  
-  const { belongsToPolymorphic } = relDef;
-  
-  if (!belongsToPolymorphic) {
-    return { valid: false, error: 'Missing belongsToPolymorphic definition' };
-  }
-  
-  const { types, typeField, idField } = belongsToPolymorphic;
-  
-  if (!types || !Array.isArray(types) || types.length === 0) {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.types must be a non-empty array' 
-    };
-  }
-  
-  if (!typeField || typeof typeField !== 'string') {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.typeField must be specified' 
-    };
-  }
-  
-  if (!idField || typeof idField !== 'string') {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.idField must be specified' 
-    };
-  }
-  
-  // Check that all types are valid scopes
-  for (const type of types) {
-    if (!scopes[type]) {
-      return { 
-        valid: false, 
-        error: `Polymorphic type '${type}' is not a registered scope` 
-      };
-    }
-  }
-  
-  return { valid: true };
-};
 
 /**
  * Validates polymorphic relationships in scope configuration to ensure they are properly defined.
@@ -251,3 +144,113 @@ export function validatePolymorphicRelationships({ eventData, api }) {
     }
   }
 }
+
+
+/**
+ * Validates a polymorphic relationship definition
+ * 
+ * Called during scope registration to ensure configuration is correct.
+ * Performs comprehensive validation of polymorphic relationship setup.
+ * This is a private helper used by validatePolymorphicRelationships.
+ * 
+ * @param {Object} relDef - The relationship definition object
+ * @param {Object} relDef.belongsToPolymorphic - Polymorphic configuration
+ * @param {Array<string>} relDef.belongsToPolymorphic.types - Allowed target types
+ * @param {string} relDef.belongsToPolymorphic.typeField - Field storing the type
+ * @param {string} relDef.belongsToPolymorphic.idField - Field storing the ID
+ * @param {string} scopeName - The scope being registered (for error messages)
+ * @param {Object} scopes - The hooked-api scopes object containing all registered scopes
+ * @returns {Object} Validation result
+ * @returns {boolean} returns.valid - Whether the configuration is valid
+ * @returns {string} [returns.error] - Error message if invalid
+ * 
+ * @example <caption>Valid polymorphic configuration</caption>
+ * const relDef = {
+ *   belongsToPolymorphic: {
+ *     types: ['articles', 'videos', 'products'],
+ *     typeField: 'commentable_type',
+ *     idField: 'commentable_id'
+ *   },
+ *   as: 'commentable',
+ *   sideLoad: true
+ * };
+ * 
+ * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);
+ * // Returns: { valid: true }
+ * 
+ * @example <caption>Invalid configuration (missing types)</caption>
+ * const relDef = {
+ *   belongsToPolymorphic: {
+ *     typeField: 'commentable_type',
+ *     idField: 'commentable_id'
+ *     // Missing: types array!
+ *   }
+ * };
+ * 
+ * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);
+ * // Returns: { valid: false, error: 'belongsToPolymorphic.types must be a non-empty array' }
+ * 
+ * @example <caption>Invalid configuration (unknown scope type)</caption>
+ * const relDef = {
+ *   belongsToPolymorphic: {
+ *     types: ['articles', 'unicorns'],  // 'unicorns' scope doesn't exist
+ *     typeField: 'attachable_type',
+ *     idField: 'attachable_id'
+ *   }
+ * };
+ * 
+ * const result = validatePolymorphicRelationship(relDef, 'attachments', scopes);
+ * // Returns: { valid: false, error: "Polymorphic type 'unicorns' is not a registered scope" }
+ * 
+ * @private
+ */
+const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
+  // Validation logic:
+  // 1. Check relDef.belongsToPolymorphic exists
+  // 2. Validate required properties: types, typeField, idField
+  // 3. Ensure types is non-empty array
+  // 4. Verify all types are registered scopes
+  // 5. Check that typeField and idField exist in the schema
+  
+  const { belongsToPolymorphic } = relDef;
+  
+  if (!belongsToPolymorphic) {
+    return { valid: false, error: 'Missing belongsToPolymorphic definition' };
+  }
+  
+  const { types, typeField, idField } = belongsToPolymorphic;
+  
+  if (!types || !Array.isArray(types) || types.length === 0) {
+    return { 
+      valid: false, 
+      error: 'belongsToPolymorphic.types must be a non-empty array' 
+    };
+  }
+  
+  if (!typeField || typeof typeField !== 'string') {
+    return { 
+      valid: false, 
+      error: 'belongsToPolymorphic.typeField must be specified' 
+    };
+  }
+  
+  if (!idField || typeof idField !== 'string') {
+    return { 
+      valid: false, 
+      error: 'belongsToPolymorphic.idField must be specified' 
+    };
+  }
+  
+  // Check that all types are valid scopes
+  for (const type of types) {
+    if (!scopes[type]) {
+      return { 
+        valid: false, 
+        error: `Polymorphic type '${type}' is not a registered scope` 
+      };
+    }
+  }
+  
+  return { valid: true };
+};
+

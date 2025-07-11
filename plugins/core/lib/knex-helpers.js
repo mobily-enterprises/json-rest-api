@@ -42,10 +42,6 @@
  * // 3. Handle multi-tenant databases with prefixed table names
  * // 4. Abstract table name resolution from query building
  */
-export const getTableName = async (scopeName, scopes) => {
-  const schema =  scopes[scopeName].vars.schemaInfo.schema;;
-  return schema?.tableName || scopeName;
-};
 
 /**
  * Extracts all foreign key fields from a schema definition.

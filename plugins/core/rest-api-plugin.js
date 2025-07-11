@@ -19,20 +19,6 @@ import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 import { compileSchemas } from './lib/compileSchemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 
-/**
- * Event handler to compile schemas when a scope is added
- * This ensures schemas are ready before any scope methods are called
- * 
- * @param {Object} params - Event parameters
- * @param {Object} params.eventData - Data from the scope:added event
- * @param {Object} params.eventData.scope - Full scope context with vars, helpers, runHooks, etc.
- */
-async function compileResourceSchemas({ eventData }) {
-  const { scope, scopeName } = eventData;
-  // Compile schemas for this scope using the full context
-  // The scope object from eventData already has the necessary properties
-  await compileSchemas(scope);
-}
 
 const cascadeConfig = (settingName, sources, defaultValue) =>
   sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
@@ -65,19 +51,21 @@ export const RestApiPlugin = {
     // Listen for scope creation to compile schemas immediately.
     // This ensures schemas are compiled and cached before any scope methods are called,
     // making them available for queries and other operations that need schema information.
-    on('scope:added', 'compileResourceSchemas', compileResourceSchemas);
+    on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, eventData.scopeName));
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions['rest-api'] || {};
     
     vars.sortableFields = restApiOptions.sortableFields || []
     vars.defaultSort = restApiOptions.defaultSort || null
-    vars.idProperty = restApiOptions.idProperty || 'id'
     vars.pageSize = restApiOptions.pageSize || 20
     vars.maxPageSize = restApiOptions.maxPageSize || 100
     vars.loadRecordOnPut = !!restApiOptions.loadRecordOnPut
-    vars.simplified = restApiOptions.simplified === undefined ? true : restApiOptions.simplified;
     
+    // Sane defaults
+    vars.simplified = restApiOptions.simplified === undefined ? true : restApiOptions.simplified;
+    vars.idProperty = restApiOptions.idProperty || 'id'
+
     // Return full record configuration
     vars.returnFullRecord = {
       post: restApiOptions.returnFullRecord?.post ?? true,
@@ -236,7 +224,6 @@ export const RestApiPlugin = {
       context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
       context.sortableFields = cascadeConfig('sortableFields', [scopeOptions, vars], [])
       context.defaultSort = cascadeConfig('defaultSort', [scopeOptions, vars], null)
-      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
 
       // Move queryParams to context and sanitize
       log.trace('[QUERY-METHOD] Before sanitizing params:', params);
@@ -264,7 +251,7 @@ export const RestApiPlugin = {
       // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
       // This enriches both schema and searchSchema via hooks
       context.schemaInfo = scopes[scopeName].vars.schemaInfo
-      context.searchSchema = context.schemaInfo.searchSchema;
+      const searchSchema = context.schemaInfo.searchSchema;
       
       // Note: ensureSearchFieldsAreIndexed is no longer needed here because
       // the searchSchema hook can handle indexing during enrichment
@@ -272,7 +259,7 @@ export const RestApiPlugin = {
       // Validate search/filter parameters against searchSchema
       if (context.queryParams.filters && Object.keys(context.queryParams.filters).length > 0) {
         // Only allow filtering if searchSchema is defined
-        if (!context.searchSchema) {
+        if (!searchSchema) {
           throw new RestApiValidationError(
             `Filtering is not enabled for resource '${scopeName}'. To enable filtering, add 'search: true' to schema fields or define a searchSchema.`,
             { 
@@ -286,9 +273,9 @@ export const RestApiPlugin = {
           );
         }
         
-        if (context.searchSchema) {
+        if (searchSchema) {
           // Validate the filter parameters using the cached searchSchema object
-          const { validatedObject, errors } = await context.searchSchema.validate(context.queryParams.filters, { 
+          const { validatedObject, errors } = await searchSchema.validate(context.queryParams.filters, { 
             onlyObjectValues: true // Partial validation for filters
           });
           
@@ -300,7 +287,6 @@ export const RestApiPlugin = {
               message: error.message
             }));
             
-            debugger
             throw new RestApiValidationError(
               'Invalid filter parameters',
               { 
@@ -328,13 +314,9 @@ export const RestApiPlugin = {
       runHooks('beforeData')
       runHooks('beforeDataQuery')
       context.record = await helpers.dataQuery({
-        scopeName, 
-        queryParams: context.queryParams,
-        idProperty: context.idProperty,
-        searchSchema: context.searchSchema,  // Pass the searchSchema (explicit or generated)
-        runHooks,
-        context,  // Pass context so it can be shared with hooks
-        methodParams: { transaction: context.transaction }
+        scopeName,
+        context,
+        trx
       })
     
       // Make a backup
@@ -469,7 +451,10 @@ export const RestApiPlugin = {
       
       // Get configuration values
       context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
+
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo
+      const schemaStructure = context.schemaInfo.schema.structure;
+      const schemaRelationships = context.schemaInfo.schemaRelationships;
 
       // Move queryParams to context and sanitize
       context.queryParams = params.queryParams || {}
@@ -489,12 +474,8 @@ export const RestApiPlugin = {
       runHooks('beforeData')
       runHooks('beforeDataGet')
       context.record = await helpers.dataGet({
-        scopeName, 
-        id: context.id, 
-        queryParams: context.queryParams,
-        idProperty: context.idProperty,
-        runHooks,
-        methodParams: { transaction: context.transaction }
+        scopeName,
+        context,
       })
     
       // Check if record was found - storage layer returns null/undefined for non-existent records.
@@ -758,12 +739,10 @@ export const RestApiPlugin = {
       
       // Get configuration values
       context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
       context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
       context.schemaInfo = scopes[scopeName].vars.schemaInfo
-      debugger
       const schemaStructure = context.schemaInfo.schema.structure;
       const schemaRelationships = context.schemaInfo.schemaRelationships;
       
@@ -800,10 +779,11 @@ export const RestApiPlugin = {
       const existingTrx = params.transaction;
       const trx = existingTrx || (api.knex?.instance ? await api.knex.instance.transaction() : null);
       const shouldCommit = trx && !existingTrx;
-      
+
+      // Update context with transaction
+      context.transaction = trx;
+
       try {
-        // Update context with transaction
-        context.transaction = trx;
         
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
@@ -900,10 +880,8 @@ export const RestApiPlugin = {
         // Create the main record - storage helper should return the created record with its ID
         context.record = await helpers.dataPost({
           scopeName,
-          inputRecord: context.inputRecord,
-          idProperty: vars.idProperty,
-          runHooks,
-          methodParams: { transaction: trx }
+          context,
+          trx
         });
         
         runHooks('afterDataCallPost')
@@ -949,6 +927,7 @@ export const RestApiPlugin = {
         if (shouldReturnFullRecord) {
           // Get the full record with relationships
           // Use the API's own get method to ensure all hooks and transformations are applied
+          debugger
           context.returnRecord = await api.resources[scopeName].get({
             id: context.record.data.id,
             queryParams: params.queryParams,
@@ -1203,7 +1182,6 @@ export const RestApiPlugin = {
     
     // Get configuration values
     context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-    context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
     context.returnFullRecord = params.returnFullRecord
     
     // Get compiled schema info early for both modes
@@ -1311,12 +1289,8 @@ export const RestApiPlugin = {
     if (vars.loadRecordOnPut) {
       context.recordBefore = await helpers.dataGet({
         scopeName,
-        id: context.id,
-        idProperty: context.idProperty,
-        runHooks,
-        methodParams: { transaction: context.transaction },
-        simplified: false
-
+        context,
+        trx
       });
 
       context.exists = !!context.recordBefore
@@ -1324,10 +1298,8 @@ export const RestApiPlugin = {
       // CHECK EXISTENCE FIRST - hooks need to know!
       context.exists = await helpers.dataExists({
         scopeName,
-        id: context.id,
-        idProperty: context.idProperty,
-        runHooks,
-        methodParams: { transaction: context.transaction }
+        context,
+        trx
       });
     }
     context.isCreate = !context.exists;
@@ -1455,14 +1427,8 @@ export const RestApiPlugin = {
     // Pass the operation type to the helper
     context.record = await helpers.dataPut({
       scopeName,
-      id: context.id,
-      schema: context.schema,
-      inputRecord: context.inputRecord,
-      queryParams: context.queryParams,
-      isCreate: context.isCreate,  // Helper knows what to do
-      idProperty: context.idProperty,
-      runHooks,
-      methodParams: { transaction: context.transaction }
+      context,
+      trx
     });
     runHooks('afterDataCallPut')
     runHooks('afterDataCall')
@@ -1759,7 +1725,6 @@ export const RestApiPlugin = {
       
       // Get configuration values
       context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
       context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
@@ -1925,13 +1890,8 @@ export const RestApiPlugin = {
       // Call the storage helper - should return the patched record
       context.record = await helpers.dataPatch({
         scopeName,
-        id: context.id,
-        schema: context.schema,
-        inputRecord: context.inputRecord,
-        queryParams: context.queryParams,
-        idProperty: context.idProperty,
-        runHooks,
-        methodParams: { transaction: context.transaction }
+        context,
+        trx
       });
 
       runHooks('afterDataCallPatch')
@@ -2106,10 +2066,8 @@ export const RestApiPlugin = {
       // Call the storage helper
       await helpers.dataDelete({
         scopeName,
-        id: context.id,
-        idProperty: vars.idProperty,
-        runHooks,
-        methodParams: { transaction: context.transaction }
+        context,
+        trx
       });
       
       runHooks('afterDataCallDelete')

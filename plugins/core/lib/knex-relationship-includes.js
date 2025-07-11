@@ -66,16 +66,7 @@
  * );
  */
 export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => {
-  
-  /**
-   * Helper to get table name for a scope
-   * @private
-   */
-  const getTableName = async (scopeName) => {
-    const schema =  scopes[scopeName].vars.schemaInfo.schema;;
-    return schema?.tableName || scopeName;
-  };
-  
+    
   /**
    * Helper to convert DB record to JSON:API format
    * @private
@@ -268,7 +259,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     
     // Get target scope information
     const targetScope = fieldDef.belongsTo;
-    const targetTable = await getTableName(targetScope);
+    const targetTable = scopes[targetScope].vars.schemaInfo.tableName
     
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
@@ -364,11 +355,11 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     if (relDef.through) {
       
       // Handle many-to-many relationship
-      const pivotTable = await getTableName(relDef.through);
+      const pivotTable = scopes[relDef.through].vars.schemaInfo.tableName 
       const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
       const otherKey = relDef.otherKey || `${relDef.hasMany.slice(0, -1)}_id`;
       const targetScope = relDef.hasMany;
-      const targetTable = await getTableName(targetScope);
+      const targetTable = scopes[targetScope].vars.schemaInfo.tableName
       
       log.debug(`[INCLUDE] Loading pivot records from ${pivotTable}:`, { 
         foreignKey,
@@ -468,7 +459,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex, helpers) => 
     
     // Regular hasMany logic (when no through property)
     const targetScope = relDef.hasMany;
-    const targetTable = await getTableName(targetScope);
+    const targetTable = scopes[targetScope].vars.schemaInfo.tableName
     const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
     
     log.trace('[INCLUDE] HasMany details:', { targetScope, targetTable, foreignKey, parentIds: mainIds.length });

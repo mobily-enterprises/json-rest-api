@@ -35,7 +35,9 @@ await api.addResource('countries', {
   relationships: {
     publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
     books: { hasMany: 'books', foreignKey: 'country_id' }
-  }
+  },
+  // tableName: 'stocazzo',
+  // idProperty: 'anotherId'
 });
 await api.resources.countries.createKnexTable()
 

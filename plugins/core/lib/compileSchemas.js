@@ -88,7 +88,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * // 6. Support virtual search fields that join to other tables
  * // 7. Ensure belongsTo fields have proper type definitions
  */
-export async function compileSchemas(scope) {
+export async function compileSchemas(scope, scopeName) {
 
   // Get raw schema
   const rawSchema = scope.scopeOptions?.schema || {};
@@ -110,7 +110,7 @@ export async function compileSchemas(scope) {
   const schemaContext = {
     schema: enrichedSchema,    // Mutable
     originalSchema: rawSchema,  // Read-only
-    scopeName: scope.scopeName
+    scopeName
   };
   await scope.runHooks('schema:enrich', schemaContext);
   
@@ -139,7 +139,7 @@ export async function compileSchemas(scope) {
     const searchSchemaContext = {
       searchSchema: rawSearchSchema,    // Mutable
       schema: schemaContext.schema,     // Read-only enriched schema
-      scopeName: scope.scopeName
+      scopeName
     };
     await scope.runHooks('searchSchema:enrich', searchSchemaContext);
     
@@ -148,11 +148,13 @@ export async function compileSchemas(scope) {
   } else {
     var searchSchemaObject = null;
   }
-  
+
   // Cache everything
   scope.vars.schemaInfo = {
     schema: schemaObject,
     searchSchema: searchSchemaObject,
-    schemaRelationships: scope.scopeOptions.relationships || {}
+    schemaRelationships: scope.scopeOptions.relationships || {},
+    tableName: scope.scopeOptions.tableName || scopeName,
+    idProperty: scope.scopeOptions.idProperty || scope.vars.idProperty
   };  
 }

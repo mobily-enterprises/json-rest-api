@@ -264,9 +264,9 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       
       // Get table names
       const sourceSchema = scopes[currentScope].vars.schemaInfo.schema;
-      const sourceTableName = sourceSchema.tableName || currentScope;
+      const sourceTableName = scopes[currentScope].vars.schemaInfo.tableName
       const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-      const targetTableName = targetSchema.tableName || targetScope;
+      const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
       
       // Generate unique alias
       const joinAlias = `${currentScope}_to_${targetScope}_${targetScope}`;
@@ -411,7 +411,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     for (const indexInfo of requiredIndexes) {
       const { scope, field } = indexInfo;
       const schema = scopes[scope].vars.schemaInfo.schema;
-      const tableName = schema?.tableName || scope;
+      const tableName = scopes[scope].vars.schemaInfo.tableName
       const indexName = `idx_${tableName}_${field}_search`;
       
       try {
