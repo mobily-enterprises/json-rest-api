@@ -30,6 +30,8 @@ await api.addResource('countries', {
   }
 });
 
+console.log("******************************************SCHEMA:", api.resources.countries.vars.schema);
+
 // Publishers table
 await api.addResource('publishers', {
   schema: {

@@ -1,4 +1,4 @@
-
+import { CreateSchema } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { createRelationshipIncludeHelpers } from './lib/knex-relationship-includes.js';
 import {
@@ -523,8 +523,8 @@ export const RestApiKnexPlugin = {
     // OLD MONOLITHIC HOOK REMOVED - The functionality is now split into the three hooks above
     
     /* ╔═════════════════════════════════════════════════════════════════════╗
-     * ║                    HELPER FUNCTION EXPORTS                              ║
-     * ║  Expose helper modules for external use via api.knex.helpers           ║
+     * ║                    HELPER FUNCTION EXPORTS                          ║
+     * ║  Expose helper modules for external use via api.knex.helpers        ║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
     
     // Expose helpers under api.knex.helpers
@@ -537,6 +537,24 @@ export const RestApiKnexPlugin = {
       getForeignKeyFields,
       buildFieldSelection
     });
+
+
+    /* ╔═════════════════════════════════════════════════════════════════════╗
+     * ║                    SCOPE METHODS                                    ║
+     * ║  Expose helper modules for external use via api.knex.helpers        ║
+     * ╚═════════════════════════════════════════════════════════════════════╝ */
+    
+    // Helper scope method to get all schema-related information
+      addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+   
+        createSchema(api.knex.instance, )
+        // Return the compiled schema info
+        if (!vars.schema) {
+          throw new Error('Schema compilation failed');
+        }
+        return vars.schema;
+      })
+    
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                    DATA OPERATION METHODS                               ║

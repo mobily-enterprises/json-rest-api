@@ -255,27 +255,25 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'query'
       
+      // Get configuration values
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
+      context.sortableFields = cascadeConfig('sortableFields', [scopeOptions, vars], [])
+      context.defaultSort = cascadeConfig('defaultSort', [scopeOptions, vars], null)
+      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
 
-      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-
-      // Sanitise parameters
+      // Move queryParams to context and sanitize
       log.trace('[QUERY-METHOD] Before sanitizing params:', params);
-      params.queryParams = params.queryParams || {}
-      params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-      params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-      params.queryParams.filters = cascadeConfig('filters', [params.queryParams], {})
-      params.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
-      params.queryParams.page = cascadeConfig('page', [params.queryParams], {})
-      log.trace('[QUERY-METHOD] After sanitizing params:', params);
-
-      // Get scope-specific or global configuration
-      const sortableFields = cascadeConfig('sortableFields', [scopeOptions, vars], [])
-      const defaultSort = cascadeConfig('defaultSort', [scopeOptions, vars], null)
-      const idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
+      context.queryParams = params.queryParams || {}
+      context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
+      context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+      context.queryParams.filters = cascadeConfig('filters', [params.queryParams], {})
+      context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
+      context.queryParams.page = cascadeConfig('page', [params.queryParams], {})
+      log.trace('[QUERY-METHOD] After setting context.queryParams:', context.queryParams);
 
       // Apply default sort if no sort specified
-      if (params.queryParams.sort.length === 0 && defaultSort) {
-        params.queryParams.sort = Array.isArray(defaultSort) ? defaultSort : [defaultSort];
+      if (context.queryParams.sort.length === 0 && context.defaultSort) {
+        context.queryParams.sort = Array.isArray(context.defaultSort) ? context.defaultSort : [context.defaultSort];
       }
 
       // Validate query parameters to ensure they follow JSON:API specification and security rules.
@@ -283,25 +281,25 @@ export const RestApiPlugin = {
       // (preventing SQL injection), pagination uses valid page[size]/page[number] format, and include
       // paths reference real relationships. Example: sort: ['-createdAt', 'title'] is checked against
       // sortableFields to ensure users can't sort by sensitive fields like 'password_hash'.
-      validateQueryPayload(params, sortableFields);
+      validateQueryPayload({ queryParams: context.queryParams }, context.sortableFields);
 
       // Get cached schema info including searchSchema
       // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
       // This enriches both schema and searchSchema via hooks
-      const schemaInfo = await scopes[scopeName].getSchemaInfo();
-      const searchSchema = schemaInfo.searchSchema;
+      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.searchSchema = context.schemaInfo.searchSchema;
       
       // Note: ensureSearchFieldsAreIndexed is no longer needed here because
       // the searchSchema hook can handle indexing during enrichment
 
       // Validate search/filter parameters against searchSchema
-      if (params.queryParams.filters && Object.keys(params.queryParams.filters).length > 0) {
+      if (context.queryParams.filters && Object.keys(context.queryParams.filters).length > 0) {
         // Only allow filtering if searchSchema is defined
-        if (!searchSchema) {
+        if (!context.searchSchema) {
           throw new RestApiValidationError(
             `Filtering is not enabled for resource '${scopeName}'. To enable filtering, add 'search: true' to schema fields or define a searchSchema.`,
             { 
-              fields: Object.keys(params.queryParams.filters).map(field => `filters.${field}`),
+              fields: Object.keys(context.queryParams.filters).map(field => `filters.${field}`),
               violations: [{
                 field: 'filters',
                 rule: 'filtering_not_enabled',
@@ -311,9 +309,9 @@ export const RestApiPlugin = {
           );
         }
         
-        if (searchSchema) {
+        if (context.searchSchema) {
           // Validate the filter parameters using the cached searchSchema object
-          const { validatedObject, errors } = await searchSchema.validate(params.queryParams.filters, { 
+          const { validatedObject, errors } = await context.searchSchema.validate(context.queryParams.filters, { 
             onlyObjectValues: true // Partial validation for filters
           });
           
@@ -336,7 +334,7 @@ export const RestApiPlugin = {
           }
           
           // Replace filter with validated/transformed values
-          params.queryParams.filters = validatedObject;
+          context.queryParams.filters = validatedObject;
         }
       }
     
@@ -354,9 +352,9 @@ export const RestApiPlugin = {
       runHooks('beforeDataQuery')
       context.record = await helpers.dataQuery({
         scopeName, 
-        queryParams: params.queryParams,
-        idProperty: vars.idProperty,
-        searchSchema,  // Pass the searchSchema (explicit or generated)
+        queryParams: context.queryParams,
+        idProperty: context.idProperty,
+        searchSchema: context.searchSchema,  // Pass the searchSchema (explicit or generated)
         runHooks,
         context,  // Pass context so it can be shared with hooks
         methodParams: { transaction: context.transaction }
@@ -397,11 +395,10 @@ export const RestApiPlugin = {
       runHooks('finishQuery')
       
       // Transform output if in simplified mode
-      if (simplified) {
-        // Get compiled schema info for transformation
-        const schemaInfo = await scopes[scopeName].getSchemaInfo();
-        const schemaStructure = schemaInfo.schema.structure;
-        const relationships = schemaInfo.relationships;
+      if (context.simplified) {
+        // Use schema info already in context
+        const schemaStructure = context.schemaInfo.schema.structure;
+        const relationships = context.schemaInfo.relationships;
         
         if (context.record) {
           // Convert JSON:API response back to simplified format
@@ -490,21 +487,24 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'get'
       
+      // Move id to context
+      context.id = params.id
+      
+      // Get configuration values
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
+      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
 
-      // Determine mode early
-      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
-
-      // Sanitise parameters
-      params.queryParams = params.queryParams || {}
-      params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-      params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+      // Move queryParams to context and sanitize
+      context.queryParams = params.queryParams || {}
+      context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
+      context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
       
       // Validate GET request to ensure required parameters are present and properly formatted.
       // This checks that 'id' parameter exists and is not empty (you can't GET without an ID),
       // validates 'include' contains valid relationship names (not arbitrary fields), and ensures
       // 'fields' for sparse fieldsets follow the format fields[type]=comma,separated,list.
       // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
-      validateGetPayload(params);
+      validateGetPayload({ id: context.id, queryParams: context.queryParams });
 
       runHooks('checkPermissions')
       runHooks('checkPermissionsGet')
@@ -513,9 +513,9 @@ export const RestApiPlugin = {
       runHooks('beforeDataGet')
       context.record = await helpers.dataGet({
         scopeName, 
-        id: params.id, 
-        queryParams: params.queryParams,
-        idProperty: vars.idProperty,
+        id: context.id, 
+        queryParams: context.queryParams,
+        idProperty: context.idProperty,
         runHooks,
         methodParams: { transaction: context.transaction }
       })
@@ -528,7 +528,7 @@ export const RestApiPlugin = {
           { 
             subtype: 'not_found',
             resourceType: scopeName,
-            resourceId: params.id
+            resourceId: context.id
           }
         );
       }
@@ -557,12 +557,13 @@ export const RestApiPlugin = {
       runHooks('finish')
       runHooks('finishGet')
       
+      // Get schema info for transformation
+      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      
       // Transform output if in simplified mode
-      if (simplified) {
-        // Get compiled schema info for transformation
-        const schemaInfo = await scopes[scopeName].getSchemaInfo();
-        const schemaStructure = schemaInfo.schema.structure;
-        const relationships = schemaInfo.relationships;
+      if (context.simplified) {
+        const schemaStructure = context.schemaInfo.schema.structure;
+        const relationships = context.schemaInfo.relationships;
         
         if (context.record) {
           // Convert JSON:API response back to simplified format
@@ -778,31 +779,35 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'post'
       
-      
-      // Determine mode early
-      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
+      // Get configuration values
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
+      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
+      context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
-      const schemaInfo = await scopes[scopeName].getSchemaInfo();
-      const schemaStructure = schemaInfo.schema.structure;
-      const relationships = schemaInfo.relationships;
+      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      const schemaStructure = context.schemaInfo.schema.structure;
+      const relationships = context.schemaInfo.relationships;
       
       // Transform input if in simplified mode
-      if (simplified) {
+      if (context.simplified) {
         // Always transform in simplified mode - no format detection needed
         // Example: { title: 'My Post', author_id: 123 } becomes
         // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-        params.inputRecord = transformSimplifiedToJsonApi(
+        context.inputRecord = transformSimplifiedToJsonApi(
           params.inputRecord || params, // Support both styles
           scopeName,
           schemaStructure,
           relationships
         );
       } else {
+        // Move inputRecord to context in strict mode
+        context.inputRecord = params.inputRecord;
+        
         // Strict mode: validate no belongsTo fields in attributes
-        if (params.inputRecord?.data?.attributes) {
+        if (context.inputRecord?.data?.attributes) {
           for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-            if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+            if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
               throw new RestApiValidationError(
                 `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
                 { fields: [`data.attributes.${key}`] }
@@ -812,7 +817,6 @@ export const RestApiPlugin = {
         }
       }
       context.scopeName = scopeName
-      context.params = params
       
       // Extract transaction from params if provided
       const existingTrx = params.transaction;
@@ -827,26 +831,22 @@ export const RestApiPlugin = {
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPost')
 
-        // Sanitise parameters and payload
-        params.queryParams = params.queryParams || {}
-        params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-        params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-
-        // Place the record in the context
-        context.inputRecord = params.inputRecord
-        context.queryParams = params.queryParams
+        // Move queryParams to context and sanitize
+        context.queryParams = params.queryParams || {}
+        context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+        context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
 
         // Validate POST payload to ensure it follows JSON:API format and references valid resources.
         // This checks the payload has required 'data' object with 'type' and 'attributes', validates
         // that data.type matches a real resource type (preventing creation of non-existent resources),
         // and ensures any relationships reference valid resource types with proper ID format.
         // Example: data.type: 'articles' must be a registered scope, relationships.author must reference 'users'.
-        validatePostPayload(params.inputRecord, scopes)
+        validatePostPayload(context.inputRecord, scopes)
         
         // Validate that the resource type matches the current scope
-        if (params.inputRecord.data.type !== scopeName) {
+        if (context.inputRecord.data.type !== scopeName) {
           throw new RestApiValidationError(
-            `Resource type mismatch. Expected '${scopeName}' but got '${params.inputRecord.data.type}'`,
+            `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
             { 
               fields: ['data.type'], 
               violations: [{ 
@@ -859,7 +859,7 @@ export const RestApiPlugin = {
         }
 
         // Use the schema info we already fetched
-        context.schema = schemaInfo.schema;
+        context.schema = context.schemaInfo.schema;
         
         // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
         // Example: relationships.author -> author_id: '123' for storage
@@ -964,8 +964,8 @@ export const RestApiPlugin = {
         }
         
         // Determine if we should return the full record
-        const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
-          params.returnFullRecord : 
+        const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
+          context.returnFullRecord : 
           cascadeConfig('post', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
         
         if (shouldReturnFullRecord) {
@@ -1012,7 +1012,7 @@ export const RestApiPlugin = {
         runHooks('finishPost')
         
         // Transform output if in simplified mode
-        if (simplified) {
+        if (context.simplified) {
           const finalRecord = context.returnRecord || context.record;
           if (finalRecord) {
             return transformJsonApiToSimplified(
@@ -1220,29 +1220,36 @@ export const RestApiPlugin = {
     
     context.method = 'put'
     
+    // Move id to context
+    context.id = params.id
     
-    // Determine mode early
-      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
+    // Get configuration values
+    context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
+    context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
+    context.returnFullRecord = params.returnFullRecord
     
     // Get compiled schema info early for both modes
-    const schemaInfo = await scopes[scopeName].getSchemaInfo();
-    const schemaStructure = schemaInfo.schema.structure;
-    const relationships = schemaInfo.relationships;
+    context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+    const schemaStructure = context.schemaInfo.schema.structure;
+    const relationships = context.schemaInfo.relationships;
     
     // Transform input if in simplified mode
-    if (simplified) {
+    if (context.simplified) {
       // Always transform in simplified mode - no format detection needed
-      params.inputRecord = transformSimplifiedToJsonApi(
+      context.inputRecord = transformSimplifiedToJsonApi(
         params.inputRecord || params, // Support both styles
         scopeName,
         schemaStructure,
         relationships
       );
     } else {
+      // Move inputRecord to context in strict mode
+      context.inputRecord = params.inputRecord;
+      
       // Strict mode: validate no belongsTo fields in attributes
-      if (params.inputRecord?.data?.attributes) {
+      if (context.inputRecord?.data?.attributes) {
         for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-          if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+          if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
             throw new RestApiValidationError(
               `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
               { fields: [`data.attributes.${key}`] }
@@ -1253,7 +1260,6 @@ export const RestApiPlugin = {
     }
     
     context.scopeName = scopeName
-    context.params = params
     
     // Extract transaction from params if provided
     const existingTrx = params.transaction;
@@ -1268,21 +1274,20 @@ export const RestApiPlugin = {
       await runHooks('beforeProcessing')
       await runHooks('beforeProcessingPut')
 
-    // Sanitise parameters
-    params.queryParams = params.queryParams || {}
-    params.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
-    params.queryParams.include = cascadeConfig('include', [params.queryParams], [])
-
-    context.inputRecord = params.inputRecord
-    context.queryParams = params.queryParams
+    // Move queryParams to context and sanitize
+    context.queryParams = params.queryParams || {}
+    context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {})
+    context.queryParams.include = cascadeConfig('include', [params.queryParams], [])
     
-    // Extract ID from request body as per JSON:API spec
-    context.id = params.inputRecord.data.id
+    // Extract ID from request body as per JSON:API spec if not already set
+    if (!context.id) {
+      context.id = context.inputRecord.data.id
+    }
     
-    // If both URL path ID and request body ID are provided, they must match (in strict mode)
-    if (params.id && params.id !== context.id) {
+    // If both URL path ID and request body ID are provided, they must match
+    if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
       throw new RestApiValidationError(
-        `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
+        `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
         { 
           fields: ['data.id'], 
           violations: [{ 
@@ -1292,10 +1297,6 @@ export const RestApiPlugin = {
           }] 
         }
       );
-    } else if (params.id && context.id && params.id !== context.id) {
-      // In relaxed mode, URL parameter takes precedence
-      context.id = params.id;
-      params.inputRecord.data.id = params.id;
     }
 
     // Validate - PUT cannot have included
@@ -1333,7 +1334,7 @@ export const RestApiPlugin = {
       context.recordBefore = await helpers.dataGet({
         scopeName,
         id: context.id,
-        idProperty: vars.idProperty,
+        idProperty: context.idProperty,
         runHooks,
         methodParams: { transaction: context.transaction },
         simplified: false
@@ -1346,7 +1347,7 @@ export const RestApiPlugin = {
       context.exists = await helpers.dataExists({
         scopeName,
         id: context.id,
-        idProperty: vars.idProperty,
+        idProperty: context.idProperty,
         runHooks,
         methodParams: { transaction: context.transaction }
       });
@@ -1355,7 +1356,7 @@ export const RestApiPlugin = {
     context.isUpdate = context.exists;
 
     // Use the schema info we already fetched
-    context.schema = schemaInfo.schema;
+    context.schema = context.schemaInfo.schema;
     
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
@@ -1481,7 +1482,7 @@ export const RestApiPlugin = {
       inputRecord: context.inputRecord,
       queryParams: context.queryParams,
       isCreate: context.isCreate,  // Helper knows what to do
-      idProperty: vars.idProperty,
+      idProperty: context.idProperty,
       runHooks,
       methodParams: { transaction: context.transaction }
     });
@@ -1533,8 +1534,8 @@ export const RestApiPlugin = {
     }
 
     // Determine if we should return the full record
-    const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
-      params.returnFullRecord : 
+    const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
+      context.returnFullRecord : 
       cascadeConfig('put', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
     
     if (shouldReturnFullRecord) {
@@ -1591,7 +1592,7 @@ export const RestApiPlugin = {
     runHooks('finishPut')
     
     // Transform output if in simplified mode
-    if (simplified && context.returnRecord) {
+    if (context.simplified && context.returnRecord) {
       return transformJsonApiToSimplified(
         context.returnRecord,
         schemaStructure,
@@ -1775,31 +1776,38 @@ export const RestApiPlugin = {
       // Make the method available to all hooks
       context.method = 'patch'
       
+      // Move id to context
+      context.id = params.id
       
-      // Determine mode early
-      const simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true) 
+      // Get configuration values
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true)
+      context.idProperty = cascadeConfig('idProperty', [scopeOptions, vars], 'id')
+      context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
-      const schemaInfo = await scopes[scopeName].getSchemaInfo();
-      const schemaStructure = schemaInfo.schema.structure;
-      const relationships = schemaInfo.relationships;
+      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      const schemaStructure = context.schemaInfo.schema.structure;
+      const relationships = context.schemaInfo.relationships;
       
       // Transform input if in simplified mode
-      if (simplified) {
+      if (context.simplified) {
         // Always transform in simplified mode - no format detection needed
         // Example: { title: 'My Post', author_id: 123 } becomes
         // { data: { type: 'posts', attributes: { title: 'My Post' }, relationships: { author: { data: { type: 'users', id: '123' } } } } }
-        params.inputRecord = transformSimplifiedToJsonApi(
+        context.inputRecord = transformSimplifiedToJsonApi(
           params.inputRecord || params, // Support both styles
           scopeName,
           schemaStructure,
           relationships
         );
       } else {
+        // Move inputRecord to context in strict mode
+        context.inputRecord = params.inputRecord;
+        
         // Strict mode: validate no belongsTo fields in attributes
-        if (params.inputRecord?.data?.attributes) {
+        if (context.inputRecord?.data?.attributes) {
           for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-            if (fieldDef.belongsTo && key in params.inputRecord.data.attributes) {
+            if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
               throw new RestApiValidationError(
                 `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
                 { fields: [`data.attributes.${key}`] }
@@ -1810,7 +1818,6 @@ export const RestApiPlugin = {
       }
       
       context.scopeName = scopeName
-      context.params = params
       
       // Extract transaction from params if provided
       const existingTrx = params.transaction;
@@ -1825,21 +1832,20 @@ export const RestApiPlugin = {
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPatch')
 
-      // Sanitise parameters
-      params.queryParams = params.queryParams || {}
-      params.queryParams.fields = params.queryParams.fields || {}
-      params.queryParams.include = params.queryParams.include || []
-
-      context.inputRecord = params.inputRecord
-      context.queryParams = params.queryParams
+      // Move queryParams to context and sanitize
+      context.queryParams = params.queryParams || {}
+      context.queryParams.fields = params.queryParams.fields || {}
+      context.queryParams.include = params.queryParams.include || []
       
-      // Extract ID from request body as per JSON:API spec
-      context.id = params.inputRecord.data.id
+      // Extract ID from request body as per JSON:API spec if not already set
+      if (!context.id && context.inputRecord.data.id) {
+        context.id = context.inputRecord.data.id
+      }
             
-      // If both URL path ID and request body ID are provided, they must match (in strict mode)
-      if (params.id && params.id !== context.id) {
+      // If both URL path ID and request body ID are provided, they must match
+      if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
         throw new RestApiValidationError(
-          `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.id}'`,
+          `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
           { 
             fields: ['data.id'], 
             violations: [{ 
@@ -1849,10 +1855,6 @@ export const RestApiPlugin = {
             }] 
           }
         );
-      } else if (params.id && context.id && params.id !== context.id) {
-        // In relaxed mode, URL parameter takes precedence
-        context.id = params.id;
-        params.inputRecord.data.id = params.id;
       }
 
       // Validate - PATCH cannot have included
@@ -1869,12 +1871,12 @@ export const RestApiPlugin = {
       // are explicit about what they want to change. Unlike PUT, PATCH preserves all fields
       // not mentioned in the request.
       // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
-      validatePatchPayload(params.inputRecord, scopes)
+      validatePatchPayload(context.inputRecord, scopes)
       
       // Validate that the resource type matches the current scope
-      if (params.inputRecord.data.type !== scopeName) {
+      if (context.inputRecord.data.type !== scopeName) {
         throw new RestApiValidationError(
-          `Resource type mismatch. Expected '${scopeName}' but got '${params.inputRecord.data.type}'`,
+          `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
           { 
             fields: ['data.type'], 
             violations: [{ 
@@ -1887,7 +1889,7 @@ export const RestApiPlugin = {
       }
 
       // Use the schema info we already fetched
-      context.schema = schemaInfo.schema;
+      context.schema = context.schemaInfo.schema;
       
       // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
       // Example: relationships.author -> author_id: '123' for storage
@@ -1949,7 +1951,7 @@ export const RestApiPlugin = {
         schema: context.schema,
         inputRecord: context.inputRecord,
         queryParams: context.queryParams,
-        idProperty: vars.idProperty,
+        idProperty: context.idProperty,
         runHooks,
         methodParams: { transaction: context.transaction }
       });
@@ -1988,8 +1990,8 @@ export const RestApiPlugin = {
       }
       
       // Determine if we should return the full record
-      const shouldReturnFullRecord = params.returnFullRecord !== undefined ? 
-        params.returnFullRecord : 
+      const shouldReturnFullRecord = context.returnFullRecord !== undefined ? 
+        context.returnFullRecord : 
         cascadeConfig('patch', [scopeOptions.returnFullRecord, vars.returnFullRecord], true)
       
       if (shouldReturnFullRecord) {
