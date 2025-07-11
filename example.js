@@ -1,15 +1,23 @@
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from './index.js';
-import { setupDatabase } from './setup-database.js';
+import knexLib from 'knex';
+
+// import { setupDatabase } from './setup-database.js';
+
+// Create a Knex instance connected to SQLite in-memory database
+const knex = knexLib({
+  client: 'sqlite3',
+  connection: {
+    filename: ':memory:'
+  },
+  useNullAsDefault: true
+});
 
 // Create API instance
 const api = new Api({
   name: 'book-catalog-api',
   version: '1.0.0'
 });
-
-// Set up the database with tables
-const knex = await setupDatabase();
 
 // Install plugins
 await api.use(RestApiPlugin);
@@ -29,8 +37,7 @@ await api.addResource('countries', {
     books: { hasMany: 'books', foreignKey: 'country_id' }
   }
 });
-
-console.log("******************************************SCHEMA:", api.resources.countries.vars.schema);
+await api.resources.countries.createKnexTable()
 
 // Publishers table
 await api.addResource('publishers', {
@@ -43,6 +50,7 @@ await api.addResource('publishers', {
     books: { hasMany: 'books', foreignKey: 'publisher_id' }
   }
 });
+await api.resources.publishers.createKnexTable()
 
 // Authors table
 await api.addResource('authors', {
@@ -54,6 +62,7 @@ await api.addResource('authors', {
     books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
   }
 });
+await api.resources.authors.createKnexTable()
 
 // Books table
 await api.addResource('books', {
@@ -76,6 +85,8 @@ await api.addResource('book_authors', {
     author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
   }
 });
+await api.resources.book_authors.createKnexTable()
+
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -83,7 +94,6 @@ await api.addResource('book_authors', {
 
 // Now you can use the API directly in your code
 try {
-
 
 
   // Create a country
@@ -102,7 +112,7 @@ try {
   // Create another publisher
   const publisher1Result = await api.resources.publishers.post({
      name: 'Penguin Random House',
-      country_id: null
+      country_id: countryResult1.id
 
   });
   console.log('Created publisher1:', publisher1Result);

@@ -115,7 +115,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
     const { fieldDef, polymorphicField } = searchInfo;
     
     // Get the relationship definition
-    const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+    const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
     const polyRel = relationships[polymorphicField];
     
     if (!polyRel?.belongsToPolymorphic) {
@@ -132,7 +132,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
       
       // Skip if we already added this JOIN
       if (!polymorphicJoins.has(baseAlias)) {
-        const targetSchema = (await scopes[targetType].getSchemaInfo()).schema;
+        const targetSchema = scopes[targetType].vars.schemaInfo.schema;;
         const targetTable = targetSchema?.tableName || targetType;
         
         log.trace('[POLYMORPHIC-SEARCH] Adding conditional JOIN:', { 
@@ -165,7 +165,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
             const relationshipName = pathParts[i];
             
             // Find the foreign key for this relationship
-            const currentSchema = (await scopes[currentScope].getSchemaInfo()).schema;
+            const currentSchema = scopes[currentScope].vars.schemaInfo.schema;
             let foreignKeyField = null;
             let nextScope = null;
             
@@ -180,7 +180,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
             
             if (!foreignKeyField) {
               // Check relationships for hasOne
-              const currentRelationships = (await scopes[currentScope].getSchemaInfo()).relationships;
+              const currentRelationships = scopes[currentScope].vars.schemaInfo.schemaRelationships
               const rel = currentRelationships?.[relationshipName];
               if (rel?.hasOne) {
                 // Handle hasOne - more complex
@@ -196,7 +196,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
             
             // Build next JOIN
             const nextAlias = `${currentAlias}_${relationshipName}`;
-            const nextSchema = (await scopes[nextScope].getSchemaInfo()).schema;
+            const nextSchema = scopes[nextScope].vars.schemaInfo.schema;
             const nextTable = nextSchema?.tableName || nextScope;
             
             log.trace('[POLYMORPHIC-SEARCH] Adding cross-table JOIN:', { 
@@ -220,7 +220,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
 
   // Pre-fetch relationships for WHERE clause processing
   const polymorphicRelationships = new Map();
-  const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+  const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships
   for (const [filterKey, searchInfo] of polymorphicSearches) {
     const { polymorphicField } = searchInfo;
     const polyRel = relationships[polymorphicField];

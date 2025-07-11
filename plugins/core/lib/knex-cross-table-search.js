@@ -114,7 +114,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     log.trace('[VALIDATE] Getting target schema for:', targetScopeName);
     let targetSchema;
     try {
-      targetSchema = (await scopes[targetScopeName].getSchemaInfo()).schema;
+      targetSchema = scopes[targetScopeName].vars.schemaInfo.schema;;
       log.trace('[VALIDATE] Got target schema:', { scopeName: targetScopeName, schemaKeys: Object.keys(targetSchema || {}) });
     } catch (error) {
       log.trace('[VALIDATE] Error getting target schema:', error.message);
@@ -218,9 +218,9 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       searchedScopes.add(currentScope);
       
       // Get current scope's schema and relationships
-      const schemaInfo = await scopes[currentScope].getSchemaInfo();
+      const schemaInfo = scopes[currentScope].vars.schemaInfo.schema;;
       const currentSchema = schemaInfo.schema;
-      const currentRelationships = schemaInfo.relationships;
+      const currentRelationships = schemaInfo.schemaRelationships;
       
       let foundRelationship = null;
       let relationshipType = null;
@@ -263,9 +263,9 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       }
       
       // Get table names
-      const sourceSchema = (await scopes[currentScope].getSchemaInfo()).schema;
+      const sourceSchema = scopes[currentScope].vars.schemaInfo.schema;
       const sourceTableName = sourceSchema.tableName || currentScope;
-      const targetSchema = (await scopes[targetScope].getSchemaInfo()).schema;
+      const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
       const targetTableName = targetSchema.tableName || targetScope;
       
       // Generate unique alias
@@ -410,7 +410,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     
     for (const indexInfo of requiredIndexes) {
       const { scope, field } = indexInfo;
-      const schema = (await scopes[scope].getSchemaInfo()).schema;
+      const schema = scopes[scope].vars.schemaInfo.schema;
       const tableName = schema?.tableName || scope;
       const indexName = `idx_${tableName}_${field}_search`;
       

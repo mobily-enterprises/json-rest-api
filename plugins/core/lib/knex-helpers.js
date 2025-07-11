@@ -43,7 +43,7 @@
  * // 4. Abstract table name resolution from query building
  */
 export const getTableName = async (scopeName, scopes) => {
-  const schema = (await scopes[scopeName].getSchemaInfo()).schema;
+  const schema =  scopes[scopeName].vars.schemaInfo.schema;;
   return schema?.tableName || scopeName;
 };
 
@@ -69,7 +69,7 @@ export const getTableName = async (scopeName, scopes) => {
  * 
  * @example <caption>Schema object vs plain object</caption>
  * // Works with both compiled Schema objects and plain schema definitions
- * const schemaObject = CreateSchema(schema);
+ * const schemaObject = createSchema(schema);
  * const foreignKeys1 = getForeignKeyFields(schemaObject); // Schema object
  * const foreignKeys2 = getForeignKeyFields(schema);       // Plain object
  * // Both return the same Set
@@ -150,7 +150,7 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   // Always include polymorphic type and id fields from relationships
   if (scopes[scopeName]) {
     try {
-      const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+      const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
       Object.entries(relationships || {}).forEach(([relName, relDef]) => {
         if (relDef.belongsToPolymorphic) {
           if (relDef.typeField) dbFields.add(relDef.typeField);
@@ -250,7 +250,7 @@ export const toJsonApi = async (scopeName, record, schema, scopes, vars) => {
   // Also filter out polymorphic type and id fields
   const polymorphicFields = new Set();
   try {
-    const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+    const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
         if (relDef.typeField) polymorphicFields.add(relDef.typeField);
@@ -437,7 +437,7 @@ export const processIncludes = async (records, scopeName, queryParams, transacti
  */
 export const buildJsonApiResponse = async (records, scopeName, schema, included = [], isSingle = false, scopes, vars) => {
   // Get relationships configuration
-  const relationships = (await scopes[scopeName].getSchemaInfo()).relationships;
+  const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
   
   // Handle both Schema objects and plain objects
   const schemaStructure = schema?.structure || schema || {};

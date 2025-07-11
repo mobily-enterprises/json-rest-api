@@ -1,4 +1,4 @@
-import { CreateSchema } from 'json-rest-schema';
+import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { createRelationshipIncludeHelpers } from './lib/knex-relationship-includes.js';
 import {
@@ -453,7 +453,7 @@ export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook }) {
+  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     
     // Get Knex configuration from plugin options
     const knexOptions = pluginOptions.knex || pluginOptions['rest-api-knex'];
@@ -545,14 +545,8 @@ export const RestApiKnexPlugin = {
      * ╚═════════════════════════════════════════════════════════════════════╝ */
     
     // Helper scope method to get all schema-related information
-      addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-   
-        createSchema(api.knex.instance, )
-        // Return the compiled schema info
-        if (!vars.schema) {
-          throw new Error('Schema compilation failed');
-        }
-        return vars.schema;
+      addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {   
+        await createKnexTable(api.knex.instance, scopeName, vars.schemaInfo.schema)
       })
     
 
@@ -610,7 +604,7 @@ export const RestApiKnexPlugin = {
     helpers.dataGet = async ({ scopeName, id, queryParams = {}, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName, scopes);
       const idProperty = vars.idProperty || 'id';
-      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
+      const schema =  scopes[scopeName].vars.schemaInfo.schema;;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -688,7 +682,7 @@ export const RestApiKnexPlugin = {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       
       const tableName = await getTableName(scopeName, scopes);
-      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
+      const schema =  scopes[scopeName].vars.schemaInfo.schema;;
       const sortableFields = schema?.sortableFields || vars.sortableFields;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
@@ -807,7 +801,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPost = async ({ scopeName, inputRecord, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName, scopes);
       const idProperty = vars.idProperty || 'id';
-      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
+      const schema =  scopes[scopeName].vars.schemaInfo.schema;;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -860,7 +854,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPut = async ({ scopeName, id, inputRecord, queryParams, isCreate, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
-      const schema = (await scopes[scopeName].getSchemaInfo()).schema;
+      const schema =  scopes[scopeName].vars.schemaInfo.schema;;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       
@@ -937,7 +931,7 @@ export const RestApiKnexPlugin = {
     helpers.dataPatch = async ({ scopeName, id, inputRecord, schema, queryParams, idProperty, runHooks, methodParams }) => {
       const tableName = await getTableName(scopeName, scopes);
       idProperty = idProperty || vars.idProperty || 'id';
-      schema = schema || (await scopes[scopeName].getSchemaInfo()).schema;
+      schema = schema ||  scopes[scopeName].vars.schemaInfo.schema;;
       const { transaction } = methodParams || {};
       const db = transaction || knex;
       

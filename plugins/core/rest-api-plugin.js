@@ -1,4 +1,3 @@
-import CreateSchema from 'json-rest-schema'
 import { 
  validateGetPayload, 
   validateQueryPayload, 
@@ -34,13 +33,6 @@ async function compileResourceSchemas({ eventData }) {
   // The scope object from eventData already has the necessary properties
   await compileSchemas(scope);
 }
-
-const scopeSetting = (settingName, params, scopeOptions, vars, defaultValue) => 
-  params[settingName] !== undefined ? params[settingName] :  // Direct param override
-  scopeOptions[settingName] !== undefined ? 
-    scopeOptions[settingName] :                             // Resource config
-    vars[settingName] !== undefined ? vars[settingName]:
-      defaultValue
 
 const cascadeConfig = (settingName, sources, defaultValue) =>
   sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
@@ -97,21 +89,6 @@ export const RestApiPlugin = {
     // Schema cache vars
     vars.schemaProcessed = false;
     vars.schema = null;
-
-    // Helper scope method to get all schema-related information
-    addScopeMethod('getSchemaInfo', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-      // Compile schemas lazily if not already done
-      if (!vars.schemaProcessed) {
-        await compileSchemas({ vars, scopeOptions, scopeName, runHooks });
-      }
-      
-      // Return the compiled schema info
-      if (!vars.schema) {
-        throw new Error('Schema compilation failed');
-      }
-      return vars.schema;
-    })
-
 
 /**
  * QUERY
@@ -286,7 +263,7 @@ export const RestApiPlugin = {
       // Get cached schema info including searchSchema
       // IMPORTANT: getSchemaInfo must be called to trigger lazy schema enrichment
       // This enriches both schema and searchSchema via hooks
-      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo
       context.searchSchema = context.schemaInfo.searchSchema;
       
       // Note: ensureSearchFieldsAreIndexed is no longer needed here because
@@ -398,7 +375,7 @@ export const RestApiPlugin = {
       if (context.simplified) {
         // Use schema info already in context
         const schemaStructure = context.schemaInfo.schema.structure;
-        const relationships = context.schemaInfo.relationships;
+        const schemaRelationships = context.schemaInfo.schemaRelationships;
         
         if (context.record) {
           // Convert JSON:API response back to simplified format
@@ -407,7 +384,7 @@ export const RestApiPlugin = {
           return transformJsonApiToSimplified(
             context.record,
             schemaStructure,
-            relationships
+            schemaRelationships
           );
         }
       }
@@ -558,12 +535,12 @@ export const RestApiPlugin = {
       runHooks('finishGet')
       
       // Get schema info for transformation
-      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo
       
       // Transform output if in simplified mode
       if (context.simplified) {
         const schemaStructure = context.schemaInfo.schema.structure;
-        const relationships = context.schemaInfo.relationships;
+        const schemaRelationships = context.schemaInfo.schemaRelationships;
         
         if (context.record) {
           // Convert JSON:API response back to simplified format
@@ -572,7 +549,7 @@ export const RestApiPlugin = {
           return transformJsonApiToSimplified(
             context.record,
             schemaStructure,
-            relationships
+            schemaRelationships
           );
         }
       }
@@ -785,9 +762,10 @@ export const RestApiPlugin = {
       context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
-      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo
+      debugger
       const schemaStructure = context.schemaInfo.schema.structure;
-      const relationships = context.schemaInfo.relationships;
+      const schemaRelationships = context.schemaInfo.schemaRelationships;
       
       // Transform input if in simplified mode
       if (context.simplified) {
@@ -798,7 +776,7 @@ export const RestApiPlugin = {
           params.inputRecord || params, // Support both styles
           scopeName,
           schemaStructure,
-          relationships
+          schemaRelationships
         );
       } else {
         // Move inputRecord to context in strict mode
@@ -867,7 +845,7 @@ export const RestApiPlugin = {
         const { belongsToUpdates, manyToManyRelationships } = processRelationships(
           context.inputRecord,
           schemaStructure,
-          relationships
+          schemaRelationships
         );
 
         // Apply schema to the main attributes
@@ -1018,7 +996,7 @@ export const RestApiPlugin = {
             return transformJsonApiToSimplified(
               finalRecord,
               schemaStructure,
-              relationships
+              schemaRelationships
             );
           }
         }
@@ -1229,9 +1207,9 @@ export const RestApiPlugin = {
     context.returnFullRecord = params.returnFullRecord
     
     // Get compiled schema info early for both modes
-    context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+    context.schemaInfo = scopes[scopeName].vars.schemaInfo
     const schemaStructure = context.schemaInfo.schema.structure;
-    const relationships = context.schemaInfo.relationships;
+    const schemaRelationships = context.schemaInfo.schemaRelationships;
     
     // Transform input if in simplified mode
     if (context.simplified) {
@@ -1240,7 +1218,7 @@ export const RestApiPlugin = {
         params.inputRecord || params, // Support both styles
         scopeName,
         schemaStructure,
-        relationships
+        schemaRelationships
       );
     } else {
       // Move inputRecord to context in strict mode
@@ -1364,7 +1342,7 @@ export const RestApiPlugin = {
     const { belongsToUpdates, manyToManyRelationships } = processRelationships(
       context.inputRecord,
       schemaStructure,
-      relationships
+      schemaRelationships
     );
 
     // Schema validation can now be different for create vs update
@@ -1596,7 +1574,7 @@ export const RestApiPlugin = {
       return transformJsonApiToSimplified(
         context.returnRecord,
         schemaStructure,
-        relationships
+        schemaRelationships
       );
     }
     
@@ -1785,9 +1763,9 @@ export const RestApiPlugin = {
       context.returnFullRecord = params.returnFullRecord
       
       // Get compiled schema info early for both modes
-      context.schemaInfo = await scopes[scopeName].getSchemaInfo();
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo
       const schemaStructure = context.schemaInfo.schema.structure;
-      const relationships = context.schemaInfo.relationships;
+      const schemaRelationships = context.schemaInfo.schemaRelationships;
       
       // Transform input if in simplified mode
       if (context.simplified) {
@@ -1798,7 +1776,7 @@ export const RestApiPlugin = {
           params.inputRecord || params, // Support both styles
           scopeName,
           schemaStructure,
-          relationships
+          schemaRelationships
         );
       } else {
         // Move inputRecord to context in strict mode
@@ -1897,7 +1875,7 @@ export const RestApiPlugin = {
       const { belongsToUpdates, manyToManyRelationships } = processRelationships(
         context.inputRecord,
         schemaStructure,
-        relationships
+        schemaRelationships
       );
 
       // Schema validation for partial updates
@@ -2051,7 +2029,7 @@ export const RestApiPlugin = {
         return transformJsonApiToSimplified(
           context.returnRecord,
           schemaStructure,
-          relationships
+          schemaRelationships
         );
       }
       

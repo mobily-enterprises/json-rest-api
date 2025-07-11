@@ -15,7 +15,7 @@
  * - Supports both explicit and implicit search field definitions
  */
 
-import CreateSchema from 'json-rest-schema';
+import { createSchema } from 'json-rest-schema';
 import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './schemaHelpers.js';
 
 /**
@@ -40,7 +40,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * 
  * addScopeMethod('query', async (scope, params) => {
  *   await compileSchemas(scope);
- *   const schemaInfo = await scope.getSchemaInfo();
+ *   const schemaInfo = scope.vars.schemaInfo.schema;;
  *   // Now schema, searchSchema, and relationships are available
  * });
  * 
@@ -89,10 +89,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * // 7. Ensure belongsTo fields have proper type definitions
  */
 export async function compileSchemas(scope) {
-  if (scope.vars.schemaProcessed) {
-    return; // Already compiled
-  }
-  
+
   // Get raw schema
   const rawSchema = scope.scopeOptions?.schema || {};
   
@@ -118,7 +115,7 @@ export async function compileSchemas(scope) {
   await scope.runHooks('schema:enrich', schemaContext);
   
   // Create schema object
-  const schemaObject = CreateSchema(schemaContext.schema);
+  const schemaObject = createSchema(schemaContext.schema);
   
   // Generate searchSchema by merging explicit searchSchema with fields marked search:true.
   // This allows two ways to define searchable fields: either mark fields with search:true
@@ -147,17 +144,15 @@ export async function compileSchemas(scope) {
     await scope.runHooks('searchSchema:enrich', searchSchemaContext);
     
     // Create searchSchema object
-    var searchSchemaObject = CreateSchema(searchSchemaContext.searchSchema);
+    var searchSchemaObject = createSchema(searchSchemaContext.searchSchema);
   } else {
     var searchSchemaObject = null;
   }
   
   // Cache everything
-  scope.vars.schema = {
+  scope.vars.schemaInfo = {
     schema: schemaObject,
     searchSchema: searchSchemaObject,
-    relationships: scope.scopeOptions.relationships || {}
-  };
-  
-  scope.vars.schemaProcessed = true;
+    schemaRelationships: scope.scopeOptions.relationships || {}
+  };  
 }
