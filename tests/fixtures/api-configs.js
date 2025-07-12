@@ -175,7 +175,7 @@ export async function createExtendedApi(knex) {
       title: { type: 'string', required: true, max: 300, search: true },
       isbn: { type: 'string', max: 13 },
       pages: { type: 'number' },
-      price: { type: 'decimal', precision: 10, scale: 2, search: true },
+      price: { type: 'string', search: true }, // Store price as string for decimal precision
       published_date: { type: 'date' },
       language: { type: 'string', max: 2, default: 'en', search: true },
       country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country', search: true },

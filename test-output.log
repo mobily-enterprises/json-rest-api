@@ -1,0 +1,763 @@
+
+> json-rest-api@1.0.4 test
+> node --test tests/*.test.js
+
+TAP version 13
+# 2025-07-12T03:08:05.968Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [ 'id', 'title', 'country_id', 'publisher_id', 'name', 'code' ]
+#   }
+# }
+# 2025-07-12T03:08:05.973Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api' installed successfully { duration: '1ms' }
+# 2025-07-12T03:08:05.973Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:05.974Z [34m[INFO][0m [36m[basic-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:05.974Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '1ms' }
+# 2025-07-12T03:08:05.974Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:05.997Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:05.998Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:05.999Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.000Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'book_authors' added successfully
+# 2025-07-12T03:08:06.001Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [
+#       'id',
+#       'title',
+#       'country_id',
+#       'publisher_id',
+#       'price',
+#       'language',
+#       'population',
+#       'name',
+#       'code'
+#     ]
+#   }
+# }
+# 2025-07-12T03:08:06.002Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.002Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:06.002Z [34m[INFO][0m [36m[extended-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:06.003Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.003Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:06.004Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:06.005Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.007Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.008Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'book_authors' added successfully
+# Subtest: Include/Sideloading Operations
+    # Subtest: Single-Level Includes
+        # Subtest: should include single belongsTo relationship
+        ok 1 - should include single belongsTo relationship
+          ---
+          duration_ms: 40.85386
+          ...
+        # Subtest: should include multiple relationships
+        ok 2 - should include multiple relationships
+          ---
+          duration_ms: 24.483892
+          ...
+        # Subtest: should include relationships in collection queries
+        ok 3 - should include relationships in collection queries
+          ---
+          duration_ms: 16.555773
+          ...
+        1..3
+    ok 1 - Single-Level Includes
+      ---
+      duration_ms: 82.95084
+      type: 'suite'
+      ...
+    # Subtest: Nested Includes
+        # Subtest: should include nested relationships
+        not ok 1 - should include nested relationships
+          ---
+          duration_ms: 10.843679
+          location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:210:5'
+          failureType: 'testCodeFailure'
+          error: "Cannot read properties of undefined (reading 'country')"
+          code: 'ERR_TEST_FAILURE'
+          name: 'TypeError'
+          stack: |-
+            TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:233:38)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Promise.all (index 0)
+            async Suite.run (node:internal/test_runner/test:1131:7)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        # Subtest: should handle multiple nested includes
+        ok 2 - should handle multiple nested includes
+          ---
+          duration_ms: 24.080859
+          ...
+        1..2
+    not ok 2 - Nested Includes
+      ---
+      duration_ms: 35.552516
+      type: 'suite'
+      location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:170:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+# 2025-07-12T03:08:06.145Z [31m[ERROR][0m [36m[extended-test-api:plugin:rest-api][0m Error in POST method {
+#   scopeName: 'books',
+#   method: 'post',
+#   inputRecord: {
+#     data: { type: 'books', attributes: [Object], relationships: [Object] }
+#   },
+#   error: {
+#     name: 'Error',
+#     message: 'No casting function for type: decimal',
+#     stack: 'Error: No casting function for type: decimal\\n' +
+#       '    at Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)\\n' +
+#       '    at Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)\\n' +
+#       '    at validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9\\n' +
+#       '    at async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)\\n' +
+#       '    at async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:336:26)\\n' +
+#       '    at async TestHook.run (node:internal/test_runner/test:790:9)\\n' +
+#       '    at async node:internal/test_runner/test:716:9\\n' +
+#       '    at async Suite.runHook (node:internal/test_runner/test:714:7)\\n' +
+#       '    at async Test.run (node:internal/test_runner/test:765:9)'
+#   },
+#   errorSummary: 'No casting function for type: decimal'
+# }
+# 2025-07-12T03:08:06.146Z [31m[ERROR][0m [36m[extended-test-api][0m Scope method 'post' on 'books' failed { error: 'No casting function for type: decimal', duration: '3ms' }
+    # Subtest: Include with Sparse Fieldsets
+        # Subtest: should include relationships with sparse fieldsets
+        not ok 1 - should include relationships with sparse fieldsets
+          ---
+          duration_ms: 17.937118
+          location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:343:5'
+          failureType: 'hookFailed'
+          error: 'No casting function for type: decimal'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)
+            Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)
+            validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)
+            async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9
+            async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)
+            async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:336:26)
+            async TestHook.run (node:internal/test_runner/test:790:9)
+            async node:internal/test_runner/test:716:9
+            async Suite.runHook (node:internal/test_runner/test:714:7)
+            async Test.run (node:internal/test_runner/test:765:9)
+          ...
+        1..1
+    not ok 3 - Include with Sparse Fieldsets
+      ---
+      duration_ms: 18.612477
+      type: 'suite'
+      location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:286:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..3
+not ok 1 - Include/Sideloading Operations
+  ---
+  duration_ms: 184.289176
+  type: 'suite'
+  location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/includes.test.js:30:1'
+  failureType: 'subtestsFailed'
+  error: '2 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# 2025-07-12T03:08:05.961Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [ 'id', 'title', 'country_id', 'publisher_id', 'name', 'code' ]
+#   }
+# }
+# 2025-07-12T03:08:05.966Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api' installed successfully { duration: '2ms' }
+# 2025-07-12T03:08:05.966Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:05.967Z [34m[INFO][0m [36m[basic-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:05.968Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '2ms' }
+# 2025-07-12T03:08:05.968Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:05.987Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:05.989Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:05.991Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:05.993Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'book_authors' added successfully
+# 2025-07-12T03:08:05.994Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [
+#       'id',
+#       'title',
+#       'country_id',
+#       'publisher_id',
+#       'price',
+#       'language',
+#       'population',
+#       'name',
+#       'code'
+#     ]
+#   }
+# }
+# 2025-07-12T03:08:05.995Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:05.995Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:05.996Z [34m[INFO][0m [36m[extended-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:05.996Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:05.996Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:05.998Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:05.999Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.000Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.001Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'book_authors' added successfully
+# Subtest: Query Operations
+    # Subtest: Filtering
+        # Subtest: should filter by simple field
+        ok 1 - should filter by simple field
+          ---
+          duration_ms: 77.453685
+          ...
+        # Subtest: should filter by multiple fields
+        ok 2 - should filter by multiple fields
+          ---
+          duration_ms: 48.440832
+          ...
+        # Subtest: should return empty array when no matches
+        ok 3 - should return empty array when no matches
+          ---
+          duration_ms: 36.115422
+          ...
+# 2025-07-12T03:08:06.195Z [31m[ERROR][0m [36m[basic-test-api][0m Scope method 'query' on 'countries' failed {
+#   error: "Filtering is not enabled for resource 'countries'. To enable filtering, add 'search: true' to schema fields or define a searchSchema.",
+#   duration: '0ms'
+# }
+        # Subtest: should throw error when filtering on non-searchable field
+        ok 4 - should throw error when filtering on non-searchable field
+          ---
+          duration_ms: 29.301474
+          ...
+        1..4
+    ok 1 - Filtering
+      ---
+      duration_ms: 192.532828
+      type: 'suite'
+      ...
+    # Subtest: Sorting
+        # Subtest: should sort by single field ascending
+        ok 1 - should sort by single field ascending
+          ---
+          duration_ms: 6.766791
+          ...
+        # Subtest: should sort by single field descending
+        ok 2 - should sort by single field descending
+          ---
+          duration_ms: 5.372673
+          ...
+        # Subtest: should sort by multiple fields
+        ok 3 - should sort by multiple fields
+          ---
+          duration_ms: 22.348487
+          ...
+        1..3
+    ok 2 - Sorting
+      ---
+      duration_ms: 34.981963
+      type: 'suite'
+      ...
+    # Subtest: Pagination
+        # Subtest: should paginate results
+        ok 1 - should paginate results
+          ---
+          duration_ms: 8.794797
+          ...
+        # Subtest: should handle last page with fewer results
+        ok 2 - should handle last page with fewer results
+          ---
+          duration_ms: 7.383007
+          ...
+        # Subtest: should handle page beyond available data
+        ok 3 - should handle page beyond available data
+          ---
+          duration_ms: 10.912436
+          ...
+        # Subtest: should respect maxPageSize limit
+        ok 4 - should respect maxPageSize limit
+          ---
+          duration_ms: 11.373061
+          ...
+        1..4
+    ok 3 - Pagination
+      ---
+      duration_ms: 38.893626
+      type: 'suite'
+      ...
+# 2025-07-12T03:08:06.275Z [31m[ERROR][0m [36m[extended-test-api:plugin:rest-api][0m Error in POST method {
+#   scopeName: 'books',
+#   method: 'post',
+#   inputRecord: {
+#     data: { type: 'books', attributes: [Object], relationships: [Object] }
+#   },
+#   error: {
+#     name: 'Error',
+#     message: 'No casting function for type: decimal',
+#     stack: 'Error: No casting function for type: decimal\\n' +
+#       '    at Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)\\n' +
+#       '    at Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)\\n' +
+#       '    at validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9\\n' +
+#       '    at async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)\\n' +
+#       '    at async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:472:9)\\n' +
+#       '    at async TestHook.run (node:internal/test_runner/test:790:9)\\n' +
+#       '    at async node:internal/test_runner/test:716:9\\n' +
+#       '    at async Suite.runHook (node:internal/test_runner/test:714:7)\\n' +
+#       '    at async Test.run (node:internal/test_runner/test:765:9)'
+#   },
+#   errorSummary: 'No casting function for type: decimal'
+# }
+# 2025-07-12T03:08:06.276Z [31m[ERROR][0m [36m[extended-test-api][0m Scope method 'post' on 'books' failed { error: 'No casting function for type: decimal', duration: '2ms' }
+    # Subtest: Combined Query Features
+        # Subtest: should filter, sort, and paginate together
+        not ok 1 - should filter, sort, and paginate together
+          ---
+          duration_ms: 6.085311
+          location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:479:5'
+          failureType: 'hookFailed'
+          error: 'No casting function for type: decimal'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)
+            Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)
+            validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)
+            async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9
+            async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)
+            async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:472:9)
+            async TestHook.run (node:internal/test_runner/test:790:9)
+            async node:internal/test_runner/test:716:9
+            async Suite.runHook (node:internal/test_runner/test:714:7)
+            async Test.run (node:internal/test_runner/test:765:9)
+          ...
+# 2025-07-12T03:08:06.282Z [31m[ERROR][0m [36m[extended-test-api:plugin:rest-api][0m Error in POST method {
+#   scopeName: 'books',
+#   method: 'post',
+#   inputRecord: {
+#     data: { type: 'books', attributes: [Object], relationships: [Object] }
+#   },
+#   error: {
+#     name: 'Error',
+#     message: 'No casting function for type: decimal',
+#     stack: 'Error: No casting function for type: decimal\\n' +
+#       '    at Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)\\n' +
+#       '    at Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)\\n' +
+#       '    at validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9\\n' +
+#       '    at async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)\\n' +
+#       '    at async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:472:9)\\n' +
+#       '    at async TestHook.run (node:internal/test_runner/test:790:9)\\n' +
+#       '    at async node:internal/test_runner/test:716:9\\n' +
+#       '    at async Suite.runHook (node:internal/test_runner/test:714:7)\\n' +
+#       '    at async Test.run (node:internal/test_runner/test:765:9)'
+#   },
+#   errorSummary: 'No casting function for type: decimal'
+# }
+# 2025-07-12T03:08:06.283Z [31m[ERROR][0m [36m[extended-test-api][0m Scope method 'post' on 'books' failed { error: 'No casting function for type: decimal', duration: '1ms' }
+        # Subtest: should filter and include relationships
+        not ok 2 - should filter and include relationships
+          ---
+          duration_ms: 6.579462
+          location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:497:5'
+          failureType: 'hookFailed'
+          error: 'No casting function for type: decimal'
+          code: 'ERR_TEST_FAILURE'
+          stack: |-
+            Schema._validateField (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:132:29)
+            Schema.validate (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/json-rest-schema/src/Schema.js:197:14)
+            validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:749:56)
+            async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9
+            async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)
+            async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:472:9)
+            async TestHook.run (node:internal/test_runner/test:790:9)
+            async node:internal/test_runner/test:716:9
+            async Suite.runHook (node:internal/test_runner/test:714:7)
+            async Test.run (node:internal/test_runner/test:765:9)
+          ...
+        1..2
+    not ok 4 - Combined Query Features
+      ---
+      duration_ms: 13.166192
+      type: 'suite'
+      location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:431:3'
+      failureType: 'subtestsFailed'
+      error: '2 subtests failed'
+      code: 'ERR_TEST_FAILURE'
+      ...
+    1..4
+not ok 2 - Query Operations
+  ---
+  duration_ms: 325.705732
+  type: 'suite'
+  location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/queries.test.js:30:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# 2025-07-12T03:08:06.003Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [ 'id', 'title', 'country_id', 'publisher_id', 'name', 'code' ]
+#   }
+# }
+# 2025-07-12T03:08:06.009Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api' installed successfully { duration: '3ms' }
+# 2025-07-12T03:08:06.009Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:06.010Z [34m[INFO][0m [36m[basic-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:06.010Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '1ms' }
+# 2025-07-12T03:08:06.011Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:06.035Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:06.037Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.038Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.040Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'book_authors' added successfully
+# 2025-07-12T03:08:06.041Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [
+#       'id',
+#       'title',
+#       'country_id',
+#       'publisher_id',
+#       'price',
+#       'language',
+#       'population',
+#       'name',
+#       'code'
+#     ]
+#   }
+# }
+# 2025-07-12T03:08:06.042Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.043Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:06.043Z [34m[INFO][0m [36m[extended-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:06.043Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.043Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:06.045Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:06.047Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.048Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.049Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'book_authors' added successfully
+# Subtest: Relationship Operations
+    # Subtest: One-to-One (belongsTo) Relationships
+        # Subtest: should create resource with belongsTo relationship
+        ok 1 - should create resource with belongsTo relationship
+          ---
+          duration_ms: 26.061801
+          ...
+        # Subtest: should update belongsTo relationship via PATCH
+        ok 2 - should update belongsTo relationship via PATCH
+          ---
+          duration_ms: 15.412087
+          ...
+# 2025-07-12T03:08:06.104Z [31m[ERROR][0m [36m[basic-test-api:plugin:rest-api][0m Error in PATCH method {
+#   scopeName: 'publishers',
+#   method: 'patch',
+#   inputRecord: { data: { type: 'publishers', id: '3', relationships: [Object] } },
+#   error: {
+#     name: 'RestApiValidationError',
+#     message: 'Schema validation failed for resource attributes',
+#     stack: 'RestApiValidationError: Schema validation failed for resource attributes\\n' +
+#       '    at validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:758:17)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1666:9\\n' +
+#       '    at async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)\\n' +
+#       '    at async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/relationships.test.js:183:7)\\n' +
+#       '    at async Test.run (node:internal/test_runner/test:790:9)\\n' +
+#       '    at async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)',
+#     code: 'REST_API_VALIDATION',
+#     type: 'rest_api_validation',
+#     details: { fields: [Array], violations: [Array] }
+#   },
+#   errorSummary: 'Schema validation failed for resource attributes | code: REST_API_VALIDATION | violations: [data.attributes.country_id: Field cannot be null] | fields: data.attributes.country_id'
+# }
+# 2025-07-12T03:08:06.105Z [31m[ERROR][0m [36m[basic-test-api][0m Scope method 'patch' on 'publishers' failed {
+#   error: 'Schema validation failed for resource attributes',
+#   duration: '5ms'
+# }
+        # Subtest: should clear belongsTo relationship with null
+        not ok 3 - should clear belongsTo relationship with null
+          ---
+          duration_ms: 12.083785
+          location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/relationships.test.js:154:5'
+          failureType: 'testCodeFailure'
+          error: 'Schema validation failed for resource attributes'
+          code: 'REST_API_VALIDATION'
+          name: 'RestApiValidationError'
+          stack: |-
+            validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:758:17)
+            async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1666:9
+            async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)
+            async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/relationships.test.js:183:7)
+            async Test.run (node:internal/test_runner/test:790:9)
+            async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)
+          ...
+        1..3
+    not ok 1 - One-to-One (belongsTo) Relationships
+      ---
+      duration_ms: 55.963004
+      type: 'suite'
+      location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/relationships.test.js:42:3'
+      failureType: 'subtestsFailed'
+      error: '1 subtest failed'
+      code: 'ERR_TEST_FAILURE'
+      stack: |-
+        async Promise.all (index 0)
+      ...
+    # Subtest: Many-to-Many Relationships
+        # Subtest: should create book with multiple authors (many-to-many)
+        ok 1 - should create book with multiple authors (many-to-many)
+          ---
+          duration_ms: 24.455007
+          ...
+# THE NEXT LINE WILL BLOCK THE TEST
+        # Subtest: should update many-to-many relationships via PUT (complete replacement)
+        ok 2 - should update many-to-many relationships via PUT (complete replacement)
+          ---
+          duration_ms: 28.582172
+          ...
+        # Subtest: should update many-to-many relationships via PATCH (partial update)
+        ok 3 - should update many-to-many relationships via PATCH (partial update) # SKIP
+          ---
+          duration_ms: 0.243763
+          ...
+        # Subtest: should clear all many-to-many relationships with empty array
+        ok 4 - should clear all many-to-many relationships with empty array # SKIP
+          ---
+          duration_ms: 0.15245
+          ...
+        1..4
+    ok 2 - Many-to-Many Relationships
+      ---
+      duration_ms: 54.140644
+      type: 'suite'
+      ...
+    # Subtest: Complex Relationship Scenarios
+        # Subtest: should create resource with multiple relationship types
+        ok 1 - should create resource with multiple relationship types # SKIP
+          ---
+          duration_ms: 0.201219
+          ...
+        # Subtest: should handle PUT with partial relationships object
+        ok 2 - should handle PUT with partial relationships object # SKIP
+          ---
+          duration_ms: 0.0977
+          ...
+        1..2
+    ok 3 - Complex Relationship Scenarios
+      ---
+      duration_ms: 0.675054
+      type: 'suite'
+      ...
+    1..3
+not ok 3 - Relationship Operations
+  ---
+  duration_ms: 164.53409
+  type: 'suite'
+  location: '/home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/relationships.test.js:30:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# 2025-07-12T03:08:06.006Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [ 'id', 'title', 'country_id', 'publisher_id', 'name', 'code' ]
+#   }
+# }
+# 2025-07-12T03:08:06.010Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api' installed successfully { duration: '1ms' }
+# 2025-07-12T03:08:06.011Z [34m[INFO][0m [36m[basic-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:06.011Z [34m[INFO][0m [36m[basic-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:06.011Z [34m[INFO][0m [36m[basic-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.012Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:06.031Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:06.033Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.034Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.036Z [34m[INFO][0m [36m[basic-test-api][0m Scope 'book_authors' added successfully
+# 2025-07-12T03:08:06.038Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api' {
+#   options: {
+#     simplified: false,
+#     returnFullRecord: {
+#       post: true,
+#       put: false,
+#       patch: false,
+#       allowRemoteOverride: false
+#     },
+#     sortableFields: [
+#       'id',
+#       'title',
+#       'country_id',
+#       'publisher_id',
+#       'price',
+#       'language',
+#       'population',
+#       'name',
+#       'code'
+#     ]
+#   }
+# }
+# 2025-07-12T03:08:06.039Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api' installed successfully { duration: '1ms' }
+# 2025-07-12T03:08:06.039Z [34m[INFO][0m [36m[extended-test-api][0m Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
+# 2025-07-12T03:08:06.039Z [34m[INFO][0m [36m[extended-test-api:plugin:rest-api-knex][0m RestApiKnexPlugin installed - basic CRUD operations ready
+# 2025-07-12T03:08:06.039Z [34m[INFO][0m [36m[extended-test-api][0m Plugin 'rest-api-knex' installed successfully { duration: '0ms' }
+# 2025-07-12T03:08:06.040Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'countries' added successfully
+# 2025-07-12T03:08:06.041Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'publishers' added successfully
+# 2025-07-12T03:08:06.043Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'authors' added successfully
+# 2025-07-12T03:08:06.044Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'books' added successfully
+# 2025-07-12T03:08:06.046Z [34m[INFO][0m [36m[extended-test-api][0m Scope 'book_authors' added successfully
+# Subtest: REST API Tests
+    # Subtest: Basic CRUD Operations
+        # Subtest: POST - Create Resources
+            # Subtest: should create a country
+            ok 1 - should create a country
+              ---
+              duration_ms: 23.971952
+              ...
+            # Subtest: should create a publisher with country relationship
+            ok 2 - should create a publisher with country relationship
+              ---
+              duration_ms: 11.928011
+              ...
+# 2025-07-12T03:08:06.091Z [31m[ERROR][0m [36m[basic-test-api:plugin:rest-api][0m Error in POST method {
+#   scopeName: 'countries',
+#   method: 'post',
+#   inputRecord: { data: { type: 'countries', attributes: [Object] } },
+#   error: {
+#     name: 'RestApiValidationError',
+#     message: 'Schema validation failed for resource attributes',
+#     stack: 'RestApiValidationError: Schema validation failed for resource attributes\\n' +
+#       '    at validateResourceAttributesBeforeWrite (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:758:17)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/plugins/core/rest-api-plugin.js:1069:9\\n' +
+#       '    at async Proxy.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/node_modules/hooked-api/index.js:574:34)\\n' +
+#       '    at async file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/rest-api.test.js:157:13\\n' +
+#       '    at async waitForActual (node:assert:800:5)\\n' +
+#       '    at async Function.rejects (node:assert:921:25)\\n' +
+#       '    at async TestContext.<anonymous> (file:///home/merc/Development/hooked-api_and_jsonrestapi/json-rest-api/tests/rest-api.test.js:155:9)\\n' +
+#       '    at async Test.run (node:internal/test_runner/test:790:9)\\n' +
+#       '    at async Suite.processPendingSubtests (node:internal/test_runner/test:517:7)',
+#     code: 'REST_API_VALIDATION',
+#     type: 'rest_api_validation',
+#     details: { fields: [Array], violations: [Array] }
+#   },
+#   errorSummary: 'Schema validation failed for resource attributes | code: REST_API_VALIDATION | violations: [data.attributes.name: Field is required] | fields: data.attributes.name'
+# }
+# 2025-07-12T03:08:06.092Z [31m[ERROR][0m [36m[basic-test-api][0m Scope method 'post' on 'countries' failed {
+#   error: 'Schema validation failed for resource attributes',
+#   duration: '4ms'
+# }
+            # Subtest: should fail to create resource with missing required field
+            ok 3 - should fail to create resource with missing required field
+              ---
+              duration_ms: 8.51128
+              ...
+            1..3
+        ok 1 - POST - Create Resources
+          ---
+          duration_ms: 45.269287
+          type: 'suite'
+          ...
+        # Subtest: GET - Retrieve Resources
+            # Subtest: should retrieve a single resource
+            ok 1 - should retrieve a single resource
+              ---
+              duration_ms: 5.441521
+              ...
+# 2025-07-12T03:08:06.103Z [31m[ERROR][0m [36m[basic-test-api][0m Scope method 'get' on 'countries' failed { error: 'Resource not found', duration: '1ms' }
+            # Subtest: should fail to retrieve non-existent resource
+            ok 2 - should fail to retrieve non-existent resource
+              ---
+              duration_ms: 4.310688
+              ...
+            # Subtest: should retrieve collection of resources
+            ok 3 - should retrieve collection of resources
+              ---
+              duration_ms: 17.220587
+              ...
+            1..3
+        ok 2 - GET - Retrieve Resources
+          ---
+          duration_ms: 27.617217
+          type: 'suite'
+          ...
+        # Subtest: PATCH - Update Resources
+            # Subtest: should partially update a resource
+            ok 1 - should partially update a resource
+              ---
+              duration_ms: 8.494226
+              ...
+            1..1
+        ok 3 - PATCH - Update Resources
+          ---
+          duration_ms: 8.935986
+          type: 'suite'
+          ...
+# 2025-07-12T03:08:06.139Z [31m[ERROR][0m [36m[basic-test-api][0m Scope method 'get' on 'countries' failed { error: 'Resource not found', duration: '1ms' }
+        # Subtest: DELETE - Remove Resources
+            # Subtest: should delete an existing resource
+            ok 1 - should delete an existing resource
+              ---
+              duration_ms: 8.697915
+              ...
+            1..1
+        ok 4 - DELETE - Remove Resources
+          ---
+          duration_ms: 8.984852
+          type: 'suite'
+          ...
+        1..4
+    ok 1 - Basic CRUD Operations
+      ---
+      duration_ms: 91.767864
+      type: 'suite'
+      ...
+    1..1
+ok 4 - REST API Tests
+  ---
+  duration_ms: 139.876676
+  type: 'suite'
+  ...
+1..4
+# tests 36
+# suites 19
+# pass 27
+# fail 5
+# cancelled 0
+# skipped 4
+# todo 0
+# duration_ms 592.896747

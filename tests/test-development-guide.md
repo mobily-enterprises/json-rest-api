@@ -1,5 +1,16 @@
 # Test Development Guide for JSON-REST-API
 
+## Missing tests:
+
+  ⎿  ☒ Plan test structure and API configurations                     
+     X Create test file with basic setup and utilities
+     X Implement basic CRUD tests (POST, GET, PUT, PATCH, DELETE)
+     ? Implement relationship tests (belongsTo, hasMany, many-to-many)
+     ? Implement query tests (filtering, sorting, pagination)
+     ? Implement include/sideloading tests
+     ? Implement sparse fieldsets tests
+     ? Implement transaction and error handling tests
+
 This guide provides comprehensive instructions for continuing test development following established patterns.
 
 ## Critical Requirements

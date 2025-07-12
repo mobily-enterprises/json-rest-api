@@ -229,8 +229,11 @@ describe('Include/Sideloading Operations', () => {
       assert(publisher, 'Should include publisher');
       assert(country, 'Should include country');
       
+      // Debug: Check what's in publisher
+      console.log('DEBUG: Publisher object:', JSON.stringify(publisher, null, 2));
+      
       // Verify the publisher has country relationship
-      assert(publisher.relationships.country);
+      assert(publisher.relationships?.country, 'Publisher should have country relationship');
       assert.equal(publisher.relationships.country.data.id, country.id);
     });
 
