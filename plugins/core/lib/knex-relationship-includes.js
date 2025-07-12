@@ -43,41 +43,7 @@
  */
 
 import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
-
-/**
- * Helper to convert DB record to JSON:API format
- * @private
- */
-export const toJsonApi = (scopeName, record, schema, idProperty = 'id') => {
-  if (!record) return null;
-  
-  const { [idProperty]: id, ...allAttributes } = record;
-  
-  // Filter out foreign keys from attributes if we have schema
-  if (schema) {
-    const foreignKeys = getForeignKeyFields(schema);
-    const attributes = {};
-    
-    Object.entries(allAttributes).forEach(([key, value]) => {
-      if (!foreignKeys.has(key)) {
-        attributes[key] = value;
-      }
-    });
-    
-    return {
-      type: scopeName,
-      id: String(id),
-      attributes
-    };
-  }
-  
-  // Fallback to original behavior if no schema
-  return {
-    type: scopeName,
-    id: String(id),
-    attributes: allAttributes
-  };
-};
+import { toJsonApi } from './knex-json-api-helpers.js';
 
 /**
  * Groups records by their polymorphic type for efficient batch loading

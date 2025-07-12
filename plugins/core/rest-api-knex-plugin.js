@@ -2,7 +2,7 @@ import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
 import { buildQuerySelection } from './lib/knex-query-helpers-base.js';
-import { toJsonApi, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
+import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
 import { processIncludes } from './lib/knex-process-includes.js';
 import {
   polymorphicFiltersHook,
@@ -67,7 +67,7 @@ export const RestApiKnexPlugin = {
 
     // Helper scope method to get all schema-related information
       addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {   
-        await createKnexTable(api.knex.instance, scopeName, vars.schemaInfo.schema)
+        await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, vars.schemaInfo.schema)
       })
     
       helpers.newTransaction = async () => {

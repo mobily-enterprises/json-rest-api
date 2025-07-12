@@ -8,6 +8,7 @@
  */
 
 import { getForeignKeyFields } from './knex-field-helpers.js';
+import { toJsonApi } from './knex-json-api-helpers.js';
 
 /**
  * Converts a database record to JSON:API format.
@@ -23,7 +24,7 @@ import { getForeignKeyFields } from './knex-field-helpers.js';
  * @param {Object} schema - The schema definition
  * @param {Object} scopes - The scopes object from the API
  * @param {Object} vars - Plugin vars containing configuration
- * @returns {Promise<Object>} JSON:API formatted resource object
+ * @returns {Object} JSON:API formatted resource object
  * 
  * @example <caption>Basic transformation with foreign keys</caption>
  * const dbRecord = {
@@ -33,7 +34,7 @@ import { getForeignKeyFields } from './knex-field-helpers.js';
  *   author_id: 2,
  *   category_id: 5
  * };
- * const jsonApiRecord = await toJsonApi('articles', dbRecord, schema, scopes, vars);
+ * const jsonApiRecord = toJsonApiRecord('articles', dbRecord, schema, scopes, vars);
  * // Returns:
  * // {
  * //   type: 'articles',
@@ -52,7 +53,7 @@ import { getForeignKeyFields } from './knex-field-helpers.js';
  *   commentable_type: 'articles',
  *   commentable_id: 1
  * };
- * const jsonApiComment = await toJsonApi('comments', commentRecord, schema, scopes, vars);
+ * const jsonApiComment = toJsonApiRecord('comments', commentRecord, schema, scopes, vars);
  * // commentable_type and commentable_id are filtered out of attributes
  * 
  * @example <caption>Why this is useful upstream</caption>
@@ -63,20 +64,10 @@ import { getForeignKeyFields } from './knex-field-helpers.js';
  * // 4. Handle polymorphic relationship fields automatically
  * // 5. Ensure consistent ID formatting (always strings in JSON:API)
  */
-export const toJsonApi = async (scopeName, record, schema, scopes, vars) => {
-  if (!record) return null;
-  
+export const toJsonApiRecord = (scopeName, record, schema, scopes, vars) => {
   const idProperty = vars.idProperty || 'id';
-  const { [idProperty]: id, ...allAttributes } = record;
   
-  // Handle both Schema objects and plain objects
-  const schemaStructure = schema?.structure || schema || {};
-  
-  // Filter out foreign keys from attributes
-  const foreignKeys = getForeignKeyFields(schema);
-  const attributes = {};
-  
-  // Also filter out polymorphic type and id fields
+  // Build polymorphic fields set
   const polymorphicFields = new Set();
   try {
     const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
@@ -90,18 +81,7 @@ export const toJsonApi = async (scopeName, record, schema, scopes, vars) => {
     // Scope might not have relationships
   }
   
-  // Only include non-foreign-key attributes
-  Object.entries(allAttributes).forEach(([key, value]) => {
-    if (!foreignKeys.has(key) && !polymorphicFields.has(key)) {
-      attributes[key] = value;
-    }
-  });
-  
-  return {
-    type: scopeName,
-    id: String(id),
-    attributes
-  };
+  return toJsonApi(scopeName, record, schema, idProperty, polymorphicFields);
 };
 
 /**
@@ -127,9 +107,9 @@ export const buildJsonApiResponse = async (records, scopeName, schema, included 
   const schemaStructure = schema?.structure || schema || {};
   
   // Process records to JSON:API format
-  const processedRecords = await Promise.all(records.map(async record => {
+  const processedRecords = records.map(record => {
     const { _relationships, ...cleanRecord } = record;
-    const jsonApiRecord = await toJsonApi(scopeName, cleanRecord, schema, scopes, vars);
+    const jsonApiRecord = toJsonApiRecord(scopeName, cleanRecord, schema, scopes, vars);
     
     // Add any loaded relationships
     if (_relationships) {
@@ -176,7 +156,7 @@ export const buildJsonApiResponse = async (records, scopeName, schema, included 
     });
     
     return jsonApiRecord;
-  }));
+  });
   
   const response = {
     data: isSingle ? processedRecords[0] : processedRecords
