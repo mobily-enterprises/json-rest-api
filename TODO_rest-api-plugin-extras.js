@@ -1,35 +1,45 @@
-TODO: Missing JSON:API Features
 
+(1) Make the user submit "country", not "country_id" in the POST/PUT/PATCH calls.
 
-(3)
+(2) Have simplifiedWire and simplifiedApi instead of just simplified.
+
+(3) Check what API calls are used in helpers, and most definitely use knex for deletes
+
+(4) 
+Check that type: 'id' is not mandatory in schema
+
+(5)
+Maybe make the POST call support the return of the ID, but HTTPSERVER will need to ignore it as a non-resource
+
+(6)
 Have an option to hide fields (hidden: yes, normallyHidden: yes)
 (Diffence being that normallyHidden CAN be made visible with field:...)
 
-(4)
+(7)
 Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
   
-(5)
+(8)
 Check that limit/default order is maintained in sub queries in dataQuery
 
-(6)
+(9)
 1. Relationship Endpoints - Separate endpoints for relationship manipulation
 - GET /articles/1/relationships/comments
-- POST/DELETE for relationship updates
+- POST/PUT/DELETE for relationship updates
 
-(7)
+(10)
 Query Depth Protection - Prevent malicious deep includes
   - Max depth limit for ?include=author.articles.author...
 
-(8)
+(11)
 - Auto-format dates to ISO 8601
 
-(9)
+(12)
 - Boolean coercion from SQLite
 
-(10) 
+(13) 
 Link and meta info in returned document
 
-(11)
+(14)
 Bulk operations
 
 
