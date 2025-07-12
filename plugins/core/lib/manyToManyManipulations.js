@@ -9,6 +9,7 @@
  */
 
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
+import { transformSimplifiedToJsonApi } from './simplifiedHelpers.js';
 
 /**
  * Updates many-to-many relationships intelligently by synchronizing pivot table records
@@ -96,6 +97,14 @@ import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
  * // 6. Provide atomic updates within transactions
  */
 export const updateManyToManyRelationship = async (api, resourceId, relDef, relData, trx) => {
+  // Get pivot table schema for transformation
+  const pivotScope = api.resources[relDef.through];
+  if (!pivotScope) {
+    throw new Error(`Pivot table resource '${relDef.through}' not found`);
+  }
+  
+  const pivotSchema = pivotScope.vars.schemaInfo.schema.structure;
+  const pivotRelationships = pivotScope.vars.schemaInfo.schemaRelationships;
   
   // Get existing pivot records
   const existingPivotRecords = await api.resources[relDef.through].query({
@@ -105,13 +114,30 @@ export const updateManyToManyRelationship = async (api, resourceId, relDef, relD
     }
   });
   
-  
-  
   // Create maps for easier lookup
   const existingMap = new Map();
   for (const record of existingPivotRecords.data || []) {
-    const otherKeyValue = record.attributes[relDef.otherKey];
-    existingMap.set(String(otherKeyValue), record);
+    // Need to find which field is the otherKey by looking at relationships
+    let otherKeyValue = null;
+    
+    // Look through relationships to find the one that's not the main resource
+    if (record.relationships) {
+      for (const [relName, relData] of Object.entries(record.relationships)) {
+        // Find the schema field that has this relationship name
+        const schemaField = Object.entries(pivotSchema).find(([fieldName, fieldDef]) => 
+          fieldDef.as === relName && fieldName === relDef.otherKey
+        );
+        
+        if (schemaField && relData.data) {
+          otherKeyValue = relData.data.id;
+          break;
+        }
+      }
+    }
+    
+    if (otherKeyValue) {
+      existingMap.set(String(otherKeyValue), record);
+    }
   }
   
   const newMap = new Map();
@@ -151,18 +177,24 @@ export const updateManyToManyRelationship = async (api, resourceId, relDef, relD
         }
       }
       
-      // Create new pivot record
+      // Create pivot record data as a simple object
+      const pivotData = {
+        [relDef.foreignKey]: resourceId,
+        [relDef.otherKey]: related.id
+      };
+      
+      // Transform to JSON:API format using the helper
+      const jsonApiDocument = transformSimplifiedToJsonApi(
+        pivotData,
+        relDef.through,
+        pivotSchema,
+        pivotRelationships
+      );
+      
+      // Create new pivot record using proper JSON:API format
       await api.resources[relDef.through].post({
         transaction: trx,
-        inputRecord: {
-          data: {
-            type: relDef.through,
-            attributes: {
-              [relDef.foreignKey]: resourceId,
-              [relDef.otherKey]: related.id
-            }
-          }
-        }
+        inputRecord: jsonApiDocument
       });
     }
   }
@@ -339,6 +371,15 @@ export const deleteExistingPivotRecords = async (api, resourceId, relDef, trx) =
  * // 6. Allow performance optimization by skipping validation when safe
  */
 export const createPivotRecords = async (api, resourceId, relDef, relData, trx) => {
+  // Get pivot table schema for transformation
+  const pivotScope = api.resources[relDef.through];
+  if (!pivotScope) {
+    throw new Error(`Pivot table resource '${relDef.through}' not found`);
+  }
+  
+  const pivotSchema = pivotScope.vars.schemaInfo.schema.structure;
+  const pivotRelationships = pivotScope.vars.schemaInfo.schemaRelationships;
+  
   for (const related of relData) {
     // Optionally validate related resource exists
     if (relDef.validateExists !== false) {
@@ -359,18 +400,24 @@ export const createPivotRecords = async (api, resourceId, relDef, relData, trx) 
       }
     }
     
-    // Create pivot record
+    // Create pivot record data as a simple object
+    const pivotData = {
+      [relDef.foreignKey]: resourceId,
+      [relDef.otherKey]: related.id
+    };
+    
+    // Transform to JSON:API format using the helper
+    const jsonApiDocument = transformSimplifiedToJsonApi(
+      pivotData,
+      relDef.through,
+      pivotSchema,
+      pivotRelationships
+    );
+    
+    // Create pivot record using proper JSON:API format
     await api.resources[relDef.through].post({
       transaction: trx,
-      inputRecord: {
-        data: {
-          type: relDef.through,
-          attributes: {
-            [relDef.foreignKey]: resourceId,
-            [relDef.otherKey]: related.id
-          }
-        }
-      }
+      inputRecord: jsonApiDocument
     });
   }
 };

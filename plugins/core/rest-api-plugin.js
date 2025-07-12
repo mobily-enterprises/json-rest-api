@@ -665,6 +665,62 @@ export const RestApiPlugin = {
         return { schema, schemaStructure, schemaRelationships };
     }
 
+/**
+ * Common helper functions for REST API methods to reduce code duplication
+ */
+
+/**
+ * Handles error cleanup and logging for write methods (POST, PUT, PATCH)
+ * 
+ * @param {Error} error - The error that was caught
+ * @param {Object} context - The request context
+ * @param {string} method - The HTTP method name (POST, PUT, PATCH)
+ * @param {string} scopeName - The name of the resource scope
+ * @param {Object} enhancedLog - The enhanced logger instance
+ * @throws {Error} Re-throws the original error after cleanup
+ */
+  const  handleWriteMethodError = async (error, context, method, scopeName, enhancedLog) => {
+  // Rollback transaction if we created it
+  if (context.shouldCommit) {
+    await context.transaction.rollback();
+  }
+  
+  // Log the full error details
+  enhancedLog.logError(`Error in ${method} method`, error, {
+    scopeName,
+    method: method.toLowerCase(),
+    inputRecord: context.inputRecord
+  });
+  
+  throw error;
+}
+
+/**
+ * Validates that a pivot resource exists for many-to-many relationships
+ * 
+ * @param {Object} scopes - All available scopes/resources
+ * @param {Object} relDef - The relationship definition
+ * @param {string} relName - The relationship name
+ * @throws {RestApiValidationError} If the pivot resource doesn't exist
+ */
+const validatePivotResource = (scopes, relDef, relName) => {
+  if (!scopes[relDef.through]) {
+    throw new RestApiValidationError(
+      `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
+      { 
+        fields: [`relationships.${relName}`],
+        violations: [{
+          field: `relationships.${relName}`,
+          rule: 'missing_pivot_resource',
+          message: `Pivot resource '${relDef.through}' must be defined`
+        }]
+      }
+    );
+  }
+}
+
+
+
     const getMethodHookSuffix = (method) => {
       if (!method) {
         return ''; // Or throw an error, depending on desired strictness
@@ -1058,19 +1114,7 @@ export const RestApiPlugin = {
         // Process many-to-many relationships after main record creation
         for (const { relName, relDef, relData } of manyToManyRelationships) {
           // Validate pivot resource exists
-          if (!scopes[relDef.through]) {
-            throw new RestApiValidationError(
-              `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
-              { 
-                fields: [`relationships.${relName}`],
-                violations: [{
-                  field: `relationships.${relName}`,
-                  rule: 'missing_pivot_resource',
-                  message: `Pivot resource '${relDef.through}' must be defined`
-                }]
-              }
-            );
-          }
+          validatePivotResource(scopes, relDef, relName);
           
           // Create pivot records in the through table to establish many-to-many relationships.
           // This creates records in the intermediary table (like 'article_tags') that link the main
@@ -1103,19 +1147,7 @@ export const RestApiPlugin = {
         return ret
         
       } catch (error) {
-        // Rollback transaction if we created it
-        if (context.shouldCommit) {
-          await context.transaction.rollback();
-        }
-        
-        // Log the full error details
-        enhancedLog.logError('Error in POST method', error, {
-          scopeName,
-          method: 'post',
-          inputRecord: context.inputRecord
-        });
-        
-        throw error;
+        await handleWriteMethodError(error, context, 'POST', scopeName, enhancedLog);
       }
     })
 
@@ -1427,19 +1459,7 @@ export const RestApiPlugin = {
     // Process many-to-many relationships after main record update/creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
         // Validate pivot resource exists
-        if (!scopes[relDef.through]) {
-          throw new RestApiValidationError(
-            `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
-            { 
-              fields: [`relationships.${relName}`],
-              violations: [{
-                field: `relationships.${relName}`,
-                rule: 'missing_pivot_resource',
-                message: `Pivot resource '${relDef.through}' must be defined`
-              }]
-            }
-          );
-        }
+        await validatePivotResource(scopes, relDef, relName);
         
         // Delete existing pivot records (only for updates, not creates)
         if (context.isUpdate) {
@@ -1477,19 +1497,7 @@ export const RestApiPlugin = {
       return ret
    
     } catch (error) {
-      // Rollback transaction if we created it
-      if (context.shouldCommit) {
-        await context.transaction.rollback();
-      }
-      
-      // Log the full error details
-      enhancedLog.logError('Error in PUT method', error, {
-        scopeName,
-        method: 'put',
-        inputRecord: context.inputRecord
-      });
-      
-      throw error;
+      await handleWriteMethodError(error, context, 'PUT', scopeName, enhancedLog);
     }
   })
 
@@ -1707,19 +1715,7 @@ export const RestApiPlugin = {
         for (const { relName, relDef, relData } of manyToManyRelationships) {
           
           // Validate pivot resource exists
-          if (!scopes[relDef.through]) {
-            throw new RestApiValidationError(
-              `Pivot resource '${relDef.through}' not found for relationship '${relName}'`,
-              { 
-                fields: [`relationships.${relName}`],
-                violations: [{
-                  field: `relationships.${relName}`,
-                  rule: 'missing_pivot_resource',
-                  message: `Pivot resource '${relDef.through}' must be defined`
-                }]
-              }
-            );
-          }
+          validatePivotResource(scopes, relDef, relName);
           
           // Update many-to-many relationships using intelligent synchronization that preserves pivot data.
           // This compares current relationships with desired state: removes records no longer needed,
@@ -1753,19 +1749,7 @@ export const RestApiPlugin = {
         return ret
       
       } catch (error) {
-        // Rollback transaction if we created it
-        if (context.shouldCommit) {
-          await context.transaction.rollback();
-        }
-        
-        // Log the full error details
-        enhancedLog.logError('Error in PATCH method', error, {
-          scopeName,
-          method: 'patch',
-          inputRecord: context.inputRecord
-        });
-        
-        throw error;
+        await handleWriteMethodError(error, context, 'PATCH', scopeName, enhancedLog);
       }
     })
 
