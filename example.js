@@ -113,13 +113,30 @@ try {
   });
   console.log('Created country:', countryResult2);
 
-  // Create another publisher
+  // Create publisher using the OLD way (foreign key field name)
   const publisher1Result = await api.resources.publishers.post({
-     name: 'Penguin Random House',
-      country_id: countryResult1.id
-
+    name: 'Penguin Random House',
+    country_id: countryResult1.id
   });
-  console.log('Created publisher1:', publisher1Result);
+  console.log('Created publisher1 (using country_id):', publisher1Result);
+
+  // Create publisher using the NEW way (relationship alias)
+  const publisher1bResult = await api.resources.publishers.post({
+    name: 'HarperCollins',
+    country: countryResult2.id  // Using 'country' instead of 'country_id'
+  });
+  console.log('Created publisher1b (using country alias):', publisher1bResult);
+
+  // Test error case: providing both country_id and country
+  try {
+    await api.resources.publishers.post({
+      name: 'Invalid Publisher',
+      country_id: countryResult1.id,
+      country: countryResult2.id  // ERROR: both specified!
+    });
+  } catch (error) {
+    console.log('Expected error when both country_id and country are provided:', error.message);
+  }
 
     // Create another publisher. NOT the simplified version
   const publisher2Result = await api.resources.publishers.post({

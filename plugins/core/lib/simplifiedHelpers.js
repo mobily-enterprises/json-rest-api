@@ -8,6 +8,8 @@
  * compliance internally.
  */
 
+import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
+
 /**
  * Transforms a simplified plain JavaScript object into a JSON:API compliant format.
  * 
@@ -43,7 +45,7 @@
  * // }
  * 
  * @example
- * // Example 2: Object with belongsTo relationship
+ * // Example 2: Object with belongsTo relationship (using foreign key name)
  * const schema = {
  *   title: { type: 'string' },
  *   author_id: { 
@@ -55,7 +57,7 @@
  * const input = {
  *   id: '456',
  *   title: 'Another Article',
- *   author_id: 789
+ *   author_id: 789 // Original way: using foreign key name
  * };
  * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
  * // Returns:
@@ -73,9 +75,27 @@
  * //     }
  * //   }
  * // }
- * 
+ *
  * @example
- * // Example 3: Object with many-to-many relationship
+ * // Example 3: Object with belongsTo relationship (using 'as' alias - NEW desired behavior)
+ * const schema = {
+ *   title: { type: 'string' },
+ *   author_id: {
+ *     type: 'number',
+ *     belongsTo: 'users',
+ *     as: 'author'
+ *   }
+ * };
+ * const input = {
+ *   id: '456',
+ *   title: 'Another Article',
+ *   author: 789 // NEW way: using the 'as' alias
+ * };
+ * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * // Returns the same JSON:API structure as above
+ *
+ * @example
+ * // Example 4: Object with many-to-many relationship
  * const relationships = {
  *   tags: {
  *     manyToMany: {
@@ -111,7 +131,7 @@
  * // }
  * 
  * @example
- * // Example 4: Already JSON:API formatted - returns as-is
+ * // Example 5: Already JSON:API formatted - returns as-is
  * const input = {
  *   data: {
  *     type: 'articles',
@@ -138,35 +158,79 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
 
   const attributes = {};
   const relationshipsData = {};
-  const { id, ...fields } = input;
+  const tempInput = { ...input }; // Create a mutable copy of the input
 
-  for (const [key, value] of Object.entries(fields)) {
-    const schemaField = schema[key];
+  const id = tempInput.id;
+  delete tempInput.id; // Extract ID from tempInput
 
-    // Check if it's a belongsTo field in schema
-    if (schemaField?.belongsTo && schemaField?.as) {
-      relationshipsData[schemaField.as] = {
-        data: value ? { type: schemaField.belongsTo, id: String(value) } : null
-      };
-    }
-    // Check if it's a relationship name (for many-to-many)
-    else if (relationships?.[key]) {
-      const rel = relationships[key];
+  // 1. Process belongsTo relationships (from schema fields)
+  // Iterate through the schema structure to find belongsTo fields
+  for (const [fieldName, fieldDef] of Object.entries(schema)) {
+    if (fieldDef.belongsTo) {
+      const relAlias = fieldDef.as || fieldName; // Use 'as' alias or foreign key name as default alias
+      let valueToProcess = undefined;
 
-      // Handle hasMany/manyToMany
-      if ((rel.hasMany || rel.manyToMany) && Array.isArray(value)) {
-        // Determine target type
-        const targetType = rel.hasMany || rel.manyToMany?.otherType || rel.through;
-        relationshipsData[key] = {
-          data: value.map(id => ({ type: targetType, id: String(id) }))
+      // Check if both foreign key and alias are provided - this is an error
+      if (fieldDef.as && tempInput[fieldName] !== undefined && tempInput[fieldDef.as] !== undefined) {
+        throw new RestApiValidationError(
+          `Cannot specify both '${fieldName}' and '${fieldDef.as}' for the same relationship. ` +
+          `Use either '${fieldName}' (foreign key) or '${fieldDef.as}' (relationship name), not both.`,
+          {
+            fields: [fieldName, fieldDef.as],
+            violations: [{
+              field: 'input',
+              rule: 'duplicate_relationship_specification',
+              message: `Both '${fieldName}' and '${fieldDef.as}' were provided for the same relationship`
+            }]
+          }
+        );
+      }
+
+      // Check if the user provided the foreign key name (e.g., country_id)
+      if (tempInput[fieldName] !== undefined) {
+        valueToProcess = tempInput[fieldName];
+        delete tempInput[fieldName]; // Remove from tempInput once processed
+      }
+      // Check if the user provided the 'as' alias (e.g., country)
+      else if (fieldDef.as && tempInput[fieldDef.as] !== undefined) {
+        valueToProcess = tempInput[fieldDef.as];
+        delete tempInput[fieldDef.as]; // Remove from tempInput once processed
+      }
+
+      if (valueToProcess !== undefined) {
+        relationshipsData[relAlias] = {
+          data: valueToProcess ? { type: fieldDef.belongsTo, id: String(valueToProcess) } : null
         };
       }
     }
-    // Regular attribute
-    else {
-      attributes[key] = value;
+  }
+
+  // 2. Process hasMany/manyToMany relationships (from relationships object)
+  // Iterate through the relationships config to find hasMany/manyToMany
+  for (const [relName, relConfig] of Object.entries(relationships || {})) {
+    // Check if the user provided data for this relationship name
+    if (tempInput[relName] !== undefined) {
+      const value = tempInput[relName];
+      delete tempInput[relName]; // Remove from tempInput once processed
+
+      if ((relConfig.hasMany || relConfig.manyToMany) && Array.isArray(value)) {
+        const targetType = relConfig.hasMany || relConfig.manyToMany?.otherType || relConfig.through;
+        relationshipsData[relName] = {
+          data: value.map(relId => ({ type: targetType, id: String(relId) }))
+        };
+      }
+      // Handle single belongsTo relationships if they were also defined in 'relationships'
+      // (though typically they are defined in schema.belongsTo)
+      else if (relConfig.belongsTo && value !== undefined) {
+          relationshipsData[relName] = {
+              data: value ? { type: relConfig.belongsTo, id: String(value) } : null
+          };
+      }
     }
   }
+
+  // 3. Any remaining fields in tempInput are attributes
+  Object.assign(attributes, tempInput);
 
   return {
     data: {
@@ -265,48 +329,63 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  * //   { id: '1', title: 'First Article' },
  * //   { id: '2', title: 'Second Article' }
  * // ]
- * 
+ *
  * @example
  * // Example 4: Resource with included data expanded
  * const jsonApi = {
  *   data: {
  *     type: 'articles',
- *     id: '123',
- *     attributes: { title: 'Article with Expanded Author' },
+ *     id: '400',
+ *     attributes: { title: 'JavaScript Guide' },
  *     relationships: {
  *       author: {
- *         data: { type: 'users', id: '456' }
+ *         data: { type: 'authors', id: '75' }
+ *       },
+ *       chapters: {
+ *         data: [
+ *           { type: 'chapters', id: '1001' },
+ *           { type: 'chapters', id: '1002' }
+ *         ]
  *       }
  *     }
  *   },
  *   included: [
  *     {
- *       type: 'users',
- *       id: '456',
- *       attributes: { name: 'John Doe', email: 'john@example.com' }
+ *       type: 'authors',
+ *       id: '75',
+ *       attributes: { name: 'Jane Smith', bio: 'Expert developer' }
+ *     },
+ *     {
+ *       type: 'chapters',
+ *       id: '1001',
+ *       attributes: { number: 1, title: 'Introduction' }
+ *     },
+ *     {
+ *       type: 'chapters',
+ *       id: '1002',
+ *       attributes: { number: 2, title: 'Basics' }
  *     }
  *   ]
  * };
  * const result = transformJsonApiToSimplified(jsonApi, schema, relationships);
  * // Returns:
  * // {
- * //   id: '123',
- * //   title: 'Article with Expanded Author',
- * //   author_id: '456',
+ * //   id: '400',
+ * //   title: 'JavaScript Guide',
+ * //   author_id: '75',
  * //   author: {  // Expanded from included
- * //     id: '456',
- * //     name: 'John Doe',
- * //     email: 'john@example.com'
- * //   }
+ * //     id: '75',
+ * //     name: 'Jane Smith',
+ * //     bio: 'Expert developer'
+ * //   },
+ * //   chapters_ids: ['1001', '1002'],
+ * //   chapters: [ // Expanded array from included
+ * //     { id: '1001', number: 1, title: 'Introduction' },
+ * //     { id: '1002', number: 2, title: 'Basics' }
+ * //   ]
  * // }
- * 
- * @example <caption>Why this is useful upstream</caption>
- * // The REST API plugin uses this to:
- * // 1. Provide a simpler response format for client applications
- * // 2. Reduce nesting and verbosity in API responses
- * // 3. Make related data easily accessible (author object vs just ID)
- * // 4. Support gradual migration from legacy APIs to JSON:API
- * // 5. Improve developer experience while maintaining standards compliance
+ *
+ * @private
  */
 export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => {
   if (!jsonApi?.data) return jsonApi;

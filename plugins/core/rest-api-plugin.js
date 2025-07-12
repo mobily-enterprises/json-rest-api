@@ -749,17 +749,38 @@ const validatePivotResource = (scopes, relDef, relName) => {
       const { validatedObject, errors } = await schema.validate(attributesToValidate, validationOptions);
 
       if (Object.keys(errors).length > 0) {
-          const violations = Object.entries(errors).map(([field, error]) => ({
-              field: `data.attributes.${field}`,
-              rule: error.code || 'invalid_value',
-              message: error.message
-          }));
+        // --- START OF MODIFICATION ---
+        const schemaStructure = context.schemaInfo.schema.structure; // Get the schema structure for lookup
+
+        const violations = Object.entries(errors).map(([field, error]) => {
+        let fieldPath = `data.attributes.${field}`; // Default path for attributes
+
+        // Check if this field is a foreign key that has an 'as' alias
+        const fieldDef = schemaStructure[field];
+        if (fieldDef && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic) && fieldDef.as) {
+          // If it's a belongsTo field with an alias, rewrite the path to the relationship alias
+          fieldPath = `data.relationships.${fieldDef.as}.data.id`;
+        }
+        // For many-to-many relationships, the original `transformSimplifiedToJsonApi`
+        // already puts them under `relationships.relName.data`, so `field` here
+        // would already be the relationship name, not a foreign key.
+        // However, if a validation error somehow slips through for a pivot table field
+        // that doesn't have an 'as' alias but is a foreign key, you might need
+        // more sophisticated mapping. For now, this covers belongsTo.
+
+        return {
+          field: fieldPath,
+          rule: error.code || 'invalid_value',
+          message: error.message
+        };
+          });
+          // --- END OF MODIFICATION ---
 
           throw new RestApiValidationError(
               'Schema validation failed for resource attributes',
               { 
-                  fields: Object.keys(errors).map(field => `data.attributes.${field}`),
-                  violations 
+                  fields: violations.map(v => v.field), // Use the potentially rewritten fields
+                  violations
               }
           );
       }
