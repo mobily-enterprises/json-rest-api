@@ -1,6 +1,5 @@
 import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
-import { createRelationshipIncludeHelpers } from './lib/knex-relationship-includes.js';
 import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
 import { buildQuerySelection } from './lib/knex-query-helpers-base.js';
 import { toJsonApi, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
@@ -35,9 +34,6 @@ export const RestApiKnexPlugin = {
     // Initialize cross-table search helpers
     const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
     
-    // Initialize relationship include helpers (will get access to helper functions after they're defined)
-    let relationshipIncludeHelpers;
-    
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                  MAIN QUERY FILTERING HOOK                              ║
      * ║  This is the heart of the filtering system. It processes searchSchema   ║
@@ -68,11 +64,6 @@ export const RestApiKnexPlugin = {
     
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
-    api.knex.helpers.relationshipIncludes = relationshipIncludeHelpers;
-    
-
-    // Now initialize relationship include helpers
-    relationshipIncludeHelpers = createRelationshipIncludeHelpers(scopes, log, knex);
 
     // Helper scope method to get all schema-related information
       addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {   
@@ -143,8 +134,7 @@ export const RestApiKnexPlugin = {
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
         scopes,
-        knex,
-        relationshipIncludeHelpers
+        knex
       });
       
       // Build and return response
@@ -244,8 +234,7 @@ export const RestApiKnexPlugin = {
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
         scopes,
-        knex,
-        relationshipIncludeHelpers
+        knex
       });
       
 

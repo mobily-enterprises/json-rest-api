@@ -7,7 +7,7 @@
  * efficiently while respecting transactions and sparse fieldsets.
  */
 
-import { createRelationshipIncludeHelpers } from './knex-relationship-includes.js';
+import { buildIncludedResources } from './knex-relationship-includes.js';
 
 /**
  * Processes the ?include= parameter to load related resources.
@@ -72,7 +72,7 @@ import { createRelationshipIncludeHelpers } from './knex-relationship-includes.j
  * // 6. Handle both belongsTo and hasMany relationships
  */
 export const processIncludes = async (records, scopeName, queryParams, transaction, dependencies) => {
-  const { log, scopes, knex, relationshipIncludeHelpers } = dependencies;
+  const { log, scopes, knex } = dependencies;
   
   if (!queryParams.include) {
     return [];
@@ -80,15 +80,13 @@ export const processIncludes = async (records, scopeName, queryParams, transacti
   
   log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include);
   
-  // If we have a transaction, we need to create a modified version of the helpers
-  // that uses the transaction instead of the base knex instance
-  let helpers = relationshipIncludeHelpers;
-  if (transaction && transaction !== knex) {
-    // Create a new instance of the helpers with the transaction
-    helpers = createRelationshipIncludeHelpers(scopes, log, transaction);
-  }
+  // Use transaction if provided, otherwise use base knex instance
+  const db = transaction || knex;
   
-  const includeResult = await helpers.buildIncludedResources(
+  const includeResult = await buildIncludedResources(
+    scopes,
+    log,
+    db,
     records,
     scopeName,
     queryParams.include,
