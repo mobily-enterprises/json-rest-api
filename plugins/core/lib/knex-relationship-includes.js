@@ -255,7 +255,7 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
   
   // Build field selection for sparse fieldsets
   const fieldsToSelect = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema) : 
+    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
     '*';
   
   // Load the target records
@@ -397,7 +397,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     // Step 3: Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
     const fieldsToSelect = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema) : 
+      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
       '*';
     
     // Step 4: Query the target table
@@ -478,7 +478,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
     const fieldsToSelect = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema) : 
+      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
       '*';
     
     // Query target table
@@ -606,7 +606,7 @@ export const loadPolymorphicBelongsTo = async (
     
     // Build field selection for sparse fieldsets
     const fieldsToSelect = fields?.[targetType] ? 
-      await buildFieldSelection(targetType, fields[targetType], targetSchema) : 
+      await buildFieldSelection(targetType, fields[targetType], targetSchema, scopes) : 
       '*';
     
     log.debug(`[INCLUDE] Loading ${targetType} records:`, { 
@@ -754,7 +754,7 @@ export const loadReversePolymorphic = async (
   // Build field selection for sparse fieldsets
   const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
   const fieldsToSelect = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema) : 
+    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
     '*';
   
   // Query for records pointing back to our scope

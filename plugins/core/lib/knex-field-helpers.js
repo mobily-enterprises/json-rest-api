@@ -108,7 +108,7 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   });
   
   // Always include polymorphic type and id fields from relationships
-  if (scopes[scopeName]) {
+  if (scopes && scopes[scopeName]) {
     try {
       const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
       Object.entries(relationships || {}).forEach(([relName, relDef]) => {
