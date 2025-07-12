@@ -152,6 +152,48 @@ export const parseIncludeTree = (includeParam) => {
 };
 
 /**
+ * Loads relationship metadata for included resources
+ * This ensures included resources have complete JSON:API representation
+ * 
+ * @param {Object} scopes - The hooked-api scopes object
+ * @param {Array<Object>} records - Records to add relationships to
+ * @param {string} scopeName - The scope/resource type name
+ */
+const loadRelationshipMetadata = async (scopes, records, scopeName) => {
+  // Get schema information
+  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
+  if (!schemaInfo) return;
+
+  const schema = schemaInfo.schema.structure || schemaInfo.schema;
+  const relationships = schemaInfo.schemaRelationships || {};
+
+  // Process each record
+  records.forEach(record => {
+    record._relationshipMetadata = {};
+
+    // Process belongsTo relationships from schema
+    for (const [fieldName, fieldDef] of Object.entries(schema)) {
+      if (fieldDef.belongsTo && fieldDef.as) {
+        const foreignKeyValue = record[fieldName];
+        if (foreignKeyValue != null) {
+          record._relationshipMetadata[fieldDef.as] = {
+            data: {
+              type: fieldDef.belongsTo,
+              id: String(foreignKeyValue)
+            }
+          };
+        } else {
+          record._relationshipMetadata[fieldDef.as] = { data: null };
+        }
+      }
+    }
+
+    // TODO: Handle hasMany relationships if needed
+    // This would require queries to get counts or related IDs
+  });
+};
+
+/**
  * Loads belongsTo relationships (many-to-one)
  * 
  * This function loads the "parent" side of a relationship. For example, if comments
@@ -223,6 +265,9 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
   }
   const targetRecords = await query;
   
+  // Load relationship metadata for all target records
+  await loadRelationshipMetadata(scopes, targetRecords, targetScope);
+  
   // Create lookup map
   const targetById = {};
   targetRecords.forEach(record => {
@@ -241,12 +286,20 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
     if (targetRecord) {
       // Convert to JSON:API format
       const jsonApiRecord = toJsonApi(targetScope, targetRecord, targetSchema, targetIdProperty);
+
+      // Add relationships from metadata
+      if (targetRecord._relationshipMetadata) {
+        jsonApiRecord.relationships = targetRecord._relationshipMetadata;
+        // Clean up the temporary property
+        delete targetRecord._relationshipMetadata;
+      }
+
       record._relationships[includeName] = { data: { type: targetScope, id: String(targetId) } };
       
       // Add to included if not already there
       const resourceKey = `${targetScope}:${targetId}`;
       if (!included.has(resourceKey)) {
-        included.set(resourceKey, jsonApiRecord);
+        included.set(resourceKey, jsonApiRecord); // Now includes relationships!
         
         // Collect for nested processing
         if (Object.keys(subIncludes).length > 0) {
@@ -356,13 +409,16 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     log.trace('[INCLUDE] Loaded target records:', { count: targetRecords.length });
     
-    // Step 5: Create lookup map for target records
+    // Step 5: Load relationship metadata for all target records
+    await loadRelationshipMetadata(scopes, targetRecords, targetScope);
+    
+    // Step 6: Create lookup map for target records
     const targetById = {};
     targetRecords.forEach(record => {
       targetById[record.id] = record;
     });
     
-    // Step 6: Group pivot records by parent ID
+    // Step 7: Group pivot records by parent ID
     const pivotsByParent = {};
     pivotRecords.forEach(pivot => {
       const parentId = pivot[foreignKey];
@@ -385,6 +441,14 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
           const resourceKey = `${targetScope}:${childRecord.id}`;
           if (!included.has(resourceKey)) {
             const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+            
+            // Add relationships from metadata
+            if (childRecord._relationshipMetadata) {
+              jsonApiRecord.relationships = childRecord._relationshipMetadata;
+              // Clean up the temporary property
+              delete childRecord._relationshipMetadata;
+            }
+            
             included.set(resourceKey, jsonApiRecord);
           }
           return { type: targetScope, id: String(childRecord.id) };
@@ -426,6 +490,9 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     log.trace('[INCLUDE] Loaded hasMany records:', { count: targetRecords.length });
     
+    // Load relationship metadata for all target records
+    await loadRelationshipMetadata(scopes, targetRecords, targetScope);
+    
     // Group by parent ID
     const childrenByParent = {};
     targetRecords.forEach(record => {
@@ -446,6 +513,14 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
         const resourceKey = `${targetScope}:${childRecord.id}`;
         if (!included.has(resourceKey)) {
           const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+          
+          // Add relationships from metadata
+          if (childRecord._relationshipMetadata) {
+            jsonApiRecord.relationships = childRecord._relationshipMetadata;
+            // Clean up the temporary property
+            delete childRecord._relationshipMetadata;
+          }
+          
           included.set(resourceKey, jsonApiRecord);
         }
         return { type: targetScope, id: String(childRecord.id) };
@@ -546,6 +621,9 @@ export const loadPolymorphicBelongsTo = async (
     }
     const targetRecords = await query;
     
+    // Load relationship metadata for all target records
+    await loadRelationshipMetadata(scopes, targetRecords, targetType);
+    
     // Create lookup map
     const targetById = {};
     targetRecords.forEach(record => {
@@ -565,6 +643,14 @@ export const loadPolymorphicBelongsTo = async (
           const resourceKey = `${targetType}:${targetId}`;
           if (!included.has(resourceKey)) {
             const jsonApiRecord = toJsonApi(targetType, targetRecord, targetSchema);
+            
+            // Add relationships from metadata
+            if (targetRecord._relationshipMetadata) {
+              jsonApiRecord.relationships = targetRecord._relationshipMetadata;
+              // Clean up the temporary property
+              delete targetRecord._relationshipMetadata;
+            }
+            
             included.set(resourceKey, jsonApiRecord);
           }
           
@@ -686,6 +772,9 @@ export const loadReversePolymorphic = async (
     count: targetRecords.length 
   });
   
+  // Load relationship metadata for all target records
+  await loadRelationshipMetadata(scopes, targetRecords, targetScope);
+  
   // Group by parent ID
   const childrenByParent = {};
   targetRecords.forEach(record => {
@@ -706,6 +795,14 @@ export const loadReversePolymorphic = async (
       const resourceKey = `${targetScope}:${childRecord.id}`;
       if (!included.has(resourceKey)) {
         const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+        
+        // Add relationships from metadata
+        if (childRecord._relationshipMetadata) {
+          jsonApiRecord.relationships = childRecord._relationshipMetadata;
+          // Clean up the temporary property
+          delete childRecord._relationshipMetadata;
+        }
+        
         included.set(resourceKey, jsonApiRecord);
       }
       return { type: targetScope, id: String(childRecord.id) };
