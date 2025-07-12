@@ -1,51 +1,127 @@
 
 # Diagram of helpers and their dependencies
 
-  ┌─────────────────────────────┐     ┌──────────────────────────────┐
-  │  knex-field-helpers.js      │     │  knex-query-helpers-base.js  │
-  │                             │     │                              │
-  │  • getForeignKeyFields()    │     │  • buildQuerySelection()     │
-  │  • buildFieldSelection()    │     │                              │
-  │                             │     │  (no dependencies)           │
-  │  (no dependencies)          │     └──────────────────────────────┘
-  └──────────────┬──────────────┘
-                 │
-                 ├─────────────────────┬────────────────────┐
-                 ↓                     ↓                    ↓
-  ┌──────────────────────────┐  ┌─────────────────────┐  ┌───────────────────────┐
-  │ knex-json-api-           │  │ knex-relationship-  │  │ knex-process-         │
-  │ transformers.js          │  │ includes.js         │  │ includes.js           │
-  │                          │  │                     │  │                       │
-  │ • toJsonApi()            │  │ • createRelationship│  │ • processIncludes()   │
-  │ • buildJsonApiResponse() │  │   IncludeHelpers()  │--│                       │
-  │ • processBelongsTo       │  │                     │  │ imports from:         │
-  │   Relationships()        │  │ imports from:       │  │ • knex-field-helpers  │
-  │                          │  │ • knex-field-helpers│  │ • knex-relationship-  │
-  │ imports from:            │  │                     │  │   includes            │
-  │ • knex-field-helpers     │  └─────────────────────┘  └───────────┬───────────┘
-  └──────────────────────────┘                                       │
-                                                                     │
-                                ┌────────────────────────────────────┘
-                                ↓
-                       ┌────────────────────────┐
-                       │ rest-api-knex-plugin.js│
-                       │                        │
-                       │ imports from ALL:      │
-                       │ • knex-field-helpers   │
-                       │ • knex-query-helpers-  │
-                       │   base                 │
-                       │ • knex-json-api-       │
-                       │   transformers         │
-                       │ • knex-process-includes│
-                       │ • knex-relationship-   │
-                       │   includes             │
-                       └────────────────────────┘
+     ┌─────────────────────────────┐
+     │      toJsonApi()            │ - Converts DB record to JSON:API format
+     │  (scopeName, record,        │ - Filters out foreign keys
+     │   schema, idProperty)       │ - Returns: {type, id, attributes}
+     └─────────────────────────────┘
 
-  Key Points:
+     ┌─────────────────────────────┐
+     │  groupByPolymorphicType()   │ - Groups records by polymorphic type
+     │  (records, typeField,       │ - Used for batch loading
+     │   idField)                  │ - Returns: {type: [ids...]}
+     └─────────────────────────────┘
 
-  1. Two leaf modules (no dependencies): knex-field-helpers.js and knex-query-helpers-base.js
-  2. Three modules depend on knex-field-helpers.js
-  3. One module (knex-process-includes.js) depends on both knex-field-helpers.js and
-  knex-relationship-includes.js
-  4. No circular dependencies - all arrows flow in one direction
-  5. The main plugin imports from all modules as needed
+     ┌─────────────────────────────┐
+     │    parseIncludeTree()       │ - Parses include parameter string
+     │    (includeParam)           │ - Converts "author,comments.user"
+     │                             │ - Returns: nested object tree
+     └─────────────────────────────┘
+     ```
+
+     ### Functions with Dependencies (scopes, log, knex as first params)
+     ```
+     ┌─────────────────────────────────────────────────────────────────┐
+     │                     buildIncludedResources()                    │
+     │ (scopes, log, knex, records, scopeName, includeParam, fields)   │
+     │                                                                 │
+     │ Main entry point - orchestrates the include loading process     │
+     │                                                                 │
+     │ 1. Parses includes ──────────────┐                              │
+     │                                  ▼                              │
+     │ 2. Calls processIncludes ─────► processIncludes()               │
+     │                                                                 │
+     │ 3. Returns: {included: [...], recordsWithRelationships: [...]}  │
+     └─────────────────────────────────────────────────────────────────┘
+                                         │
+                                         ▼
+     ┌────────────────────────────────────────────────────────────────┐
+     │                        processIncludes()                       │
+     │ (scopes, log, knex, records, scopeName, includeTree,           │
+     │  included, processedPaths, currentPath, fields)                │
+     │                                                                │
+     │ Recursive function that examines schema and calls loaders      │
+     │                                                                │
+     │ Dispatches to: ─────────────────┬───────────────┬──────────────┤
+     └─────────────────────────────────┴───────────────┴──────────────┘
+                         │                     │                │
+                         ▼                     ▼                ▼
+     ┌───────────────────────────┐ ┌─────────────────────┐ ┌──────────────────────────┐
+     │     loadBelongsTo()       │ │    loadHasMany()    │ │ loadPolymorphicBelongsTo │
+     │ (scopes, log, knex,       │ │ (scopes, log, knex, │ │ (scopes, log, knex,      │
+     │  records, fieldName,      │ │  records, scopeName,│ │  records, relName,       │
+     │  fieldDef, includeName,   │ │  includeName,       │ │  relDef, subIncludes,    │
+     │  subIncludes, included,   │ │  relDef,            │ │  included,               │
+     │  processedPaths,          │ │  subIncludes,       │ │  processedPaths,         │
+     │  currentPath, fields)     │ │  included,          │ │  currentPath, fields)    │
+     │                           │ │  processedPaths,    │ │                          │
+     │ Loads many-to-one         │ │  currentPath,       │ │ Loads polymorphic        │
+     │ e.g. comment→article      │ │  fields)            │ │ e.g. comment→(article    │
+     │                           │ │                     │ │      or video)           │
+     │ ┌─────────────────┐       │ │ Loads one-to-many   │ │                          │
+     │ │ Recursively     │       │ │ or many-to-many     │ │ ┌──────────────────┐     │
+     │ │ calls           │◄──────┼─┤ e.g. article→       │ │ │ Recursively      │     │
+     │ │ processIncludes │       │ │      comments       │ │ │ calls            │◄────┤
+     │ └─────────────────┘       │ │                     │ │ │ processIncludes  │     │
+     └───────────────────────────┘ │ ┌─────────────────┐ │ │ └──────────────────┘     │
+                                   │ │ Recursively     │ │ └──────────────────────────┘
+                                   │ │ calls           │◄┤
+                                   │ │ processIncludes │ │           Also dispatches to:
+                                   │ └─────────────────┘ │                    │
+                                   └─────────────────────┘                    ▼
+                                                           ┌──────────────────────────┐
+                                                           │ loadReversePolymorphic() │
+                                                           │ (scopes, log, knex,      │
+                                                           │  records, scopeName,     │
+                                                           │  includeName, relDef,    │
+                                                           │  subIncludes, included,  │
+                                                           │  processedPaths,         │
+                                                           │  currentPath, fields)    │
+                                                           │                          │
+                                                           │ Loads via relationships  │
+                                                           │ e.g. article→comments    │
+                                                           │      (via commentable)   │
+                                                           │                          │
+                                                           │ ┌──────────────────┐     │
+                                                           │ │ Recursively      │     │
+                                                           │ │ calls            │◄────┤
+                                                           │ │ processIncludes  │     │
+                                                           │ └──────────────────┘     │
+                                                           └──────────────────────────┘
+     ```
+
+     ## Module: knex-process-includes.js
+
+     ```
+     ┌─────────────────────────────────────────────────────────────────┐
+     │                      processIncludes()                          │
+     │ (records, scopeName, queryParams, transaction, dependencies)    │
+     │                                                                 │
+     │ High-level orchestrator that:                                   │
+     │ 1. Extracts scopes, log, knex from dependencies                 │
+     │ 2. Uses transaction if provided, otherwise uses knex            │
+     │ 3. Calls buildIncludedResources with all parameters             │
+     │ 4. Returns just the included array                              │
+     │                                                                 │
+     │ Called by: REST API plugin dataGet/dataQuery methods            │
+     └─────────────────────────────────────────────────────────────────┘
+     ```
+
+   
+     ## Data Flow:
+     ```
+     REST API Plugin
+         │
+         ├─► processIncludes (knex-process-includes.js)
+         │       │
+         │       └─► buildIncludedResources (knex-relationship-includes.js)
+         │               │
+         │               └─► processIncludes (recursive orchestrator)
+         │                       │
+         │                       ├─► loadBelongsTo
+         │                       ├─► loadHasMany
+         │                       ├─► loadPolymorphicBelongsTo
+         │                       └─► loadReversePolymorphic
+         │
+         └─► Returns: Array of included resources in JSON:API format

@@ -297,15 +297,16 @@ export const RestApiPlugin = {
         context.queryParams.filters = validatedObject;
       }
     
-      runHooks('checkPermissions')
-      runHooks('checkPermissionsQuery')
+      await runHooks ('checkPermissions')
+      await runHooks ('checkPermissionsQuery')
       
-      runHooks('beforeData')
-      runHooks('beforeDataQuery')
+      await runHooks ('beforeData')
+      await runHooks ('beforeDataQuery')
       context.record = await helpers.dataQuery({
         scopeName,
         context,
-        transaction: context.transaction
+        transaction: context.transaction,
+        runHooks
       })
     
       // Make a backup
@@ -321,7 +322,7 @@ export const RestApiPlugin = {
       }
 
       // This will enhance record, which is the WHOLE JSON:API record
-      runHooks('enrichRecord')
+      await runHooks ('enrichRecord')
 
       // Run enrichAttributes for every single set of attribute, calling it from the right scope
       for (const entry of context.record.data) {
@@ -339,8 +340,8 @@ export const RestApiPlugin = {
       }
 
       // The called hooks should NOT change context.record
-      runHooks('finish')
-      runHooks('finishQuery')
+      await runHooks ('finish')
+      await runHooks ('finishQuery')
       
       // Transform output if in simplified mode
       if (context.simplified) {
@@ -444,7 +445,7 @@ export const RestApiPlugin = {
       context.scopeName = scopeName;
 
       // These are just shortcuts used in this function and will be returned
-      const schema = context.schemaInfo.schema;
+      // const schema = context.schemaInfo.schema; // Not needed
       const schemaStructure = context.schemaInfo.schema.structure;
       const schemaRelationships = context.schemaInfo.schemaRelationships;
 
@@ -457,11 +458,11 @@ export const RestApiPlugin = {
       // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
       validateGetPayload({ id: context.id, queryParams: context.queryParams });
 
-      runHooks('checkPermissions')
-      runHooks('checkPermissionsGet')
+      await runHooks('checkPermissions')
+      await runHooks('checkPermissionsGet')
       
-      runHooks('beforeData')
-      runHooks('beforeDataGet')
+      await runHooks('beforeData')
+      await runHooks('beforeDataGet')
 
       context.record = await helpers.dataGet({
         scopeName,
@@ -482,14 +483,14 @@ export const RestApiPlugin = {
         );
       }
     
-      runHooks('checkDataPermissions')
-      runHooks('checkDataPermissionsGet')
+      await runHooks ('checkDataPermissions')
+      await runHooks ('checkDataPermissionsGet')
       
       // Make a backup
       context.originalRecord = structuredClone(context.record)
 
       // This will enhance record, which is the WHOLE JSON:API record
-      runHooks('enrichRecord')
+      await runHooks ('enrichRecord')
       context.record.data.attributes = await scope.enrichAttributes({ 
         attributes: context.record.data.attributes, 
         parentContext: context 
@@ -502,11 +503,11 @@ export const RestApiPlugin = {
         })
       }
       
-      runHooks('enrichRecordWithRelationships')
+      await runHooks ('enrichRecordWithRelationships')
 
       // The called hooks should NOT change context.record
-      runHooks('finish')
-      runHooks('finishGet')
+      await runHooks ('finish')
+      await runHooks ('finishGet')
       
       // Get schema info for transformation
       context.schemaInfo = scopes[scopeName].vars.schemaInfo
@@ -693,8 +694,8 @@ export const RestApiPlugin = {
       // Dynamically get the method suffix
       const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
 
-      runHooks('beforeSchemaValidate');
-      runHooks(`beforeSchemaValidate${methodSpecificHookSuffix}`);
+      await runHooks ('beforeSchemaValidate');
+      await runHooks (`beforeSchemaValidate${methodSpecificHookSuffix}`);
 
       // Store original input attributes before validation adds defaults (primarily for POST)
       // Only if it's not already set and the current method is POST
@@ -729,8 +730,8 @@ export const RestApiPlugin = {
       }
       context.inputRecord.data.attributes = validatedObject;
 
-      runHooks(`afterSchemaValidate${methodSpecificHookSuffix}`);
-      runHooks('afterSchemaValidate');
+      await runHooks (`afterSchemaValidate${methodSpecificHookSuffix}`);
+      await runHooks ('afterSchemaValidate');
     };
 
 
@@ -749,7 +750,7 @@ export const RestApiPlugin = {
         schemaRelationships,
         scopeOptions, // Used for cascadeConfig
         vars,         // Used for cascadeConfig
-        runHooks      // Used to run finish hooks
+        runHooks       // Used to run finish hooks
     }) {
         const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
 
@@ -1004,8 +1005,6 @@ export const RestApiPlugin = {
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
       
-      if (scopeName === 'books') debugger
-      
       const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
           params, context, vars, scopes, scopeOptions, scopeName, helpers
       });
@@ -1036,15 +1035,15 @@ export const RestApiPlugin = {
             context, 
             schema, 
             belongsToUpdates, 
-            runHooks, 
+            runHooks , 
         });
 
         
-        runHooks('checkPermissions')
-        runHooks('checkPermissionsPost')
+        await runHooks ('checkPermissions')
+        await runHooks ('checkPermissionsPost')
         
-        runHooks('beforeDataCall')
-        runHooks('beforeDataCallPost')
+        await runHooks ('beforeDataCall')
+        await runHooks ('beforeDataCallPost')
         
         // Create the main record - storage helper should return the created record with its ID
         context.id = await helpers.dataPost({
@@ -1053,8 +1052,8 @@ export const RestApiPlugin = {
           transaction: context.transaction,
         });
         
-        runHooks('afterDataCallPost')
-        runHooks('afterDataCall')
+        await runHooks ('afterDataCallPost')
+        await runHooks ('afterDataCall')
         
         // Process many-to-many relationships after main record creation
         for (const { relName, relDef, relData } of manyToManyRelationships) {
@@ -1298,10 +1297,10 @@ export const RestApiPlugin = {
   scopeName }) => {
     context.method = 'put'
     
-    const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
+    const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
         params, context, vars, scopes, scopeOptions, scopeName, helpers
     });
-    context.id = context.inputRecord.id;
+    context.id = context.inputRecord.data.id;
 
     try {
       // Run early hooks for pre-processing (e.g., file handling)
@@ -1410,20 +1409,20 @@ export const RestApiPlugin = {
       };
     }
 
-    runHooks('checkPermissions')
-    runHooks('checkPermissionsPut')
-    runHooks(`checkPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
+    await runHooks ('checkPermissions')
+    await runHooks ('checkPermissionsPut')
+    await runHooks (`checkPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
   
-    runHooks('beforeDataCall')
-    runHooks('beforeDataCallPut')
+    await runHooks ('beforeDataCall')
+    await runHooks ('beforeDataCallPut')
     // Pass the operation type to the helper
     await helpers.dataPut({
       scopeName,
       context,
       transaction: context.transaction
     });
-    runHooks('afterDataCallPut')
-    runHooks('afterDataCall')
+    await runHooks ('afterDataCallPut')
+    await runHooks ('afterDataCall')
 
     // Process many-to-many relationships after main record update/creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
@@ -1649,10 +1648,10 @@ export const RestApiPlugin = {
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'patch'
         
-      const { schema, schemaStructure, schemaRelationships } = setupCommonRequest({
+      const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
           params, context, vars, scopes, scopeOptions, scopeName, helpers
       });
-      context.id = context.inputRecord.id;
+      context.id = context.inputRecord.data.id;
       
       try {        
         // Run early hooks for pre-processing (e.g., file handling)
@@ -1687,11 +1686,11 @@ export const RestApiPlugin = {
 
     
         // Permissions check
-        runHooks('checkPermissions')
-        runHooks('checkPermissionsPatch')
+        await runHooks ('checkPermissions')
+        await runHooks ('checkPermissionsPatch')
         
-        runHooks('beforeDataCall')
-        runHooks('beforeDataCallPatch')
+        await runHooks ('beforeDataCall')
+        await runHooks ('beforeDataCallPatch')
 
         // Call the storage helper - should return the patched record
         await helpers.dataPatch({
@@ -1700,8 +1699,8 @@ export const RestApiPlugin = {
           transaction: context.transaction
         });
 
-        runHooks('afterDataCallPatch')
-        runHooks('afterDataCall')
+        await runHooks ('afterDataCallPatch')
+        await runHooks ('afterDataCall')
 
         // Process many-to-many relationships after main record update
         // For PATCH, we only update the relationships that were explicitly provided
@@ -1807,16 +1806,18 @@ export const RestApiPlugin = {
       // Set the ID in context
       context.id = params.id
       
+      // Set schema info even for DELETE (needed by storage layer)
+      context.schemaInfo = scopes[scopeName].vars.schemaInfo;
+      
       // No payload validation needed for DELETE
-      // No schema needed for DELETE
       
       // Run permission checks
-      runHooks('checkPermissions')
-      runHooks('checkPermissionsDelete')
+      await runHooks ('checkPermissions')
+      await runHooks ('checkPermissionsDelete')
       
       // Before data operations
-      runHooks('beforeDataCall')
-      runHooks('beforeDataCallDelete')
+      await runHooks ('beforeDataCall')
+      await runHooks ('beforeDataCallDelete')
       
       // Initialize record context for hooks
       context.record = {}
@@ -1828,13 +1829,13 @@ export const RestApiPlugin = {
         transaction: context.transaction
       });
       
-      runHooks('afterDataCallDelete')
-      runHooks('afterDataCall')
+      await runHooks ('afterDataCallDelete')
+      await runHooks ('afterDataCall')
       
       // No return record for DELETE (204 No Content)
       
-      runHooks('finish')
-      runHooks('finishDelete')
+      await runHooks ('finish')
+      await runHooks ('finishDelete')
       
       // DELETE typically returns void/undefined (204 No Content)
       return;

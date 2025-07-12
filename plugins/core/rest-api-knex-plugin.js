@@ -9,6 +9,7 @@ import {
   crossTableFiltersHook,
   basicFiltersHook
 } from './lib/knex-query-helpers.js';
+import { RestApiResourceError } from '../../lib/rest-api-errors.js';
 
 
 export const RestApiKnexPlugin = {
@@ -123,10 +124,14 @@ export const RestApiKnexPlugin = {
       const record = await query.first();
       
       if (!record) {
-        const error = new Error(`Record not found: ${scopeName}/${id}`);
-        error.code = 'REST_API_RESOURCE';
-        error.subtype = 'not_found';
-        throw error;
+        throw new RestApiResourceError(
+          `Resource not found`,
+          { 
+            subtype: 'not_found',
+            resourceType: scopeName,
+            resourceId: id
+          }
+        );
       }
       
       // Process includes
@@ -141,10 +146,10 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(records, scopeName, schema, included, true, scopes, vars);
     };
 
-    helpers.dataQuery = async ({ scopeName, context, transaction }) => {    
+    helpers.dataQuery = async ({ scopeName, context, transaction, runHooks }) => {    
       const tableName = context.schemaInfo.tableName;
       const schema =  context.schemaInfo.schema;
-      const searchSchema =  context.schemaInfo.schema;
+      const searchSchema =  context.schemaInfo.searchSchema;
       const queryParams = context.queryParams
       const db = transaction || knex;
       const sortableFields = context.sortableFields
@@ -269,8 +274,9 @@ export const RestApiKnexPlugin = {
       const schema =  context.schemaInfo.schema;
       const db = transaction || knex;
       const inputRecord = context.inputRecord      
+      const isCreate = context.isCreate
     
-      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${isCreate})`);
+      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${context.isCreate})`);
       
       // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
@@ -292,10 +298,14 @@ export const RestApiKnexPlugin = {
           .first();
         
         if (!exists) {
-          const error = new Error(`Record not found: ${scopeName}/${id}`);
-          error.code = 'REST_API_RESOURCE';
-          error.subtype = 'not_found';
-          throw error;
+          throw new RestApiResourceError(
+            `Resource not found`,
+            { 
+              subtype: 'not_found',
+              resourceType: scopeName,
+              resourceId: id
+            }
+          );
         }
         
         // Update the record (replace all fields)
@@ -325,10 +335,14 @@ export const RestApiKnexPlugin = {
         .first();
       
       if (!exists) {
-        const error = new Error(`Record not found: ${scopeName}/${id}`);
-        error.code = 'REST_API_RESOURCE';
-        error.subtype = 'not_found';
-        throw error;
+        throw new RestApiResourceError(
+          `Resource not found`,
+          { 
+            subtype: 'not_found',
+            resourceType: scopeName,
+            resourceId: id
+          }
+        );
       }
       
       // Extract attributes and process relationships using helper
@@ -363,10 +377,14 @@ export const RestApiKnexPlugin = {
         .first();
       
       if (!exists) {
-        const error = new Error(`Record not found: ${scopeName}/${id}`);
-        error.code = 'REST_API_RESOURCE';
-        error.subtype = 'not_found';
-        throw error;
+        throw new RestApiResourceError(
+          `Resource not found`,
+          { 
+            subtype: 'not_found',
+            resourceType: scopeName,
+            resourceId: id
+          }
+        );
       }
       
       // Delete the record
