@@ -43,7 +43,7 @@ export async function createBasicApi(knex) {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
-      country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
       books: { hasMany: 'books', foreignKey: 'publisher_id' }
@@ -140,7 +140,7 @@ export async function createExtendedApi(knex) {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
-      country_id: { type: 'number', belongsTo: 'countries', as: 'country' },
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' },
       founded_year: { type: 'number' },
       website: { type: 'string', max: 255 },
       active: { type: 'boolean', default: true }
@@ -175,7 +175,7 @@ export async function createExtendedApi(knex) {
       title: { type: 'string', required: true, max: 300, search: true },
       isbn: { type: 'string', max: 13 },
       pages: { type: 'number' },
-      price: { type: 'string', search: true }, // Store price as string for decimal precision
+      price: { type: 'number', search: true }, // Store price as string for decimal precision
       published_date: { type: 'date' },
       language: { type: 'string', max: 2, default: 'en', search: true },
       country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country', search: true },

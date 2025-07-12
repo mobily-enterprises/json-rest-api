@@ -453,11 +453,11 @@ describe('Query Operations', () => {
 
       // Create books with prices
       const bookData = [
-        { title: 'Cheap Book A', price: '9.99', countryId: countries[0].id, language: 'en' },
-        { title: 'Expensive Book B', price: '29.99', countryId: countries[0].id, language: 'en' },
-        { title: 'Medium Book C', price: '19.99', countryId: countries[1].id, language: 'en' },
-        { title: 'Cheap Book D', price: '12.99', countryId: countries[1].id, language: 'fr' },
-        { title: 'Expensive Book E', price: '39.99', countryId: countries[2].id, language: 'fr' }
+        { title: 'Cheap Book A', price: 9.99, countryId: countries[0].id, language: 'en' },
+        { title: 'Expensive Book B', price: 29.99, countryId: countries[0].id, language: 'en' },
+        { title: 'Medium Book C', price: 19.99, countryId: countries[1].id, language: 'en' },
+        { title: 'Cheap Book D', price: 12.99, countryId: countries[1].id, language: 'fr' },
+        { title: 'Expensive Book E', price: 39.99, countryId: countries[2].id, language: 'fr' }
       ];
 
       for (const data of bookData) {

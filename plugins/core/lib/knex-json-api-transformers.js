@@ -118,15 +118,22 @@ export const buildJsonApiResponse = async (records, scopeName, schema, included 
     
     // Add regular belongsTo relationships (only if not already loaded)
     for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-      if (fieldDef.belongsTo && fieldDef.as && cleanRecord[fieldName]) {
+      if (fieldDef.belongsTo && fieldDef.as && fieldName in cleanRecord) {
         jsonApiRecord.relationships = jsonApiRecord.relationships || {};
         if (!jsonApiRecord.relationships[fieldDef.as]) {
-          jsonApiRecord.relationships[fieldDef.as] = {
-            data: {
-              type: fieldDef.belongsTo,
-              id: String(cleanRecord[fieldName])
-            }
-          };
+          if (cleanRecord[fieldName] !== null && cleanRecord[fieldName] !== undefined) {
+            jsonApiRecord.relationships[fieldDef.as] = {
+              data: {
+                type: fieldDef.belongsTo,
+                id: String(cleanRecord[fieldName])
+              }
+            };
+          } else {
+            // Explicitly null relationship
+            jsonApiRecord.relationships[fieldDef.as] = {
+              data: null
+            };
+          }
         }
       }
     }
