@@ -25,22 +25,32 @@ This README uses a consistent example throughout - a book catalog system with au
 
 **Important**: The five tables defined below (countries, publishers, authors, books, and book_authors) form the foundation for all examples, tests, and documentation in this guide. We'll consistently reference this same schema structure to demonstrate all features of the library.
 
+Also for brevity, the `inspect()` function will be assumed to be set:
+
 ```javascript
-import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
-import Knex from 'knex';
+import { Api } from 'hooked-api';
+import knexLib from 'knex';
+import util from 'util';
+
+
+// import { setupDatabase } from './setup-database.js';
+
+const inspect = (obj) => util.inspect(obj, { depth: 5 })
+
+// Create a Knex instance connected to SQLite in-memory database
+const knex = knexLib({
+  client: 'sqlite3',
+  connection: {
+    filename: ':memory:'
+  },
+  useNullAsDefault: true
+});
 
 // Create API instance
 const api = new Api({
   name: 'book-catalog-api',
   version: '1.0.0'
-});
-
-// Database connection
-const knex = Knex({
-  client: 'sqlite3',
-  connection: { filename: ':memory:' },
-  useNullAsDefault: true
 });
 
 // Install plugins
@@ -50,32 +60,36 @@ await api.use(RestApiKnexPlugin, { knex });
 // Define schemas for our book catalog system
 
 // Countries table
-api.addResource('countries', {
+await api.addResource('countries', {
   schema: {
     id: { type: 'id' },
     name: { type: 'string', required: true, max: 100 },
-    code: { type: 'string', required: true, max: 2, unique: true }, // ISO country code
+    code: { type: 'string', max: 2, unique: true }, // ISO country code
   },
   relationships: {
     publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
     books: { hasMany: 'books', foreignKey: 'country_id' }
-  }
+  },
+  // tableName: 'stocazzo',
+  // idProperty: 'anotherId'
 });
+await api.resources.countries.createKnexTable()
 
 // Publishers table
-api.addResource('publishers', {
+await api.addResource('publishers', {
   schema: {
     id: { type: 'id' },
     name: { type: 'string', required: true, max: 200 },
-    country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
+    country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
   relationships: {
     books: { hasMany: 'books', foreignKey: 'publisher_id' }
   }
 });
+await api.resources.publishers.createKnexTable()
 
 // Authors table
-api.addResource('authors', {
+await api.addResource('authors', {
   schema: {
     id: { type: 'id' },
     name: { type: 'string', required: true, max: 200 },
@@ -84,33 +98,167 @@ api.addResource('authors', {
     books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
   }
 });
+await api.resources.authors.createKnexTable()
 
 // Books table
-api.addResource('books', {
+await api.addResource('books', {
   schema: {
     id: { type: 'id' },
     title: { type: 'string', required: true, max: 300 },
     country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
+    publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
   }
 });
+await api.resources.books.createKnexTable()
 
 // Book-Authors pivot table (many-to-many relationship)
-api.addResource('book_authors', {
+await api.addResource('book_authors', {
   schema: {
     id: { type: 'id' },
     book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
     author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
   }
 });
+await api.resources.book_authors.createKnexTable()
 ```
+### Database optons
+
+Explain how this part:
+
+```javascript
+// Create a Knex instance connected to SQLite in-memory database
+const knex = knexLib({
+  client: 'sqlite3',
+  connection: {
+    filename: ':memory:'
+  },
+  useNullAsDefault: true
+});
+```
+
+Can be changed into something else, depending on the storage requied (MariaDb, PostgreSL, etc.)
 
 ## Basic API usage of the library
 
+## Basic usage
+
+Intro: this is the basic usage.
+
+### Programmatic usage
+
+WRITE: Writeup on how to create records in the "countries" resource.
+
+```javascript
+  // Create a country
+  const countryUs = await api.resources.countries.post({
+    name: 'United States',
+    code: 'US'
+  });
+  console.log('Country:', inspect(countryUs));
+```
+
+WRITE: And explain that data can then be refetched:
+
+```javascript
+ const countryUsRefetched = await api.resources.publishers.get({ 
+    id: country.id,
+  }) 
+  console.log('Refetched country:', inspect(countryUs));
+```
+
+### Rest usage
+
+Explain how it's easy to make this available via the HTTP plugin or the Expres plugin.
+Explain basic usage of both.
+The, explain the example REST usage of the two calls above and explain that the rest of this guide
+From now on, every usage will explain CURL usage and programmatic usage.
+
+Probably noticed how the server response (and requests) were more complex. The reason is that the command
+line works in simplified mode.
+
+### Simplified mode
+
+WRITE: Then explain that by default API calls are set accept and return data in "simplified" mode.
+In "simplified" mode the input can be just an object, and the result is flat.
+
+Show the exact same operations above, but in "simplified" mode. Explain also that when in simplified mode
+you can also pass `inputRecord` (and have extra parameters if needed). And also explain that in simplified mode you can still pass a full record. However, you CANNOT pass a simplified record in normal mode.
+
+Explain in detail where the simplified mode setting comes from
+
+### Return full record
+
+Show how to use the settings for returnFullRecord. Show what the differences are by creating a new country, and
+showing have the result come -- or not.
 
 
+NOTE: MAYBE RETURN THE ID IN COMMAND LINE MODE, AND IF THE RSPONSE IS OF TYPE INTEGER, TREAT IT AS NO DATA
+
+### Search
+
+Introduce straight search using just normal field. Explain the while "searchable" issue and searchSchema,
+and explain how the searchSchema defines what can be searched. Also explain how searchSchema is
+dynamically created from "searchable" in schema.
+
+### Sparse fields
+
+Explain how users can decide what fields they can see
+
+
+## belongsTo records
+
+Adding a record 
+
+### Search (belongsTo)
+
+### Sparse fields (belongsTo)
+
+## hasMany records
+
+### Search (hasMany)
+
+### Sparse fields (hasMany)
+
+## hasMany with through records
+
+### Search (hasMany with through)
+
+### Sparse fields (hasMany with through)
+
+
+## Next Steps
+
+- [Schema Definition Guide](docs/schemas.md) - Learn about all field types and validation rules
+- [Relationships Guide](docs/relationships.md) - Deep dive into relationship configuration
+- [Querying Guide](docs/querying.md) - Advanced filtering, sorting, and pagination
+- [File Uploads Guide](docs/file-uploads.md) - Handle file uploads with various storage backends
+- [Authentication Guide](docs/authentication.md) - Add authentication and authorization
+- [Testing Guide](docs/testing.md) - Write tests for your API
+
+## License
+
+GPL-3.0-or-later
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Via API usage
 
 ```javascript
 // Now you can use the API directly in your code
@@ -154,167 +302,6 @@ const publishers = await api.resources.publishers.query({
   }
 });
 console.log('Found', publishers.data.length, 'publishers');
-```
 
-## Available Methods
 
-With the above configuration, each resource automatically gets these methods:
 
-### Countries (api.resources.countries)
-- `query(params)` - List all countries
-- `get({ id })` - Get a specific country
-- `post({ inputRecord })` - Create a new country
-- `patch({ id, inputRecord })` - Update a country
-- `put({ id, inputRecord })` - Replace a country
-- `delete({ id })` - Delete a country
-
-### Publishers (api.resources.publishers)
-- `query(params)` - List all publishers
-- `get({ id })` - Get a specific publisher
-- `post({ inputRecord })` - Create a new publisher
-- `patch({ id, inputRecord })` - Update a publisher
-- `put({ id, inputRecord })` - Replace a publisher
-- `delete({ id })` - Delete a publisher
-
-### Authors (api.resources.authors)
-- `query(params)` - List all authors
-- `get({ id })` - Get a specific author
-- `post({ inputRecord })` - Create a new author
-- `patch({ id, inputRecord })` - Update an author
-- `put({ id, inputRecord })` - Replace an author
-- `delete({ id })` - Delete an author
-
-### Books (api.resources.books)
-- `query(params)` - List all books
-- `get({ id })` - Get a specific book
-- `post({ inputRecord })` - Create a new book
-- `patch({ id, inputRecord })` - Update a book
-- `put({ id, inputRecord })` - Replace a book
-- `delete({ id })` - Delete a book
-
-### Book-Authors (api.resources.book_authors)
-- `query(params)` - List all book-author relationships
-- `get({ id })` - Get a specific relationship
-- `post({ inputRecord })` - Create a new book-author relationship
-- `patch({ id, inputRecord })` - Update a relationship
-- `put({ id, inputRecord })` - Replace a relationship
-- `delete({ id })` - Delete a relationship
-
-## Example Usage
-
-### Creating a Country
-```javascript
-const country = await api.resources.countries.post({
-  inputRecord: {
-    data: {
-      type: 'countries',
-      attributes: {
-        name: 'United States',
-        code: 'US'
-      }
-    }
-  }
-});
-console.log('Created country:', country.data);
-```
-
-### Creating a Publisher with Country Relationship
-```javascript
-const publisher = await api.resources.publishers.post({
-  inputRecord: {
-    data: {
-      type: 'publishers',
-      attributes: {
-        name: 'Penguin Random House',
-        founded_year: 2013,
-        website: 'https://www.penguinrandomhouse.com'
-      },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: country.data.id }
-        }
-      }
-    }
-  }
-});
-console.log('Created publisher:', publisher.data);
-```
-
-### Creating an Author
-```javascript
-const author = await api.resources.authors.post({
-  inputRecord: {
-    data: {
-      type: 'authors',
-      attributes: {
-        name: 'George Orwell',
-        birth_year: 1903,
-        biography: 'English novelist and essayist, journalist and critic.'
-      }
-    }
-  }
-});
-console.log('Created author:', author.data);
-```
-
-### Creating a Book with Relationships
-```javascript
-const book = await api.resources.books.post({
-  inputRecord: {
-    data: {
-      type: 'books',
-      attributes: {
-        title: '1984'
-      },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: country.data.id }
-        },
-        authors: {
-          data: [
-            { type: 'authors', id: author.data.id }
-          ]
-        }
-      }
-    }
-  }
-});
-console.log('Created book:', book.data);
-```
-
-### Querying Books with Relationships
-```javascript
-// Get books with their country and authors included
-const booksWithRelations = await api.resources.books.query({
-  queryParams: {
-    include: ['country', 'authors']
-  }
-});
-
-// Get books sorted by title
-const sortedBooks = await api.resources.books.query({
-  queryParams: {
-    sort: ['title']
-  }
-});
-
-// Paginate results
-const paginatedBooks = await api.resources.books.query({
-  queryParams: {
-    page: { number: 2, size: 10 }
-  }
-});
-```
-
-## Next Steps
-
-- [Schema Definition Guide](docs/schemas.md) - Learn about all field types and validation rules
-- [Relationships Guide](docs/relationships.md) - Deep dive into relationship configuration
-- [Querying Guide](docs/querying.md) - Advanced filtering, sorting, and pagination
-- [File Uploads Guide](docs/file-uploads.md) - Handle file uploads with various storage backends
-- [Authentication Guide](docs/authentication.md) - Add authentication and authorization
-- [Testing Guide](docs/testing.md) - Write tests for your API
-
-## License
-
-GPL-3.0-or-later
