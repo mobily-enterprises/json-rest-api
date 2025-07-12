@@ -106,6 +106,27 @@ export async function compileSchemas(scope, scopeName) {
     }
   }
   
+  // ADD LOGIC TO MAKE FIELDS SEARCHABLE HERE
+  // Auto-detect pivot tables and make their foreign key fields searchable
+  // This is critical for many-to-many relationship operations which need to filter pivot records
+  const fields = Object.entries(enrichedSchema);
+  const belongsToFields = fields.filter(([_, def]) => def.belongsTo);
+  
+  // If 2+ belongsTo fields and they make up 40%+ of non-id fields, likely a pivot table
+  const nonIdFields = fields.filter(([name, _]) => name !== 'id');
+  const isProbablyPivot = belongsToFields.length >= 2 && 
+    (nonIdFields.length === 0 || belongsToFields.length / nonIdFields.length >= 0.4);
+  
+  if (isProbablyPivot) {
+    // Make all belongsTo fields searchable for pivot operations
+    for (const [fieldName, fieldDef] of belongsToFields) {
+      if (!fieldDef.search) {
+        fieldDef.search = true;
+      }
+    }
+  }
+
+
   // Hook: schema:enrich
   const schemaContext = {
     schema: enrichedSchema,    // Mutable

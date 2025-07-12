@@ -570,30 +570,9 @@ export const RestApiPlugin = {
         context.scopeName = scopeName;
 
         // Transaction handling
-        let currentTransaction = params.transaction;
-        let shouldCommitTransaction = false;
-
-        if (helpers.newTransaction) {
-            // If newTransaction helper exists, it means we can create transactions
-            if (!currentTransaction) {
-                // No existing transaction provided, so create a new one
-                currentTransaction = await helpers.newTransaction();
-                shouldCommitTransaction = true; // We created it, so we should commit/rollback
-            }
-        } else if (currentTransaction === undefined) {
-            // If newTransaction helper is NOT available AND no transaction was provided,
-            // then we're in a scenario where transactions aren't supported or weren't used.
-            // We should ensure context.transaction is explicitly null or undefined,
-            // and shouldCommit is false.
-            currentTransaction = null; 
-            shouldCommitTransaction = false;
-        }
-        // If currentTransaction was provided AND helpers.newTransaction does NOT exist,
-        // we assume it's an external transaction that we shouldn't manage (i.e., not commit/rollback).
-        // shouldCommitTransaction remains false in this case.
-
-        context.transaction = currentTransaction;
-        context.shouldCommit = shouldCommitTransaction;
+        context.transaction = params.transaction || 
+            (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
+        context.shouldCommit = !params.transaction && !!context.transaction;
 
         // These are just shortcuts used in this function and will be returned
         const schema = context.schemaInfo.schema;
@@ -1786,43 +1765,57 @@ const validatePivotResource = (scopes, relDef, relName) => {
       // Make the method available to all hooks
       context.method = 'delete'
       
-      
       // Set the ID in context
       context.id = params.id
       
       // Set schema info even for DELETE (needed by storage layer)
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
       
-      // No payload validation needed for DELETE
+      // Transaction handling
+      context.transaction = params.transaction || 
+          (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
+      context.shouldCommit = !params.transaction && !!context.transaction;
       
-      // Run permission checks
-      await runHooks ('checkPermissions')
-      await runHooks ('checkPermissionsDelete')
-      
-      // Before data operations
-      await runHooks ('beforeDataCall')
-      await runHooks ('beforeDataCallDelete')
-      
-      // Initialize record context for hooks
-      context.record = {}
-      
-      // Call the storage helper
-      await helpers.dataDelete({
-        scopeName,
-        context,
-        transaction: context.transaction
-      });
-      
-      await runHooks ('afterDataCallDelete')
-      await runHooks ('afterDataCall')
-      
-      // No return record for DELETE (204 No Content)
-      
-      await runHooks ('finish')
-      await runHooks ('finishDelete')
-      
-      // DELETE typically returns void/undefined (204 No Content)
-      return;
+      try {
+        // No payload validation needed for DELETE
+        
+        // Run permission checks
+        await runHooks ('checkPermissions')
+        await runHooks ('checkPermissionsDelete')
+        
+        // Before data operations
+        await runHooks ('beforeDataCall')
+        await runHooks ('beforeDataCallDelete')
+        
+        // Initialize record context for hooks
+        context.record = {}
+        
+        // Call the storage helper
+        await helpers.dataDelete({
+          scopeName,
+          context,
+          transaction: context.transaction
+        });
+        
+        await runHooks ('afterDataCallDelete')
+        await runHooks ('afterDataCall')
+        
+        // No return record for DELETE (204 No Content)
+        
+        await runHooks ('finish')
+        await runHooks ('finishDelete')
+        
+        // Commit transaction if we created it
+        if (context.shouldCommit) {
+          await context.transaction.commit();
+        }
+        
+        // DELETE typically returns void/undefined (204 No Content)
+        return;
+        
+      } catch (error) {
+        await handleWriteMethodError(error, context, 'DELETE', scopeName, enhancedLog);
+      }
     })
 
     /**

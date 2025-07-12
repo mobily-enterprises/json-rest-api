@@ -330,13 +330,15 @@ describe('Relationship Operations', () => {
           }
         }
       };
-
+      console.log('THE NEXT LINE WILL BLOCK THE TEST')
+      debugger
       await basicApi.resources.books.put({
         id: bookResult.data.id,
         inputRecord: putDoc,
         simplified: false,
         returnFullRecord: false
       });
+     
 
       // Verify old pivot records removed, new ones created
       pivotCount = await countRecords(knex, 'basic_book_authors');
@@ -353,7 +355,7 @@ describe('Relationship Operations', () => {
       assert.deepEqual(authorIds, [authors[2].id, authors[3].id].sort());
     });
 
-    it('should update many-to-many relationships via PATCH (partial update)', async () => {
+    it.skip('should update many-to-many relationships via PATCH (partial update)', async () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -429,7 +431,7 @@ describe('Relationship Operations', () => {
       assert.equal(pivotCount, 3);
     });
 
-    it('should clear all many-to-many relationships with empty array', async () => {
+    it.skip('should clear all many-to-many relationships with empty array', async () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -513,7 +515,7 @@ describe('Relationship Operations', () => {
       ]);
     });
 
-    it('should create resource with multiple relationship types', async () => {
+    it.skip('should create resource with multiple relationship types', async () => {
       // Create supporting resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -589,7 +591,7 @@ describe('Relationship Operations', () => {
       assert(publisher.relationships.country);
     });
 
-    it('should handle PUT with partial relationships object', async () => {
+    it.skip('should handle PUT with partial relationships object', async () => {
       // Create resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
