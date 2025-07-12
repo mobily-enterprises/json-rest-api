@@ -1,6 +1,8 @@
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from './index.js';
 import knexLib from 'knex';
+import util from 'util';
+
 
 // import { setupDatabase } from './setup-database.js';
 
@@ -75,9 +77,10 @@ await api.addResource('books', {
     publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
   }
 });
+await api.resources.books.createKnexTable()
 
 // Book-Authors pivot table (many-to-many relationship)
 await api.addResource('book_authors', {
@@ -98,7 +101,6 @@ await api.resources.book_authors.createKnexTable()
 try {
 
   // Create a country
-  debugger
   const countryResult1 = await api.resources.countries.post({
     name: 'United States',
     code: 'US'
@@ -120,7 +122,6 @@ try {
   console.log('Created publisher1:', publisher1Result);
 
     // Create another publisher. NOT the simplified version
-    debugger
   const publisher2Result = await api.resources.publishers.post({
     inputRecord: {
       data: {
@@ -140,17 +141,14 @@ try {
   console.log('Created publisher:', publisher2Result);
 
 
-  // Clean up database connection
-  await knex.destroy();
-  console.log('\nExample completed successfully!');
+  const fetchedPublisher = await api.resources.publishers.get({ 
+    id: publisher2Result.data.id,
+    queryParams: { include: ['country']},
+    simplified: false
+  }) 
+  console.log('Refetched publisher:', util.inspect(fetchedPublisher, { depth: 5 }));
 
-
-
-  /*
-
-
-
-  // Create a publisher
+// Create a publisher
   const publisherResult = await api.resources.publishers.post({
     inputRecord: {
       data: {
@@ -160,13 +158,13 @@ try {
         },
         relationships: {
           country: {
-            data: { type: 'countries', id: countryResult.data.id }
+            data: { type: 'countries', id: countryResult1.id }
           }
         }
       }
     }
   });
-  console.log('Created publisher:', publisherResult.data);
+
 
   // Create authors
   const author1Result = await api.resources.authors.post({
@@ -179,7 +177,7 @@ try {
       }
     }
   });
-  console.log('Created author:', author1Result.data);
+  console.log('Created author:');
 
   const author2Result = await api.resources.authors.post({
     inputRecord: {
@@ -191,7 +189,50 @@ try {
       }
     }
   });
-  console.log('Created author:', author2Result.data);
+  console.log('Created another author:');
+
+  // Create a book with relationships
+  const bookResult = await api.resources.books.post({
+    simplified: false,
+    queryParams: { include: ['authors'] },       
+     inputRecord: {
+      data: {
+        type: 'books',
+        attributes: {
+          title: '1984'
+        },
+        relationships: {
+          country: {
+            data: { type: 'countries', id: countryResult1.id }
+          },
+          publisher: {
+            data: { type: 'publishers', id: publisherResult.id }
+          },
+          authors: {
+            data: [
+              { type: 'authors', id: author1Result.id },
+              { type: 'authors', id: author2Result.id }
+
+            ]
+          }
+        }
+      }
+    }
+  });
+  console.log('Created book:', util.inspect(bookResult, { depth: 5 }))
+
+  const pivotRecords = await knex('book_authors').where('book_id', bookResult.data.id);
+console.log('Pivot records:', pivotRecords);  
+                                               
+
+
+  // Clean up database connection
+  await knex.destroy();
+  console.log('\nExample completed successfully!');
+
+
+
+  /*
 
   // Create a book with relationships
   const bookResult = await api.resources.books.post({

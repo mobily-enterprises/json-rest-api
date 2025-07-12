@@ -390,8 +390,8 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
       
       // Step 3: Build field selection for sparse fieldsets
       const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-      const fieldsToSelect = helpers?.buildFieldSelection ? 
-        await helpers.buildFieldSelection(targetScope, fields?.[targetScope], targetSchema) : 
+      const fieldsToSelect = fields?.[targetScope] ? 
+        await buildFieldSelection(targetScope, fields[targetScope], targetSchema) : 
         '*';
       
       // Step 4: Query the target table
@@ -580,8 +580,8 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
       const targetTable = targetSchema?.tableName || targetType;
       
       // Build field selection for sparse fieldsets
-      const fieldsToSelect = helpers?.buildFieldSelection ? 
-        await helpers.buildFieldSelection(targetType, fields?.[targetType], targetSchema) : 
+      const fieldsToSelect = fields?.[targetType] ? 
+        await buildFieldSelection(targetType, fields[targetType], targetSchema) : 
         '*';
       
       log.debug(`[INCLUDE] Loading ${targetType} records:`, { 
@@ -804,6 +804,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
    * @returns {Promise<void>}
    */
   const processIncludes = async (records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}) => {
+    debugger
     log.trace('[INCLUDE] Processing includes:', { scopeName, includes: Object.keys(includeTree), currentPath });
     
     // Skip if no records or no includes
@@ -821,7 +822,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
     processedPaths.add(pathKey);
     
     // Get scope schema and relationships
-    const schemaInfo = scopes[scopeName].vars.schemaInfo.schema;;
+    const schemaInfo = scopes[scopeName].vars.schemaInfo;
     const schema = schemaInfo.schema;
     const relationships = schemaInfo.schemaRelationships;
     
@@ -832,7 +833,7 @@ export const createRelationshipIncludeHelpers = (scopes, log, knex) => {
       // First, check if it's a belongsTo relationship in the schema
       let processed = false;
       
-      for (const [fieldName, fieldDef] of Object.entries(schema)) {
+      for (const [fieldName, fieldDef] of Object.entries(schema.structure)) {
         if (fieldDef.as === includeName && fieldDef.belongsTo && (fieldDef.sideLoadSingle !== false)) {
           log.trace('[INCLUDE] Found belongsTo relationship:', { fieldName, target: fieldDef.belongsTo });
           await loadBelongsTo(records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields);

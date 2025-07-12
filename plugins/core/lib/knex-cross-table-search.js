@@ -218,7 +218,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       searchedScopes.add(currentScope);
       
       // Get current scope's schema and relationships
-      const schemaInfo = scopes[currentScope].vars.schemaInfo.schema;;
+      const schemaInfo = scopes[currentScope].vars.schemaInfo
       const currentSchema = schemaInfo.schema;
       const currentRelationships = schemaInfo.schemaRelationships;
       

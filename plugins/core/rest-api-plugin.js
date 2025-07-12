@@ -230,6 +230,8 @@ export const RestApiPlugin = {
       context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
       context.queryParams.page = cascadeConfig('page', [params.queryParams], {})
   
+      context.transaction = params.transaction; 
+      
       context.scopeName = scopeName;
 
       // These are just shortcuts used in this function and will be returned
@@ -436,6 +438,8 @@ export const RestApiPlugin = {
       // These only make sense as parameter per query
       context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
       context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+      
+      context.transaction = params.transaction; 
 
       context.scopeName = scopeName;
 
@@ -458,9 +462,11 @@ export const RestApiPlugin = {
       
       runHooks('beforeData')
       runHooks('beforeDataGet')
+
       context.record = await helpers.dataGet({
         scopeName,
         context,
+        transaction: context.transaction
       })
     
       // Check if record was found - storage layer returns null/undefined for non-existent records.
@@ -760,7 +766,7 @@ export const RestApiPlugin = {
             context.returnRecord = await api.resources[scopeName].get({
                 id: context.id, // context.id is now reliably set by POST, PUT, and PATCH
                 queryParams: context.queryParams,
-                transaction: null, // Ensure no transaction is passed if it was committed already
+                transaction: context.transaction,
                 simplified: false // Request the full JSON:API format from GET for internal processing
             });
             
@@ -998,6 +1004,8 @@ export const RestApiPlugin = {
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
       
+      if (scopeName === 'books') debugger
+      
       const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
           params, context, vars, scopes, scopeOptions, scopeName, helpers
       });
@@ -1075,22 +1083,25 @@ export const RestApiPlugin = {
           await createPivotRecords(api, context.id, relDef, relData, context.transaction);
         }
         
+        const ret = await handleRecordReturnAfterWrite({
+          context,
+          scopeName,
+          api,
+          scopes,
+          schemaStructure,
+          schemaRelationships,
+          scopeOptions,
+          vars,
+          runHooks
+      });
+
+
         // Commit transaction if we created it
         if (context.shouldCommit) {
           await context.transaction.commit();
         }
-        
-        return handleRecordReturnAfterWrite({
-            context,
-            scopeName,
-            api,
-            scopes,
-            schemaStructure,      // These variables need to be available in the context/scope
-            schemaRelationships, // Or passed explicitly if they are not part of context/scope
-            scopeOptions,
-            vars,
-            runHooks
-        });
+
+        return ret
         
       } catch (error) {
         // Rollback transaction if we created it
@@ -1445,13 +1456,8 @@ export const RestApiPlugin = {
           await createPivotRecords(api, context.id, relDef, relData, context.transaction);
         }
       }
-    
-    // Commit transaction if we created it
-    if (context.shouldCommit) {
-      await context.transaction.commit();
-    }
-
-    return handleRecordReturnAfterWrite({
+   
+       const ret = await handleRecordReturnAfterWrite({
         context,
         scopeName,
         api,
@@ -1463,6 +1469,14 @@ export const RestApiPlugin = {
         runHooks
     });
 
+
+      // Commit transaction if we created it
+      if (context.shouldCommit) {
+        await context.transaction.commit();
+      }
+
+      return ret
+   
     } catch (error) {
       // Rollback transaction if we created it
       if (context.shouldCommit) {
@@ -1719,17 +1733,25 @@ export const RestApiPlugin = {
           await updateManyToManyRelationship(api, context.id, relDef, relData, context.transaction);
         }
         
-        return handleRecordReturnAfterWrite({
+        const ret = await handleRecordReturnAfterWrite({
           context,
           scopeName,
           api,
           scopes,
-          schemaStructure,      // These variables need to be available in the context/scope
-          schemaRelationships, // Or passed explicitly if they are not part of context/scope
+          schemaStructure,
+          schemaRelationships,
           scopeOptions,
           vars,
           runHooks
-        });
+      });
+
+
+        // Commit transaction if we created it
+        if (context.shouldCommit) {
+          await context.transaction.commit();
+        }
+
+        return ret
       
       } catch (error) {
         // Rollback transaction if we created it

@@ -18,7 +18,7 @@ api.addResource('articles', {
 
 // Get the schema info (triggers lazy enrichment)
 const articleScope = api.scopes.articles;
-const schemaInfo = articleScope.vars.schemaInfo.schema;;
+const schemaInfo = articleScope.vars.schemaInfo;
 
 console.log('Original schema (before enrichment):');
 console.log('author_id field:', {

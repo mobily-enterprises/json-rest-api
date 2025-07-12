@@ -62,7 +62,7 @@ postScope.addHook('searchSchema:enrich', 'add-search-fields', {}, ({ searchSchem
 });
 
 // Get the schema info (triggers hooks)
-const schemaInfo = postScope.vars.schemaInfo.schema;;
+const schemaInfo = postScope.vars.schemaInfo
 
 console.log('\nEnriched schema fields:');
 console.log('- id:', schemaInfo.schema.structure.id);
