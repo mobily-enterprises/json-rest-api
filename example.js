@@ -127,6 +127,7 @@ try {
   });
   console.log('Created publisher1b (using country alias):', publisher1bResult);
 
+  debugger
   // Test error case: providing both country_id and country
   try {
     await api.resources.publishers.post({

@@ -1087,11 +1087,10 @@ const validatePivotResource = (scopes, relDef, relName) => {
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
       
-      const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
-          params, context, vars, scopes, scopeOptions, scopeName, helpers
-      });
-      
       try {
+        const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+            params, context, vars, scopes, scopeOptions, scopeName, helpers
+        });
 
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
@@ -1355,12 +1354,11 @@ const validatePivotResource = (scopes, relDef, relName) => {
   scopeName }) => {
     context.method = 'put'
     
-    const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
-        params, context, vars, scopes, scopeOptions, scopeName, helpers
-    });
-    context.id = context.inputRecord.data.id;
-
     try {
+      const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+          params, context, vars, scopes, scopeOptions, scopeName, helpers
+      });
+      context.id = context.inputRecord.data.id;
       // Run early hooks for pre-processing (e.g., file handling)
       await runHooks('beforeProcessing')
       await runHooks('beforeProcessingPut')
@@ -1682,12 +1680,11 @@ const validatePivotResource = (scopes, relDef, relName) => {
     addScopeMethod('patch', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'patch'
         
-      const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
-          params, context, vars, scopes, scopeOptions, scopeName, helpers
-      });
-      context.id = context.inputRecord.data.id;
-      
-      try {        
+      try {
+        const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+            params, context, vars, scopes, scopeOptions, scopeName, helpers
+        });
+        context.id = context.inputRecord.data.id;        
         // Run early hooks for pre-processing (e.g., file handling)
         await runHooks('beforeProcessing')
         await runHooks('beforeProcessingPatch')
