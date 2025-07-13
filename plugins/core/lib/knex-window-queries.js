@@ -1,5 +1,5 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
-import { ROW_NUMBER_KEY } from './knex-constants.js';
+import { ROW_NUMBER_KEY } from '../utils/knex-constants.js';
 
 /**
  * Builds a window function query for limited includes

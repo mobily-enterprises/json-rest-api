@@ -1,7 +1,7 @@
 import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
-import { buildQuerySelection } from './lib/knex-query-helpers-base.js';
+import { buildQuerySelection } from './utils/knex-query-helpers-base.js';
 import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
 import { processIncludes } from './lib/knex-process-includes.js';
 import {
@@ -11,7 +11,7 @@ import {
 } from './lib/knex-query-helpers.js';
 import { RestApiResourceError } from '../../lib/rest-api-errors.js';
 import { supportsWindowFunctions, getDatabaseInfo } from './lib/database-capabilities.js';
-import { ERROR_SUBTYPES } from './lib/knex-constants.js';
+import { ERROR_SUBTYPES } from './utils/knex-constants.js';
 
 
 export const RestApiKnexPlugin = {

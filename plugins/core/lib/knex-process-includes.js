@@ -103,14 +103,20 @@ export const processIncludes = async (scope, records, deps) => {
     log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include);
     
     const includeResult = await buildIncludedResources(
-      scopes,
-      log,
-      db,
-      records,
-      scopeName,
-      queryParams.include,
-      queryParams.fields || {},
-      idProperty
+      {
+        records,
+        scopeName,
+        includeParam: queryParams.include,
+        fields: queryParams.fields || {},
+        idProperty
+      },
+      {
+        context: {
+          scopes,
+          log,
+          knex: db
+        }
+      }
     );
     
     log.debug('[PROCESS-INCLUDES] Include result:', {

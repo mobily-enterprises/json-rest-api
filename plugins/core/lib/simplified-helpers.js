@@ -18,10 +18,13 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * It intelligently converts plain objects into properly structured JSON:API documents
  * by analyzing the schema to determine what fields are attributes vs relationships.
  * 
- * @param {Object} input - The input object to transform (plain object or already JSON:API)
- * @param {string} scopeName - The resource type name (e.g., 'articles', 'users')
- * @param {Object} schema - The resource schema defining field types and relationships
- * @param {Object} relationships - The relationships configuration for the resource
+ * @param {Object} scope - The scope object containing the input data to transform
+ * @param {Object} scope.inputRecord - The input object to transform (plain object or already JSON:API)
+ * @param {Object} deps - The dependencies object
+ * @param {Object} deps.context - The context object containing configuration
+ * @param {string} deps.context.scopeName - The resource type name (e.g., 'articles', 'users')
+ * @param {Object} deps.context.schemaStructure - The resource schema defining field types and relationships
+ * @param {Object} deps.context.schemaRelationships - The relationships configuration for the resource
  * @returns {Object} A properly formatted JSON:API document
  * 
  * @example
@@ -31,7 +34,10 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  *   title: 'My Article',
  *   content: 'Article content here'
  * };
- * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * const result = transformSimplifiedToJsonApi(
+ *   { inputRecord: input },
+ *   { context: { scopeName: 'articles', schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   data: {
@@ -59,7 +65,10 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  *   title: 'Another Article',
  *   author_id: 789 // Original way: using foreign key name
  * };
- * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * const result = transformSimplifiedToJsonApi(
+ *   { inputRecord: input },
+ *   { context: { scopeName: 'articles', schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   data: {
@@ -91,7 +100,10 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  *   title: 'Another Article',
  *   author: 789 // NEW way: using the 'as' alias
  * };
- * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * const result = transformSimplifiedToJsonApi(
+ *   { inputRecord: input },
+ *   { context: { scopeName: 'articles', schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns the same JSON:API structure as above
  *
  * @example
@@ -110,7 +122,10 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  *   title: 'Tagged Article',
  *   tags: ['10', '20', '30']  // Array of tag IDs
  * };
- * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * const result = transformSimplifiedToJsonApi(
+ *   { inputRecord: input },
+ *   { context: { scopeName: 'articles', schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   data: {
@@ -139,7 +154,10 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  *     attributes: { title: 'Already formatted' }
  *   }
  * };
- * const result = transformSimplifiedToJsonApi(input, 'articles', schema, relationships);
+ * const result = transformSimplifiedToJsonApi(
+ *   { inputRecord: input },
+ *   { context: { scopeName: 'articles', schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns the same object unchanged
  * 
  * @example <caption>Why this is useful upstream</caption>
@@ -150,7 +168,13 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * // 4. Reduce boilerplate in client applications
  * // 5. Maintain JSON:API compliance internally for consistency
  */
-export const transformSimplifiedToJsonApi = (input, scopeName, schema, relationships) => {
+export const transformSimplifiedToJsonApi = (scope, deps) => {
+  // Extract needed values from scope and deps
+  const input = scope.inputRecord;
+  const scopeName = deps.context.scopeName;
+  const schema = deps.context.schemaStructure;
+  const relationships = deps.context.schemaRelationships;
+
   // If already JSON:API format, return as-is
   if (input?.data?.type) {
     return input;
@@ -256,9 +280,12 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  * 3. Extracts many-to-many relationship IDs into arrays (e.g., tags -> tags_ids)
  * 4. Optionally expands included resources inline for convenient access
  * 
- * @param {Object} jsonApi - The JSON:API response to transform
- * @param {Object} schema - The resource schema for mapping relationships back to fields
- * @param {Object} relationships - The relationships configuration
+ * @param {Object} scope - The scope object containing the JSON:API response
+ * @param {Object} scope.record - The JSON:API response to transform
+ * @param {Object} deps - The dependencies object
+ * @param {Object} deps.context - The context object containing configuration
+ * @param {Object} deps.context.schemaStructure - The resource schema for mapping relationships back to fields
+ * @param {Object} deps.context.schemaRelationships - The relationships configuration
  * @returns {Object|Array} Simplified object(s) - single object or array depending on input
  * 
  * @example
@@ -273,7 +300,10 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  *     }
  *   }
  * };
- * const result = transformJsonApiToSimplified(jsonApi, schema, relationships);
+ * const result = transformJsonApiToSimplified(
+ *   { record: jsonApi },
+ *   { context: { schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   id: '123',
@@ -299,7 +329,10 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  *     }
  *   }
  * };
- * const result = transformJsonApiToSimplified(jsonApi, schema, relationships);
+ * const result = transformJsonApiToSimplified(
+ *   { record: jsonApi },
+ *   { context: { schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   id: '456',
@@ -323,7 +356,10 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  *     }
  *   ]
  * };
- * const result = transformJsonApiToSimplified(jsonApi, schema, relationships);
+ * const result = transformJsonApiToSimplified(
+ *   { record: jsonApi },
+ *   { context: { schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // [
  * //   { id: '1', title: 'First Article' },
@@ -367,7 +403,10 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  *     }
  *   ]
  * };
- * const result = transformJsonApiToSimplified(jsonApi, schema, relationships);
+ * const result = transformJsonApiToSimplified(
+ *   { record: jsonApi },
+ *   { context: { schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   id: '400',
@@ -387,18 +426,29 @@ export const transformSimplifiedToJsonApi = (input, scopeName, schema, relations
  *
  * @private
  */
-export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => {
+export const transformJsonApiToSimplified = (scope, deps) => {
+  // Extract needed values from scope and deps
+  const jsonApi = scope.record;
+  const schema = deps.context.schemaStructure;
+  const relationships = deps.context.schemaRelationships;
+
   if (!jsonApi?.data) return jsonApi;
 
   // Handle array response (QUERY)
   if (Array.isArray(jsonApi.data)) {
     return jsonApi.data.map(item =>
-      transformSingleJsonApiToSimplified(item, jsonApi.included, schema, relationships)
+      transformSingleJsonApiToSimplified(
+        { data: item, included: jsonApi.included },
+        { context: { schemaStructure: schema, schemaRelationships: relationships } }
+      )
     );
   }
 
   // Handle single response
-  return transformSingleJsonApiToSimplified(jsonApi.data, jsonApi.included, schema, relationships);
+  return transformSingleJsonApiToSimplified(
+    { data: jsonApi.data, included: jsonApi.included },
+    { context: { schemaStructure: schema, schemaRelationships: relationships } }
+  );
 };
 
 /**
@@ -414,10 +464,13 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  * - Extracting many-to-many relationship IDs into _ids arrays
  * - Expanding included related resources when available
  * 
- * @param {Object} data - Single JSON:API resource object
- * @param {Array} included - Array of included resources from JSON:API response
- * @param {Object} schema - Resource schema for field mappings
- * @param {Object} relationships - Relationships configuration
+ * @param {Object} scope - The scope object containing the data
+ * @param {Object} scope.data - Single JSON:API resource object
+ * @param {Array} scope.included - Array of included resources from JSON:API response
+ * @param {Object} deps - The dependencies object
+ * @param {Object} deps.context - The context object containing configuration
+ * @param {Object} deps.context.schemaStructure - Resource schema for field mappings
+ * @param {Object} deps.context.schemaRelationships - Relationships configuration
  * @returns {Object} Simplified plain object
  * 
  * @example
@@ -444,7 +497,10 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  *   author_id: { type: 'number', belongsTo: 'users', as: 'author' },
  *   article_id: { type: 'number', belongsTo: 'articles', as: 'article' }
  * };
- * const result = transformSingleJsonApiToSimplified(data, null, schema, {});
+ * const result = transformSingleJsonApiToSimplified(
+ *   { data: data, included: null },
+ *   { context: { schemaStructure: schema, schemaRelationships: {} } }
+ * );
  * // Returns:
  * // {
  * //   id: '100',
@@ -473,7 +529,10 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  * const relationships = {
  *   tags: { manyToMany: { via: 'article_tags' } }
  * };
- * const result = transformSingleJsonApiToSimplified(data, null, {}, relationships);
+ * const result = transformSingleJsonApiToSimplified(
+ *   { data: data, included: null },
+ *   { context: { schemaStructure: {}, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   id: '300',
@@ -516,7 +575,10 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  *     attributes: { number: 2, title: 'Basics' }
  *   }
  * ];
- * const result = transformSingleJsonApiToSimplified(data, included, schema, relationships);
+ * const result = transformSingleJsonApiToSimplified(
+ *   { data: data, included: included },
+ *   { context: { schemaStructure: schema, schemaRelationships: relationships } }
+ * );
  * // Returns:
  * // {
  * //   id: '400',
@@ -536,7 +598,13 @@ export const transformJsonApiToSimplified = (jsonApi, schema, relationships) => 
  * 
  * @private
  */
-export const transformSingleJsonApiToSimplified = (data, included, schema, relationships) => {
+export const transformSingleJsonApiToSimplified = (scope, deps) => {
+  // Extract needed values from scope and deps
+  const data = scope.data;
+  const included = scope.included;
+  const schema = deps.context.schemaStructure;
+  const relationships = deps.context.schemaRelationships;
+
   const simplified = {};
 
   // Add ID

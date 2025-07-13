@@ -24,33 +24,32 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * - `belongsToUpdates`: Direct field updates for foreign keys
  * - `manyToManyRelationships`: Array of many-to-many operations to perform
  * 
- * @param {Object} inputRecord - The JSON:API input record containing relationship data
- * @param {Object} schemaFields - The resource's schema field definitions
- * @param {Object} relationships - The resource's relationship configurations
+ * @param {Object} scope - The scope object containing schema info
+ * @param {Object} deps - Dependencies object
+ * @param {Object} deps.context - Request context
+ * @param {Object} deps.context.inputRecord - The JSON:API input record containing relationship data
  * @returns {Object} Object with belongsToUpdates and manyToManyRelationships arrays
  * @throws {RestApiValidationError} If polymorphic relationship type is invalid
  * 
  * @example
  * // Example 1: Processing a simple belongsTo relationship
- * const inputRecord = {
- *   data: {
- *     type: 'articles',
- *     attributes: { title: 'My Article' },
- *     relationships: {
- *       author: {
- *         data: { type: 'users', id: '123' }
+ * const scope = api.resources['articles'];
+ * const deps = {
+ *   context: {
+ *     inputRecord: {
+ *       data: {
+ *         type: 'articles',
+ *         attributes: { title: 'My Article' },
+ *         relationships: {
+ *           author: {
+ *             data: { type: 'users', id: '123' }
+ *           }
+ *         }
  *       }
  *     }
  *   }
  * };
- * const schemaFields = {
- *   author_id: { 
- *     type: 'number', 
- *     belongsTo: 'users', 
- *     as: 'author'  // Maps to relationships.author
- *   }
- * };
- * const result = processRelationships(inputRecord, schemaFields, {});
+ * const result = processRelationships(scope, deps);
  * // Returns:
  * // {
  * //   belongsToUpdates: { author_id: '123' },  // Foreign key extracted
@@ -59,28 +58,23 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * 
  * @example
  * // Example 2: Processing polymorphic relationships
- * const inputRecord = {
- *   data: {
- *     type: 'comments',
- *     attributes: { text: 'Great!' },
- *     relationships: {
- *       commentable: {
- *         data: { type: 'posts', id: '456' }  // Can be 'posts' or 'videos'
+ * const scope = api.resources['comments'];
+ * const deps = {
+ *   context: {
+ *     inputRecord: {
+ *       data: {
+ *         type: 'comments',
+ *         attributes: { text: 'Great!' },
+ *         relationships: {
+ *           commentable: {
+ *             data: { type: 'posts', id: '456' }  // Can be 'posts' or 'videos'
+ *           }
+ *         }
  *       }
  *     }
  *   }
  * };
- * const schemaFields = {
- *   commentable: {
- *     belongsToPolymorphic: {
- *       types: ['posts', 'videos'],
- *       typeField: 'commentable_type',
- *       idField: 'commentable_id'
- *     },
- *     as: 'commentable'
- *   }
- * };
- * const result = processRelationships(inputRecord, schemaFields, {});
+ * const result = processRelationships(scope, deps);
  * // Returns:
  * // {
  * //   belongsToUpdates: {
@@ -92,31 +86,27 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * 
  * @example
  * // Example 3: Processing many-to-many relationships
- * const inputRecord = {
- *   data: {
- *     type: 'articles',
- *     attributes: { title: 'Tagged Article' },
- *     relationships: {
- *       tags: {
- *         data: [
- *           { type: 'tags', id: '10' },
- *           { type: 'tags', id: '20' },
- *           { type: 'tags', id: '30' }
- *         ]
+ * const scope = api.resources['articles'];
+ * const deps = {
+ *   context: {
+ *     inputRecord: {
+ *       data: {
+ *         type: 'articles',
+ *         attributes: { title: 'Tagged Article' },
+ *         relationships: {
+ *           tags: {
+ *             data: [
+ *               { type: 'tags', id: '10' },
+ *               { type: 'tags', id: '20' },
+ *               { type: 'tags', id: '30' }
+ *             ]
+ *           }
+ *         }
  *       }
  *     }
  *   }
  * };
- * const relationships = {
- *   tags: {
- *     manyToMany: {
- *       through: 'article_tags',
- *       foreignKey: 'article_id',
- *       otherKey: 'tag_id'
- *     }
- *   }
- * };
- * const result = processRelationships(inputRecord, {}, relationships);
+ * const result = processRelationships(scope, deps);
  * // Returns:
  * // {
  * //   belongsToUpdates: {},
@@ -137,20 +127,25 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * 
  * @example
  * // Example 4: Clearing relationships (setting to null)
- * const inputRecord = {
- *   data: {
- *     type: 'articles',
- *     relationships: {
- *       author: {
- *         data: null  // Clear the author
- *       },
- *       tags: {
- *         data: []    // Clear all tags
+ * const scope = api.resources['articles'];
+ * const deps = {
+ *   context: {
+ *     inputRecord: {
+ *       data: {
+ *         type: 'articles',
+ *         relationships: {
+ *           author: {
+ *             data: null  // Clear the author
+ *           },
+ *           tags: {
+ *             data: []    // Clear all tags
+ *           }
+ *         }
  *       }
  *     }
  *   }
  * };
- * const result = processRelationships(inputRecord, schemaFields, relationships);
+ * const result = processRelationships(scope, deps);
  * // Returns:
  * // {
  * //   belongsToUpdates: { author_id: null },  // Foreign key cleared
@@ -163,11 +158,16 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * 
  * @example
  * // Example 5: Invalid polymorphic type throws error
- * const inputRecord = {
- *   data: {
- *     relationships: {
- *       commentable: {
- *         data: { type: 'invalid_type', id: '123' }
+ * const scope = api.resources['comments'];
+ * const deps = {
+ *   context: {
+ *     inputRecord: {
+ *       data: {
+ *         relationships: {
+ *           commentable: {
+ *             data: { type: 'invalid_type', id: '123' }
+ *           }
+ *         }
  *       }
  *     }
  *   }
@@ -184,7 +184,17 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * // 5. Maintain data integrity by validating relationships before database writes
  * // 6. Abstract the complexity of different relationship types from storage plugins
  */
-export const processRelationships = (inputRecord, schemaFields, relationships) => {
+export const processRelationships = (scope, deps) => {
+  // Extract values from scope
+  const { 
+    vars: { 
+      schemaInfo: { schemaStructure: schemaFields, schemaRelationships: relationships }
+    }
+  } = scope;
+  
+  // Extract values from deps
+  const { context } = deps;
+  const { inputRecord } = context;
   const belongsToUpdates = {};
   const manyToManyRelationships = [];
   

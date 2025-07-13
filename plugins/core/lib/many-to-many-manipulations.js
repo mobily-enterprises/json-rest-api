@@ -9,7 +9,7 @@
  */
 
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
-import { transformSimplifiedToJsonApi } from './simplifiedHelpers.js';
+import { transformSimplifiedToJsonApi } from './simplified-helpers.js';
 
 /**
  * Updates many-to-many relationships intelligently by synchronizing pivot table records
@@ -28,31 +28,41 @@ import { transformSimplifiedToJsonApi } from './simplifiedHelpers.js';
  * - Maintains referential integrity
  * - Provides better audit trails
  * 
- * @param {Object} api - The API instance with access to resources
- * @param {string|number} resourceId - The ID of the resource being updated
- * @param {Object} relDef - The relationship definition object
- * @param {string} relDef.through - The pivot table/scope name
- * @param {string} relDef.foreignKey - The foreign key field pointing to this resource
- * @param {string} relDef.otherKey - The foreign key field pointing to the related resource
- * @param {boolean} [relDef.validateExists=true] - Whether to validate related resources exist
- * @param {Array} relData - Array of relationship data objects with type and id
- * @param {Object} trx - Database transaction object
+ * @param {Object} scope - The scope object (not used directly, for consistency)
+ * @param {Object} deps - Dependencies object
+ * @param {Object} deps.api - The API instance with access to resources
+ * @param {Object} deps.context - Request context
+ * @param {string|number} deps.context.resourceId - The ID of the resource being updated
+ * @param {Object} deps.context.relDef - The relationship definition object
+ * @param {string} deps.context.relDef.through - The pivot table/scope name
+ * @param {string} deps.context.relDef.foreignKey - The foreign key field pointing to this resource
+ * @param {string} deps.context.relDef.otherKey - The foreign key field pointing to the related resource
+ * @param {boolean} [deps.context.relDef.validateExists=true] - Whether to validate related resources exist
+ * @param {Array} deps.context.relData - Array of relationship data objects with type and id
+ * @param {Object} deps.context.transaction - Database transaction object
  * @throws {RestApiResourceError} If a related resource doesn't exist when validation is enabled
  * 
  * @example
  * // Example 1: Updating article tags (some added, some removed, some kept)
- * const relDef = {
- *   through: 'article_tags',
- *   foreignKey: 'article_id',
- *   otherKey: 'tag_id',
- *   validateExists: true
+ * const deps = {
+ *   api,
+ *   context: {
+ *     resourceId: '100',
+ *     relDef: {
+ *       through: 'article_tags',
+ *       foreignKey: 'article_id',
+ *       otherKey: 'tag_id',
+ *       validateExists: true
+ *     },
+ *     relData: [
+ *       { type: 'tags', id: '1' },  // Existing - will be kept
+ *       { type: 'tags', id: '3' },  // New - will be added
+ *       // Tag 2 was in the relationship but not in relData - will be removed
+ *     ],
+ *     transaction: trx
+ *   }
  * };
- * const relData = [
- *   { type: 'tags', id: '1' },  // Existing - will be kept
- *   { type: 'tags', id: '3' },  // New - will be added
- *   // Tag 2 was in the relationship but not in relData - will be removed
- * ];
- * await updateManyToManyRelationship(api, '100', relDef, relData, trx);
+ * await updateManyToManyRelationship(null, deps);
  * // Result in article_tags table:
  * // - Record linking article 100 to tag 1: Preserved with original created_at
  * // - Record linking article 100 to tag 2: Deleted
@@ -60,31 +70,56 @@ import { transformSimplifiedToJsonApi } from './simplifiedHelpers.js';
  * 
  * @example
  * // Example 2: Clearing all relationships
- * await updateManyToManyRelationship(api, '100', relDef, [], trx);
+ * const deps = {
+ *   api,
+ *   context: {
+ *     resourceId: '100',
+ *     relDef,
+ *     relData: [],
+ *     transaction: trx
+ *   }
+ * };
+ * await updateManyToManyRelationship(null, deps);
  * // All pivot records for article 100 will be deleted
  * 
  * @example
  * // Example 3: Pivot table with extra data preservation
  * // Assume article_tags has extra fields like 'display_order' and 'featured'
  * // Existing pivot record: { article_id: 100, tag_id: 1, display_order: 1, featured: true }
- * const relData = [
- *   { type: 'tags', id: '1' },  // This tag stays
- *   { type: 'tags', id: '2' }   // New tag added
- * ];
- * await updateManyToManyRelationship(api, '100', relDef, relData, trx);
+ * const deps = {
+ *   api,
+ *   context: {
+ *     resourceId: '100',
+ *     relDef,
+ *     relData: [
+ *       { type: 'tags', id: '1' },  // This tag stays
+ *       { type: 'tags', id: '2' }   // New tag added
+ *     ],
+ *     transaction: trx
+ *   }
+ * };
+ * await updateManyToManyRelationship(null, deps);
  * // Result:
  * // - Tag 1 pivot: display_order and featured are preserved
  * // - Tag 2 pivot: created with default values for extra fields
  * 
  * @example
  * // Example 4: Skip validation for performance (when you know resources exist)
- * const relDef = {
- *   through: 'user_roles',
- *   foreignKey: 'user_id',
- *   otherKey: 'role_id',
- *   validateExists: false  // Skip GET requests for each role
+ * const deps = {
+ *   api,
+ *   context: {
+ *     resourceId: userId,
+ *     relDef: {
+ *       through: 'user_roles',
+ *       foreignKey: 'user_id',
+ *       otherKey: 'role_id',
+ *       validateExists: false  // Skip GET requests for each role
+ *     },
+ *     relData: roleData,
+ *     transaction: trx
+ *   }
  * };
- * await updateManyToManyRelationship(api, userId, relDef, roleData, trx);
+ * await updateManyToManyRelationship(null, deps);
  * // Faster execution, but could create orphaned relationships if roles don't exist
  * 
  * @example <caption>Why this is useful upstream</caption>
@@ -96,7 +131,10 @@ import { transformSimplifiedToJsonApi } from './simplifiedHelpers.js';
  * // 5. Support complex pivot tables with additional attributes
  * // 6. Provide atomic updates within transactions
  */
-export const updateManyToManyRelationship = async (api, resourceId, relDef, relData, trx) => {
+export const updateManyToManyRelationship = async (scope, deps) => {
+  // Extract values from deps
+  const { api, context } = deps;
+  const { resourceId, relDef, relData, transaction: trx } = context;
   // Get pivot table schema for transformation
   const pivotScope = api.resources[relDef.through];
   if (!pivotScope) {
@@ -185,10 +223,14 @@ export const updateManyToManyRelationship = async (api, resourceId, relDef, relD
       
       // Transform to JSON:API format using the helper
       const jsonApiDocument = transformSimplifiedToJsonApi(
-        pivotData,
-        relDef.through,
-        pivotSchema,
-        pivotRelationships
+        { inputRecord: pivotData },
+        { 
+          context: {
+            scopeName: relDef.through,
+            schemaStructure: pivotSchema,
+            schemaRelationships: pivotRelationships
+          }
+        }
       );
       
       // Create new pivot record using proper JSON:API format
@@ -408,10 +450,14 @@ export const createPivotRecords = async (api, resourceId, relDef, relData, trx) 
     
     // Transform to JSON:API format using the helper
     const jsonApiDocument = transformSimplifiedToJsonApi(
-      pivotData,
-      relDef.through,
-      pivotSchema,
-      pivotRelationships
+      { inputRecord: pivotData },
+      { 
+        context: {
+          scopeName: relDef.through,
+          schemaStructure: pivotSchema,
+          schemaRelationships: pivotRelationships
+        }
+      }
     );
     
     // Create pivot record using proper JSON:API format

@@ -11,9 +11,9 @@ import {
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
 import { validatePolymorphicRelationships } from './lib/scope-validations.js';
-import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplifiedHelpers.js';
+import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplified-helpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
-import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/manyToManyManipulations.js';
+import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/many-to-many-manipulations.js';
 import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 import { compileSchemas } from './lib/compileSchemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
@@ -69,7 +69,7 @@ export const RestApiPlugin = {
     // Listen for scope creation to compile schemas immediately.
     // This ensures schemas are compiled and cached before any scope methods are called,
     // making them available for queries and other operations that need schema information.
-    on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, eventData.scopeName));
+    on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, { context: { scopeName: eventData.scopeName } }));
     
     // Validate include configurations in relationships after schemas are compiled
     on('scope:added', 'validateIncludeConfigurations', async ({eventData}) => {
@@ -446,9 +446,8 @@ export const RestApiPlugin = {
         // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
         // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
         return transformJsonApiToSimplified(
-          context.record,
-          schemaStructure,
-          schemaRelationships
+          { record: context.record },
+          { context: { schemaStructure, schemaRelationships } }
         );
       }
       
@@ -637,9 +636,8 @@ export const RestApiPlugin = {
         // Example: {data: {type: 'posts', id: '1', attributes: {title: 'My Post'}, relationships: {author: {data: {type: 'users', id: '123'}}}}} 
         // becomes: {id: '1', title: 'My Post', author_id: '123'} - flattens structure and restores foreign keys
         return transformJsonApiToSimplified(
-          context.record,
-          schemaStructure,
-          schemaRelationships
+          { record: context.record },
+          { context: { schemaStructure, schemaRelationships } }
         );
       }
       
@@ -701,10 +699,8 @@ export const RestApiPlugin = {
         // Transform input if in simplified mode
         if (context.simplified) {
             context.inputRecord = transformSimplifiedToJsonApi(
-                context.inputRecord,
-                scopeName,
-                schemaStructure,
-                schemaRelationships
+                { inputRecord: context.inputRecord },
+                { context: { scopeName, schemaStructure, schemaRelationships } }
             );
         } else {
             // Strict mode: validate no belongsTo fields in attributes
@@ -975,9 +971,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
             // Ensure we are transforming the 'returnRecord' which comes from the 'get' call,
             // as it contains the fully enriched and structured JSON:API data.
             return transformJsonApiToSimplified(
-                context.returnRecord,
-                schemaStructure,
-                schemaRelationships
+                { record: context.returnRecord },
+                { context: { schemaStructure, schemaRelationships } }
             );
         }
         
@@ -1203,9 +1198,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Example: relationships.author -> author_id: '123' for storage
         // Example: relationships.tags -> array of pivot records to create later
         const { belongsToUpdates, manyToManyRelationships } = await processRelationships(
-          context.inputRecord,
-          schemaStructure,
-          schemaRelationships
+          scope,
+          { context }
         );
 
         await validateResourceAttributesBeforeWrite({ 
@@ -1481,9 +1475,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later
     const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-      context.inputRecord,
-      schemaStructure,
-      schemaRelationships
+      scope,
+      { context }
     );
 
     await validateResourceAttributesBeforeWrite({ 
@@ -1798,9 +1791,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Example: relationships.author -> author_id: '123' for storage
         // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
         const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-          context.inputRecord,
-          schemaStructure,
-          schemaRelationships
+          scope,
+          { context }
         );
 
         await validateResourceAttributesBeforeWrite({ 
@@ -1844,7 +1836,15 @@ const validatePivotResource = (scopes, relDef, relName) => {
           // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
           // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
           // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
-          await updateManyToManyRelationship(api, context.id, relDef, relData, context.transaction);
+          await updateManyToManyRelationship(null, {
+            api,
+            context: {
+              resourceId: context.id,
+              relDef,
+              relData,
+              transaction: context.transaction
+            }
+          });
         }
         
         const ret = await handleRecordReturnAfterWrite({

@@ -32,6 +32,8 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * 6. Caches all compiled schemas for the scope
  * 
  * @param {Object} scope - The scope object containing vars, runHooks, scopeOptions, etc.
+ * @param {Object} deps - Dependencies object
+ * @param {Object} deps.context - Request context containing scopeName
  * @returns {Promise<void>} Resolves when schemas are compiled
  * 
  * @example <caption>Basic usage in REST method</caption>
@@ -39,8 +41,9 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * import { compileSchemas } from './lib/compileSchemas.js';
  * 
  * addScopeMethod('query', async (scope, params) => {
- *   await compileSchemas(scope);
- *   const schemaInfo = scope.vars.schemaInfo.schema;;
+ *   const deps = { context: { scopeName: 'articles' } };
+ *   await compileSchemas(scope, deps);
+ *   const schemaInfo = scope.vars.schemaInfo.schema;
  *   // Now schema, searchSchema, and relationships are available
  * });
  * 
@@ -88,7 +91,10 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * // 6. Support virtual search fields that join to other tables
  * // 7. Ensure belongsTo fields have proper type definitions
  */
-export async function compileSchemas(scope, scopeName) {
+export async function compileSchemas(scope, deps) {
+  // Extract scopeName from context
+  const { context } = deps;
+  const scopeName = context.scopeName;
 
   // Get raw schema and computed fields
   const rawSchema = scope.scopeOptions?.schema || {};

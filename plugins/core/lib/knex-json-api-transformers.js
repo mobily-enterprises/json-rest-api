@@ -9,7 +9,7 @@
 
 import { getForeignKeyFields } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
-import { RELATIONSHIPS_KEY, getSchemaStructure } from './knex-constants.js';
+import { RELATIONSHIPS_KEY, getSchemaStructure } from '../utils/knex-constants.js';
 
 /**
  * Converts a database record to JSON:API format.
@@ -84,7 +84,16 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
     // Scope might not have relationships
   }
   
-  return toJsonApi(scopeName, record, schema, idProperty, polymorphicFields);
+  // Create deps object for toJsonApi
+  const deps = {
+    context: {
+      scopeName,
+      schemaInfo: { idProperty },
+      polymorphicFields
+    }
+  };
+  
+  return toJsonApi(scope, record, deps);
 };
 
 /**

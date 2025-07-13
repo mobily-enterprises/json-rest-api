@@ -45,7 +45,7 @@
 import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js';
-import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY } from './knex-constants.js';
+import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY } from '../utils/knex-constants.js';
 
 /**
  * Groups records by their polymorphic type for efficient batch loading
@@ -212,21 +212,26 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  * This function loads the "parent" side of a relationship. For example, if comments
  * belong to articles, this loads the articles for a set of comments.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - Records to load relationships for
- * @param {string} fieldName - The foreign key field name (e.g., 'author_id')
- * @param {Object} fieldDef - The field definition from the schema
- * @param {string} includeName - The relationship name (e.g., 'author')
- * @param {Object} subIncludes - Nested includes to process recursively
- * @param {Map} included - Map of already included resources
- * @param {Set} processedPaths - Set of already processed paths
- * @param {string} currentPath - Current include path for tracking
- * @param {Object} fields - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - Records to load relationships for
+ *   - fieldName: string - The foreign key field name (e.g., 'author_id')
+ *   - fieldDef: Object - The field definition from the schema
+ *   - includeName: string - The relationship name (e.g., 'author')
+ *   - subIncludes: Object - Nested includes to process recursively
+ *   - included: Map - Map of already included resources
+ *   - processedPaths: Set - Set of already processed paths
+ *   - currentPath: string - Current include path for tracking
+ *   - fields: Object - Sparse fieldsets configuration
+ *   - idProperty: string - The ID property name
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
  */
-export const loadBelongsTo = async (scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty) => {
+export const loadBelongsTo = async (scope, deps) => {
+  const { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Loading belongsTo:', { 
       fieldName, 
@@ -306,7 +311,11 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
       
       if (targetRecord) {
         // Convert to JSON:API format
-        const jsonApiRecord = toJsonApi(targetScope, targetRecord, targetSchema, targetIdProperty);
+        const jsonApiRecord = toJsonApi(
+          scopes[targetScope],
+          targetRecord,
+          { context: { scopeName: targetScope, schemaInfo: scopes[targetScope].vars.schemaInfo, polymorphicFields: new Set() } }
+        );
 
         // Add relationships from metadata
         if (targetRecord[RELATIONSHIP_METADATA_KEY]) {
@@ -336,7 +345,10 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
     if (targetRecordsToProcess.length > 0) {
       const nextPath = `${currentPath}.${includeName}`;
       if (!processedPaths.has(nextPath)) {
-        await processIncludes(scopes, log, knex, targetRecordsToProcess, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+        await processIncludes(
+          { records: targetRecordsToProcess, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { context: { scopes, log, knex } }
+        );
       }
     }
   } catch (error) {
@@ -367,21 +379,25 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
  * have many comments, this loads all comments for a set of articles. It also handles
  * many-to-many relationships through a pivot table.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - Parent records to load relationships for
- * @param {string} scopeName - The parent scope name
- * @param {string} includeName - The relationship name to include
- * @param {Object} relDef - The relationship definition
- * @param {Object} subIncludes - Nested includes to process recursively
- * @param {Map} included - Map of already included resources
- * @param {Set} processedPaths - Set of already processed paths
- * @param {string} currentPath - Current include path for tracking
- * @param {Object} fields - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - Parent records to load relationships for
+ *   - scopeName: string - The parent scope name
+ *   - includeName: string - The relationship name to include
+ *   - relDef: Object - The relationship definition
+ *   - subIncludes: Object - Nested includes to process recursively
+ *   - included: Map - Map of already included resources
+ *   - processedPaths: Set - Set of already processed paths
+ *   - currentPath: string - Current include path for tracking
+ *   - fields: Object - Sparse fieldsets configuration
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
  */
-export const loadHasMany = async (scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields) => {
+export const loadHasMany = async (scope, deps) => {
+  const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Loading hasMany relationship:', { 
       scopeName, 
@@ -535,7 +551,11 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
           // Add to included
           const resourceKey = `${targetScope}:${childRecord.id}`;
           if (!included.has(resourceKey)) {
-            const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+            const jsonApiRecord = toJsonApi(
+            scopes[targetScope],
+            childRecord,
+            { context: { scopeName: targetScope, schemaInfo: scopes[targetScope].vars.schemaInfo, polymorphicFields: new Set() } }
+          );
             
             // Add relationships from metadata
             if (childRecord[RELATIONSHIP_METADATA_KEY]) {
@@ -556,7 +576,10 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
       const nextPath = `${currentPath}.${includeName}`;
       if (!processedPaths.has(nextPath)) {
-        await processIncludes(scopes, log, knex, targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+        await processIncludes(
+          { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { context: { scopes, log, knex } }
+        );
       }
     }
     
@@ -664,7 +687,11 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
         // Add to included
         const resourceKey = `${targetScope}:${childRecord.id}`;
         if (!included.has(resourceKey)) {
-          const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+          const jsonApiRecord = toJsonApi(
+            scopes[targetScope],
+            childRecord,
+            { context: { scopeName: targetScope, schemaInfo: scopes[targetScope].vars.schemaInfo, polymorphicFields: new Set() } }
+          );
           
           // Add relationships from metadata
           if (childRecord[RELATIONSHIP_METADATA_KEY]) {
@@ -685,7 +712,10 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
       const nextPath = `${currentPath}.${includeName}`;
       if (!processedPaths.has(nextPath)) {
-        await processIncludes(scopes, log, knex, targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+        await processIncludes(
+          { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { context: { scopes, log, knex } }
+        );
       }
     }
   }
@@ -716,32 +746,24 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
  * Handles relationships where a record can belong to different types of parent records.
  * For example, comments that can belong to either articles or videos.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - Records with polymorphic relationships
- * @param {string} relName - The relationship name
- * @param {Object} relDef - The relationship definition with belongsToPolymorphic
- * @param {Object} subIncludes - Nested includes to process recursively
- * @param {Map} included - Map of already included resources
- * @param {Set} processedPaths - Set of already processed paths
- * @param {string} currentPath - Current include path for tracking
- * @param {Object} fields - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - Records with polymorphic relationships
+ *   - relName: string - The relationship name
+ *   - relDef: Object - The relationship definition with belongsToPolymorphic
+ *   - subIncludes: Object - Nested includes to process recursively
+ *   - included: Map - Map of already included resources
+ *   - processedPaths: Set - Set of already processed paths
+ *   - currentPath: string - Current include path for tracking
+ *   - fields: Object - Sparse fieldsets configuration
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
  */
-export const loadPolymorphicBelongsTo = async (
-  scopes,
-  log,
-  knex,
-  records, 
-  relName,
-  relDef,
-  subIncludes,
-  included,
-  processedPaths,
-  currentPath,
-  fields
-) => {
+export const loadPolymorphicBelongsTo = async (scope, deps) => {
+  const { records, relName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
       relName, 
@@ -822,7 +844,11 @@ export const loadPolymorphicBelongsTo = async (
           // Add to included
           const resourceKey = `${targetType}:${targetId}`;
           if (!included.has(resourceKey)) {
-            const jsonApiRecord = toJsonApi(targetType, targetRecord, targetSchema);
+            const jsonApiRecord = toJsonApi(
+              scopes[targetType],
+              targetRecord,
+              { context: { scopeName: targetType, schemaInfo: scopes[targetType].vars.schemaInfo, polymorphicFields: new Set() } }
+            );
             
             // Add relationships from metadata
             if (targetRecord[RELATIONSHIP_METADATA_KEY]) {
@@ -847,7 +873,10 @@ export const loadPolymorphicBelongsTo = async (
     if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
       const nextPath = `${currentPath}.${relName}`;
       if (!processedPaths.has(nextPath)) {
-        await processIncludes(scopes, log, knex, targetRecords, targetType, subIncludes, included, processedPaths, nextPath, fields);
+        await processIncludes(
+          { records: targetRecords, scopeName: targetType, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { context: { scopes, log, knex } }
+        );
       }
     }
   }
@@ -885,34 +914,25 @@ export const loadPolymorphicBelongsTo = async (
  * Handles loading "child" records that have a polymorphic relationship back to the parent.
  * For example, loading all comments (which can belong to articles or videos) for a specific article.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - Parent records
- * @param {string} scopeName - The parent scope name
- * @param {string} includeName - The relationship name
- * @param {Object} relDef - The relationship definition with 'via' property
- * @param {Object} subIncludes - Nested includes to process recursively
- * @param {Map} included - Map of already included resources
- * @param {Set} processedPaths - Set of already processed paths
- * @param {string} currentPath - Current include path for tracking
- * @param {Object} fields - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - Parent records
+ *   - scopeName: string - The parent scope name
+ *   - includeName: string - The relationship name
+ *   - relDef: Object - The relationship definition with 'via' property
+ *   - subIncludes: Object - Nested includes to process recursively
+ *   - included: Map - Map of already included resources
+ *   - processedPaths: Set - Set of already processed paths
+ *   - currentPath: string - Current include path for tracking
+ *   - fields: Object - Sparse fieldsets configuration
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
  */
-export const loadReversePolymorphic = async (
-  scopes,
-  log,
-  knex,
-  records,
-  scopeName,
-  includeName,
-  relDef,
-  subIncludes,
-  included,
-  processedPaths,
-  currentPath,
-  fields
-) => {
+export const loadReversePolymorphic = async (scope, deps) => {
+  const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Loading reverse polymorphic (via):', { 
       scopeName,
@@ -955,13 +975,10 @@ export const loadReversePolymorphic = async (
   const targetScopeObject = scopes[targetScope];
   const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   const fieldSelectionInfo = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScopeObject, {
-      context: {
-        scopeName: targetScope,
-        queryParams: { fields: { [targetScope]: fields[targetScope] } },
-        schemaInfo: targetScopeObject.vars.schemaInfo
-      }
-    }) : 
+    await buildFieldSelection(
+      { scopeName: targetScope, queryParams: { fields: { [targetScope]: fields[targetScope] } }, schemaInfo: targetScopeObject.vars.schemaInfo },
+      { context: { scopes, log, knex } }
+    ) : 
     null;
   
   // Query for records pointing back to our scope
@@ -1001,7 +1018,11 @@ export const loadReversePolymorphic = async (
       // Add to included
       const resourceKey = `${targetScope}:${childRecord.id}`;
       if (!included.has(resourceKey)) {
-        const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
+        const jsonApiRecord = toJsonApi(
+          scopes[targetScope],
+          childRecord,
+          { context: { scopeName: targetScope, schemaInfo: scopes[targetScope].vars.schemaInfo, polymorphicFields: new Set() } }
+        );
         
         // Add relationships from metadata
         if (childRecord[RELATIONSHIP_METADATA_KEY]) {
@@ -1022,7 +1043,10 @@ export const loadReversePolymorphic = async (
   if (Object.keys(subIncludes).length > 0 && targetRecords.length > 0) {
     const nextPath = `${currentPath}.${includeName}`;
     if (!processedPaths.has(nextPath)) {
-      await processIncludes(scopes, log, knex, targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+      await processIncludes(
+        { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+        { context: { scopes, log, knex } }
+      );
     }
   }
   } catch (error) {
@@ -1053,19 +1077,24 @@ export const loadReversePolymorphic = async (
  * This is the main recursive function that processes the include tree. It examines
  * the schema to determine relationship types and calls the appropriate loader function.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - Records to process includes for
- * @param {string} scopeName - The scope name of the records
- * @param {Object} includeTree - Parsed include tree from parseIncludeTree
- * @param {Map} included - Map storing all included resources
- * @param {Set} processedPaths - Set tracking processed paths to prevent cycles
- * @param {string} [currentPath=''] - Current path in the include tree
- * @param {Object} [fields={}] - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - Records to process includes for
+ *   - scopeName: string - The scope name of the records
+ *   - includeTree: Object - Parsed include tree from parseIncludeTree
+ *   - included: Map - Map storing all included resources
+ *   - processedPaths: Set - Set tracking processed paths to prevent cycles
+ *   - currentPath: string - Current path in the include tree (default '')
+ *   - fields: Object - Sparse fieldsets configuration (default {})
+ *   - idProperty: string - The ID property name
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
  */
-export const processIncludes = async (scopes, log, knex, records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty) => {
+export const processIncludes = async (scope, deps) => {
+  const { records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Processing includes:', { 
       scopeName, 
@@ -1103,7 +1132,10 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
         // Look for belongsTo relationships in schema fields
         for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
-            await loadBelongsTo(scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty);
+            await loadBelongsTo(
+              { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
+              { context: { scopes, log, knex } }
+            );
             handled = true;
             break;
           }
@@ -1117,13 +1149,22 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
             if (relDef.hasMany) {
               // Check if it's a reverse polymorphic (via)
               if (relDef.via) {
-                await loadReversePolymorphic(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+                await loadReversePolymorphic(
+                  { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
+                  { context: { scopes, log, knex } }
+                );
               } else {
-                await loadHasMany(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+                await loadHasMany(
+                  { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
+                  { context: { scopes, log, knex } }
+                );
               }
               handled = true;
             } else if (relDef.belongsToPolymorphic) {
-              await loadPolymorphicBelongsTo(scopes, log, knex, records, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+              await loadPolymorphicBelongsTo(
+                { records, relName: includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
+                { context: { scopes, log, knex } }
+              );
               handled = true;
             }
           }
@@ -1169,24 +1210,28 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
  * Takes a set of records and an include parameter, loads all requested relationships,
  * and returns both the included resources and the records with relationship data attached.
  * 
- * @param {Object} scopes - The hooked-api scopes object
- * @param {Object} log - Logger instance
- * @param {Object} knex - Knex instance
- * @param {Array<Object>} records - The main records to process
- * @param {string} scopeName - The scope name of the main resources
- * @param {string} includeString - The include parameter value (e.g., "author,comments.author")
- * @param {Object} fields - Sparse fieldsets configuration
+ * @param {Object} scope - The hooked-api scope object containing:
+ *   - records: Array<Object> - The main records to process
+ *   - scopeName: string - The scope name of the main resources
+ *   - includeParam: string - The include parameter value (e.g., "author,comments.author")
+ *   - fields: Object - Sparse fieldsets configuration
+ *   - idProperty: string - The ID property name
+ * @param {Object} deps - Dependencies object containing:
+ *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.log: Object - Logger instance
+ *   - context.knex: Object - Knex instance
  * @returns {Promise<Object>} Object with included array and records with relationships
  * 
  * @example
  * const result = await buildIncludedResources(
- *   scopes,
- *   log,
- *   knex,
- *   articleRecords,
- *   'articles',
- *   'author,comments.author',
- *   { articles: 'title,body', people: 'name' }
+ *   {
+ *     records: articleRecords,
+ *     scopeName: 'articles',
+ *     includeParam: 'author,comments.author',
+ *     fields: { articles: 'title,body', people: 'name' },
+ *     idProperty: 'id'
+ *   },
+ *   { context: { scopes, log, knex } }
  * );
  * 
  * // result.included = [
@@ -1197,7 +1242,9 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
  * 
  * // result.recordsWithRelationships = original records with _relationships added
  */
-export const buildIncludedResources = async (scopes, log, knex, records, scopeName, includeParam, fields, idProperty) => {
+export const buildIncludedResources = async (scope, deps) => {
+  const { records, scopeName, includeParam, fields, idProperty } = scope;
+  const { scopes, log, knex } = deps.context;
   try {
     log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
     
@@ -1229,7 +1276,10 @@ export const buildIncludedResources = async (scopes, log, knex, records, scopeNa
     const processedPaths = new Set(); // Prevent infinite loops
     
     // Process all includes
-    await processIncludes(scopes, log, knex, records, scopeName, includeTree, included, processedPaths, '', fields, idProperty);
+    await processIncludes(
+      { records, scopeName, includeTree, included, processedPaths, currentPath: '', fields, idProperty },
+      { context: { scopes, log, knex } }
+    );
     
     // Convert Map to array for JSON:API format
     const includedArray = Array.from(included.values());

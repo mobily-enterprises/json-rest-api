@@ -32,6 +32,11 @@ Query Depth Protection - Prevent malicious deep includes
 (12)
 - Boolean coercion from SQLite
 
+(14)
+Check if post and put logic when zapping are correct
+
+
+
 (13) 
 Link and meta info in returned document
 
@@ -40,8 +45,6 @@ Link and meta info in returned document
 - GET /articles/1/relationships/comments
 - POST/PUT/DELETE for relationship updates
 
-(14)
-Check if post and put logic when zapping are correct
 
 (15)
 Bulk operations

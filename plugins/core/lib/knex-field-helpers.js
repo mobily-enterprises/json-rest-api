@@ -1,60 +1,15 @@
 /**
  * @module knex-field-helpers
- * @description Field and schema manipulation helpers for Knex operations
+ * @description Context-dependent field helpers for Knex operations
  * 
- * This module contains low-level helper functions for working with schema fields,
- * foreign keys, and field selections. These are the most basic building blocks
- * used by other modules in the REST API Knex plugin.
+ * This module contains field helper functions that require scope context and
+ * dependencies. Pure utility functions have been moved to utils/field-utils.js.
  */
 
-/**
- * Extracts all foreign key fields from a schema definition.
- * 
- * This function identifies fields that represent foreign keys based on belongsTo
- * relationships in the schema. These fields need special handling because they're
- * stored in the database but not exposed as attributes in JSON:API responses.
- * Instead, they're represented as relationships.
- * 
- * @param {Object} schema - The schema definition (can be Schema object or plain object)
- * @returns {Set<string>} Set of foreign key field names
- * 
- * @example <caption>Basic foreign key extraction</caption>
- * const schema = {
- *   title: { type: 'string' },
- *   author_id: { type: 'number', belongsTo: 'users', as: 'author' },
- *   category_id: { type: 'number', belongsTo: 'categories', as: 'category' }
- * };
- * const foreignKeys = getForeignKeyFields(schema);
- * // Returns Set(['author_id', 'category_id'])
- * 
- * @example <caption>Schema object vs plain object</caption>
- * // Works with both compiled Schema objects and plain schema definitions
- * const schemaObject = createSchema(schema);
- * const foreignKeys1 = getForeignKeyFields(schemaObject); // Schema object
- * const foreignKeys2 = getForeignKeyFields(schema);       // Plain object
- * // Both return the same Set
- * 
- * @example <caption>Why this is useful upstream</caption>
- * // The REST API Knex plugin uses this to:
- * // 1. Filter out foreign keys when building JSON:API attributes
- * // 2. Include foreign keys in SELECT even with sparse fieldsets
- * // 3. Identify which fields need relationship transformation
- * // 4. Optimize queries by knowing which fields are joins
- */
-export const getForeignKeyFields = (schema) => {
-  const foreignKeys = new Set();
-  if (!schema) return foreignKeys;
-  
-  // Handle both Schema objects and plain objects
-  const schemaStructure = schema.structure || schema;
-  
-  Object.entries(schemaStructure).forEach(([field, def]) => {
-    if (def.belongsTo) {
-      foreignKeys.add(field);
-    }
-  });
-  return foreignKeys;
-};
+import { getForeignKeyFields, filterHiddenFields } from '../utils/field-utils.js';
+
+// Re-export pure utility functions from field-utils
+export { getForeignKeyFields, filterHiddenFields } from '../utils/field-utils.js';
 
 /**
  * Builds the field selection list for database queries, handling sparse fieldsets.
@@ -64,35 +19,41 @@ export const getForeignKeyFields = (schema) => {
  * It always includes ID and foreign key fields even if not explicitly requested,
  * because these are needed for JSON:API relationship links.
  * 
- * @param {string} scopeName - The name of the scope/resource
- * @param {string|null} requestedFields - Comma-separated list of requested fields or null for all
- * @param {Object} schema - The schema definition
- * @param {Object} scopes - The scopes object from the API
- * @param {Object} vars - Plugin vars containing configuration
- * @returns {Promise<Array<string>|string>} Array of field names to select or '*' for all
+ * @param {Object} scope - The scope object containing schema and configuration
+ * @param {Object} deps - Dependencies object
+ * @param {Object} deps.context - Request context containing queryParams and schemaInfo
+ * @returns {Promise<Object>} Object with fieldsToSelect, requestedFields, and computedDependencies
  * 
  * @example <caption>Sparse fieldset with automatic foreign key inclusion</caption>
- * const fields = await buildFieldSelection('articles', 'title,body', schema, scopes, vars);
- * // Returns ['id', 'title', 'body', 'author_id', 'category_id']
- * // Note: author_id and category_id included automatically for relationships
+ * const scope = api.resources['articles'];
+ * const deps = {
+ *   context: {
+ *     scopeName: 'articles',
+ *     queryParams: { fields: { articles: 'title,body' } },
+ *     schemaInfo: scope.vars.schemaInfo
+ *   }
+ * };
+ * const fieldInfo = await buildFieldSelection(scope, deps);
+ * // Returns {
+ * //   fieldsToSelect: ['id', 'title', 'body', 'author_id', 'category_id'],
+ * //   requestedFields: ['title', 'body'],
+ * //   computedDependencies: []
+ * // }
  * 
- * @example <caption>No specific fields requested - select all</caption>
- * const fields = await buildFieldSelection('articles', null, schema, scopes, vars);
- * // Returns '*' (select all columns)
- * 
- * @example <caption>Polymorphic relationships included</caption>
- * // For a comments table with polymorphic commentable relationship
- * const fields = await buildFieldSelection('comments', 'text', schema, scopes, vars);
- * // Returns ['id', 'text', 'commentable_type', 'commentable_id']
- * // Polymorphic type and id fields included automatically
- * 
- * @example <caption>Why this is useful upstream</caption>
- * // The REST API Knex plugin uses this to:
- * // 1. Optimize database queries by selecting only needed fields
- * // 2. Ensure relationship fields are always available for JSON:API links
- * // 3. Support JSON:API sparse fieldsets feature efficiently
- * // 4. Handle both regular and polymorphic foreign keys automatically
- * // 5. Reduce data transfer from database for large tables
+ * @example <caption>With computed fields and dependencies</caption>
+ * const deps = {
+ *   context: {
+ *     scopeName: 'products',
+ *     queryParams: { fields: { products: 'name,profit_margin' } },
+ *     schemaInfo: scope.vars.schemaInfo
+ *   }
+ * };
+ * const fieldInfo = await buildFieldSelection(scope, deps);
+ * // Returns {
+ * //   fieldsToSelect: ['id', 'name', 'price', 'cost'], // cost needed for profit_margin
+ * //   requestedFields: ['name', 'profit_margin'],
+ * //   computedDependencies: ['cost'] // will be removed from final response
+ * // }
  */
 export const buildFieldSelection = async (scope, deps) => {
   let fieldsToSelect = new Set();
@@ -277,43 +238,3 @@ export const getRequestedComputedFields = (scopeName, requestedFields, computedF
   return requested.filter(field => allComputedFields.includes(field));
 };
 
-/**
- * Filters hidden fields from attributes based on schema rules.
- * 
- * @param {Object} attributes - The attributes object to filter
- * @param {Object} schema - The schema object with structure property
- * @param {Array<string>|string} requestedFields - Fields explicitly requested (for normallyHidden)
- * @returns {Object} Filtered attributes object
- */
-export const filterHiddenFields = (attributes, schema, requestedFields) => {
-  const filtered = {};
-  
-  // Parse requested fields if it's a string (from query params)
-  // Example: "name,price,cost" -> ['name', 'price', 'cost']
-  const requested = requestedFields ? (
-    typeof requestedFields === 'string'
-      ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
-      : requestedFields
-  ) : null;
-  
-  Object.entries(attributes).forEach(([field, value]) => {
-    const fieldDef = schema.structure?.[field];
-    
-    // Never include hidden fields - these are completely invisible
-    // Example: password_hash with hidden:true is always filtered out
-    if (fieldDef?.hidden === true) return;
-    
-    // Include normallyHidden fields only if explicitly requested
-    // Example: 'cost' with normallyHidden:true is only included if user requests it
-    // via sparse fieldsets like ?fields[products]=name,cost
-    if (fieldDef?.normallyHidden === true) {
-      if (!requested || !requested.includes(field)) {
-        return; // Filter out normallyHidden field
-      }
-    }
-    
-    filtered[field] = value;
-  });
-  
-  return filtered;
-};
