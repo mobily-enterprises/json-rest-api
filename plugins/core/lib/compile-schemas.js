@@ -16,7 +16,7 @@
  */
 
 import { createSchema } from 'json-rest-schema';
-import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './schemaHelpers.js';
+import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './schema-helpers.js';
 
 /**
  * Compiles and enriches schemas for a given scope.
@@ -38,7 +38,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * 
  * @example <caption>Basic usage in REST method</caption>
  * // At the beginning of a REST method:
- * import { compileSchemas } from './lib/compileSchemas.js';
+ * import { compileSchemas } from './lib/compile-schemas.js';
  * 
  * addScopeMethod('query', async (scope, params) => {
  *   const deps = { context: { scopeName: 'articles' } };

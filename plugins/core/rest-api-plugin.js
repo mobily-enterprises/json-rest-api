@@ -14,8 +14,8 @@ import { validatePolymorphicRelationships } from './lib/scope-validations.js';
 import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplified-helpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
 import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/many-to-many-manipulations.js';
-import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
-import { compileSchemas } from './lib/compileSchemas.js';
+import { createDefaultDataHelpers } from './lib/default-data-helpers.js';
+import { compileSchemas } from './lib/compile-schemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 import { getRequestedComputedFields, filterHiddenFields } from './lib/knex-field-helpers.js';
 
