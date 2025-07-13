@@ -11,7 +11,8 @@ export async function createBasicApi(knex) {
   });
 
   await api.use(RestApiPlugin, {
-    simplified: false,
+    simplifiedApi: false,
+    simplifiedTransport: false,
     returnFullRecord: {
       post: true,  // Need to return record to get ID for tests
       put: false,
@@ -104,7 +105,8 @@ export async function createExtendedApi(knex) {
   });
 
   await api.use(RestApiPlugin, {
-    simplified: false,
+    simplifiedApi: false,
+    simplifiedTransport: false,
     returnFullRecord: {
       post: true,  // Need to return record to get ID for tests
       put: false,

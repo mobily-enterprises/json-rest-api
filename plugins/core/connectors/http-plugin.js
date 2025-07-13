@@ -333,7 +333,7 @@ export const HttpPlugin = {
               methodName = 'query';
             }
             params.queryParams = parseQueryParams(req.url);
-            params.simplified = false; // Force JSON:API mode for HTTP
+            params.isTransport = true; // Mark as transport request
             break;
             
           case 'POST':
@@ -344,7 +344,7 @@ export const HttpPlugin = {
             }
             methodName = 'post';
             params.queryParams = parseQueryParams(req.url);
-            params.simplified = false; // Force JSON:API mode for HTTP
+            params.isTransport = true; // Mark as transport request
             break;
             
           case 'PUT':
@@ -356,7 +356,7 @@ export const HttpPlugin = {
             methodName = 'put';
             params.id = id;
             params.queryParams = parseQueryParams(req.url);
-            params.simplified = false; // Force JSON:API mode for HTTP
+            params.isTransport = true; // Mark as transport request
             break;
             
           case 'PATCH':
@@ -368,7 +368,7 @@ export const HttpPlugin = {
             methodName = 'patch';
             params.id = id;
             params.queryParams = parseQueryParams(req.url);
-            params.simplified = false; // Force JSON:API mode for HTTP
+            params.isTransport = true; // Mark as transport request
             break;
             
           case 'DELETE':

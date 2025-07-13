@@ -22,6 +22,24 @@ import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 const cascadeConfig = (settingName, sources, defaultValue) =>
   sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
 
+/**
+ * Determines which simplified setting to use based on request context
+ * @param {Object} params - Request parameters
+ * @param {Object} scopeOptions - Scope-specific options
+ * @param {Object} vars - Plugin variables
+ * @returns {boolean} Whether to use simplified mode
+ */
+const getSimplifiedSetting = (params, scopeOptions, vars) => {
+  // Check if this request comes from a transport (HTTP/Express)
+  const isTransport = params.isTransport === true;
+  
+  // Determine which default to use
+  const defaultSetting = isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+  
+  // Allow override at request/scope level
+  return cascadeConfig('simplified', [params, scopeOptions], defaultSetting);
+}
+
 export const RestApiPlugin = {
   name: 'rest-api',
 
@@ -53,6 +71,7 @@ export const RestApiPlugin = {
     on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, eventData.scopeName));
 
     // Initialize default vars for the plugin from pluginOptions
+    // hooked-api wraps plugin options with the plugin name
     const restApiOptions = pluginOptions['rest-api'] || {};
     
     vars.sortableFields = restApiOptions.sortableFields || []
@@ -60,8 +79,15 @@ export const RestApiPlugin = {
     vars.pageSize = restApiOptions.pageSize || 20
     vars.maxPageSize = restApiOptions.maxPageSize || 100
     
-    // Sane defaults
-    vars.simplified = restApiOptions.simplified === undefined ? true : restApiOptions.simplified;
+    // New simplified settings
+    vars.simplifiedTransport = restApiOptions.simplifiedTransport !== undefined 
+      ? restApiOptions.simplifiedTransport 
+      : false; // Default false for JSON:API compliance over the wire
+    
+    vars.simplifiedApi = restApiOptions.simplifiedApi !== undefined 
+      ? restApiOptions.simplifiedApi 
+      : true; // Default true for better DX in programmatic API
+    
     vars.idProperty = restApiOptions.idProperty || 'id'
 
     // Return full record configuration
@@ -216,8 +242,8 @@ export const RestApiPlugin = {
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
       context.method = 'query'
             
-      // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
+      // Get configuration values using new helper
+      context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
@@ -428,8 +454,8 @@ export const RestApiPlugin = {
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'get'
 
-      // Get configuration values
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
+      // Get configuration values using new helper
+      context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
@@ -543,8 +569,8 @@ export const RestApiPlugin = {
      * @returns {object} An object containing schema-related shortcuts.
      */
     async function setupCommonRequest({ params, context, vars, scopes, scopeOptions, scopeName }) {
-        // Get configuration values
-        context.simplified = cascadeConfig('simplified', [params, scopeOptions, vars], true);
+        // Get configuration values using new helper
+        context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
 
         // Params is totally bypassed in simplified mode
         if (context.simplified) {

@@ -1,7 +1,7 @@
 
-(1) Make the user submit "country", not "country_id" in the POST/PUT/PATCH calls.
+X (1) Make the user submit "country", not "country_id" in the POST/PUT/PATCH calls.
 
-(2) Have simplifiedWire and simplifiedApi instead of just simplified.
+X (2) Have simplifiedTransport and simplifiedApi instead of just simplified.
 
 (3) Check what API calls are used in helpers, and most definitely use knex for deletes
 
@@ -40,6 +40,9 @@ Query Depth Protection - Prevent malicious deep includes
 Link and meta info in returned document
 
 (14)
+Check if post and put logic when zapping are correct
+
+(15)
 Bulk operations
 
 
