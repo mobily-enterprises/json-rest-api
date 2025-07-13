@@ -70,13 +70,65 @@ export const RestApiPlugin = {
     // This ensures schemas are compiled and cached before any scope methods are called,
     // making them available for queries and other operations that need schema information.
     on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, eventData.scopeName));
+    
+    // Validate include configurations in relationships after schemas are compiled
+    on('scope:added', 'validateIncludeConfigurations', async ({eventData}) => {
+      const { scope, scopeName } = eventData;
+      const relationships = scope.vars.schemaInfo?.schemaRelationships;
+      
+      if (!relationships) return;
+      
+      // Check each relationship for include configuration
+      for (const [relName, relDef] of Object.entries(relationships)) {
+        if (relDef.include?.strategy === 'window') {
+          // This relationship requires window functions
+          // We'll validate this at query time since the database might not be connected yet
+          log.debug(`Relationship ${scopeName}.${relName} configured for window function includes`);
+        }
+        
+        // Validate include configuration
+        if (relDef.include) {
+          if (relDef.include.limit && typeof relDef.include.limit !== 'number') {
+            throw new Error(
+              `Invalid include limit for ${scopeName}.${relName}: limit must be a number`
+            );
+          }
+          
+          if (relDef.include.orderBy && !Array.isArray(relDef.include.orderBy)) {
+            throw new Error(
+              `Invalid include orderBy for ${scopeName}.${relName}: orderBy must be an array`
+            );
+          }
+        }
+      }
+    });
+
+
+    // Set scope variables based on the the passed options
+    // sortableFiels and defaultSort are always coming from options
+    // and pageSize and maxPageSize will be set if passed -- if not, the `vars`
+    // proxy will point to the api's values (set as defaults)
+    on('scope:added', 'turnScopeInitIntoVars', async ({eventData}) => {
+      // Refer to the scope's vars
+      const scopeOptions = eventData.scope?.scopeOptions || eventData.api?.scopeOptions || {};
+      const vars = eventData.scope?.vars || eventData.api?.vars
+
+      // The scope-specific ones
+      vars.sortableFields = scopeOptions.sortableFields || [];
+      vars.defaultSort = scopeOptions.defaultSort || null;   
+      
+      // The general ones that are also set at api level, but overrideable
+      if (typeof scopeOptions.pageSize !== 'undefined') vars.pageSize = scopeOptions.pageSize
+      if (typeof scopeOptions.maxPageSize !== 'undefined') vars.maxPageSize = scopeOptions.maxPageSize
+    })
+    // compileSchemas(eventData.scope, eventData.scopeName));
 
     // Initialize default vars for the plugin from pluginOptions
     // hooked-api wraps plugin options with the plugin name
     const restApiOptions = pluginOptions['rest-api'] || {};
-    
-    vars.sortableFields = restApiOptions.sortableFields || []
-    vars.defaultSort = restApiOptions.defaultSort || null
+
+    // These will be used as default fallbacks by the vars proxy if
+    // they are not set in the scope options
     vars.pageSize = restApiOptions.pageSize || 20
     vars.maxPageSize = restApiOptions.maxPageSize || 100
     
@@ -512,7 +564,7 @@ export const RestApiPlugin = {
       context.record = await helpers.dataGet({
         scopeName,
         context,
-        transaction: context.transaction
+        transaction: context.transaction,
       })
     
       // Check if record was found - storage layer returns null/undefined for non-existent records.
@@ -542,12 +594,15 @@ export const RestApiPlugin = {
       const requestedFields = context.queryParams.fields?.[scopeName];
       const requestedComputedFields = getRequestedComputedFields(scopeName, requestedFields, computedFields);
       
+      // Enrich attributes for the main resource
+      // Pass computedDependencies from context (set by dataGet in Knex plugin)
+      // This tells enrichAttributes which fields to remove after computation
       context.record.data.attributes = await scope.enrichAttributes({ 
         attributes: context.record.data.attributes, 
         parentContext: context,
         requestedComputedFields: requestedComputedFields,
         isMainResource: true,
-        computedDependencies: context.computedDependencies
+        computedDependencies: context.computedDependencies  // Fields to remove if not requested
       })
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
@@ -1931,6 +1986,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
      * }
      */
     addScopeMethod('enrichAttributes', async ({ params, runHooks, scopeName, scopes, api, helpers }) => {
+      // Extract parameters passed to enrichAttributes
+      // - attributes: The raw attributes from database
+      // - parentContext: The context from the calling method (has queryParams, transaction, etc.)
+      // - requestedComputedFields: Which computed fields to calculate (from sparse fieldsets)
+      // - isMainResource: Whether this is the main resource or an included one
+      // - computedDependencies: Fields fetched only for computation (to be removed)
       const { attributes, parentContext, requestedComputedFields, isMainResource, computedDependencies } = params || {};
       
       // Return empty object if no attributes provided
@@ -1942,34 +2003,41 @@ const validatePivotResource = (scopes, relDef, relName) => {
       const schemaStructure = scopes[scopeName]?.vars?.schemaInfo?.schemaStructure || {};
       const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
       
-      // Filter hidden fields from attributes
+      // Filter hidden fields from attributes based on visibility rules
+      // This removes hidden:true fields and normallyHidden:true fields (unless requested)
       const requestedFields = parentContext?.queryParams?.fields?.[scopeName];
       const filteredAttributes = filterHiddenFields(attributes, { structure: schemaStructure }, requestedFields);
       
       // Determine which computed fields to calculate
+      // We only compute fields that are requested to optimize performance
       let fieldsToCompute = [];
       if (requestedComputedFields) {
         // Explicit list provided (from sparse fieldsets)
+        // Example: ?fields[products]=name,profit_margin -> only compute profit_margin
         fieldsToCompute = requestedComputedFields;
       } else if (isMainResource || !parentContext?.queryParams?.fields) {
         // No sparse fieldsets or this is the main resource - compute all fields
+        // This ensures all computed fields are available when no filtering is applied
         fieldsToCompute = Object.keys(computedFields);
       }
       
       // Create compute context with all available resources
+      // IMPORTANT: We pass the original attributes (including dependencies) to compute functions
+      // This ensures computed fields can access normallyHidden dependencies like 'cost'
+      // Example: profit_margin compute function gets access to both 'price' and 'cost'
       const computeContext = {
-        attributes: filteredAttributes,
-        record: { ...filteredAttributes, id: attributes.id },
+        attributes: attributes,              // All attributes including dependencies
+        record: { ...attributes },           // Full record for convenience
         context: {
           ...parentContext,
-          transaction: parentContext?.transaction,
-          knex: parentContext?.knex || parentContext?.db,
+          transaction: parentContext?.transaction,  // For DB queries in compute
+          knex: parentContext?.knex || parentContext?.db,  // Direct DB access
           scopeName
         },
-        helpers,
-        api,
-        scopeName,
-        requestContext: parentContext
+        helpers,                             // API helpers for complex operations
+        api,                                 // Full API instance
+        scopeName,                           // Current resource name
+        requestContext: parentContext        // Original request context
       };
       
       // Auto-compute fields that have compute functions
@@ -1978,9 +2046,11 @@ const validatePivotResource = (scopes, relDef, relName) => {
         if (fieldDef && fieldDef.compute) {
           try {
             // Call the compute function with full context
+            // Example: profit_margin compute gets { attributes: { price: 100, cost: 60 } }
+            // and returns: ((100 - 60) / 100 * 100) = "40.00"
             filteredAttributes[fieldName] = await fieldDef.compute(computeContext);
           } catch (error) {
-            // Log error but don't fail the request
+            // Log error but don't fail the request - computed fields shouldn't break API
             console.error(`Error computing field '${fieldName}' for ${scopeName}:`, error);
             filteredAttributes[fieldName] = null;
           }
@@ -2002,16 +2072,28 @@ const validatePivotResource = (scopes, relDef, relName) => {
       await runHooks('enrichAttributes', hookContext);
       
       // Remove fields that were only fetched as dependencies
+      // This is the key to the dependency resolution feature:
+      // 1. We fetched dependencies from DB (e.g., 'cost' for profit_margin)
+      // 2. We used them in compute functions
+      // 3. Now we remove them if they weren't explicitly requested
+      // Example: User requests profit_margin, we fetch cost, compute, then remove cost
+      const finalAttributes = { ...hookContext.attributes };
       if (requestedFields && computedDependencies && computedDependencies.length > 0) {
+        // Parse requested fields if it's a string
+        const requested = typeof requestedFields === 'string'
+          ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
+          : requestedFields;
+          
         for (const dep of computedDependencies) {
           // Only remove if it wasn't explicitly requested
-          if (!requestedFields.includes(dep)) {
-            delete hookContext.attributes[dep];
+          // Example: 'cost' is removed unless user explicitly asked for it
+          if (!requested.includes(dep)) {
+            delete finalAttributes[dep];
           }
         }
       }
       
-      return hookContext.attributes;
+      return finalAttributes;
     });
 
     // Initialize default data helpers that throw errors until a storage plugin is installed

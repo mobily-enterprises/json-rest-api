@@ -44,6 +44,7 @@
 
 import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
+import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js';
 
 /**
  * Groups records by their polymorphic type for efficient batch loading
@@ -213,7 +214,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  * @param {Object} fields - Sparse fieldsets configuration
  * @returns {Promise<void>}
  */
-export const loadBelongsTo = async (scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields) => {
+export const loadBelongsTo = async (scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty) => {
   log.trace('[INCLUDE] Loading belongsTo:', { 
     fieldName, 
     includeName, 
@@ -254,14 +255,14 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
   const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
   
   // Build field selection for sparse fieldsets
-  const fieldsToSelect = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
-    '*';
+  const fieldSelectionInfo = fields?.[targetScope] ? 
+    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+    null;
   
   // Load the target records
   let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds);
-  if (fieldsToSelect !== '*') {
-    query = query.select(fieldsToSelect);
+  if (fieldSelectionInfo) {
+    query = query.select(fieldSelectionInfo.fieldsToSelect);
   }
   const targetRecords = await query;
   
@@ -357,6 +358,9 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     return;
   }
   
+  // Get database capabilities from API
+  const capabilities = knex.capabilities || { windowFunctions: false };
+  
   // Check if this is a many-to-many relationship (has through property)
   if (relDef.through) {
     
@@ -391,21 +395,65 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     const targetIds = [...new Set(pivotRecords.map(p => p[otherKey]).filter(Boolean))];
     
     log.debug(`[INCLUDE] Loading ${targetScope} records:`, { 
-      whereIn: targetIds 
+      whereIn: targetIds,
+      includeConfig: relDef.include
     });
     
     // Step 3: Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const fieldsToSelect = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
-      '*';
+    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+    const fieldSelectionInfo = fields?.[targetScope] ? 
+      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+      null;
     
-    // Step 4: Query the target table
-    let query = knex(targetTable).whereIn('id', targetIds);
-    if (fieldsToSelect !== '*') {
-      query = query.select(fieldsToSelect);
+    // Step 4: For many-to-many with limits, we need a different approach
+    let targetRecords;
+
+    if (relDef.include?.limit && relDef.include?.strategy === 'window') {
+      // For many-to-many with window functions, we need to limit per parent
+      // This requires joining back through the pivot table
+      
+      const windowQuery = knex
+        .select(`${targetTable}.*`)
+        .select(
+          knex.raw(
+            'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' + 
+            buildOrderByClause(relDef.include.orderBy || ['id']) + 
+            ') as _rn',
+            [foreignKey]
+          )
+        )
+        .from(targetTable)
+        .join(`${pivotTable} as pivot`, `${targetTable}.id`, 'pivot.' + otherKey)
+        .whereIn(`pivot.${foreignKey}`, mainIds);
+      
+      // Wrap to filter by row number
+      const limitedQuery = knex
+        .select('*')
+        .from(windowQuery.as('_windowed'))
+        .where('_rn', '<=', relDef.include.limit);
+      
+      targetRecords = await limitedQuery;
+      
+      // Remove _rn column and restore proper pivot grouping
+      targetRecords.forEach(record => delete record._rn);
+      
+    } else {
+      // Standard query without per-parent limits
+      let query = knex(targetTable).whereIn('id', targetIds);
+      
+      if (fieldSelectionInfo) {
+        query = query.select(fieldSelectionInfo.fieldsToSelect);
+      }
+      
+      // Apply standard include config (global limits)
+      if (relDef.include) {
+        const targetVars = scopes[targetScope].vars;
+        query = applyStandardIncludeConfig(query, relDef.include, targetVars, log);
+      }
+      
+      targetRecords = await query;
     }
-    const targetRecords = await query;
     
     log.trace('[INCLUDE] Loaded target records:', { count: targetRecords.length });
     
@@ -472,23 +520,73 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
     
     log.debug(`[INCLUDE] Loading ${targetScope} records with foreign key ${foreignKey}:`, { 
-      whereIn: mainIds 
+      whereIn: mainIds,
+      includeConfig: relDef.include
     });
     
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const fieldsToSelect = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
-      '*';
+    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+    const fieldSelectionInfo = fields?.[targetScope] ? 
+      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+      null;
     
-    // Query target table
-    let query = knex(targetTable).whereIn(foreignKey, mainIds);
-    if (fieldsToSelect !== '*') {
-      query = query.select(fieldsToSelect);
+    let query;
+    let usingWindowFunction = false;
+    
+    // Check if we should use window functions
+    if (relDef.include?.strategy === 'window' && relDef.include?.limit) {
+      try {
+        // Try to build window function query
+        query = buildWindowedIncludeQuery(
+          knex,
+          targetTable,
+          foreignKey,
+          mainIds,
+          fieldSelectionInfo ? fieldSelectionInfo.fieldsToSelect : null,
+          relDef.include,
+          capabilities
+        );
+        usingWindowFunction = true;
+        log.debug('[INCLUDE] Using window function strategy for per-parent limits');
+      } catch (error) {
+        // If window functions not supported, this will throw a clear error
+        if (error.details?.requiredFeature === 'window_functions') {
+          throw error; // Re-throw the descriptive error
+        }
+        // For other errors, fall back to standard query
+        log.warn('[INCLUDE] Window function query failed, falling back to standard query:', error);
+        usingWindowFunction = false;
+      }
     }
+    
+    // Build standard query if not using window functions
+    if (!usingWindowFunction) {
+      query = knex(targetTable).whereIn(foreignKey, mainIds);
+      
+      if (fieldSelectionInfo) {
+        query = query.select(fieldSelectionInfo.fieldsToSelect);
+      }
+      
+      // Apply include configuration without window functions
+      if (relDef.include) {
+        const targetVars = scopes[targetScope].vars;
+        query = applyStandardIncludeConfig(query, relDef.include, targetVars, log);
+      }
+    }
+    
+    // Execute query
     const targetRecords = await query;
     
-    log.trace('[INCLUDE] Loaded hasMany records:', { count: targetRecords.length });
+    // If using window functions, remove the _rn column
+    if (usingWindowFunction) {
+      targetRecords.forEach(record => delete record._rn);
+    }
+    
+    log.trace('[INCLUDE] Loaded hasMany records:', { 
+      count: targetRecords.length,
+      usingWindowFunction 
+    });
     
     // Load relationship metadata for all target records
     await loadRelationshipMetadata(scopes, targetRecords, targetScope);
@@ -605,19 +703,20 @@ export const loadPolymorphicBelongsTo = async (
     const targetTable = targetSchema?.tableName || targetType;
     
     // Build field selection for sparse fieldsets
-    const fieldsToSelect = fields?.[targetType] ? 
-      await buildFieldSelection(targetType, fields[targetType], targetSchema, scopes) : 
-      '*';
+    const targetIdProperty = scopes[targetType].vars.schemaInfo.idProperty;
+    const fieldSelectionInfo = fields?.[targetType] ? 
+      await buildFieldSelection(targetType, fields[targetType], targetSchema, scopes, targetIdProperty) : 
+      null;
     
     log.debug(`[INCLUDE] Loading ${targetType} records:`, { 
       ids: targetIds,
-      fields: fieldsToSelect 
+      fields: fieldSelectionInfo ? fieldSelectionInfo.fieldsToSelect : '*' 
     });
     
     // Query for this type
     let query = knex(targetTable).whereIn('id', targetIds);
-    if (fieldsToSelect !== '*') {
-      query = query.select(fieldsToSelect);
+    if (fieldSelectionInfo) {
+      query = query.select(fieldSelectionInfo.fieldsToSelect);
     }
     const targetRecords = await query;
     
@@ -753,17 +852,18 @@ export const loadReversePolymorphic = async (
   
   // Build field selection for sparse fieldsets
   const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-  const fieldsToSelect = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes) : 
-    '*';
+  const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+  const fieldSelectionInfo = fields?.[targetScope] ? 
+    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+    null;
   
   // Query for records pointing back to our scope
   let query = knex(targetTable)
     .where(typeField, scopeName)
     .whereIn(idField, parentIds);
     
-  if (fieldsToSelect !== '*') {
-    query = query.select(fieldsToSelect);
+  if (fieldSelectionInfo) {
+    query = query.select(fieldSelectionInfo.fieldsToSelect);
   }
   
   const targetRecords = await query;
@@ -838,7 +938,7 @@ export const loadReversePolymorphic = async (
  * @param {Object} [fields={}] - Sparse fieldsets configuration
  * @returns {Promise<void>}
  */
-export const processIncludes = async (scopes, log, knex, records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}) => {
+export const processIncludes = async (scopes, log, knex, records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty) => {
   log.trace('[INCLUDE] Processing includes:', { 
     scopeName, 
     includes: Object.keys(includeTree),
@@ -874,7 +974,7 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
     // Look for belongsTo relationships in schema fields
     for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
       if (fieldDef.as === includeName && fieldDef.belongsTo) {
-        await loadBelongsTo(scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields);
+        await loadBelongsTo(scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty);
         handled = true;
         break;
       }
@@ -945,7 +1045,7 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
  * 
  * // result.recordsWithRelationships = original records with _relationships added
  */
-export const buildIncludedResources = async (scopes, log, knex, records, scopeName, includeParam, fields) => {
+export const buildIncludedResources = async (scopes, log, knex, records, scopeName, includeParam, fields, idProperty) => {
   log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
   
   // Check if includes are empty or records are empty
@@ -976,7 +1076,7 @@ export const buildIncludedResources = async (scopes, log, knex, records, scopeNa
   const processedPaths = new Set(); // Prevent infinite loops
   
   // Process all includes
-  await processIncludes(scopes, log, knex, records, scopeName, includeTree, included, processedPaths, '', fields);
+  await processIncludes(scopes, log, knex, records, scopeName, includeTree, included, processedPaths, '', fields, idProperty);
   
   // Convert Map to array for JSON:API format
   const includedArray = Array.from(included.values());

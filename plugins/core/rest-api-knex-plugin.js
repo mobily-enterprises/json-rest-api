@@ -10,6 +10,7 @@ import {
   basicFiltersHook
 } from './lib/knex-query-helpers.js';
 import { RestApiResourceError } from '../../lib/rest-api-errors.js';
+import { supportsWindowFunctions, getDatabaseInfo } from './lib/database-capabilities.js';
 
 
 export const RestApiKnexPlugin = {
@@ -31,6 +32,22 @@ export const RestApiKnexPlugin = {
       instance: knex,
       helpers: {}
     };
+
+    // Check database capabilities
+    const hasWindowFunctions = await supportsWindowFunctions(knex);
+    const dbInfo = await getDatabaseInfo(knex);
+    
+    // Store capabilities in API instance for access throughout
+    api.knex.capabilities = {
+      windowFunctions: hasWindowFunctions,
+      dbInfo
+    };
+    
+    log.info(`Database capabilities detected:`, {
+      database: dbInfo.client,
+      version: dbInfo.version,
+      windowFunctions: hasWindowFunctions
+    });
 
     // Initialize cross-table search helpers
     const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
@@ -109,15 +126,19 @@ export const RestApiKnexPlugin = {
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
       // Build field selection for sparse fieldsets
+      // This determines which fields to SELECT from database
+      // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
         schema,
         scopes,
-        vars
+        idProperty
       );
       
       // Store dependency info in context for enrichAttributes
+      // Example: If user requests 'profit_margin' (computed), this might contain ['cost']
+      // The REST API plugin will use this to remove 'cost' from response if not requested
       context.computedDependencies = fieldSelectionInfo.computedDependencies;
       
       // Build and execute query
@@ -142,7 +163,8 @@ export const RestApiKnexPlugin = {
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
         scopes,
-        knex
+        knex,
+        idProperty
       });
       
       // Build and return response
@@ -156,20 +178,25 @@ export const RestApiKnexPlugin = {
       const queryParams = context.queryParams
       const db = transaction || knex;
       const sortableFields = context.sortableFields
+      const idProperty = context.schemaInfo.idProperty
 
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
       // Build field selection for sparse fieldsets
+      // This determines which fields to SELECT from database
+      // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
         schema,
         scopes,
-        vars
+        idProperty
       );
       
       // Store dependency info in context for enrichAttributes
+      // Example: If user requests 'profit_margin' (computed), this might contain ['cost']
+      // The REST API plugin will use this to remove 'cost' from response if not requested
       context.computedDependencies = fieldSelectionInfo.computedDependencies;
       
       // Start building query with table prefix (for JOIN support)
@@ -245,7 +272,8 @@ export const RestApiKnexPlugin = {
       const included = await processIncludes(records, scopeName, queryParams, db, {
         log,
         scopes,
-        knex
+        knex,
+        idProperty
       });
       
 

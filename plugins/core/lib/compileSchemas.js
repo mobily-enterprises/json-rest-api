@@ -94,14 +94,23 @@ export async function compileSchemas(scope, scopeName) {
   const rawSchema = scope.scopeOptions?.schema || {};
   const computed = scope.scopeOptions?.computed || {};
   
-  // Validate computed fields
+  // Validate computed fields to ensure they're properly defined
+  // Example: profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: (ctx) => ... }
   Object.entries(computed).forEach(([fieldName, fieldDef]) => {
+    // Every computed field must have a type (for JSON:API serialization)
     if (!fieldDef.type) {
       throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' must have a type`);
     }
+    
+    // If a compute function is provided, it must be a function
+    // Note: compute is optional - you might use enrichAttributes hook instead
     if (fieldDef.compute && typeof fieldDef.compute !== 'function') {
       throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' has invalid compute function`);
     }
+    
+    // Dependencies are optional but recommended for automatic fetching
+    // Example: dependencies: ['price', 'cost'] ensures these fields are 
+    // fetched from DB even if not explicitly requested
   });
   
   // Deep clone schema while preserving functions

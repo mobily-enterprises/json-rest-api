@@ -94,15 +94,15 @@ export const getForeignKeyFields = (schema) => {
  * // 4. Handle both regular and polymorphic foreign keys automatically
  * // 5. Reduce data transfer from database for large tables
  */
-export const buildFieldSelection = async (scopeName, requestedFields, schema, scopes, vars) => {
-  const idProperty = vars.idProperty || 'id';
+export const buildFieldSelection = async (scopeName, requestedFields, schema, scopes, idProperty) => {
   let fieldsToSelect = new Set();
   let computedDependencies = new Set();
   
-  // Always include the ID
+  // Always include the ID field - required for JSON:API
   fieldsToSelect.add(idProperty);
   
-  // Get computed fields to exclude from SQL
+  // Get computed fields definitions - these are virtual fields not in the database
+  // Example: { profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: ... } }
   const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
   const computedFieldNames = new Set(Object.keys(computedFields));
   
@@ -117,30 +117,37 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   ) : null;
   
   if (requested && requested.length > 0) {
-    // Sparse fieldsets requested
+    // Sparse fieldsets requested - only select specified fields
+    // Example: ?fields[products]=name,price,profit_margin
     requested.forEach(field => {
       // Skip computed fields - they don't exist in database
+      // They'll be calculated later in enrichAttributes
       if (computedFieldNames.has(field)) return;
       
       const fieldDef = schemaStructure[field];
-      if (!fieldDef) return;
+      if (!fieldDef) return; // Unknown field, skip
       
       // NEVER include hidden fields, even if explicitly requested
+      // Example: password_hash with hidden:true is never returned
       if (fieldDef.hidden === true) return;
       
       fieldsToSelect.add(field);
     });
     
-    // Handle computed field dependencies
+    // Handle computed field dependencies - fetch fields needed for calculations
+    // Example: User requests 'profit_margin' which depends on 'price' and 'cost'
+    // We need to fetch price and cost from DB even if not explicitly requested
     const requestedComputedFields = requested.filter(f => computedFieldNames.has(f));
     for (const computedField of requestedComputedFields) {
       const fieldDef = computedFields[computedField];
       if (fieldDef.dependencies) {
         for (const dep of fieldDef.dependencies) {
           const depFieldDef = schemaStructure[dep];
+          // Only add dependency if it exists and isn't hidden
           if (depFieldDef && depFieldDef.hidden !== true) {
             fieldsToSelect.add(dep);
-            // Track if this dependency wasn't explicitly requested
+            // Track dependencies that weren't explicitly requested
+            // These will be removed from the final response
             if (!requested.includes(dep)) {
               computedDependencies.add(dep);
             }
@@ -164,16 +171,39 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
       });
     }
   } else {
-    // No sparse fieldsets - return all non-hidden database fields
+    // No sparse fieldsets - return all visible fields
+    // This is the default behavior when no ?fields parameter is provided
     Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
-      // Skip hidden fields
+      // Skip hidden fields - these are NEVER returned
+      // Example: password_hash with hidden:true
       if (fieldDef.hidden === true) return;
       
-      // Skip normallyHidden fields
+      // Skip normallyHidden fields - these are hidden by default
+      // Example: cost with normallyHidden:true (only returned when explicitly requested)
       if (fieldDef.normallyHidden === true) return;
       
       fieldsToSelect.add(field);
     });
+    
+    // When no sparse fieldsets, we compute all computed fields
+    // So we need to include their dependencies even if normallyHidden
+    // Example: profit_margin depends on 'cost' which is normallyHidden
+    // We fetch 'cost' for calculation but don't return it in response
+    for (const [fieldName, fieldDef] of Object.entries(computedFields)) {
+      if (fieldDef.dependencies) {
+        for (const dep of fieldDef.dependencies) {
+          const depFieldDef = schemaStructure[dep];
+          if (depFieldDef && depFieldDef.hidden !== true) {
+            fieldsToSelect.add(dep);
+            // Track normallyHidden dependencies for later removal
+            // These are fetched for computation but not returned
+            if (depFieldDef.normallyHidden === true) {
+              computedDependencies.add(dep);
+            }
+          }
+        }
+      }
+    }
   }
   
   // Always include foreign keys for relationships (unless hidden)
@@ -199,10 +229,14 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   }
   
   // Return detailed information about field selection
+  // This info is used by:
+  // 1. SQL query builder to SELECT the right columns
+  // 2. enrichAttributes to know which computed fields to calculate
+  // 3. enrichAttributes to remove dependencies from final response
   return {
-    fieldsToSelect: Array.from(fieldsToSelect),
-    requestedFields: requested,
-    computedDependencies: Array.from(computedDependencies)
+    fieldsToSelect: Array.from(fieldsToSelect),      // Fields to SELECT from database
+    requestedFields: requested,                       // Fields explicitly requested by user
+    computedDependencies: Array.from(computedDependencies)  // Dependencies to remove from response
   };
 };
 
@@ -244,7 +278,8 @@ export const getRequestedComputedFields = (scopeName, requestedFields, computedF
 export const filterHiddenFields = (attributes, schema, requestedFields) => {
   const filtered = {};
   
-  // Parse requested fields if it's a string
+  // Parse requested fields if it's a string (from query params)
+  // Example: "name,price,cost" -> ['name', 'price', 'cost']
   const requested = requestedFields ? (
     typeof requestedFields === 'string'
       ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
@@ -254,13 +289,16 @@ export const filterHiddenFields = (attributes, schema, requestedFields) => {
   Object.entries(attributes).forEach(([field, value]) => {
     const fieldDef = schema.structure?.[field];
     
-    // Never include hidden fields
+    // Never include hidden fields - these are completely invisible
+    // Example: password_hash with hidden:true is always filtered out
     if (fieldDef?.hidden === true) return;
     
     // Include normallyHidden fields only if explicitly requested
+    // Example: 'cost' with normallyHidden:true is only included if user requests it
+    // via sparse fieldsets like ?fields[products]=name,cost
     if (fieldDef?.normallyHidden === true) {
       if (!requested || !requested.includes(field)) {
-        return;
+        return; // Filter out normallyHidden field
       }
     }
     

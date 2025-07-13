@@ -72,7 +72,7 @@ import { buildIncludedResources } from './knex-relationship-includes.js';
  * // 6. Handle both belongsTo and hasMany relationships
  */
 export const processIncludes = async (records, scopeName, queryParams, transaction, dependencies) => {
-  const { log, scopes, knex } = dependencies;
+  const { log, scopes, knex, idProperty } = dependencies;
   
   if (!queryParams.include) {
     return [];
@@ -90,7 +90,8 @@ export const processIncludes = async (records, scopeName, queryParams, transacti
     records,
     scopeName,
     queryParams.include,
-    queryParams.fields || {}
+    queryParams.fields || {},
+    idProperty
   );
   
   log.debug('[PROCESS-INCLUDES] Include result:', {
