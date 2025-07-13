@@ -90,8 +90,19 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  */
 export async function compileSchemas(scope, scopeName) {
 
-  // Get raw schema
+  // Get raw schema and computed fields
   const rawSchema = scope.scopeOptions?.schema || {};
+  const computed = scope.scopeOptions?.computed || {};
+  
+  // Validate computed fields
+  Object.entries(computed).forEach(([fieldName, fieldDef]) => {
+    if (!fieldDef.type) {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' must have a type`);
+    }
+    if (fieldDef.compute && typeof fieldDef.compute !== 'function') {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' has invalid compute function`);
+    }
+  });
   
   // Deep clone schema while preserving functions
   const enrichedSchema = {};
@@ -173,6 +184,8 @@ export async function compileSchemas(scope, scopeName) {
   // Cache everything
   scope.vars.schemaInfo = {
     schema: schemaObject,
+    schemaStructure: schemaContext.schema,
+    computed: computed,
     searchSchema: searchSchemaObject,
     schemaRelationships: scope.scopeOptions.relationships || {},
     tableName: scope.scopeOptions.tableName || scopeName,

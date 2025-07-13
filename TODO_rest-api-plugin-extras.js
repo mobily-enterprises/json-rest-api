@@ -9,20 +9,19 @@ X (4) Check that type: 'id' is not mandatory in schema
 
 X (5) Maybe make the POST call support the return of the ID, but HTTPSERVER will need to ignore it as a non-resource
 
-(6)
-Have an option to hide fields (hidden: yes, normallyHidden: yes)
+
+
+X (6) Have an option to hide fields (hidden: yes, normallyHidden: yes)
 (Diffence being that normallyHidden CAN be made visible with field:...)
 
-(7)
-Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
+X (7) Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
   
+-------------------------------------------------
+
+
 (8)
 Check that limit/default order is maintained in sub queries in dataQuery
 
-(9)
-1. Relationship Endpoints - Separate endpoints for relationship manipulation
-- GET /articles/1/relationships/comments
-- POST/PUT/DELETE for relationship updates
 
 (10)
 Query Depth Protection - Prevent malicious deep includes
@@ -36,6 +35,11 @@ Query Depth Protection - Prevent malicious deep includes
 
 (13) 
 Link and meta info in returned document
+
+(9)
+1. Relationship Endpoints - Separate endpoints for relationship manipulation
+- GET /articles/1/relationships/comments
+- POST/PUT/DELETE for relationship updates
 
 (14)
 Check if post and put logic when zapping are correct

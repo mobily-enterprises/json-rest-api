@@ -17,6 +17,7 @@ import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRe
 import { createDefaultDataHelpers } from './lib/defaultDataHelpers.js';
 import { compileSchemas } from './lib/compileSchemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
+import { getRequestedComputedFields, filterHiddenFields } from './lib/knex-field-helpers.js';
 
 
 const cascadeConfig = (settingName, sources, defaultValue) =>
@@ -350,18 +351,35 @@ export const RestApiPlugin = {
       // This will enhance record, which is the WHOLE JSON:API record
       await runHooks ('enrichRecord')
 
+      // Get computed field information for main resource
+      const computedFields = scope.vars.schemaInfo?.computed || {};
+      const requestedFields = context.queryParams.fields?.[scopeName];
+      const requestedComputedFields = getRequestedComputedFields(scopeName, requestedFields, computedFields);
+
       // Run enrichAttributes for every single set of attribute, calling it from the right scope
       for (const entry of context.record.data) {
         entry.attributes = await scope.enrichAttributes({ 
           attributes: entry.attributes, 
-          parentContext: context 
+          parentContext: context,
+          requestedComputedFields: requestedComputedFields,
+          isMainResource: true
         })
       }
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
+        const entryComputed = entryScope.vars.schemaInfo?.computed || {};
+        const entryRequestedFields = context.queryParams.fields?.[entry.type];
+        const entryRequestedComputed = getRequestedComputedFields(
+          entry.type, 
+          entryRequestedFields, 
+          entryComputed
+        );
+        
         entry.attributes = await entryScope.enrichAttributes({ 
           attributes: entry.attributes, 
-          parentContext: context 
+          parentContext: context,
+          requestedComputedFields: entryRequestedComputed,
+          isMainResource: false
         })
       }
 
@@ -517,15 +535,33 @@ export const RestApiPlugin = {
 
       // This will enhance record, which is the WHOLE JSON:API record
       await runHooks ('enrichRecord')
+      
+      // Get computed field information for main resource
+      const computedFields = scope.vars.schemaInfo?.computed || {};
+      const requestedFields = context.queryParams.fields?.[scopeName];
+      const requestedComputedFields = getRequestedComputedFields(scopeName, requestedFields, computedFields);
+      
       context.record.data.attributes = await scope.enrichAttributes({ 
         attributes: context.record.data.attributes, 
-        parentContext: context 
+        parentContext: context,
+        requestedComputedFields: requestedComputedFields,
+        isMainResource: true
       })
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
+        const entryComputed = entryScope.vars.schemaInfo?.computed || {};
+        const entryRequestedFields = context.queryParams.fields?.[entry.type];
+        const entryRequestedComputed = getRequestedComputedFields(
+          entry.type, 
+          entryRequestedFields, 
+          entryComputed
+        );
+        
         entry.attributes = await entryScope.enrichAttributes({ 
           attributes: entry.attributes, 
-          parentContext: context 
+          parentContext: context,
+          requestedComputedFields: entryRequestedComputed,
+          isMainResource: false
         })
       }
       
@@ -1089,8 +1125,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
-      
-      debugger
       
       try {
         const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
@@ -1894,22 +1928,78 @@ const validatePivotResource = (scopes, relDef, relName) => {
      *   });
      * }
      */
-    addScopeMethod('enrichAttributes', async ({ params, runHooks }) => {
-      const { attributes, parentContext } = params || {};
+    addScopeMethod('enrichAttributes', async ({ params, runHooks, scopeName, scopes, api, helpers }) => {
+      const { attributes, parentContext, requestedComputedFields, isMainResource } = params || {};
       
       // Return empty object if no attributes provided
       if (!attributes) {
         return {};
       }
       
-      const context = {
-        parentContext,
-        attributes  // Pass attributes directly so hooks can modify them
+      // Get schema and computed field definitions
+      const schemaStructure = scopes[scopeName]?.vars?.schemaInfo?.schemaStructure || {};
+      const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
+      
+      // Filter hidden fields from attributes
+      const requestedFields = parentContext?.queryParams?.fields?.[scopeName];
+      const filteredAttributes = filterHiddenFields(attributes, { structure: schemaStructure }, requestedFields);
+      
+      // Determine which computed fields to calculate
+      let fieldsToCompute = [];
+      if (requestedComputedFields) {
+        // Explicit list provided (from sparse fieldsets)
+        fieldsToCompute = requestedComputedFields;
+      } else if (isMainResource || !parentContext?.queryParams?.fields) {
+        // No sparse fieldsets or this is the main resource - compute all fields
+        fieldsToCompute = Object.keys(computedFields);
+      }
+      
+      // Create compute context with all available resources
+      const computeContext = {
+        attributes: filteredAttributes,
+        record: { ...filteredAttributes, id: attributes.id },
+        context: {
+          ...parentContext,
+          transaction: parentContext?.transaction,
+          knex: parentContext?.knex || parentContext?.db,
+          scopeName
+        },
+        helpers,
+        api,
+        scopeName,
+        requestContext: parentContext
       };
       
-      await runHooks('enrichAttributes', context);
+      // Auto-compute fields that have compute functions
+      for (const fieldName of fieldsToCompute) {
+        const fieldDef = computedFields[fieldName];
+        if (fieldDef && fieldDef.compute) {
+          try {
+            // Call the compute function with full context
+            filteredAttributes[fieldName] = await fieldDef.compute(computeContext);
+          } catch (error) {
+            // Log error but don't fail the request
+            console.error(`Error computing field '${fieldName}' for ${scopeName}:`, error);
+            filteredAttributes[fieldName] = null;
+          }
+        }
+      }
       
-      return context.attributes;
+      // Create context for enrichAttributes hooks
+      const hookContext = {
+        parentContext,
+        attributes: filteredAttributes,
+        computedFields,
+        requestedComputedFields: fieldsToCompute,
+        scopeName,
+        helpers,
+        api
+      };
+      
+      // Run enrichAttributes hooks for additional/override computations
+      await runHooks('enrichAttributes', hookContext);
+      
+      return hookContext.attributes;
     });
 
     // Initialize default data helpers that throw errors until a storage plugin is installed

@@ -95,15 +95,67 @@ export const getForeignKeyFields = (schema) => {
  * // 5. Reduce data transfer from database for large tables
  */
 export const buildFieldSelection = async (scopeName, requestedFields, schema, scopes, vars) => {
-  const dbFields = new Set(['id']); // Always need id
+  const idProperty = vars.idProperty || 'id';
+  let fieldsToSelect = new Set();
+  
+  // Always include the ID
+  fieldsToSelect.add(idProperty);
+  
+  // Get computed fields to exclude from SQL
+  const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
+  const computedFieldNames = new Set(Object.keys(computedFields));
   
   // Handle both Schema objects and plain objects
   const schemaStructure = schema?.structure || schema || {};
   
-  // Always include ALL foreign keys (for relationships)
-  Object.entries(schemaStructure).forEach(([field, def]) => {
-    if (def.belongsTo) {
-      dbFields.add(field); // e.g., author_id
+  if (requestedFields && requestedFields.length > 0) {
+    // Sparse fieldsets requested
+    const requested = typeof requestedFields === 'string' 
+      ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
+      : requestedFields;
+      
+    requested.forEach(field => {
+      // Skip computed fields - they don't exist in database
+      if (computedFieldNames.has(field)) return;
+      
+      const fieldDef = schemaStructure[field];
+      if (!fieldDef) return;
+      
+      // NEVER include hidden fields, even if explicitly requested
+      if (fieldDef.hidden === true) return;
+      
+      fieldsToSelect.add(field);
+    });
+    
+    // Special handling for normallyHidden fields that might be needed for computed fields
+    // If a computed field is requested, we need to ensure its dependencies are included
+    const requestedComputedFields = requested.filter(f => computedFieldNames.has(f));
+    if (requestedComputedFields.length > 0) {
+      // Add any normallyHidden fields that computed fields might need
+      Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
+        if (fieldDef.normallyHidden === true && fieldDef.hidden !== true) {
+          // This is a normallyHidden field - include it so computed fields can use it
+          fieldsToSelect.add(field);
+        }
+      });
+    }
+  } else {
+    // No sparse fieldsets - return all non-hidden database fields
+    Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
+      // Skip hidden fields
+      if (fieldDef.hidden === true) return;
+      
+      // Skip normallyHidden fields
+      if (fieldDef.normallyHidden === true) return;
+      
+      fieldsToSelect.add(field);
+    });
+  }
+  
+  // Always include foreign keys for relationships (unless hidden)
+  Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
+    if (fieldDef.belongsTo && fieldDef.hidden !== true) {
+      fieldsToSelect.add(field);
     }
   });
   
@@ -113,8 +165,8 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
       const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
       Object.entries(relationships || {}).forEach(([relName, relDef]) => {
         if (relDef.belongsToPolymorphic) {
-          if (relDef.typeField) dbFields.add(relDef.typeField);
-          if (relDef.idField) dbFields.add(relDef.idField);
+          if (relDef.typeField) fieldsToSelect.add(relDef.typeField);
+          if (relDef.idField) fieldsToSelect.add(relDef.idField);
         }
       });
     } catch (e) {
@@ -122,20 +174,69 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
     }
   }
   
-  // No specific fields requested = return all fields
-  if (!requestedFields) {
-    return '*';
+  return Array.from(fieldsToSelect);
+};
+
+/**
+ * Gets the list of requested computed fields based on sparse fieldsets.
+ * 
+ * @param {string} scopeName - The name of the scope/resource
+ * @param {Array<string>|string} requestedFields - Array or comma-separated string of requested fields
+ * @param {Object} computedFields - Object containing computed field definitions
+ * @returns {Array<string>} Array of computed field names to calculate
+ */
+export const getRequestedComputedFields = (scopeName, requestedFields, computedFields) => {
+  if (!computedFields) return [];
+  
+  const allComputedFields = Object.keys(computedFields);
+  
+  if (!requestedFields || requestedFields.length === 0) {
+    // No sparse fieldsets - return all computed fields
+    return allComputedFields;
   }
   
-  // Parse requested fields
-  const requested = requestedFields.split(',').map(f => f.trim()).filter(f => f);
+  // Parse requested fields if it's a string
+  const requested = typeof requestedFields === 'string'
+    ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
+    : requestedFields;
   
-  // Add each valid requested field
-  for (const field of requested) {
-    if (schemaStructure[field]) {
-      dbFields.add(field);
+  // Return only requested computed fields that exist
+  return requested.filter(field => allComputedFields.includes(field));
+};
+
+/**
+ * Filters hidden fields from attributes based on schema rules.
+ * 
+ * @param {Object} attributes - The attributes object to filter
+ * @param {Object} schema - The schema object with structure property
+ * @param {Array<string>|string} requestedFields - Fields explicitly requested (for normallyHidden)
+ * @returns {Object} Filtered attributes object
+ */
+export const filterHiddenFields = (attributes, schema, requestedFields) => {
+  const filtered = {};
+  
+  // Parse requested fields if it's a string
+  const requested = requestedFields ? (
+    typeof requestedFields === 'string'
+      ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
+      : requestedFields
+  ) : null;
+  
+  Object.entries(attributes).forEach(([field, value]) => {
+    const fieldDef = schema.structure?.[field];
+    
+    // Never include hidden fields
+    if (fieldDef?.hidden === true) return;
+    
+    // Include normallyHidden fields only if explicitly requested
+    if (fieldDef?.normallyHidden === true) {
+      if (!requested || !requested.includes(field)) {
+        return;
+      }
     }
-  }
+    
+    filtered[field] = value;
+  });
   
-  return Array.from(dbFields);
+  return filtered;
 };
