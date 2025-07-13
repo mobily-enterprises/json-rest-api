@@ -37,6 +37,11 @@ await api.addResource('countries', {
     publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
     books: { hasMany: 'books', foreignKey: 'country_id' }
   },
+  returnFullRecord: {
+    post: false,
+    patch: false,
+    put: false
+  },
   // tableName: 'stocazzo',
   // idProperty: 'anotherId'
 });

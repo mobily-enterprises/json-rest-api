@@ -388,6 +388,22 @@ export const ExpressPlugin = {
           
           const result = await scope[methodName](params, context);
           
+          // Handle write operations - set Location header
+          if (['post', 'put', 'patch'].includes(methodName)) {
+            // Get the record ID - from result for POST, from params for PUT/PATCH
+            const recordId = result?.id || id;
+            if (recordId && helpers.getLocation) {
+              const location = helpers.getLocation({ scopeName, id: recordId });
+              res.set('Location', `${basePath}${location}`);
+            }
+            
+            // Check if we should return empty response
+            if (context.returnFullRecord[methodName] === false) {
+              res.sendStatus(methodName === 'post' ? 201 : 204);
+              return;
+            }
+          }
+          
           // Send response
           res.set('Content-Type', 'application/vnd.api+json');
           

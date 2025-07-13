@@ -586,7 +586,7 @@ export const RestApiPlugin = {
 
         // Assign common context properties
         context.schemaInfo = scopes[scopeName].vars.schemaInfo;
-        context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, vars], false);
+        context.returnFullRecord = cascadeConfig('returnFullRecord',  [context.params, scopeOptions, vars], false);
 
         // These only make sense as parameter per query, not in vars etc.
         context.queryParams = params.queryParams || {};
@@ -837,10 +837,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
         const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
 
         // Determine if we should return the full record based on configurations.
-        const shouldReturnRecord = context.returnFullRecord !== undefined 
-          ? context.returnFullRecord 
-          : cascadeConfig(context.method, [scopeOptions.returnFullRecord, vars.returnFullRecord], true);
-
+        const shouldReturnRecord = context.returnFullRecord[context.method]
+        
         if (shouldReturnRecord) {
             // If a full record is requested, use the API's own 'get' method.
             // The 'get' method itself is responsible for fetching the data,
@@ -865,8 +863,13 @@ const validatePivotResource = (scopes, relDef, relName) => {
             }
 
         } else {
-            // If 'shouldReturnRecord' is false, the explicit requirement is to return nothing.
-            context.returnRecord = undefined;
+            // If 'shouldReturnRecord' is false, return minimal response with just the ID
+            // Always return in simplified format for consistency - transport can use result.id
+            context.returnRecord = { id: context.id };
+            // Early return to skip transformation logic below
+            await runHooks('finish');
+            await runHooks(`finish${methodSpecificHookSuffix}`);
+            return context.returnRecord;
         }
 
         // Run common finish hooks.
@@ -1086,6 +1089,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
+      
+      debugger
       
       try {
         const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
@@ -1912,6 +1917,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Example: helpers.dataGet, helpers.dataPost, etc. will throw "No storage implementation" errors
     const defaultHelpers = createDefaultDataHelpers(api);
     Object.assign(helpers, defaultHelpers);
+    
+    // Add default getLocation helper for generating resource URLs
+    // This can be overridden by storage plugins if needed
+    helpers.getLocation = ({ scopeName, id }) => {
+      return `/${scopeName}/${id}`;
+    };
 
 
 
