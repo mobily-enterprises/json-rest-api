@@ -9,6 +9,7 @@
 
 import { getForeignKeyFields } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
+import { RELATIONSHIPS_KEY, getSchemaStructure } from './knex-constants.js';
 
 /**
  * Converts a database record to JSON:API format.
@@ -19,11 +20,9 @@ import { toJsonApi } from './knex-json-api-helpers.js';
  * in JSON:API format. This maintains the clean separation between data and
  * relationships that JSON:API requires.
  * 
- * @param {string} scopeName - The name of the scope/resource
- * @param {Object} record - The database record
- * @param {Object} schema - The schema definition
- * @param {Object} scopes - The scopes object from the API
- * @param {Object} vars - Plugin vars containing configuration
+ * @param {Object} scope - The scope object containing schema and relationship info
+ * @param {Object} record - The database record to transform
+ * @param {string} scopeName - The name of the scope/resource type
  * @returns {Object} JSON:API formatted resource object
  * 
  * @example <caption>Basic transformation with foreign keys</caption>
@@ -64,13 +63,17 @@ import { toJsonApi } from './knex-json-api-helpers.js';
  * // 4. Handle polymorphic relationship fields automatically
  * // 5. Ensure consistent ID formatting (always strings in JSON:API)
  */
-export const toJsonApiRecord = (scopeName, record, schema, scopes, vars) => {
-  const idProperty = vars.idProperty || 'id';
+export const toJsonApiRecord = (scope, record, scopeName) => {
+  // Extract values from scope
+  const { 
+    vars: { 
+      schemaInfo: { schema, schemaRelationships: relationships, idProperty }
+    }
+  } = scope;
   
   // Build polymorphic fields set
   const polymorphicFields = new Set();
   try {
-    const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
         if (relDef.typeField) polymorphicFields.add(relDef.typeField);
@@ -86,30 +89,34 @@ export const toJsonApiRecord = (scopeName, record, schema, scopes, vars) => {
 
 /**
  * Builds the final JSON:API response with data and optional included resources
- * @param {Array<Object>} records - The primary records
- * @param {string} scopeName - The scope name
- * @param {Object} schema - The schema definition
- * @param {Array<Object>} included - Optional included resources
+ * 
+ * @param {Object} scope - The scope object containing schema and relationship info
+ * @param {Array<Object>} records - The primary records to transform
+ * @param {Array<Object>} included - Optional array of included resources
  * @param {boolean} isSingle - Whether this is a single resource response
- * @param {Object} scopes - The scopes object from the API
- * @param {Object} vars - Plugin vars
+ * @param {string} scopeName - The name of the scope/resource type
  * @returns {Promise<Object>} Complete JSON:API response object
  * 
  * @example
- * const response = await buildJsonApiResponse([article], 'articles', schema, [author], true, scopes, vars);
+ * const scope = api.resources['articles'];
+ * const response = await buildJsonApiResponse(scope, [article], [author], true, 'articles');
  * // Returns { data: { type: 'articles', id: '1', ... }, included: [...] }
  */
-export const buildJsonApiResponse = async (records, scopeName, schema, included = [], isSingle = false, scopes, vars) => {
-  // Get relationships configuration
-  const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
+export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName) => {
+  // Extract values from scope
+  const { 
+    vars: { 
+      schemaInfo: { schema, schemaRelationships: relationships }
+    }
+  } = scope;
   
   // Handle both Schema objects and plain objects
-  const schemaStructure = schema?.structure || schema || {};
+  const schemaStructure = getSchemaStructure(schema);
   
   // Process records to JSON:API format
   const processedRecords = records.map(record => {
-    const { _relationships, ...cleanRecord } = record;
-    const jsonApiRecord = toJsonApiRecord(scopeName, cleanRecord, schema, scopes, vars);
+    const { [RELATIONSHIPS_KEY]: _relationships, ...cleanRecord } = record;
+    const jsonApiRecord = toJsonApiRecord(scope, cleanRecord, scopeName);
     
     // Add any loaded relationships
     if (_relationships) {
@@ -178,23 +185,38 @@ export const buildJsonApiResponse = async (records, scopeName, schema, included 
 
 /**
  * Processes belongsTo relationships from JSON:API input to foreign key updates
- * @param {Object} inputRecord - The JSON:API input record
- * @param {Object} schema - The schema definition
+ * 
+ * @param {Object} scope - The scope object containing schema info
+ * @param {Object} deps - Dependencies object containing context with inputRecord
  * @returns {Object} Object mapping foreign key fields to their values
  * 
  * @example
- * const updates = processBelongsToRelationships(inputRecord, schema);
+ * const scope = api.resources['articles'];
+ * const deps = { context: { inputRecord: jsonApiData } };
+ * const updates = processBelongsToRelationships(scope, deps);
  * // Converts relationships.author.data.id to { author_id: '123' }
+ * // Returns: { author_id: '123', category_id: '456' }
  */
-export const processBelongsToRelationships = (inputRecord, schema) => {
+export const processBelongsToRelationships = (scope, deps) => {
   const foreignKeyUpdates = {};
+  
+  // Extract values from deps
+  const { context } = deps;
+  const inputRecord = context.inputRecord;
   
   if (!inputRecord.data.relationships) {
     return foreignKeyUpdates;
   }
   
+  // Extract schema from scope
+  const { 
+    vars: { 
+      schemaInfo: { schema }
+    }
+  } = scope;
+  
   // Schema might be a Schema object or plain object
-  const schemaStructure = schema.structure || schema;
+  const schemaStructure = getSchemaStructure(schema);
   
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (fieldDef.belongsTo && fieldDef.as) {

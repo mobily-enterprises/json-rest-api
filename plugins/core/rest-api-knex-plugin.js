@@ -11,6 +11,7 @@ import {
 } from './lib/knex-query-helpers.js';
 import { RestApiResourceError } from '../../lib/rest-api-errors.js';
 import { supportsWindowFunctions, getDatabaseInfo } from './lib/database-capabilities.js';
+import { ERROR_SUBTYPES } from './lib/knex-constants.js';
 
 
 export const RestApiKnexPlugin = {
@@ -116,11 +117,23 @@ export const RestApiKnexPlugin = {
     };
 
     helpers.dataGet = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
+      if (!scope) {
+        log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) });
+        throw new Error(`Scope '${scopeName}' not found in api.resources`);
+      }
+      if (!scope.scopeName && !scope.name) {
+        log.debug('[DATA-GET] Scope structure:', { 
+          scopeKeys: Object.keys(scope),
+          scopeName,
+          hasVars: !!scope.vars,
+          varKeys: scope.vars ? Object.keys(scope.vars) : []
+        });
+      }
       const id = context.id;      
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const queryParams = context.queryParams
       const db = transaction || knex;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
@@ -129,11 +142,8 @@ export const RestApiKnexPlugin = {
       // This determines which fields to SELECT from database
       // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
-        scopeName,
-        queryParams.fields?.[scopeName],
-        schema,
-        scopes,
-        idProperty
+        scope,
+        { context }
       );
       
       // Store dependency info in context for enrichAttributes
@@ -151,7 +161,7 @@ export const RestApiKnexPlugin = {
         throw new RestApiResourceError(
           `Resource not found`,
           { 
-            subtype: 'not_found',
+            subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }
@@ -160,18 +170,19 @@ export const RestApiKnexPlugin = {
       
       // Process includes
       const records = [record]; // Wrap in array for processing
-      const included = await processIncludes(records, scopeName, queryParams, db, {
+      const included = await processIncludes(scope, records, {
         log,
         scopes,
         knex,
-        idProperty
+        context
       });
       
       // Build and return response
-      return buildJsonApiResponse(records, scopeName, schema, included, true, scopes, vars);
+      return buildJsonApiResponse(scope, records, included, true, scopeName);
     };
 
     helpers.dataQuery = async ({ scopeName, context, transaction, runHooks }) => {    
+      const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const schema =  context.schemaInfo.schema;
       const searchSchema =  context.schemaInfo.searchSchema;
@@ -187,11 +198,8 @@ export const RestApiKnexPlugin = {
       // This determines which fields to SELECT from database
       // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
-        scopeName,
-        queryParams.fields?.[scopeName],
-        schema,
-        scopes,
-        idProperty
+        scope,
+        { context }
       );
       
       // Store dependency info in context for enrichAttributes
@@ -255,8 +263,8 @@ export const RestApiKnexPlugin = {
       // Apply pagination directly (no hooks)
       if (queryParams.page) {
         const pageSize = Math.min(
-          queryParams.page.size || vars.pageSize || 20,
-          vars.maxPageSize || 100
+          queryParams.page.size || scope.vars.pageSize || 20,
+          scope.vars.maxPageSize || 100
         );
         const pageNumber = queryParams.page.number || 1;
         
@@ -269,19 +277,20 @@ export const RestApiKnexPlugin = {
       const records = await query;
       
       // Process includes
-      const included = await processIncludes(records, scopeName, queryParams, db, {
+      const included = await processIncludes(scope, records, {
         log,
         scopes,
         knex,
-        idProperty
+        context
       });
       
 
       // Build and return response
-      return buildJsonApiResponse(records, scopeName, schema, included, false, scopes, vars);
+      return buildJsonApiResponse(scope, records, included, false, scopeName);
     };
     
     helpers.dataPost = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
@@ -302,6 +311,7 @@ export const RestApiKnexPlugin = {
     };
     
     helpers.dataPut = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
@@ -314,7 +324,7 @@ export const RestApiKnexPlugin = {
       
       // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
-      const foreignKeyUpdates = processBelongsToRelationships(inputRecord, schema);
+      const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
       const finalAttributes = { ...attributes, ...foreignKeyUpdates };
       
       if (isCreate) {
@@ -335,7 +345,7 @@ export const RestApiKnexPlugin = {
           throw new RestApiResourceError(
             `Resource not found`,
             { 
-              subtype: 'not_found',
+              subtype: ERROR_SUBTYPES.NOT_FOUND,
               resourceType: scopeName,
               resourceId: id
             }
@@ -354,6 +364,7 @@ export const RestApiKnexPlugin = {
     };
     
     helpers.dataPatch = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
@@ -372,7 +383,7 @@ export const RestApiKnexPlugin = {
         throw new RestApiResourceError(
           `Resource not found`,
           { 
-            subtype: 'not_found',
+            subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }
@@ -381,7 +392,7 @@ export const RestApiKnexPlugin = {
       
       // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
-      const foreignKeyUpdates = processBelongsToRelationships(inputRecord, schema);
+      const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
       const finalAttributes = { ...attributes, ...foreignKeyUpdates };
       
       log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
@@ -397,6 +408,7 @@ export const RestApiKnexPlugin = {
     };
     
     helpers.dataDelete = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
       const id = context.id;
 
       const tableName = context.schemaInfo.tableName;
@@ -414,7 +426,7 @@ export const RestApiKnexPlugin = {
         throw new RestApiResourceError(
           `Resource not found`,
           { 
-            subtype: 'not_found',
+            subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }

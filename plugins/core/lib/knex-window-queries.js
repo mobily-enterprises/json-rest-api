@@ -1,4 +1,5 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
+import { ROW_NUMBER_KEY } from './knex-constants.js';
 
 /**
  * Builds a window function query for limited includes
@@ -46,7 +47,7 @@ export const buildWindowedIncludeQuery = (
       knex.raw(
         'ROW_NUMBER() OVER (PARTITION BY ?? ORDER BY ' + 
         buildOrderByClause(orderBy) + 
-        ') as _rn',
+        ') as ' + ROW_NUMBER_KEY + ',',
         [foreignKey]
       )
     )
@@ -55,7 +56,7 @@ export const buildWindowedIncludeQuery = (
   // Apply field selection if specified
   if (fieldsToSelect !== '*' && Array.isArray(fieldsToSelect)) {
     // Include the foreign key and row number in selection
-    const fieldsWithFK = [...new Set([...fieldsToSelect, foreignKey, '_rn'])];
+    const fieldsWithFK = [...new Set([...fieldsToSelect, foreignKey, ROW_NUMBER_KEY])];
     subquery.select(fieldsWithFK);
   }
   
@@ -63,7 +64,7 @@ export const buildWindowedIncludeQuery = (
   const query = knex
     .select('*')
     .from(subquery.as('_windowed'))
-    .where('_rn', '<=', limit);
+    .where(ROW_NUMBER_KEY, '<=', limit);
   
   return query;
 };

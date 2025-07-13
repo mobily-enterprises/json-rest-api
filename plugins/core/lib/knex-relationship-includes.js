@@ -45,6 +45,7 @@
 import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js';
+import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY } from './knex-constants.js';
 
 /**
  * Groups records by their polymorphic type for efficient batch loading
@@ -161,37 +162,48 @@ export const parseIncludeTree = (includeParam) => {
  * @param {string} scopeName - The scope/resource type name
  */
 const loadRelationshipMetadata = async (scopes, records, scopeName) => {
-  // Get schema information
-  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
-  if (!schemaInfo) return;
+  try {
+    // Get schema information
+    const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
+    if (!schemaInfo) return;
 
-  const schema = schemaInfo.schema.structure || schemaInfo.schema;
-  const relationships = schemaInfo.schemaRelationships || {};
+    const schema = schemaInfo.schema.structure || schemaInfo.schema;
+    const relationships = schemaInfo.schemaRelationships || {};
 
-  // Process each record
-  records.forEach(record => {
-    record._relationshipMetadata = {};
+    // Process each record
+    records.forEach(record => {
+      record[RELATIONSHIP_METADATA_KEY] = {};
 
-    // Process belongsTo relationships from schema
-    for (const [fieldName, fieldDef] of Object.entries(schema)) {
-      if (fieldDef.belongsTo && fieldDef.as) {
-        const foreignKeyValue = record[fieldName];
-        if (foreignKeyValue != null) {
-          record._relationshipMetadata[fieldDef.as] = {
-            data: {
-              type: fieldDef.belongsTo,
-              id: String(foreignKeyValue)
-            }
-          };
-        } else {
-          record._relationshipMetadata[fieldDef.as] = { data: null };
+      // Process belongsTo relationships from schema
+      for (const [fieldName, fieldDef] of Object.entries(schema)) {
+        if (fieldDef.belongsTo && fieldDef.as) {
+          const foreignKeyValue = record[fieldName];
+          if (foreignKeyValue != null) {
+            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = {
+              data: {
+                type: fieldDef.belongsTo,
+                id: String(foreignKeyValue)
+              }
+            };
+          } else {
+            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = { data: null };
+          }
         }
       }
-    }
 
-    // TODO: Handle hasMany relationships if needed
-    // This would require queries to get counts or related IDs
-  });
+      // TODO: Handle hasMany relationships if needed
+      // This would require queries to get counts or related IDs
+    });
+  } catch (error) {
+    // Log error with context and re-throw
+    const errorContext = {
+      scopeName,
+      recordCount: records?.length || 0,
+      error: error.message
+    };
+    console.error('[loadRelationshipMetadata] Error loading relationship metadata:', errorContext);
+    throw new Error(`Failed to load relationship metadata for scope '${scopeName}': ${error.message}`);
+  }
 };
 
 /**
@@ -215,109 +227,136 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  * @returns {Promise<void>}
  */
 export const loadBelongsTo = async (scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty) => {
-  log.trace('[INCLUDE] Loading belongsTo:', { 
-    fieldName, 
-    includeName, 
-    recordCount: records.length 
-  });
-  
-  // Get the target scope name
-  const targetScope = fieldDef.belongsTo;
-  if (!scopes[targetScope]) {
-    log.warn('[INCLUDE] Target scope not found:', targetScope);
-    return;
-  }
-  
-  // Collect all foreign key values
-  const foreignKeyValues = records
-    .map(r => r[fieldName])
-    .filter(val => val != null); // Filter out null/undefined
-  
-  const uniqueIds = [...new Set(foreignKeyValues)];
-  
-  log.debug('[INCLUDE] Loading belongsTo records:', { 
-    targetScope, 
-    uniqueIds 
-  });
-  
-  if (uniqueIds.length === 0) {
-    // No relationships to load, set all to null
-    records.forEach(record => {
-      if (!record._relationships) record._relationships = {};
-      record._relationships[includeName] = { data: null };
+  try {
+    log.trace('[INCLUDE] Loading belongsTo:', { 
+      fieldName, 
+      includeName, 
+      recordCount: records.length 
     });
-    return;
-  }
-  
-  // Get target table info
-  const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
-  const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty 
-  const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-  
-  // Build field selection for sparse fieldsets
-  const fieldSelectionInfo = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
-    null;
-  
-  // Load the target records
-  let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds);
-  if (fieldSelectionInfo) {
-    query = query.select(fieldSelectionInfo.fieldsToSelect);
-  }
-  const targetRecords = await query;
-  
-  // Load relationship metadata for all target records
-  await loadRelationshipMetadata(scopes, targetRecords, targetScope);
-  
-  // Create lookup map
-  const targetById = {};
-  targetRecords.forEach(record => {
-    targetById[record[targetIdProperty]] = record;
-  });
-  
-  // Set relationships on original records
-  const targetRecordsToProcess = [];
-  
-  records.forEach(record => {
-    if (!record._relationships) record._relationships = {};
     
-    const targetId = record[fieldName];
-    const targetRecord = targetById[targetId];
+    // Get the target scope name
+    const targetScope = fieldDef.belongsTo;
+    if (!scopes[targetScope]) {
+      log.warn('[INCLUDE] Target scope not found:', targetScope);
+      return;
+    }
     
-    if (targetRecord) {
-      // Convert to JSON:API format
-      const jsonApiRecord = toJsonApi(targetScope, targetRecord, targetSchema, targetIdProperty);
-
-      // Add relationships from metadata
-      if (targetRecord._relationshipMetadata) {
-        jsonApiRecord.relationships = targetRecord._relationshipMetadata;
-        // Clean up the temporary property
-        delete targetRecord._relationshipMetadata;
-      }
-
-      record._relationships[includeName] = { data: { type: targetScope, id: String(targetId) } };
-      
-      // Add to included if not already there
-      const resourceKey = `${targetScope}:${targetId}`;
-      if (!included.has(resourceKey)) {
-        included.set(resourceKey, jsonApiRecord); // Now includes relationships!
-        
-        // Collect for nested processing
-        if (Object.keys(subIncludes).length > 0) {
-          targetRecordsToProcess.push(targetRecord);
+    // Collect all foreign key values
+    const foreignKeyValues = records
+      .map(r => r[fieldName])
+      .filter(val => val != null); // Filter out null/undefined
+    
+    const uniqueIds = [...new Set(foreignKeyValues)];
+    
+    log.debug('[INCLUDE] Loading belongsTo records:', { 
+      targetScope, 
+      uniqueIds 
+    });
+    
+    if (uniqueIds.length === 0) {
+      // No relationships to load, set all to null
+      records.forEach(record => {
+        if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
+        record[RELATIONSHIPS_KEY][includeName] = { data: null };
+      });
+      return;
+    }
+    
+    // Get target table info
+    const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
+    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty 
+    const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+    
+    // Build field selection for sparse fieldsets
+    const targetScopeObject = scopes[targetScope];
+    const fieldSelectionInfo = fields?.[targetScope] ? 
+      await buildFieldSelection(targetScopeObject, {
+        context: {
+          scopeName: targetScope,
+          queryParams: { fields: { [targetScope]: fields[targetScope] } },
+          schemaInfo: targetScopeObject.vars.schemaInfo
         }
+      }) : 
+      null;
+    
+    // Load the target records
+    let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds);
+    if (fieldSelectionInfo) {
+      query = query.select(fieldSelectionInfo.fieldsToSelect);
+    }
+    const targetRecords = await query;
+    
+    // Load relationship metadata for all target records
+    await loadRelationshipMetadata(scopes, targetRecords, targetScope);
+    
+    // Create lookup map
+    const targetById = {};
+    targetRecords.forEach(record => {
+      targetById[record[targetIdProperty]] = record;
+    });
+    
+    // Set relationships on original records
+    const targetRecordsToProcess = [];
+    
+    records.forEach(record => {
+      if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
+      
+      const targetId = record[fieldName];
+      const targetRecord = targetById[targetId];
+      
+      if (targetRecord) {
+        // Convert to JSON:API format
+        const jsonApiRecord = toJsonApi(targetScope, targetRecord, targetSchema, targetIdProperty);
+
+        // Add relationships from metadata
+        if (targetRecord[RELATIONSHIP_METADATA_KEY]) {
+          jsonApiRecord.relationships = targetRecord[RELATIONSHIP_METADATA_KEY];
+          // Clean up the temporary property
+          delete targetRecord[RELATIONSHIP_METADATA_KEY];
+        }
+
+        record[RELATIONSHIPS_KEY][includeName] = { data: { type: targetScope, id: String(targetId) } };
+        
+        // Add to included if not already there
+        const resourceKey = `${targetScope}:${targetId}`;
+        if (!included.has(resourceKey)) {
+          included.set(resourceKey, jsonApiRecord); // Now includes relationships!
+          
+          // Collect for nested processing
+          if (Object.keys(subIncludes).length > 0) {
+            targetRecordsToProcess.push(targetRecord);
+          }
+        }
+      } else {
+        record[RELATIONSHIPS_KEY][includeName] = { data: null };
       }
-    } else {
-      record._relationships[includeName] = { data: null };
+    });
+    
+    // Process nested includes if any
+    if (targetRecordsToProcess.length > 0) {
+      const nextPath = `${currentPath}.${includeName}`;
+      if (!processedPaths.has(nextPath)) {
+        await processIncludes(scopes, log, knex, targetRecordsToProcess, targetScope, subIncludes, included, processedPaths, nextPath, fields);
+      }
     }
-  });
-  
-  // Process nested includes if any
-  if (targetRecordsToProcess.length > 0) {
-    const nextPath = `${currentPath}.${includeName}`;
-    if (!processedPaths.has(nextPath)) {
-      await processIncludes(scopes, log, knex, targetRecordsToProcess, targetScope, subIncludes, included, processedPaths, nextPath, fields);
-    }
+  } catch (error) {
+    // Log error with detailed context
+    log.error('[INCLUDE] Error loading belongsTo relationship:', {
+      fieldName,
+      includeName,
+      targetScope: fieldDef.belongsTo,
+      recordCount: records?.length || 0,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Re-throw with enhanced error message
+    const enhancedError = new Error(
+      `Failed to load belongsTo relationship '${includeName}' for field '${fieldName}': ${error.message}`
+    );
+    enhancedError.originalError = error;
+    enhancedError.context = { fieldName, includeName, targetScope: fieldDef.belongsTo };
+    throw enhancedError;
   }
 };
 
@@ -343,12 +382,13 @@ export const loadBelongsTo = async (scopes, log, knex, records, fieldName, field
  * @returns {Promise<void>}
  */
 export const loadHasMany = async (scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields) => {
-  log.trace('[INCLUDE] Loading hasMany relationship:', { 
-    scopeName, 
-    includeName, 
-    recordCount: records.length,
-    hasThrough: !!relDef.through 
-  });
+  try {
+    log.trace('[INCLUDE] Loading hasMany relationship:', { 
+      scopeName, 
+      includeName, 
+      recordCount: records.length,
+      hasThrough: !!relDef.through 
+    });
   
   // Collect all parent IDs
   const mainIds = records.map(r => r.id).filter(Boolean);
@@ -385,8 +425,8 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     if (pivotRecords.length === 0) {
       // No relationships found, set empty arrays for all records
       records.forEach(record => {
-        if (!record._relationships) record._relationships = {};
-        record._relationships[includeName] = { data: [] };
+        if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
+        record[RELATIONSHIPS_KEY][includeName] = { data: [] };
       });
       return;
     }
@@ -401,9 +441,16 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     // Step 3: Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+    const targetScopeObject = scopes[targetScope];
+    const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+      await buildFieldSelection(targetScopeObject, {
+        context: {
+          scopeName: targetScope,
+          queryParams: { fields: { [targetScope]: fields[targetScope] } },
+          schemaInfo: targetScopeObject.vars.schemaInfo
+        }
+      }) : 
       null;
     
     // Step 4: For many-to-many with limits, we need a different approach
@@ -419,7 +466,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
           knex.raw(
             'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' + 
             buildOrderByClause(relDef.include.orderBy || ['id']) + 
-            ') as _rn',
+            ') as ' + ROW_NUMBER_KEY,
             [foreignKey]
           )
         )
@@ -431,12 +478,12 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
       const limitedQuery = knex
         .select('*')
         .from(windowQuery.as('_windowed'))
-        .where('_rn', '<=', relDef.include.limit);
+        .where(ROW_NUMBER_KEY, '<=', relDef.include.limit);
       
       targetRecords = await limitedQuery;
       
-      // Remove _rn column and restore proper pivot grouping
-      targetRecords.forEach(record => delete record._rn);
+      // Remove row number column and restore proper pivot grouping
+      targetRecords.forEach(record => delete record[ROW_NUMBER_KEY]);
       
     } else {
       // Standard query without per-parent limits
@@ -478,7 +525,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     // Step 7: Set relationships on parent records
     records.forEach(record => {
-      if (!record._relationships) record._relationships = {};
+      if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
       
       const childIds = pivotsByParent[record.id] || [];
       const relData = childIds
@@ -491,10 +538,10 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
             const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
             
             // Add relationships from metadata
-            if (childRecord._relationshipMetadata) {
-              jsonApiRecord.relationships = childRecord._relationshipMetadata;
+            if (childRecord[RELATIONSHIP_METADATA_KEY]) {
+              jsonApiRecord.relationships = childRecord[RELATIONSHIP_METADATA_KEY];
               // Clean up the temporary property
-              delete childRecord._relationshipMetadata;
+              delete childRecord[RELATIONSHIP_METADATA_KEY];
             }
             
             included.set(resourceKey, jsonApiRecord);
@@ -502,7 +549,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
           return { type: targetScope, id: String(childRecord.id) };
         });
       
-      record._relationships[includeName] = { data: relData };
+      record[RELATIONSHIPS_KEY][includeName] = { data: relData };
     });
     
     // Step 8: Process nested includes if any
@@ -526,9 +573,16 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+    const targetScopeObject = scopes[targetScope];
+    const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
-      await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+      await buildFieldSelection(targetScopeObject, {
+        context: {
+          scopeName: targetScope,
+          queryParams: { fields: { [targetScope]: fields[targetScope] } },
+          schemaInfo: targetScopeObject.vars.schemaInfo
+        }
+      }) : 
       null;
     
     let query;
@@ -578,9 +632,9 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     // Execute query
     const targetRecords = await query;
     
-    // If using window functions, remove the _rn column
+    // If using window functions, remove the row number column
     if (usingWindowFunction) {
-      targetRecords.forEach(record => delete record._rn);
+      targetRecords.forEach(record => delete record[ROW_NUMBER_KEY]);
     }
     
     log.trace('[INCLUDE] Loaded hasMany records:', { 
@@ -603,7 +657,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
     
     // Set relationships on parent records
     records.forEach(record => {
-      if (!record._relationships) record._relationships = {};
+      if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
       
       const children = childrenByParent[record.id] || [];
       const relData = children.map(childRecord => {
@@ -613,10 +667,10 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
           const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
           
           // Add relationships from metadata
-          if (childRecord._relationshipMetadata) {
-            jsonApiRecord.relationships = childRecord._relationshipMetadata;
+          if (childRecord[RELATIONSHIP_METADATA_KEY]) {
+            jsonApiRecord.relationships = childRecord[RELATIONSHIP_METADATA_KEY];
             // Clean up the temporary property
-            delete childRecord._relationshipMetadata;
+            delete childRecord[RELATIONSHIP_METADATA_KEY];
           }
           
           included.set(resourceKey, jsonApiRecord);
@@ -624,7 +678,7 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
         return { type: targetScope, id: String(childRecord.id) };
       });
       
-      record._relationships[includeName] = { data: relData };
+      record[RELATIONSHIPS_KEY][includeName] = { data: relData };
     });
     
     // Process nested includes
@@ -634,6 +688,25 @@ export const loadHasMany = async (scopes, log, knex, records, scopeName, include
         await processIncludes(scopes, log, knex, targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
       }
     }
+  }
+  } catch (error) {
+    // Log error with detailed context
+    log.error('[INCLUDE] Error loading hasMany relationship:', {
+      scopeName,
+      includeName,
+      hasThrough: !!relDef.through,
+      recordCount: records?.length || 0,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Re-throw with enhanced error message
+    const enhancedError = new Error(
+      `Failed to load hasMany relationship '${includeName}' for scope '${scopeName}': ${error.message}`
+    );
+    enhancedError.originalError = error;
+    enhancedError.context = { scopeName, includeName, hasThrough: !!relDef.through };
+    throw enhancedError;
   }
 };
 
@@ -669,10 +742,11 @@ export const loadPolymorphicBelongsTo = async (
   currentPath,
   fields
 ) => {
-  log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
-    relName, 
-    recordCount: records.length 
-  });
+  try {
+    log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
+      relName, 
+      recordCount: records.length 
+    });
   
   const { typeField, idField, types } = relDef.belongsToPolymorphic;
   
@@ -703,9 +777,16 @@ export const loadPolymorphicBelongsTo = async (
     const targetTable = targetSchema?.tableName || targetType;
     
     // Build field selection for sparse fieldsets
-    const targetIdProperty = scopes[targetType].vars.schemaInfo.idProperty;
+    const targetScopeObject = scopes[targetType];
+    const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetType] ? 
-      await buildFieldSelection(targetType, fields[targetType], targetSchema, scopes, targetIdProperty) : 
+      await buildFieldSelection(targetScopeObject, {
+        context: {
+          scopeName: targetType,
+          queryParams: { fields: { [targetType]: fields[targetType] } },
+          schemaInfo: targetScopeObject.vars.schemaInfo
+        }
+      }) : 
       null;
     
     log.debug(`[INCLUDE] Loading ${targetType} records:`, { 
@@ -735,7 +816,7 @@ export const loadPolymorphicBelongsTo = async (
         const targetId = record[idField];
         const targetRecord = targetById[targetId];
         
-        if (!record._relationships) record._relationships = {};
+        if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
         
         if (targetRecord) {
           // Add to included
@@ -744,20 +825,20 @@ export const loadPolymorphicBelongsTo = async (
             const jsonApiRecord = toJsonApi(targetType, targetRecord, targetSchema);
             
             // Add relationships from metadata
-            if (targetRecord._relationshipMetadata) {
-              jsonApiRecord.relationships = targetRecord._relationshipMetadata;
+            if (targetRecord[RELATIONSHIP_METADATA_KEY]) {
+              jsonApiRecord.relationships = targetRecord[RELATIONSHIP_METADATA_KEY];
               // Clean up the temporary property
-              delete targetRecord._relationshipMetadata;
+              delete targetRecord[RELATIONSHIP_METADATA_KEY];
             }
             
             included.set(resourceKey, jsonApiRecord);
           }
           
-          record._relationships[relName] = {
+          record[RELATIONSHIPS_KEY][relName] = {
             data: { type: targetType, id: String(targetId) }
           };
         } else {
-          record._relationships[relName] = { data: null };
+          record[RELATIONSHIPS_KEY][relName] = { data: null };
         }
       }
     });
@@ -773,11 +854,29 @@ export const loadPolymorphicBelongsTo = async (
   
   // Set null for records without relationships
   records.forEach(record => {
-    if (!record._relationships) record._relationships = {};
-    if (!record._relationships[relName]) {
-      record._relationships[relName] = { data: null };
+    if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
+    if (!record[RELATIONSHIPS_KEY][relName]) {
+      record[RELATIONSHIPS_KEY][relName] = { data: null };
     }
   });
+  } catch (error) {
+    // Log error with detailed context
+    log.error('[INCLUDE] Error loading polymorphic belongsTo relationship:', {
+      relName,
+      recordCount: records?.length || 0,
+      types: relDef?.belongsToPolymorphic?.types,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Re-throw with enhanced error message
+    const enhancedError = new Error(
+      `Failed to load polymorphic belongsTo relationship '${relName}': ${error.message}`
+    );
+    enhancedError.originalError = error;
+    enhancedError.context = { relName, types: relDef?.belongsToPolymorphic?.types };
+    throw enhancedError;
+  }
 };
 
 /**
@@ -814,12 +913,13 @@ export const loadReversePolymorphic = async (
   currentPath,
   fields
 ) => {
-  log.trace('[INCLUDE] Loading reverse polymorphic (via):', { 
-    scopeName,
-    includeName, 
-    via: relDef.via,
-    recordCount: records.length 
-  });
+  try {
+    log.trace('[INCLUDE] Loading reverse polymorphic (via):', { 
+      scopeName,
+      includeName, 
+      via: relDef.via,
+      recordCount: records.length 
+    });
   
   const targetScope = relDef.hasMany;
   const viaRelName = relDef.via;
@@ -852,9 +952,16 @@ export const loadReversePolymorphic = async (
   
   // Build field selection for sparse fieldsets
   const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
-  const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty;
+  const targetScopeObject = scopes[targetScope];
+  const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   const fieldSelectionInfo = fields?.[targetScope] ? 
-    await buildFieldSelection(targetScope, fields[targetScope], targetSchema, scopes, targetIdProperty) : 
+    await buildFieldSelection(targetScopeObject, {
+      context: {
+        scopeName: targetScope,
+        queryParams: { fields: { [targetScope]: fields[targetScope] } },
+        schemaInfo: targetScopeObject.vars.schemaInfo
+      }
+    }) : 
     null;
   
   // Query for records pointing back to our scope
@@ -887,7 +994,7 @@ export const loadReversePolymorphic = async (
   
   // Set relationships on parent records
   records.forEach(record => {
-    if (!record._relationships) record._relationships = {};
+    if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
     
     const children = childrenByParent[record.id] || [];
     const relData = children.map(childRecord => {
@@ -897,10 +1004,10 @@ export const loadReversePolymorphic = async (
         const jsonApiRecord = toJsonApi(targetScope, childRecord, targetSchema);
         
         // Add relationships from metadata
-        if (childRecord._relationshipMetadata) {
-          jsonApiRecord.relationships = childRecord._relationshipMetadata;
+        if (childRecord[RELATIONSHIP_METADATA_KEY]) {
+          jsonApiRecord.relationships = childRecord[RELATIONSHIP_METADATA_KEY];
           // Clean up the temporary property
-          delete childRecord._relationshipMetadata;
+          delete childRecord[RELATIONSHIP_METADATA_KEY];
         }
         
         included.set(resourceKey, jsonApiRecord);
@@ -908,7 +1015,7 @@ export const loadReversePolymorphic = async (
       return { type: targetScope, id: String(childRecord.id) };
     });
     
-    record._relationships[includeName] = { data: relData };
+    record[RELATIONSHIPS_KEY][includeName] = { data: relData };
   });
   
   // Process nested includes
@@ -917,6 +1024,26 @@ export const loadReversePolymorphic = async (
     if (!processedPaths.has(nextPath)) {
       await processIncludes(scopes, log, knex, targetRecords, targetScope, subIncludes, included, processedPaths, nextPath, fields);
     }
+  }
+  } catch (error) {
+    // Log error with detailed context
+    log.error('[INCLUDE] Error loading reverse polymorphic relationship:', {
+      scopeName,
+      includeName,
+      via: relDef?.via,
+      targetScope: relDef?.hasMany,
+      recordCount: records?.length || 0,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Re-throw with enhanced error message
+    const enhancedError = new Error(
+      `Failed to load reverse polymorphic relationship '${includeName}' via '${relDef?.via}' for scope '${scopeName}': ${error.message}`
+    );
+    enhancedError.originalError = error;
+    enhancedError.context = { scopeName, includeName, via: relDef?.via, targetScope: relDef?.hasMany };
+    throw enhancedError;
   }
 };
 
@@ -939,75 +1066,100 @@ export const loadReversePolymorphic = async (
  * @returns {Promise<void>}
  */
 export const processIncludes = async (scopes, log, knex, records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty) => {
-  log.trace('[INCLUDE] Processing includes:', { 
-    scopeName, 
-    includes: Object.keys(includeTree),
-    recordCount: records.length,
-    currentPath
-  });
-  
-  if (records.length === 0) return;
-  
-  // Get schema info for this scope
-  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
-  if (!schemaInfo) {
-    log.warn('[INCLUDE] No schema info for scope:', scopeName);
-    return;
-  }
-  
-  const { schema, schemaRelationships } = schemaInfo;
-  
-  // Process each include
-  for (const [includeName, subIncludes] of Object.entries(includeTree)) {
-    const fullPath = currentPath ? `${currentPath}.${includeName}` : includeName;
+  try {
+    log.trace('[INCLUDE] Processing includes:', { 
+      scopeName, 
+      includes: Object.keys(includeTree),
+      recordCount: records.length,
+      currentPath
+    });
     
-    // Skip if already processed (prevents infinite loops)
-    if (processedPaths.has(fullPath)) {
-      log.trace('[INCLUDE] Skipping already processed path:', fullPath);
-      continue;
-    }
-    processedPaths.add(fullPath);
+    if (records.length === 0) return;
     
-    // Check if it's a schema field (belongsTo)
-    let handled = false;
-    
-    // Look for belongsTo relationships in schema fields
-    for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
-      if (fieldDef.as === includeName && fieldDef.belongsTo) {
-        await loadBelongsTo(scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty);
-        handled = true;
-        break;
-      }
+    // Get schema info for this scope
+    const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
+    if (!schemaInfo) {
+      log.warn('[INCLUDE] No schema info for scope:', scopeName);
+      return;
     }
     
-    // Check relationships
-    if (!handled && schemaRelationships) {
-      const relDef = schemaRelationships[includeName];
+    const { schema, schemaRelationships } = schemaInfo;
+    
+    // Process each include
+    for (const [includeName, subIncludes] of Object.entries(includeTree)) {
+      const fullPath = currentPath ? `${currentPath}.${includeName}` : includeName;
       
-      if (relDef) {
-        if (relDef.hasMany) {
-          // Check if it's a reverse polymorphic (via)
-          if (relDef.via) {
-            await loadReversePolymorphic(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
-          } else {
-            await loadHasMany(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+      // Skip if already processed (prevents infinite loops)
+      if (processedPaths.has(fullPath)) {
+        log.trace('[INCLUDE] Skipping already processed path:', fullPath);
+        continue;
+      }
+      processedPaths.add(fullPath);
+      
+      // Check if it's a schema field (belongsTo)
+      let handled = false;
+      
+      try {
+        // Look for belongsTo relationships in schema fields
+        for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
+          if (fieldDef.as === includeName && fieldDef.belongsTo) {
+            await loadBelongsTo(scopes, log, knex, records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty);
+            handled = true;
+            break;
           }
-          handled = true;
-        } else if (relDef.belongsToPolymorphic) {
-          await loadPolymorphicBelongsTo(scopes, log, knex, records, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
-          handled = true;
         }
+        
+        // Check relationships
+        if (!handled && schemaRelationships) {
+          const relDef = schemaRelationships[includeName];
+          
+          if (relDef) {
+            if (relDef.hasMany) {
+              // Check if it's a reverse polymorphic (via)
+              if (relDef.via) {
+                await loadReversePolymorphic(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+              } else {
+                await loadHasMany(scopes, log, knex, records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+              }
+              handled = true;
+            } else if (relDef.belongsToPolymorphic) {
+              await loadPolymorphicBelongsTo(scopes, log, knex, records, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields);
+              handled = true;
+            }
+          }
+        }
+      } catch (includeError) {
+        // Log specific include error and continue with other includes
+        log.error('[INCLUDE] Error processing include:', {
+          scopeName,
+          includeName,
+          fullPath,
+          error: includeError.message
+        });
+        // Re-throw to maintain existing behavior
+        throw includeError;
+      }
+      
+      if (!handled) {
+        log.warn('[INCLUDE] Unknown relationship:', { 
+          scopeName, 
+          includeName,
+          availableFields: Object.keys(schema.structure || {}).filter(k => schema.structure[k].as),
+          availableRelationships: Object.keys(schemaRelationships || {})
+        });
       }
     }
-    
-    if (!handled) {
-      log.warn('[INCLUDE] Unknown relationship:', { 
-        scopeName, 
-        includeName,
-        availableFields: Object.keys(schema.structure || {}).filter(k => schema.structure[k].as),
-        availableRelationships: Object.keys(schemaRelationships || {})
-      });
-    }
+  } catch (error) {
+    // Log error with full context
+    log.error('[INCLUDE] Error in processIncludes:', {
+      scopeName,
+      currentPath,
+      includeTree: Object.keys(includeTree || {}),
+      recordCount: records?.length || 0,
+      error: error.message,
+      stack: error.stack
+    });
+    throw error; // Re-throw to maintain existing error propagation
   }
 };
 
@@ -1046,48 +1198,69 @@ export const processIncludes = async (scopes, log, knex, records, scopeName, inc
  * // result.recordsWithRelationships = original records with _relationships added
  */
 export const buildIncludedResources = async (scopes, log, knex, records, scopeName, includeParam, fields, idProperty) => {
-  log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
-  
-  // Check if includes are empty or records are empty
-  if (!includeParam || records.length === 0) {
-    log.trace('[INCLUDE] No includes requested or no records');
+  try {
+    log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
+    
+    // Check if includes are empty or records are empty
+    if (!includeParam || records.length === 0) {
+      log.trace('[INCLUDE] No includes requested or no records');
+      return {
+        included: [],
+        recordsWithRelationships: records
+      };
+    }
+    
+    // Handle both string and array formats
+    if (Array.isArray(includeParam) && includeParam.length === 0) {
+      log.trace('[INCLUDE] Empty include array, no relationships to load');
+      return {
+        included: [],
+        recordsWithRelationships: records
+      };
+    }
+    
+    // Parse the include parameter
+    const includeTree = parseIncludeTree(includeParam);
+    
+    log.debug('[INCLUDE] Parsed include tree:', includeTree);
+    
+    // Use a Map to track included resources by type:id
+    const included = new Map();
+    const processedPaths = new Set(); // Prevent infinite loops
+    
+    // Process all includes
+    await processIncludes(scopes, log, knex, records, scopeName, includeTree, included, processedPaths, '', fields, idProperty);
+    
+    // Convert Map to array for JSON:API format
+    const includedArray = Array.from(included.values());
+    
+    log.debug('[INCLUDE] Completed building includes:', {
+      includedCount: includedArray.length,
+      uniqueTypes: [...new Set(includedArray.map(r => r.type))]
+    });
+    
     return {
-      included: [],
+      included: includedArray,
       recordsWithRelationships: records
     };
-  }
-  
-  // Handle both string and array formats
-  if (Array.isArray(includeParam) && includeParam.length === 0) {
-    log.trace('[INCLUDE] Empty include array, no relationships to load');
-    return {
-      included: [],
-      recordsWithRelationships: records
+  } catch (error) {
+    // Log comprehensive error information
+    log.error('[INCLUDE] Failed to build included resources:', {
+      scopeName,
+      includeParam,
+      recordCount: records?.length || 0,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Re-throw with additional context
+    const enhancedError = new Error(`Failed to build included resources for scope '${scopeName}': ${error.message}`);
+    enhancedError.originalError = error;
+    enhancedError.context = {
+      scopeName,
+      includeParam,
+      recordCount: records?.length || 0
     };
+    throw enhancedError;
   }
-  
-  // Parse the include parameter
-  const includeTree = parseIncludeTree(includeParam);
-  
-  log.debug('[INCLUDE] Parsed include tree:', includeTree);
-  
-  // Use a Map to track included resources by type:id
-  const included = new Map();
-  const processedPaths = new Set(); // Prevent infinite loops
-  
-  // Process all includes
-  await processIncludes(scopes, log, knex, records, scopeName, includeTree, included, processedPaths, '', fields, idProperty);
-  
-  // Convert Map to array for JSON:API format
-  const includedArray = Array.from(included.values());
-  
-  log.debug('[INCLUDE] Completed building includes:', {
-    includedCount: includedArray.length,
-    uniqueTypes: [...new Set(includedArray.map(r => r.type))]
-  });
-  
-  return {
-    included: includedArray,
-    recordsWithRelationships: records
-  };
 };

@@ -25,9 +25,9 @@ const parseVersion = (versionString) => {
  * Check if database supports window functions
  */
 export const supportsWindowFunctions = async (knex) => {
-  const client = knex.client.config.client;
-  
   try {
+    const client = knex.client.config.client;
+    
     let versionString;
     
     switch (client) {
@@ -38,17 +38,27 @@ export const supportsWindowFunctions = async (knex) => {
         
       case 'mysql':
       case 'mysql2':
-        versionString = await knex.raw('SELECT VERSION() as version');
-        const mysqlVersion = parseVersion(versionString[0].version);
-        return mysqlVersion && mysqlVersion.major >= 8;
+        try {
+          versionString = await knex.raw('SELECT VERSION() as version');
+          const mysqlVersion = parseVersion(versionString[0].version);
+          return mysqlVersion && mysqlVersion.major >= 8;
+        } catch (dbError) {
+          console.warn(`[supportsWindowFunctions] Failed to get MySQL version: ${dbError.message}`);
+          return false;
+        }
         
       case 'sqlite3':
       case 'better-sqlite3':
-        versionString = await knex.raw('SELECT sqlite_version() as version');
-        const sqliteVersion = versionString[0].version;
-        // SQLite 3.25.0+ supports window functions
-        const parsed = parseVersion(sqliteVersion);
-        return parsed && (parsed.major > 3 || (parsed.major === 3 && parsed.minor >= 25));
+        try {
+          versionString = await knex.raw('SELECT sqlite_version() as version');
+          const sqliteVersion = versionString[0].version;
+          // SQLite 3.25.0+ supports window functions
+          const parsed = parseVersion(sqliteVersion);
+          return parsed && (parsed.major > 3 || (parsed.major === 3 && parsed.minor >= 25));
+        } catch (dbError) {
+          console.warn(`[supportsWindowFunctions] Failed to get SQLite version: ${dbError.message}`);
+          return false;
+        }
         
       case 'mssql':
         // SQL Server 2005+ supports window functions
@@ -61,20 +71,30 @@ export const supportsWindowFunctions = async (knex) => {
       default:
         // For MariaDB, we need to check if it's actually MariaDB or MySQL
         if (client.includes('maria')) {
-          versionString = await knex.raw('SELECT VERSION() as version');
-          const version = versionString[0].version.toLowerCase();
-          if (version.includes('mariadb')) {
-            const mariaVersion = parseVersion(version);
-            // MariaDB 10.2+ supports window functions
-            return mariaVersion && (mariaVersion.major > 10 || 
-              (mariaVersion.major === 10 && mariaVersion.minor >= 2));
+          try {
+            versionString = await knex.raw('SELECT VERSION() as version');
+            const version = versionString[0].version.toLowerCase();
+            if (version.includes('mariadb')) {
+              const mariaVersion = parseVersion(version);
+              // MariaDB 10.2+ supports window functions
+              return mariaVersion && (mariaVersion.major > 10 || 
+                (mariaVersion.major === 10 && mariaVersion.minor >= 2));
+            }
+          } catch (dbError) {
+            console.warn(`[supportsWindowFunctions] Failed to get MariaDB version: ${dbError.message}`);
+            return false;
           }
         }
         return false;
     }
   } catch (error) {
-    // If we can't determine, assume no support
-    console.warn('Could not determine database window function support:', error);
+    // Log error with context
+    console.error('[supportsWindowFunctions] Unexpected error checking database capabilities:', {
+      error: error.message,
+      stack: error.stack,
+      client: knex?.client?.config?.client || 'unknown'
+    });
+    // If we can't determine, assume no support for safety
     return false;
   }
 };
@@ -83,30 +103,56 @@ export const supportsWindowFunctions = async (knex) => {
  * Get database info for error messages
  */
 export const getDatabaseInfo = async (knex) => {
-  const client = knex.client.config.client;
-  
   try {
+    const client = knex.client.config.client;
+    
     let versionString;
     switch (client) {
       case 'mysql':
       case 'mysql2':
-        versionString = await knex.raw('SELECT VERSION() as version');
-        return { client: 'MySQL', version: versionString[0].version };
+        try {
+          versionString = await knex.raw('SELECT VERSION() as version');
+          return { client: 'MySQL', version: versionString[0].version };
+        } catch (dbError) {
+          console.warn(`[getDatabaseInfo] Failed to get MySQL version: ${dbError.message}`);
+          return { client: 'MySQL', version: 'unknown', error: dbError.message };
+        }
         
       case 'sqlite3':
       case 'better-sqlite3':
-        versionString = await knex.raw('SELECT sqlite_version() as version');
-        return { client: 'SQLite', version: versionString[0].version };
+        try {
+          versionString = await knex.raw('SELECT sqlite_version() as version');
+          return { client: 'SQLite', version: versionString[0].version };
+        } catch (dbError) {
+          console.warn(`[getDatabaseInfo] Failed to get SQLite version: ${dbError.message}`);
+          return { client: 'SQLite', version: 'unknown', error: dbError.message };
+        }
         
       case 'pg':
       case 'postgresql':
-        versionString = await knex.raw('SELECT version() as version');
-        return { client: 'PostgreSQL', version: versionString.rows[0].version };
+        try {
+          versionString = await knex.raw('SELECT version() as version');
+          return { client: 'PostgreSQL', version: versionString.rows[0].version };
+        } catch (dbError) {
+          console.warn(`[getDatabaseInfo] Failed to get PostgreSQL version: ${dbError.message}`);
+          return { client: 'PostgreSQL', version: 'unknown', error: dbError.message };
+        }
         
       default:
         return { client, version: 'unknown' };
     }
   } catch (error) {
-    return { client, version: 'unknown' };
+    // Log unexpected errors
+    console.error('[getDatabaseInfo] Unexpected error getting database info:', {
+      error: error.message,
+      stack: error.stack,
+      client: knex?.client?.config?.client || 'unknown'
+    });
+    
+    return { 
+      client: knex?.client?.config?.client || 'unknown', 
+      version: 'unknown',
+      error: error.message 
+    };
   }
 };

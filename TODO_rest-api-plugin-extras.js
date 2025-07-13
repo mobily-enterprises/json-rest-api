@@ -18,8 +18,7 @@ X (7) Computed/Virtual fields. They must be in schema at all times but not alway
   
 -------------------------------------------------
 
-(8)
-Check that limit/default order is maintained in sub queries in dataQuery
+X (8) Check that limit/default order is maintained in sub queries in dataQuery
 
 
 (10)

@@ -94,16 +94,28 @@ export const getForeignKeyFields = (schema) => {
  * // 4. Handle both regular and polymorphic foreign keys automatically
  * // 5. Reduce data transfer from database for large tables
  */
-export const buildFieldSelection = async (scopeName, requestedFields, schema, scopes, idProperty) => {
+export const buildFieldSelection = async (scope, deps) => {
   let fieldsToSelect = new Set();
   let computedDependencies = new Set();
+  
+  // Extract values from scope
+  const { 
+    vars: { 
+      schemaInfo: { schema, computed: computedFields = {} }
+    }
+  } = scope;
+  
+  // Extract values from deps
+  const { context } = deps;
+  const scopeName = context.scopeName;
+  const requestedFields = context.queryParams?.fields?.[scopeName];
+  const idProperty = context.schemaInfo.idProperty;
   
   // Always include the ID field - required for JSON:API
   fieldsToSelect.add(idProperty);
   
   // Get computed fields definitions - these are virtual fields not in the database
   // Example: { profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: ... } }
-  const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
   const computedFieldNames = new Set(Object.keys(computedFields));
   
   // Handle both Schema objects and plain objects
@@ -214,18 +226,16 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   });
   
   // Always include polymorphic type and id fields from relationships
-  if (scopes && scopes[scopeName]) {
-    try {
-      const relationships = scopes[scopeName].vars.schemaInfo.schemaRelationships;
-      Object.entries(relationships || {}).forEach(([relName, relDef]) => {
-        if (relDef.belongsToPolymorphic) {
-          if (relDef.typeField) fieldsToSelect.add(relDef.typeField);
-          if (relDef.idField) fieldsToSelect.add(relDef.idField);
-        }
-      });
-    } catch (e) {
-      // Scope might not have relationships
-    }
+  try {
+    const relationships = scope.vars.schemaInfo.schemaRelationships;
+    Object.entries(relationships || {}).forEach(([relName, relDef]) => {
+      if (relDef.belongsToPolymorphic) {
+        if (relDef.typeField) fieldsToSelect.add(relDef.typeField);
+        if (relDef.idField) fieldsToSelect.add(relDef.idField);
+      }
+    });
+  } catch (e) {
+    // Scope might not have relationships
   }
   
   // Return detailed information about field selection
