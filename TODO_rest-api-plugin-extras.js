@@ -16,12 +16,11 @@ X (6) Have an option to hide fields (hidden: yes, normallyHidden: yes)
 
 X (7) Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
   
--------------------------------------------------
-
 
 (8)
 Check that limit/default order is maintained in sub queries in dataQuery
 
+-------------------------------------------------
 
 (10)
 Query Depth Protection - Prevent malicious deep includes

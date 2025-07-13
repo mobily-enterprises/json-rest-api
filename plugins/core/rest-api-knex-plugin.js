@@ -109,7 +109,7 @@ export const RestApiKnexPlugin = {
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
       // Build field selection for sparse fieldsets
-      const fieldsToSelect = await buildFieldSelection(
+      const fieldSelectionInfo = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
         schema,
@@ -117,9 +117,12 @@ export const RestApiKnexPlugin = {
         vars
       );
       
+      // Store dependency info in context for enrichAttributes
+      context.computedDependencies = fieldSelectionInfo.computedDependencies;
+      
       // Build and execute query
       let query = db(tableName).where(idProperty, id);
-      query = buildQuerySelection(query, tableName, fieldsToSelect, false);
+      query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, false);
       
       const record = await query.first();
       
@@ -158,7 +161,7 @@ export const RestApiKnexPlugin = {
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
       // Build field selection for sparse fieldsets
-      const fieldsToSelect = await buildFieldSelection(
+      const fieldSelectionInfo = await buildFieldSelection(
         scopeName,
         queryParams.fields?.[scopeName],
         schema,
@@ -166,9 +169,12 @@ export const RestApiKnexPlugin = {
         vars
       );
       
+      // Store dependency info in context for enrichAttributes
+      context.computedDependencies = fieldSelectionInfo.computedDependencies;
+      
       // Start building query with table prefix (for JOIN support)
       let query = db(tableName);
-      query = buildQuerySelection(query, tableName, fieldsToSelect, true);
+      query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, true);
       
       /* ═══════════════════════════════════════════════════════════════════
        * FILTERING HOOKS

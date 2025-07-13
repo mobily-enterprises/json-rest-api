@@ -362,7 +362,8 @@ export const RestApiPlugin = {
           attributes: entry.attributes, 
           parentContext: context,
           requestedComputedFields: requestedComputedFields,
-          isMainResource: true
+          isMainResource: true,
+          computedDependencies: context.computedDependencies
         })
       }
       for (const entry of (context.record.included || [])) {
@@ -545,7 +546,8 @@ export const RestApiPlugin = {
         attributes: context.record.data.attributes, 
         parentContext: context,
         requestedComputedFields: requestedComputedFields,
-        isMainResource: true
+        isMainResource: true,
+        computedDependencies: context.computedDependencies
       })
       for (const entry of (context.record.included || [])) {
         const entryScope = scopes[entry.type];
@@ -1929,7 +1931,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
      * }
      */
     addScopeMethod('enrichAttributes', async ({ params, runHooks, scopeName, scopes, api, helpers }) => {
-      const { attributes, parentContext, requestedComputedFields, isMainResource } = params || {};
+      const { attributes, parentContext, requestedComputedFields, isMainResource, computedDependencies } = params || {};
       
       // Return empty object if no attributes provided
       if (!attributes) {
@@ -1998,6 +2000,16 @@ const validatePivotResource = (scopes, relDef, relName) => {
       
       // Run enrichAttributes hooks for additional/override computations
       await runHooks('enrichAttributes', hookContext);
+      
+      // Remove fields that were only fetched as dependencies
+      if (requestedFields && computedDependencies && computedDependencies.length > 0) {
+        for (const dep of computedDependencies) {
+          // Only remove if it wasn't explicitly requested
+          if (!requestedFields.includes(dep)) {
+            delete hookContext.attributes[dep];
+          }
+        }
+      }
       
       return hookContext.attributes;
     });

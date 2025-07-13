@@ -97,6 +97,7 @@ export const getForeignKeyFields = (schema) => {
 export const buildFieldSelection = async (scopeName, requestedFields, schema, scopes, vars) => {
   const idProperty = vars.idProperty || 'id';
   let fieldsToSelect = new Set();
+  let computedDependencies = new Set();
   
   // Always include the ID
   fieldsToSelect.add(idProperty);
@@ -108,12 +109,15 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
   // Handle both Schema objects and plain objects
   const schemaStructure = schema?.structure || schema || {};
   
-  if (requestedFields && requestedFields.length > 0) {
-    // Sparse fieldsets requested
-    const requested = typeof requestedFields === 'string' 
+  // Parse requested fields
+  const requested = requestedFields ? (
+    typeof requestedFields === 'string' 
       ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
-      : requestedFields;
-      
+      : requestedFields
+  ) : null;
+  
+  if (requested && requested.length > 0) {
+    // Sparse fieldsets requested
     requested.forEach(field => {
       // Skip computed fields - they don't exist in database
       if (computedFieldNames.has(field)) return;
@@ -127,15 +131,35 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
       fieldsToSelect.add(field);
     });
     
-    // Special handling for normallyHidden fields that might be needed for computed fields
-    // If a computed field is requested, we need to ensure its dependencies are included
+    // Handle computed field dependencies
     const requestedComputedFields = requested.filter(f => computedFieldNames.has(f));
+    for (const computedField of requestedComputedFields) {
+      const fieldDef = computedFields[computedField];
+      if (fieldDef.dependencies) {
+        for (const dep of fieldDef.dependencies) {
+          const depFieldDef = schemaStructure[dep];
+          if (depFieldDef && depFieldDef.hidden !== true) {
+            fieldsToSelect.add(dep);
+            // Track if this dependency wasn't explicitly requested
+            if (!requested.includes(dep)) {
+              computedDependencies.add(dep);
+            }
+          }
+        }
+      }
+    }
+    
+    // Still handle normallyHidden fields for backward compatibility
     if (requestedComputedFields.length > 0) {
-      // Add any normallyHidden fields that computed fields might need
       Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
         if (fieldDef.normallyHidden === true && fieldDef.hidden !== true) {
-          // This is a normallyHidden field - include it so computed fields can use it
-          fieldsToSelect.add(field);
+          // Only add if not already handled by dependencies
+          if (!fieldsToSelect.has(field)) {
+            fieldsToSelect.add(field);
+            if (!requested.includes(field)) {
+              computedDependencies.add(field);
+            }
+          }
         }
       });
     }
@@ -174,7 +198,12 @@ export const buildFieldSelection = async (scopeName, requestedFields, schema, sc
     }
   }
   
-  return Array.from(fieldsToSelect);
+  // Return detailed information about field selection
+  return {
+    fieldsToSelect: Array.from(fieldsToSelect),
+    requestedFields: requested,
+    computedDependencies: Array.from(computedDependencies)
+  };
 };
 
 /**
