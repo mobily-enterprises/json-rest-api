@@ -3,13 +3,11 @@ X (1) Make the user submit "country", not "country_id" in the POST/PUT/PATCH cal
 
 X (2) Have simplifiedTransport and simplifiedApi instead of just simplified.
 
-(3) Check what API calls are used in helpers, and most definitely use knex for deletes
+X (3) Check what API calls are used in helpers, and most definitely use knex for deletes
 
-(4) 
-Check that type: 'id' is not mandatory in schema
+X (4) Check that type: 'id' is not mandatory in schema
 
-(5)
-Maybe make the POST call support the return of the ID, but HTTPSERVER will need to ignore it as a non-resource
+X (5) Maybe make the POST call support the return of the ID, but HTTPSERVER will need to ignore it as a non-resource
 
 (6)
 Have an option to hide fields (hidden: yes, normallyHidden: yes)

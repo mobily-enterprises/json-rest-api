@@ -30,7 +30,6 @@ await api.use(RestApiKnexPlugin, { knex });
 // Countries table
 await api.addResource('countries', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 100 },
     code: { type: 'string', max: 2, unique: true }, // ISO country code
   },
@@ -46,7 +45,6 @@ await api.resources.countries.createKnexTable()
 // Publishers table
 await api.addResource('publishers', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 200 },
     country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
@@ -59,7 +57,6 @@ await api.resources.publishers.createKnexTable()
 // Authors table
 await api.addResource('authors', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 200 },
   },
   relationships: {
@@ -71,7 +68,6 @@ await api.resources.authors.createKnexTable()
 // Books table
 await api.addResource('books', {
   schema: {
-    id: { type: 'id' },
     title: { type: 'string', required: true, max: 300 },
     country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
     publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
@@ -85,7 +81,6 @@ await api.resources.books.createKnexTable()
 // Book-Authors pivot table (many-to-many relationship)
 await api.addResource('book_authors', {
   schema: {
-    id: { type: 'id' },
     book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
     author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
   }
