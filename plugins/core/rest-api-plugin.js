@@ -125,12 +125,16 @@ export const RestApiPlugin = {
 
       // The scope-specific ones
       vars.sortableFields = scopeOptions.sortableFields || [];
-      vars.defaultSort = scopeOptions.defaultSort || null;   
-      
+      vars.defaultSort = scopeOptions.defaultSort || null;     
+
       // The general ones that are also set at api level, but overrideable
       if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit
       if (typeof scopeOptions.queryMaxLimit !== 'undefined') vars.queryMaxLimit = scopeOptions.queryMaxLimit
+      if (typeof scopeOptions.includeDepthLimit !== 'undefined') vars.includeDepthLimit = scopeOptions.includeDepthLimit
+      if (typeof scopeOptions.resourceUrlPrefix !== 'undefined') vars.resourceUrlPrefix = scopeOptions.resourceUrlPrefix
+      if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts
       
+
       // Add validation for query limits
       if (vars.queryDefaultLimit && vars.queryMaxLimit) {
         if (vars.queryDefaultLimit > vars.queryMaxLimit) {
@@ -164,7 +168,10 @@ export const RestApiPlugin = {
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
- 
+    vars.resourceUrlPrefix = restApiOptions.resourceUrlPrefix || ''
+    vars.enablePaginationCounts = restApiOptions.enablePaginationCounts || true
+
+
     // New simplified settings
     vars.simplifiedTransport = restApiOptions.simplifiedTransport !== undefined 
       ? restApiOptions.simplifiedTransport 

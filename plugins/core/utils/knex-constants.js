@@ -15,7 +15,7 @@ export const ROW_NUMBER_KEY = '__$jsonrestapi_rn$__';
 export const DEFAULT_QUERY_LIMIT = 20;
 export const DEFAULT_MAX_QUERY_LIMIT = 100;
 export const DEFAULT_MAX_INCLUDE_LIMIT = 1000;
-export const DEFAULT_INCLUDE_DEPTH_LIMIT = 3;
+export const DEFAULT_INCLUDE_DEPTH_LIMIT = 3
 
 
 // Schema handling helpers
