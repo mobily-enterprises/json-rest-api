@@ -192,8 +192,30 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
         }
       }
 
-      // TODO: Handle hasMany relationships if needed
-      // This would require queries to get counts or related IDs
+      // Process hasMany relationships
+      for (const [relName, relDef] of Object.entries(relationships)) {
+        if (relDef.hasMany) {
+          // Add empty relationship data - will be populated if explicitly included
+          record[RELATIONSHIP_METADATA_KEY][relName] = { data: [] };
+        }
+      }
+      
+      // Process belongsToPolymorphic relationships from schema
+      for (const [fieldName, fieldDef] of Object.entries(schema)) {
+        if (fieldDef.belongsToPolymorphic && fieldDef.as) {
+          const { typeField, idField } = fieldDef.belongsToPolymorphic;
+          const type = record[typeField];
+          const id = record[idField];
+          
+          if (type && id) {
+            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = {
+              data: { type, id: String(id) }
+            };
+          } else {
+            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = { data: null };
+          }
+        }
+      }
     });
   } catch (error) {
     // Log error with context and re-throw
@@ -588,6 +610,16 @@ export const loadHasMany = async (scope, deps) => {
         });
       
       record[RELATIONSHIPS_KEY][includeName] = { data: relData };
+      
+      // Update the record in the included Map if it exists
+      const recordKey = `${scopeName}:${record.id}`;
+      if (included.has(recordKey)) {
+        const existingRecord = included.get(recordKey);
+        if (!existingRecord.relationships) {
+          existingRecord.relationships = {};
+        }
+        existingRecord.relationships[includeName] = { data: relData };
+      }
     });
     
     // Step 8: Process nested includes if any
@@ -731,6 +763,16 @@ export const loadHasMany = async (scope, deps) => {
       });
       
       record[RELATIONSHIPS_KEY][includeName] = { data: relData };
+      
+      // Update the record in the included Map if it exists
+      const recordKey = `${scopeName}:${record.id}`;
+      if (included.has(recordKey)) {
+        const existingRecord = included.get(recordKey);
+        if (!existingRecord.relationships) {
+          existingRecord.relationships = {};
+        }
+        existingRecord.relationships[includeName] = { data: relData };
+      }
     });
     
     // Process nested includes
