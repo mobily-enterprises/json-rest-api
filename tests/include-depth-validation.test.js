@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import knexLib from 'knex';
-import { createBasicApi } from './fixtures/api-configs.js';
+import { createBasicApi, createLimitedDepthApi } from './fixtures/api-configs.js';
 import { cleanTables } from './helpers/test-utils.js';
 
 // Create Knex instance for tests
@@ -198,12 +198,44 @@ describe('Include Depth Validation', () => {
 
   describe('Custom depth limits', () => {
     it('should respect custom includeDepthLimit configuration', async () => {
-      // Create API with depth limit of 2
-      const limitedApi = await createBasicApi(knex, {
-        apiName: 'limited-depth-api',
-        skipTableCreation: true,  // Tables already exist from main API
-        'rest-api': {
-          includeDepthLimit: 2
+      // Create API with depth limit of 2 and different table names
+      const limitedApi = await createLimitedDepthApi(knex);
+
+      // Set up test data for limited API
+      await cleanTables(knex, [
+        'limited_countries', 'limited_publishers', 'limited_authors', 'limited_books', 'limited_book_authors'
+      ]);
+
+      const country = await limitedApi.resources.countries.post({
+        inputRecord: {
+          data: {
+            type: 'countries',
+            attributes: { name: 'Limited Country', code: 'LC' }
+          }
+        }
+      });
+
+      const publisher = await limitedApi.resources.publishers.post({
+        inputRecord: {
+          data: {
+            type: 'publishers',
+            attributes: { name: 'Limited Publisher' },
+            relationships: {
+              country: { data: { type: 'countries', id: country.data.id } }
+            }
+          }
+        }
+      });
+
+      const author = await limitedApi.resources.authors.post({
+        inputRecord: {
+          data: {
+            type: 'authors',
+            attributes: { name: 'Limited Author' },
+            relationships: {
+              publisher: { data: { type: 'publishers', id: publisher.data.id } }
+            }
+          }
         }
       });
 

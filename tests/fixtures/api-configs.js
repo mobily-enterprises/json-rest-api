@@ -41,9 +41,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     },
     tableName: 'basic_countries'
   });
-  if (!pluginOptions.skipTableCreation) {
-    await api.resources.countries.createKnexTable();
-  }
+  await api.resources.countries.createKnexTable();
 
   // Publishers table
   await api.addResource('publishers', {
@@ -57,9 +55,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     },
     tableName: 'basic_publishers'
   });
-  if (!pluginOptions.skipTableCreation) {
-    await api.resources.publishers.createKnexTable();
-  }
+  await api.resources.publishers.createKnexTable();
 
   // Authors table
   await api.addResource('authors', {
@@ -72,9 +68,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     },
     tableName: 'basic_authors'
   });
-  if (!pluginOptions.skipTableCreation) {
-    await api.resources.authors.createKnexTable();
-  }
+  await api.resources.authors.createKnexTable();
 
   // Books table
   await api.addResource('books', {
@@ -89,9 +83,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     },
     tableName: 'basic_books'
   });
-  if (!pluginOptions.skipTableCreation) {
-    await api.resources.books.createKnexTable();
-  }
+  await api.resources.books.createKnexTable();
 
   // Book-Authors pivot table
   await api.addResource('book_authors', {
@@ -102,9 +94,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     },
     tableName: 'basic_book_authors'
   });
-  if (!pluginOptions.skipTableCreation) {
-    await api.resources.book_authors.createKnexTable();
-  }
+  await api.resources.book_authors.createKnexTable();
 
   return api;
 }
@@ -260,4 +250,96 @@ export async function createExtendedApi(knex) {
   return api;
 }
 
-// Additional API configurations would go here (reviews, inventory, series, minimal)
+/**
+ * Creates an API with limited include depth for testing depth validation
+ * Uses 'limited_' prefix for all tables to avoid conflicts
+ */
+export async function createLimitedDepthApi(knex) {
+  const api = new Api({
+    name: 'limited-depth-api',
+    version: '1.0.0'
+  });
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnFullRecord: {
+      post: true,
+      put: false,
+      patch: false,
+      allowRemoteOverride: false
+    },
+    sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
+    includeDepthLimit: 2  // Key difference: limit is 2 instead of default 3
+  });
+  
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Use different table names with 'limited_' prefix to avoid conflicts
+  await api.addResource('countries', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 100 },
+      code: { type: 'string', max: 2, unique: true }
+    },
+    relationships: {
+      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
+      books: { hasMany: 'books', foreignKey: 'country_id' }
+    },
+    tableName: 'limited_countries'
+  });
+  await api.resources.countries.createKnexTable();
+
+  await api.addResource('publishers', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
+    },
+    relationships: {
+      books: { hasMany: 'books', foreignKey: 'publisher_id' },
+      authors: { hasMany: 'authors', foreignKey: 'publisher_id' }
+    },
+    tableName: 'limited_publishers'
+  });
+  await api.resources.publishers.createKnexTable();
+
+  await api.addResource('authors', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher' }
+    },
+    relationships: {
+      books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
+    },
+    tableName: 'limited_authors'
+  });
+  await api.resources.authors.createKnexTable();
+
+  await api.addResource('books', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 300, search: true },
+      country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country', search: true },
+      publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
+    },
+    relationships: {
+      authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
+    },
+    tableName: 'limited_books'
+  });
+  await api.resources.books.createKnexTable();
+
+  await api.addResource('book_authors', {
+    schema: {
+      id: { type: 'id' },
+      book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
+      author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' }
+    },
+    tableName: 'limited_book_authors'
+  });
+  await api.resources.book_authors.createKnexTable();
+
+  return api;
+}

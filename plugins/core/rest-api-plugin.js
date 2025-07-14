@@ -13,7 +13,7 @@ import {
 import { validatePolymorphicRelationships } from './lib/scope-validations.js';
 import { transformSimplifiedToJsonApi, transformJsonApiToSimplified, transformSingleJsonApiToSimplified } from './lib/simplified-helpers.js';
 import { processRelationships } from './lib/relationship-processor.js';
-import { updateManyToManyRelationship, deleteExistingPivotRecords, createPivotRecords } from './lib/many-to-many-manipulations.js';
+import { updateManyToManyRelationship, createPivotRecords } from './lib/many-to-many-manipulations.js';
 import { createDefaultDataHelpers } from './lib/default-data-helpers.js';
 import { compileSchemas } from './lib/compile-schemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
@@ -1613,18 +1613,24 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Validate pivot resource exists
         await validatePivotResource(scopes, relDef, relName);
         
-        // Delete existing pivot records (only for updates, not creates)
+        // Use smart sync for updates (like industry standard ORMs)
         if (context.isUpdate) {
-          // Clear all existing relationships for this resource from the pivot table
-          // Example: Deletes all records from article_tags where article_id = 100
-          await deleteExistingPivotRecords(api, context.id, relDef, context.transaction);
-        }
-        
-        // Create new pivot records
-        if (relData.length > 0) {
-          // Create fresh pivot records for the new relationships
-          // Example: Creates new article_tags records for the provided tag IDs
-          await createPivotRecords(api, context.id, relDef, relData, context.transaction);
+          // Update many-to-many relationships using intelligent synchronization
+          // This preserves existing pivot data while efficiently updating relationships
+          await updateManyToManyRelationship(null, {
+            api,
+            context: {
+              resourceId: context.id,
+              relDef,
+              relData,
+              transaction: context.transaction
+            }
+          });
+        } else {
+          // For new records, just create the pivot records
+          if (relData.length > 0) {
+            await createPivotRecords(api, context.id, relDef, relData, context.transaction);
+          }
         }
       }
    

@@ -22,22 +22,16 @@ X (8) Check that limit/default order is maintained in sub queries in dataQuery
 
 X (10) Query Depth Protection - Prevent malicious deep includes - Max depth limit for ?include=author.articles.author...
 
-  -------------------------------------------------
+X (11) - Auto-format dates to ISO 8601
 
-(11)
-- Auto-format dates to ISO 8601
+X (12) - Boolean coercion from SQLite
 
-(12)
-- Boolean coercion from SQLite
-
-(14)
-Check if post and put logic when zapping are correct
-
-
------------------------------------------------
+X (14) Check if post and put logic when zapping are correct
 
 (13) 
 Link and meta info in returned document
+
+-----------------------------------------------
 
 (9)
 1. Relationship Endpoints - Separate endpoints for relationship manipulation
