@@ -795,8 +795,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     if (targetIds.length === 0) continue;
     
     // Get target table information
-    const targetSchema = scopes[targetType].vars.schemaInfo.schema;
-    const targetTable = targetSchema?.tableName || targetType;
+    const targetSchemaInfo = scopes[targetType].vars.schemaInfo;
+    const targetTable = targetSchemaInfo?.tableName || targetType;
     
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetType];

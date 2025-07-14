@@ -196,13 +196,23 @@ export async function compileSchemas(scope, deps) {
     var searchSchemaObject = null;
   }
 
+  // Build schemaRelationships including polymorphic fields from schema
+  const schemaRelationships = { ...(scope.scopeOptions.relationships || {}) };
+  
+  // Extract polymorphic relationships from schema fields
+  for (const [fieldName, fieldDef] of Object.entries(schemaContext.schema)) {
+    if (fieldDef.belongsToPolymorphic && fieldDef.as) {
+      schemaRelationships[fieldDef.as] = fieldDef;
+    }
+  }
+
   // Cache everything
   scope.vars.schemaInfo = {
     schema: schemaObject,
     schemaStructure: schemaContext.schema,
     computed: computed,
     searchSchema: searchSchemaObject,
-    schemaRelationships: scope.scopeOptions.relationships || {},
+    schemaRelationships: schemaRelationships,
     tableName: scope.scopeOptions.tableName || scopeName,
     idProperty: scope.scopeOptions.idProperty || scope.vars.idProperty
   };  

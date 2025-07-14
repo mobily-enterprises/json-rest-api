@@ -148,7 +148,11 @@ export async function createExtendedApi(knex) {
       active: { type: 'boolean', default: true }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' }
+      books: { hasMany: 'books', foreignKey: 'publisher_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
     },
     tableName: 'ext_publishers'
   });
@@ -160,11 +164,15 @@ export async function createExtendedApi(knex) {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
       birth_date: { type: 'date' },
-      biography: { type: 'text' },
+      biography: { type: 'string', max: 5000 },
       nationality_id: { type: 'number', belongsTo: 'countries', as: 'nationality' }
     },
     relationships: {
-      books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
+      books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
     },
     tableName: 'ext_authors'
   });
@@ -184,7 +192,11 @@ export async function createExtendedApi(knex) {
       publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
     },
     relationships: {
-      authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
+      authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
     },
     tableName: 'ext_books'
   });
@@ -202,6 +214,34 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_book_authors'
   });
   await api.resources.book_authors.createKnexTable();
+
+  // Polymorphic reviews (can go on authors, books and publishers)
+  await api.addResource('reviews', {
+    schema: {
+      id: { type: 'id' },
+      rating: { type: 'number', required: true, min: 1, max: 5 },
+      title: { type: 'string', max: 200 },
+      content: { type: 'string', required: true, max: 5000 },
+      reviewer_name: { type: 'string', required: true, max: 100 },
+      review_date: { type: 'datetime', default: 'now()' },
+      helpful_count: { type: 'number', default: 0 },
+      reviewable_type: { type: 'string', required: true },
+      reviewable_id: { type: 'number', required: true },
+      // Define the polymorphic field in schema
+      reviewable: {
+        belongsToPolymorphic: {
+          types: ['books', 'authors', 'publishers'],
+          typeField: 'reviewable_type',
+          idField: 'reviewable_id'
+        },
+        as: 'reviewable'
+      }
+    },
+    relationships: {},
+    tableName: 'ext_reviews'
+  });
+  await api.resources.reviews.createKnexTable();
+
 
   return api;
 }
