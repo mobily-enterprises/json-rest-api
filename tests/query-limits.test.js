@@ -85,7 +85,7 @@ describe('Query Limits and Include Limits', () => {
           through: 'book_authors', 
           foreignKey: 'author_id', 
           otherKey: 'book_id',
-          sideLoadMany: true,  // Enable sideloading for many-to-many
+          canSideLoadMany: true,  // Enable sideloading for many-to-many
           include: {
             limit: 3,  // Explicit limit for testing
             strategy: 'window'
@@ -108,7 +108,7 @@ describe('Query Limits and Include Limits', () => {
           through: 'book_authors', 
           foreignKey: 'book_id', 
           otherKey: 'author_id',
-          sideLoadMany: true  // Enable sideloading for many-to-many
+          canSideLoadMany: true  // Enable sideloading for many-to-many
         },
         reviews: { hasMany: 'reviews', via: 'reviewable' }
       }

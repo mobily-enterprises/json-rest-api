@@ -78,7 +78,7 @@ await api.addResource('books', {
     publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', canSideLoadMany: true },
   }
 });
 await api.resources.books.createKnexTable()

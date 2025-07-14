@@ -1918,7 +1918,7 @@ DB_NAME=myapp_db
 <h5 id="for-hasmany-relationships">For hasMany Relationships</h5>
 
 <ul>
-  <li><strong><code class="language-plaintext highlighter-rouge">sideLoadMany</code></strong> (default: <code class="language-plaintext highlighter-rouge">false</code>) - Controls whether related resources can be included</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">canSideLoadMany</code></strong> (default: <code class="language-plaintext highlighter-rouge">false</code>) - Controls whether related resources can be included</li>
   <li><strong><code class="language-plaintext highlighter-rouge">sideSearchMany</code></strong> (default: <code class="language-plaintext highlighter-rouge">false</code>) - Controls whether you can filter by related resources</li>
 </ul>
 
@@ -1931,7 +1931,7 @@ DB_NAME=myapp_db
     <span class="na">books</span><span class="p">:</span> <span class="p">{</span>
       <span class="na">hasMany</span><span class="p">:</span> <span class="dl">'</span><span class="s1">books</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">foreignKey</span><span class="p">:</span> <span class="dl">'</span><span class="s1">author_id</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>    <span class="c1">// Must be explicitly enabled</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>    <span class="c1">// Must be explicitly enabled</span>
       <span class="na">sideSearchMany</span><span class="p">:</span> <span class="kc">true</span>   <span class="c1">// Must be explicitly enabled</span>
     <span class="p">}</span>
   <span class="p">}</span>
@@ -1944,7 +1944,7 @@ DB_NAME=myapp_db
 
 <h5 id="for-many-to-many-relationships">For Many-to-Many Relationships</h5>
 
-<p>Many-to-many relationships using <code class="language-plaintext highlighter-rouge">hasMany</code> with <code class="language-plaintext highlighter-rouge">through</code> also use <code class="language-plaintext highlighter-rouge">sideLoadMany</code>:</p>
+<p>Many-to-many relationships using <code class="language-plaintext highlighter-rouge">hasMany</code> with <code class="language-plaintext highlighter-rouge">through</code> also use <code class="language-plaintext highlighter-rouge">canSideLoadMany</code>:</p>
 
 <div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nx">api</span><span class="p">.</span><span class="nx">addResource</span><span class="p">(</span><span class="dl">'</span><span class="s1">books</span><span class="dl">'</span><span class="p">,</span> <span class="p">{</span>
   <span class="na">schema</span><span class="p">:</span> <span class="p">{</span>
@@ -1957,7 +1957,7 @@ DB_NAME=myapp_db
       <span class="na">through</span><span class="p">:</span> <span class="dl">'</span><span class="s1">book_tags</span><span class="dl">'</span><span class="p">,</span>    <span class="c1">// Pivot table</span>
       <span class="na">foreignKey</span><span class="p">:</span> <span class="dl">'</span><span class="s1">book_id</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">otherKey</span><span class="p">:</span> <span class="dl">'</span><span class="s1">tag_id</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span>       <span class="c1">// Enable including tags</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span>       <span class="c1">// Enable including tags</span>
     <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">});</span>
@@ -1970,7 +1970,7 @@ DB_NAME=myapp_db
 
 <ol>
   <li>
-    <p><strong>Performance Consideration</strong>: hasMany relationships have <code class="language-plaintext highlighter-rouge">sideLoadMany</code> disabled by default because including many related resources can impact performance. Enable it only when needed.</p>
+    <p><strong>Performance Consideration</strong>: hasMany relationships have <code class="language-plaintext highlighter-rouge">canSideLoadMany</code> disabled by default because including many related resources can impact performance. Enable it only when needed.</p>
   </li>
   <li><strong>Nested Includes</strong>: You can include nested relationships using dot notation:
     <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GET /api/books/1?include=author.company,reviews.reviewer.department
@@ -2054,7 +2054,7 @@ DB_NAME=myapp_db
       <span class="na">hasMany</span><span class="p">:</span> <span class="dl">'</span><span class="s1">book_authors</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">foreignKey</span><span class="p">:</span> <span class="dl">'</span><span class="s1">book_id</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">as</span><span class="p">:</span> <span class="dl">'</span><span class="s1">authors</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
     <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">});</span>
@@ -2071,7 +2071,7 @@ DB_NAME=myapp_db
       <span class="na">hasMany</span><span class="p">:</span> <span class="dl">'</span><span class="s1">book_authors</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">foreignKey</span><span class="p">:</span> <span class="dl">'</span><span class="s1">author_id</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">as</span><span class="p">:</span> <span class="dl">'</span><span class="s1">books</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
     <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">});</span>
@@ -2310,7 +2310,7 @@ curl <span class="s2">"http://localhost:3000/api/people/1?include=books.book"</s
       <span class="na">hasMany</span><span class="p">:</span> <span class="dl">'</span><span class="s1">comments</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">via</span><span class="p">:</span> <span class="dl">'</span><span class="s1">commentable</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">as</span><span class="p">:</span> <span class="dl">'</span><span class="s1">comments</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
     <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">});</span>
@@ -2327,7 +2327,7 @@ curl <span class="s2">"http://localhost:3000/api/people/1?include=books.book"</s
       <span class="na">hasMany</span><span class="p">:</span> <span class="dl">'</span><span class="s1">comments</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">via</span><span class="p">:</span> <span class="dl">'</span><span class="s1">commentable</span><span class="dl">'</span><span class="p">,</span>
       <span class="na">as</span><span class="p">:</span> <span class="dl">'</span><span class="s1">comments</span><span class="dl">'</span><span class="p">,</span>
-      <span class="na">sideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
+      <span class="na">canSideLoadMany</span><span class="p">:</span> <span class="kc">true</span>
     <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">});</span>

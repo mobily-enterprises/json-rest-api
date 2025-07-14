@@ -93,7 +93,7 @@ await api.addResource('books', {
     metadata: { type: 'object', default: {} }
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', canSideLoadMany: true },
     reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
@@ -410,7 +410,7 @@ await apiSimplified.addResource('books', {
     metadata: { type: 'object', default: {} }
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', canSideLoadMany: true },
     reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
@@ -576,7 +576,7 @@ await apiReturnControl.addResource('books', {
     metadata: { type: 'object', default: {} }
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', canSideLoadMany: true },
   }
 });
 await apiReturnControl.resources.books.createKnexTable()

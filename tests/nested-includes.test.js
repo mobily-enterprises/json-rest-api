@@ -78,7 +78,7 @@ describe('Nested Include Operations', () => {
           through: 'book_authors', 
           foreignKey: 'author_id', 
           otherKey: 'book_id',
-          sideLoadMany: true,
+          canSideLoadMany: true,
           include: {
             limit: 5,
             strategy: 'window'
@@ -101,7 +101,7 @@ describe('Nested Include Operations', () => {
           through: 'book_authors', 
           foreignKey: 'book_id', 
           otherKey: 'author_id',
-          sideLoadMany: true
+          canSideLoadMany: true
         },
         reviews: { 
           hasMany: 'reviews', 

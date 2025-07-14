@@ -56,7 +56,7 @@ In Chapter 1, we also added reverse relationships to each parent resource so the
 ```javascript
 // In the books resource definition from Chapter 1:
 relationships: {
-  authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+  authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', canSideLoadMany: true },
   reviews: { hasMany: 'reviews', via: 'reviewable' }
 }
 
@@ -77,7 +77,7 @@ The `via: 'reviewable'` tells the system to use the polymorphic relationship def
 
 ### Step 3: Understanding Side-Loading Configuration
 
-In the Chapter 1 setup, we didn't add `sideLoadMany: true` to the reverse relationships. This means reviews are not automatically included when fetching books, authors, or publishers. If you want automatic inclusion, you would modify the relationships like this:
+In the Chapter 1 setup, we didn't add `canSideLoadMany: true` to the reverse relationships. This means reviews are not automatically included when fetching books, authors, or publishers. If you want automatic inclusion, you would modify the relationships like this:
 
 ```javascript
 // To enable automatic inclusion of reviews:
@@ -86,12 +86,12 @@ relationships: {
   reviews: { 
     hasMany: 'reviews', 
     via: 'reviewable',
-    sideLoadMany: true  // Automatically include reviews in responses
+    canSideLoadMany: true  // Automatically include reviews in responses
   }
 }
 ```
 
-With `sideLoadMany: true`, when you fetch a book, its reviews will automatically be included in the response without needing to explicitly request them with `?include=reviews`. However, for performance reasons, the default setup in Chapter 1 keeps this as `false`, requiring explicit inclusion.
+With `canSideLoadMany: true`, when you fetch a book, its reviews will automatically be included in the response without needing to explicitly request them with `?include=reviews`. However, for performance reasons, the default setup in Chapter 1 keeps this as `false`, requiring explicit inclusion.
 
 ## Using Polymorphic Relationships
 
@@ -204,7 +204,7 @@ This will return reviews with their parent resources (books, authors, or publish
 
 You can also query from the parent side:
 
-**Note**: If you configured `sideLoadMany: true` on the reverse relationships, reviews will be automatically included. Otherwise, you need to explicitly request them with `include`:
+**Note**: If you configured `canSideLoadMany: true` on the reverse relationships, reviews will be automatically included. Otherwise, you need to explicitly request them with `include`:
 
 ```javascript
 // Get a book with all its reviews
@@ -320,14 +320,14 @@ const results = await api.resources.reviews.query({
 
 5. **Side-loading Configuration**: 
    - For polymorphic `belongsTo`: `sideLoadSingle` defaults to `true`, so the parent is automatically included
-   - For reverse `hasMany` relationships: Set `sideLoadMany: true` if you want reviews automatically included
+   - For reverse `hasMany` relationships: Set `canSideLoadMany: true` if you want reviews automatically included
    - Example with side-loading:
      ```javascript
-     // With sideLoadMany: true on books.reviews
+     // With canSideLoadMany: true on books.reviews
      const book = await api.resources.books.get({ id: '1' });
      // Response automatically includes reviews without ?include=reviews
      
-     // With default sideLoadMany: false
+     // With default canSideLoadMany: false
      const book = await api.resources.books.get({ id: '1' });
      // Reviews not included unless you add ?include=reviews
      ```
@@ -492,7 +492,7 @@ await api.addResource('books', {
     reviews: { 
       hasMany: 'reviews', 
       via: 'reviewable',
-      sideLoadMany: false,  // Don't auto-include
+      canSideLoadMany: false,  // Don't auto-include
       include: {
         limit: 5,           // Show 5 reviews per book
         orderBy: ['-review_rating', '-id'],  // Best rated first

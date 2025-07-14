@@ -1765,7 +1765,7 @@ api.addResource('books', {
 
 ##### For hasMany Relationships
 
-- **`sideLoadMany`** (default: `false`) - Controls whether related resources can be included
+- **`canSideLoadMany`** (default: `false`) - Controls whether related resources can be included
 - **`sideSearchMany`** (default: `false`) - Controls whether you can filter by related resources
 
 ```javascript
@@ -1778,7 +1778,7 @@ api.addResource('authors', {
     books: {
       hasMany: 'books',
       foreignKey: 'author_id',
-      sideLoadMany: true,    // Must be explicitly enabled
+      canSideLoadMany: true,    // Must be explicitly enabled
       sideSearchMany: true   // Must be explicitly enabled
     }
   }
@@ -1791,7 +1791,7 @@ api.addResource('authors', {
 
 ##### For Many-to-Many Relationships
 
-Many-to-many relationships using `hasMany` with `through` also use `sideLoadMany`:
+Many-to-many relationships using `hasMany` with `through` also use `canSideLoadMany`:
 
 ```javascript
 api.addResource('books', {
@@ -1805,7 +1805,7 @@ api.addResource('books', {
       through: 'book_tags',    // Pivot table
       foreignKey: 'book_id',
       otherKey: 'tag_id',
-      sideLoadMany: true       // Enable including tags
+      canSideLoadMany: true       // Enable including tags
     }
   }
 });
@@ -1816,7 +1816,7 @@ api.addResource('books', {
 
 #### Important Notes on Side-Loading
 
-1. **Performance Consideration**: hasMany relationships have `sideLoadMany` disabled by default because including many related resources can impact performance. Enable it only when needed.
+1. **Performance Consideration**: hasMany relationships have `canSideLoadMany` disabled by default because including many related resources can impact performance. Enable it only when needed.
 
 2. **Nested Includes**: You can include nested relationships using dot notation:
    ```
@@ -1903,7 +1903,7 @@ api.addResource('books', {
       hasMany: 'book_authors',
       foreignKey: 'book_id',
       as: 'authors',
-      sideLoadMany: true
+      canSideLoadMany: true
     }
   }
 });
@@ -1920,7 +1920,7 @@ api.addResource('people', {
       hasMany: 'book_authors',
       foreignKey: 'author_id',
       as: 'books',
-      sideLoadMany: true
+      canSideLoadMany: true
     }
   }
 });
@@ -2162,7 +2162,7 @@ api.addResource('books', {
       hasMany: 'comments',
       via: 'commentable',
       as: 'comments',
-      sideLoadMany: true
+      canSideLoadMany: true
     }
   }
 });
@@ -2179,7 +2179,7 @@ api.addResource('articles', {
       hasMany: 'comments',
       via: 'commentable',
       as: 'comments',
-      sideLoadMany: true
+      canSideLoadMany: true
     }
   }
 });
