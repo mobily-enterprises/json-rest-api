@@ -1,0 +1,353 @@
+# Chapter 8: Polymorphic Relationships
+
+In real-world applications, you often need to create relationships where a single entity can belong to multiple different types of parents. For example, a comment might belong to either a blog post or a video, or a review might be for a book, an author, or a publisher. This is where **polymorphic relationships** come in.
+
+## What Are Polymorphic Relationships?
+
+A polymorphic relationship allows a model to belong to more than one other model using a single association. Instead of creating separate tables for each type of relationship (like `book_reviews`, `author_reviews`, `publisher_reviews`), you can have a single `reviews` table that can reference any of these parent types.
+
+## Understanding the Setup from Chapter 1
+
+In Chapter 1's initial setup, we already included a `reviews` table that demonstrates polymorphic relationships. Let's examine how it was configured to understand the key concepts.
+
+### Step 1: The Polymorphic Resource Definition
+
+Here's how the `reviews` resource was defined in our initial setup:
+
+```javascript
+// Reviews table (polymorphic - can review books, authors, or publishers)
+await api.addResource('reviews', {
+  schema: {
+    id: { type: 'id' },
+    review_author: { type: 'string', required: true, max: 100 },
+    review_text: { type: 'string', required: true, max: 5000 },
+    review_rating: { type: 'number', required: true, min: 1, max: 5 },
+    reviewable_type: { type: 'string', required: true },
+    reviewable_id: { type: 'number', required: true },
+    // Define the polymorphic field
+    reviewable: {
+      belongsToPolymorphic: {
+        types: ['books', 'authors', 'publishers'],
+        typeField: 'reviewable_type',
+        idField: 'reviewable_id'
+      },
+      as: 'reviewable'
+    }
+  }
+});
+await api.resources.reviews.createKnexTable()
+```
+
+*(This was already set up in Chapter 1 - we're examining it here to understand how it works)*
+
+Key points about this polymorphic definition:
+- `reviewable_type` and `reviewable_id` are the actual database fields that store the parent type and ID
+- The `reviewable` field is a special schema field that defines the polymorphic relationship
+- `belongsToPolymorphic` specifies:
+  - `types`: Array of resource types that can be reviewed
+  - `typeField`: The field that stores the parent type (e.g., 'books', 'authors')
+  - `idField`: The field that stores the parent's ID
+- `as: 'reviewable'` creates the relationship name for API access
+
+### Step 2: The Reverse Relationships
+
+In Chapter 1, we also added reverse relationships to each parent resource so they know they can have reviews:
+
+```javascript
+// In the books resource definition from Chapter 1:
+relationships: {
+  authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+  reviews: { hasMany: 'reviews', via: 'reviewable' }
+}
+
+// In the authors resource definition from Chapter 1:
+relationships: {
+  books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
+  reviews: { hasMany: 'reviews', via: 'reviewable' }
+}
+
+// In the publishers resource definition from Chapter 1:
+relationships: {
+  books: { hasMany: 'books', foreignKey: 'publisher_id' },
+  reviews: { hasMany: 'reviews', via: 'reviewable' }
+}
+```
+
+The `via: 'reviewable'` tells the system to use the polymorphic relationship defined in the reviews table.
+
+### Step 3: Understanding Side-Loading Configuration
+
+In the Chapter 1 setup, we didn't add `sideLoadMany: true` to the reverse relationships. This means reviews are not automatically included when fetching books, authors, or publishers. If you want automatic inclusion, you would modify the relationships like this:
+
+```javascript
+// To enable automatic inclusion of reviews:
+relationships: {
+  // ... existing relationships ...
+  reviews: { 
+    hasMany: 'reviews', 
+    via: 'reviewable',
+    sideLoadMany: true  // Automatically include reviews in responses
+  }
+}
+```
+
+With `sideLoadMany: true`, when you fetch a book, its reviews will automatically be included in the response without needing to explicitly request them with `?include=reviews`. However, for performance reasons, the default setup in Chapter 1 keeps this as `false`, requiring explicit inclusion.
+
+## Using Polymorphic Relationships
+
+### Creating Reviews
+
+You can create reviews for different resource types using relationships:
+
+```javascript
+// Create a book review
+const bookReview = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        review_author: 'John Doe',
+        review_text: 'This is an excellent book about JavaScript!',
+        review_rating: 5
+      },
+      relationships: {
+        reviewable: {
+          data: { type: 'books', id: '1' }
+        }
+      }
+    }
+  }
+});
+
+// Create an author review
+const authorReview = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        review_author: 'Jane Smith',
+        review_text: 'Great writing style, love all their books!',
+        review_rating: 4
+      },
+      relationships: {
+        reviewable: {
+          data: { type: 'authors', id: '2' }
+        }
+      }
+    }
+  }
+});
+```
+
+**CURL Examples:**
+
+```bash
+# Create a book review
+curl -X POST -H "Content-Type: application/vnd.api+json" \
+-d '{
+  "data": {
+    "type": "reviews",
+    "attributes": {
+      "review_author": "John Doe",
+      "review_text": "This is an excellent book about JavaScript!",
+      "review_rating": 5
+    },
+    "relationships": {
+      "reviewable": {
+        "data": { "type": "books", "id": "1" }
+      }
+    }
+  }
+}' http://localhost:3000/api/reviews
+
+# Create a publisher review
+curl -X POST -H "Content-Type: application/vnd.api+json" \
+-d '{
+  "data": {
+    "type": "reviews",
+    "attributes": {
+      "review_author": "Industry Expert",
+      "review_text": "They publish high quality technical books.",
+      "review_rating": 4
+    },
+    "relationships": {
+      "reviewable": {
+        "data": { "type": "publishers", "id": "3" }
+      }
+    }
+  }
+}' http://localhost:3000/api/reviews
+```
+
+### Querying Reviews with Includes
+
+You can query reviews and include the polymorphic parent:
+
+```javascript
+// Get all reviews with their reviewable resources
+const reviewsWithParents = await api.resources.reviews.query({
+  queryParams: {
+    include: ['reviewable']
+  }
+});
+```
+
+**CURL Example:**
+
+```bash
+curl -X GET "http://localhost:3000/api/reviews?include=reviewable"
+```
+
+This will return reviews with their parent resources (books, authors, or publishers) included in the response.
+
+### Querying Parents with Their Reviews
+
+You can also query from the parent side:
+
+**Note**: If you configured `sideLoadMany: true` on the reverse relationships, reviews will be automatically included. Otherwise, you need to explicitly request them with `include`:
+
+```javascript
+// Get a book with all its reviews
+const bookWithReviews = await api.resources.books.get({
+  id: '1',
+  queryParams: {
+    include: ['reviews']
+  }
+});
+
+// Get all authors with their reviews
+const authorsWithReviews = await api.resources.authors.query({
+  queryParams: {
+    include: ['reviews']
+  }
+});
+```
+
+**CURL Examples:**
+
+```bash
+# Get a specific book with its reviews
+curl -X GET "http://localhost:3000/api/books/1?include=reviews"
+
+# Get all publishers with their reviews
+curl -X GET "http://localhost:3000/api/publishers?include=reviews"
+```
+
+## Advanced Polymorphic Features
+
+### Filtering by Parent Type
+
+You can filter reviews by their parent type:
+
+```javascript
+// Get only book reviews
+const bookReviews = await api.resources.reviews.query({
+  queryParams: {
+    filter: {
+      reviewable_type: 'books'
+    }
+  }
+});
+```
+
+**CURL Example:**
+
+```bash
+curl -X GET "http://localhost:3000/api/reviews?filter[reviewable_type]=books"
+```
+
+### Polymorphic Search Schemas
+
+You can create search schemas that work across polymorphic relationships:
+
+```javascript
+await api.addResource('reviews', {
+  schema: {
+    // ... schema definition ...
+  },
+  searchSchema: {
+    // Search by the title of the reviewed item
+    reviewableTitle: {
+      type: 'string',
+      filterUsing: 'like',
+      polymorphicField: 'reviewable',
+      targetFields: {
+        books: 'title',
+        authors: 'name',
+        publishers: 'name'
+      }
+    }
+  }
+});
+```
+
+This allows you to search reviews by the title/name of what was reviewed:
+
+```javascript
+// Find all reviews for items with "JavaScript" in their title/name
+const results = await api.resources.reviews.query({
+  queryParams: {
+    filter: {
+      reviewableTitle: 'JavaScript'
+    }
+  }
+});
+```
+
+## Best Practices
+
+1. **Consistent Naming**: Use clear, consistent names for polymorphic fields (e.g., `commentable`, `taggable`, `reviewable`)
+
+2. **Type Validation**: The system automatically validates that the parent type is one of the allowed types
+
+3. **Database Indexes**: Consider adding indexes on the type and ID fields for better query performance:
+   ```javascript
+   // In your database migration
+   table.index(['reviewable_type', 'reviewable_id']);
+   ```
+
+4. **Simplified Mode**: Polymorphic relationships work seamlessly in simplified mode:
+   ```javascript
+   // Creating a review in simplified mode
+   const review = await api.resources.reviews.post({
+     review_author: 'John Doe',
+     review_text: 'Great book!',
+     review_rating: 5,
+     reviewable_type: 'books',
+     reviewable_id: 1
+   });
+   ```
+
+5. **Side-loading Configuration**: 
+   - For polymorphic `belongsTo`: `sideLoadSingle` defaults to `true`, so the parent is automatically included
+   - For reverse `hasMany` relationships: Set `sideLoadMany: true` if you want reviews automatically included
+   - Example with side-loading:
+     ```javascript
+     // With sideLoadMany: true on books.reviews
+     const book = await api.resources.books.get({ id: '1' });
+     // Response automatically includes reviews without ?include=reviews
+     
+     // With default sideLoadMany: false
+     const book = await api.resources.books.get({ id: '1' });
+     // Reviews not included unless you add ?include=reviews
+     ```
+
+## Common Use Cases
+
+Polymorphic relationships are perfect for:
+- **Comments**: Comments on posts, videos, photos
+- **Tags**: Tagging multiple resource types
+- **Attachments**: Files attached to various entities
+- **Likes/Reactions**: Users liking different types of content
+- **Audit Logs**: Tracking changes across multiple models
+- **Notifications**: Notifications about different resource types
+
+## Summary
+
+Polymorphic relationships provide a powerful way to create flexible, reusable associations in your API. By understanding how to define and use them, you can build more maintainable and scalable applications without duplicating tables and logic for similar relationships.
+
+Remember:
+- Define the polymorphic field in the schema with `belongsToPolymorphic`
+- Add reverse relationships with `via` pointing to the polymorphic field
+- Use standard JSON:API relationship syntax for creating and querying
+- Take advantage of includes to fetch related data efficiently

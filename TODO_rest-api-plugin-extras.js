@@ -16,10 +16,10 @@ X (6) Have an option to hide fields (hidden: yes, normallyHidden: yes)
 
 X (7) Computed/Virtual fields. They must be in schema at all times but not always whole record available. Support in sparse fieldsets
   
--------------------------------------------------
 
 X (8) Check that limit/default order is maintained in sub queries in dataQuery
 
+-------------------------------------------------
 
 (10)
 Query Depth Protection - Prevent malicious deep includes
@@ -36,6 +36,7 @@ Query Depth Protection - Prevent malicious deep includes
 Check if post and put logic when zapping are correct
 
 
+-----------------------------------------------
 
 (13) 
 Link and meta info in returned document
@@ -50,7 +51,8 @@ Link and meta info in returned document
 Bulk operations
 
 
-
+(16)
+Websockets
 
 
 

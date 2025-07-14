@@ -59,7 +59,8 @@ await api.addResource('publishers', {
     country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' }
+    books: { hasMany: 'books', foreignKey: 'publisher_id' },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await api.resources.publishers.createKnexTable()
@@ -71,7 +72,8 @@ await api.addResource('authors', {
     name: { type: 'string', required: true, max: 200, search: true },
   },
   relationships: {
-    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
+    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await api.resources.authors.createKnexTable()
@@ -92,6 +94,7 @@ await api.addResource('books', {
   },
   relationships: {
     authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await api.resources.books.createKnexTable()
@@ -105,6 +108,28 @@ await api.addResource('book_authors', {
   }
 });
 await api.resources.book_authors.createKnexTable()
+
+// Reviews table (polymorphic - can review books, authors, or publishers)
+await api.addResource('reviews', {
+  schema: {
+    id: { type: 'id' },
+    review_author: { type: 'string', required: true, max: 100 },
+    review_text: { type: 'string', required: true, max: 5000 },
+    review_rating: { type: 'number', required: true, min: 1, max: 5 },
+    reviewable_type: { type: 'string', required: true },
+    reviewable_id: { type: 'number', required: true },
+    // Define the polymorphic field
+    reviewable: {
+      belongsToPolymorphic: {
+        types: ['books', 'authors', 'publishers'],
+        typeField: 'reviewable_type',
+        idField: 'reviewable_id'
+      },
+      as: 'reviewable'
+    }
+  }
+});
+await api.resources.reviews.createKnexTable()
 ```
 
 ### Database Options
@@ -353,7 +378,8 @@ await apiSimplified.addResource('publishers', {
     country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' }
+    books: { hasMany: 'books', foreignKey: 'publisher_id' },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await apiSimplified.resources.publishers.createKnexTable()
@@ -364,7 +390,8 @@ await apiSimplified.addResource('authors', {
     name: { type: 'string', required: true, max: 200, search: true },
   },
   relationships: {
-    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
+    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await apiSimplified.resources.authors.createKnexTable()
@@ -384,6 +411,7 @@ await apiSimplified.addResource('books', {
   },
   relationships: {
     authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id', sideLoadMany: true },
+    reviews: { hasMany: 'reviews', via: 'reviewable' }
   }
 });
 await apiSimplified.resources.books.createKnexTable()
@@ -396,6 +424,26 @@ await apiSimplified.addResource('book_authors', {
   }
 });
 await apiSimplified.resources.book_authors.createKnexTable()
+
+await apiSimplified.addResource('reviews', {
+  schema: {
+    id: { type: 'id' },
+    review_author: { type: 'string', required: true, max: 100 },
+    review_text: { type: 'string', required: true, max: 5000 },
+    review_rating: { type: 'number', required: true, min: 1, max: 5 },
+    reviewable_type: { type: 'string', required: true },
+    reviewable_id: { type: 'number', required: true },
+    reviewable: {
+      belongsToPolymorphic: {
+        types: ['books', 'authors', 'publishers'],
+        typeField: 'reviewable_type',
+        idField: 'reviewable_id'
+      },
+      as: 'reviewable'
+    }
+  }
+});
+await apiSimplified.resources.reviews.createKnexTable()
 
 // Example: Create a country in simplified mode
 const countryCanada = await apiSimplified.resources.countries.post({
