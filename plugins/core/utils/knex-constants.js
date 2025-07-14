@@ -11,6 +11,11 @@ export const RELATIONSHIPS_KEY = '_relationships';
 export const RELATIONSHIP_METADATA_KEY = '_relationshipMetadata';
 export const ROW_NUMBER_KEY = '_rn';
 
+// Default query limits
+export const DEFAULT_QUERY_LIMIT = 20;
+export const DEFAULT_MAX_QUERY_LIMIT = 100;
+export const DEFAULT_MAX_INCLUDE_LIMIT = 1000;
+
 // Schema handling helpers
 export const getSchemaStructure = (schema) => schema?.structure || schema || {};
 export const getIdProperty = (schemaInfo) => schemaInfo?.idProperty || 'id';

@@ -45,7 +45,8 @@
 import { getForeignKeyFields, buildFieldSelection } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js';
-import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY } from '../utils/knex-constants.js';
+import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, DEFAULT_QUERY_LIMIT } from '../utils/knex-constants.js';
+import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
 
 /**
  * Groups records by their polymorphic type for efficient batch loading
@@ -472,16 +473,31 @@ export const loadHasMany = async (scope, deps) => {
     // Step 4: For many-to-many with limits, we need a different approach
     let targetRecords;
 
-    if (relDef.include?.limit && relDef.include?.strategy === 'window') {
+    if (relDef.include?.strategy === 'window') {
       // For many-to-many with window functions, we need to limit per parent
       // This requires joining back through the pivot table
+      
+      // Get target scope vars for defaults
+      const targetVars = scopes[targetScope].vars || {};
+      
+      // Calculate effective limit with defaults
+      const effectiveLimit = relDef.include?.limit ?? targetVars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT;
+      
+      // Validate against max
+      if (targetVars.queryMaxLimit && effectiveLimit > targetVars.queryMaxLimit) {
+        throw new RestApiResourceError({
+          title: 'Include Limit Exceeds Maximum',
+          detail: `Requested include limit (${effectiveLimit}) exceeds queryMaxLimit (${targetVars.queryMaxLimit})`,
+          status: 400
+        });
+      }
       
       const windowQuery = knex
         .select(`${targetTable}.*`)
         .select(
           knex.raw(
             'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' + 
-            buildOrderByClause(relDef.include.orderBy || ['id']) + 
+            buildOrderByClause(relDef.include?.orderBy || ['id']) + 
             ') as ' + ROW_NUMBER_KEY,
             [foreignKey]
           )
@@ -494,7 +510,7 @@ export const loadHasMany = async (scope, deps) => {
       const limitedQuery = knex
         .select('*')
         .from(windowQuery.as('_windowed'))
-        .where(ROW_NUMBER_KEY, '<=', relDef.include.limit);
+        .where(ROW_NUMBER_KEY, '<=', effectiveLimit);
       
       targetRecords = await limitedQuery;
       
@@ -611,8 +627,8 @@ export const loadHasMany = async (scope, deps) => {
     let query;
     let usingWindowFunction = false;
     
-    // Check if we should use window functions
-    if (relDef.include?.strategy === 'window' && relDef.include?.limit) {
+    // Check if we should use window functions (now includes default limit check)
+    if (relDef.include?.strategy === 'window' && (relDef.include?.limit !== null && relDef.include?.limit !== false)) {
       try {
         // Try to build window function query
         query = buildWindowedIncludeQuery(
@@ -621,11 +637,12 @@ export const loadHasMany = async (scope, deps) => {
           foreignKey,
           mainIds,
           fieldSelectionInfo ? fieldSelectionInfo.fieldsToSelect : null,
-          relDef.include,
-          capabilities
+          relDef.include || {},
+          capabilities,
+          targetScopeObject.vars  // Pass target scope vars
         );
         usingWindowFunction = true;
-        log.debug('[INCLUDE] Using window function strategy for per-parent limits');
+        log.debug('[INCLUDE] Using window function strategy with limits');
       } catch (error) {
         // If window functions not supported, this will throw a clear error
         if (error.details?.requiredFeature === 'window_functions') {
@@ -645,11 +662,14 @@ export const loadHasMany = async (scope, deps) => {
         query = query.select(fieldSelectionInfo.fieldsToSelect);
       }
       
-      // Apply include configuration without window functions
-      if (relDef.include) {
-        const targetVars = scopes[targetScope].vars;
-        query = applyStandardIncludeConfig(query, relDef.include, targetVars, log);
-      }
+      // Apply standard config with defaults
+      const targetVars = scopes[targetScope].vars;
+      query = applyStandardIncludeConfig(
+        query,
+        relDef.include || {},
+        targetVars,
+        log
+      );
     }
     
     // Execute query

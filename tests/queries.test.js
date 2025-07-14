@@ -414,8 +414,8 @@ describe('Query Operations', () => {
       assert.equal(emptyPage.data.length, 0, 'Should return empty array for page beyond data');
     });
 
-    it('should respect maxPageSize limit', async () => {
-      // Assuming maxPageSize is 100 (from vars)
+    it('should respect queryMaxLimit limit', async () => {
+      // Assuming queryMaxLimit is 100 (from vars)
       const result = await basicApi.resources.books.query({
         queryParams: {
           page: { number: 1, size: 200 } // Request more than max
@@ -424,7 +424,7 @@ describe('Query Operations', () => {
       });
 
       validateJsonApiStructure(result, true);
-      assert(result.data.length <= 100, 'Should not exceed maxPageSize');
+      assert(result.data.length <= 100, 'Should not exceed queryMaxLimit');
     });
   });
 

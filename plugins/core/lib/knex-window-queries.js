@@ -1,5 +1,5 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js';
-import { ROW_NUMBER_KEY } from '../utils/knex-constants.js';
+import { ROW_NUMBER_KEY, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_MAX_INCLUDE_LIMIT } from '../utils/knex-constants.js';
 
 /**
  * Builds a window function query for limited includes
@@ -20,9 +20,22 @@ export const buildWindowedIncludeQuery = (
   parentIds,
   fieldsToSelect,
   includeConfig,
-  capabilities
+  capabilities,
+  scopeVars = {}
 ) => {
-  const { limit, orderBy = [] } = includeConfig;
+  const { orderBy = [] } = includeConfig;
+  
+  // Apply defaults for limit
+  const effectiveLimit = includeConfig.limit ?? scopeVars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT;
+  
+  // Validate against max
+  if (scopeVars.queryMaxLimit && effectiveLimit > scopeVars.queryMaxLimit) {
+    throw new RestApiResourceError({
+      title: 'Include Limit Exceeds Maximum',
+      detail: `Requested include limit (${effectiveLimit}) exceeds queryMaxLimit (${scopeVars.queryMaxLimit})`,
+      status: 400
+    });
+  }
   
   // Check if window functions are supported
   if (!capabilities.windowFunctions) {
@@ -64,7 +77,7 @@ export const buildWindowedIncludeQuery = (
   const query = knex
     .select('*')
     .from(subquery.as('_windowed'))
-    .where(ROW_NUMBER_KEY, '<=', limit);
+    .where(ROW_NUMBER_KEY, '<=', effectiveLimit);
   
   return query;
 };
@@ -90,7 +103,7 @@ export const buildOrderByClause = (orderBy) => {
  * Used for fallback or when window strategy not requested
  */
 export const applyStandardIncludeConfig = (query, includeConfig, scopeVars, log) => {
-  const { limit, orderBy = [] } = includeConfig;
+  const { orderBy = [] } = includeConfig;
   
   // Apply ordering
   orderBy.forEach(field => {
@@ -99,16 +112,29 @@ export const applyStandardIncludeConfig = (query, includeConfig, scopeVars, log)
     query = query.orderBy(column, desc ? 'desc' : 'asc');
   });
   
-  // Apply global limit (not per-parent)
-  if (limit) {
-    const effectiveLimit = Math.min(limit, scopeVars.maxIncludeLimit || 1000);
+  // Apply limit with defaults
+  const requestedLimit = includeConfig.limit;
+  const defaultLimit = scopeVars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT;
+  const limit = requestedLimit ?? defaultLimit;
+  
+  // Allow explicit null/false to mean no limit
+  if (limit !== null && limit !== false) {
+    const maxInclude = scopeVars.maxIncludeLimit || DEFAULT_MAX_INCLUDE_LIMIT;
+    const maxQuery = scopeVars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT;
+    const effectiveMax = Math.min(maxInclude, maxQuery);
+    const effectiveLimit = Math.min(limit, effectiveMax);
+    
     query = query.limit(effectiveLimit);
     
-    log.debug('Applied global include limit:', {
-      requested: limit,
+    log.debug('Applied include limit:', {
+      requested: requestedLimit,
+      default: defaultLimit,
       effective: effectiveLimit,
-      note: 'This is a global limit, not per-parent'
+      maxAllowed: effectiveMax,
+      note: requestedLimit !== undefined ? 'Using explicit limit' : 'Using default limit'
     });
+  } else {
+    log.debug('No limit applied to include query (explicitly disabled)');
   }
   
   return query;

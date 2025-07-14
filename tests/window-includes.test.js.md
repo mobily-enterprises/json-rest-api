@@ -30,8 +30,8 @@ describe('Window Function Includes', () => {
     });
 
     await api.use(RestApiPlugin, {
-      pageSize: 20,
-      maxPageSize: 100,
+      queryDefaultLimit: 20,
+      queryMaxLimit: 100,
       simplified: false
     });
 

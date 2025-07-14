@@ -11,7 +11,7 @@ import {
 } from './lib/knex-query-helpers.js';
 import { RestApiResourceError } from '../../lib/rest-api-errors.js';
 import { supportsWindowFunctions, getDatabaseInfo } from './lib/database-capabilities.js';
-import { ERROR_SUBTYPES } from './utils/knex-constants.js';
+import { ERROR_SUBTYPES, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './utils/knex-constants.js';
 
 
 export const RestApiKnexPlugin = {
@@ -263,8 +263,8 @@ export const RestApiKnexPlugin = {
       // Apply pagination directly (no hooks)
       if (queryParams.page) {
         const pageSize = Math.min(
-          queryParams.page.size || scope.vars.pageSize || 20,
-          scope.vars.maxPageSize || 100
+          queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT,
+          scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
         );
         const pageNumber = queryParams.page.number || 1;
         

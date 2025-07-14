@@ -18,6 +18,7 @@ import { createDefaultDataHelpers } from './lib/default-data-helpers.js';
 import { compileSchemas } from './lib/compile-schemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 import { getRequestedComputedFields, filterHiddenFields } from './lib/knex-field-helpers.js';
+import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './utils/knex-constants.js';
 
 
 const cascadeConfig = (settingName, sources, defaultValue) =>
@@ -87,18 +88,26 @@ export const RestApiPlugin = {
         }
         
         // Validate include configuration
-        if (relDef.include) {
-          if (relDef.include.limit && typeof relDef.include.limit !== 'number') {
+        if (relDef.include?.limit) {
+          if (typeof relDef.include.limit !== 'number') {
             throw new Error(
               `Invalid include limit for ${scopeName}.${relName}: limit must be a number`
             );
           }
-          
-          if (relDef.include.orderBy && !Array.isArray(relDef.include.orderBy)) {
+          // Check against queryMaxLimit if available
+          const maxLimit = scope.vars?.queryMaxLimit;
+          if (maxLimit && relDef.include.limit > maxLimit) {
             throw new Error(
-              `Invalid include orderBy for ${scopeName}.${relName}: orderBy must be an array`
+              `Invalid include limit for ${scopeName}.${relName}: ` +
+              `limit (${relDef.include.limit}) exceeds queryMaxLimit (${maxLimit})`
             );
           }
+        }
+        
+        if (relDef.include?.orderBy && !Array.isArray(relDef.include.orderBy)) {
+          throw new Error(
+            `Invalid include orderBy for ${scopeName}.${relName}: orderBy must be an array`
+          );
         }
       }
     });
@@ -106,7 +115,7 @@ export const RestApiPlugin = {
 
     // Set scope variables based on the the passed options
     // sortableFiels and defaultSort are always coming from options
-    // and pageSize and maxPageSize will be set if passed -- if not, the `vars`
+    // and queryDefaultLimit and queryMaxLimit will be set if passed -- if not, the `vars`
     // proxy will point to the api's values (set as defaults)
     on('scope:added', 'turnScopeInitIntoVars', async ({eventData}) => {
       // Refer to the scope's vars
@@ -118,8 +127,30 @@ export const RestApiPlugin = {
       vars.defaultSort = scopeOptions.defaultSort || null;   
       
       // The general ones that are also set at api level, but overrideable
-      if (typeof scopeOptions.pageSize !== 'undefined') vars.pageSize = scopeOptions.pageSize
-      if (typeof scopeOptions.maxPageSize !== 'undefined') vars.maxPageSize = scopeOptions.maxPageSize
+      if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit
+      if (typeof scopeOptions.queryMaxLimit !== 'undefined') vars.queryMaxLimit = scopeOptions.queryMaxLimit
+      
+      // Add validation for query limits
+      if (vars.queryDefaultLimit && vars.queryMaxLimit) {
+        if (vars.queryDefaultLimit > vars.queryMaxLimit) {
+          throw new Error(
+            `Invalid scope '${eventData.scopeName}' configuration: ` +
+            `queryDefaultLimit (${vars.queryDefaultLimit}) cannot exceed queryMaxLimit (${vars.queryMaxLimit})`
+          );
+        }
+      }
+      
+      // Validate relationship include limits at scope creation time
+      Object.entries(scopeOptions.relationships || {}).forEach(([relName, relDef]) => {
+        if (relDef.include?.limit && vars.queryMaxLimit) {
+          if (relDef.include.limit > vars.queryMaxLimit) {
+            throw new Error(
+              `Invalid relationship '${eventData.scopeName}.${relName}' configuration: ` +
+              `include.limit (${relDef.include.limit}) cannot exceed queryMaxLimit (${vars.queryMaxLimit})`
+            );
+          }
+        }
+      });
     })
     // compileSchemas(eventData.scope, eventData.scopeName));
 
@@ -129,8 +160,8 @@ export const RestApiPlugin = {
 
     // These will be used as default fallbacks by the vars proxy if
     // they are not set in the scope options
-    vars.pageSize = restApiOptions.pageSize || 20
-    vars.maxPageSize = restApiOptions.maxPageSize || 100
+    vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
+    vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     
     // New simplified settings
     vars.simplifiedTransport = restApiOptions.simplifiedTransport !== undefined 

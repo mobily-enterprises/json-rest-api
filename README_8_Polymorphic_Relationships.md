@@ -342,6 +342,174 @@ Polymorphic relationships are perfect for:
 - **Audit Logs**: Tracking changes across multiple models
 - **Notifications**: Notifications about different resource types
 
+## Controlling Query and Include Limits
+
+When working with relationships (especially polymorphic ones that can have many related items), it's important to control how much data is returned. The REST API plugin provides several configuration options for this.
+
+### Query Default and Maximum Limits
+
+You can configure default and maximum limits for queries at the plugin level:
+
+```javascript
+await api.use(RestApiPlugin, {
+  queryDefaultLimit: 20,      // Default number of records per query
+  queryMaxLimit: 100,         // Maximum allowed limit
+  // ... other options
+});
+```
+
+These settings affect:
+- **Main queries**: When fetching collections without specifying a page size
+- **Relationship includes**: When including related resources without specifying limits
+
+### Limiting Relationship Includes
+
+When including related resources, you often want to limit how many are returned per parent. For example, when fetching books with reviews, you might only want the latest 5 reviews per book:
+
+```javascript
+// Configure at resource definition
+await api.addResource('books', {
+  schema: {
+    // ... schema fields ...
+  },
+  relationships: {
+    reviews: { 
+      hasMany: 'reviews', 
+      via: 'reviewable',
+      include: {
+        limit: 5,              // Only include 5 reviews per book
+        orderBy: ['-id'],      // Order by newest first
+        strategy: 'window'     // Use window functions for per-parent limits
+      }
+    }
+  }
+});
+```
+
+### Include Configuration Options
+
+The `include` configuration supports:
+
+- **`limit`**: Maximum number of related records to include per parent
+- **`orderBy`**: Array of fields to sort by (prefix with `-` for descending)
+- **`strategy`**: Either `'window'` (per-parent limits) or `'standard'` (global limit)
+
+#### Window Strategy (Per-Parent Limits)
+
+With `strategy: 'window'`, each parent gets its own limit:
+
+```javascript
+// Fetch authors with their latest 3 books each
+await api.resources.authors.query({
+  queryParams: {
+    include: ['books']
+  }
+});
+// Result: Each author has up to 3 books included
+```
+
+#### Standard Strategy (Global Limit)
+
+With `strategy: 'standard'` or no strategy specified, the limit applies globally:
+
+```javascript
+// Without window strategy, limit applies to all included records
+relationships: {
+  reviews: { 
+    hasMany: 'reviews', 
+    via: 'reviewable',
+    include: {
+      limit: 10  // Total of 10 reviews across all parents
+    }
+  }
+}
+```
+
+### Database Support for Window Functions
+
+The window strategy requires database support for window functions:
+- **PostgreSQL**: 8.4+
+- **MySQL**: 8.0+
+- **MariaDB**: 10.2+
+- **SQLite**: 3.25+
+- **SQL Server**: 2005+
+
+If your database doesn't support window functions, the system will automatically fall back to the standard strategy.
+
+### Dynamic Include Limits
+
+You can also control limits when making queries:
+
+```javascript
+// Override the default include configuration
+const booksWithManyReviews = await api.resources.books.query({
+  queryParams: {
+    include: ['reviews'],
+    // Note: Dynamic include limits in query params are not yet supported
+    // Use the relationship definition to set limits
+  }
+});
+```
+
+### Best Practices for Limits
+
+1. **Set Reasonable Defaults**: Configure `queryDefaultLimit` to balance performance and usability
+   ```javascript
+   queryDefaultLimit: 20,   // Good for most APIs
+   queryMaxLimit: 100      // Prevent excessive data fetching
+   ```
+
+2. **Use Window Strategy for One-to-Many**: When each parent needs its own set of related records
+   ```javascript
+   include: {
+     limit: 10,
+     strategy: 'window',
+     orderBy: ['-created_at']  // Most recent first
+   }
+   ```
+
+3. **Consider Performance**: Smaller limits = faster queries and less memory usage
+
+4. **Document Your Limits**: Let API consumers know about default and maximum limits
+
+### Example: Reviews with Controlled Limits
+
+Here's a complete example showing how to set up reviews with proper limits:
+
+```javascript
+// Configure the API with sensible defaults
+await api.use(RestApiPlugin, {
+  queryDefaultLimit: 20,
+  queryMaxLimit: 100
+});
+
+// Define books with limited review includes
+await api.addResource('books', {
+  schema: {
+    // ... book fields ...
+  },
+  relationships: {
+    reviews: { 
+      hasMany: 'reviews', 
+      via: 'reviewable',
+      sideLoadMany: false,  // Don't auto-include
+      include: {
+        limit: 5,           // Show 5 reviews per book
+        orderBy: ['-review_rating', '-id'],  // Best rated first
+        strategy: 'window'  // Each book gets 5 reviews
+      }
+    }
+  }
+});
+
+// Query books with their top reviews
+const booksWithTopReviews = await api.resources.books.query({
+  queryParams: {
+    include: ['reviews']  // Each book includes up to 5 best reviews
+  }
+});
+```
+
 ## Summary
 
 Polymorphic relationships provide a powerful way to create flexible, reusable associations in your API. By understanding how to define and use them, you can build more maintainable and scalable applications without duplicating tables and logic for similar relationships.
@@ -351,3 +519,5 @@ Remember:
 - Add reverse relationships with `via` pointing to the polymorphic field
 - Use standard JSON:API relationship syntax for creating and querying
 - Take advantage of includes to fetch related data efficiently
+- Configure appropriate query and include limits for performance
+- Use window strategies for per-parent relationship limits when needed
