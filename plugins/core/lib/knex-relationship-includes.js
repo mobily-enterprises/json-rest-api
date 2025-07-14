@@ -504,7 +504,6 @@ export const loadHasMany = async (scope, deps) => {
         .join(`${pivotTable} as pivot`, `${targetTable}.id`, 'pivot.' + otherKey)
         .whereIn(`pivot.${foreignKey}`, mainIds);
         
-      console.log('[DEBUG] Many-to-many window query for', includeName, '- effectiveLimit:', effectiveLimit);
       
       // Wrap to filter by row number
       const limitedQuery = knex
@@ -513,8 +512,6 @@ export const loadHasMany = async (scope, deps) => {
         .where(ROW_NUMBER_KEY, '<=', effectiveLimit);
       
       targetRecords = await limitedQuery;
-      
-      console.log('[DEBUG] Many-to-many window query returned', targetRecords.length, 'records for mainIds:', mainIds);
       
       // Remove row number column and restore proper pivot grouping
       targetRecords.forEach(record => delete record[ROW_NUMBER_KEY]);
@@ -558,10 +555,12 @@ export const loadHasMany = async (scope, deps) => {
     });
     
     // Step 7: Set relationships on parent records
+    
     records.forEach(record => {
       if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
       
       const childIds = pivotsByParent[record.id] || [];
+      
       const relData = childIds
         .map(childId => targetById[childId])
         .filter(Boolean)
@@ -574,6 +573,7 @@ export const loadHasMany = async (scope, deps) => {
             childRecord,
             { context: { scopeName: targetScope, schemaInfo: scopes[targetScope].vars.schemaInfo, polymorphicFields: new Set() } }
           );
+            
             
             // Add relationships from metadata
             if (childRecord[RELATIONSHIP_METADATA_KEY]) {

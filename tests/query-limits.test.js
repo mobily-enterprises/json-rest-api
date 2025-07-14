@@ -63,6 +63,7 @@ describe('Query Limits and Include Limits', () => {
         books: { 
           hasMany: 'books', 
           foreignKey: 'publisher_id',
+          sideLoad: true,  // Enable sideloading
           include: {
             strategy: 'window'  // Use window strategy for per-publisher limits
           }
@@ -84,6 +85,7 @@ describe('Query Limits and Include Limits', () => {
           through: 'book_authors', 
           foreignKey: 'author_id', 
           otherKey: 'book_id',
+          sideLoadMany: true,  // Enable sideloading for many-to-many
           include: {
             limit: 3,  // Explicit limit for testing
             strategy: 'window'
@@ -105,7 +107,8 @@ describe('Query Limits and Include Limits', () => {
           hasMany: 'authors', 
           through: 'book_authors', 
           foreignKey: 'book_id', 
-          otherKey: 'author_id'
+          otherKey: 'author_id',
+          sideLoadMany: true  // Enable sideloading for many-to-many
         },
         reviews: { hasMany: 'reviews', via: 'reviewable' }
       }
@@ -560,31 +563,21 @@ describe('Query Limits and Include Limits', () => {
         simplified: false
       });
 
-      console.log('Query result - authors:', result.data.length, 'included books:', result.included?.filter(r => r.type === 'books').length);
-      console.log('Authors:', result.data.map(a => ({ id: a.id, name: a.attributes.name })));
-      console.log('All included books:', result.included?.filter(r => r.type === 'books').map(b => ({
-        id: b.id,
-        title: b.attributes.title,
-        authorsData: b.relationships?.authors?.data
-      })));
       
       // Each author should get exactly 3 books (configured limit)
       for (const author of result.data) {
-        const authorBooks = result.included.filter(r => {
-          // Check if this book is associated with this author
-          return r.type === 'books' && 
-                 r.relationships?.authors?.data?.some(a => a.id === author.id);
-        });
+        // Check the author's relationships to see which books they have
+        const authorBookIds = author.relationships?.books?.data?.map(b => b.id) || [];
         
-        console.log(`Author ${author.id} has ${authorBooks.length} books`);
-        console.log('Books for author', author.id, ':', authorBooks.map(b => ({ 
-          id: b.id, 
-          title: b.attributes.title,
-          authorsData: b.relationships?.authors?.data 
-        })));
+        // Verify the books exist in the included array
+        const authorBooks = result.included.filter(r => 
+          r.type === 'books' && authorBookIds.includes(r.id)
+        );
         
+        assert.equal(authorBookIds.length, 3, 
+          `Author ${author.id} should have exactly 3 book relationships (configured limit)`);
         assert.equal(authorBooks.length, 3, 
-          `Author ${author.id} should have exactly 3 books (configured limit)`);
+          `Author ${author.id} should have exactly 3 books in included array`);
       }
     });
   });
