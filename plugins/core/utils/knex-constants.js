@@ -6,10 +6,10 @@
  * throughout the plugin to avoid repetition and improve maintainability.
  */
 
-// Internal property names used for relationship tracking
-export const RELATIONSHIPS_KEY = '_relationships';
-export const RELATIONSHIP_METADATA_KEY = '_relationshipMetadata';
-export const ROW_NUMBER_KEY = '_rn';
+// Internal property names - using unique names to avoid collisions with user data
+export const RELATIONSHIPS_KEY = '__$jsonrestapi_relationships$__';
+export const RELATIONSHIP_METADATA_KEY = '__$jsonrestapi_metadata$__';
+export const ROW_NUMBER_KEY = '__$jsonrestapi_rn$__';
 
 // Default query limits
 export const DEFAULT_QUERY_LIMIT = 20;

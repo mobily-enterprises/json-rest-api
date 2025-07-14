@@ -7,6 +7,7 @@
  */
 
 import { getForeignKeyFields } from '../utils/field-utils.js';
+import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY } from '../utils/knex-constants.js';
 
 /**
  * Converts a database record to JSON:API format
@@ -60,10 +61,17 @@ export const toJsonApi = (scope, record, deps) => {
   // Get foreign keys to filter out
   const foreignKeys = schema ? getForeignKeyFields(schema) : new Set();
   
-  // Build attributes excluding foreign keys and polymorphic fields
+  // Define internal fields that should never appear in attributes
+  const internalFields = new Set([
+    RELATIONSHIPS_KEY,        // '__$jsonrestapi_relationships$__'
+    RELATIONSHIP_METADATA_KEY, // '__$jsonrestapi_metadata$__'
+    ROW_NUMBER_KEY            // '__$jsonrestapi_rn$__'
+  ]);
+  
+  // Build attributes excluding foreign keys, polymorphic fields, and internal fields
   const attributes = {};
   Object.entries(allAttributes).forEach(([key, value]) => {
-    if (!foreignKeys.has(key) && !polymorphicFields.has(key)) {
+    if (!foreignKeys.has(key) && !polymorphicFields.has(key) && !internalFields.has(key)) {
       attributes[key] = value;
     }
   });
