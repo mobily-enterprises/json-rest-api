@@ -9,9 +9,16 @@ import {
   crossTableFiltersHook,
   basicFiltersHook
 } from './lib/knex-query-helpers.js';
-import { RestApiResourceError } from '../../lib/rest-api-errors.js';
+import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js';
 import { supportsWindowFunctions, getDatabaseInfo } from './lib/database-capabilities.js';
 import { ERROR_SUBTYPES, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './utils/knex-constants.js';
+import { 
+  calculatePaginationMeta, 
+  generatePaginationLinks,
+  generateCursorPaginationLinks,
+  buildCursorMeta,
+  parseCursor
+} from './lib/knex-pagination-helpers.js';
 
 
 export const RestApiKnexPlugin = {
@@ -260,21 +267,254 @@ export const RestApiKnexPlugin = {
         });
       }
       
-      // Apply pagination directly (no hooks)
-      if (queryParams.page) {
+      // Apply pagination
+      // Check if page object has any actual pagination parameters
+      const hasPageParams = queryParams.page && 
+        (queryParams.page.size !== undefined || 
+         queryParams.page.number !== undefined || 
+         queryParams.page.after !== undefined || 
+         queryParams.page.before !== undefined);
+      
+      if (hasPageParams) {
+        const requestedSize = queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
         const pageSize = Math.min(
-          queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT,
+          requestedSize,
           scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
         );
-        const pageNumber = queryParams.page.number || 1;
         
-        query
-          .limit(pageSize)
-          .offset((pageNumber - 1) * pageSize);
+        // Validate page size
+        if (requestedSize <= 0) {
+          throw new RestApiValidationError(
+            'Page size must be greater than 0',
+            {
+              fields: ['page.size'],
+              violations: [{
+                field: 'page.size',
+                rule: 'min_value',
+                message: 'Page size must be a positive number'
+              }]
+            }
+          );
+        }
+        
+        // Offset-based pagination
+        if (queryParams.page.number !== undefined) {
+          const pageNumber = queryParams.page.number || 1;
+          query
+            .limit(pageSize)
+            .offset((pageNumber - 1) * pageSize);
+        }
+        // Cursor-based pagination
+        else if (queryParams.page.after || queryParams.page.before) {
+          // Fetch one extra record to determine if there are more
+          query.limit(pageSize + 1);
+          
+          if (queryParams.page.after) {
+            let cursorData;
+            try {
+              cursorData = parseCursor(queryParams.page.after);
+            } catch (error) {
+              throw new RestApiValidationError(
+                'Invalid cursor format in page[after] parameter',
+                {
+                  fields: ['page.after'],
+                  violations: [{
+                    field: 'page.after',
+                    rule: 'invalid_cursor',
+                    message: 'The cursor value is not valid'
+                  }]
+                }
+              );
+            }
+            // Add where conditions for cursor
+            // Use the actual sort from query params or default
+            let sortField = 'id';
+            let sortDirection = 'ASC';
+            
+            if (queryParams.sort && queryParams.sort.length > 0) {
+              const firstSort = queryParams.sort[0];
+              sortDirection = firstSort.startsWith('-') ? 'DESC' : 'ASC';
+              sortField = firstSort.startsWith('-') ? firstSort.substring(1) : firstSort;
+            } else if (scope.vars.defaultSort) {
+              sortField = scope.vars.defaultSort.field || 'id';
+              sortDirection = scope.vars.defaultSort.direction || 'ASC';
+            }
+            
+            // Ensure the field is properly prefixed when JOINs might be present
+            const qualifiedField = `${tableName}.${sortField}`;
+            
+            if (sortDirection === 'DESC') {
+              query.where(qualifiedField, '<', cursorData[sortField]);
+            } else {
+              query.where(qualifiedField, '>', cursorData[sortField]);
+            }
+          } else if (queryParams.page.before) {
+            let cursorData;
+            try {
+              cursorData = parseCursor(queryParams.page.before);
+            } catch (error) {
+              throw new RestApiValidationError(
+                'Invalid cursor format in page[before] parameter',
+                {
+                  fields: ['page.before'],
+                  violations: [{
+                    field: 'page.before',
+                    rule: 'invalid_cursor',
+                    message: 'The cursor value is not valid'
+                  }]
+                }
+              );
+            }
+            // Use the actual sort from query params or default
+            let sortField = 'id';
+            let sortDirection = 'ASC';
+            
+            if (queryParams.sort && queryParams.sort.length > 0) {
+              const firstSort = queryParams.sort[0];
+              sortDirection = firstSort.startsWith('-') ? 'DESC' : 'ASC';
+              sortField = firstSort.startsWith('-') ? firstSort.substring(1) : firstSort;
+            } else if (scope.vars.defaultSort) {
+              sortField = scope.vars.defaultSort.field || 'id';
+              sortDirection = scope.vars.defaultSort.direction || 'ASC';
+            }
+            
+            // Ensure the field is properly prefixed when JOINs might be present
+            const qualifiedField = `${tableName}.${sortField}`;
+            
+            if (sortDirection === 'DESC') {
+              query.where(qualifiedField, '>', cursorData[sortField]);
+            } else {
+              query.where(qualifiedField, '<', cursorData[sortField]);
+            }
+          }
+        }
+        // Default pagination if only size is specified - treat as cursor-based for "load more"
+        else {
+          // Fetch one extra to detect hasMore
+          query.limit(pageSize + 1);
+        }
+      } else {
+        // No pagination params provided - apply default limit
+        const defaultLimit = scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
+        query.limit(defaultLimit);
       }
       
       // Execute query
       const records = await query;
+      
+      // Store query string for response building
+      const queryParts = [];
+      Object.entries(queryParams).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          // Handle arrays (like sort, include)
+          if (value.length > 0) {
+            queryParts.push(`${key}=${value.map(v => encodeURIComponent(v)).join(',')}`);
+          }
+        } else if (typeof value === 'object' && value !== null) {
+          // Handle nested objects (like filters, fields, page)
+          Object.entries(value).forEach(([subKey, subValue]) => {
+            if (subValue !== undefined && subValue !== null) {
+              if (typeof subValue === 'object' && !Array.isArray(subValue)) {
+                // Handle deeply nested objects (like filters[country][code])
+                Object.entries(subValue).forEach(([subSubKey, subSubValue]) => {
+                  if (subSubValue !== undefined && subSubValue !== null) {
+                    queryParts.push(`${key}[${subKey}][${subSubKey}]=${encodeURIComponent(subSubValue)}`);
+                  }
+                });
+              } else {
+                queryParts.push(`${key}[${subKey}]=${encodeURIComponent(subValue)}`);
+              }
+            }
+          });
+        } else if (value !== undefined && value !== null) {
+          queryParts.push(`${key}=${encodeURIComponent(value)}`);
+        }
+      });
+      
+      scope.vars.queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
+
+      // Execute count query for pagination if offset-based pagination is used
+      if (queryParams.page?.number !== undefined || (queryParams.page?.size !== undefined && !queryParams.page?.after && !queryParams.page?.before)) {
+        const page = parseInt(queryParams.page?.number) || 1;
+        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
+        
+        // Only execute count query if enabled
+        if (scope.vars.enablePaginationCounts) {
+          // Build count query with same filters as main query
+          const countQuery = db(tableName);
+          
+          // Apply filters through hooks (same as main query)
+          if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
+            // Store query data in context for hooks
+            if (context) {
+              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchema, scopeName, tableName, db };
+            }
+            
+            // Run the same filtering hooks
+            await runHooks('knexQueryFiltering');
+            
+            // Clean up
+            if (context && context.knexQuery) {
+              delete context.knexQuery;
+            }
+          }
+          
+          // Get total count
+          const countResult = await countQuery.count('* as total').first();
+          const total = parseInt(countResult.total);
+          
+          // Calculate pagination metadata with total
+          scope.vars.paginationMeta = calculatePaginationMeta(total, page, pageSize);
+        } else {
+          // Without count, we can still provide basic pagination info
+          scope.vars.paginationMeta = {
+            page,
+            pageSize
+            // No total, pageCount, or hasMore when counts are disabled
+          };
+        }
+        
+        // Generate links 
+        scope.vars.paginationLinks = generatePaginationLinks(
+          scope.vars.resourceUrlPrefix,
+          scopeName,
+          queryParams,
+          scope.vars.paginationMeta
+        );
+      }
+      
+      // Handle cursor-based pagination meta
+      // Generate cursor metadata when using cursor parameters OR when only size is specified (no page number)
+      if (queryParams.page?.after || queryParams.page?.before || 
+          (queryParams.page?.size && queryParams.page?.number === undefined)) {
+        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
+        
+        // Check if there are more records
+        // We fetched pageSize + 1 records to detect if there are more
+        const hasMore = records.length > pageSize;
+        
+        // Remove the extra record if present
+        if (hasMore) {
+          records.pop();
+        }
+        
+        // Determine sort fields for cursor
+        let sortFields = ['id'];
+        if (queryParams.sort && queryParams.sort.length > 0) {
+          sortFields = queryParams.sort.map(s => s.startsWith('-') ? s.substring(1) : s);
+        }
+        
+        scope.vars.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields);
+        scope.vars.paginationLinks = generateCursorPaginationLinks(
+          scope.vars.resourceUrlPrefix,
+          scopeName,
+          queryParams,
+          records,
+          pageSize,
+          hasMore,
+          sortFields
+        );
+      }
       
       // Process includes
       const included = await processIncludes(scope, records, {

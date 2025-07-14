@@ -343,3 +343,73 @@ export async function createLimitedDepthApi(knex) {
 
   return api;
 }
+
+/**
+ * Creates an API configuration for pagination testing
+ */
+export async function createPaginationApi(knex, options = {}) {
+  const api = new Api({
+    name: 'pagination-test-api',
+    version: '1.0.0'
+  });
+
+  const restApiOptions = {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnFullRecord: {
+      post: true,
+      put: false,
+      patch: false,
+      allowRemoteOverride: false
+    },
+    sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
+    ...options  // Allow overriding options like resourceUrlPrefix, enablePaginationCounts
+  };
+
+  await api.use(RestApiPlugin, restApiOptions);
+  
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Countries table
+  await api.addResource('countries', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 100 },
+      code: { type: 'string', max: 2, unique: true }
+    },
+    relationships: {
+      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
+      books: { hasMany: 'books', foreignKey: 'country_id' }
+    },
+    tableName: 'pagination_countries'
+  });
+  await api.resources.countries.createKnexTable();
+
+  // Publishers table
+  await api.addResource('publishers', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
+    },
+    relationships: {
+      books: { hasMany: 'books', foreignKey: 'publisher_id' }
+    },
+    tableName: 'pagination_publishers'
+  });
+  await api.resources.publishers.createKnexTable();
+
+  // Books table
+  await api.addResource('books', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 300, search: true },
+      country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country', search: true },
+      publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
+    },
+    tableName: 'pagination_books'
+  });
+  await api.resources.books.createKnexTable();
+
+  return api;
+}

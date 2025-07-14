@@ -189,10 +189,10 @@ describe('Query Limits and Include Limits', () => {
         });
       }
 
-      // Query with page size exceeding max
+      // Query with page size exceeding max (use offset-based pagination)
       const result = await api.resources.countries.query({
         queryParams: {
-          page: { size: 100 }  // Exceeds queryMaxLimit of 50
+          page: { size: 100, number: 1 }  // Exceeds queryMaxLimit of 50
         },
         simplified: false
       });

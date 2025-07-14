@@ -10,6 +10,10 @@
 import { getForeignKeyFields } from './knex-field-helpers.js';
 import { toJsonApi } from './knex-json-api-helpers.js';
 import { RELATIONSHIPS_KEY, getSchemaStructure } from '../utils/knex-constants.js';
+import { 
+  generatePaginationLinks, 
+  generateCursorPaginationLinks 
+} from './knex-pagination-helpers.js';
 
 /**
  * Converts a database record to JSON:API format.
@@ -181,14 +185,61 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
     return jsonApiRecord;
   });
   
-  const response = {
-    data: isSingle ? processedRecords[0] : processedRecords
-  };
+  // Add self links to individual resources if urlPrefix is configured
+  const urlPrefix = scope.vars.resourceUrlPrefix;
+  const normalizedData = isSingle ? processedRecords[0] : processedRecords;
   
+  if (urlPrefix && normalizedData) {
+    if (Array.isArray(normalizedData)) {
+      // Collection: add self link to each item
+      normalizedData.forEach(item => {
+        if (!item.links) item.links = {};
+        item.links.self = `${urlPrefix}/${scopeName}/${item.id}`;
+      });
+    } else {
+      // Single resource: add self link
+      if (!normalizedData.links) normalizedData.links = {};
+      normalizedData.links.self = `${urlPrefix}/${scopeName}/${normalizedData.id}`;
+    }
+  }
+
+  // Build response
+  const response = {
+    data: normalizedData
+  };
+
+  // Add included resources if any
   if (included.length > 0) {
+    // Add self links to included resources
+    if (urlPrefix) {
+      included.forEach(item => {
+        if (!item.links) item.links = {};
+        item.links.self = `${urlPrefix}/${item.type}/${item.id}`;
+      });
+    }
+    
     response.included = included;
   }
+
+  // Add pagination metadata if provided
+  if (scope.vars.paginationMeta) {
+    response.meta = {
+      pagination: scope.vars.paginationMeta
+    };
+  }
   
+  // Add links to response
+  if (scope.vars.paginationLinks) {
+    response.links = scope.vars.paginationLinks;
+  } else if (urlPrefix) {
+    // Add basic self link for the response when no pagination links
+    response.links = {
+      self: isSingle 
+        ? `${urlPrefix}/${scopeName}/${normalizedData.id}`
+        : `${urlPrefix}/${scopeName}${scope.vars.queryString || ''}`
+    };
+  }
+
   return response;
 };
 
