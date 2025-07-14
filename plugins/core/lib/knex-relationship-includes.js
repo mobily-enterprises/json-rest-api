@@ -232,7 +232,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  */
 export const loadBelongsTo = async (scope, deps) => {
   const { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading belongsTo:', { 
       fieldName, 
@@ -348,7 +348,7 @@ export const loadBelongsTo = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecordsToProcess, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
-          { context: { scopes, log, knex } }
+          { context: { scopes, log, knex, capabilities } }
         );
       }
     }
@@ -398,7 +398,7 @@ export const loadBelongsTo = async (scope, deps) => {
  */
 export const loadHasMany = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading hasMany relationship:', { 
       scopeName, 
@@ -415,8 +415,6 @@ export const loadHasMany = async (scope, deps) => {
     return;
   }
   
-  // Get database capabilities from API
-  const capabilities = knex.capabilities || { windowFunctions: false };
   
   // Check if this is a many-to-many relationship (has through property)
   if (relDef.through) {
@@ -497,7 +495,7 @@ export const loadHasMany = async (scope, deps) => {
         .select(
           knex.raw(
             'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' + 
-            buildOrderByClause(relDef.include?.orderBy || ['id']) + 
+            buildOrderByClause(relDef.include?.orderBy || ['id'], targetTable) + 
             ') as ' + ROW_NUMBER_KEY,
             [foreignKey]
           )
@@ -505,6 +503,8 @@ export const loadHasMany = async (scope, deps) => {
         .from(targetTable)
         .join(`${pivotTable} as pivot`, `${targetTable}.id`, 'pivot.' + otherKey)
         .whereIn(`pivot.${foreignKey}`, mainIds);
+        
+      console.log('[DEBUG] Many-to-many window query for', includeName, '- effectiveLimit:', effectiveLimit);
       
       // Wrap to filter by row number
       const limitedQuery = knex
@@ -513,6 +513,8 @@ export const loadHasMany = async (scope, deps) => {
         .where(ROW_NUMBER_KEY, '<=', effectiveLimit);
       
       targetRecords = await limitedQuery;
+      
+      console.log('[DEBUG] Many-to-many window query returned', targetRecords.length, 'records for mainIds:', mainIds);
       
       // Remove row number column and restore proper pivot grouping
       targetRecords.forEach(record => delete record[ROW_NUMBER_KEY]);
@@ -594,7 +596,7 @@ export const loadHasMany = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
-          { context: { scopes, log, knex } }
+          { context: { scopes, log, knex, capabilities } }
         );
       }
     }
@@ -627,8 +629,8 @@ export const loadHasMany = async (scope, deps) => {
     let query;
     let usingWindowFunction = false;
     
-    // Check if we should use window functions (now includes default limit check)
-    if (relDef.include?.strategy === 'window' && (relDef.include?.limit !== null && relDef.include?.limit !== false)) {
+    // Check if we should use window functions
+    if (relDef.include?.strategy === 'window') {
       try {
         // Try to build window function query
         query = buildWindowedIncludeQuery(
@@ -649,7 +651,10 @@ export const loadHasMany = async (scope, deps) => {
           throw error; // Re-throw the descriptive error
         }
         // For other errors, fall back to standard query
-        log.warn('[INCLUDE] Window function query failed, falling back to standard query:', error);
+        log.warn('[INCLUDE] Window function query failed, falling back to standard query:', { 
+          error: error.message, 
+          stack: error.stack 
+        });
         usingWindowFunction = false;
       }
     }
@@ -734,7 +739,7 @@ export const loadHasMany = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
-          { context: { scopes, log, knex } }
+          { context: { scopes, log, knex, capabilities } }
         );
       }
     }
@@ -783,7 +788,7 @@ export const loadHasMany = async (scope, deps) => {
  */
 export const loadPolymorphicBelongsTo = async (scope, deps) => {
   const { records, relName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
       relName, 
@@ -895,7 +900,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecords, scopeName: targetType, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
-          { context: { scopes, log, knex } }
+          { context: { scopes, log, knex, capabilities } }
         );
       }
     }
@@ -952,7 +957,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
  */
 export const loadReversePolymorphic = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading reverse polymorphic (via):', { 
       scopeName,
@@ -1009,6 +1014,15 @@ export const loadReversePolymorphic = async (scope, deps) => {
   if (fieldSelectionInfo) {
     query = query.select(fieldSelectionInfo.fieldsToSelect);
   }
+  
+  // Apply include configuration (limits, ordering, etc.)
+  const targetVars = scopes[targetScope].vars;
+  query = applyStandardIncludeConfig(
+    query,
+    relDef.include || {},
+    targetVars,
+    log
+  );
   
   const targetRecords = await query;
   
@@ -1114,7 +1128,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
  */
 export const processIncludes = async (scope, deps) => {
   const { records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Processing includes:', { 
       scopeName, 
@@ -1154,7 +1168,7 @@ export const processIncludes = async (scope, deps) => {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
             await loadBelongsTo(
               { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
-              { context: { scopes, log, knex } }
+              { context: { scopes, log, knex, capabilities } }
             );
             handled = true;
             break;
@@ -1171,19 +1185,19 @@ export const processIncludes = async (scope, deps) => {
               if (relDef.via) {
                 await loadReversePolymorphic(
                   { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                  { context: { scopes, log, knex } }
+                  { context: { scopes, log, knex, capabilities } }
                 );
               } else {
                 await loadHasMany(
                   { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                  { context: { scopes, log, knex } }
+                  { context: { scopes, log, knex, capabilities } }
                 );
               }
               handled = true;
             } else if (relDef.belongsToPolymorphic) {
               await loadPolymorphicBelongsTo(
                 { records, relName: includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                { context: { scopes, log, knex } }
+                { context: { scopes, log, knex, capabilities } }
               );
               handled = true;
             }
@@ -1264,7 +1278,7 @@ export const processIncludes = async (scope, deps) => {
  */
 export const buildIncludedResources = async (scope, deps) => {
   const { records, scopeName, includeParam, fields, idProperty } = scope;
-  const { scopes, log, knex } = deps.context;
+  const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length });
     
@@ -1298,7 +1312,7 @@ export const buildIncludedResources = async (scope, deps) => {
     // Process all includes
     await processIncludes(
       { records, scopeName, includeTree, included, processedPaths, currentPath: '', fields, idProperty },
-      { context: { scopes, log, knex } }
+      { context: { scopes, log, knex, capabilities } }
     );
     
     // Convert Map to array for JSON:API format

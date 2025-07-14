@@ -60,7 +60,7 @@ export const buildWindowedIncludeQuery = (
       knex.raw(
         'ROW_NUMBER() OVER (PARTITION BY ?? ORDER BY ' + 
         buildOrderByClause(orderBy) + 
-        ') as ' + ROW_NUMBER_KEY + ',',
+        ') as ' + ROW_NUMBER_KEY,
         [foreignKey]
       )
     )
@@ -85,16 +85,17 @@ export const buildWindowedIncludeQuery = (
 /**
  * Build ORDER BY clause from array of sort fields
  */
-export const buildOrderByClause = (orderBy) => {
+export const buildOrderByClause = (orderBy, tablePrefix) => {
   if (!orderBy || orderBy.length === 0) {
-    return 'id ASC'; // Default ordering
+    const defaultField = tablePrefix ? `${tablePrefix}.id` : 'id';
+    return `${defaultField} ASC`; // Default ordering
   }
   
   return orderBy.map(field => {
-    if (field.startsWith('-')) {
-      return `${field.substring(1)} DESC`;
-    }
-    return `${field} ASC`;
+    const isDesc = field.startsWith('-');
+    const fieldName = isDesc ? field.substring(1) : field;
+    const qualifiedField = tablePrefix ? `${tablePrefix}.${fieldName}` : fieldName;
+    return `${qualifiedField} ${isDesc ? 'DESC' : 'ASC'}`;
   }).join(', ');
 };
 

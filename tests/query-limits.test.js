@@ -57,10 +57,9 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country_id: { type: 'number', belongsTo: 'countries' }
+        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
-        country: { belongsTo: 'countries', foreignKey: 'country_id' },
         books: { 
           hasMany: 'books', 
           foreignKey: 'publisher_id',
@@ -77,10 +76,9 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country_id: { type: 'number', belongsTo: 'countries' }
+        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
-        country: { belongsTo: 'countries', foreignKey: 'country_id' },
         books: { 
           hasMany: 'books', 
           through: 'book_authors', 
@@ -100,10 +98,9 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         title: { type: 'string', required: true },
-        publisher_id: { type: 'number', belongsTo: 'publishers' }
+        publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
       },
       relationships: {
-        publisher: { belongsTo: 'publishers', foreignKey: 'publisher_id' },
         authors: { 
           hasMany: 'authors', 
           through: 'book_authors', 
@@ -119,8 +116,8 @@ describe('Query Limits and Include Limits', () => {
     await api.addResource('book_authors', {
       schema: {
         id: { type: 'id' },
-        book_id: { type: 'number', belongsTo: 'books' },
-        author_id: { type: 'number', belongsTo: 'authors' }
+        book_id: { type: 'number', belongsTo: 'books', as: 'book' },
+        author_id: { type: 'number', belongsTo: 'authors', as: 'author' }
       }
     });
     await api.resources.book_authors.createKnexTable();
@@ -217,10 +214,8 @@ describe('Query Limits and Include Limits', () => {
           data: {
             type: 'publishers',
             attributes: {
-              name: 'Test Publisher'
-            },
-            relationships: {
-              country: { data: { type: 'countries', id: country.id } }
+              name: 'Test Publisher',
+              country_id: parseInt(country.id)
             }
           }
         }
@@ -233,10 +228,8 @@ describe('Query Limits and Include Limits', () => {
             data: {
               type: 'books',
               attributes: {
-                title: `Book ${i}`
-              },
-              relationships: {
-                publisher: { data: { type: 'publishers', id: publisher.id } }
+                title: `Book ${i}`,
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -253,24 +246,33 @@ describe('Query Limits and Include Limits', () => {
         simplified: false
       });
 
+      assert(result.data, 'Result should have data array');
+      assert(result.data.length > 0, 'Should have at least one publisher');
+      
       const publisher = result.data[0];
-      const publisherBooks = result.included.filter(r => r.type === 'books');
+      const publisherBooks = (result.included || []).filter(r => r.type === 'books');
 
       // Should apply queryDefaultLimit of 10
       assert.equal(publisherBooks.length, 10, 'Should include only 10 books by default');
     });
 
     it('should respect explicit limit in relationship config', async () => {
+      // Create a publisher first
+      const publisher = await api.resources.publishers.post({
+        inputRecord: createJsonApiDocument('publishers', {
+          name: 'Test Publisher',
+          country_id: 1
+        })
+      });
+
       // Create authors with many books
       const author = await api.resources.authors.post({
         inputRecord: {
           data: {
             type: 'authors',
             attributes: {
-              name: 'Test Author'
-            },
-            relationships: {
-              country: { data: { type: 'countries', id: '1' } }
+              name: 'Test Author',
+              country_id: 1
             }
           }
         }
@@ -283,10 +285,8 @@ describe('Query Limits and Include Limits', () => {
             data: {
               type: 'books',
               attributes: {
-                title: `Book ${i}`
-              },
-              relationships: {
-                publisher: { data: { type: 'publishers', id: '1' } }
+                title: `Book ${i}`,
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -432,10 +432,8 @@ describe('Query Limits and Include Limits', () => {
             data: {
               type: 'publishers',
               attributes: {
-                name: `Publisher ${pubNum}`
-              },
-              relationships: {
-                country: { data: { type: 'countries', id: '1' } }
+                name: `Publisher ${pubNum}`,
+                country_id: 1
               }
             }
           }
@@ -485,7 +483,8 @@ describe('Query Limits and Include Limits', () => {
       // Total books can exceed queryDefaultLimit since each parent gets its own limit
       const totalBooks = result.included.filter(r => r.type === 'books').length;
       assert(totalBooks > 10, 'Total books should exceed 10 with window strategy');
-      assert.equal(totalBooks, 30, 'Should have 30 total books (10 per publisher)');
+      // Publisher 1 has 8 books, Publishers 2 and 3 are limited to 10 each
+      assert.equal(totalBooks, 28, 'Should have 28 total books (8 + 10 + 10)');
     });
   });
 
@@ -504,10 +503,8 @@ describe('Query Limits and Include Limits', () => {
           data: {
             type: 'publishers',
             attributes: {
-              name: 'Test Publisher'
-            },
-            relationships: {
-              country: { data: { type: 'countries', id: country.id } }
+              name: 'Test Publisher',
+              country_id: parseInt(country.id)
             }
           }
         }
@@ -521,10 +518,8 @@ describe('Query Limits and Include Limits', () => {
             data: {
               type: 'authors',
               attributes: {
-                name: `Author ${i}`
-              },
-              relationships: {
-                country: { data: { type: 'countries', id: country.id } }
+                name: `Author ${i}`,
+                country_id: parseInt(country.id)
               }
             }
           }
@@ -539,10 +534,8 @@ describe('Query Limits and Include Limits', () => {
             data: {
               type: 'books',
               attributes: {
-                title: `Book ${i}`
-              },
-              relationships: {
-                publisher: { data: { type: 'publishers', id: publisher.id } }
+                title: `Book ${i}`,
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -552,8 +545,8 @@ describe('Query Limits and Include Limits', () => {
         for (const author of authors) {
           await api.resources.book_authors.post({
             inputRecord: createJsonApiDocument('book_authors', {
-              book_id: parseInt(book.data.id),
-              author_id: parseInt(author.data.id)
+              book_id: parseInt(book.id),
+              author_id: parseInt(author.id)
             })
           });
         }
@@ -567,6 +560,14 @@ describe('Query Limits and Include Limits', () => {
         simplified: false
       });
 
+      console.log('Query result - authors:', result.data.length, 'included books:', result.included?.filter(r => r.type === 'books').length);
+      console.log('Authors:', result.data.map(a => ({ id: a.id, name: a.attributes.name })));
+      console.log('All included books:', result.included?.filter(r => r.type === 'books').map(b => ({
+        id: b.id,
+        title: b.attributes.title,
+        authorsData: b.relationships?.authors?.data
+      })));
+      
       // Each author should get exactly 3 books (configured limit)
       for (const author of result.data) {
         const authorBooks = result.included.filter(r => {
@@ -574,6 +575,13 @@ describe('Query Limits and Include Limits', () => {
           return r.type === 'books' && 
                  r.relationships?.authors?.data?.some(a => a.id === author.id);
         });
+        
+        console.log(`Author ${author.id} has ${authorBooks.length} books`);
+        console.log('Books for author', author.id, ':', authorBooks.map(b => ({ 
+          id: b.id, 
+          title: b.attributes.title,
+          authorsData: b.relationships?.authors?.data 
+        })));
         
         assert.equal(authorBooks.length, 3, 
           `Author ${author.id} should have exactly 3 books (configured limit)`);

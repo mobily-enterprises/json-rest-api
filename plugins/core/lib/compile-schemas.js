@@ -199,8 +199,17 @@ export async function compileSchemas(scope, deps) {
   // Build schemaRelationships including polymorphic fields from schema
   const schemaRelationships = { ...(scope.scopeOptions.relationships || {}) };
   
-  // Extract polymorphic relationships from schema fields
+  // Extract polymorphic relationships from schema fields and validate belongsTo fields
   for (const [fieldName, fieldDef] of Object.entries(schemaContext.schema)) {
+    // Validate that belongsTo fields have 'as' property
+    if (fieldDef.belongsTo && !fieldDef.belongsToPolymorphic && !fieldDef.as) {
+      throw new Error(
+        `Field '${fieldName}' in resource '${scopeName}' has belongsTo: '${fieldDef.belongsTo}' but is missing the required 'as' property. ` +
+        `The 'as' property defines the relationship name used in JSON:API payloads. ` +
+        `Example: ${fieldName}: { type: 'number', belongsTo: '${fieldDef.belongsTo}', as: '${fieldName.replace(/_id$/, '')}' }`
+      );
+    }
+    
     if (fieldDef.belongsToPolymorphic && fieldDef.as) {
       schemaRelationships[fieldDef.as] = fieldDef;
     }

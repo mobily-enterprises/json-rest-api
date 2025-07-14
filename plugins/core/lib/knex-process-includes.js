@@ -79,7 +79,7 @@ import { buildIncludedResources } from './knex-relationship-includes.js';
  */
 export const processIncludes = async (scope, records, deps) => {
   try {
-    const { log, scopes, knex, context } = deps;
+    const { log, scopes, knex, context, api } = deps;
     
     // Get scopeName from context
     const scopeName = context.scopeName;
@@ -114,7 +114,8 @@ export const processIncludes = async (scope, records, deps) => {
         context: {
           scopes,
           log,
-          knex: db
+          knex: db,
+          capabilities: api?.knex?.capabilities
         }
       }
     );

@@ -281,7 +281,8 @@ export const RestApiKnexPlugin = {
         log,
         scopes,
         knex,
-        context
+        context,
+        api
       });
       
 
