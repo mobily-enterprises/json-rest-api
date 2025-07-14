@@ -416,7 +416,6 @@ POST /api/articles?returnFullRecord=false
 POST /api/articles?returnFullRecord=true
 ```
 
-
 #### Network vs Programmatic Usage
 
 ### Complete Example
@@ -497,7 +496,7 @@ await api.resources.posts.patch({
   inputRecord: { 
     data: { 
       type: 'posts',
-      // No ID required in body
+      id: 1,
       attributes: { status: 'published' } 
     } 
   },
@@ -1714,9 +1713,9 @@ These filters will be combined with AND, ensuring that security filters cannot b
 
 Many-to-many relationships require a pivot table. In the JSON REST API system, the pivot table is treated as a full resource with its own schema and endpoints.
 
-### Understanding Relationships and Side-Loading
+### Understanding Relationships and Including Related Data
 
-Before diving into many-to-many relationships, it's important to understand how relationships work in the JSON REST API system and the side-loading functionality.
+Before diving into many-to-many relationships, it's important to understand how relationships work in the JSON REST API system.
 
 #### Relationship Types
 
@@ -1726,9 +1725,9 @@ The system supports three types of relationships:
 2. **hasMany** (One-to-Many) - The inverse of belongsTo, where a resource has many related resources
 3. **hasMany with through** (Many-to-Many) - A relationship through a pivot/junction table
 
-#### Side-Loading with Include Parameter
+#### Including Related Resources with the Include Parameter
 
-Side-loading allows you to fetch related resources in a single request using the `include` query parameter. This follows the JSON:API specification and helps prevent N+1 query problems.
+You can fetch related resources in a single request using the `include` query parameter. This follows the JSON:API specification and helps prevent N+1 query problems.
 
 ```javascript
 // Example: Get a book with its author included
@@ -1738,36 +1737,25 @@ GET /api/books/1?include=author
 GET /api/books/1?include=author.company,reviews.reviewer
 ```
 
-#### Configuring Side-Load Behavior
-
-The side-loading functionality is controlled by the following properties in your relationship definitions:
+#### Defining Relationships
 
 ##### For belongsTo Relationships
-
-- **`sideLoadSingle`** (default: `true`) - Controls whether the related resource can be included via the `include` parameter
-- **`sideSearchSingle`** (default: `true`) - Controls whether you can filter parent resources by fields in the related resource
 
 ```javascript
 api.addResource('books', {
   schema: {
     author_id: {
       belongsTo: 'authors',
-      as: 'author',
-      // sideLoadSingle: true,  // Default - can be omitted
-      // sideSearchSingle: true  // Default - can be omitted
+      as: 'author'
     }
   }
 });
 
 // This allows:
 // GET /api/books?include=author
-// GET /api/books?filter[authorName]=Tolkien (with appropriate searchSchema)
 ```
 
 ##### For hasMany Relationships
-
-- **`canSideLoadMany`** (default: `false`) - Controls whether related resources can be included
-- **`sideSearchMany`** (default: `false`) - Controls whether you can filter by related resources
 
 ```javascript
 api.addResource('authors', {
@@ -1778,21 +1766,18 @@ api.addResource('authors', {
   relationships: {
     books: {
       hasMany: 'books',
-      foreignKey: 'author_id',
-      canSideLoadMany: true,    // Must be explicitly enabled
-      sideSearchMany: true   // Must be explicitly enabled
+      foreignKey: 'author_id'
     }
   }
 });
 
 // This allows:
 // GET /api/authors/1?include=books
-// GET /api/authors?filter[bookTitle]=Hobbit (with appropriate searchSchema)
 ```
 
 ##### For Many-to-Many Relationships
 
-Many-to-many relationships using `hasMany` with `through` also use `canSideLoadMany`:
+Many-to-many relationships use `hasMany` with `through` to specify the pivot table:
 
 ```javascript
 api.addResource('books', {
@@ -1804,9 +1789,8 @@ api.addResource('books', {
     tags: {
       hasMany: 'tags',
       through: 'book_tags',    // Pivot table
-      foreignKey: 'book_id',
-      otherKey: 'tag_id',
-      canSideLoadMany: true       // Enable including tags
+      foreignKey: 'book_id',   // Key for this resource
+      otherKey: 'tag_id'       // Key for related resource
     }
   }
 });
@@ -1815,9 +1799,9 @@ api.addResource('books', {
 // GET /api/books/1?include=tags
 ```
 
-#### Important Notes on Side-Loading
+#### Important Notes on Including Relationships
 
-1. **Performance Consideration**: hasMany relationships have `canSideLoadMany` disabled by default because including many related resources can impact performance. Enable it only when needed.
+1. **Performance Consideration**: Including many related resources can impact performance. Be mindful when including hasMany relationships.
 
 2. **Nested Includes**: You can include nested relationships using dot notation:
    ```
@@ -1829,7 +1813,7 @@ api.addResource('books', {
    GET /api/books/1?include=author&fields[authors]=name,email
    ```
 
-4. **Cross-Table Search**: When `sideSearchSingle` or `sideSearchMany` is enabled, you can define searchSchema fields that reference related tables:
+4. **Cross-Table Search**: You can define searchSchema fields that reference related tables:
    ```javascript
    api.addResource('books', {
      schema: { /* ... */ },
@@ -1857,15 +1841,12 @@ api.addResource('book_authors', {
     book_id: { 
       type: 'number',
       belongsTo: 'books',
-      as: 'book',
-      sideSearchSingle: true
+      as: 'book'
     },
     author_id: {
       type: 'number', 
       belongsTo: 'people',
-      as: 'author',
-      // sideLoadSingle: true,  // Default for belongsTo - can be omitted
-      sideSearchSingle: true
+      as: 'author'
     },
     author_order: { type: 'number' }, // Display order for multiple authors
     contribution_type: { type: 'string' } // 'primary', 'co-author', 'contributor'
@@ -1903,8 +1884,7 @@ api.addResource('books', {
     authors: {
       hasMany: 'book_authors',
       foreignKey: 'book_id',
-      as: 'authors',
-      canSideLoadMany: true
+      as: 'authors'
     }
   }
 });
@@ -1920,8 +1900,7 @@ api.addResource('people', {
     books: {
       hasMany: 'book_authors',
       foreignKey: 'author_id',
-      as: 'books',
-      canSideLoadMany: true
+      as: 'books'
     }
   }
 });
@@ -2125,7 +2104,6 @@ api.addResource('comments', {
       type: 'number',
       belongsTo: 'people',
       as: 'author'
-      // sideLoadSingle: true  // Default for belongsTo - can be omitted
     },
     // Polymorphic relationship - defines both the relationship and the fields
     commentable: {
@@ -2135,7 +2113,6 @@ api.addResource('comments', {
         idField: 'commentable_id'
       },
       as: 'commentable'
-      // sideLoadSingle: true  // Default for belongsToPolymorphic - can be omitted
     }
   },
   searchSchema: {
@@ -2162,8 +2139,7 @@ api.addResource('books', {
     comments: {
       hasMany: 'comments',
       via: 'commentable',
-      as: 'comments',
-      canSideLoadMany: true
+      as: 'comments'
     }
   }
 });
@@ -2179,8 +2155,7 @@ api.addResource('articles', {
     comments: {
       hasMany: 'comments',
       via: 'commentable',
-      as: 'comments',
-      canSideLoadMany: true
+      as: 'comments'
     }
   }
 });

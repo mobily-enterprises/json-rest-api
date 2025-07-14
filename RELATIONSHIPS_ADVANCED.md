@@ -52,7 +52,6 @@ const articlesSchema = {
     type: 'number',
     belongsTo: 'users',
     as: 'author',
-    sideLoad: true,     // Enable includes
     sideSearch: true    // Enable cross-table search
   }
 }
@@ -84,7 +83,7 @@ api.addResource('users', {
       hasMany: 'articles',
       foreignKey: 'author_id',  // Field in articles table
       as: 'articles',
-      sideLoad: true
+      // Relationships are always includable via ?include=
     }
   }
 });
@@ -118,7 +117,7 @@ api.addResource('comments', {
         idField: 'commentable_id'
       },
       as: 'commentable',
-      sideLoad: true
+      // Relationships are always includable via ?include=
     }
   }
 });
@@ -155,7 +154,7 @@ api.addResource('articles', {
       hasMany: 'comments',
       via: 'commentable',  // Polymorphic field name
       as: 'comments',
-      sideLoad: true
+      // Relationships are always includable via ?include=
     }
   }
 });
@@ -186,13 +185,13 @@ api.addResource('project_members', {
       type: 'number',
       belongsTo: 'projects',
       as: 'project',
-      sideLoad: true
+      // Relationships are always includable via ?include=
     },
     user_id: {
       type: 'number', 
       belongsTo: 'users',
       as: 'user',
-      sideLoad: true
+      // Relationships are always includable via ?include=
     },
     role: { type: 'string' },
     hours_allocated: { type: 'number' }

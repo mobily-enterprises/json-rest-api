@@ -63,7 +63,7 @@ describe('Query Limits and Include Limits', () => {
         books: { 
           hasMany: 'books', 
           foreignKey: 'publisher_id',
-          sideLoad: true,  // Enable sideloading
+          // Relationships are always includable via ?include=
           include: {
             strategy: 'window'  // Use window strategy for per-publisher limits
           }
@@ -85,7 +85,7 @@ describe('Query Limits and Include Limits', () => {
           through: 'book_authors', 
           foreignKey: 'author_id', 
           otherKey: 'book_id',
-          canSideLoadMany: true,  // Enable sideloading for many-to-many
+          // Relationships are always includable via ?include=
           include: {
             limit: 3,  // Explicit limit for testing
             strategy: 'window'
@@ -108,7 +108,7 @@ describe('Query Limits and Include Limits', () => {
           through: 'book_authors', 
           foreignKey: 'book_id', 
           otherKey: 'author_id',
-          canSideLoadMany: true  // Enable sideloading for many-to-many
+          // Relationships are always includable via ?include=
         },
         reviews: { hasMany: 'reviews', via: 'reviewable' }
       }

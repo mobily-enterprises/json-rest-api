@@ -53,13 +53,13 @@ describe('Nested Include Operations', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country_id: { type: 'number', belongsTo: 'countries', as: 'country', sideLoad: true }
+        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
         books: { 
           hasMany: 'books', 
           foreignKey: 'publisher_id',
-          sideLoad: true
+          // Relationships are always includable via ?include=
         }
       }
     });
@@ -78,7 +78,7 @@ describe('Nested Include Operations', () => {
           through: 'book_authors', 
           foreignKey: 'author_id', 
           otherKey: 'book_id',
-          canSideLoadMany: true,
+          // Relationships are always includable via ?include=
           include: {
             limit: 5,
             strategy: 'window'
@@ -101,12 +101,12 @@ describe('Nested Include Operations', () => {
           through: 'book_authors', 
           foreignKey: 'book_id', 
           otherKey: 'author_id',
-          canSideLoadMany: true
+          // Relationships are always includable via ?include=
         },
         reviews: { 
           hasMany: 'reviews', 
           foreignKey: 'book_id',
-          sideLoad: true
+          // Relationships are always includable via ?include=
         }
       }
     });
@@ -400,8 +400,7 @@ describe('Nested Include Operations', () => {
       
       assert.equal(books.length, 2, 'Should include 2 books');
       assert.equal(publishers.length, 2, 'Should include 2 publishers');
-      // Countries might not be included if belongsTo relationships don't have sideLoad
-      // This is by design - only relationships with sideLoad are included
+      // All defined relationships will be included when requested via ?include=
       
       // Verify nested relationships are populated
       books.forEach(book => {

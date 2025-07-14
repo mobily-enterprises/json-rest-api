@@ -6,8 +6,8 @@
  * specification. It supports:
  * - Single-level includes (e.g., "author")
  * - Nested includes (e.g., "comments.author")  
- * - Many-to-one relationships (belongsTo with sideLoad: true)
- * - One-to-many relationships (hasMany with sideLoad: true)
+ * - Many-to-one relationships (belongsTo)
+ * - One-to-many relationships (hasMany)
  * - Polymorphic relationships (belongsToPolymorphic)
  * - Reverse polymorphic relationships (hasMany with via)
  * - Automatic deduplication of included resources

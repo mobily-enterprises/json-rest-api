@@ -45,8 +45,7 @@
  *         types: ['posts', 'videos'],     // Both scopes must already exist
  *         typeField: 'commentable_type',  // Which field stores the type
  *         idField: 'commentable_id'       // Which field stores the ID
- *       },
- *       sideLoad: true  // Allow including via ?include=commentable
+ *       }
  *     }
  *   }
  * });
@@ -105,8 +104,7 @@
  *         types: ['posts', 'comments', 'users', 'products'],
  *         typeField: 'trackable_type',
  *         idField: 'trackable_id'
- *       },
- *       sideLoad: true
+ *       }
  *     },
  *     // The user or system that made the change
  *     actor: {
@@ -114,8 +112,7 @@
  *         types: ['users', 'api_clients', 'cron_jobs'],
  *         typeField: 'actor_type',
  *         idField: 'actor_id'
- *       },
- *       sideLoad: true
+ *       }
  *     }
  *   }
  * });
@@ -171,8 +168,7 @@ export function validatePolymorphicRelationships({ eventData, api }) {
  *     typeField: 'commentable_type',
  *     idField: 'commentable_id'
  *   },
- *   as: 'commentable',
- *   sideLoad: true
+ *   as: 'commentable'
  * };
  * 
  * const result = validatePolymorphicRelationship(relDef, 'comments', scopes);

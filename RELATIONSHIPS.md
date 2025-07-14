@@ -699,8 +699,7 @@ api.scope('comments', {
         typeField: 'commentable_type',              // Column storing the type
         idField: 'commentable_id'                   // Column storing the ID
       },
-      as: 'commentable',
-      sideLoad: true
+      as: 'commentable'
     }
   }
 });
@@ -720,8 +719,7 @@ api.scope('articles', {
     comments: {
       hasMany: 'comments',
       via: 'commentable',     // References the polymorphic relationship name
-      as: 'comments',
-      sideLoad: true
+      as: 'comments'
     }
   }
 });
@@ -733,8 +731,7 @@ api.scope('videos', {
     comments: {
       hasMany: 'comments',
       via: 'commentable',
-      as: 'comments',
-      sideLoad: true
+      as: 'comments'
     }
   }
 });
@@ -918,8 +915,7 @@ api.scope('activities', {
         typeField: 'trackable_type',
         idField: 'trackable_id'
       },
-      as: 'trackable',
-      sideLoad: true
+      as: 'trackable'
     },
     performer: {
       belongsToPolymorphic: {
@@ -927,8 +923,7 @@ api.scope('activities', {
         typeField: 'performer_type',
         idField: 'performer_id'
       },
-      as: 'performer',
-      sideLoad: true
+      as: 'performer'
     }
   }
 });
@@ -976,15 +971,13 @@ const projectMembersSchema = {
     type: 'integer', 
     required: true,
     belongsTo: 'projects',
-    as: 'project',
-    sideLoad: true
+    as: 'project'
   },
   user_id: { 
     type: 'integer', 
     required: true,
     belongsTo: 'users',
-    as: 'user',
-    sideLoad: true
+    as: 'user'
   },
   role: { type: 'string', required: true },
   hours_allocated: { type: 'decimal' },
@@ -1026,8 +1019,7 @@ api.scope('projects', {
     members: {
       hasMany: 'project_members',
       foreignKey: 'project_id',
-      as: 'members',
-      sideLoad: true
+      as: 'members'
     }
   }
 });
@@ -1039,8 +1031,7 @@ api.scope('users', {
     projectMemberships: {
       hasMany: 'project_members',
       foreignKey: 'user_id',
-      as: 'projectMemberships',
-      sideLoad: true
+      as: 'projectMemberships'
     }
   }
 });
