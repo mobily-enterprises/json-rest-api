@@ -4,13 +4,14 @@ import { RestApiPlugin, RestApiKnexPlugin } from '../../index.js';
 /**
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
  */
-export async function createBasicApi(knex) {
+export async function createBasicApi(knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'basic-test-api';
   const api = new Api({
-    name: 'basic-test-api',
+    name: apiName,
     version: '1.0.0'
   });
 
-  await api.use(RestApiPlugin, {
+  const restApiOptions = {
     simplifiedApi: false,
     simplifiedTransport: false,
     returnFullRecord: {
@@ -19,8 +20,11 @@ export async function createBasicApi(knex) {
       patch: false,
       allowRemoteOverride: false
     },
-    sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code']
-  });
+    sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
+    ...pluginOptions['rest-api']  // Merge any custom options for rest-api plugin
+  };
+
+  await api.use(RestApiPlugin, restApiOptions);
   
   await api.use(RestApiKnexPlugin, { knex });
 
@@ -37,7 +41,9 @@ export async function createBasicApi(knex) {
     },
     tableName: 'basic_countries'
   });
-  await api.resources.countries.createKnexTable();
+  if (!pluginOptions.skipTableCreation) {
+    await api.resources.countries.createKnexTable();
+  }
 
   // Publishers table
   await api.addResource('publishers', {
@@ -51,7 +57,9 @@ export async function createBasicApi(knex) {
     },
     tableName: 'basic_publishers'
   });
-  await api.resources.publishers.createKnexTable();
+  if (!pluginOptions.skipTableCreation) {
+    await api.resources.publishers.createKnexTable();
+  }
 
   // Authors table
   await api.addResource('authors', {
@@ -64,7 +72,9 @@ export async function createBasicApi(knex) {
     },
     tableName: 'basic_authors'
   });
-  await api.resources.authors.createKnexTable();
+  if (!pluginOptions.skipTableCreation) {
+    await api.resources.authors.createKnexTable();
+  }
 
   // Books table
   await api.addResource('books', {
@@ -79,7 +89,9 @@ export async function createBasicApi(knex) {
     },
     tableName: 'basic_books'
   });
-  await api.resources.books.createKnexTable();
+  if (!pluginOptions.skipTableCreation) {
+    await api.resources.books.createKnexTable();
+  }
 
   // Book-Authors pivot table
   await api.addResource('book_authors', {
@@ -90,7 +102,9 @@ export async function createBasicApi(knex) {
     },
     tableName: 'basic_book_authors'
   });
-  await api.resources.book_authors.createKnexTable();
+  if (!pluginOptions.skipTableCreation) {
+    await api.resources.book_authors.createKnexTable();
+  }
 
   return api;
 }

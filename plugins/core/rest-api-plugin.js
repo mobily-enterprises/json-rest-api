@@ -18,7 +18,8 @@ import { createDefaultDataHelpers } from './lib/default-data-helpers.js';
 import { compileSchemas } from './lib/compile-schemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 import { getRequestedComputedFields, filterHiddenFields } from './lib/knex-field-helpers.js';
-import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './utils/knex-constants.js';
+import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT } from './utils/knex-constants.js';
+import { normalizeRecordAttributes } from './lib/database-value-normalizers.js';
 
 
 const cascadeConfig = (settingName, sources, defaultValue) =>
@@ -162,7 +163,8 @@ export const RestApiPlugin = {
     // they are not set in the scope options
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-    
+    vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
+ 
     // New simplified settings
     vars.simplifiedTransport = restApiOptions.simplifiedTransport !== undefined 
       ? restApiOptions.simplifiedTransport 
@@ -362,7 +364,7 @@ export const RestApiPlugin = {
       // (preventing SQL injection), pagination uses valid page[size]/page[number] format, and include
       // paths reference real relationships. Example: sort: ['-createdAt', 'title'] is checked against
       // sortableFields to ensure users can't sort by sensitive fields like 'password_hash'.
-      validateQueryPayload({ queryParams: context.queryParams }, context.sortableFields);
+      validateQueryPayload({ queryParams: context.queryParams }, context.sortableFields, vars.includeDepthLimit);
 
       // Validate search/filter parameters against searchSchema
       if (context.queryParams.filters && Object.keys(context.queryParams.filters).length > 0) {
@@ -418,6 +420,9 @@ export const RestApiPlugin = {
         transaction: context.transaction,
         runHooks
       })
+    
+      // Normalize database values (e.g., convert 1/0 to true/false for booleans)
+      context.record = normalizeRecordAttributes(context.record, scopes);
     
       // Make a backup
       try {
@@ -583,7 +588,7 @@ export const RestApiPlugin = {
       // validates 'include' contains valid relationship names (not arbitrary fields), and ensures
       // 'fields' for sparse fieldsets follow the format fields[type]=comma,separated,list.
       // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
-      validateGetPayload({ id: context.id, queryParams: context.queryParams });
+      validateGetPayload({ id: context.id, queryParams: context.queryParams }, vars.includeDepthLimit);
 
       await runHooks('checkPermissions')
       await runHooks('checkPermissionsGet')
@@ -609,6 +614,9 @@ export const RestApiPlugin = {
           }
         );
       }
+    
+      // Normalize database values (e.g., convert 1/0 to true/false for booleans)
+      context.record = normalizeRecordAttributes(context.record, scopes);
     
       await runHooks ('checkDataPermissions')
       await runHooks ('checkDataPermissionsGet')

@@ -1,6 +1,44 @@
 import { RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js';
 
 /**
+ * Validates that include paths don't exceed maximum depth
+ * 
+ * @param {string[]} includes - Array of include paths to validate
+ * @param {number} maxDepth - Maximum allowed depth
+ * @returns {boolean} True if valid
+ * @throws {RestApiValidationError} If depth is exceeded
+ * @private
+ */
+function validateIncludeDepth(includes, maxDepth) {
+  if (!includes || !Array.isArray(includes)) {
+    return true;
+  }
+  
+  for (const includePath of includes) {
+    if (typeof includePath !== 'string') {
+      continue; // Let other validators handle type errors
+    }
+    
+    const depth = includePath.split('.').length;
+    if (depth > maxDepth) {
+      throw new RestApiValidationError(
+        `Include path '${includePath}' exceeds maximum depth of ${maxDepth}`,
+        { 
+          fields: ['include'], 
+          violations: [{ 
+            field: 'include', 
+            rule: 'max_depth', 
+            message: `Path '${includePath}' has depth ${depth}, maximum allowed is ${maxDepth}` 
+          }] 
+        }
+      );
+    }
+  }
+  
+  return true;
+}
+
+/**
  * Validates a JSON:API resource identifier object
  * 
  * Ensures that a resource identifier follows JSON:API spec with proper type and id.
@@ -238,7 +276,7 @@ function validateRelationship(relationship, relationshipName, scopes = null) {
  * // invalid queries from reaching the database and providing consistent
  * // error messages across all storage implementations.
  */
-export function validateGetPayload(params) {
+export function validateGetPayload(params, maxIncludeDepth = 3) {
   if (!params || typeof params !== 'object') {
     throw new RestApiPayloadError(
       'GET parameters must be an object',
@@ -289,6 +327,9 @@ export function validateGetPayload(params) {
           );
         }
       });
+      
+      // Validate include depth
+      validateIncludeDepth(include, maxIncludeDepth);
     }
     
     // Validate fields
@@ -398,7 +439,7 @@ export function validateGetPayload(params) {
  * // 3. Prevent sorting on non-indexed fields that could slow queries
  * // 4. Provide clear error messages before hitting the database
  */
-export function validateQueryPayload(params, sortableFields = []) {
+export function validateQueryPayload(params, sortableFields = [], maxIncludeDepth = 3) {
   if (!params || typeof params !== 'object') {
     throw new RestApiPayloadError(
       'Query parameters must be an object',
@@ -434,6 +475,9 @@ export function validateQueryPayload(params, sortableFields = []) {
           );
         }
       });
+      
+      // Validate include depth
+      validateIncludeDepth(include, maxIncludeDepth);
     }
     
     // Validate fields
