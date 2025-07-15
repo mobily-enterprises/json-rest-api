@@ -28,20 +28,13 @@ X (12) - Boolean coercion from SQLite
 
 X (14) Check if post and put logic when zapping are correct
 
-(13) 
-Link and meta info in returned document
+X (13)  Link and meta info in returned document
+
+X (9) 1. Relationship Endpoints - Separate endpoints for relationship manipulation - GET /articles/1/relationships/comments - POST/PUT/DELETE for relationship updates
+
+X (15) Bulk operations
 
 -----------------------------------------------
-
-(9)
-1. Relationship Endpoints - Separate endpoints for relationship manipulation
-- GET /articles/1/relationships/comments
-- POST/PUT/DELETE for relationship updates
-
-
-(15)
-Bulk operations
-
 
 (16)
 Websockets

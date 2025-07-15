@@ -17,7 +17,6 @@ export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
 
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js';
-export { HttpPlugin } from './plugins/core/connectors/http-plugin.js';
 // Future: export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js';
 // Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
 
