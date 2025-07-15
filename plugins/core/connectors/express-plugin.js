@@ -81,8 +81,9 @@ export const ExpressPlugin = {
       }
     }
     
-    // Create Express router
+    // Create Express routers
     const router = expressOptions.router || express.Router();
+    const notFoundRouter = express.Router();
     
     // Add body parsing middleware
     router.use(express.json({ 
@@ -266,15 +267,9 @@ export const ExpressPlugin = {
       finalRouter = globalRouter;
     }
     
-    // Store router in api.http.express namespace
-    api.http.express.router = finalRouter;
-    
-    // Add convenient mounting method
-    api.http.express.mount = (app, path = '') => {
-      app.use(path, finalRouter);
-      
-      // Add 404 handler AFTER mounting the routes
-      app.use((req, res, next) => {
+    // Set up 404 handler in separate router (unless disabled)
+    if (expressOptions.handle404 !== false) {
+      notFoundRouter.use((req, res, next) => {
         if (req.path.startsWith('/api')) {
           res.status(404).json({
             errors: [{
@@ -287,6 +282,32 @@ export const ExpressPlugin = {
           next();
         }
       });
+    }
+    
+    // Store routers in api.http.express namespace
+    api.http.express.router = finalRouter;
+    api.http.express.notFoundRouter = notFoundRouter;
+    
+    // Allow other plugins to add middleware before 404 handler
+    const beforeNotFoundMiddleware = [];
+    api.http.express.beforeNotFound = (middleware) => {
+      beforeNotFoundMiddleware.push(middleware);
+    };
+    
+    // Add convenient mounting method
+    api.http.express.mount = (app, path = '') => {
+      // Mount main router with all routes
+      app.use(path, finalRouter);
+      
+      // Mount any middleware that should come before 404
+      beforeNotFoundMiddleware.forEach(middleware => {
+        app.use(path, middleware);
+      });
+      
+      // Mount 404 handler router after all other routes (if enabled)
+      if (expressOptions.handle404 !== false) {
+        app.use(path, notFoundRouter);
+      }
       
       log.info(`Express routes mounted at ${path || '/'}`);
     };
