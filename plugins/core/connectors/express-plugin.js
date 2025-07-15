@@ -266,27 +266,28 @@ export const ExpressPlugin = {
       finalRouter = globalRouter;
     }
     
-    // Add 404 handler at the end
-    finalRouter.use((req, res, next) => {
-      if (req.path.startsWith('/api')) {
-        res.status(404).json({
-          errors: [{
-            status: '404',
-            title: 'Not Found',
-            detail: `The requested endpoint ${req.method} ${req.path} does not exist`
-          }]
-        });
-      } else {
-        next();
-      }
-    });
-    
     // Store router in api.http.express namespace
     api.http.express.router = finalRouter;
     
     // Add convenient mounting method
     api.http.express.mount = (app, path = '') => {
       app.use(path, finalRouter);
+      
+      // Add 404 handler AFTER mounting the routes
+      app.use((req, res, next) => {
+        if (req.path.startsWith('/api')) {
+          res.status(404).json({
+            errors: [{
+              status: '404',
+              title: 'Not Found',
+              detail: `The requested endpoint ${req.method} ${req.path} does not exist`
+            }]
+          });
+        } else {
+          next();
+        }
+      });
+      
       log.info(`Express routes mounted at ${path || '/'}`);
     };
     

@@ -48,7 +48,7 @@ const getSimplifiedSetting = (params, scopeOptions, vars) => {
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install({ helpers, addScopeMethod, vars, addHook, apiOptions, pluginOptions, api, setScopeAlias, scopes, log, on }) {
+  install({ helpers, addScopeMethod, addApiMethod, vars, addHook, runHooks, apiOptions, pluginOptions, api, setScopeAlias, scopes, log, on }) {
 
     // Enhance the logger to show full error details
     const enhancedLog = createEnhancedLogger(log, { 

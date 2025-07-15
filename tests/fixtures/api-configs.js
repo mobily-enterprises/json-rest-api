@@ -1,5 +1,6 @@
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from '../../index.js';
+import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
 
 /**
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
@@ -27,12 +28,17 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   await api.use(RestApiPlugin, restApiOptions);
   
   await api.use(RestApiKnexPlugin, { knex });
+  
+  // Add Express plugin if requested
+  if (pluginOptions.includeExpress) {
+    await api.use(ExpressPlugin, pluginOptions.express || {});
+  }
 
   // Countries table
   await api.addResource('countries', {
     schema: {
       id: { type: 'id' },
-      name: { type: 'string', required: true, max: 100 },
+      name: { type: 'string', required: true, max: 100, search: true },
       code: { type: 'string', max: 2, unique: true }
     },
     relationships: {
