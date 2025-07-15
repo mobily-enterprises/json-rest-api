@@ -106,6 +106,28 @@ export async function createBasicApi(knex, pluginOptions = {}) {
 }
 
 /**
+ * Creates a basic API with bulk operations enabled
+ */
+export async function createBulkOperationsApi(knex, pluginOptions = {}) {
+  const { BulkOperationsPlugin } = await import('../../plugins/core/bulk-operations-plugin.js');
+  
+  const api = await createBasicApi(knex, pluginOptions);
+  
+  // Add bulk operations plugin
+  await api.use(BulkOperationsPlugin, {
+    'bulk-operations': {
+      maxBulkOperations: 100,
+      defaultAtomic: true,
+      batchSize: 10,
+      enableOptimizations: true,
+      ...pluginOptions['bulk-operations']
+    }
+  });
+  
+  return api;
+}
+
+/**
  * Creates an extended API with additional fields for more complex testing
  */
 export async function createExtendedApi(knex) {
