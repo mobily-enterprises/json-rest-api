@@ -340,12 +340,12 @@ export const RestApiPlugin = {
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
-      context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
+      context.returnFullRecord = cascadeConfig('returnFullRecord', [params, scopeOptions, vars], false);
       context.queryParams = params.queryParams || {};
 
       // These only make sense as parameter per query
-      context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
-      context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
+      context.queryParams.fields = cascadeConfig('fields', [params.queryParams], {});
+      context.queryParams.include = cascadeConfig('include', [params.queryParams], []);
       context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
       context.queryParams.page = cascadeConfig('page', [params.queryParams], {})
   
