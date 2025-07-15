@@ -253,7 +253,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  * @returns {Promise<void>}
  */
 export const loadBelongsTo = async (scope, deps) => {
-  const { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty } = scope;
+  const { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty } = scope;
   const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading belongsTo:', { 
@@ -285,7 +285,18 @@ export const loadBelongsTo = async (scope, deps) => {
       // No relationships to load, set all to null
       records.forEach(record => {
         if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
-        record[RELATIONSHIPS_KEY][includeName] = { data: null };
+        const relationshipObject = { data: null };
+        
+        // Add links if urlPrefix is configured
+        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+        if (urlPrefix && scopeName) {
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
+            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
+          };
+        }
+        
+        record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
       });
       return;
     }
@@ -347,7 +358,18 @@ export const loadBelongsTo = async (scope, deps) => {
           delete targetRecord[RELATIONSHIP_METADATA_KEY];
         }
 
-        record[RELATIONSHIPS_KEY][includeName] = { data: { type: targetScope, id: String(targetId) } };
+        const relationshipObject = { data: { type: targetScope, id: String(targetId) } };
+        
+        // Add links if urlPrefix is configured
+        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+        if (urlPrefix && scopeName) {
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
+            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
+          };
+        }
+        
+        record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
         
         // Add to included if not already there
         const resourceKey = `${targetScope}:${targetId}`;
@@ -360,7 +382,18 @@ export const loadBelongsTo = async (scope, deps) => {
           }
         }
       } else {
-        record[RELATIONSHIPS_KEY][includeName] = { data: null };
+        const relationshipObject = { data: null };
+        
+        // Add links if urlPrefix is configured
+        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+        if (urlPrefix && scopeName) {
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
+            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
+          };
+        }
+        
+        record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
       }
     });
     
@@ -463,7 +496,18 @@ export const loadHasMany = async (scope, deps) => {
       // No relationships found, set empty arrays for all records
       records.forEach(record => {
         if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
-        record[RELATIONSHIPS_KEY][includeName] = { data: [] };
+        const relationshipObject = { data: [] };
+        
+        // Add links if urlPrefix is configured
+        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+        if (urlPrefix && scopeName) {
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
+            related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
+          };
+        }
+        
+        record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
       });
       return;
     }
@@ -609,7 +653,18 @@ export const loadHasMany = async (scope, deps) => {
           return { type: targetScope, id: String(childRecord.id) };
         });
       
-      record[RELATIONSHIPS_KEY][includeName] = { data: relData };
+      const relationshipObject = { data: relData };
+      
+      // Add links if urlPrefix is configured
+      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+      if (urlPrefix && scopeName) {
+        relationshipObject.links = {
+          self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
+          related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
+        };
+      }
+      
+      record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
       
       // Update the record in the included Map if it exists
       const recordKey = `${scopeName}:${record.id}`;
@@ -618,7 +673,7 @@ export const loadHasMany = async (scope, deps) => {
         if (!existingRecord.relationships) {
           existingRecord.relationships = {};
         }
-        existingRecord.relationships[includeName] = { data: relData };
+        existingRecord.relationships[includeName] = relationshipObject;
       }
     });
     
@@ -762,7 +817,18 @@ export const loadHasMany = async (scope, deps) => {
         return { type: targetScope, id: String(childRecord.id) };
       });
       
-      record[RELATIONSHIPS_KEY][includeName] = { data: relData };
+      const relationshipObject = { data: relData };
+      
+      // Add links if urlPrefix is configured
+      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+      if (urlPrefix && scopeName) {
+        relationshipObject.links = {
+          self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
+          related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
+        };
+      }
+      
+      record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
       
       // Update the record in the included Map if it exists
       const recordKey = `${scopeName}:${record.id}`;
@@ -771,7 +837,7 @@ export const loadHasMany = async (scope, deps) => {
         if (!existingRecord.relationships) {
           existingRecord.relationships = {};
         }
-        existingRecord.relationships[includeName] = { data: relData };
+        existingRecord.relationships[includeName] = relationshipObject;
       }
     });
     
@@ -829,7 +895,7 @@ export const loadHasMany = async (scope, deps) => {
  * @returns {Promise<void>}
  */
 export const loadPolymorphicBelongsTo = async (scope, deps) => {
-  const { records, relName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
+  const { records, scopeName, relName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
   const { scopes, log, knex, capabilities } = deps.context;
   try {
     log.trace('[INCLUDE] Loading polymorphic belongsTo:', { 
@@ -927,11 +993,33 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
             included.set(resourceKey, jsonApiRecord);
           }
           
-          record[RELATIONSHIPS_KEY][relName] = {
+          const relationshipObject = {
             data: { type: targetType, id: String(targetId) }
           };
+          
+          // Add links if urlPrefix is configured
+          const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+          if (urlPrefix && scopeName) {
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
+              related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
+            };
+          }
+          
+          record[RELATIONSHIPS_KEY][relName] = relationshipObject;
         } else {
-          record[RELATIONSHIPS_KEY][relName] = { data: null };
+          const relationshipObject = { data: null };
+          
+          // Add links if urlPrefix is configured
+          const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+          if (urlPrefix && scopeName) {
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
+              related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
+            };
+          }
+          
+          record[RELATIONSHIPS_KEY][relName] = relationshipObject;
         }
       }
     });
@@ -952,7 +1040,18 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
   records.forEach(record => {
     if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
     if (!record[RELATIONSHIPS_KEY][relName]) {
-      record[RELATIONSHIPS_KEY][relName] = { data: null };
+      const relationshipObject = { data: null };
+      
+      // Add links if urlPrefix is configured
+      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+      if (urlPrefix && scopeName) {
+        relationshipObject.links = {
+          self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
+          related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
+        };
+      }
+      
+      record[RELATIONSHIPS_KEY][relName] = relationshipObject;
     }
   });
   } catch (error) {
@@ -1112,7 +1211,18 @@ export const loadReversePolymorphic = async (scope, deps) => {
       return { type: targetScope, id: String(childRecord.id) };
     });
     
-    record[RELATIONSHIPS_KEY][includeName] = { data: relData };
+    const relationshipObject = { data: relData };
+    
+    // Add links if urlPrefix is configured
+    const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
+    if (urlPrefix && scopeName) {
+      relationshipObject.links = {
+        self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
+        related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
+      };
+    }
+    
+    record[RELATIONSHIPS_KEY][includeName] = relationshipObject;
   });
   
   // Process nested includes
@@ -1209,7 +1319,7 @@ export const processIncludes = async (scope, deps) => {
         for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
             await loadBelongsTo(
-              { records, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
+              { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
               { context: { scopes, log, knex, capabilities } }
             );
             handled = true;
@@ -1238,7 +1348,7 @@ export const processIncludes = async (scope, deps) => {
               handled = true;
             } else if (relDef.belongsToPolymorphic) {
               await loadPolymorphicBelongsTo(
-                { records, relName: includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
+                { records, scopeName, relName: includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
                 { context: { scopes, log, knex, capabilities } }
               );
               handled = true;

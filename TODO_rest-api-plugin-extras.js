@@ -34,10 +34,7 @@ X (9) 1. Relationship Endpoints - Separate endpoints for relationship manipulati
 
 X (15) Bulk operations
 
------------------------------------------------
-
-(16)
-Websockets
+X (16) Websockets
 
 
 

@@ -119,9 +119,11 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
   // Extract values from scope
   const { 
     vars: { 
-      schemaInfo: { schema, schemaRelationships: relationships }
+      schemaInfo: { schema, schemaRelationships: relationships, idProperty }
     }
   } = scope;
+  
+  const idField = idProperty || 'id';
   
   // Handle both Schema objects and plain objects
   const schemaStructure = getSchemaStructure(schema);
@@ -142,17 +144,39 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
         jsonApiRecord.relationships = jsonApiRecord.relationships || {};
         if (!jsonApiRecord.relationships[fieldDef.as]) {
           if (cleanRecord[fieldName] !== null && cleanRecord[fieldName] !== undefined) {
-            jsonApiRecord.relationships[fieldDef.as] = {
+            const relationshipObject = {
               data: {
                 type: fieldDef.belongsTo,
                 id: String(cleanRecord[fieldName])
               }
             };
+            
+            // Add links if urlPrefix is configured
+            const urlPrefix = scope.vars.resourceUrlPrefix;
+            if (urlPrefix) {
+              relationshipObject.links = {
+                self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
+                related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+              };
+            }
+            
+            jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
           } else {
             // Explicitly null relationship
-            jsonApiRecord.relationships[fieldDef.as] = {
+            const relationshipObject = {
               data: null
             };
+            
+            // Add links even for null relationships
+            const urlPrefix = scope.vars.resourceUrlPrefix;
+            if (urlPrefix) {
+              relationshipObject.links = {
+                self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
+                related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+              };
+            }
+            
+            jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
           }
         }
       }
@@ -166,18 +190,40 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
         
         if (typeValue && idValue) {
           jsonApiRecord.relationships = jsonApiRecord.relationships || {};
-          jsonApiRecord.relationships[relName] = {
+          const relationshipObject = {
             data: {
               type: typeValue,
               id: String(idValue)
             }
           };
+          
+          // Add links if urlPrefix is configured
+          const urlPrefix = scope.vars.resourceUrlPrefix;
+          if (urlPrefix) {
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
+              related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+            };
+          }
+          
+          jsonApiRecord.relationships[relName] = relationshipObject;
         } else if (typeValue === null || idValue === null) {
           // Explicitly null relationship
           jsonApiRecord.relationships = jsonApiRecord.relationships || {};
-          jsonApiRecord.relationships[relName] = {
+          const relationshipObject = {
             data: null
           };
+          
+          // Add links even for null relationships
+          const urlPrefix = scope.vars.resourceUrlPrefix;
+          if (urlPrefix) {
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
+              related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+            };
+          }
+          
+          jsonApiRecord.relationships[relName] = relationshipObject;
         }
       }
     });
