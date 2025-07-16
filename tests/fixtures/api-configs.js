@@ -6,7 +6,7 @@ import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
  */
 export async function createBasicApi(knex, pluginOptions = {}) {
-  const apiName = pluginOptions.apiName || 'basic-test-api';
+  const apiName = pluginOptions.apiName || `basic-test-api`;
   const api = new Api({
     name: apiName,
     version: '1.0.0'
@@ -255,7 +255,7 @@ export async function createExtendedApi(knex) {
       title: { type: 'string', max: 200 },
       content: { type: 'string', required: true, max: 5000 },
       reviewer_name: { type: 'string', required: true, max: 100 },
-      review_date: { type: 'datetime', default: 'now()' },
+      review_date: { type: 'dateTime', default: 'now()' },
       helpful_count: { type: 'number', default: 0 },
       reviewable_type: { type: 'string', required: true },
       reviewable_id: { type: 'number', required: true },

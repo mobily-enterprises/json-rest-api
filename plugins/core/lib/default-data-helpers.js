@@ -30,6 +30,17 @@ export const createDefaultDataHelpers = (api) => {
     dataGet: async function(scope, deps) {
       throw new Error(`No storage implementation for get. Install a storage plugin.`);
     },
+
+    /**
+     * Default implementation of dataGetMinimal that throws an error
+     * @param {Object} scope - The scope object
+     * @param {Object} deps - Dependencies object
+     * @param {Object} deps.context - Request context with id, transaction, etc
+     * @throws {Error} Always throws error about missing storage plugin
+     */
+    dataGetMinimal: async function(scope, deps) {
+      throw new Error(`No storage implementation for getMinimal. Install a storage plugin.`);
+    },
     
     /**
      * Default implementation of dataQuery that throws an error

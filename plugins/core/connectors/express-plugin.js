@@ -237,7 +237,10 @@ export const ExpressPlugin = {
           // Handle response based on method
           res.set('Content-Type', 'application/vnd.api+json');
           
-          if (method === 'DELETE' && !result) {
+          // Check if handler returned a specific status code
+          if (result && typeof result.statusCode === 'number') {
+            res.status(result.statusCode).json(result.body || result);
+          } else if (method === 'DELETE' && !result) {
             res.sendStatus(204);
           } else if (method === 'POST') {
             // Set Location header for created resources

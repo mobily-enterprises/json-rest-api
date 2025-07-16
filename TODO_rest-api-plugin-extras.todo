@@ -1,0 +1,8 @@
+☐ Finish websockets properly, make it actually work
+☐ Change name to runPluginHooks
+☐ improve way in which jvt-auth works, no need for those vars and helpers
+☐ Improve enrichAttributes, split into helpers
+☐ Add 'created_at' module, maybe have 'protected' fields
+☐ Create ownership-filter-plugin.js for multihoming and user filtering
+☐ Final checks
+☐ Document the lot properly

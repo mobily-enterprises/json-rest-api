@@ -50,10 +50,11 @@ export async function createRevocationResource(api, tableName) {
   
   await api.addResource(tableName, {
     schema: {
-      jti: { type: 'string', primary: true, required: true },
+      id: { type: 'id' },
+      jti: { type: 'string', required: true, unique: true },
       user_id: { type: 'string', required: true },
-      expires_at: { type: 'timestamp', required: true },
-      revoked_at: { type: 'timestamp', required: true }
+      expires_at: { type: 'dateTime', required: true },
+      revoked_at: { type: 'dateTime', required: true }
     },
     
     // Add index for cleanup queries

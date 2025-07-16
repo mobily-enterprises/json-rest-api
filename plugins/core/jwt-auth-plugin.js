@@ -12,37 +12,40 @@ export const JwtAuthPlugin = {
   version: '1.0.0',
   dependencies: ['rest-api'],
   
-  async install({ api, addHook, log, addRoute, runHooks, helpers, vars, on }) {
+  async install({ api, addHook, log, runHooks, helpers, vars, on, pluginOptions }) {
+    // Get JWT-specific options from the wrapped pluginOptions
+    const jwtOptions = pluginOptions['jwt-auth'] || {};
+    
     const config = {
       // Token validation
-      secret: api.config.jwtAuth?.secret,
-      publicKey: api.config.jwtAuth?.publicKey,
-      jwksUrl: api.config.jwtAuth?.jwksUrl,
-      algorithms: api.config.jwtAuth?.algorithms || ['HS256', 'RS256'],
-      audience: api.config.jwtAuth?.audience,
-      issuer: api.config.jwtAuth?.issuer,
+      secret: jwtOptions.secret,
+      publicKey: jwtOptions.publicKey,
+      jwksUrl: jwtOptions.jwksUrl,
+      algorithms: jwtOptions.algorithms || ['HS256', 'RS256'],
+      audience: jwtOptions.audience,
+      issuer: jwtOptions.issuer,
       
       // Token parsing
-      userIdField: api.config.jwtAuth?.userIdField || 'sub',
-      emailField: api.config.jwtAuth?.emailField || 'email',
-      rolesField: api.config.jwtAuth?.rolesField || 'roles',
-      permissionsField: api.config.jwtAuth?.permissionsField || 'permissions',
+      userIdField: jwtOptions.userIdField || 'sub',
+      emailField: jwtOptions.emailField || 'email',
+      rolesField: jwtOptions.rolesField || 'roles',
+      permissionsField: jwtOptions.permissionsField || 'permissions',
       
       // Ownership settings
-      ownershipField: api.config.jwtAuth?.ownershipField || 'user_id',
+      ownershipField: jwtOptions.ownershipField || 'user_id',
       
       // Revocation settings
       revocation: {
-        enabled: api.config.jwtAuth?.revocation?.enabled !== false,
-        storage: api.config.jwtAuth?.revocation?.storage || 'database',
-        cleanupInterval: api.config.jwtAuth?.revocation?.cleanupInterval || 3600000, // 1 hour
-        tableName: api.config.jwtAuth?.revocation?.tableName || 'revoked_tokens'
+        enabled: jwtOptions.revocation?.enabled !== false,
+        storage: jwtOptions.revocation?.storage || 'database',
+        cleanupInterval: jwtOptions.revocation?.cleanupInterval || 3600000, // 1 hour
+        tableName: jwtOptions.revocation?.tableName || 'revoked_tokens'
       },
       
       // Endpoints
       endpoints: {
-        logout: api.config.jwtAuth?.endpoints?.logout || false,
-        session: api.config.jwtAuth?.endpoints?.session || false
+        logout: jwtOptions.endpoints?.logout || false,
+        session: jwtOptions.endpoints?.session || false
       }
     };
     
@@ -104,10 +107,13 @@ export const JwtAuthPlugin = {
       // Must own the resource
       'is_owner': (context, { existingRecord, scopeVars }) => {
         if (!context.auth?.userId) return false;
-        if (!existingRecord) return true; // Creating new record is OK
+        
+        // Use attributes from the new checkPermissions context
+        const record = context.attributes;
+        if (!record) return true; // Creating new record is OK
         
         const ownerField = scopeVars?.ownershipField || config.ownershipField;
-        return existingRecord[ownerField] === context.auth.userId;
+        return record[ownerField] === context.auth.userId;
       },
       
       // Must be admin (special case of role check)
@@ -139,16 +145,17 @@ export const JwtAuthPlugin = {
     vars.authCheckers = authCheckers;
     
     // Hook into scope:added to process auth rules
-    on('scope:added', ({ scope, scopeName, scopeVars }) => {
+    on('scope:added', 'jwt-process-auth-rules', ({ eventData }) => {
+      const { scope, scopeName } = eventData;
       // Get auth from scopeOptions (where addResource config goes)
       const auth = scope?.scopeOptions?.auth;
       
       if (!auth) return;
       
       // Store auth rules in scopeVars for permission checking
-      scopeVars.authRules = auth;
+      scope.vars.authRules = auth;
       
-      log.debug(`Auth rules registered for ${scopeName}:`, scopeVars.authRules);
+      log.debug(`Auth rules registered for ${scopeName}:`, scope.vars.authRules);
     });
     
     // Simple auth population hook - just validates token and sets context.auth
@@ -225,7 +232,11 @@ export const JwtAuthPlugin = {
     
     // Add the declarative auth check hook
     addHook('checkPermissions', 'declarative-auth-check', { sequence: -100 }, 
-      async ({ context, scopeName, operation, existingRecord, scopeVars }) => {
+      async ({ context, scope, scopeName }) => {
+        const operation = context.method; // 'post', 'get', 'patch', etc.
+        const scopeVars = scope?.vars;
+        const existingRecord = context.attributes;
+        
         const authRules = scopeVars?.authRules;
         if (!authRules) return; // No auth rules defined
         
@@ -436,9 +447,12 @@ export const JwtAuthPlugin = {
     };
     
     // Add logout endpoint if configured
-    if (config.endpoints.logout) {
+    if (config.endpoints.logout && api.addRoute) {
       // Add as a public route that checks its own auth
-      addRoute('POST', config.endpoints.logout, async ({ context }) => {
+      await api.addRoute({
+        method: 'POST',
+        path: config.endpoints.logout,
+        handler: async ({ context }) => {
         try {
           if (!context.auth) {
             return {
@@ -455,14 +469,17 @@ export const JwtAuthPlugin = {
             body: { error: error.message }
           };
         }
-      });
+      }});
       
       log.info(`Added logout endpoint: POST ${config.endpoints.logout}`);
     }
     
     // Add session endpoint if configured
-    if (config.endpoints.session) {
-      addRoute('GET', config.endpoints.session, async ({ context }) => {
+    if (config.endpoints.session && api.addRoute) {
+      await api.addRoute({
+        method: 'GET',
+        path: config.endpoints.session,
+        handler: async ({ context }) => {
         if (!context.auth) {
           return {
             statusCode: 200,
@@ -482,7 +499,7 @@ export const JwtAuthPlugin = {
             expiresAt: new Date(context.auth.token.exp * 1000).toISOString()
           }
         };
-      });
+      }});
       
       log.info(`Added session endpoint: GET ${config.endpoints.session}`);
     }

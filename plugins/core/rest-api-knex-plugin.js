@@ -188,6 +188,22 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(scope, records, included, true, scopeName);
     };
 
+    helpers.dataGetMinimal = async ({ scopeName, context, transaction }) => {
+      const id = context.id;
+      const tableName = context.schemaInfo.tableName;
+      const idProperty = context.schemaInfo.idProperty;
+      const db = transaction || knex;
+      
+      log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
+      
+      // Simple select without any joins or processing
+      const record = await db(tableName)
+        .where(idProperty, id)
+        .first();
+        
+      return record;
+    };
+
     helpers.dataQuery = async ({ scopeName, context, transaction, runHooks }) => {    
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;

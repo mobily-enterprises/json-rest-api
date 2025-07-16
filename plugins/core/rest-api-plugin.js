@@ -35,6 +35,13 @@ const cascadeConfig = (settingName, sources, defaultValue) =>
  * @returns {boolean} Whether to use simplified mode
  */
 const getSimplifiedSetting = (params, scopeOptions, vars) => {
+
+  // If there was no params.inputRecord, then simplified must be true regardless
+  // The rest of this function is based on `params` actually being `params`,
+  // so it will be skipped
+  const configSimplified = cascadeConfig('simplified', [scopeOptions], false)
+  if (!params.inputRecord && !configSimplified) return true
+
   // Check if this request comes from a transport (HTTP/Express)
   const isTransport = params.isTransport === true;
   
@@ -337,8 +344,8 @@ export const RestApiPlugin = {
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
       context.method = 'query'
             
-      // Get configuration values using new helper
-      context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
+      const defaultSimplifiedSetting = params.isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions], defaultSimplifiedSetting);
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
@@ -417,10 +424,14 @@ export const RestApiPlugin = {
         // Replace filter with validated/transformed values
         context.queryParams.filters = validatedObject;
       }
-    
-      await runHooks ('checkPermissions')
-      await runHooks ('checkPermissionsQuery')
-      
+
+      // Centralised checkPermissions function
+      await scope.checkPermissions({
+        method: 'query',
+        auth: context.auth,
+        transaction: context.transaction
+      })
+
       await runHooks ('beforeData')
       await runHooks ('beforeDataQuery')
       context.record = await helpers.dataQuery({
@@ -569,8 +580,8 @@ export const RestApiPlugin = {
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'get'
 
-      // Get configuration values using new helper
-      context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
+      const defaultSimplifiedSetting = params.isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+      context.simplified = cascadeConfig('simplified', [params, scopeOptions], defaultSimplifiedSetting);
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
@@ -599,8 +610,13 @@ export const RestApiPlugin = {
       // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
       validateGetPayload({ id: context.id, queryParams: context.queryParams }, vars.includeDepthLimit);
 
-      await runHooks('checkPermissions')
-      await runHooks('checkPermissionsGet')
+      // Centralised checkPermissions function
+      await scope.checkPermissions({
+        method: 'get',
+        auth: context.auth,
+        id: context.id,
+        transaction: context.transaction
+      })
       
       await runHooks('beforeData')
       await runHooks('beforeDataGet')
@@ -764,6 +780,7 @@ export const RestApiPlugin = {
             }
         }
 
+        if (!context.inputRecord) debugger
         if (context.inputRecord.data.type !== scopeName) {
           throw new RestApiValidationError(
             `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
@@ -787,7 +804,8 @@ export const RestApiPlugin = {
         }
 
         // If both URL path ID and request body ID are provided, they must match
-        if (context.id && context.inputRecord.data.id && context.id !== context.inputRecord.data.id) {
+        // Convert both to strings for comparison since databases may return numeric IDs
+        if (context.id && context.inputRecord.data.id && String(context.id) !== String(context.inputRecord.data.id)) {
           throw new RestApiValidationError(
             `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
             { 
@@ -1257,10 +1275,13 @@ const validatePivotResource = (scopes, relDef, relName) => {
             runHooks , 
         });
 
-        
-        await runHooks ('checkPermissions')
-        await runHooks ('checkPermissionsPost')
-        
+        // Centralised checkPermissions function
+        await scope.checkPermissions({
+          method: 'post',
+          auth: context.auth,
+          transaction: context.transaction
+        })
+
         await runHooks ('beforeDataCall')
         await runHooks ('beforeDataCallPost')
         
@@ -1519,6 +1540,24 @@ const validatePivotResource = (scopes, relDef, relName) => {
     context.isCreate = !context.exists;
     context.isUpdate = context.exists;
 
+    // Fetch minimal record for authorization checks (only for updates)
+    if (context.isUpdate) {
+      const minimalRecord = await helpers.dataGetMinimal({
+        scopeName,
+        context,
+        transaction: context.transaction
+      });
+
+      if (!minimalRecord) {
+        throw new RestApiResourceError(
+          `Resource not found: ${scopeName}/${context.id}`,
+          ERROR_SUBTYPES.NOT_FOUND
+        );
+      }
+
+      context.minimalRecord = minimalRecord;
+    }
+
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later
@@ -1602,9 +1641,15 @@ const validatePivotResource = (scopes, relDef, relName) => {
       };
     }
 
-    await runHooks ('checkPermissions')
-    await runHooks ('checkPermissionsPut')
-    await runHooks (`checkPermissionsPut${context.isCreate ? 'Create' : 'Update'}`)
+    // Centralised checkPermissions function
+    await scope.checkPermissions({
+      method: 'put',
+      auth: context.auth,
+      id: context.id,
+      attributes: context.minimalRecord,
+      isUpdate: context.isUpdate,
+      transaction: context.transaction
+    })
   
     await runHooks ('beforeDataCall')
     await runHooks ('beforeDataCallPut')
@@ -1857,11 +1902,31 @@ const validatePivotResource = (scopes, relDef, relName) => {
             isPartialValidation: true 
         });
 
+        // Fetch minimal record for authorization checks
+        const minimalRecord = await helpers.dataGetMinimal({
+          scopeName,
+          context,
+          transaction: context.transaction
+        });
+
+        if (!minimalRecord) {
+          throw new RestApiResourceError(
+            `Resource not found: ${scopeName}/${context.id}`,
+            ERROR_SUBTYPES.NOT_FOUND
+          );
+        }
+
+        context.minimalRecord = minimalRecord;
     
-        // Permissions check
-        await runHooks ('checkPermissions')
-        await runHooks ('checkPermissionsPatch')
-        
+        // Centralised checkPermissions function
+        await scope.checkPermissions({
+          method: 'patch',
+          auth: context.auth,
+          id: context.id,
+          attributes: context.minimalRecord,
+          transaction: context.transaction
+        })
+
         await runHooks ('beforeDataCall')
         await runHooks ('beforeDataCallPatch')
 
@@ -1973,9 +2038,13 @@ const validatePivotResource = (scopes, relDef, relName) => {
       try {
         // No payload validation needed for DELETE
         
-        // Run permission checks
-        await runHooks ('checkPermissions')
-        await runHooks ('checkPermissionsDelete')
+        // Centralised checkPermissions function
+        await scope.checkPermissions({
+          method: 'delete',
+          auth: context.auth,
+          id: context.id,
+          transaction: context.transaction
+        })
         
         // Before data operations
         await runHooks ('beforeDataCall')
@@ -2039,7 +2108,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
      *   });
      * }
      */
-    addScopeMethod('enrichAttributes', async ({ params, runHooks, scopeName, scopes, api, helpers }) => {
+    addScopeMethod('enrichAttributes', async ({ context, params, runHooks, scopeName, scopes, api, helpers }) => {
       // Extract parameters passed to enrichAttributes
       // - attributes: The raw attributes from database
       // - parentContext: The context from the calling method (has queryParams, transaction, etc.)
@@ -2112,7 +2181,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
       }
       
       // Create context for enrichAttributes hooks
-      const hookContext = {
+      Object.assign(context, {
         parentContext,
         attributes: filteredAttributes,
         computedFields,
@@ -2120,10 +2189,10 @@ const validatePivotResource = (scopes, relDef, relName) => {
         scopeName,
         helpers,
         api
-      };
+      });
       
       // Run enrichAttributes hooks for additional/override computations
-      await runHooks('enrichAttributes', hookContext);
+      await runHooks('enrichAttributes');
       
       // Remove fields that were only fetched as dependencies
       // This is the key to the dependency resolution feature:
@@ -2131,7 +2200,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
       // 2. We used them in compute functions
       // 3. Now we remove them if they weren't explicitly requested
       // Example: User requests profit_margin, we fetch cost, compute, then remove cost
-      const finalAttributes = { ...hookContext.attributes };
+      const finalAttributes = { ...context.attributes };
       if (requestedFields && computedDependencies && computedDependencies.length > 0) {
         // Parse requested fields if it's a string
         const requested = typeof requestedFields === 'string'
@@ -2148,6 +2217,31 @@ const validatePivotResource = (scopes, relDef, relName) => {
       }
       
       return finalAttributes;
+    });
+
+     /**
+     * checkPermissions
+     * Check if ther are permissions to access a resource.
+     * 
+     */
+    addScopeMethod('checkPermissions', async ({ context, params, runHooks, scopeName, scopes, helpers }) => {
+      // Extract parameters passed to enrichAttributes
+      // - attributes: The raw attributes from database
+      // - parentContext: The context from the calling method (has queryParams, transaction, etc.)
+      // - requestedComputedFields: Which computed fields to calculate (from sparse fieldsets)
+      // - isMainResource: Whether this is the main resource or an included one
+      // - computedDependencies: Fields fetched only for computation (to be removed)
+      Object.assign(context, {
+        method: params.method,
+        isUpdate: params.isUpdate,
+        id: params.id,
+        auth: params.auth,
+        transaction: params.transaction,
+        attributes: params.attributes
+      })
+      
+      // Run enrichAttributes hooks for additional/override computations
+      await runHooks('checkPermissions');
     });
 
     // Initialize default data helpers that throw errors until a storage plugin is installed

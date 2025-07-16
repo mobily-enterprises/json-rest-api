@@ -116,7 +116,7 @@ describe('Socket.io Plugin', () => {
         schema: {
           id: { type: 'id' },
           title: { type: 'string', required: true },
-          content: { type: 'text' },
+          content: { type: 'string' },
           user_id: { type: 'string' },
           published: { type: 'boolean', default: false }
         },
@@ -431,7 +431,7 @@ describe('Socket.io Plugin', () => {
         schema: {
           id: { type: 'id' },
           title: { type: 'string', required: true },
-          content: { type: 'text' },
+          content: { type: 'string' },
           user_id: { type: 'string' },
           private: { type: 'boolean', default: true }
         },
