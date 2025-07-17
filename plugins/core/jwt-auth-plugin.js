@@ -113,6 +113,29 @@ export const JwtAuthPlugin = {
         if (!record) return true; // Creating new record is OK
         
         const ownerField = scopeVars?.ownershipField || config.ownershipField;
+        
+        // Handle JSON:API format (from dataGetMinimal)
+        if (record.type && record.attributes) {
+          // Check in attributes first
+          if (record.attributes[ownerField] !== undefined) {
+            return record.attributes[ownerField] === context.auth.userId;
+          }
+          
+          // Check in relationships for belongsTo fields
+          if (record.relationships) {
+            // Look for the relationship that corresponds to the owner field
+            // For example, if ownerField is 'user_id', look for relationship 'user'
+            const relationshipName = ownerField.replace(/_id$/, '');
+            const relationship = record.relationships[relationshipName];
+            if (relationship?.data?.id) {
+              return String(relationship.data.id) === String(context.auth.userId);
+            }
+          }
+          
+          return false;
+        }
+        
+        // Handle flat format (legacy or simplified)
         return record[ownerField] === context.auth.userId;
       },
       

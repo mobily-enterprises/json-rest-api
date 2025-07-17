@@ -290,6 +290,117 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
 };
 
 /**
+ * Converts a database record to JSON:API format with belongsTo relationships.
+ * This is used internally by dataGetMinimal to provide consistent JSON:API
+ * structure without requiring additional database queries.
+ * 
+ * @param {Object} scope - The scope object containing schema and relationship info
+ * @param {Object} record - The raw database record to transform
+ * @param {string} scopeName - The name of the scope/resource type
+ * @returns {Object} JSON:API formatted resource object with belongsTo relationships
+ * 
+ * @example
+ * const dbRecord = {
+ *   id: 1,
+ *   title: 'Hello World',
+ *   author_id: 2,
+ *   publisher_id: 3,
+ *   category_id: null
+ * };
+ * const jsonApiRecord = toJsonApiRecordWithBelongsTo(scope, dbRecord, 'articles');
+ * // Returns:
+ * // {
+ * //   type: 'articles',
+ * //   id: '1',
+ * //   attributes: {
+ * //     title: 'Hello World'
+ * //   },
+ * //   relationships: {
+ * //     author: {
+ * //       data: { type: 'authors', id: '2' }
+ * //     },
+ * //     publisher: {
+ * //       data: { type: 'publishers', id: '3' }
+ * //     },
+ * //     category: {
+ * //       data: null
+ * //     }
+ * //   }
+ * // }
+ */
+export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
+  if (!record) return null;
+  
+  // Get the basic JSON:API structure (without relationships)
+  const jsonApiRecord = toJsonApiRecord(scope, record, scopeName);
+  
+  // Extract schema info from scope
+  const { 
+    vars: { 
+      schemaInfo: { schema, schemaRelationships: relationships, idProperty }
+    }
+  } = scope;
+  
+  const idField = idProperty || 'id';
+  
+  // Get schema structure
+  const schemaStructure = getSchemaStructure(schema);
+  
+  // Initialize relationships object
+  jsonApiRecord.relationships = {};
+  
+  // Process regular belongsTo relationships from schema
+  for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
+    if (fieldDef.belongsTo && fieldDef.as) {
+      const foreignKeyValue = record[fieldName];
+      
+      if (foreignKeyValue !== null && foreignKeyValue !== undefined) {
+        jsonApiRecord.relationships[fieldDef.as] = {
+          data: {
+            type: fieldDef.belongsTo,
+            id: String(foreignKeyValue)
+          }
+        };
+      } else {
+        // Explicitly null relationship
+        jsonApiRecord.relationships[fieldDef.as] = {
+          data: null
+        };
+      }
+    }
+  }
+  
+  // Process polymorphic belongsTo relationships
+  Object.entries(relationships || {}).forEach(([relName, relDef]) => {
+    if (relDef.belongsToPolymorphic) {
+      const typeValue = record[relDef.typeField];
+      const idValue = record[relDef.idField];
+      
+      if (typeValue && idValue) {
+        jsonApiRecord.relationships[relName] = {
+          data: {
+            type: typeValue,
+            id: String(idValue)
+          }
+        };
+      } else {
+        // Explicitly null relationship
+        jsonApiRecord.relationships[relName] = {
+          data: null
+        };
+      }
+    }
+  });
+  
+  // Remove relationships object if empty
+  if (Object.keys(jsonApiRecord.relationships).length === 0) {
+    delete jsonApiRecord.relationships;
+  }
+  
+  return jsonApiRecord;
+};
+
+/**
  * Processes belongsTo relationships from JSON:API input to foreign key updates
  * 
  * @param {Object} scope - The scope object containing schema info

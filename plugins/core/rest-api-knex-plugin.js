@@ -2,7 +2,7 @@ import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
 import { buildQuerySelection } from './utils/knex-query-helpers-base.js';
-import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships } from './lib/knex-json-api-transformers.js';
+import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships, toJsonApiRecordWithBelongsTo } from './lib/knex-json-api-transformers.js';
 import { processIncludes } from './lib/knex-process-includes.js';
 import {
   polymorphicFiltersHook,
@@ -189,6 +189,7 @@ export const RestApiKnexPlugin = {
     };
 
     helpers.dataGetMinimal = async ({ scopeName, context, transaction }) => {
+      const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty;
@@ -200,8 +201,13 @@ export const RestApiKnexPlugin = {
       const record = await db(tableName)
         .where(idProperty, id)
         .first();
-        
-      return record;
+      
+      if (!record) {
+        return null;
+      }
+      
+      // Transform to JSON:API format with belongsTo relationships
+      return toJsonApiRecordWithBelongsTo(scope, record, scopeName);
     };
 
     helpers.dataQuery = async ({ scopeName, context, transaction, runHooks }) => {    
