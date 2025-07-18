@@ -1,6 +1,6 @@
 Session 1:
-☐ Finish websockets properly, make it actually work
-☐ Get rid of runPluginHooks, runHooks, on (!!). Only have runHooks, with the runHooks of methods automatically setting context, params
+✔ Finish websockets properly, make it actually work @done(25-07-18 14:43)
+✔ Get rid of runPluginHooks, runHooks, on (!!). Only have runHooks, with the runHooks of methods automatically setting context, params @done(25-07-18 14:43)
 
 Session 2:
 ☐ improve way in which jvt-auth works, no need for those vars and helpers

@@ -7,6 +7,38 @@ import {
   cleanupExpiredTokens 
 } from './lib/jwt-auth-helpers.js';
 
+// Module-level state management for plugin instances
+const pluginInstances = new WeakMap();
+
+/**
+ * Internal state container for JWT Auth Plugin
+ * Keeps plugin internals private and out of the global vars namespace
+ */
+class JwtAuthState {
+  constructor() {
+    // Timer ID for cleanup job
+    this.cleanupJob = null;
+    
+    // Memory storage for revoked tokens (when not using database)
+    this.memoryRevocationStore = new Map();
+    
+    // Registry of auth checker functions
+    this.authCheckers = new Map();
+  }
+  
+  /**
+   * Clean up resources when plugin is destroyed
+   */
+  cleanup() {
+    if (this.cleanupJob) {
+      clearInterval(this.cleanupJob);
+      this.cleanupJob = null;
+    }
+    this.memoryRevocationStore.clear();
+    this.authCheckers.clear();
+  }
+}
+
 export const JwtAuthPlugin = {
   name: 'jwt-auth',
   version: '1.0.0',
@@ -15,6 +47,10 @@ export const JwtAuthPlugin = {
   async install({ api, addHook, log, runHooks, helpers, vars, on, pluginOptions }) {
     // Get JWT-specific options from the wrapped pluginOptions
     const jwtOptions = pluginOptions['jwt-auth'] || {};
+    
+    // Initialize plugin state
+    const state = new JwtAuthState();
+    pluginInstances.set(api, state);
     
     const config = {
       // Token validation
@@ -83,90 +119,75 @@ export const JwtAuthPlugin = {
           }
         }, config.revocation.cleanupInterval);
         
-        // Store cleanup job reference in vars
-        vars.jwtAuthCleanupJob = cleanupJob;
+        // Store cleanup job reference in state
+        state.cleanupJob = cleanupJob;
       }
     }
     
-    // In-memory revocation store (fallback)
-    const memoryRevocationStore = new Map();
+    // In-memory revocation store (fallback) is now in state
+    // No need to create separate variable - use state.memoryRevocationStore directly
     
-    // Store in vars for cleanup access
-    vars.jwtAuthMemoryStore = memoryRevocationStore;
+    // Initialize auth checkers in state
+    state.authCheckers.set('public', (context) => true);
     
-    // Store auth checkers for declarative auth
-    const authCheckers = {
-      // Anyone can access
-      'public': (context) => true,
+    state.authCheckers.set('authenticated', (context) => {
+      return !!context.auth?.userId;
+    });
+    
+    state.authCheckers.set('is_owner', (context, { existingRecord, scopeVars }) => {
+      if (!context.auth?.userId) return false;
       
-      // Must be authenticated
-      'authenticated': (context) => {
-        return !!context.auth?.userId;
-      },
+      // Use existingRecord passed from checkPermissions hook
+      const record = existingRecord || context.attributes;
+      if (!record) return true; // Creating new record is OK
       
-      // Must own the resource
-      'is_owner': (context, { existingRecord, scopeVars }) => {
-        if (!context.auth?.userId) return false;
-        
-        // Use existingRecord passed from checkPermissions hook
-        const record = existingRecord || context.attributes;
-        if (!record) return true; // Creating new record is OK
-        
-        
-        const ownerField = scopeVars?.ownershipField || config.ownershipField;
-        
-        // Handle JSON:API format (from dataGetMinimal)
-        if (record.type && record.attributes) {
-          // Check in attributes first
-          if (record.attributes[ownerField] !== undefined) {
-            return record.attributes[ownerField] === context.auth.userId;
-          }
-          
-          // Check in relationships for belongsTo fields
-          if (record.relationships) {
-            // Look for the relationship that corresponds to the owner field
-            // For example, if ownerField is 'user_id', look for relationship 'user'
-            const relationshipName = ownerField.replace(/_id$/, '');
-            const relationship = record.relationships[relationshipName];
-            if (relationship?.data?.id) {
-              return String(relationship.data.id) === String(context.auth.userId);
-            }
-          }
-          
-          return false;
+      const ownerField = scopeVars?.ownershipField || config.ownershipField;
+      
+      // Handle JSON:API format (from dataGetMinimal)
+      if (record.type && record.attributes) {
+        // Check in attributes first
+        if (record.attributes[ownerField] !== undefined) {
+          return record.attributes[ownerField] === context.auth.userId;
         }
         
-        // Handle flat format (legacy or simplified)
-        return record[ownerField] === context.auth.userId;
-      },
-      
-      // Must be admin (special case of role check)
-      'admin': (context) => {
-        return context.auth?.roles?.includes('admin');
-      },
-      
-      // Dynamic role check: 'has_role:moderator', 'has_role:editor'
-      'has_role': (context, { param }) => {
-        if (!param) throw new Error('has_role requires a role parameter');
-        return context.auth?.roles?.includes(param);
-      },
-      
-      // Dynamic permission check: 'has_permission:posts:write'
-      'has_permission': (context, { param }) => {
-        if (!param) throw new Error('has_permission requires a permission parameter');
-        const permissions = context.auth?.permissions || [];
+        // Check in relationships for belongsTo fields
+        if (record.relationships) {
+          // Look for the relationship that corresponds to the owner field
+          // For example, if ownerField is 'user_id', look for relationship 'user'
+          const relationshipName = ownerField.replace(/_id$/, '');
+          const relationship = record.relationships[relationshipName];
+          if (relationship?.data?.id) {
+            return String(relationship.data.id) === String(context.auth.userId);
+          }
+        }
         
-        // Check exact match
-        if (permissions.includes(param)) return true;
-        
-        // Check wildcard
-        const [resource] = param.split(':');
-        return permissions.includes(`${resource}:*`) || permissions.includes('*');
+        return false;
       }
-    };
+      
+      // Handle flat format (legacy or simplified)
+      return record[ownerField] === context.auth.userId;
+    });
     
-    // Store checkers in vars for extension
-    vars.authCheckers = authCheckers;
+    state.authCheckers.set('admin', (context) => {
+      return context.auth?.roles?.includes('admin');
+    });
+    
+    state.authCheckers.set('has_role', (context, { param }) => {
+      if (!param) throw new Error('has_role requires a role parameter');
+      return context.auth?.roles?.includes(param);
+    });
+    
+    state.authCheckers.set('has_permission', (context, { param }) => {
+      if (!param) throw new Error('has_permission requires a permission parameter');
+      const permissions = context.auth?.permissions || [];
+      
+      // Check exact match
+      if (permissions.includes(param)) return true;
+      
+      // Check wildcard
+      const [resource] = param.split(':');
+      return permissions.includes(`${resource}:*`) || permissions.includes('*');
+    });
     
     // Hook into scope:added to process auth rules
     addHook('scope:added', 'jwt-process-auth-rules', {}, ({ context, scopes }) => {
@@ -184,7 +205,7 @@ export const JwtAuthPlugin = {
     });
     
     // Simple auth population hook - just validates token and sets context.auth
-    addHook('transport:request', 'jwt-populate-auth', {}, async ({ context, runHooks }) => {
+    addHook('transport:request', 'jwt-populate-auth', {}, async ({ context }) => {
       const token = context.request.token; // Already extracted by framework
       
       if (!token) {
@@ -210,7 +231,7 @@ export const JwtAuthPlugin = {
             payload.jti,
             api,
             config.revocation,
-            memoryRevocationStore
+            state.memoryRevocationStore
           );
           
           if (isRevoked) {
@@ -283,10 +304,10 @@ export const JwtAuthPlugin = {
             // Parse rule (e.g., 'has_role:moderator' -> checker='has_role', param='moderator')
             if (rule.includes(':')) {
               const [checkerName, ...paramParts] = rule.split(':');
-              checker = authCheckers[checkerName];
+              checker = state.authCheckers.get(checkerName);
               param = paramParts.join(':');
             } else {
-              checker = authCheckers[rule];
+              checker = state.authCheckers.get(rule);
             }
             
             if (!checker) {
@@ -393,7 +414,11 @@ export const JwtAuthPlugin = {
       
       // Register custom auth checker
       registerChecker(name, checkerFn) {
-        authCheckers[name] = checkerFn;
+        const state = pluginInstances.get(api);
+        if (!state) {
+          throw new Error('JWT Auth plugin state not found');
+        }
+        state.authCheckers.set(name, checkerFn);
         log.debug(`Registered custom auth checker: ${name}`);
       },
       
@@ -405,7 +430,8 @@ export const JwtAuthPlugin = {
         
         for (const rule of rules) {
           const [checkerName, param] = rule.split(':');
-          const checker = authCheckers[checkerName];
+          const state = pluginInstances.get(api);
+          const checker = state.authCheckers.get(checkerName);
           
           if (checker && await checker(context, { existingRecord, scopeVars, param })) {
             return true;
@@ -437,7 +463,7 @@ export const JwtAuthPlugin = {
             });
           } else {
             // Memory storage
-            memoryRevocationStore.set(token.jti, {
+            state.memoryRevocationStore.set(token.jti, {
               userId: context.auth.userId,
               expiresAt: token.exp * 1000,
               revokedAt: Date.now()
@@ -465,19 +491,27 @@ export const JwtAuthPlugin = {
             revoked_at: new Date()
           });
         } else {
-          memoryRevocationStore.set(jti, {
+          const state = pluginInstances.get(api);
+          state.memoryRevocationStore.set(jti, {
             userId,
             expiresAt: expiresAt * 1000,
             revokedAt: Date.now()
           });
         }
+      },
+      
+      // Clean up plugin resources (for testing)
+      cleanup() {
+        const state = pluginInstances.get(api);
+        if (state) {
+          state.cleanup();
+          pluginInstances.delete(api);
+        }
       }
     };
     
-    // Register built-in auth checkers
-    Object.entries(authCheckers).forEach(([name, checker]) => {
-      helpers.auth.registerChecker(name, checker);
-    });
+    // Built-in auth checkers are already registered in state
+    // No need for additional registration
     
     // Add logout endpoint if configured
     if (config.endpoints.logout && api.addRoute) {

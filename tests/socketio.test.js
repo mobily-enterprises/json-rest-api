@@ -82,9 +82,9 @@ describe('WebSocket/Socket.IO Plugin', () => {
       });
     }
     
-    // Clean up any intervals from plugins
-    if (api.vars.jwtAuthCleanupJob) {
-      clearInterval(api.vars.jwtAuthCleanupJob);
+    // Clean up JWT plugin resources
+    if (api.helpers?.auth?.cleanup) {
+      api.helpers.auth.cleanup();
     }
     
     // Always destroy knex connection to allow tests to exit

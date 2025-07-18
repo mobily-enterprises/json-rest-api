@@ -116,9 +116,9 @@ describe('JWT Auth Plugin', () => {
   });
 
   after(async () => {
-    // Clear the JWT cleanup interval if it exists
-    if (api.vars.jwtAuthCleanupJob) {
-      clearInterval(api.vars.jwtAuthCleanupJob);
+    // Clean up JWT plugin resources
+    if (api.helpers?.auth?.cleanup) {
+      api.helpers.auth.cleanup();
     }
     
     // Close database connection to allow tests to exit
