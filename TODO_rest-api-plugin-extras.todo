@@ -3,7 +3,7 @@ Session 1:
 ✔ Get rid of runPluginHooks, runHooks, on (!!). Only have runHooks, with the runHooks of methods automatically setting context, params @done(25-07-18 14:43)
 
 Session 2:
-☐ improve way in which jvt-auth works, no need for those vars and helpers
+✔ improve way in which jvt-auth works, no need for those vars and helpers @done(25-07-18 15:50)
 ☐ Improve enrichAttributes, split into helpers <--- ???????????????
 
 Sessoon 3:
