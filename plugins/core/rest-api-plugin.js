@@ -19,7 +19,7 @@ import { createDefaultDataHelpers } from './lib/default-data-helpers.js';
 import { compileSchemas } from './lib/compile-schemas.js';
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js';
 import { getRequestedComputedFields, filterHiddenFields } from './lib/knex-field-helpers.js';
-import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT } from './utils/knex-constants.js';
+import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT, ERROR_SUBTYPES } from './utils/knex-constants.js';
 import { normalizeRecordAttributes } from './lib/database-value-normalizers.js';
 import { parseJsonApiQuery } from './utils/connectors-query-parser.js';
 
@@ -75,16 +75,21 @@ export const RestApiPlugin = {
     // Example: For comments that can belong to posts or videos, it ensures commentable_type field
     // exists, commentable_id field exists, and that 'posts' and 'videos' are registered scopes.
     // Catches config errors early before any requests are made.
-    on('scope:added', 'validatePolymorphicRelationships', validatePolymorphicRelationships);
+    addHook('scope:added', 'validatePolymorphicRelationships', {}, validatePolymorphicRelationships);
     
     // Listen for scope creation to compile schemas immediately.
     // This ensures schemas are compiled and cached before any scope methods are called,
     // making them available for queries and other operations that need schema information.
-    on('scope:added', 'compileResourceSchemas', async ({eventData}) => compileSchemas(eventData.scope, { context: { scopeName: eventData.scopeName } }));
+    addHook('scope:added', 'compileResourceSchemas', {}, async ({context, scopes, runHooks}) => {
+      const scope = scopes[context.scopeName];
+      // Pass scopeOptions and vars from context since scope object structure is different
+      return compileSchemas({ ...scope, scopeOptions: context.scopeOptions, vars: context.vars }, { context: { scopeName: context.scopeName }, runHooks });
+    });
     
     // Validate include configurations in relationships after schemas are compiled
-    on('scope:added', 'validateIncludeConfigurations', async ({eventData}) => {
-      const { scope, scopeName } = eventData;
+    addHook('scope:added', 'validateIncludeConfigurations', {}, async ({context, scopes}) => {
+      const { scopeName } = context;
+      const scope = scopes[scopeName];
       const relationships = scope.vars.schemaInfo?.schemaRelationships;
       
       if (!relationships) return;
@@ -127,10 +132,11 @@ export const RestApiPlugin = {
     // sortableFiels and defaultSort are always coming from options
     // and queryDefaultLimit and queryMaxLimit will be set if passed -- if not, the `vars`
     // proxy will point to the api's values (set as defaults)
-    on('scope:added', 'turnScopeInitIntoVars', async ({eventData}) => {
+    addHook('scope:added', 'turnScopeInitIntoVars', {}, async ({context, scopes, vars: apiVars}) => {
       // Refer to the scope's vars
-      const scopeOptions = eventData.scope?.scopeOptions || eventData.api?.scopeOptions || {};
-      const vars = eventData.scope?.vars || eventData.api?.vars
+      const scope = scopes[context.scopeName];
+      const scopeOptions = scope?.scopeOptions || context.scopeOptions || {};
+      const vars = scope?.vars || apiVars
 
       // The scope-specific ones
       vars.sortableFields = scopeOptions.sortableFields || [];
@@ -2365,8 +2371,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
     });
 
     // Listen for scope additions to register routes
-    on('scope:added', 'registerScopeRoutes', async ({ eventData }) => {
-      const { scopeName } = eventData;
+    addHook('scope:added', 'registerScopeRoutes', {}, async ({ context }) => {
+      const { scopeName } = context;
       const basePath = vars.resourceUrlPrefix || '';
       
       // Helper to create route handlers

@@ -126,13 +126,13 @@
  * // 4. API inconsistencies from incomplete polymorphic configurations
  * // 5. Complex debugging sessions from misconfigured relationships
  */
-export function validatePolymorphicRelationships({ eventData, api }) {
-  const { scopeName, scopeOptions } = eventData;
+export function validatePolymorphicRelationships({ context, scopes }) {
+  const { scopeName, scopeOptions } = context;
   const relationships = scopeOptions.relationships || {};
   
   for (const [relName, relDef] of Object.entries(relationships)) {
     if (relDef.belongsToPolymorphic) {
-      const validation = validatePolymorphicRelationship(relDef, scopeName, api.scopes);
+      const validation = validatePolymorphicRelationship(relDef, scopeName, scopes);
       if (!validation.valid) {
         throw new Error(
           `Invalid polymorphic relationship '${relName}' in scope '${scopeName}': ${validation.error}`

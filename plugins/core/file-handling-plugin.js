@@ -101,8 +101,8 @@ export const FileHandlingPlugin = {
     }
     
     // Listen for new scopes being added
-    on('scope:added', 'analyzeFileFields', ({ eventData }) => {
-      const { scopeName, scopeOptions } = eventData;
+    addHook('scope:added', 'analyzeFileFields', {}, ({ context }) => {
+      const { scopeName, scopeOptions } = context;
       analyzeScopeSchema(scopeName, scopeOptions);
     });
     

@@ -624,8 +624,8 @@ export const RestApiRelationshipsPlugin = {
     });
 
     // Listen for scope additions to register relationship routes
-    on('scope:added', 'registerRelationshipRoutes', async ({ eventData }) => {
-      const { scopeName } = eventData;
+    addHook('scope:added', 'registerRelationshipRoutes', {}, async ({ context }) => {
+      const { scopeName } = context;
       const basePath = api.scopes[scopeName].vars.resourceUrlPrefix || '';
       const scopePath = `${basePath}/${scopeName}`;
 

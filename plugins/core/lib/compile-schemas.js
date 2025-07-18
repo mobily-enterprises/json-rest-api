@@ -93,7 +93,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  */
 export async function compileSchemas(scope, deps) {
   // Extract scopeName from context
-  const { context } = deps;
+  const { context, runHooks } = deps;
   const scopeName = context.scopeName;
 
   // Get raw schema and computed fields
@@ -159,7 +159,7 @@ export async function compileSchemas(scope, deps) {
     originalSchema: rawSchema,  // Read-only
     scopeName
   };
-  await scope.runHooks('schema:enrich', schemaContext);
+  await runHooks('schema:enrich', schemaContext);
   
   // Create schema object
   const schemaObject = createSchema(schemaContext.schema);
@@ -188,7 +188,7 @@ export async function compileSchemas(scope, deps) {
       schema: schemaContext.schema,     // Read-only enriched schema
       scopeName
     };
-    await scope.runHooks('searchSchema:enrich', searchSchemaContext);
+    await runHooks('searchSchema:enrich', searchSchemaContext);
     
     // Create searchSchema object
     var searchSchemaObject = createSchema(searchSchemaContext.searchSchema);

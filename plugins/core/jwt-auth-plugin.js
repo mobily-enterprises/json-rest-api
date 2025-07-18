@@ -169,10 +169,11 @@ export const JwtAuthPlugin = {
     vars.authCheckers = authCheckers;
     
     // Hook into scope:added to process auth rules
-    on('scope:added', 'jwt-process-auth-rules', ({ eventData }) => {
-      const { scope, scopeName } = eventData;
+    addHook('scope:added', 'jwt-process-auth-rules', {}, ({ context, scopes }) => {
+      const { scopeName } = context;
+      const scope = scopes[scopeName];
       // Get auth from scopeOptions (where addResource config goes)
-      const auth = scope?.scopeOptions?.auth;
+      const auth = context.scopeOptions?.auth;
       
       if (!auth) return;
       

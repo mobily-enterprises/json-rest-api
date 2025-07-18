@@ -320,8 +320,8 @@ export const ExpressPlugin = {
     };
     
     // Listen for scope additions
-    on('scope:added', 'createExpressRoutes', ({ eventData }) => {
-      createRoutesForScope(eventData.scopeName);
+    addHook('scope:added', 'createExpressRoutes', {}, ({ context }) => {
+      createRoutesForScope(context.scopeName);
     });
     
     // Create routes for any existing scopes
