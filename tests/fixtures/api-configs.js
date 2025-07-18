@@ -1,6 +1,8 @@
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from '../../index.js';
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
+import express from 'express';
+import { createServer } from 'http';
 
 /**
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
@@ -440,4 +442,51 @@ export async function createPaginationApi(knex, options = {}) {
   await api.resources.books.createKnexTable();
 
   return api;
+}
+
+/**
+ * Creates an API with WebSocket/Socket.IO support for testing
+ */
+export async function createWebSocketApi(knex, pluginOptions = {}) {
+  const { SocketIOPlugin } = await import('../../plugins/core/socketio-plugin.js');
+  const { JwtAuthPlugin } = await import('../../plugins/core/jwt-auth-plugin.js');
+  
+  const api = await createBasicApi(knex, {
+    ...pluginOptions,
+    includeExpress: true,
+    express: {
+      port: 0 // Let OS assign a port
+    }
+  });
+  
+  // Add JWT auth plugin (required by SocketIO plugin)
+  await api.use(JwtAuthPlugin, {
+    secret: 'test-secret-key',
+    expiresIn: '1h'
+  });
+  
+  // Add SocketIO plugin
+  await api.use(SocketIOPlugin, pluginOptions['socketio'] || {});
+  
+  // Create and start Express server
+  const app = express();
+  api.http.express.app = app;
+  
+  // Mount the API routes
+  app.use('/api', api.http.express.router);
+  
+  // Create HTTP server
+  const server = createServer(app);
+  
+  // Start Socket.IO server
+  await api.startSocketServer(server);
+  
+  // Start listening
+  await new Promise((resolve) => {
+    server.listen(0, () => {
+      resolve();
+    });
+  });
+  
+  return { api, server };
 }

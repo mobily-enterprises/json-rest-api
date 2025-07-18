@@ -1,856 +1,1034 @@
-# Socket.io Real-time Updates Guide
-
-The Socket.io Plugin enables real-time updates for your JSON:API server using Socket.io. It integrates seamlessly with the JWT Authentication Plugin and supports both single-server and multi-server deployments.
+# WebSocket Real-time Updates with Socket.IO
 
 ## Table of Contents
-- [Overview](#overview)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Client Connection](#client-connection)
-- [Subscriptions](#subscriptions)
-- [Authentication](#authentication)
-- [Message Reference](#message-reference)
-- [Examples](#examples)
-- [Multi-Server Deployment](#multi-server-deployment)
-- [Best Practices](#best-practices)
+
+1. [Overview](#overview)
+2. [Server Setup](#server-setup)
+3. [Core Concepts](#core-concepts)
+4. [The Filter System](#the-filter-system)
+5. [Security Architecture](#security-architecture)
+6. [Advanced Features](#advanced-features)
+7. [Client Usage](#client-usage)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-The Socket.io plugin provides:
-- Real-time updates when resources are created, updated, or deleted
-- JWT authentication using the same tokens as your REST API
-- Declarative permission enforcement
-- Filtered subscriptions
-- Automatic disconnection on logout
-- Optional Redis support for multi-server deployments
-- Callback and event-based messaging patterns
+The Socket.IO plugin provides real-time notifications when resources change in your json-rest-api application. It implements a **notification-only pattern** - instead of broadcasting full data (which could leak sensitive information), it only sends minimal notifications about what changed. Clients then fetch the updated data through the regular REST API, ensuring all permissions and transformations are properly applied.
 
-## Installation
+### Key Benefits
 
-```javascript
-import { SocketIOPlugin } from 'json-rest-api/plugins/core/socketio-plugin.js';
+- **Security First**: No data leaks possible - notifications contain only resource type and ID
+- **Performance**: One broadcast per change, not N database queries for N subscribers
+- **Consistency**: Uses the same searchSchema as REST API for filtering
+- **Transaction Safe**: Only broadcasts after database commits succeed
+- **Scalable**: Supports Redis adapter for multi-server deployments
 
-// The Socket.io plugin depends on JWT Auth
-await api.use(JwtAuthPlugin, {
-  jwksUrl: `${SUPABASE_URL}/auth/v1/.well-known/jwks.json`
-});
-
-// Install Socket.io plugin
-await api.use(SocketIOPlugin, {
-  port: 3001,                    // Socket.io server port
-  cors: {                        // CORS configuration
-    origin: '*',
-    credentials: true
-  }
-});
-```
-
-## Configuration
-
-### Basic Configuration
-
-```javascript
-await api.use(SocketIOPlugin, {
-  // Socket.io server port (default: 3001)
-  port: 3001,
-  
-  // CORS settings
-  cors: {
-    origin: ['http://localhost:3000', 'https://myapp.com'],
-    credentials: true
-  }
-});
-```
-
-### Multi-Server Configuration with Redis
-
-```javascript
-await api.use(SocketIOPlugin, {
-  port: 3001,
-  
-  // Enable Redis adapter for multi-server support
-  redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
-  }
-});
-```
-
-## Client Connection
+## Server Setup
 
 ### Installation
 
+The Socket.IO plugin is included in json-rest-api core plugins. To use it, you need to:
+
+1. Install Socket.IO dependencies:
 ```bash
-npm install socket.io-client
+npm install socket.io @socket.io/redis-adapter redis
 ```
 
-### Basic Connection
+2. Use the plugin and start the Socket.IO server:
 
 ```javascript
-import { io } from 'socket.io-client';
+import { Api } from 'json-rest-api';
+import { RestApiPlugin } from 'json-rest-api/plugins/rest-api';
+import { RestApiKnexPlugin } from 'json-rest-api/plugins/rest-api-knex';
+import { SocketIOPlugin } from 'json-rest-api/plugins/socketio';
+import { JWTAuthPlugin } from 'json-rest-api/plugins/jwt-auth';
 
-// Connect without authentication
-const socket = io('http://localhost:3001');
-
-socket.on('connected', (data) => {
-  console.log('Connected:', data);
-  // { socketId: 'abc123', authenticated: false, timestamp: '...' }
-});
-```
-
-### Authenticated Connection
-
-```javascript
-// With Supabase
-const { data: { session } } = await supabase.auth.getSession();
-
-// Connect with JWT token
-const socket = io('http://localhost:3001', {
-  auth: {
-    token: session.access_token
-  }
+// Create your API instance
+const api = new Api({
+  name: 'my-api',
+  version: '1.0.0'
 });
 
-socket.on('connected', (data) => {
-  console.log('Connected:', data);
-  // { socketId: 'abc123', authenticated: true, userId: '123', timestamp: '...' }
-});
-```
+// Add required plugins
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, { knex: knexInstance });
+await api.use(JWTAuthPlugin, { secret: process.env.JWT_SECRET });
+await api.use(SocketIOPlugin);
 
-### Alternative Authentication Methods
+// Start your HTTP server
+const server = app.listen(3000);
 
-```javascript
-// 1. Via auth object (recommended)
-const socket = io('http://localhost:3001', {
-  auth: {
-    token: jwtToken
-  }
-});
-
-// 2. Via Authorization header
-const socket = io('http://localhost:3001', {
-  extraHeaders: {
-    'Authorization': `Bearer ${jwtToken}`
-  }
-});
-```
-
-## Subscriptions
-
-### Subscribe to Resources
-
-Socket.io plugin supports both callback and event-based patterns:
-
-#### Callback Style (Recommended)
-
-```javascript
-// Subscribe with callback for immediate confirmation
-socket.emit('subscribe', {
-  resource: 'books',
-  filters: { published: true },
-  subscriptionId: 'published-books' // Optional
-}, (response) => {
-  if (response.success) {
-    console.log('Subscribed:', response.data);
-    // { subscriptionId: 'published-books', resource: 'books', status: 'active' }
-  } else {
-    console.error('Subscribe failed:', response.error);
-  }
-});
-```
-
-#### Subscribe to a Specific Record by ID
-
-```javascript
-// Get updates only for a specific post
-socket.emit('subscribe', {
-  resource: 'posts',
-  filters: { id: '123' },  // Filter by ID
-  subscriptionId: 'post-123'
-}, (response) => {
-  if (response.success) {
-    console.log('Subscribed to post 123');
-  }
-});
-
-// You'll only receive updates when post 123 changes
-socket.on('resource.update', (data) => {
-  if (data.subscriptionId === 'post-123') {
-    console.log('Post 123 was updated:', data);
-  }
-});
-```
-
-#### Event Style
-
-```javascript
-// Subscribe using events
-socket.emit('subscribe', {
-  resource: 'books',
-  filters: { published: true }
-});
-
-socket.on('subscription.created', (data) => {
-  console.log('Subscribed:', data);
-});
-
-socket.on('subscription.error', (error) => {
-  console.error('Subscribe failed:', error);
-});
-```
-
-### Subscription Options
-
-```javascript
-socket.emit('subscribe', {
-  // Required: Resource name
-  resource: 'posts',
-  
-  // Optional: Filter criteria
-  filters: {
-    user_id: '123',
-    published: true,
-    category: 'tech'
+// Start Socket.IO server
+const io = await api.startSocketServer(server, {
+  path: '/socket.io',           // Socket.IO path (default: '/socket.io')
+  cors: {                       // CORS configuration
+    origin: '*',                // Configure for your security needs
+    methods: ['GET', 'POST']
   },
-  
-  // Optional: Custom subscription ID
-  subscriptionId: 'my-tech-posts'
-}, callback);
-```
-
-**Note on Filtering**: Currently, filters only support simple equality checks. Complex queries like `$gt`, `$in`, etc. are not supported in subscriptions. Only fields that exist on the resource can be filtered.
-
-### Unsubscribe
-
-```javascript
-// Unsubscribe with callback
-socket.emit('unsubscribe', {
-  subscriptionId: 'my-tech-posts'
-}, (response) => {
-  if (response.success) {
-    console.log('Unsubscribed');
+  redis: {                      // Optional: Redis adapter for scaling
+    host: 'localhost',
+    port: 6379
   }
 });
-
-// Or using events
-socket.emit('unsubscribe', {
-  subscriptionId: 'my-tech-posts'
-});
-
-socket.on('subscription.removed', (data) => {
-  console.log('Unsubscribed:', data.subscriptionId);
-});
 ```
 
-### Receiving Updates
+### Configuration Options
 
-When a subscribed resource changes:
+The `startSocketServer` method accepts these options:
 
-```javascript
-socket.on('resource.update', (data) => {
-  console.log('Resource updated:', data);
-  /*
-  {
-    type: 'resource.update',
-    subscriptionId: 'my-tech-posts',
-    resource: 'posts',
-    operation: 'create', // or 'update', 'delete'
-    data: {
-      type: 'posts',
-      id: '123',
-      attributes: {
-        title: 'New Post',
-        content: '...',
-        published: true
-      }
-    },
-    meta: {
-      timestamp: '2024-01-01T12:00:00.000Z'
-    }
-  }
-  */
-});
-```
-
-## Authentication
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `path` | string | '/socket.io' | URL path for Socket.IO endpoint |
+| `cors` | object | `{ origin: '*', methods: ['GET', 'POST'] }` | CORS configuration |
+| `redis` | object | null | Redis configuration for multi-server setup |
 
 ### How It Works
 
-1. **Token Validation**: The Socket.io plugin uses your JWT Auth plugin to validate tokens
-2. **Permission Enforcement**: Declarative auth rules are enforced for subscriptions and updates
-3. **User Rooms**: Authenticated users automatically join a user-specific room
-4. **Logout Handling**: Sockets are disconnected when users log out
+1. **REST API Integration**: The plugin hooks into the REST API's `finish` event
+2. **Transaction Awareness**: Waits for database commits before broadcasting
+3. **Filter Matching**: Uses `context.minimalRecord` to check subscription filters
+4. **Notification Broadcasting**: Sends minimal notifications to matching subscribers
+
+## Core Concepts
+
+### Notification-Only Pattern
+
+Traditional WebSocket implementations often broadcast full data:
+
+```javascript
+// ❌ INSECURE: Broadcasting full data
+io.emit('user.updated', {
+  id: 123,
+  name: 'John Doe',
+  email: 'john@example.com',
+  ssn: '123-45-6789',     // LEAKED to all subscribers!
+  salary: 150000,         // LEAKED to all subscribers!
+  medical_notes: '...'    // LEAKED to all subscribers!
+});
+```
+
+Our implementation broadcasts only notifications:
+
+```javascript
+// ✅ SECURE: Notification only
+socket.emit('subscription.update', {
+  type: 'resource.updated',
+  resource: 'users',
+  id: '123',
+  action: 'update',
+  subscriptionId: 'users-12345-abc',
+  meta: { timestamp: '2024-01-15T10:00:00Z' }
+});
+```
+
+Clients then fetch data through REST API with proper permissions:
+
+```javascript
+// Client fetches with their permissions applied
+const response = await fetch('/api/users/123', {
+  headers: { Authorization: `Bearer ${token}` }
+});
+// Server applies all permission checks, field hiding, etc.
+```
+
+### searchSchema Integration
+
+The plugin reuses your existing searchSchema definitions for filtering subscriptions. This ensures consistency between REST API queries and WebSocket subscriptions:
+
+```javascript
+// Define your resource with searchSchema
+await api.addResource('posts', {
+  schema: {
+    title: { type: 'string', required: true },
+    content: { type: 'string' },
+    status: { type: 'string', defaultTo: 'draft' },
+    author_id: { type: 'id', required: true },
+    published_at: { type: 'dateTime', nullable: true },
+    view_count: { type: 'number', defaultTo: 0 }
+  },
+  
+  searchSchema: {
+    // These filters work for both REST and WebSocket
+    status: { type: 'string', filterUsing: '=' },
+    author_id: { type: 'id', filterUsing: '=' },
+    published_at: { type: 'dateTime', filterUsing: '>=' },
+    view_count: { type: 'number', filterUsing: '>' }
+  }
+});
+
+// REST API query
+GET /api/posts?filter[status]=published&filter[view_count]=100
+
+// WebSocket subscription - SAME filters!
+socket.emit('subscribe', {
+  resource: 'posts',
+  filters: {
+    status: 'published',
+    view_count: 100
+  }
+});
+```
+
+### Transaction Safety
+
+The plugin ensures broadcasts only happen after successful database commits:
+
+```javascript
+// In a transaction
+const trx = await knex.transaction();
+try {
+  // Create a post
+  const post = await api.resources.posts.post({
+    inputRecord: { /* ... */ },
+    transaction: trx
+  });
+  
+  // At this point, NO broadcast has been sent
+  
+  await trx.commit();
+  // NOW the broadcast is sent
+} catch (error) {
+  await trx.rollback();
+  // No broadcast is ever sent
+}
+```
+
+## The Filter System
+
+### Simple Operator Filters
+
+Filters using simple operators (`=`, `>`, `>=`, `<`, `<=`, `!=`, `like`, `in`, `between`) work automatically for both REST and WebSocket:
+
+```javascript
+searchSchema: {
+  // Equality
+  status: { type: 'string', filterUsing: '=' },
+  
+  // Comparison
+  price: { type: 'number', filterUsing: '>=' },
+  stock: { type: 'number', filterUsing: '>' },
+  
+  // Pattern matching
+  title: { type: 'string', filterUsing: 'like' },
+  
+  // Multiple values
+  category_id: { type: 'array', filterUsing: 'in' },
+  
+  // Range
+  created_at: { type: 'date', filterUsing: 'between' }
+}
+
+// These work for both REST and WebSocket
+socket.emit('subscribe', {
+  resource: 'products',
+  filters: {
+    status: 'active',
+    price: 99.99,
+    title: 'phone',
+    category_id: [1, 2, 3],
+    created_at: ['2024-01-01', '2024-12-31']
+  }
+});
+```
+
+### Complex Filters with filterRecord
+
+When `filterUsing` is a function (for complex SQL queries), you must provide `filterRecord` for WebSocket support:
+
+```javascript
+searchSchema: {
+  // Complex multi-field search
+  search: {
+    type: 'string',
+    
+    // For REST API - builds SQL query
+    filterUsing: function(query, value, { tableName }) {
+      query.where(function() {
+        this.where(`${tableName}.title`, 'like', `%${value}%`)
+            .orWhere(`${tableName}.description`, 'like', `%${value}%`)
+            .orWhere(`${tableName}.tags`, 'like', `%${value}%`);
+      });
+    },
+    
+    // For WebSocket - evaluates single record (REQUIRED!)
+    filterRecord: function(record, value) {
+      const search = value.toLowerCase();
+      const title = (record.title || '').toLowerCase();
+      const desc = (record.description || '').toLowerCase();
+      const tags = (record.tags || []).join(' ').toLowerCase();
+      
+      return title.includes(search) || 
+             desc.includes(search) || 
+             tags.includes(search);
+    }
+  },
+  
+  // Location-based search
+  near_location: {
+    type: 'object',
+    
+    // REST: Haversine formula in SQL
+    filterUsing: function(query, value, { tableName }) {
+      const { lat, lng, radius = 10 } = value;
+      query.whereRaw(`
+        (6371 * acos(
+          cos(radians(?)) * cos(radians(${tableName}.latitude)) *
+          cos(radians(${tableName}.longitude) - radians(?)) +
+          sin(radians(?)) * sin(radians(${tableName}.latitude))
+        )) <= ?
+      `, [lat, lng, lat, radius]);
+    },
+    
+    // WebSocket: JavaScript distance calculation
+    filterRecord: function(record, value) {
+      const { lat, lng, radius = 10 } = value;
+      const distance = calculateDistance(
+        lat, lng, 
+        record.latitude, record.longitude
+      );
+      return distance <= radius;
+    }
+  },
+  
+  // Custom business logic
+  available_for_user: {
+    type: 'object',
+    
+    // REST: Complex JOIN with user permissions
+    filterUsing: function(query, value, { tableName }) {
+      const { user_id, include_private } = value;
+      query.where(`${tableName}.owner_id`, user_id);
+      if (!include_private) {
+        query.orWhere(`${tableName}.is_public`, true);
+      }
+    },
+    
+    // WebSocket: Same logic in JavaScript
+    filterRecord: function(record, value) {
+      const { user_id, include_private } = value;
+      if (record.owner_id === user_id) return true;
+      if (record.is_public) return true;
+      return include_private && record.shared_with?.includes(user_id);
+    }
+  }
+}
+```
+
+### Filter Validation
+
+All filters are validated against searchSchema before subscription:
+
+```javascript
+// This subscription
+socket.emit('subscribe', {
+  resource: 'posts',
+  filters: {
+    status: 'published',      // ✅ Valid: defined in searchSchema
+    invalid_field: 'value'    // ❌ Error: not in searchSchema
+  }
+});
+
+// Returns error:
+{
+  error: {
+    code: 'INVALID_FILTERS',
+    message: 'Invalid filter values',
+    details: {
+      invalid_field: {
+        code: 'UNKNOWN_FIELD',
+        message: 'Field not defined in searchSchema'
+      }
+    }
+  }
+}
+```
+
+## Security Architecture
+
+### Authentication
+
+All connections must be authenticated using JWT tokens:
+
+```javascript
+// Client must provide valid JWT
+const socket = io('http://localhost:3000', {
+  auth: {
+    token: 'eyJhbGciOiJIUzI1NiIs...' // Your JWT token
+  }
+});
+
+// Without valid token, connection is rejected
+socket.on('connect_error', (error) => {
+  console.error('Authentication failed:', error.message);
+});
+```
 
 ### Permission Checking
 
-The plugin respects your resource auth rules:
+Subscriptions require 'query' permission on the resource:
 
 ```javascript
-await api.addResource('posts', {
-  schema: {
-    id: { type: 'id' },
-    title: { type: 'string', required: true },
-    content: { type: 'text' },
-    user_id: { type: 'string' },
-    status: { type: 'string' },
-    published: { type: 'boolean', default: false }
-  },
+// In your scope definition
+await api.addResource('secret-documents', {
+  // ... schema ...
   
-  auth: {
-    query: ['public'],         // Who can subscribe
-    get: ['public'],          // Who can see individual records
-    post: ['authenticated'],   
-    patch: ['is_owner', 'has_role:editor'],      
-    delete: ['is_owner', 'admin']
+  checkPermissions: async ({ method, auth }) => {
+    if (method === 'query') {
+      // Check if user can query/subscribe to this resource
+      return auth.roles?.includes('admin');
+    }
+    // ... other permission checks
   }
 });
 ```
 
-For subscriptions:
-- The `query` permission determines who can subscribe
-- When broadcasting, only records the user can `get` are sent
-- Filters are applied before permission checks
+### Filter Injection with Hooks
 
-### Logout Handling
-
-When a user logs out via REST API:
+Use the `subscriptionFilters` hook to enforce security policies:
 
 ```javascript
-// User logs out
-await fetch('/api/auth/logout', {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${token}`
+// Multi-tenancy plugin example
+export const MultiTenancyPlugin = {
+  name: 'multi-tenancy',
+  
+  install({ addHook }) {
+    // This hook runs for EVERY subscription
+    addHook('subscriptionFilters', 'workspace-isolation', {}, 
+      async ({ subscription, auth }) => {
+        // Force workspace isolation
+        if (!auth.workspace_id) {
+          throw new Error('User must belong to a workspace');
+        }
+        
+        // Always add workspace filter
+        subscription.filters.workspace_id = auth.workspace_id;
+        
+        // Prevent bypassing workspace isolation
+        if (subscription.filters.workspace_id && 
+            subscription.filters.workspace_id !== auth.workspace_id) {
+          throw new Error('Cannot subscribe to other workspaces');
+        }
+      }
+    );
   }
-});
+};
 
-// Socket.io connection receives logout event and disconnects
-socket.on('logout', (data) => {
-  console.log('Logged out:', data.message);
-  // Socket will disconnect automatically
-});
-```
-
-## Message Reference
-
-### Client → Server Messages
-
-#### subscribe
-```javascript
+// Now ALL subscriptions automatically include workspace filter
 socket.emit('subscribe', {
-  resource: 'books',           // Required
-  filters: { /* optional */ },
-  subscriptionId: 'custom-id'  // Optional
-}, callback);
+  resource: 'projects',
+  filters: { status: 'active' }
+});
+// Server automatically adds: filters.workspace_id = user's workspace
 ```
 
-#### unsubscribe
+### Data Isolation Example
+
+Here's a complete example showing how data isolation works:
+
 ```javascript
-socket.emit('unsubscribe', {
-  subscriptionId: 'custom-id'  // Required
-}, callback);
+// User Roles Plugin
+export const UserRolesPlugin = {
+  name: 'user-roles',
+  
+  install({ addHook }) {
+    // Filter subscriptions based on user role
+    addHook('subscriptionFilters', 'role-based-filters', {}, 
+      async ({ subscription, auth }) => {
+        const { resource, filters } = subscription;
+        
+        // Regular users can only see their own data
+        if (!auth.roles?.includes('admin')) {
+          switch (resource) {
+            case 'orders':
+              subscription.filters.customer_id = auth.user_id;
+              break;
+              
+            case 'invoices':
+              subscription.filters.user_id = auth.user_id;
+              break;
+              
+            case 'messages':
+              // Can see messages where they're sender or recipient
+              subscription.filters.$or = [
+                { sender_id: auth.user_id },
+                { recipient_id: auth.user_id }
+              ];
+              break;
+              
+            case 'admin-logs':
+              throw new Error('Access denied to admin resources');
+          }
+        }
+      }
+    );
+  }
+};
 ```
 
-### Server → Client Messages
+## Advanced Features
 
-#### connected
+### Redis Adapter for Scaling
+
+When running multiple servers, use Redis adapter for proper broadcasting:
+
 ```javascript
-socket.on('connected', (data) => {
-  // {
-  //   socketId: 'unique-socket-id',
-  //   authenticated: true/false,
-  //   userId: 'user-123',  // if authenticated
-  //   timestamp: '2024-01-01T12:00:00.000Z'
-  // }
+// Server configuration
+const io = await api.startSocketServer(server, {
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: process.env.REDIS_PORT || 6379,
+    password: process.env.REDIS_PASSWORD,
+    db: 0
+  }
+});
+
+// Now broadcasts work across all servers
+// Server A: Record updated → broadcast
+// Server B: Receives broadcast → notifies its connected clients
+```
+
+### Subscription Management
+
+Each socket can have multiple subscriptions with different filters:
+
+```javascript
+// Subscribe to different filtered views
+const sub1 = await subscribeToResource(socket, {
+  resource: 'orders',
+  filters: { status: 'pending' }
+});
+
+const sub2 = await subscribeToResource(socket, {
+  resource: 'orders',
+  filters: { status: 'processing', priority: 'high' }
+});
+
+const sub3 = await subscribeToResource(socket, {
+  resource: 'products',
+  filters: { category_id: 5, in_stock: true }
+});
+
+// Unsubscribe from specific subscription
+socket.emit('unsubscribe', { 
+  subscriptionId: sub1.subscriptionId 
 });
 ```
 
-#### resource.update
+### Include and Fields Storage
+
+While notifications don't include data, subscriptions can store include/fields preferences:
+
 ```javascript
-socket.on('resource.update', (data) => {
-  // {
-  //   type: 'resource.update',
-  //   subscriptionId: 'your-subscription-id',
-  //   resource: 'books',
-  //   operation: 'create' | 'update' | 'delete',
-  //   data: { /* JSON:API resource */ },
-  //   meta: { timestamp: '...' }
-  // }
+// Subscribe with preferred includes and fields
+socket.emit('subscribe', {
+  resource: 'posts',
+  filters: { status: 'published' },
+  include: ['author', 'comments.user'],
+  fields: {
+    posts: ['title', 'summary', 'published_at'],
+    users: ['name', 'avatar'],
+    comments: ['body', 'created_at']
+  }
+});
+
+// Client can use these when fetching
+socket.on('subscription.update', async (notification) => {
+  // Use the stored preferences for fetching
+  const url = `/api/posts/${notification.id}?` +
+    'include=author,comments.user&' +
+    'fields[posts]=title,summary,published_at&' +
+    'fields[users]=name,avatar';
+    
+  const response = await fetch(url);
 });
 ```
 
-#### subscription.created / subscription.removed
+### Reconnection Support
+
+Restore subscriptions after reconnection:
+
 ```javascript
-socket.on('subscription.created', (data) => {
-  // { subscriptionId, resource, filters, status: 'active' }
+// Store active subscriptions
+const activeSubscriptions = new Map();
+
+socket.on('subscription.created', (response) => {
+  activeSubscriptions.set(response.subscriptionId, response);
 });
+
+// On reconnect, restore all subscriptions
+socket.on('connect', async () => {
+  if (activeSubscriptions.size > 0) {
+    const { restored, failed } = await restoreSubscriptions(
+      socket, 
+      Array.from(activeSubscriptions.values())
+    );
+    
+    console.log(`Restored ${restored.length} subscriptions`);
+    if (failed.length > 0) {
+      console.error(`Failed to restore ${failed.length} subscriptions`);
+    }
+  }
+});
+
+async function restoreSubscriptions(socket, subscriptions) {
+  return new Promise((resolve) => {
+    socket.emit('restore-subscriptions', 
+      { subscriptions }, 
+      resolve
+    );
+  });
+}
 ```
 
-#### subscription.error
+### Error Handling
+
+The plugin provides detailed error information:
+
 ```javascript
 socket.on('subscription.error', (error) => {
-  // { 
-  //   subscriptionId: '...', 
-  //   error: { 
-  //     code: 'RESOURCE_NOT_FOUND', 
-  //     message: '...' 
-  //   } 
-  // }
+  switch (error.code) {
+    case 'RESOURCE_NOT_FOUND':
+      console.error(`Resource type '${error.resource}' doesn't exist`);
+      break;
+      
+    case 'PERMISSION_DENIED':
+      console.error('You lack permission to subscribe to this resource');
+      break;
+      
+    case 'INVALID_FILTERS':
+      console.error('Filter validation failed:', error.details);
+      break;
+      
+    case 'UNSUPPORTED_FILTER':
+      console.error(`Filter requires 'filterRecord' for WebSocket support`);
+      break;
+      
+    case 'FILTERING_NOT_ENABLED':
+      console.error('Resource does not have searchSchema defined');
+      break;
+  }
 });
 ```
 
-#### logout
+## Client Usage
+
+### Basic Setup
+
 ```javascript
-socket.on('logout', (data) => {
-  // { message: 'You have been logged out' }
-  // Socket disconnects after this
+import { io } from 'socket.io-client';
+
+// Connect with authentication
+const socket = io('http://localhost:3000', {
+  auth: {
+    token: localStorage.getItem('jwt_token')
+  }
+});
+
+// Handle connection events
+socket.on('connect', () => {
+  console.log('Connected to WebSocket server');
+});
+
+socket.on('connect_error', (error) => {
+  console.error('Connection failed:', error.message);
+});
+
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected:', reason);
 });
 ```
 
-## Examples
-
-### React Hook
+### Subscribing to Resources
 
 ```javascript
-import { useEffect, useState, useCallback } from 'react';
-import { io } from 'socket.io-client';
-
-function useSocketIO(url, token) {
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
-  
-  useEffect(() => {
-    const newSocket = io(url, {
-      auth: { token }
-    });
-    
-    newSocket.on('connected', (data) => {
-      setConnected(true);
-      console.log('Socket connected:', data);
-    });
-    
-    newSocket.on('disconnect', () => {
-      setConnected(false);
-    });
-    
-    setSocket(newSocket);
-    
-    return () => {
-      newSocket.close();
-    };
-  }, [url, token]);
-  
-  const subscribe = useCallback((resource, filters, callback) => {
-    if (!socket) return;
-    
-    socket.emit('subscribe', {
-      resource,
-      filters,
-      subscriptionId: `${resource}-${Date.now()}`
-    }, callback);
-  }, [socket]);
-  
-  return { socket, connected, subscribe };
-}
-
-// Usage
-function BookList() {
-  const { session } = useAuth();
-  const { socket, connected, subscribe } = useSocketIO(
-    'http://localhost:3001',
-    session?.access_token
-  );
-  
-  useEffect(() => {
-    if (!connected) return;
-    
-    // Subscribe to books
-    subscribe('books', { published: true }, (response) => {
-      if (response.success) {
-        console.log('Subscribed to books');
-      }
-    });
-    
-    // Listen for updates
-    socket.on('resource.update', (data) => {
-      if (data.resource === 'books') {
-        // Update your state/cache
-        updateBookList(data);
-      }
-    });
-  }, [connected, socket, subscribe]);
-}
-```
-
-### Vue 3 Composable
-
-```javascript
-// composables/useSocketIO.js
-import { ref, onMounted, onUnmounted } from 'vue';
-import { io } from 'socket.io-client';
-
-export function useSocketIO(url, token) {
-  const socket = ref(null);
-  const connected = ref(false);
-  const subscriptions = ref(new Map());
-  
-  onMounted(() => {
-    socket.value = io(url, {
-      auth: { token }
-    });
-    
-    socket.value.on('connected', (data) => {
-      connected.value = true;
-    });
-    
-    socket.value.on('resource.update', (data) => {
-      const handlers = subscriptions.value.get(data.subscriptionId);
-      if (handlers) {
-        handlers.forEach(handler => handler(data));
+// Helper function for subscribing
+async function subscribeToResource(socket, options) {
+  return new Promise((resolve, reject) => {
+    socket.emit('subscribe', options, (response) => {
+      if (response.error) {
+        reject(response.error);
+      } else {
+        resolve(response.data);
       }
     });
   });
-  
-  onUnmounted(() => {
-    if (socket.value) {
-      socket.value.close();
+}
+
+// Subscribe to filtered resources
+try {
+  const subscription = await subscribeToResource(socket, {
+    resource: 'posts',
+    filters: {
+      status: 'published',
+      category_id: 5
     }
   });
   
-  const subscribe = (resource, filters, handler) => {
-    if (!socket.value) return;
-    
-    const subscriptionId = `${resource}-${Date.now()}`;
-    
-    socket.value.emit('subscribe', {
-      resource,
-      filters,
-      subscriptionId
-    }, (response) => {
-      if (response.success) {
-        if (!subscriptions.value.has(subscriptionId)) {
-          subscriptions.value.set(subscriptionId, []);
-        }
-        subscriptions.value.get(subscriptionId).push(handler);
-      }
-    });
-    
-    return subscriptionId;
-  };
-  
-  const unsubscribe = (subscriptionId) => {
-    if (!socket.value) return;
-    
-    socket.value.emit('unsubscribe', { subscriptionId });
-    subscriptions.value.delete(subscriptionId);
-  };
-  
-  return {
-    socket,
-    connected,
-    subscribe,
-    unsubscribe
-  };
+  console.log('Subscribed:', subscription.subscriptionId);
+} catch (error) {
+  console.error('Subscription failed:', error);
 }
 ```
 
-### Complete Real-time Blog Example
+### Handling Updates
 
 ```javascript
-// Backend setup
-await api.addResource('posts', {
-  schema: {
-    id: { type: 'id' },
-    title: { type: 'string', required: true },
-    content: { type: 'text' },
-    user_id: { type: 'string' },
-    published: { type: 'boolean', default: false },
-    tags: { type: 'json' }
-  },
+// Set up update handler
+socket.on('subscription.update', async (notification) => {
+  console.log('Resource updated:', notification);
+  // {
+  //   type: 'resource.updated',
+  //   resource: 'posts',
+  //   id: '123',
+  //   action: 'update',
+  //   subscriptionId: 'posts-1234567-abc',
+  //   meta: { timestamp: '2024-01-15T10:00:00Z' }
+  // }
   
-  auth: {
-    query: ['public'],         // Anyone can subscribe
-    get: ['public'],          
-    post: ['authenticated'],   // Must be logged in to create
-    patch: ['is_owner', 'has_role:editor'],  // Owner or editor can edit
-    delete: ['is_owner', 'admin']  // Owner or admin can delete
+  // Handle different actions
+  switch (notification.action) {
+    case 'post':
+      await handleNewResource(notification);
+      break;
+      
+    case 'update':
+    case 'patch':
+      await handleUpdatedResource(notification);
+      break;
+      
+    case 'delete':
+      await handleDeletedResource(notification);
+      break;
   }
 });
 
-// Frontend React component
-import { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
+// Fetch updated data when needed
+async function handleUpdatedResource(notification) {
+  // Check if user is viewing this resource
+  if (isCurrentlyViewing(notification.resource, notification.id)) {
+    // Fetch immediately
+    const response = await fetch(
+      `/api/${notification.resource}/${notification.id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      updateUI(data);
+    }
+  } else {
+    // Just invalidate cache
+    cacheManager.invalidate(notification.resource, notification.id);
+  }
+}
+```
 
-function LiveBlog() {
-  const [posts, setPosts] = useState([]);
-  const [socket, setSocket] = useState(null);
-  const { session } = useSupabase();
+### Complete Client Example
+
+```javascript
+class RealtimeResourceManager {
+  constructor(apiUrl, token) {
+    this.apiUrl = apiUrl;
+    this.token = token;
+    this.subscriptions = new Map();
+    this.cache = new Map();
+    
+    this.socket = io(apiUrl, {
+      auth: { token }
+    });
+    
+    this.setupEventHandlers();
+  }
   
-  useEffect(() => {
-    // Connect with authentication
-    const newSocket = io('http://localhost:3001', {
-      auth: {
-        token: session?.access_token
+  setupEventHandlers() {
+    this.socket.on('connect', () => {
+      console.log('WebSocket connected');
+      this.restoreSubscriptions();
+    });
+    
+    this.socket.on('subscription.update', (notification) => {
+      this.handleUpdate(notification);
+    });
+    
+    this.socket.on('subscription.created', (response) => {
+      this.subscriptions.set(response.subscriptionId, response);
+    });
+  }
+  
+  async subscribe(resource, filters = {}, options = {}) {
+    return new Promise((resolve, reject) => {
+      this.socket.emit('subscribe', {
+        resource,
+        filters,
+        ...options
+      }, (response) => {
+        if (response.error) {
+          reject(response.error);
+        } else {
+          resolve(response.data);
+        }
+      });
+    });
+  }
+  
+  async handleUpdate(notification) {
+    const { resource, id, action } = notification;
+    
+    // Invalidate cache
+    const cacheKey = `${resource}:${id}`;
+    this.cache.delete(cacheKey);
+    
+    // Emit custom event for UI updates
+    this.emit('resource:updated', {
+      resource,
+      id,
+      action,
+      notification
+    });
+  }
+  
+  async fetchResource(resource, id, options = {}) {
+    const cacheKey = `${resource}:${id}`;
+    
+    // Check cache first
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey);
+    }
+    
+    // Fetch from API
+    const queryString = new URLSearchParams(options).toString();
+    const url = `${this.apiUrl}/${resource}/${id}${queryString ? '?' + queryString : ''}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`
       }
     });
     
-    setSocket(newSocket);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${resource}/${id}`);
+    }
     
-    newSocket.on('connected', (data) => {
-      console.log('Connected:', data);
+    const data = await response.json();
+    
+    // Cache the result
+    this.cache.set(cacheKey, data);
+    
+    return data;
+  }
+  
+  async restoreSubscriptions() {
+    if (this.subscriptions.size === 0) return;
+    
+    const subscriptions = Array.from(this.subscriptions.values());
+    
+    return new Promise((resolve) => {
+      this.socket.emit('restore-subscriptions', 
+        { subscriptions }, 
+        (response) => {
+          if (response.error) {
+            console.error('Failed to restore subscriptions:', response.error);
+          } else {
+            console.log(`Restored ${response.restored.length} subscriptions`);
+          }
+          resolve(response);
+        }
+      );
+    });
+  }
+}
+
+// Usage
+const realtime = new RealtimeResourceManager(
+  'http://localhost:3000',
+  localStorage.getItem('jwt_token')
+);
+
+// Subscribe to posts
+await realtime.subscribe('posts', {
+  status: 'published',
+  author_id: currentUser.id
+});
+
+// React to updates
+realtime.on('resource:updated', async ({ resource, id, action }) => {
+  if (resource === 'posts' && isViewingPost(id)) {
+    const post = await realtime.fetchResource('posts', id, {
+      include: 'author,comments'
+    });
+    updatePostUI(post);
+  }
+});
+```
+
+## Performance Considerations
+
+### Subscription Limits
+
+Each socket is limited to 100 subscriptions to prevent memory exhaustion:
+
+```javascript
+// After 100 subscriptions, new ones are rejected
+socket.emit('subscribe', { resource: 'posts' }, (response) => {
+  if (response.error?.code === 'SUBSCRIPTION_LIMIT_EXCEEDED') {
+    console.error('Too many active subscriptions');
+  }
+});
+```
+
+### Filter Efficiency
+
+- **Simple operators** (`=`, `>`, etc.) are very fast - just property comparisons
+- **Complex filters** with `filterRecord` functions should be kept lightweight
+- **Avoid expensive operations** in filterRecord (no async calls, minimal computation)
+
+### Broadcast Optimization
+
+The plugin optimizes broadcasts by:
+
+1. **Single broadcast per change** - Not N broadcasts for N subscribers
+2. **Room-based delivery** - Socket.IO efficiently handles room broadcasts
+3. **Minimal payload** - Notifications are tiny (< 200 bytes)
+4. **In-memory filtering** - Uses context.minimalRecord, no database queries
+
+### Client-Side Optimization
+
+Optimize your client implementation:
+
+```javascript
+// Batch fetch requests
+const pendingFetches = new Set();
+
+socket.on('subscription.update', (notification) => {
+  pendingFetches.add(`${notification.resource}:${notification.id}`);
+});
+
+// Fetch in batches every 100ms
+setInterval(async () => {
+  if (pendingFetches.size === 0) return;
+  
+  const toFetch = Array.from(pendingFetches);
+  pendingFetches.clear();
+  
+  // Batch fetch multiple resources
+  const results = await Promise.all(
+    toFetch.map(key => {
+      const [resource, id] = key.split(':');
+      return fetchResource(resource, id);
+    })
+  );
+  
+  // Update UI with all results
+  updateBatchUI(results);
+}, 100);
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**1. Subscriptions not receiving updates**
+
+Check:
+- Are filters too restrictive?
+- Does the record pass `context.minimalRecord` filtering?
+- Are you in a transaction that hasn't committed?
+
+**2. "UNSUPPORTED_FILTER" errors**
+
+If using custom filterUsing functions, you must provide filterRecord:
+
+```javascript
+// ❌ This will error for WebSocket
+searchSchema: {
+  complex_search: {
+    type: 'string',
+    filterUsing: function(query, value) { /* SQL */ }
+  }
+}
+
+// ✅ This works for both REST and WebSocket
+searchSchema: {
+  complex_search: {
+    type: 'string',
+    filterUsing: function(query, value) { /* SQL */ },
+    filterRecord: function(record, value) { /* JavaScript */ }
+  }
+}
+```
+
+**3. Authentication failures**
+
+Ensure:
+- JWT token is valid and not expired
+- Token is sent in auth.token, not headers
+- JWT plugin is configured correctly
+
+**4. Redis connection issues**
+
+If using Redis adapter:
+- Check Redis server is running
+- Verify connection credentials
+- Ensure all servers use same Redis instance
+
+### Debug Logging
+
+Enable debug logging to troubleshoot:
+
+```javascript
+// Server-side
+const api = new Api({
+  name: 'my-api',
+  version: '1.0.0',
+  logging: { level: 'debug' }
+});
+
+// Client-side
+localStorage.debug = 'socket.io-client:*';
+```
+
+### Testing WebSocket Functionality
+
+```javascript
+// Test helper for WebSocket subscriptions
+async function testWebSocketSubscription() {
+  const socket = io('http://localhost:3000', {
+    auth: { token: testToken }
+  });
+  
+  return new Promise((resolve, reject) => {
+    socket.on('connect', async () => {
+      console.log('✓ Connected to WebSocket');
       
-      // Subscribe to published posts
-      newSocket.emit('subscribe', {
+      // Test subscription
+      socket.emit('subscribe', {
         resource: 'posts',
-        filters: { published: true },
-        subscriptionId: 'live-posts'
+        filters: { status: 'published' }
       }, (response) => {
-        if (response.success) {
-          console.log('Subscribed to posts');
+        if (response.error) {
+          console.error('✗ Subscription failed:', response.error);
+          reject(response.error);
+        } else {
+          console.log('✓ Subscription successful:', response.data);
+          
+          // Wait for an update
+          socket.once('subscription.update', (notification) => {
+            console.log('✓ Received update:', notification);
+            socket.close();
+            resolve(notification);
+          });
+          
+          // Trigger an update
+          createTestPost();
         }
       });
     });
     
-    // Handle real-time updates
-    newSocket.on('resource.update', (update) => {
-      if (update.resource !== 'posts') return;
-      
-      switch (update.operation) {
-        case 'create':
-          setPosts(prev => [...prev, update.data]);
-          break;
-          
-        case 'update':
-          setPosts(prev => prev.map(post => 
-            post.id === update.data.id ? update.data : post
-          ));
-          break;
-          
-        case 'delete':
-          setPosts(prev => prev.filter(post => 
-            post.id !== update.data.id
-          ));
-          break;
-      }
+    socket.on('connect_error', (error) => {
+      console.error('✗ Connection failed:', error.message);
+      reject(error);
     });
-    
-    // Load initial posts
-    fetch('/api/posts?filter[published]=true')
-      .then(res => res.json())
-      .then(data => setPosts(data.data));
-    
-    return () => {
-      newSocket.close();
-    };
-  }, [session]);
-  
-  const createPost = async (title, content) => {
-    const response = await fetch('/api/posts', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        data: {
-          type: 'posts',
-          attributes: { title, content, published: true }
-        }
-      })
-    });
-    
-    // The post will appear via Socket.io update
-  };
-  
-  return (
-    <div>
-      {/* Post creation form */}
-      {/* Post list that updates in real-time */}
-    </div>
-  );
-}
-```
-
-## Multi-Server Deployment
-
-### Single Server (Default)
-
-No special configuration needed:
-
-```javascript
-await api.use(SocketIOPlugin, {
-  port: 3001
-});
-```
-
-### Multi-Server with Redis
-
-For load-balanced environments:
-
-```javascript
-await api.use(SocketIOPlugin, {
-  port: 3001,
-  redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
-  }
-});
-```
-
-This enables:
-- Cross-server message broadcasting
-- Sticky sessions not required
-- Horizontal scaling support
-
-### AWS Deployment Example
-
-```javascript
-// Use ElastiCache Redis
-await api.use(SocketIOPlugin, {
-  port: 3001,
-  redis: {
-    url: `redis://${process.env.ELASTICACHE_ENDPOINT}:6379`
-  }
-});
-
-// Load balancer configuration:
-// - Route /api/* to API servers
-// - Route Socket.io traffic to any server (no sticky sessions needed)
-```
-
-## Best Practices
-
-### 1. Connection Management
-
-```javascript
-class SocketManager {
-  constructor(url, getToken) {
-    this.url = url;
-    this.getToken = getToken;
-    this.socket = null;
-    this.reconnectDelay = 1000;
-  }
-  
-  connect() {
-    this.socket = io(this.url, {
-      auth: {
-        token: this.getToken()
-      },
-      reconnection: true,
-      reconnectionDelay: this.reconnectDelay,
-      reconnectionDelayMax: 10000
-    });
-    
-    this.socket.on('connect_error', (error) => {
-      if (error.message === 'Authentication failed') {
-        // Token might be expired, refresh it
-        this.refreshConnection();
-      }
-    });
-  }
-  
-  async refreshConnection() {
-    const newToken = await this.getToken(true); // Force refresh
-    this.socket.auth.token = newToken;
-    this.socket.connect();
-  }
-}
-```
-
-### 2. Subscription Lifecycle
-
-```javascript
-// Clean up subscriptions properly
-useEffect(() => {
-  const subscriptionId = 'my-posts';
-  
-  socket.emit('subscribe', {
-    resource: 'posts',
-    filters: { user_id: userId },
-    subscriptionId
   });
-  
-  return () => {
-    // Unsubscribe on cleanup
-    socket.emit('unsubscribe', { subscriptionId });
-  };
-}, [userId]);
-```
-
-### 3. Error Handling
-
-```javascript
-// Global error handler
-socket.on('error', (error) => {
-  console.error('Socket error:', error);
-  // Show user notification
-});
-
-// Subscription error handling
-socket.emit('subscribe', { resource: 'posts' }, (response) => {
-  if (!response.success) {
-    switch (response.error.code) {
-      case 'PERMISSION_DENIED':
-        // User doesn't have access
-        break;
-      case 'RESOURCE_NOT_FOUND':
-        // Resource doesn't exist
-        break;
-    }
-  }
-});
-```
-
-### 4. Optimizing Subscriptions
-
-```javascript
-// Good: Specific filters reduce unnecessary updates
-socket.emit('subscribe', {
-  resource: 'posts',
-  filters: { 
-    user_id: currentUser.id,
-    status: 'draft'
-  }
-});
-
-// Avoid: Broad subscriptions
-socket.emit('subscribe', {
-  resource: 'posts'  // Gets ALL post updates
-});
-```
-
-### 5. TypeScript Support
-
-```typescript
-interface ResourceUpdate<T = any> {
-  type: 'resource.update';
-  subscriptionId: string;
-  resource: string;
-  operation: 'create' | 'update' | 'delete';
-  data: {
-    type: string;
-    id: string;
-    attributes: T;
-  };
-  meta: {
-    timestamp: string;
-  };
 }
-
-// Type-safe event handling
-socket.on('resource.update', (update: ResourceUpdate<Post>) => {
-  if (update.resource === 'posts') {
-    handlePostUpdate(update.data.attributes);
-  }
-});
 ```
-
-## Summary
-
-The Socket.io Plugin provides production-ready real-time capabilities for your JSON:API server:
-
-- **Easy Integration**: Works with your existing JWT auth and permissions
-- **Flexible Deployment**: Single server or multi-server with Redis
-- **Developer Friendly**: Callback and event-based APIs
-- **Type Safe**: Full TypeScript support
-- **Battle Tested**: Built on Socket.io's proven infrastructure
-
-Whether you're building a chat app, live dashboard, or collaborative tool, the Socket.io plugin gives you real-time updates that respect your existing security model.

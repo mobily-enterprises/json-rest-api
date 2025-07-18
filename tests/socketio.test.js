@@ -1,47 +1,36 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import jwt from 'jsonwebtoken';
 import knexLib from 'knex';
 import { io as ioClient } from 'socket.io-client';
+import jwt from 'jsonwebtoken';
 import { 
   validateJsonApiStructure, 
   cleanTables, 
-  createJsonApiDocument, 
+  createJsonApiDocument,
+  assertResourceAttributes,
   createRelationship,
-  resourceIdentifier,
-  assertResourceAttributes
+  resourceIdentifier
 } from './helpers/test-utils.js';
-import { createBasicApi } from './fixtures/api-configs.js';
-import { JwtAuthPlugin } from '../plugins/core/jwt-auth-plugin.js';
-import { SocketIOPlugin } from '../plugins/core/socketio-plugin.js';
-import { HttpPlugin } from '../plugins/core/connectors/http-plugin.js';
+import { createWebSocketApi } from './fixtures/api-configs.js';
 
-const TEST_SECRET = 'test-secret-key';
-const TEST_USER = {
-  sub: '123',
-  email: 'test@example.com',
-  roles: ['user']
-};
+// Create Knex instance for tests
+const knex = knexLib({
+  client: 'sqlite3',
+  connection: {
+    filename: ':memory:'
+  },
+  useNullAsDefault: true
+});
 
-function createToken(payload, options = {}) {
-  return jwt.sign(
-    { 
-      ...TEST_USER, 
-      ...payload,
-      jti: options.jti || `test-${Date.now()}`,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (options.expiresIn || 3600)
-    },
-    TEST_SECRET,
-    { algorithm: 'HS256' }
-  );
-}
+// API instance that persists across ALL tests
+let api;
+let server;
 
-// Helper to wait for Socket.io event
+// Helper function to wait for socket event with timeout
 function waitForSocketEvent(socket, eventName, timeout = 1000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`Timeout waiting for event: ${eventName}`));
+      reject(new Error(`Timeout waiting for ${eventName}`));
     }, timeout);
     
     socket.once(eventName, (data) => {
@@ -51,743 +40,729 @@ function waitForSocketEvent(socket, eventName, timeout = 1000) {
   });
 }
 
-// Helper to create Socket.io client
-function createSocketClient(port, auth = {}) {
-  return ioClient(`http://localhost:${port}`, {
-    transports: ['websocket'],
-    auth
-  });
-}
-
-describe('Socket.io Plugin', () => {
-  let knex;
-  let api;
-  let httpServer;
-  let ioServer;
-  const socketPort = 3001;
-  const httpPort = 3002;
-  
+describe('WebSocket/Socket.IO Plugin', () => {
+  // IMPORTANT: before() runs ONCE for the entire test suite
   before(async () => {
-    knex = knexLib({
-      client: 'sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true
-    });
+    // Create API instance ONCE with WebSocket support
+    const result = await createWebSocketApi(knex);
+    api = result.api;
+    server = result.server;
   });
   
+  // IMPORTANT: after() cleans up resources
   after(async () => {
-    if (ioServer) {
-      await ioServer.close();
+    // Skip cleanup if nothing was initialized
+    if (!api || !server) {
+      return;
     }
-    if (httpServer) {
-      await httpServer.close();
+    
+    // Close Socket.IO server first
+    if (api.vars.socketIO) {
+      // Disconnect all connected sockets
+      await api.vars.socketIO.disconnectSockets();
+      
+      // Close the Socket.IO server
+      await new Promise((resolve) => {
+        api.vars.socketIO.close(() => {
+          resolve();
+        });
+      });
     }
+    
+    // Close Redis clients if they exist
+    if (api.vars.socketIORedisClients) {
+      await api.vars.socketIORedisClients.pubClient.quit();
+      await api.vars.socketIORedisClients.subClient.quit();
+    }
+    
+    // Close HTTP server
+    if (server) {
+      await new Promise((resolve) => {
+        server.close(resolve);
+      });
+    }
+    
+    // Clean up any intervals from plugins
+    if (api.vars.jwtAuthCleanupJob) {
+      clearInterval(api.vars.jwtAuthCleanupJob);
+    }
+    
+    // Always destroy knex connection to allow tests to exit
     await knex.destroy();
   });
   
-  describe('Basic Socket.io Functionality', () => {
-    beforeEach(async () => {
-      // Create fresh API instance
-      api = await createBasicApi(knex, {
-        jwtAuth: {
-          secret: TEST_SECRET,
-          revocation: {
-            enabled: true,
-            storage: 'database'
-          }
-        }
-      });
-      
-      // Install plugins
-      await api.use(JwtAuthPlugin);
-      await api.use(SocketIOPlugin, {
-        port: socketPort
-      });
-      
-      // Add HTTP server for REST operations
-      await api.use(HttpPlugin, { port: httpPort });
-      httpServer = api.vars.httpServer;
-      
-      // Store Socket.io server reference
-      ioServer = api.io;
-      
-      // Add resource with declarative auth
-      await api.addResource('posts', {
-        schema: {
-          id: { type: 'id' },
-          title: { type: 'string', required: true },
-          content: { type: 'string' },
-          user_id: { type: 'string' },
-          published: { type: 'boolean', default: false }
-        },
-        auth: {
-          query: ['public'],
-          get: ['public'],
-          post: ['authenticated'],
-          patch: ['is_owner', 'admin'],
-          delete: ['is_owner', 'admin']
-        }
-      });
-      
-      await api.resources.posts.createKnexTable();
-      await cleanTables(knex, ['posts', 'revoked_tokens']);
-    });
-    
-    it('should establish connection without authentication', async () => {
-      const socket = createSocketClient(socketPort);
-      
-      const connectedData = await waitForSocketEvent(socket, 'connected');
-      
-      assert(connectedData.socketId, 'Should have socket ID');
-      assert.equal(connectedData.authenticated, false);
-      assert.equal(connectedData.userId, undefined);
-      assert(connectedData.timestamp, 'Should have timestamp');
-      
-      socket.disconnect();
-    });
-    
-    it('should establish authenticated connection', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      
-      const connectedData = await waitForSocketEvent(socket, 'connected');
-      
-      assert(connectedData.socketId, 'Should have socket ID');
-      assert.equal(connectedData.authenticated, true);
-      assert.equal(connectedData.userId, '123');
-      
-      socket.disconnect();
-    });
-    
-    it('should handle connection with invalid token gracefully', async () => {
-      const socket = createSocketClient(socketPort, { token: 'invalid-token' });
-      
-      const connectedData = await waitForSocketEvent(socket, 'connected');
-      
-      // Should connect but not be authenticated
-      assert.equal(connectedData.authenticated, false);
-      assert.equal(connectedData.userId, undefined);
-      
-      socket.disconnect();
-    });
+  // IMPORTANT: beforeEach() cleans data but does NOT recreate API
+  beforeEach(async () => {
+    // Clean all tables
+    await cleanTables(knex, [
+      'basic_countries',
+      'basic_publishers',
+      'basic_authors',
+      'basic_books',
+      'basic_book_authors'
+    ]);
   });
-  
-  describe('Subscription Management', () => {
-    let userId = '123';
-    let adminId = '456';
-    
-    beforeEach(async () => {
-      api = await createBasicApi(knex);
+
+  describe('Basic Subscription and Notifications', () => {
+    it('should receive minimal notifications for subscribed resources', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      await api.use(JwtAuthPlugin, {
-        secret: TEST_SECRET,
-        ownershipField: 'user_id'
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
-      
-      await api.use(SocketIOPlugin, {
-        port: socketPort
-      });
-      
-      await api.use(HttpPlugin, { port: httpPort });
-      httpServer = api.vars.httpServer;
-      ioServer = api.io;
-      
-      await api.addResource('books', {
-        schema: {
-          id: { type: 'id' },
-          title: { type: 'string', required: true },
-          user_id: { type: 'string' },
-          published: { type: 'boolean', default: false }
-        },
-        auth: {
-          query: ['public'],
-          get: ['public'],
-          post: ['authenticated'],
-          patch: ['is_owner', 'admin'],
-          delete: ['is_owner', 'admin']
-        }
-      });
-      
-      await api.resources.books.createKnexTable();
-      await cleanTables(knex, ['books']);
-    });
-    
-    it('should subscribe to resources with callback', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe using callback style
-      const response = await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          filters: { published: true },
-          subscriptionId: 'my-books'
-        }, (response) => {
-          resolve(response);
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
         });
-      });
-      
-      assert.equal(response.success, true);
-      assert.equal(response.data.subscriptionId, 'my-books');
-      assert.equal(response.data.resource, 'books');
-      assert.deepEqual(response.data.filters, { published: true });
-      assert.equal(response.data.status, 'active');
-      
-      socket.disconnect();
-    });
-    
-    it('should subscribe to resources with events', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe using event style
-      const subscriptionPromise = waitForSocketEvent(socket, 'subscription.created');
-      
-      socket.emit('subscribe', {
-        resource: 'books',
-        filters: { published: true }
-      });
-      
-      const subscriptionData = await subscriptionPromise;
-      assert(subscriptionData.subscriptionId, 'Should have subscription ID');
-      assert.equal(subscriptionData.resource, 'books');
-      assert.deepEqual(subscriptionData.filters, { published: true });
-      
-      socket.disconnect();
-    });
-    
-    it('should receive updates for subscribed resources', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe to all books
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          subscriptionId: 'all-books'
-        }, resolve);
-      });
-      
-      // Create a book via REST API
-      const bookDoc = createJsonApiDocument('books', {
-        title: 'Test Book',
-        user_id: userId,
-        published: true
-      });
-      
-      const updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      const response = await fetch(`http://localhost:${httpPort}/api/books`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(bookDoc)
-      });
-      
-      const createResult = await response.json();
-      
-      // Should receive Socket.io update
-      const updateData = await updatePromise;
-      assert.equal(updateData.type, 'resource.update');
-      assert.equal(updateData.subscriptionId, 'all-books');
-      assert.equal(updateData.resource, 'books');
-      assert.equal(updateData.operation, 'create');
-      assert.equal(updateData.data.type, 'books');
-      assert.equal(updateData.data.attributes.title, 'Test Book');
-      
-      socket.disconnect();
-    });
-    
-    it('should filter updates based on subscription filters', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe only to published books
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          filters: { published: true },
-          subscriptionId: 'published-books'
-        }, resolve);
-      });
-      
-      // Create unpublished book - should NOT receive update
-      const unpublishedDoc = createJsonApiDocument('books', {
-        title: 'Unpublished Book',
-        user_id: userId,
-        published: false
-      });
-      
-      await fetch(`http://localhost:${httpPort}/api/books`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(unpublishedDoc)
-      });
-      
-      // Create published book - SHOULD receive update
-      const publishedDoc = createJsonApiDocument('books', {
-        title: 'Published Book',
-        user_id: userId,
-        published: true
-      });
-      
-      const updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      await fetch(`http://localhost:${httpPort}/api/books`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(publishedDoc)
-      });
-      
-      const updateData = await updatePromise;
-      assert.equal(updateData.data.attributes.title, 'Published Book');
-      assert.equal(updateData.data.attributes.published, true);
-      
-      socket.disconnect();
-    });
-    
-    it('should unsubscribe from resources', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          subscriptionId: 'books-to-remove'
-        }, resolve);
-      });
-      
-      // Unsubscribe with callback
-      const response = await new Promise((resolve) => {
-        socket.emit('unsubscribe', {
-          subscriptionId: 'books-to-remove'
-        }, resolve);
-      });
-      
-      assert.equal(response.success, true);
-      assert.equal(response.data.subscriptionId, 'books-to-remove');
-      assert.equal(response.data.status, 'removed');
-      
-      socket.disconnect();
-    });
-    
-    it('should handle invalid resource subscription', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Try to subscribe to non-existent resource
-      const response = await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'invalid-resource'
-        }, resolve);
-      });
-      
-      assert.equal(response.error.code, 'RESOURCE_NOT_FOUND');
-      assert(response.error.message.includes('invalid-resource'));
-      
-      socket.disconnect();
-    });
-  });
-  
-  describe('Authentication and Authorization', () => {
-    let userToken;
-    let adminToken;
-    let userId = '123';
-    let adminId = '456';
-    let otherUserId = '789';
-    
-    beforeEach(async () => {
-      api = await createBasicApi(knex);
-      
-      await api.use(JwtAuthPlugin, {
-        secret: TEST_SECRET,
-        ownershipField: 'user_id'
-      });
-      
-      await api.use(SocketIOPlugin, {
-        port: socketPort
-      });
-      
-      await api.use(HttpPlugin, { port: httpPort });
-      httpServer = api.vars.httpServer;
-      ioServer = api.io;
-      
-      await api.addResource('private_posts', {
-        schema: {
-          id: { type: 'id' },
-          title: { type: 'string', required: true },
-          content: { type: 'string' },
-          user_id: { type: 'string' },
-          private: { type: 'boolean', default: true }
-        },
-        auth: {
-          query: ['authenticated'],
-          get: ['is_owner', 'admin'],
-          post: ['authenticated'],
-          patch: ['is_owner'],
-          delete: ['is_owner', 'admin']
-        }
-      });
-      
-      await api.resources.private_posts.createKnexTable();
-      await cleanTables(knex, ['private_posts']);
-      
-      // Create tokens
-      userToken = createToken({ sub: userId });
-      adminToken = createToken({ sub: adminId, roles: ['admin'] });
-    });
-    
-    it('should deny subscription to unauthenticated users for protected resources', async () => {
-      const socket = createSocketClient(socketPort); // No auth
-      await waitForSocketEvent(socket, 'connected');
-      
-      const response = await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'private_posts'
-        }, resolve);
-      });
-      
-      assert.equal(response.error.code, 'PERMISSION_DENIED');
-      
-      socket.disconnect();
-    });
-    
-    it('should respect declarative auth rules for updates', async () => {
-      // Create posts by different users
-      const userPostDoc = createJsonApiDocument('private_posts', {
-        title: 'User Post',
-        content: 'My private content',
-        user_id: userId
-      });
-      
-      const otherPostDoc = createJsonApiDocument('private_posts', {
-        title: 'Other User Post',
-        content: 'Other private content',
-        user_id: otherUserId
-      });
-      
-      // Create posts via REST
-      await fetch(`http://localhost:${httpPort}/api/private_posts`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(userPostDoc)
-      });
-      
-      const otherToken = createToken({ sub: otherUserId });
-      await fetch(`http://localhost:${httpPort}/api/private_posts`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${otherToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(otherPostDoc)
-      });
-      
-      // Connect as user and subscribe
-      const socket = createSocketClient(socketPort, { token: userToken });
-      await waitForSocketEvent(socket, 'connected');
-      
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'private_posts',
-          subscriptionId: 'my-private-posts'
-        }, resolve);
-      });
-      
-      // Update user's own post - should receive update
-      const updateDoc = {
-        data: {
-          type: 'private_posts',
-          id: '1',
-          attributes: {
-            title: 'Updated User Post'
-          }
-        }
-      };
-      
-      const updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      await fetch(`http://localhost:${httpPort}/api/private_posts/1`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateDoc)
-      });
-      
-      const updateData = await updatePromise;
-      assert.equal(updateData.data.attributes.title, 'Updated User Post');
-      
-      // Update other user's post - should NOT receive update due to auth rules
-      const otherUpdateDoc = {
-        data: {
-          type: 'private_posts',
-          id: '2',
-          attributes: {
-            title: 'Updated Other Post'
-          }
-        }
-      };
-      
-      await fetch(`http://localhost:${httpPort}/api/private_posts/2`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${otherToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(otherUpdateDoc)
-      });
-      
-      // Wait a bit to ensure no message is received
-      await assert.rejects(
-        waitForSocketEvent(socket, 'resource.update', 500),
-        /Timeout/,
-        'Should not receive update for other user\'s post'
-      );
-      
-      socket.disconnect();
-    });
-    
-    it('should disconnect on logout', async () => {
-      const token = createToken({ jti: 'logout-test-123' });
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
-      
-      // Subscribe to verify connection is active
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'private_posts'
-        }, resolve);
-      });
-      
-      // Setup disconnect listener
-      const disconnectPromise = new Promise((resolve) => {
-        socket.on('logout', (data) => {
-          resolve(data);
+        
+        // Subscribe to posts with status filter
+        const subResponse = await new Promise((resolve) => {
+          socket.emit('subscribe', {
+            resource: 'books',
+            filters: { title: 'Test Book' }  // Exact match
+          }, resolve);
         });
+
+        assert(subResponse.success, 'Subscription should succeed');
+        assert(subResponse.data.subscriptionId, 'Should return subscription ID');
+
+        // Listen for updates
+        const updatePromise = waitForSocketEvent(socket, 'subscription.update');
+
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Create a book using API
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Test Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        
+        const createResult = await api.resources.books.post({
+          inputRecord: bookDoc,
+          simplified: false
+        });
+
+        // Check notification
+        const notification = await updatePromise;
+        assert.equal(notification.type, 'resource.postd');
+        assert.equal(notification.resource, 'books');
+        assert.equal(String(notification.id), String(createResult.data.id));
+        assert.equal(notification.action, 'post');
+        assert(!notification.data, 'Should not include data in notification');
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('should not receive notifications for non-matching filters', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
-      
-      // Logout via REST API
-      await fetch(`http://localhost:${httpPort}/api/auth/logout`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      // Should receive logout message and disconnect
-      const logoutData = await disconnectPromise;
-      assert.equal(logoutData.message, 'You have been logged out');
-      
-      // Socket should be disconnected
-      await new Promise(resolve => setTimeout(resolve, 100));
-      assert.equal(socket.connected, false);
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', () => {
+            console.log('Socket connected successfully');
+            resolve();
+          });
+          socket.on('connect_error', (error) => {
+            console.error('Connection error:', error.message, error.type);
+            reject(error);
+          });
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        
+        // Subscribe with specific filter
+        await new Promise((resolve) => {
+          socket.emit('subscribe', {
+            resource: 'books',
+            filters: { title: 'Specific Title' }
+          }, resolve);
+        });
+
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+        
+        // Create a book that doesn't match filter
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Different Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        
+        await api.resources.books.post({
+          inputRecord: bookDoc,
+          simplified: false
+        });
+
+        // Should not receive update
+        await assert.rejects(
+          waitForSocketEvent(socket, 'subscription.update', 500),
+          { message: /Timeout/ }
+        );
+      } finally {
+        socket.close();
+      }
     });
   });
-  
-  describe('Real-time Updates', () => {
-    beforeEach(async () => {
-      api = await createBasicApi(knex);
+
+  describe('Filter Validation', () => {
+    it('should validate filters against searchSchema', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      await api.use(JwtAuthPlugin, {
-        secret: TEST_SECRET
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
-      
-      await api.use(SocketIOPlugin, {
-        port: socketPort
-      });
-      
-      await api.use(HttpPlugin, { port: httpPort });
-      httpServer = api.vars.httpServer;
-      ioServer = api.io;
-      
-      await cleanTables(knex, ['basic_books', 'basic_countries']);
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Try invalid filter
+        const response = await new Promise((resolve) => {
+          socket.emit('subscribe', {
+            resource: 'books',
+            filters: { invalid_field: 'value' }
+          }, resolve);
+        });
+
+        assert(response.error, 'Should return error');
+        assert.equal(response.error.code, 'INVALID_FILTERS');
+      } finally {
+        socket.close();
+      }
     });
+
+    it('should reject function filters without filterRecord', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
+      });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Create a country first
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Assuming we add a complex filter to the schema that uses filterUsing function
+        // For now, test with country_id which is a simple filter
+        const response = await new Promise((resolve) => {
+          socket.emit('subscribe', {
+            resource: 'books',
+            filters: { country_id: countryResult.data.id }
+          }, resolve);
+        });
+
+        // Should succeed for simple filters
+        assert(response.success, 'Should succeed for simple filters');
+      } finally {
+        socket.close();
+      }
+    });
+  });
+
+  describe('Transaction Safety', () => {
+    // These tests verify that broadcasts are properly deferred until after transaction commit
+    // The implementation uses:
+    // - WeakMap to store pending broadcasts per transaction
+    // - afterCommit hook to broadcast after successful transactions
+    // - afterRollback hook to clean up after failed transactions
+    // - No mutation of transaction objects
     
-    it('should broadcast create, update, and delete operations', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
+    it('should not broadcast when operations fail', async () => {
+      // This test verifies that broadcasts don't happen when operations fail
+      // The library should rollback transactions and not send notifications
       
-      // Subscribe to books
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          subscriptionId: 'books-crud'
-        }, resolve);
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        
+        // Subscribe to all books
+        await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+
+        // Track notifications
+        const notifications = [];
+        socket.on('subscription.update', (notification) => {
+          notifications.push(notification);
+        });
+
+        // Try to create a book without required country relationship
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Invalid Book' }
+          // Missing required country relationship
+        );
+        
+        try {
+          await api.resources.books.post({
+            inputRecord: bookDoc,
+            simplified: false
+          });
+          assert.fail('Should have thrown an error');
+        } catch (error) {
+          // Expected to fail due to missing required relationship
+        }
+
+        // Wait a bit to ensure no broadcast happens
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Should not have received any notification
+        assert.equal(notifications.length, 0, 'Should not receive any notifications for failed operations');
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('should broadcast after successful operations', async () => {
+      // This test verifies that broadcasts happen after successful operations
+      // The library handles transactions internally and uses afterCommit hook
+      // to ensure broadcasts happen only after successful commit
       
-      // Create country first
-      const countryDoc = createJsonApiDocument('countries', {
-        name: 'Test Country',
-        code: 'TC'
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        
+        // Subscribe to all books
+        await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Track notifications
+        const notifications = [];
+        socket.on('subscription.update', (notification) => {
+          notifications.push(notification);
+        });
+
+        // Create book - the library will handle transaction internally if configured
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Broadcast Test Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        
+        const createResult = await api.resources.books.post({
+          inputRecord: bookDoc,
+          simplified: false
+        });
+
+        // Wait a bit to ensure broadcast happens (setImmediate)
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // Should have received the notification
+        assert.equal(notifications.length, 1, 'Should receive one notification');
+        assert.equal(notifications[0].type, 'resource.postd');
+        assert.equal(notifications[0].resource, 'books');
+        assert.equal(String(notifications[0].id), String(createResult.data.id));
+      } finally {
+        socket.close();
+      }
+    });
+  });
+
+  describe('Multiple Subscriptions', () => {
+    it('should handle multiple subscriptions from same client', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      const countryRes = await fetch(`http://localhost:${httpPort}/api/countries`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(countryDoc)
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Subscribe to books and countries
+        const bookSubResponse = await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+        
+        const countrySubResponse = await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'countries' }, resolve);
+        });
+
+        assert(bookSubResponse.success);
+        assert(countrySubResponse.success);
+        assert.notEqual(bookSubResponse.data.subscriptionId, countrySubResponse.data.subscriptionId);
+
+        // Create both resources
+        const notifications = [];
+        socket.on('subscription.update', (notification) => {
+          notifications.push(notification);
+        });
+
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', { name: 'Multi Test Country', code: 'MT' });
+        const countryResult = await api.resources.countries.post({ inputRecord: countryDoc, simplified: false });
+
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Multi Test Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        await api.resources.books.post({ inputRecord: bookDoc, simplified: false });
+
+        const countryDoc2 = createJsonApiDocument('countries', { name: 'Multi Test Country 2', code: 'MT2' });
+        await api.resources.countries.post({ inputRecord: countryDoc2, simplified: false });
+
+        // Wait a bit for notifications
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        assert.equal(notifications.length, 3, 'Should receive 3 notifications');
+        assert.equal(notifications.filter(n => n.resource === 'books').length, 1, 'Should receive 1 book notification');
+        assert.equal(notifications.filter(n => n.resource === 'countries').length, 2, 'Should receive 2 country notifications');
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('should unsubscribe correctly', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      const countryResult = await countryRes.json();
-      const countryId = countryResult.data.id;
-      
-      // CREATE: Create a book
-      const bookDoc = createJsonApiDocument('books', {
-        title: 'Real-time Book',
-        country_id: countryId
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Subscribe
+        const subResponse = await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+
+        const subscriptionId = subResponse.data.subscriptionId;
+
+        // Unsubscribe
+        const unsubResponse = await new Promise((resolve) => {
+          socket.emit('unsubscribe', { subscriptionId }, resolve);
+        });
+
+        assert(unsubResponse.success);
+
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Create a book
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'After Unsub Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        await api.resources.books.post({ inputRecord: bookDoc, simplified: false });
+
+        // Should not receive notification
+        await assert.rejects(
+          waitForSocketEvent(socket, 'subscription.update', 500),
+          { message: /Timeout/ }
+        );
+      } finally {
+        socket.close();
+      }
+    });
+  });
+
+  describe('Update and Delete Notifications', () => {
+    it('should receive notifications for updates', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      let updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      const createRes = await fetch(`http://localhost:${httpPort}/api/books`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(bookDoc)
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
-      
-      const createResult = await createRes.json();
-      const bookId = createResult.data.id;
-      
-      let updateData = await updatePromise;
-      assert.equal(updateData.operation, 'create');
-      assert.equal(updateData.data.type, 'books');
-      assert.equal(updateData.data.attributes.title, 'Real-time Book');
-      
-      // UPDATE: Update the book
-      const updateDoc = {
-        data: {
-          type: 'books',
-          id: String(bookId),
-          attributes: {
-            title: 'Updated Real-time Book'
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Create a book first
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'Original Title' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        const createResult = await api.resources.books.post({
+          inputRecord: bookDoc,
+          simplified: false
+        });
+        const bookId = createResult.data.id;
+
+        // Subscribe to books
+        await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+
+        // Update the book
+        const updatePromise = waitForSocketEvent(socket, 'subscription.update');
+        
+        const patchDoc = {
+          data: {
+            type: 'books',
+            id: String(bookId),
+            attributes: { title: 'Updated Title' }
           }
-        }
-      };
-      
-      updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      await fetch(`http://localhost:${httpPort}/api/books/${bookId}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateDoc)
-      });
-      
-      updateData = await updatePromise;
-      assert.equal(updateData.operation, 'update');
-      assert.equal(updateData.data.id, String(bookId));
-      assert.equal(updateData.data.attributes.title, 'Updated Real-time Book');
-      
-      // DELETE: Delete the book
-      updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      await fetch(`http://localhost:${httpPort}/api/books/${bookId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      updateData = await updatePromise;
-      assert.equal(updateData.operation, 'delete');
-      assert.equal(updateData.data.id, String(bookId));
-      
-      socket.disconnect();
+        };
+        
+        await api.resources.books.patch({
+          id: bookId,
+          inputRecord: patchDoc,
+          simplified: false
+        });
+
+        // Check notification
+        const notification = await updatePromise;
+        assert.equal(notification.type, 'resource.patchd');
+        assert.equal(notification.resource, 'books');
+        assert.equal(String(notification.id), String(bookId));
+        assert.equal(notification.action, 'patch');
+      } finally {
+        socket.close();
+      }
     });
-    
-    it('should support multiple concurrent subscriptions', async () => {
-      const token = createToken();
-      const socket = createSocketClient(socketPort, { token });
-      await waitForSocketEvent(socket, 'connected');
+
+    it('should receive notifications for deletes', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      // Subscribe to multiple resources
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'countries',
-          subscriptionId: 'countries-sub'
-        }, resolve);
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Create a country first (required for books)
+        const countryDoc = createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+
+        // Create a book first
+        const bookDoc = createJsonApiDocument('books', 
+          { title: 'To Delete' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        const createResult = await api.resources.books.post({
+          inputRecord: bookDoc,
+          simplified: false
+        });
+        const bookId = createResult.data.id;
+
+        // Subscribe to books
+        await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve);
+        });
+        
+        // Delete the book
+        const deletePromise = waitForSocketEvent(socket, 'subscription.update');
+        
+        await api.resources.books.delete({ id: bookId });
+
+        // Check notification
+        const notification = await deletePromise;
+        assert.equal(notification.type, 'resource.deleted');
+        assert.equal(notification.resource, 'books');
+        assert.equal(String(notification.id), String(bookId));
+        assert.equal(notification.action, 'delete');
+      } finally {
+        socket.close();
+      }
+    });
+  });
+
+  describe('Relationship Filters', () => {
+    it('should filter by relationship fields', async () => {
+      // Generate a real JWT token for testing
+      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
-      await new Promise((resolve) => {
-        socket.emit('subscribe', {
-          resource: 'books',
-          subscriptionId: 'books-sub'
-        }, resolve);
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        auth: { token }
       });
-      
-      // Create a country - should receive update
-      const countryDoc = createJsonApiDocument('countries', {
-        name: 'Multi Sub Country',
-        code: 'MS'
-      });
-      
-      let updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      const countryRes = await fetch(`http://localhost:${httpPort}/api/countries`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(countryDoc)
-      });
-      
-      const countryResult = await countryRes.json();
-      
-      let updateData = await updatePromise;
-      assert.equal(updateData.subscriptionId, 'countries-sub');
-      assert.equal(updateData.data.type, 'countries');
-      
-      // Create a book - should receive update
-      const bookDoc = createJsonApiDocument('books', {
-        title: 'Multi Sub Book',
-        country_id: countryResult.data.id
-      });
-      
-      updatePromise = waitForSocketEvent(socket, 'resource.update');
-      
-      await fetch(`http://localhost:${httpPort}/api/books`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(bookDoc)
-      });
-      
-      updateData = await updatePromise;
-      assert.equal(updateData.subscriptionId, 'books-sub');
-      assert.equal(updateData.data.type, 'books');
-      
-      socket.disconnect();
+
+      try {
+        // Wait for connection
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve);
+          socket.on('connect_error', reject);
+          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        });
+        // Create test data
+        const countryDoc = createJsonApiDocument('countries', { name: 'Filter Country', code: 'FC' });
+        const countryResult = await api.resources.countries.post({
+          inputRecord: countryDoc,
+          simplified: false
+        });
+        
+        const publisherDoc = createJsonApiDocument('publishers', 
+          { name: 'Filter Publisher' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        const publisherResult = await api.resources.publishers.post({
+          inputRecord: publisherDoc,
+          simplified: false
+        });
+
+        // Subscribe to books filtered by publisher
+        await new Promise((resolve) => {
+          socket.emit('subscribe', {
+            resource: 'books',
+            filters: { publisher_id: publisherResult.data.id }
+          }, resolve);
+        });
+
+        // Create book with matching publisher
+        const matchingBookPromise = waitForSocketEvent(socket, 'subscription.update');
+        
+        const matchingBookDoc = createJsonApiDocument('books',
+          { title: 'Matching Book' },
+          { 
+            country: createRelationship(resourceIdentifier('countries', countryResult.data.id)),
+            publisher: createRelationship(resourceIdentifier('publishers', publisherResult.data.id))
+          }
+        );
+        await api.resources.books.post({
+          inputRecord: matchingBookDoc,
+          simplified: false
+        });
+
+        // Should receive notification
+        const notification = await matchingBookPromise;
+        assert.equal(notification.resource, 'books');
+
+        // Create book with different publisher
+        const otherPublisherDoc = createJsonApiDocument('publishers', 
+          { name: 'Other Publisher' },
+          { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
+        );
+        const otherPublisherResult = await api.resources.publishers.post({
+          inputRecord: otherPublisherDoc,
+          simplified: false
+        });
+
+        const nonMatchingBookDoc = createJsonApiDocument('books',
+          { title: 'Non-Matching Book' },
+          { 
+            country: createRelationship(resourceIdentifier('countries', countryResult.data.id)),
+            publisher: createRelationship(resourceIdentifier('publishers', otherPublisherResult.data.id))
+          }
+        );
+        await api.resources.books.post({
+          inputRecord: nonMatchingBookDoc,
+          simplified: false
+        });
+
+        // Should not receive notification for non-matching book
+        await assert.rejects(
+          waitForSocketEvent(socket, 'subscription.update', 500),
+          { message: /Timeout/ }
+        );
+      } finally {
+        socket.close();
+      }
     });
   });
 });

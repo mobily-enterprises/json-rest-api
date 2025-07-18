@@ -1,8 +1,15 @@
+Session 1:
 ☐ Finish websockets properly, make it actually work
-☐ Change name to runPluginHooks
+☐ Get rid of runPluginHooks, runHooks, on (!!). Only have runHooks, with the runHooks of methods automatically setting context, params
+
+Session 2:
 ☐ improve way in which jvt-auth works, no need for those vars and helpers
-☐ Improve enrichAttributes, split into helpers
+☐ Improve enrichAttributes, split into helpers <--- ???????????????
+
+Sessoon 3:
 ☐ Add 'created_at' module, maybe have 'protected' fields
 ☐ Create ownership-filter-plugin.js for multihoming and user filtering
+
+Sessions 4, 5, 6:
 ☐ Final checks
 ☐ Document the lot properly

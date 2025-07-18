@@ -610,11 +610,32 @@ export const RestApiPlugin = {
       // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
       validateGetPayload({ id: context.id, queryParams: context.queryParams }, vars.includeDepthLimit);
 
+      // Fetch minimal record for authorization checks
+      const minimalRecord = await helpers.dataGetMinimal({
+        scopeName,
+        context,
+        transaction: context.transaction
+      });
+
+      if (!minimalRecord) {
+        throw new RestApiResourceError(
+          `Resource not found`,
+          { 
+            subtype: 'not_found',
+            resourceType: scopeName,
+            resourceId: context.id
+          }
+        );
+      }
+
+      context.minimalRecord = minimalRecord;
+
       // Centralised checkPermissions function
       await scope.checkPermissions({
         method: 'get',
         auth: context.auth,
         id: context.id,
+        minimalRecord: context.minimalRecord,
         transaction: context.transaction
       })
       
@@ -843,6 +864,7 @@ export const RestApiPlugin = {
   // Rollback transaction if we created it
   if (context.shouldCommit) {
     await context.transaction.rollback();
+    await runHooks('afterRollback');
   }
   
   // Log the full error details
@@ -987,9 +1009,42 @@ const validatePivotResource = (scopes, relDef, relName) => {
         schemaRelationships,
         scopeOptions, // Used for cascadeConfig
         vars,         // Used for cascadeConfig
-        runHooks       // Used to run finish hooks
+        runHooks,      // Used to run finish hooks
+        helpers,       // Used to fetch minimal records
+        enhancedLog    // Used for logging warnings
     }) {
         const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
+        
+        // Set up originalMinimalRecord and minimalRecord for hooks
+        // Based on the method type and operation
+        if (context.method === 'DELETE') {
+            // For DELETE, rename existing minimalRecord to originalMinimalRecord
+            // and keep minimalRecord as the same (deleted record)
+            if (context.minimalRecord) {
+                context.originalMinimalRecord = context.minimalRecord;
+                // minimalRecord stays the same for DELETE
+            }
+        } else {
+            // For POST, PUT, PATCH - handle record state
+            if (context.minimalRecord) {
+                // This means we have a pre-existing record (PUT update or PATCH)
+                context.originalMinimalRecord = context.minimalRecord;
+            }
+            
+            // Fetch the current/created record for POST, PUT, PATCH
+            try {
+                const currentRecord = await helpers.dataGetMinimal({
+                    scopeName,
+                    context: { ...context, id: context.id },
+                    transaction: context.transaction
+                });
+                context.minimalRecord = currentRecord;
+            } catch (error) {
+                // If we can't fetch the record, keep the existing minimalRecord
+                // This handles edge cases where the record might not exist
+                enhancedLog.warn(`Could not fetch minimal record after ${context.method} operation`, { error, id: context.id });
+            }
+        }
 
         // Determine if we should return the full record based on configurations.
         const shouldReturnRecord = context.returnFullRecord[context.method]
@@ -1319,13 +1374,17 @@ const validatePivotResource = (scopes, relDef, relName) => {
           schemaRelationships,
           scopeOptions,
           vars,
-          runHooks
+          runHooks,
+          helpers,
+          enhancedLog
       });
 
 
         // Commit transaction if we created it
         if (context.shouldCommit) {
           await context.transaction.commit();
+          await runHooks('afterCommit');
+
         }
 
         return ret
@@ -1530,6 +1589,21 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
     validatePutPayload(context.inputRecord, scopes)
     
+   // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
+    // Example: relationships.author -> author_id: '123' for storage
+    // Example: relationships.tags -> array of pivot records to create later
+    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+      scope,
+      { context }
+    );
+
+    await validateResourceAttributesBeforeWrite({ 
+            context, 
+            schema, 
+            belongsToUpdates, 
+            runHooks, 
+        });
+
     // Check existence first
     context.exists = await helpers.dataExists({
       scopeName,
@@ -1557,22 +1631,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
       context.minimalRecord = minimalRecord;
     }
-
-    // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
-    // Example: relationships.author -> author_id: '123' for storage
-    // Example: relationships.tags -> array of pivot records to create later
-    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
-      scope,
-      { context }
-    );
-
-    await validateResourceAttributesBeforeWrite({ 
-            context, 
-            schema, 
-            belongsToUpdates, 
-            runHooks, 
-        });
-
 
     // For PUT, we also need to handle relationships that are NOT provided
     // (they should be set to null/empty as PUT is a complete replacement)
@@ -1646,7 +1704,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
       method: 'put',
       auth: context.auth,
       id: context.id,
-      attributes: context.minimalRecord,
+      minimalRecord: context.minimalRecord,
       isUpdate: context.isUpdate,
       transaction: context.transaction
     })
@@ -1697,13 +1755,16 @@ const validatePivotResource = (scopes, relDef, relName) => {
         schemaRelationships,
         scopeOptions,
         vars,
-        runHooks
+        runHooks,
+        helpers,
+        enhancedLog
     });
 
 
       // Commit transaction if we created it
       if (context.shouldCommit) {
         await context.transaction.commit();
+        await runHooks('afterCommit');
       }
 
       return ret
@@ -1923,7 +1984,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
           method: 'patch',
           auth: context.auth,
           id: context.id,
-          attributes: context.minimalRecord,
+          minimalRecord: context.minimalRecord,
           transaction: context.transaction
         })
 
@@ -1975,13 +2036,16 @@ const validatePivotResource = (scopes, relDef, relName) => {
           schemaRelationships,
           scopeOptions,
           vars,
-          runHooks
+          runHooks,
+          helpers,
+          enhancedLog
       });
 
 
         // Commit transaction if we created it
         if (context.shouldCommit) {
           await context.transaction.commit();
+          await runHooks('afterCommit');
         }
 
         return ret
@@ -2027,6 +2091,9 @@ const validatePivotResource = (scopes, relDef, relName) => {
       // Set the ID in context
       context.id = params.id
       
+      // Set scopeName in context (needed for broadcasting)
+      context.scopeName = scopeName
+      
       // Set schema info even for DELETE (needed by storage layer)
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
       
@@ -2038,11 +2105,33 @@ const validatePivotResource = (scopes, relDef, relName) => {
       try {
         // No payload validation needed for DELETE
         
+        // Fetch minimal record for authorization and logging
+        const minimalRecord = await helpers.dataGetMinimal({
+          scopeName,
+          context,
+          transaction: context.transaction
+        });
+        
+        if (!minimalRecord) {
+          throw new RestApiResourceError(
+            `Resource not found`,
+            { 
+              subtype: 'not_found',
+              resourceType: scopeName,
+              resourceId: context.id
+            }
+          );
+        }
+        
+        context.originalMinimalRecord = minimalRecord;
+        context.minimalRecord = minimalRecord;
+        
         // Centralised checkPermissions function
         await scope.checkPermissions({
           method: 'delete',
           auth: context.auth,
           id: context.id,
+          minimalRecord: context.minimalRecord,
           transaction: context.transaction
         })
         
@@ -2071,6 +2160,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Commit transaction if we created it
         if (context.shouldCommit) {
           await context.transaction.commit();
+          await runHooks('afterCommit');
         }
         
         // DELETE typically returns void/undefined (204 No Content)
@@ -2237,7 +2327,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         id: params.id,
         auth: params.auth,
         transaction: params.transaction,
-        attributes: params.attributes
+        minimalRecord: params.minimalRecord
       })
       
       // Run enrichAttributes hooks for additional/override computations

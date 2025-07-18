@@ -108,9 +108,10 @@ export const JwtAuthPlugin = {
       'is_owner': (context, { existingRecord, scopeVars }) => {
         if (!context.auth?.userId) return false;
         
-        // Use attributes from the new checkPermissions context
-        const record = context.attributes;
+        // Use existingRecord passed from checkPermissions hook
+        const record = existingRecord || context.attributes;
         if (!record) return true; // Creating new record is OK
+        
         
         const ownerField = scopeVars?.ownershipField || config.ownershipField;
         
@@ -258,7 +259,7 @@ export const JwtAuthPlugin = {
       async ({ context, scope, scopeName }) => {
         const operation = context.method; // 'post', 'get', 'patch', etc.
         const scopeVars = scope?.vars;
-        const existingRecord = context.attributes;
+        const existingRecord = context.minimalRecord;
         
         const authRules = scopeVars?.authRules;
         if (!authRules) return; // No auth rules defined
@@ -320,6 +321,9 @@ export const JwtAuthPlugin = {
         }
       }
     );
+    
+    // Add verifyToken helper for other plugins (like socketio)
+    helpers.verifyToken = (token) => verifyToken(token, config);
     
     // Add auth helpers using the standard pattern
     helpers.auth = {
@@ -468,6 +472,11 @@ export const JwtAuthPlugin = {
         }
       }
     };
+    
+    // Register built-in auth checkers
+    Object.entries(authCheckers).forEach(([name, checker]) => {
+      helpers.auth.registerChecker(name, checker);
+    });
     
     // Add logout endpoint if configured
     if (config.endpoints.logout && api.addRoute) {

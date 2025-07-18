@@ -2,298 +2,636 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 
+// WeakMap to store pending broadcasts per transaction
+const pendingBroadcasts = new WeakMap();
+
 export const SocketIOPlugin = {
   name: 'socketio',
   dependencies: ['rest-api', 'jwt-auth'],
-  
-  async install({ api, addHook, log, scopes, helpers, vars }) {
-    const config = {
-      port: api.config.socketio?.port || 3001,
-      cors: {
-        origin: '*',
-        credentials: true,
-        ...api.config.socketio?.cors
-      },
-      // Optional Redis configuration
-      redis: api.config.socketio?.redis,
-      ...api.config.socketio
-    };
-    
-    // Create Socket.io server
-    const io = new Server(config.port, {
-      cors: config.cors,
-      transports: ['websocket', 'polling']
-    });
-    
-    // Setup Redis adapter if configured (for multi-server support)
-    if (config.redis?.url) {
-      try {
-        const pubClient = createClient({ url: config.redis.url });
-        const subClient = pubClient.duplicate();
-        
-        await Promise.all([
-          pubClient.connect(),
-          subClient.connect()
-        ]);
-        
-        io.adapter(createAdapter(pubClient, subClient));
-        log.info('Socket.io Redis adapter configured for multi-server support');
-      } catch (error) {
-        log.error('Failed to setup Redis adapter:', error);
-        throw error;
+
+  async install({ api, addHook, log, scopes, helpers, vars, runHooks }) {
+    let io;
+
+    // Helper function to match filters using searchSchema
+    function matchesFilters(record, filters, searchSchema) {
+      if (!filters || Object.keys(filters).length === 0) {
+        return true;
       }
-    }
-    
-    // Store io instance for external access
-    vars.io = io;
-    api.io = io;
-    
-    // Middleware to authenticate socket connections
-    io.use(async (socket, next) => {
-      try {
-        const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.slice(7);
+
+      if (!searchSchema) {
+        return true; // No schema means no filtering
+      }
+
+      // Check each filter
+      for (const [filterKey, filterValue] of Object.entries(filters)) {
+        const fieldDef = searchSchema.structure[filterKey];
+        if (!fieldDef) continue; // Skip unknown filters
+
+        // Get the actual field name and value
+        const fieldName = fieldDef.actualField || filterKey;
         
-        if (!token) {
-          // Allow connection but mark as unauthenticated
-          socket.data.auth = null;
-          return next();
+        // Check if this is a foreign key field (ends with _id and has belongsTo)
+        let recordValue;
+        if (filterKey.endsWith('_id') && fieldDef.belongsTo) {
+          // For foreign keys, check the relationship
+          const relationName = fieldDef.as || fieldDef.belongsTo;
+          const relationshipData = record.relationships?.[relationName]?.data;
+          recordValue = relationshipData?.id;
+        } else {
+          // Handle both JSON:API structure (attributes nested) and flat structure (minimal records)
+          recordValue = record.attributes?.[fieldName] ?? record[fieldName];
         }
-        
-        // Create context for JWT validation
-        const context = {
-          request: { token },
-          auth: null
-        };
-        
-        // Run the transport:request hooks which includes JWT validation
-        await runHooks('transport:request', context);
-        
-        // Store auth data on socket
-        socket.data.auth = context.auth;
-        socket.data.userId = context.auth?.userId;
-        
-        next();
-      } catch (error) {
-        next(new Error('Authentication failed'));
-      }
-    });
-    
-    // Handle socket connections
-    io.on('connection', (socket) => {
-      const { auth } = socket.data;
-      
-      log.debug(`Socket connected: ${socket.id}, authenticated: ${!!auth}`);
-      
-      // Join user-specific room if authenticated
-      if (auth?.userId) {
-        socket.join(`user:${auth.userId}`);
-      }
-      
-      // Send connection confirmation
-      socket.emit('connected', {
-        socketId: socket.id,
-        authenticated: !!auth,
-        userId: auth?.userId,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Handle resource subscriptions
-      socket.on('subscribe', async (data, callback) => {
-        try {
-          const { resource, filters = {}, subscriptionId } = data;
-          
-          // Validate resource exists
-          if (!scopes[resource]) {
-            const error = { code: 'RESOURCE_NOT_FOUND', message: `Resource '${resource}' not found` };
-            if (callback) callback({ error });
-            else socket.emit('subscription.error', { subscriptionId, error });
-            return;
+
+        // Handle null/undefined
+        if (recordValue === null || recordValue === undefined) {
+          if (filterValue !== null && filterValue !== undefined) {
+            return false;
           }
-          
-          // Check if user has permission to query this resource
-          const scope = scopes[resource];
-          const authRules = scope.vars?.authRules;
-          
-          if (authRules?.query) {
-            const hasPermission = await helpers.auth.checkPermission(
-              { auth },
-              authRules.query,
-              { scopeVars: scope.vars }
-            );
-            
-            if (!hasPermission) {
-              const error = { code: 'PERMISSION_DENIED', message: 'You do not have permission to subscribe to this resource' };
-              if (callback) callback({ error });
-              else socket.emit('subscription.error', { subscriptionId, error });
-              return;
-            }
+          continue;
+        }
+
+        // Check if filterUsing is a function
+        if (typeof fieldDef.filterUsing === 'function') {
+          // Must use filterRecord (validated during subscription)
+          if (!fieldDef.filterRecord(record, filterValue)) {
+            return false;
           }
-          
-          // Join resource room
-          const roomName = `resource:${resource}`;
-          socket.join(roomName);
-          
-          // Store subscription metadata
-          if (!socket.data.subscriptions) {
-            socket.data.subscriptions = new Map();
-          }
-          
-          const subId = subscriptionId || `${resource}-${Date.now()}`;
-          socket.data.subscriptions.set(subId, {
-            resource,
-            filters,
-            roomName,
-            createdAt: new Date()
-          });
-          
-          // Send confirmation
-          const response = {
-            subscriptionId: subId,
-            resource,
-            filters,
-            status: 'active'
-          };
-          
-          if (callback) callback({ success: true, data: response });
-          else socket.emit('subscription.created', response);
-          
-        } catch (error) {
-          log.error('Subscribe error:', error);
-          const errorResponse = { code: 'SUBSCRIBE_ERROR', message: error.message };
-          if (callback) callback({ error: errorResponse });
-          else socket.emit('subscription.error', { error: errorResponse });
-        }
-      });
-      
-      // Handle unsubscribe
-      socket.on('unsubscribe', (data, callback) => {
-        const { subscriptionId } = data;
-        
-        if (!subscriptionId || !socket.data.subscriptions?.has(subscriptionId)) {
-          const error = { code: 'SUBSCRIPTION_NOT_FOUND', message: 'Subscription not found' };
-          if (callback) callback({ error });
-          return;
-        }
-        
-        const subscription = socket.data.subscriptions.get(subscriptionId);
-        socket.leave(subscription.roomName);
-        socket.data.subscriptions.delete(subscriptionId);
-        
-        const response = { subscriptionId, status: 'removed' };
-        if (callback) callback({ success: true, data: response });
-        else socket.emit('subscription.removed', response);
-      });
-      
-      // Handle disconnect
-      socket.on('disconnect', (reason) => {
-        log.debug(`Socket disconnected: ${socket.id}, reason: ${reason}`);
-      });
-    });
-    
-    // Hook into logout to disconnect user sockets
-    addHook('afterLogout', 'socketio-disconnect-on-logout', {}, async ({ context }) => {
-      if (context.auth?.userId) {
-        // Disconnect all sockets for this user
-        const userRoom = `user:${context.auth.userId}`;
-        const sockets = await io.in(userRoom).fetchSockets();
-        
-        for (const socket of sockets) {
-          socket.emit('logout', { message: 'You have been logged out' });
-          socket.disconnect(true);
-        }
-      }
-    });
-    
-    // Hook into REST API data operations for broadcasting
-    addHook('afterDataWrite', 'socketio-broadcast', {}, async (result) => {
-      const { scopeName, operation, record, context } = result;
-      
-      // Get all sockets in the resource room
-      const roomName = `resource:${scopeName}`;
-      const sockets = await io.in(roomName).fetchSockets();
-      
-      // Prepare the update message
-      const message = {
-        type: 'resource.update',
-        resource: scopeName,
-        operation, // 'create', 'update', 'delete'
-        data: {
-          type: scopeName,
-          id: String(record.id),
-          attributes: record
-        },
-        meta: {
-          timestamp: new Date().toISOString()
-        }
-      };
-      
-      // Check permissions and filters for each socket
-      for (const socket of sockets) {
-        try {
-          // Find relevant subscriptions for this socket
-          if (!socket.data.subscriptions) continue;
-          
-          for (const [subId, subscription] of socket.data.subscriptions) {
-            if (subscription.resource !== scopeName) continue;
-            
-            // Check if record matches subscription filters
-            let matchesFilters = true;
-            if (subscription.filters && Object.keys(subscription.filters).length > 0) {
-              for (const [key, value] of Object.entries(subscription.filters)) {
-                if (record[key] !== value) {
-                  matchesFilters = false;
-                  break;
+        } else {
+          // Use simple operator logic
+          const operator = fieldDef.filterUsing || '=';
+
+          switch (operator) {
+            case 'like':
+              if (!String(recordValue).toLowerCase().includes(String(filterValue).toLowerCase())) {
+                return false;
+              }
+              break;
+
+            case 'in':
+              if (Array.isArray(filterValue)) {
+                if (!filterValue.includes(recordValue)) {
+                  return false;
+                }
+              } else if (recordValue !== filterValue) {
+                return false;
+              }
+              break;
+
+            case 'between':
+              if (Array.isArray(filterValue) && filterValue.length === 2) {
+                if (recordValue < filterValue[0] || recordValue > filterValue[1]) {
+                  return false;
                 }
               }
-            }
-            
-            if (!matchesFilters) continue;
-            
-            // Check if user has permission to see this specific record
-            const scope = scopes[scopeName];
-            const authRules = scope.vars?.authRules;
-            
-            if (authRules) {
-              const readRules = authRules.query || authRules.get;
-              if (readRules) {
-                const hasPermission = await helpers.auth.checkPermission(
-                  { auth: socket.data.auth },
-                  readRules,
-                  { existingRecord: record, scopeVars: scope.vars }
-                );
-                
-                if (!hasPermission) continue;
+              break;
+
+            case '=':
+              // For ID comparisons, convert both to strings to handle JSON:API string IDs
+              if (filterKey.endsWith('_id') && fieldDef.belongsTo) {
+                if (String(recordValue) !== String(filterValue)) {
+                  return false;
+                }
+              } else if (recordValue !== filterValue) {
+                return false;
               }
+              break;
+
+            case '>':
+              if (!(recordValue > filterValue)) return false;
+              break;
+
+            case '>=':
+              if (!(recordValue >= filterValue)) return false;
+              break;
+
+            case '<':
+              if (!(recordValue < filterValue)) return false;
+              break;
+
+            case '<=':
+              if (!(recordValue <= filterValue)) return false;
+              break;
+
+            case '!=':
+            case '<>':
+              if (recordValue === filterValue) return false;
+              break;
+
+            default:
+              // Unknown operator, treat as equality
+              if (recordValue !== filterValue) return false;
+          }
+        }
+      }
+
+      return true;
+    }
+
+    // Main broadcast function
+    async function performBroadcast({ method, scopeName, id, context }) {
+      const scope = api.resources[scopeName];
+      if (!scope) {
+        log.error(`Scope ${scopeName} not found for broadcasting`);
+        return;
+      }
+
+      // Get all sockets in the resource room
+      const roomName = `${scopeName}:updates`;
+      const socketsInRoom = await io.in(roomName).fetchSockets();
+
+      if (socketsInRoom.length === 0) {
+        log.debug(`No sockets subscribed to ${roomName}`);
+        return;
+      }
+
+      // Get searchSchema for filter matching
+      const searchSchema = scope.vars.schemaInfo?.searchSchema;
+
+      // Use context.minimalRecord - it's GUARANTEED to be there!
+      const recordForFiltering = context.minimalRecord;
+      
+
+      // Process each socket's subscriptions
+      for (const socket of socketsInRoom) {
+        try {
+          // Limit subscriptions per socket
+          if (socket.data.subscriptions?.size > 100) {
+            log.warn(`Socket ${socket.id} has too many subscriptions (${socket.data.subscriptions.size})`);
+            continue;
+          }
+
+          // Find matching subscriptions
+          const matchingSubscriptions = Array.from(socket.data.subscriptions?.values() || [])
+            .filter(sub => sub.resource === scopeName);
+
+          for (const subscription of matchingSubscriptions) {
+            // Check if record matches filters using searchSchema
+            if (!matchesFilters(recordForFiltering, subscription.filters, searchSchema)) {
+              continue;
             }
-            
-            // Send update to this socket with subscription ID
-            socket.emit('resource.update', {
-              ...message,
-              subscriptionId: subId
-            });
-            
-            // Only send once per socket, even if multiple subscriptions match
+
+            // Send minimal notification only
+            const notification = {
+              type: `resource.${method}d`,
+              resource: scopeName,
+              id: id,
+              action: method,
+              subscriptionId: subscription.id,
+              meta: {
+                timestamp: new Date().toISOString()
+              }
+            };
+
+            // For delete, include minimal info since record is gone
+            if (method === 'delete') {
+              notification.deletedRecord = {
+                id: id
+              };
+            }
+
+            socket.emit('subscription.update', notification);
+            log.debug(`Broadcast ${method} notification for ${scopeName}/${id} to socket ${socket.id}`);
+
+            // Only send once per socket
             break;
           }
         } catch (error) {
           log.error(`Error broadcasting to socket ${socket.id}:`, error);
+          // Continue with next socket
         }
       }
-      
-      return result;
-    });
-    
-    // Cleanup on shutdown
-    if (api.on) {
-      api.on('shutdown', async () => {
-        await io.close();
-        log.info('Socket.io server closed');
+    }
+
+    // Create Socket.IO server
+    api.startSocketServer = async (server, options = {}) => {
+      const {
+        path = '/socket.io',
+        cors = { origin: '*', methods: ['GET', 'POST'] },
+        redis = null
+      } = options;
+
+      io = new Server(server, {
+        path,
+        cors,
+        transports: ['websocket', 'polling']
       });
-    }
-    
-    log.info(`Socket.io server started on port ${config.port}`);
-    if (config.redis?.url) {
-      log.info('Socket.io configured for multi-server support with Redis');
-    }
+
+      // Store io instance for cleanup
+      vars.socketIO = io;
+
+      // Set up Redis adapter if configured
+      if (redis) {
+        const pubClient = createClient(redis);
+        const subClient = pubClient.duplicate();
+
+        await Promise.all([
+          pubClient.connect(),
+          subClient.connect()
+        ]);
+
+        io.adapter(createAdapter(pubClient, subClient));
+        log.info('Socket.IO using Redis adapter');
+        
+        // Store Redis clients for cleanup
+        vars.socketIORedisClients = { pubClient, subClient };
+      }
+
+      // Authentication middleware
+      io.use(async (socket, next) => {
+        try {
+          const token = socket.handshake.auth.token;
+          if (!token) {
+            return next(new Error('Authentication required'));
+          }
+
+          const decoded = await helpers.verifyToken(token);
+          socket.data.auth = decoded;
+          socket.data.subscriptions = new Map();
+
+          next();
+        } catch (error) {
+          next(new Error('Invalid authentication token'));
+        }
+      });
+
+      // Connection handler
+      io.on('connection', (socket) => {
+        log.info(`Socket connected: ${socket.id}`, {
+          userId: socket.data.auth?.userId
+        });
+
+        socket.emit('connected', {
+          socketId: socket.id,
+          serverTime: new Date().toISOString()
+        });
+
+        // Subscribe to resource updates
+        socket.on('subscribe', async (data, callback) => {
+          try {
+            const { resource, filters = {}, include, fields, subscriptionId } = data;
+
+            // Validate resource exists
+            if (!scopes[resource]) {
+              const error = {
+                code: 'RESOURCE_NOT_FOUND',
+                message: `Resource '${resource}' not found`
+              };
+              if (callback) callback({ error });
+              else socket.emit('subscription.error', { subscriptionId, error });
+              return;
+            }
+
+            const scope = scopes[resource];
+
+            // Check permission to query this resource
+            // If checkPermissions throws an error, permission is denied
+            // If it completes without error, permission is granted
+            try {
+              await scope.checkPermissions({
+                method: 'query',
+                auth: socket.data.auth,
+                transaction: null
+              });
+              // No error thrown = permission granted, continue
+            } catch (permissionError) {
+              // Error thrown = permission denied
+              const error = {
+                code: 'PERMISSION_DENIED',
+                message: permissionError.message || 'You do not have permission to subscribe to this resource'
+              };
+              if (callback) callback({ error });
+              else socket.emit('subscription.error', { subscriptionId, error });
+              return;
+            }
+
+            // Validate and modify filters
+            if (filters && Object.keys(filters).length > 0) {
+              const searchSchema = scope.vars.schemaInfo?.searchSchema;
+
+              if (!searchSchema) {
+                const error = {
+                  code: 'FILTERING_NOT_ENABLED',
+                  message: `Filtering is not enabled for resource '${resource}'`
+                };
+                if (callback) callback({ error });
+                else socket.emit('subscription.error', { subscriptionId, error });
+                return;
+              }
+
+              // Check for function-based filters without filterRecord
+              for (const filterKey of Object.keys(filters)) {
+                const fieldDef = searchSchema.structure[filterKey];
+
+                if (fieldDef && typeof fieldDef.filterUsing === 'function' && !fieldDef.filterRecord) {
+                  const error = {
+                    code: 'UNSUPPORTED_FILTER',
+                    message: `Filter '${filterKey}' uses custom SQL logic and requires 'filterRecord' for real-time 
+subscriptions`
+                  };
+                  if (callback) callback({ error });
+                  else socket.emit('subscription.error', { subscriptionId, error });
+                  return;
+                }
+              }
+
+              // Validate filter values using searchSchema
+              const { validatedObject, errors } = await searchSchema.validate(filters, {
+                onlyObjectValues: true
+              });
+
+              if (Object.keys(errors).length > 0) {
+                const error = {
+                  code: 'INVALID_FILTERS',
+                  message: 'Invalid filter values',
+                  details: errors
+                };
+                if (callback) callback({ error });
+                else socket.emit('subscription.error', { subscriptionId, error });
+                return;
+              }
+
+              // Use validated filters
+              data.filters = validatedObject;
+            }
+
+            // Create subscription object
+            const subscription = {
+              id: subscriptionId || `${resource}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              resource,
+              filters: data.filters || {},
+              include: include || [],
+              fields: fields || {},
+              auth: socket.data.auth,
+              createdAt: new Date()
+            };
+
+            // Run hook to modify/validate subscription filters
+            const hookContext = { subscription, auth: socket.data.auth };
+            await runHooks('subscriptionFilters', hookContext);
+
+            // Validate include parameter
+            if (subscription.include && subscription.include.length > 0) {
+              if (!Array.isArray(subscription.include)) {
+                const error = {
+                  code: 'INVALID_INCLUDE',
+                  message: 'Include parameter must be an array'
+                };
+                if (callback) callback({ error });
+                else socket.emit('subscription.error', { subscriptionId, error });
+                return;
+              }
+
+              const relationships = scope.vars.schemaInfo?.schemaRelationships || {};
+              for (const includePath of subscription.include) {
+                const baseName = includePath.split('.')[0];
+                if (!relationships[baseName]) {
+                  const error = {
+                    code: 'INVALID_INCLUDE',
+                    message: `Invalid relationship '${baseName}' for resource '${resource}'`
+                  };
+                  if (callback) callback({ error });
+                  else socket.emit('subscription.error', { subscriptionId, error });
+                  return;
+                }
+              }
+            }
+
+            // Validate fields parameter
+            if (subscription.fields && Object.keys(subscription.fields).length > 0) {
+              if (typeof subscription.fields !== 'object' || Array.isArray(subscription.fields)) {
+                const error = {
+                  code: 'INVALID_FIELDS',
+                  message: 'Fields parameter must be an object'
+                };
+                if (callback) callback({ error });
+                else socket.emit('subscription.error', { subscriptionId, error });
+                return;
+              }
+
+              for (const [resourceType, fieldList] of Object.entries(subscription.fields)) {
+                if (!Array.isArray(fieldList)) {
+                  const error = {
+                    code: 'INVALID_FIELDS',
+                    message: `Fields for '${resourceType}' must be an array`
+                  };
+                  if (callback) callback({ error });
+                  else socket.emit('subscription.error', { subscriptionId, error });
+                  return;
+                }
+              }
+            }
+
+            // Join resource room
+            const roomName = `${resource}:updates`;
+            socket.join(roomName);
+
+            // Store subscription
+            socket.data.subscriptions.set(subscription.id, subscription);
+
+            // Send success response
+            const response = {
+              subscriptionId: subscription.id,
+              resource,
+              filters: subscription.filters,
+              include: subscription.include,
+              fields: subscription.fields,
+              status: 'active'
+            };
+
+            if (callback) callback({ success: true, data: response });
+            else socket.emit('subscription.created', response);
+
+            log.info(`Socket ${socket.id} subscribed to ${resource}`, {
+              subscriptionId: subscription.id,
+              filters: subscription.filters
+            });
+
+          } catch (error) {
+            log.error('Subscribe error:', error);
+            const errorResponse = {
+              code: 'SUBSCRIBE_ERROR',
+              message: error.message
+            };
+            if (callback) callback({ error: errorResponse });
+            else socket.emit('subscription.error', { subscriptionId, error: errorResponse });
+          }
+        });
+
+        // Unsubscribe from resource updates
+        socket.on('unsubscribe', async (data, callback) => {
+          try {
+            const { subscriptionId } = data;
+
+            if (!subscriptionId) {
+              const error = {
+                code: 'MISSING_SUBSCRIPTION_ID',
+                message: 'Subscription ID is required'
+              };
+              if (callback) callback({ error });
+              return;
+            }
+
+            const subscription = socket.data.subscriptions.get(subscriptionId);
+            if (!subscription) {
+              const error = {
+                code: 'SUBSCRIPTION_NOT_FOUND',
+                message: 'Subscription not found'
+              };
+              if (callback) callback({ error });
+              return;
+            }
+
+            // Remove subscription
+            socket.data.subscriptions.delete(subscriptionId);
+
+            // Leave room if no more subscriptions for this resource
+            const hasOtherSubs = Array.from(socket.data.subscriptions.values())
+              .some(sub => sub.resource === subscription.resource);
+
+            if (!hasOtherSubs) {
+              const roomName = `${subscription.resource}:updates`;
+              socket.leave(roomName);
+            }
+
+            if (callback) callback({ success: true });
+
+            log.info(`Socket ${socket.id} unsubscribed from ${subscription.resource}`, {
+              subscriptionId
+            });
+
+          } catch (error) {
+            log.error('Unsubscribe error:', error);
+            if (callback) callback({
+              error: {
+                code: 'UNSUBSCRIBE_ERROR',
+                message: error.message
+              }
+            });
+          }
+        });
+
+        // Restore subscriptions on reconnect
+        socket.on('restore-subscriptions', async (data, callback) => {
+          try {
+            const { subscriptions } = data;
+
+            if (!Array.isArray(subscriptions)) {
+              if (callback) callback({
+                error: {
+                  code: 'INVALID_DATA',
+                  message: 'Subscriptions must be an array'
+                }
+              });
+              return;
+            }
+
+            const restored = [];
+            const failed = [];
+
+            for (const sub of subscriptions) {
+              await new Promise((resolve) => {
+                socket.emit('subscribe', sub, (response) => {
+                  if (response.error) {
+                    failed.push({
+                      subscriptionId: sub.subscriptionId,
+                      error: response.error
+                    });
+                  } else {
+                    restored.push(response.data.subscriptionId);
+                  }
+                  resolve();
+                });
+              });
+            }
+
+            if (callback) callback({
+              success: true,
+              restored,
+              failed
+            });
+
+          } catch (error) {
+            if (callback) callback({
+              error: {
+                code: 'RESTORE_ERROR',
+                message: error.message
+              }
+            });
+          }
+        });
+
+        // Handle disconnect
+        socket.on('disconnect', (reason) => {
+          log.info(`Socket disconnected: ${socket.id}`, {
+            reason,
+            userId: socket.data.auth?.userId,
+            subscriptionCount: socket.data.subscriptions?.size || 0
+          });
+        });
+      });
+
+      // Store io instance
+      api.io = io;
+
+      log.info('Socket.IO server started', { path });
+
+      return io;
+    };
+
+    // Hook into REST API finish hook for broadcasting
+    addHook('finish', 'socketio-broadcast', {}, async ({ context }) => {
+      const { method, scopeName, id } = context;
+
+      // Only broadcast for write operations
+      if (!['post', 'put', 'patch', 'delete'].includes(method)) {
+        return;
+      }
+
+      // Skip if no ID (might happen in error cases)
+      if (!id && method !== 'delete') {
+        return;
+      }
+
+      // Skip if io not initialized
+      if (!io) {
+        return;
+      }
+
+      // If there's a transaction, defer broadcasting
+      if (context.transaction) {
+        // Store broadcast info in WeakMap
+        if (!pendingBroadcasts.has(context.transaction)) {
+          pendingBroadcasts.set(context.transaction, []);
+        }
+        pendingBroadcasts.get(context.transaction).push({
+          method, scopeName, id, context
+        });
+        return;
+      }
+
+      // No transaction, broadcast immediately
+      await performBroadcast({ method, scopeName, id, context });
+    });
+
+    // Hook to handle deferred broadcasts after transaction commit
+    addHook('afterCommit', 'socketio-broadcast-deferred', {}, async ({ context }) => {
+      if (context && context.transaction) {
+        const broadcasts = pendingBroadcasts.get(context.transaction);
+        if (broadcasts) {
+          for (const broadcast of broadcasts) {
+            await performBroadcast(broadcast);
+          }
+          pendingBroadcasts.delete(context.transaction);
+        }
+      }
+    });
+
+    // Hook to clean up on transaction rollback
+    addHook('afterRollback', 'socketio-cleanup-broadcasts', {}, async ({ context }) => {
+      if (context && context.transaction) {
+        pendingBroadcasts.delete(context.transaction);
+        log.debug(`Cleaned up pending broadcasts for rolled back transaction`);
+      }
+    });
   }
 };
