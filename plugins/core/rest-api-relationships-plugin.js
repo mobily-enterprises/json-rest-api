@@ -123,6 +123,7 @@ export const RestApiRelationshipsPlugin = {
       context.queryParams = params.queryParams || {};
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
       context.transaction = params.transaction;
+      context.db = context.transaction || api.knex.instance
 
       // Validate the relationship exists
       const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName);
@@ -152,8 +153,7 @@ export const RestApiRelationshipsPlugin = {
       // Verify parent exists
       const exists = await helpers.dataExists({
         scopeName,
-        context: { id: context.id, schemaInfo: context.schemaInfo },
-        transaction: context.transaction
+        context: { db: context.db, id: context.id, schemaInfo: context.schemaInfo }
       });
 
       if (!exists) {
@@ -377,6 +377,8 @@ export const RestApiRelationshipsPlugin = {
         (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
       context.shouldCommit = !params.transaction && !!context.transaction;
 
+      context.db = context.transaction || api.knex.instance
+      
       try {
         // Validate
         const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName);
@@ -405,8 +407,7 @@ export const RestApiRelationshipsPlugin = {
         // Verify parent exists
         const exists = await helpers.dataExists({
           scopeName,
-          context: { id: context.id, schemaInfo: context.schemaInfo },
-          transaction: context.transaction
+          context: { db: context.db, id: context.id, schemaInfo: context.schemaInfo },
         });
 
         if (!exists) {
@@ -474,6 +475,7 @@ export const RestApiRelationshipsPlugin = {
       context.transaction = params.transaction || 
         (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
       context.shouldCommit = !params.transaction && !!context.transaction;
+      context.db = context.transaction || api.knex.instance
 
       try {
         // Check permissions
@@ -531,6 +533,7 @@ export const RestApiRelationshipsPlugin = {
       context.transaction = params.transaction || 
         (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
       context.shouldCommit = !params.transaction && !!context.transaction;
+      context.db = context.transaction || api.knex.instance
 
       try {
         // Validate
@@ -560,8 +563,7 @@ export const RestApiRelationshipsPlugin = {
         // Verify parent exists
         const exists = await helpers.dataExists({
           scopeName,
-          context: { id: context.id, schemaInfo: context.schemaInfo },
-          transaction: context.transaction
+          context: {  db: context.db, id: context.id, schemaInfo: context.schemaInfo }
         });
 
         if (!exists) {

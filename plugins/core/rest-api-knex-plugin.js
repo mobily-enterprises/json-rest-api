@@ -105,7 +105,20 @@ export const RestApiKnexPlugin = {
      * ║  Implementation of the storage interface required by REST API plugin║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
 
-    helpers.dataExists = async ({ scopeName, context, transaction }) => {
+    /**
+     * Checks if a resource exists in the database
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to check for existence
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @returns {Promise<boolean>} True if the resource exists, false otherwise
+     */
+    helpers.dataExists = async ({ scopeName, context }) => {
       const id = context.id;
       const scope = api.resources[scopeName];
 
@@ -123,7 +136,26 @@ export const RestApiKnexPlugin = {
       return !!record;
     };
 
-    helpers.dataGet = async ({ scopeName, context, transaction }) => {
+    /**
+     * Retrieves a single resource by ID with support for sparse fieldsets and includes
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to retrieve
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @param {Object} [params.context.queryParams] - Query parameters for sparse fieldsets and includes
+     * @param {Object} [params.context.queryParams.fields] - Sparse fieldset selections
+     * @param {Array<string>} [params.context.queryParams.include] - Related resources to include
+     * @param {Object} [params.context.computedDependencies] - Set by function to track computed field dependencies
+     * @returns {Promise<Object>} JSON:API formatted response with data and optional included resources
+     * @throws {RestApiResourceError} When the resource is not found
+     */
+    helpers.dataGet = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       if (!scope) {
         log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) });
@@ -188,7 +220,20 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(scope, records, included, true, scopeName);
     };
 
-    helpers.dataGetMinimal = async ({ scopeName, context, transaction }) => {
+    /**
+     * Retrieves a single resource by ID with minimal processing (no includes or sparse fieldsets)
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to retrieve
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
+     */
+    helpers.dataGetMinimal = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
@@ -210,7 +255,35 @@ export const RestApiKnexPlugin = {
       return toJsonApiRecordWithBelongsTo(scope, record, scopeName);
     };
 
-    helpers.dataQuery = async ({ scopeName, context, transaction, runHooks }) => {    
+    /**
+     * Queries resources with support for filtering, sorting, pagination, sparse fieldsets, and includes
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.searchSchema - Search schema for filtering capabilities
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.queryParams - Query parameters object
+     * @param {Object} [params.context.queryParams.filters] - Filter conditions
+     * @param {Array<string>} [params.context.queryParams.sort] - Sort fields (prefix with - for DESC)
+     * @param {Object} [params.context.queryParams.page] - Pagination parameters
+     * @param {number} [params.context.queryParams.page.size] - Page size
+     * @param {number} [params.context.queryParams.page.number] - Page number (offset pagination)
+     * @param {string} [params.context.queryParams.page.after] - Cursor for forward pagination
+     * @param {string} [params.context.queryParams.page.before] - Cursor for backward pagination
+     * @param {Array<string>} [params.context.queryParams.include] - Related resources to include
+     * @param {Object} [params.context.queryParams.fields] - Sparse fieldset selections
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @param {Array<string>} params.context.sortableFields - Array of fields that can be sorted
+     * @param {Object} [params.context.knexQuery] - Temporarily set during hooks for query building
+     * @param {Object} [params.context.computedDependencies] - Set by function to track computed field dependencies
+     * @param {Function} params.runHooks - Function to run hooks (e.g., 'knexQueryFiltering')
+     * @returns {Promise<Object>} JSON:API formatted response with data array, optional included resources, and pagination meta/links
+     */
+    helpers.dataQuery = async ({ scopeName, context, runHooks }) => {    
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const schema =  context.schemaInfo.schema;
@@ -552,7 +625,23 @@ export const RestApiKnexPlugin = {
       return buildJsonApiResponse(scope, records, included, false, scopeName);
     };
     
-    helpers.dataPost = async ({ scopeName, context, transaction }) => {
+    /**
+     * Creates a new resource in the database
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @param {Object} params.context.inputRecord - JSON:API formatted input record
+     * @param {Object} params.context.inputRecord.data - The resource data
+     * @param {Object} params.context.inputRecord.data.attributes - The resource attributes to insert
+     * @returns {Promise<string|number>} The ID of the newly created resource
+     */
+    helpers.dataPost = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
@@ -573,7 +662,27 @@ export const RestApiKnexPlugin = {
       return id
     };
     
-    helpers.dataPut = async ({ scopeName, context, transaction }) => {
+    /**
+     * Replaces an entire resource (PUT operation) or creates it with a specific ID
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to replace or create
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @param {Object} params.context.inputRecord - JSON:API formatted input record
+     * @param {Object} params.context.inputRecord.data - The resource data
+     * @param {Object} [params.context.inputRecord.data.attributes] - The resource attributes
+     * @param {Object} [params.context.inputRecord.data.relationships] - The resource relationships (processed for foreign keys)
+     * @param {boolean} params.context.isCreate - Whether this is a create operation (true) or update (false)
+     * @returns {Promise<void>} Resolves when the operation is complete
+     * @throws {RestApiResourceError} When updating and the resource is not found
+     */
+    helpers.dataPut = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
@@ -626,7 +735,26 @@ export const RestApiKnexPlugin = {
       return 
     };
     
-    helpers.dataPatch = async ({ scopeName, context, transaction }) => {
+    /**
+     * Partially updates a resource (PATCH operation)
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to update
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @param {Object} params.context.inputRecord - JSON:API formatted input record with partial updates
+     * @param {Object} params.context.inputRecord.data - The resource data
+     * @param {Object} [params.context.inputRecord.data.attributes] - The resource attributes to update
+     * @param {Object} [params.context.inputRecord.data.relationships] - The resource relationships (processed for foreign keys)
+     * @returns {Promise<void>} Resolves when the update is complete
+     * @throws {RestApiResourceError} When the resource is not found
+     */
+    helpers.dataPatch = async ({ scopeName, context  }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
@@ -670,7 +798,21 @@ export const RestApiKnexPlugin = {
       return
     };
     
-    helpers.dataDelete = async ({ scopeName, context, transaction }) => {
+    /**
+     * Deletes a resource from the database
+     * 
+     * @param {Object} params - The parameters object
+     * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
+     * @param {Object} params.context - The context object containing request-specific data
+     * @param {string|number} params.context.id - The ID of the resource to delete
+     * @param {Object} params.context.schemaInfo - Schema information for the resource
+     * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
+     * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
+     * @param {Object} params.context.db - Database connection (knex instance or transaction)
+     * @returns {Promise<Object>} Returns { success: true } when deletion is successful
+     * @throws {RestApiResourceError} When the resource is not found
+     */
+    helpers.dataDelete = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
 

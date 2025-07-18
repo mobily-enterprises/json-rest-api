@@ -443,7 +443,6 @@ export const RestApiPlugin = {
       context.record = await helpers.dataQuery({
         scopeName,
         context,
-        transaction: context.transaction,
         runHooks
       })
     
@@ -620,8 +619,7 @@ export const RestApiPlugin = {
       // Fetch minimal record for authorization checks
       const minimalRecord = await helpers.dataGetMinimal({
         scopeName,
-        context,
-        transaction: context.transaction
+        context
       });
 
       if (!minimalRecord) {
@@ -651,8 +649,7 @@ export const RestApiPlugin = {
 
       context.record = await helpers.dataGet({
         scopeName,
-        context,
-        transaction: context.transaction,
+        context
       })
     
       // Check if record was found - storage layer returns null/undefined for non-existent records.
@@ -1043,8 +1040,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
             try {
                 const currentRecord = await helpers.dataGetMinimal({
                     scopeName,
-                    context: { ...context, id: context.id },
-                    transaction: context.transaction
+                    context: { ...context, id: context.id }
                 });
                 context.minimalRecord = currentRecord;
             } catch (error) {
@@ -1351,8 +1347,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Create the main record - storage helper should return the created record with its ID
         context.id = await helpers.dataPost({
           scopeName,
-          context,
-          transaction: context.transaction,
+          context
         });
         
         await runHooks ('afterDataCallPost')
@@ -1615,8 +1610,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Check existence first
     context.exists = await helpers.dataExists({
       scopeName,
-      context,
-      transaction: context.transaction
+      context
     });
   
     context.isCreate = !context.exists;
@@ -1626,8 +1620,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
     if (context.isUpdate) {
       const minimalRecord = await helpers.dataGetMinimal({
         scopeName,
-        context,
-        transaction: context.transaction
+        context
       });
 
       if (!minimalRecord) {
@@ -1722,8 +1715,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Pass the operation type to the helper
     await helpers.dataPut({
       scopeName,
-      context,
-      transaction: context.transaction
+      context
     });
     await runHooks ('afterDataCallPut')
     await runHooks ('afterDataCall')
@@ -1974,8 +1966,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Fetch minimal record for authorization checks
         const minimalRecord = await helpers.dataGetMinimal({
           scopeName,
-          context,
-          transaction: context.transaction
+          context
         });
 
         if (!minimalRecord) {
@@ -2002,8 +1993,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Call the storage helper - should return the patched record
         await helpers.dataPatch({
           scopeName,
-          context,
-          transaction: context.transaction
+          context
         });
 
         await runHooks ('afterDataCallPatch')
@@ -2118,7 +2108,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
         const minimalRecord = await helpers.dataGetMinimal({
           scopeName,
           context,
-          transaction: context.transaction
         });
         
         if (!minimalRecord) {
@@ -2154,8 +2143,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Call the storage helper
         await helpers.dataDelete({
           scopeName,
-          context,
-          transaction: context.transaction
+          context
         });
         
         await runHooks ('afterDataCallDelete')
