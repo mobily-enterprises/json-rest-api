@@ -1,43 +1,4 @@
-// Helper function for single record validation
-  function validateSingleRecordAccess(context, scopeName, multihomeConfig, scopes, log) {
-    // Skip if no multihome context
-    if (!context.auth?.multihome_id) {
-      if (multihomeConfig.requireAuth) {
-        throw new Error('No multihome context available - cannot access record');
-      }
-      return;
-    }
-
-    // Skip excluded resources
-    if (multihomeConfig.excludeResources.includes(scopeName)) {
-      return;
-    }
-
-    // Check if resource has multihome field
-    const scope = scopes[scopeName];
-    const hasMultihomeField = scope?.vars?.schemaInfo?.schema?.structure?.[multihomeConfig.field];
-
-    if (!hasMultihomeField && !multihomeConfig.allowMissing) {
-      throw new Error(`Resource ${scopeName} missing required ${multihomeConfig.field} field`);
-    }
-
-    // For existing records, the knexQueryFiltering hook will handle filtering
-    // This is just an additional safety check
-    if (context.minimalRecord && hasMultihomeField) {
-      const recordMultihomeId = context.minimalRecord[multihomeConfig.field];
-      if (recordMultihomeId && recordMultihomeId !== context.auth.multihome_id) {
-        log.error('Multihome security violation attempt', {
-          scopeName,
-          recordId: context.id,
-          recordMultihomeId,
-          contextMultihomeId: context.auth.multihome_id
-        });
-        throw new Error('Access denied - invalid tenant context');
-      }
-    }
-  }
-
-  export const MultiHomePlugin = {
+export const MultiHomePlugin = {
     name: 'multihome',
     dependencies: ['rest-api', 'rest-api-knex'],
 
@@ -215,7 +176,7 @@
 
       // Add checkPermissions hook to enforce tenant isolation
       // This is the single source of truth for single-record access control
-      addHook('checkPermissions', 'multihome-check-permissions', {}, async ({ context, scopeName, method, id, minimalRecord }) => {
+      addHook('checkPermissions', 'multihome-check-permissions', {}, async ({ context, scopeName }) => {
         // Skip excluded resources
         if (vars.multihome.excludeResources.includes(scopeName)) {
           return;
@@ -238,25 +199,31 @@
         }
         
         // For operations on existing records, verify tenant ownership
-        if (minimalRecord && minimalRecord[vars.multihome.field] !== context.auth.multihome_id) {
-          log.error('Multihome permission violation', {
-            scopeName,
-            recordId: id,
-            recordTenant: minimalRecord[vars.multihome.field],
-            userTenant: context.auth.multihome_id,
-            method
-          });
+        if (context.minimalRecord) {
+          // minimalRecord is in JSON:API format, so tenant_id is in attributes
+          const recordTenant = context.minimalRecord.attributes?.[vars.multihome.field];
+          const userTenant = context.auth.multihome_id;
           
-          // Return 404 for GET to prevent information leakage
-          // Return 403 for other operations
-          if (method === 'get') {
-            const error = new Error('Resource not found');
-            error.code = 'REST_API_RESOURCE';
-            throw error;
-          } else {
-            const error = new Error('Access denied - insufficient permissions');
-            error.code = 'REST_API_FORBIDDEN';
-            throw error;
+          if (recordTenant !== userTenant) {
+            log.error('Multihome permission violation', {
+              scopeName,
+              recordId: context.id,
+              recordTenant: recordTenant,
+              userTenant: userTenant,
+              method: context.method
+            });
+            
+            // Return 404 for GET to prevent information leakage
+            // Return 403 for other operations
+            if (context.method === 'get') {
+              const error = new Error('Resource not found');
+              error.code = 'REST_API_RESOURCE';
+              throw error;
+            } else {
+              const error = new Error('Access denied - insufficient permissions');
+              error.code = 'REST_API_FORBIDDEN';
+              throw error;
+            }
           }
         }
       });

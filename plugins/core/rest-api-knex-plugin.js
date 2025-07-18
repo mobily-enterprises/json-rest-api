@@ -236,7 +236,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
-    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;

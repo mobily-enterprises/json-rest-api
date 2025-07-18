@@ -1036,7 +1036,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
             isUpdate: false
           };
           
-          // This will trigger checkPermissions and throw if access denied
+          // Get the minimal record
           const record = await helpers.dataGetMinimal({ 
             scopeName: item.type, 
             context: getContext, 
@@ -1046,6 +1046,16 @@ const validatePivotResource = (scopes, relDef, relName) => {
           if (!record) {
             throw new Error(`Related ${item.type} with id ${item.id} not found`);
           }
+          
+          // Now check permissions on the related record
+          getContext.minimalRecord = record;
+          await relatedScope.checkPermissions({
+            method: 'get',
+            auth: getContext.auth,
+            id: item.id,
+            minimalRecord: record,
+            transaction: getContext.transaction
+          });
         }
       }
     };
