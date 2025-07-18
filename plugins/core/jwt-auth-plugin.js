@@ -1,4 +1,20 @@
-import jwt from 'jsonwebtoken';
+/**
+ * JWT Authentication Plugin for REST API
+ * 
+ * This plugin provides:
+ * 1. JWT token validation and authentication
+ * 2. Declarative authorization rules on resources
+ * 3. Token revocation support
+ * 4. Built-in and custom auth checkers
+ * 5. Helper methods for auth operations
+ * 
+ * The plugin works by:
+ * - Intercepting requests in the transport:request hook
+ * - Validating JWT tokens and populating context.auth
+ * - Checking permissions in the checkPermissions hook
+ * - Providing helpers for programmatic auth checks
+ */
+
 import jwksClient from 'jwks-rsa';
 import { 
   verifyToken, 
@@ -7,53 +23,55 @@ import {
   cleanupExpiredTokens 
 } from './lib/jwt-auth-helpers.js';
 
-// Module-level state management for plugin instances
-const pluginInstances = new WeakMap();
+/* =========================================================================
+ * PLUGIN EXPORTS
+ * ========================================================================= */
 
-/**
- * Internal state container for JWT Auth Plugin
- * Keeps plugin internals private and out of the global vars namespace
- */
-class JwtAuthState {
-  constructor() {
-    // Timer ID for cleanup job
-    this.cleanupJob = null;
-    
-    // Memory storage for revoked tokens (when not using database)
-    this.memoryRevocationStore = new Map();
-    
-    // Registry of auth checker functions
-    this.authCheckers = new Map();
-  }
-  
-  /**
-   * Clean up resources when plugin is destroyed
-   */
-  cleanup() {
-    if (this.cleanupJob) {
-      clearInterval(this.cleanupJob);
-      this.cleanupJob = null;
-    }
-    this.memoryRevocationStore.clear();
-    this.authCheckers.clear();
-  }
-}
+/* =========================================================================
+ * PLUGIN DEFINITION AND MAIN INSTALL FUNCTION
+ * ========================================================================= */
 
 export const JwtAuthPlugin = {
   name: 'jwt-auth',
   version: '1.0.0',
-  dependencies: ['rest-api'],
+  dependencies: ['rest-api'], // Requires REST API plugin for resource operations
   
   async install({ api, addHook, log, runHooks, helpers, vars, on, pluginOptions }) {
-    // Get JWT-specific options from the wrapped pluginOptions
+    
+    /* -----------------------------------------------------------------------
+     * INITIALIZATION
+     * ----------------------------------------------------------------------- */
+    
+    // Extract JWT-specific options from the wrapped pluginOptions
+    // hooked-api wraps plugin options with the plugin name
     const jwtOptions = pluginOptions['jwt-auth'] || {};
     
     // Initialize plugin state
-    const state = new JwtAuthState();
-    pluginInstances.set(api, state);
+    // State is scoped to this install method and accessible via closure
+    const state = {
+      // Timer ID for periodic cleanup of expired revoked tokens
+      cleanupJob: null,
+      
+      // In-memory storage for revoked tokens (alternative to database storage)
+      // WARNING: Memory storage is cleared on restart - use database for production
+      memoryRevocationStore: new Map(),
+      
+      // Registry of auth checker functions (public, authenticated, is_owner, etc.)
+      authCheckers: new Map()
+    };
+    
+    /* -----------------------------------------------------------------------
+     * CONFIGURATION PARSING
+     * 
+     * Parses and validates all configuration options with sensible defaults.
+     * Configuration is divided into logical groups for clarity.
+     * ----------------------------------------------------------------------- */
     
     const config = {
-      // Token validation
+      // Token validation strategies
+      // - secret: For symmetric algorithms (HS256)
+      // - publicKey: For asymmetric algorithms (RS256)
+      // - jwksUrl: For dynamic key rotation (fetches public key by kid)
       secret: jwtOptions.secret,
       publicKey: jwtOptions.publicKey,
       jwksUrl: jwtOptions.jwksUrl,
@@ -61,52 +79,92 @@ export const JwtAuthPlugin = {
       audience: jwtOptions.audience,
       issuer: jwtOptions.issuer,
       
-      // Token parsing
-      userIdField: jwtOptions.userIdField || 'sub',
+      // Token claim mapping
+      // These configure which JWT claims map to auth context properties
+      // Example JWT payload:
+      // {
+      //   "sub": "user123",
+      //   "email": "user@example.com",
+      //   "roles": ["user", "editor"],
+      //   "permissions": ["posts:write", "comments:*"]
+      // }
+      userIdField: jwtOptions.userIdField || 'sub',         // Standard JWT subject claim
       emailField: jwtOptions.emailField || 'email',
       rolesField: jwtOptions.rolesField || 'roles',
       permissionsField: jwtOptions.permissionsField || 'permissions',
       
-      // Ownership settings
+      // Resource ownership
+      // Configures which field in resources indicates the owner
       ownershipField: jwtOptions.ownershipField || 'user_id',
       
-      // Revocation settings
+      // Token revocation configuration
+      // Supports both database and in-memory storage
       revocation: {
-        enabled: jwtOptions.revocation?.enabled !== false,
-        storage: jwtOptions.revocation?.storage || 'database',
+        enabled: jwtOptions.revocation?.enabled !== false,    // Default: enabled
+        storage: jwtOptions.revocation?.storage || 'database', // 'database' or 'memory'
         cleanupInterval: jwtOptions.revocation?.cleanupInterval || 3600000, // 1 hour
         tableName: jwtOptions.revocation?.tableName || 'revoked_tokens'
       },
       
-      // Endpoints
+      // Optional REST endpoints
+      // The plugin can automatically add logout and session endpoints
       endpoints: {
-        logout: jwtOptions.endpoints?.logout || false,
-        session: jwtOptions.endpoints?.session || false
+        logout: jwtOptions.endpoints?.logout || false,   // e.g., '/auth/logout'
+        session: jwtOptions.endpoints?.session || false  // e.g., '/auth/session'
       }
     };
     
-    // Validate configuration
+    /* -----------------------------------------------------------------------
+     * CONFIGURATION VALIDATION
+     * ----------------------------------------------------------------------- */
+    
+    // Ensure at least one token validation method is provided
     if (!config.secret && !config.publicKey && !config.jwksUrl) {
       throw new Error('JwtAuthPlugin requires either secret, publicKey, or jwksUrl');
     }
     
-    // Initialize JWKS client if needed
+    /* -----------------------------------------------------------------------
+     * JWKS CLIENT SETUP
+     * 
+     * For Auth0, Supabase, and other providers that use rotating keys.
+     * The JWKS client fetches public keys dynamically based on the 'kid' claim.
+     * 
+     * When to use each verification method:
+     * - secret: For simple symmetric keys (HS256) - same key signs and verifies
+     * - publicKey: For static asymmetric keys (RS256) - private key signs, public verifies
+     * - jwksUrl: For providers with key rotation - fetches current public key by kid
+     * 
+     * JWKS is preferred for production as it:
+     * - Supports automatic key rotation
+     * - Caches keys to reduce network calls
+     * - Rate limits to prevent abuse
+     * ----------------------------------------------------------------------- */
+    
     let jwksClientInstance;
     if (config.jwksUrl) {
       jwksClientInstance = jwksClient({
         jwksUri: config.jwksUrl,
-        cache: true,
-        cacheMaxAge: 600000, // 10 minutes
-        rateLimit: true,
-        jwksRequestsPerMinute: 5
+        cache: true,                    // Cache keys to reduce network calls
+        cacheMaxAge: 600000,           // Cache for 10 minutes
+        rateLimit: true,               // Prevent abuse
+        jwksRequestsPerMinute: 5       // Max 5 key fetches per minute
       });
     }
     
-    // Create revocation resource if using database
+    /* -----------------------------------------------------------------------
+     * TOKEN REVOCATION SETUP
+     * 
+     * Supports two storage backends:
+     * 1. Database: Persistent, survives restarts, scalable
+     * 2. Memory: Fast, ephemeral, good for development
+     * ----------------------------------------------------------------------- */
+    
     if (config.revocation.enabled && config.revocation.storage === 'database') {
+      // Create the revoked_tokens table if it doesn't exist
       await createRevocationResource(api, config.revocation.tableName);
       
-      // Set up cleanup interval
+      // Set up periodic cleanup of expired tokens
+      // This prevents the revocation table from growing indefinitely
       if (config.revocation.cleanupInterval > 0) {
         const cleanupJob = setInterval(async () => {
           try {
@@ -119,41 +177,62 @@ export const JwtAuthPlugin = {
           }
         }, config.revocation.cleanupInterval);
         
-        // Store cleanup job reference in state
+        // Store cleanup job in state for proper cleanup later
         state.cleanupJob = cleanupJob;
       }
     }
+    // Note: In-memory revocation store has limitations:
+    // - Tokens are NOT persisted across restarts
+    // - No automatic cleanup of expired tokens
+    // - Not suitable for multi-instance deployments
+    // Use database storage for production systems
     
-    // In-memory revocation store (fallback) is now in state
-    // No need to create separate variable - use state.memoryRevocationStore directly
+    /* -----------------------------------------------------------------------
+     * BUILT-IN AUTH CHECKERS
+     * 
+     * These are the authorization rules that can be used in resource definitions.
+     * Each checker is a function that returns true/false for permission.
+     * 
+     * Usage in resource definition:
+     *   auth: {
+     *     query: ['public'],
+     *     post: ['authenticated'],
+     *     patch: ['is_owner', 'admin'],
+     *     delete: ['admin']
+     *   }
+     * ----------------------------------------------------------------------- */
     
-    // Initialize auth checkers in state
+    // 'public' - Anyone can access, no authentication required
     state.authCheckers.set('public', (context) => true);
     
+    // 'authenticated' - User must be logged in (have a valid token)
     state.authCheckers.set('authenticated', (context) => {
       return !!context.auth?.userId;
     });
     
+    // 'is_owner' - User must own the resource
+    // This is the most complex checker as it handles multiple data formats
     state.authCheckers.set('is_owner', (context, { existingRecord, scopeVars }) => {
       if (!context.auth?.userId) return false;
       
-      // Use existingRecord passed from checkPermissions hook
+      // For new records being created, ownership check passes
       const record = existingRecord || context.attributes;
-      if (!record) return true; // Creating new record is OK
+      if (!record) return true;
       
+      // Determine which field indicates ownership (configurable per scope)
       const ownerField = scopeVars?.ownershipField || config.ownershipField;
       
-      // Handle JSON:API format (from dataGetMinimal)
+      // Handle JSON:API format (record has type and attributes)
       if (record.type && record.attributes) {
-        // Check in attributes first
+        // First check attributes for the ownership field
         if (record.attributes[ownerField] !== undefined) {
           return record.attributes[ownerField] === context.auth.userId;
         }
         
-        // Check in relationships for belongsTo fields
+        // If not in attributes, check relationships
+        // This handles belongsTo relationships (e.g., user_id stored as 'user' relationship)
         if (record.relationships) {
-          // Look for the relationship that corresponds to the owner field
-          // For example, if ownerField is 'user_id', look for relationship 'user'
+          // Convert 'user_id' to 'user' for relationship name
           const relationshipName = ownerField.replace(/_id$/, '');
           const relationship = record.relationships[relationshipName];
           if (relationship?.data?.id) {
@@ -164,58 +243,126 @@ export const JwtAuthPlugin = {
         return false;
       }
       
-      // Handle flat format (legacy or simplified)
+      // Handle simplified/flat format
       return record[ownerField] === context.auth.userId;
     });
     
+    // 'admin' - User must have the 'admin' role
     state.authCheckers.set('admin', (context) => {
       return context.auth?.roles?.includes('admin');
     });
     
+    // 'has_role:X' - User must have a specific role
+    // Usage: 'has_role:editor', 'has_role:moderator'
     state.authCheckers.set('has_role', (context, { param }) => {
       if (!param) throw new Error('has_role requires a role parameter');
       return context.auth?.roles?.includes(param);
     });
     
+    // 'has_permission:X' - User must have a specific permission
+    // Usage: 'has_permission:posts:write', 'has_permission:users:delete'
     state.authCheckers.set('has_permission', (context, { param }) => {
       if (!param) throw new Error('has_permission requires a permission parameter');
       const permissions = context.auth?.permissions || [];
       
-      // Check exact match
+      // Check for exact permission match
       if (permissions.includes(param)) return true;
       
-      // Check wildcard
+      // Check for wildcard permissions (e.g., 'posts:*' or '*')
       const [resource] = param.split(':');
       return permissions.includes(`${resource}:*`) || permissions.includes('*');
     });
     
-    // Hook into scope:added to process auth rules
+    /*
+     * Summary: All built-in auth checkers are now registered in state.
+     * Resources can use these in their auth definitions:
+     * - 'public', 'authenticated', 'is_owner', 'admin'
+     * - 'has_role:X', 'has_permission:X'
+     * Custom checkers can be added via helpers.auth.registerChecker()
+     */
+    
+    /* -----------------------------------------------------------------------
+     * HOOK REGISTRATIONS
+     * 
+     * Hooks integrate the JWT plugin with the REST API flow.
+     * They execute in this order for a typical authenticated request:
+     * 
+     * 1. scope:added (at startup) - Process auth rules from resource definitions
+     * 2. transport:request (per request) - Validate JWT and populate context.auth
+     * 3. checkPermissions (per operation) - Enforce auth rules before data access
+     * 
+     * Example request flow:
+     * - Client: POST /api/posts with Bearer token
+     * - Hook 2: Validates token, sets context.auth = {userId: '123', roles: ['user']}
+     * - REST API: Routes to posts resource, method = 'post'
+     * - Hook 3: Checks posts.auth.post rules against context.auth
+     * - If authorized: Operation proceeds
+     * - If not: 403 Forbidden error
+     * ----------------------------------------------------------------------- */
+    
+    // HOOK 1: Process auth rules when a scope is added
+    // This extracts the 'auth' configuration from resource definitions
+    // 
+    // Example resource definition:
+    // api.declareResource('posts', {
+    //   auth: {
+    //     query: ['public'],           // Anyone can read
+    //     post: ['authenticated'],     // Must be logged in to create
+    //     patch: ['is_owner', 'admin'], // Owner or admin can edit
+    //     delete: ['admin']            // Only admin can delete
+    //   }
+    // });
     addHook('scope:added', 'jwt-process-auth-rules', {}, ({ context, scopes }) => {
       const { scopeName } = context;
       const scope = scopes[scopeName];
-      // Get auth from scopeOptions (where addResource config goes)
+      
+      // Extract auth rules from the resource definition
       const auth = context.scopeOptions?.auth;
       
       if (!auth) return;
       
-      // Store auth rules in scopeVars for permission checking
+      // Store auth rules in scope vars for later permission checking
       scope.vars.authRules = auth;
       
       log.debug(`Auth rules registered for ${scopeName}:`, scope.vars.authRules);
     });
     
-    // Simple auth population hook - just validates token and sets context.auth
+    // HOOK 2: Authenticate incoming requests
+    // 
+    // WHEN: This hook fires for EVERY incoming HTTP request, very early in the pipeline
+    // WHO CALLS IT: The transport plugin (e.g., express-plugin) triggers this hook
+    // EXECUTION ORDER: After request parsing but BEFORE any resource operation
+    // 
+    // DATA FLOW:
+    // 1. Transport extracts JWT from Authorization header: "Bearer <token>"
+    // 2. Transport sets context.request.token = extracted token string
+    // 3. This hook validates the token and populates context.auth
+    // 4. All subsequent hooks/operations can access context.auth
+    // 
+    // FAILURE HANDLING:
+    // - No token provided → context.auth = null → request continues as anonymous
+    // - Invalid/expired token → context.auth = null → request continues as anonymous
+    // - Revoked token → context.auth = null → request continues as anonymous
+    // 
+    // The request is NEVER blocked here. Instead:
+    // - Resources with auth: { query: ['public'] } → Will allow anonymous access
+    // - Resources with auth: { query: ['authenticated'] } → Will reject with 403 later
+    // 
+    // IMPORTANT: This hook ALWAYS returns true (never blocks requests)
+    // Authorization happens later in the checkPermissions hook
     addHook('transport:request', 'jwt-populate-auth', {}, async ({ context }) => {
-      const token = context.request.token; // Already extracted by framework
+      // Token is extracted by transport layer (e.g., Express plugin)
+      const token = context.request.token;
       
       if (!token) {
-        // No token - no problem, let resources decide if they need auth
+        // No token provided - this is fine, anonymous access is allowed
+        // Individual resources will enforce their own auth requirements
         context.auth = null;
         return true;
       }
       
       try {
-        // Verify token
+        // Step 1: Verify the token signature and claims
         const payload = await verifyToken(token, {
           secret: config.secret,
           publicKey: config.publicKey,
@@ -225,7 +372,7 @@ export const JwtAuthPlugin = {
           jwksClient: jwksClientInstance
         });
         
-        // Check revocation if enabled
+        // Step 2: Check if token has been revoked (logout functionality)
         if (config.revocation.enabled && payload.jti) {
           const isRevoked = await checkRevocation(
             payload.jti,
@@ -235,13 +382,27 @@ export const JwtAuthPlugin = {
           );
           
           if (isRevoked) {
-            // Revoked token - treat as no auth
+            // Token has been revoked - treat as anonymous
             context.auth = null;
             return true;
           }
         }
         
-        // Parse nested fields (e.g., 'app_metadata.roles' for Supabase)
+        // Step 3: Extract user information from token claims
+        
+        /**
+         * Helper to extract potentially nested values from JWT payload
+         * Some providers (like Supabase) nest roles/permissions under app_metadata
+         * 
+         * Examples:
+         * - 'roles' → payload.roles
+         * - 'app_metadata.roles' → payload.app_metadata.roles
+         * - 'user.permissions' → payload.user.permissions
+         * 
+         * @param {object} payload - JWT payload object
+         * @param {string} field - Dot-notation path to the field
+         * @returns {array} - Array of values, or empty array if not found
+         */
         const getRoleValue = (payload, field) => {
           const keys = field.split('.');
           let value = payload;
@@ -254,29 +415,75 @@ export const JwtAuthPlugin = {
           return Array.isArray(value) ? value : [];
         };
         
-        // Populate auth context
+        // Step 4: Populate context.auth with user information
+        // This object will be available throughout the request lifecycle
         context.auth = {
           userId: payload[config.userIdField],
           email: payload[config.emailField],
           roles: getRoleValue(payload, config.rolesField),
           permissions: getRoleValue(payload, config.permissionsField),
-          token: payload,
-          tokenId: payload.jti
+          token: payload,        // Full token payload for advanced use cases
+          tokenId: payload.jti   // JWT ID for revocation
         };
         
-        // Run post-auth hooks if any
+        // Step 5: Allow other plugins to react to successful authentication
         await runHooks('afterAuthentication', context, { payload });
         
       } catch (error) {
-        // Invalid token - treat as no auth
+        // Invalid token - log for debugging but treat as anonymous
+        // This allows requests to continue with no auth context
+        // 
+        // Common errors:
+        // - TokenExpiredError: JWT has expired (exp claim in past)
+        // - JsonWebTokenError: Invalid signature, malformed token
+        // - NotBeforeError: Token not active yet (nbf claim in future)
+        // 
+        // By setting context.auth = null, we allow:
+        // - Public endpoints to still work
+        // - Protected endpoints to return proper 403 errors
+        // - Better error messages from checkPermissions hook
         log.debug('Token validation failed:', error.message);
         context.auth = null;
       }
       
-      return true; // Always continue - let resources handle authorization
+      // Always return true - authentication is separate from authorization
+      // Resources will check permissions based on context.auth
+      return true;
     });
     
-    // Add the declarative auth check hook
+    /*
+     * Summary: Hooks are registered. Every request now:
+     * 1. Has its JWT validated and context.auth populated
+     * 2. Has its permissions checked against resource auth rules
+     * This creates a declarative, centralized auth system.
+     * 
+     * Example flow with bad token:
+     * - Client: POST /api/posts with expired Bearer token
+     * - HOOK 2: Token validation fails, sets context.auth = null
+     * - REST API: Routes to posts resource, method = 'post'
+     * - HOOK 3: Checks posts.auth.post = ['authenticated']
+     * - Since context.auth is null, 'authenticated' checker returns false
+     * - Result: 403 Forbidden - "Access denied. Required one of: authenticated"
+     */
+    
+    // HOOK 3: Enforce authorization rules
+    // 
+    // WHEN: Fires AFTER successful routing, BEFORE the actual operation executes
+    // WHO CALLS IT: The REST API plugin triggers this after determining which resource/method
+    // EXECUTION ORDER: After transport:request, route matching, but BEFORE data operations
+    // 
+    // DATA PROVIDED:
+    // - context: Contains auth (from HOOK 2), method, attributes, request details
+    // - scope: The resource definition including vars.authRules from HOOK 1
+    // - scopeName: The resource name (e.g., 'posts', 'users')
+    // 
+    // FLOW:
+    // 1. Check if resource has auth rules (from scope.vars.authRules)
+    // 2. Get rules for current operation (e.g., auth.post = ['authenticated'])
+    // 3. Evaluate each rule using registered auth checkers
+    // 4. If ANY rule passes = allow, if ALL fail = throw 403 error
+    // 
+    // Sequence -100 ensures this runs BEFORE custom permission checks
     addHook('checkPermissions', 'declarative-auth-check', { sequence: -100 }, 
       async ({ context, scope, scopeName }) => {
         const operation = context.method; // 'post', 'get', 'patch', etc.
@@ -289,10 +496,14 @@ export const JwtAuthPlugin = {
         const rules = authRules[operation];
         if (!rules) {
           // No rules for this operation - deny by default
+          // Example: If posts only defines auth: { query: ['public'] }
+          // Then POST, PATCH, DELETE will all be denied
           throw new Error(`Operation '${operation}' not allowed on resource '${scopeName}'`);
         }
         
-        // Check if any rule passes
+        // Check if any rule passes (OR logic)
+        // Example: auth.patch = ['is_owner', 'admin'] means:
+        // Allow if user is owner OR user is admin
         let passed = false;
         let failureReasons = [];
         
@@ -344,12 +555,31 @@ export const JwtAuthPlugin = {
       }
     );
     
+    /* -----------------------------------------------------------------------
+     * HELPER METHODS
+     * 
+     * These methods provide programmatic access to auth functionality.
+     * They can be used in hooks, custom endpoints, or other plugins.
+     * 
+     * Access via: helpers.auth.methodName()
+     * ----------------------------------------------------------------------- */
+    
     // Add verifyToken helper for other plugins (like socketio)
+    // This allows external plugins to verify JWT tokens using our config
     helpers.verifyToken = (token) => verifyToken(token, config);
     
     // Add auth helpers using the standard pattern
     helpers.auth = {
-      // Check if user is authenticated
+      /**
+       * HELPER: requireAuth
+       * Require user to be authenticated
+       * Throws 401 error if no valid auth context exists
+       * 
+       * @example
+       * // In a custom hook
+       * helpers.auth.requireAuth(context);
+       * console.log('User ID:', context.auth.userId);
+       */
       requireAuth(context) {
         if (!context.auth?.userId) {
           const error = new Error('Authentication required');
@@ -359,7 +589,15 @@ export const JwtAuthPlugin = {
         return context.auth;
       },
       
-      // Check if user has required roles
+      /**
+       * HELPER: requireRoles
+       * Require user to have one of the specified roles
+       * Automatically calls requireAuth first
+       * 
+       * @example
+       * // Require admin OR moderator role
+       * helpers.auth.requireRoles(context, ['admin', 'moderator']);
+       */
       requireRoles(context, requiredRoles) {
         this.requireAuth(context);
         
@@ -375,7 +613,19 @@ export const JwtAuthPlugin = {
         return context.auth;
       },
       
-      // Check if user owns resource
+      /**
+       * HELPER: requireOwnership
+       * Require user to own the resource (or be admin)
+       * Supports multiple formats: direct user ID, resource object, or uses context
+       * 
+       * @example
+       * // Check ownership of a fetched record
+       * const post = await api.resources.posts.get(postId);
+       * helpers.auth.requireOwnership(context, post);
+       * 
+       * // Check direct user ID
+       * helpers.auth.requireOwnership(context, '123');
+       */
       requireOwnership(context, resourceOrUserId) {
         this.requireAuth(context);
         
@@ -412,17 +662,36 @@ export const JwtAuthPlugin = {
         return context.auth;
       },
       
-      // Register custom auth checker
+      /**
+       * HELPER: registerChecker
+       * Register a custom auth checker for use in declarative rules
+       * 
+       * @example
+       * // Register a time-based checker
+       * helpers.auth.registerChecker('business_hours', (context) => {
+       *   const hour = new Date().getHours();
+       *   return hour >= 9 && hour < 17;
+       * });
+       * 
+       * // Use in resource: auth: { post: ['business_hours'] }
+       */
       registerChecker(name, checkerFn) {
-        const state = pluginInstances.get(api);
-        if (!state) {
-          throw new Error('JWT Auth plugin state not found');
-        }
         state.authCheckers.set(name, checkerFn);
         log.debug(`Registered custom auth checker: ${name}`);
       },
       
-      // Check if context passes any of the given auth rules
+      /**
+       * HELPER: checkPermission
+       * Check if context passes any of the given auth rules
+       * Returns true if any rule passes, false otherwise
+       * 
+       * @example
+       * // Check multiple rules programmatically
+       * const canEdit = await helpers.auth.checkPermission(
+       *   context, 
+       *   ['is_owner', 'admin', 'has_role:editor']
+       * );
+       */
       async checkPermission(context, rules, options = {}) {
         if (!rules || rules.length === 0) return true;
         
@@ -430,7 +699,6 @@ export const JwtAuthPlugin = {
         
         for (const rule of rules) {
           const [checkerName, param] = rule.split(':');
-          const state = pluginInstances.get(api);
           const checker = state.authCheckers.get(checkerName);
           
           if (checker && await checker(context, { existingRecord, scopeVars, param })) {
@@ -441,7 +709,16 @@ export const JwtAuthPlugin = {
         return false;
       },
       
-      // Logout current session
+      /**
+       * HELPER: logout
+       * Logout the current session by revoking the JWT token
+       * Requires token to have 'jti' claim for revocation tracking
+       * 
+       * @example
+       * // In a custom logout endpoint
+       * const result = await helpers.auth.logout(context);
+       * return { message: 'Logged out successfully' };
+       */
       async logout(context) {
         if (!context.auth?.token) {
           throw new Error('No active session to logout');
@@ -477,7 +754,15 @@ export const JwtAuthPlugin = {
         return { success: true, message: 'Logged out successfully' };
       },
       
-      // Revoke specific token (for external auth integration)
+      /**
+       * HELPER: revokeToken
+       * Manually revoke a specific token by its JWT ID
+       * Useful for external auth system integration
+       * 
+       * @example
+       * // Revoke a token received from webhook
+       * await helpers.auth.revokeToken('token-id-123', 'user-456', 1234567890);
+       */
       async revokeToken(jti, userId, expiresAt) {
         if (!config.revocation.enabled) {
           throw new Error('Token revocation is not enabled');
@@ -491,7 +776,6 @@ export const JwtAuthPlugin = {
             revoked_at: new Date()
           });
         } else {
-          const state = pluginInstances.get(api);
           state.memoryRevocationStore.set(jti, {
             userId,
             expiresAt: expiresAt * 1000,
@@ -500,18 +784,39 @@ export const JwtAuthPlugin = {
         }
       },
       
-      // Clean up plugin resources (for testing)
+      /**
+       * HELPER: cleanup
+       * Clean up all plugin resources
+       * IMPORTANT: Call this in tests to prevent memory leaks and hanging processes
+       * 
+       * @example
+       * // In test teardown
+       * afterAll(() => helpers.auth.cleanup());
+       */
       cleanup() {
-        const state = pluginInstances.get(api);
-        if (state) {
-          state.cleanup();
-          pluginInstances.delete(api);
+        // Clean up all resources
+        if (state.cleanupJob) {
+          clearInterval(state.cleanupJob);
+          state.cleanupJob = null;
         }
+        state.memoryRevocationStore.clear();
+        state.authCheckers.clear();
       }
     };
     
-    // Built-in auth checkers are already registered in state
-    // No need for additional registration
+    /* -----------------------------------------------------------------------
+     * END OF HELPER METHODS
+     * -----------------------------------------------------------------------
+     * Summary: Auth helpers are now available for programmatic auth checks.
+     * Use these in hooks, custom endpoints, or other plugins via helpers.auth.*
+     * ----------------------------------------------------------------------- */
+    
+    /* -----------------------------------------------------------------------
+     * OPTIONAL ENDPOINTS
+     * 
+     * The plugin can automatically create REST endpoints for auth operations.
+     * These are opt-in via configuration.
+     * ----------------------------------------------------------------------- */
     
     // Add logout endpoint if configured
     if (config.endpoints.logout && api.addRoute) {
@@ -541,7 +846,8 @@ export const JwtAuthPlugin = {
       log.info(`Added logout endpoint: POST ${config.endpoints.logout}`);
     }
     
-    // Add session endpoint if configured
+    // Add session endpoint if configured  
+    // Returns current user info or {authenticated: false} for anonymous
     if (config.endpoints.session && api.addRoute) {
       await api.addRoute({
         method: 'GET',
@@ -570,6 +876,11 @@ export const JwtAuthPlugin = {
       
       log.info(`Added session endpoint: GET ${config.endpoints.session}`);
     }
+    
+    /*
+     * Summary: Optional endpoints provide REST API access to auth operations.
+     * Enable via config: endpoints: { logout: '/auth/logout', session: '/auth/session' }
+     */
     
     log.info('JWT authentication plugin installed with declarative auth support');
   }
