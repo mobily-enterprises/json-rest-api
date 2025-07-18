@@ -213,187 +213,50 @@
         }
       });
 
-      // Hook into single record GET queries to add tenant filter
-      addHook('knexGetFiltering', 'multihome-get-filter', { beforePlugin: 'rest-api-knex' }, async ({ context, vars }) => {
-        // Get scope name from context
-        const scopeName = context.scopeName;
-        if (!scopeName) return;
-
-        // Skip excluded resources first
+      // Add checkPermissions hook to enforce tenant isolation
+      // This is the single source of truth for single-record access control
+      addHook('checkPermissions', 'multihome-check-permissions', {}, async ({ context, scopeName, method, id, minimalRecord }) => {
+        // Skip excluded resources
         if (vars.multihome.excludeResources.includes(scopeName)) {
           return;
         }
-
+        
         // Skip if no multihome context
         if (!context.auth?.multihome_id) {
           if (vars.multihome.requireAuth) {
-            throw new Error('No multihome context available - cannot access record');
+            throw new Error('No multihome context available');
           }
           return;
         }
-
-        // Check if this resource has multihome field
+        
+        // Get the scope to check if it has multihome field
         const scope = scopes[scopeName];
         const hasMultihomeField = scope?.vars?.schemaInfo?.schema?.structure?.[vars.multihome.field];
-
+        
         if (!hasMultihomeField) {
-          return; // Resource doesn't have multihome field
-        }
-
-        // Add tenant filter to the query
-        context.query = context.query.where(function() {
-          this.where(vars.multihome.field, context.auth.multihome_id);
-        });
-
-        log.debug('Added multihome filter to GET query', {
-          scopeName,
-          multihome_id: context.auth.multihome_id
-        });
-      });
-
-      // Validate cross-tenant relationships before they are saved
-      // This is critical for security - we must prevent any cross-tenant relationships
-      addHook('beforeSchemaValidate', 'validate-cross-tenant-relationships', { afterPlugin: 'rest-api' }, async ({ context, scopeName, vars }) => {
-        // Skip if no multihome context or excluded resource
-        if (!context.auth?.multihome_id || vars.multihome.excludeResources.includes(scopeName)) {
-          return;
-        }
-
-        // Only check on create and update operations with relationships
-        if (!context.inputRecord?.data?.relationships) {
-          return;
-        }
-
-        // Use context.db for database queries (respects transactions)
-        const db = context.db || api.knex?.instance;
-        if (!db) {
-          throw new Error('Cannot access database for cross-tenant security validation');
-        }
-
-        // Get the current resource's schema
-        const scope = scopes[scopeName];
-        const schemaFields = scope?.vars?.schemaInfo?.schema?.structure || {};
-
-        // Get relationships info from the scope
-        const relationships = scope?.vars?.schemaInfo?.schemaRelationships || {};
-
-        // Group relationships by resource type for efficient validation
-        const relationshipsByResource = {};
-        
-        // Check each relationship in the input
-        for (const [relName, relData] of Object.entries(context.inputRecord.data.relationships)) {
-          // Skip if no data
-          if (!relData?.data) continue;
-
-          // Handle both single and array relationships
-          const relatedItems = Array.isArray(relData.data) ? relData.data : [relData.data];
-          
-          // Find what resource this relationship points to
-          let relatedResourceName = null;
-          
-          // Check schema fields for belongsTo relationships
-          const belongsToField = Object.entries(schemaFields).find(([fieldName, fieldDef]) => 
-            (fieldDef.as === relName || fieldName.replace('_id', '') === relName) && fieldDef.belongsTo
-          );
-          
-          if (belongsToField) {
-            relatedResourceName = belongsToField[1].belongsTo;
-          }
-          
-          // Check for polymorphic belongsTo
-          const polymorphicField = Object.entries(schemaFields).find(([fieldName, fieldDef]) => 
-            fieldDef.as === relName && fieldDef.belongsToPolymorphic
-          );
-          
-          if (polymorphicField) {
-            // For polymorphic relationships, get the type from the data
-            const polymorphicTypes = polymorphicField[1].belongsToPolymorphic.types;
-            relatedResourceName = relData.data.type;
-            if (!polymorphicTypes.includes(relatedResourceName)) {
-              throw new Error(`Invalid polymorphic type: ${relatedResourceName}`);
-            }
-          } else if (relationships[relName]) {
-            // Check relationships definition for hasMany/manyToMany
-            const relDef = relationships[relName];
-            if (relDef.hasMany) {
-              relatedResourceName = relDef.hasMany;
-            } else if (relDef.manyToMany) {
-              relatedResourceName = relDef.manyToMany.related;
-            }
-          }
-
-          if (!relatedResourceName) {
-            log.warn('Could not determine related resource for relationship', { relName, scopeName });
-            continue;
-          }
-
-          const relatedScope = scopes[relatedResourceName];
-          if (!relatedScope) {
-            log.warn('Related scope not found', { relatedResourceName });
-            continue;
-          }
-
-          // Skip if related resource doesn't have multihome field
-          if (!relatedScope.vars?.schemaInfo?.schema?.structure?.[vars.multihome.field]) {
-            continue;
-          }
-
-          // Skip if related resource is excluded
-          if (vars.multihome.excludeResources.includes(relatedResourceName)) {
-            continue;
-          }
-
-          // Group IDs by resource type
-          if (!relationshipsByResource[relatedResourceName]) {
-            relationshipsByResource[relatedResourceName] = {
-              scope: relatedScope,
-              ids: [],
-              relName
-            };
-          }
-          
-          // Collect all IDs for this resource type
-          for (const item of relatedItems) {
-            relationshipsByResource[relatedResourceName].ids.push(item.id);
-          }
+          return; // Resource doesn't support multihome
         }
         
-        // Now validate all relationships with efficient IN queries
-        for (const [resourceName, resourceData] of Object.entries(relationshipsByResource)) {
-          const { scope: relatedScope, ids, relName } = resourceData;
-          const relatedTable = relatedScope.vars.tableName;
+        // For operations on existing records, verify tenant ownership
+        if (minimalRecord && minimalRecord[vars.multihome.field] !== context.auth.multihome_id) {
+          log.error('Multihome permission violation', {
+            scopeName,
+            recordId: id,
+            recordTenant: minimalRecord[vars.multihome.field],
+            userTenant: context.auth.multihome_id,
+            method
+          });
           
-          // Single query to check all records of this type
-          const results = await db(relatedTable)
-            .select('id', vars.multihome.field)
-            .whereIn('id', ids);
-          
-          // Create a map for quick lookup
-          const resultMap = {};
-          for (const row of results) {
-            resultMap[row.id] = row[vars.multihome.field];
-          }
-          
-          // Check each ID
-          for (const id of ids) {
-            if (!resultMap[id]) {
-              throw new Error(
-                `Cannot link to ${resourceName} '${id}' - resource not found`
-              );
-            }
-            
-            if (resultMap[id] !== context.auth.multihome_id) {
-              log.error('Cross-tenant relationship attempt blocked', {
-                scopeName,
-                relatedResource: resourceName,
-                relatedId: id,
-                expectedTenant: context.auth.multihome_id,
-                actualTenant: resultMap[id]
-              });
-              throw new Error(
-                `Cannot link to ${resourceName} '${id}' - belongs to different tenant`
-              );
-            }
+          // Return 404 for GET to prevent information leakage
+          // Return 403 for other operations
+          if (method === 'get') {
+            const error = new Error('Resource not found');
+            error.code = 'REST_API_RESOURCE';
+            throw error;
+          } else {
+            const error = new Error('Access denied - insufficient permissions');
+            error.code = 'REST_API_FORBIDDEN';
+            throw error;
           }
         }
       });

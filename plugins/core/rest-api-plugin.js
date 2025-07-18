@@ -999,6 +999,57 @@ const validatePivotResource = (scopes, relDef, relName) => {
       await runHooks ('afterSchemaValidate');
     };
 
+    /**
+     * Validates that the user has read access to all related resources in relationships.
+     * This ensures users can only create relationships to resources they can access.
+     * 
+     * @param {object} context - The context object from addScopeMethod
+     * @param {object} inputRecord - The JSON:API input record with relationships
+     * @param {object} helpers - Data helpers including dataGetMinimal
+     * @param {function} runHooks - Function to run hooks
+     * @param {object} api - API instance to access resources
+     * @throws {Error} If user doesn't have access to any related resource
+     */
+    const validateRelationshipAccess = async (context, inputRecord) => {
+      if (!inputRecord?.data?.relationships) return;
+      
+      for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
+        if (!relData?.data) continue;
+        
+        // Handle both single and array relationships
+        const relatedItems = Array.isArray(relData.data) ? relData.data : [relData.data];
+        
+        for (const item of relatedItems) {
+          // Get the scope for the related resource
+          const relatedScope = api.resources[item.type];
+          if (!relatedScope) {
+            throw new Error(`Unknown resource type: ${item.type}`);
+          }
+          
+          // Create context for dataGetMinimal
+          const getContext = {
+            ...context,
+            id: item.id,
+            schemaInfo: relatedScope.vars.schemaInfo,
+            scopeName: item.type,
+            method: 'get', // We're checking read permission
+            isUpdate: false
+          };
+          
+          // This will trigger checkPermissions and throw if access denied
+          const record = await helpers.dataGetMinimal({ 
+            scopeName: item.type, 
+            context: getContext, 
+            runHooks 
+          });
+          
+          if (!record) {
+            throw new Error(`Related ${item.type} with id ${item.id} not found`);
+          }
+        }
+      }
+    };
+
 
     // Function: handleRecordReturn
     // Location: You should place this in a common utility file that can be imported
@@ -1321,6 +1372,10 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Example: data.type: 'articles' must be a registered scope, relationships.author must reference 'users'.
         validatePostPayload(context.inputRecord, scopes)
         
+        // Validate that user has read access to all related resources
+        // This ensures users can only create relationships to resources they can access
+        await validateRelationshipAccess(context, context.inputRecord);
+        
         // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
         // Example: relationships.author -> author_id: '123' for storage
         // Example: relationships.tags -> array of pivot records to create later
@@ -1593,6 +1648,10 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // provided will be removed or reset to defaults - this is the key difference from PATCH.
     // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
     validatePutPayload(context.inputRecord, scopes)
+    
+    // Validate that user has read access to all related resources
+    // This ensures users can only create relationships to resources they can access
+    await validateRelationshipAccess(context, context.inputRecord, helpers, runHooks, api);
     
    // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
@@ -1949,6 +2008,9 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
         validatePatchPayload(context.inputRecord, scopes)
         
+        // Validate that user has read access to all related resources
+        // This ensures users can only create relationships to resources they can access
+        await validateRelationshipAccess(context, context.inputRecord);
 
         // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
         // Example: relationships.author -> author_id: '123' for storage

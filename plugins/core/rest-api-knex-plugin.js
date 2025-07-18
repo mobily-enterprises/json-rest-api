@@ -190,14 +190,9 @@ export const RestApiKnexPlugin = {
       // The REST API plugin will use this to remove 'cost' from response if not requested
       context.computedDependencies = fieldSelectionInfo.computedDependencies;
       
-      // Build query
+      // Build query - no filtering hooks for single records
+      // Permission checks will handle access control
       let query = db(tableName).where(idProperty, id);
-      
-      // Allow plugins to filter single record queries (e.g., for multi-tenancy)
-      context.query = query;
-      context.tableName = tableName;
-      await runHooks('knexGetFiltering');
-      query = context.query;
       
       // Apply field selection
       query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, false);
@@ -250,14 +245,9 @@ export const RestApiKnexPlugin = {
       
       log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
       
-      // Build query
-      let query = db(tableName).where(idProperty, id);
-      
-      // Allow plugins to filter single record queries (e.g., for multi-tenancy)
-      context.query = query;
-      context.tableName = tableName;
-      await runHooks('knexGetFiltering');
-      query = context.query;
+      // Build query - no filtering hooks for single records
+      // Permission checks will handle access control
+      const query = db(tableName).where(idProperty, id);
       
       // Execute query
       const record = await query.first();
