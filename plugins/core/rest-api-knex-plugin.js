@@ -155,7 +155,7 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object>} JSON:API formatted response with data and optional included resources
      * @throws {RestApiResourceError} When the resource is not found
      */
-    helpers.dataGet = async ({ scopeName, context }) => {
+    helpers.dataGet = async ({ scopeName, context, runHooks }) => {
       const scope = api.resources[scopeName];
       if (!scope) {
         log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) });
@@ -190,8 +190,16 @@ export const RestApiKnexPlugin = {
       // The REST API plugin will use this to remove 'cost' from response if not requested
       context.computedDependencies = fieldSelectionInfo.computedDependencies;
       
-      // Build and execute query
+      // Build query
       let query = db(tableName).where(idProperty, id);
+      
+      // Allow plugins to filter single record queries (e.g., for multi-tenancy)
+      context.query = query;
+      context.tableName = tableName;
+      await runHooks('knexGetFiltering');
+      query = context.query;
+      
+      // Apply field selection
       query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, false);
       
       const record = await query.first();
@@ -233,7 +241,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
-    helpers.dataGetMinimal = async ({ scopeName, context }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
       const scope = api.resources[scopeName];
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
@@ -242,10 +250,17 @@ export const RestApiKnexPlugin = {
       
       log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
       
-      // Simple select without any joins or processing
-      const record = await db(tableName)
-        .where(idProperty, id)
-        .first();
+      // Build query
+      let query = db(tableName).where(idProperty, id);
+      
+      // Allow plugins to filter single record queries (e.g., for multi-tenancy)
+      context.query = query;
+      context.tableName = tableName;
+      await runHooks('knexGetFiltering');
+      query = context.query;
+      
+      // Execute query
+      const record = await query.first();
       
       if (!record) {
         return null;

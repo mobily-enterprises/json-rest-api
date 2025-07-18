@@ -490,3 +490,99 @@ export async function createWebSocketApi(knex, pluginOptions = {}) {
   
   return { api, server };
 }
+
+/**
+ * Creates an API with MultiHome (multi-tenancy) support for testing
+ */
+export async function createMultiHomeApi(knex, pluginOptions = {}) {
+  const { MultiHomePlugin } = await import('../../plugins/core/rest-api-multihome-plugin.js');
+  
+  const api = new Api({
+    name: 'multihome-test-api',
+    version: '1.0.0'
+  });
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnFullRecord: {
+      post: true,
+      put: false,
+      patch: false,
+      allowRemoteOverride: false
+    },
+    sortableFields: ['id', 'title', 'name', 'tenant_id']
+  });
+  
+  await api.use(RestApiKnexPlugin, { knex });
+  
+  // Add Express plugin if requested for transport testing
+  if (pluginOptions.includeExpress) {
+    await api.use(ExpressPlugin, pluginOptions.express || {});
+  }
+  
+  // Add MultiHome plugin with configuration
+  await api.use(MultiHomePlugin, {
+    field: pluginOptions.field || 'tenant_id',
+    excludeResources: pluginOptions.excludeResources || ['system_settings'],
+    requireAuth: pluginOptions.requireAuth !== undefined ? pluginOptions.requireAuth : true,
+    allowMissing: pluginOptions.allowMissing || false,
+    extractor: pluginOptions.extractor || ((request) => {
+      // Default to header extraction for tests
+      return request.headers?.['x-tenant-id'] || null;
+    })
+  });
+
+  // Tenant-specific resources
+  await api.addResource('projects', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      description: { type: 'string', max: 1000 },
+      status: { type: 'string', defaultTo: 'active' },
+      tenant_id: { type: 'string', required: true }
+    },
+    relationships: {
+      tasks: { hasMany: 'tasks', foreignKey: 'project_id' }
+    },
+    tableName: 'multihome_projects'
+  });
+  await api.resources.projects.createKnexTable();
+
+  await api.addResource('tasks', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200 },
+      completed: { type: 'boolean', defaultTo: false },
+      project_id: { type: 'number', belongsTo: 'projects', as: 'project' },
+      tenant_id: { type: 'string', required: true }
+    },
+    tableName: 'multihome_tasks'
+  });
+  await api.resources.tasks.createKnexTable();
+
+  await api.addResource('users', {
+    schema: {
+      id: { type: 'id' },
+      email: { type: 'string', required: true, unique: true },
+      name: { type: 'string', required: true },
+      role: { type: 'string', defaultTo: 'member', search: true },
+      tenant_id: { type: 'string', required: true }
+    },
+    tableName: 'multihome_users'
+  });
+  await api.resources.users.createKnexTable();
+
+  // Global resource (excluded from multihome)
+  await api.addResource('system_settings', {
+    schema: {
+      id: { type: 'id' },
+      key: { type: 'string', required: true, unique: true },
+      value: { type: 'string', required: true }
+    },
+    tableName: 'multihome_system_settings'
+  });
+  await api.resources.system_settings.createKnexTable();
+
+  return api;
+}

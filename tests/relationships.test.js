@@ -355,7 +355,7 @@ describe('Relationship Operations', () => {
       assert.deepEqual(authorIds, [authors[2].id, authors[3].id].sort());
     });
 
-    it.skip('should update many-to-many relationships via PATCH (partial update)', async () => {
+    it('should update many-to-many relationships via PATCH (partial update)', async () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -431,7 +431,7 @@ describe('Relationship Operations', () => {
       assert.equal(pivotCount, 3);
     });
 
-    it.skip('should clear all many-to-many relationships with empty array', async () => {
+    it('should clear all many-to-many relationships with empty array', async () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -500,6 +500,7 @@ describe('Relationship Operations', () => {
       // Verify through GET
       const getResult = await basicApi.resources.books.get({
         id: bookResult.data.id,
+        queryParams: { include: ['authors'] },
         simplified: false
       });
 
@@ -515,7 +516,7 @@ describe('Relationship Operations', () => {
       ]);
     });
 
-    it.skip('should create resource with multiple relationship types', async () => {
+    it('should create resource with multiple relationship types', async () => {
       // Create supporting resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({
@@ -591,7 +592,7 @@ describe('Relationship Operations', () => {
       assert(publisher.relationships.country);
     });
 
-    it.skip('should handle PUT with partial relationships object', async () => {
+    it('should handle PUT with partial relationships object', async () => {
       // Create resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' });
       const countryResult = await basicApi.resources.countries.post({

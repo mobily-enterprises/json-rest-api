@@ -618,7 +618,8 @@ export const RestApiPlugin = {
       // Fetch minimal record for authorization checks
       const minimalRecord = await helpers.dataGetMinimal({
         scopeName,
-        context
+        context,
+        runHooks
       });
 
       if (!minimalRecord) {
@@ -648,7 +649,8 @@ export const RestApiPlugin = {
 
       context.record = await helpers.dataGet({
         scopeName,
-        context
+        context,
+        runHooks
       })
     
       // Check if record was found - storage layer returns null/undefined for non-existent records.
@@ -1039,7 +1041,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
             try {
                 const currentRecord = await helpers.dataGetMinimal({
                     scopeName,
-                    context: { ...context, id: context.id }
+                    context,
+                    runHooks
                 });
                 context.minimalRecord = currentRecord;
             } catch (error) {
@@ -1062,7 +1065,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
                 queryParams: context.queryParams,
                 transaction: context.transaction,
                 simplified: false // Request the full JSON:API format from GET for internal processing
-            });
+            }, {...context });
             
             // If the 'get' method returns null/undefined (e.g., resource was deleted between write and read),
             // we might still need to handle a potential 404 or just return undefined.
@@ -1619,7 +1622,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
     if (context.isUpdate) {
       const minimalRecord = await helpers.dataGetMinimal({
         scopeName,
-        context
+        context,
+        runHooks
       });
 
       if (!minimalRecord) {
@@ -1965,7 +1969,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Fetch minimal record for authorization checks
         const minimalRecord = await helpers.dataGetMinimal({
           scopeName,
-          context
+          context,
+          runHooks
         });
 
         if (!minimalRecord) {
@@ -2107,6 +2112,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         const minimalRecord = await helpers.dataGetMinimal({
           scopeName,
           context,
+          runHooks
         });
         
         if (!minimalRecord) {

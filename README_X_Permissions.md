@@ -12,6 +12,7 @@ The JWT Authentication Plugin provides a powerful declarative permission system 
 - [Installation and Setup](#installation-and-setup)
 - [Declarative Permissions](#declarative-permissions)
 - [Built-in Auth Checkers](#built-in-auth-checkers)
+- [Making Authenticated API Calls Directly](#making-authenticated-api-calls-directly)
 - [Using Auth Helpers](#using-auth-helpers)
 - [Token Management](#token-management)
 - [Custom Auth Checkers](#custom-auth-checkers)
@@ -403,6 +404,144 @@ auth: {
   patch: ['has_permission:posts:write'],
   delete: ['has_permission:posts:delete']
 }
+```
+
+## Making Authenticated API Calls Directly
+
+When using the API programmatically (not through HTTP), you can pass authentication context as the second parameter to any API method:
+
+### Direct API Usage
+
+```javascript
+// Import your configured API
+import { api } from './your-api-setup.js';
+
+// Make authenticated calls by passing auth context as second parameter
+const authContext = {
+  auth: {
+    userId: 'user-123',
+    email: 'user@example.com',
+    role: 'admin',
+    // Any other auth data your app needs
+  }
+};
+
+// Query with auth
+const books = await api.resources.books.query({
+  filters: { published: true },
+  include: ['author'],
+  page: { size: 10 }
+}, authContext);
+
+// Get single resource with auth
+const book = await api.resources.books.get({
+  id: 123
+}, authContext);
+
+// Create with auth
+const newBook = await api.resources.books.post({
+  inputRecord: {
+    data: {
+      type: 'books',
+      attributes: {
+        title: 'My New Book',
+        isbn: '978-3-16-148410-0'
+      }
+    }
+  }
+}, authContext);
+
+// Update with auth
+const updated = await api.resources.books.patch({
+  id: 123,
+  inputRecord: {
+    data: {
+      type: 'books',
+      id: '123',
+      attributes: {
+        title: 'Updated Title'
+      }
+    }
+  }
+}, authContext);
+
+// Delete with auth
+await api.resources.books.delete({
+  id: 123
+}, authContext);
+```
+
+### Multi-tenancy Example
+
+If using the MultiHome plugin for multi-tenancy:
+
+```javascript
+// Tenant-specific context
+const tenantContext = {
+  auth: {
+    userId: 'user-123',
+    multihome_id: 'tenant-a'  // Required for multihome
+  }
+};
+
+// All operations will be scoped to tenant-a
+const tenantProjects = await api.resources.projects.query({}, tenantContext);
+```
+
+### Script/Admin Usage
+
+For administrative scripts or background jobs:
+
+```javascript
+// Admin context with elevated privileges
+const adminContext = {
+  auth: {
+    userId: 'system',
+    role: 'superadmin',
+    isSystem: true
+  }
+};
+
+// Batch operations
+async function processAllBooks() {
+  const books = await api.resources.books.query({
+    page: { size: 100 }
+  }, adminContext);
+  
+  for (const book of books.data) {
+    // Process each book with admin privileges
+    await api.resources.books.patch({
+      id: book.id,
+      inputRecord: { /* ... */ }
+    }, adminContext);
+  }
+}
+```
+
+### Testing Example
+
+In tests, you can easily simulate different users:
+
+```javascript
+// Test different permission scenarios
+const contexts = {
+  anonymous: {},  // No auth
+  regular: { auth: { userId: 'user-1', role: 'member' } },
+  editor: { auth: { userId: 'user-2', role: 'editor' } },
+  admin: { auth: { userId: 'user-3', role: 'admin' } }
+};
+
+// Test that regular users can't delete
+await assert.rejects(
+  api.resources.books.delete({ id: 1 }, contexts.regular),
+  /Forbidden/
+);
+
+// Test that editors can update
+await api.resources.books.patch({
+  id: 1,
+  inputRecord: { /* ... */ }
+}, contexts.editor);
 ```
 
 ## Using Auth Helpers
