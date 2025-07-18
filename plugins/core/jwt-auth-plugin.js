@@ -42,8 +42,7 @@ export const JwtAuthPlugin = {
      * INITIALIZATION
      * ----------------------------------------------------------------------- */
     
-    // Extract JWT-specific options from the wrapped pluginOptions
-    // hooked-api wraps plugin options with the plugin name
+    // Extract JWT-specific options from pluginOptions
     const jwtOptions = pluginOptions['jwt-auth'] || {};
     
     // Initialize plugin state

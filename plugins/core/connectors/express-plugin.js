@@ -36,7 +36,7 @@ export const ExpressPlugin = {
     }
     api.http.express = {};
     
-    const expressOptions = pluginOptions.express || {};
+    const expressOptions = pluginOptions['express'] || {};
     const basePath = expressOptions.basePath || '';
     const strictContentType = expressOptions.strictContentType !== false;
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb';

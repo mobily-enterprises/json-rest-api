@@ -28,7 +28,7 @@ export const RestApiKnexPlugin = {
   async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     
     // Get Knex configuration from plugin options
-    const knexOptions = pluginOptions.knex || pluginOptions['rest-api-knex'];
+    const knexOptions = pluginOptions['rest-api-knex'] || {};
     if (!knexOptions || !knexOptions.knex) {
       throw new Error('RestApiKnexPlugin requires a knex instance in pluginOptions');
     }

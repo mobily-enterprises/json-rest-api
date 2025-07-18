@@ -175,7 +175,6 @@ export const RestApiPlugin = {
     // compileSchemas(eventData.scope, eventData.scopeName));
 
     // Initialize default vars for the plugin from pluginOptions
-    // hooked-api wraps plugin options with the plugin name
     const restApiOptions = pluginOptions['rest-api'] || {};
 
     // These will be used as default fallbacks by the vars proxy if
