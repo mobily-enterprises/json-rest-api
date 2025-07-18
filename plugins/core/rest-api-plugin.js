@@ -364,12 +364,12 @@ export const RestApiPlugin = {
       context.queryParams.sort = cascadeConfig('sort', [params.queryParams], [])
       context.queryParams.page = cascadeConfig('page', [params.queryParams], {})
   
-      context.transaction = params.transaction; 
+      context.transaction = params.transaction;
+      context.db = context.transaction || api.knex.instance;
       
       context.scopeName = scopeName;
 
       // These are just shortcuts used in this function and will be returned
-      const schema = context.schemaInfo.schema;
       const searchSchema = context.schemaInfo.searchSchema;
       const schemaStructure = context.schemaInfo.schema.structure;
       const schemaRelationships = context.schemaInfo.schemaRelationships;
@@ -598,7 +598,8 @@ export const RestApiPlugin = {
       context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {});
       context.queryParams.include = cascadeConfig('include', [context.queryParams], []);
       
-      context.transaction = params.transaction; 
+      context.transaction = params.transaction;
+      context.db = context.transaction || api.knex.instance;
 
       context.scopeName = scopeName;
 
@@ -781,6 +782,7 @@ export const RestApiPlugin = {
         context.transaction = params.transaction || 
             (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
         context.shouldCommit = !params.transaction && !!context.transaction;
+        context.db = context.transaction || api.knex.instance;
 
         // These are just shortcuts used in this function and will be returned
         const schema = context.schemaInfo.schema;
@@ -2107,6 +2109,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
       context.transaction = params.transaction || 
           (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null);
       context.shouldCommit = !params.transaction && !!context.transaction;
+      context.db = context.transaction || api.knex.instance;
       
       try {
         // No payload validation needed for DELETE
@@ -2183,26 +2186,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
      * before they are returned to the client. This is a scope method so each resource type
      * can have its own attribute enrichment logic.
      * 
-     * @param {Object} attributes - The attributes to enrich
-     * @param {Object} parentContext - The parent context from the calling method
-     * @returns {Promise<Object>} The enriched attributes
-     * 
-     * @example
-     * // Enrich attributes for the main resource
-     * const enrichedAttrs = await scope.enrichAttributes({ 
-     *   attributes: record.data.attributes,
-     *   parentContext: context 
-     * });
-     * 
-     * @example
-     * // Enrich attributes for included resources
-     * for (const entry of included) {
-     *   const entryScope = scopes[entry.type];
-     *   entry.attributes = await entryScope.enrichAttributes({
-     *     attributes: entry.attributes,
-     *     parentContext: context
-     *   });
-     * }
      */
     addScopeMethod('enrichAttributes', async ({ context, params, runHooks, scopeName, scopes, api, helpers }) => {
       // Extract parameters passed to enrichAttributes
@@ -2212,21 +2195,21 @@ const validatePivotResource = (scopes, relDef, relName) => {
       // - isMainResource: Whether this is the main resource or an included one
       // - computedDependencies: Fields fetched only for computation (to be removed)
       const { attributes, parentContext, requestedComputedFields, isMainResource, computedDependencies } = params || {};
-      
+
       // Return empty object if no attributes provided
       if (!attributes) {
         return {};
       }
-      
+
       // Get schema and computed field definitions
       const schemaStructure = scopes[scopeName]?.vars?.schemaInfo?.schemaStructure || {};
       const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
-      
+
       // Filter hidden fields from attributes based on visibility rules
       // This removes hidden:true fields and normallyHidden:true fields (unless requested)
       const requestedFields = parentContext?.queryParams?.fields?.[scopeName];
       const filteredAttributes = filterHiddenFields(attributes, { structure: schemaStructure }, requestedFields);
-      
+
       // Determine which computed fields to calculate
       // We only compute fields that are requested to optimize performance
       let fieldsToCompute = [];
@@ -2239,7 +2222,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // This ensures all computed fields are available when no filtering is applied
         fieldsToCompute = Object.keys(computedFields);
       }
-      
+
       // Create compute context with all available resources
       // IMPORTANT: We pass the original attributes (including dependencies) to compute functions
       // This ensures computed fields can access normallyHidden dependencies like 'cost'
@@ -2247,18 +2230,11 @@ const validatePivotResource = (scopes, relDef, relName) => {
       const computeContext = {
         attributes: attributes,              // All attributes including dependencies
         record: { ...attributes },           // Full record for convenience
-        context: {
-          ...parentContext,
-          transaction: parentContext?.transaction,  // For DB queries in compute
-          knex: parentContext?.knex || parentContext?.db,  // Direct DB access
-          scopeName
-        },
+        context: parentContext,       
         helpers,                             // API helpers for complex operations
         api,                                 // Full API instance
-        scopeName,                           // Current resource name
-        requestContext: parentContext        // Original request context
       };
-      
+
       // Auto-compute fields that have compute functions
       for (const fieldName of fieldsToCompute) {
         const fieldDef = computedFields[fieldName];
@@ -2275,34 +2251,20 @@ const validatePivotResource = (scopes, relDef, relName) => {
           }
         }
       }
-      
-      // Create context for enrichAttributes hooks
-      Object.assign(context, {
-        parentContext,
-        attributes: filteredAttributes,
-        computedFields,
-        requestedComputedFields: fieldsToCompute,
-        scopeName,
-        helpers,
-        api
-      });
-      
-      // Run enrichAttributes hooks for additional/override computations
-      await runHooks('enrichAttributes');
-      
+
       // Remove fields that were only fetched as dependencies
       // This is the key to the dependency resolution feature:
       // 1. We fetched dependencies from DB (e.g., 'cost' for profit_margin)
       // 2. We used them in compute functions
       // 3. Now we remove them if they weren't explicitly requested
       // Example: User requests profit_margin, we fetch cost, compute, then remove cost
-      const finalAttributes = { ...context.attributes };
+      const finalAttributes = { ...filteredAttributes };
       if (requestedFields && computedDependencies && computedDependencies.length > 0) {
         // Parse requested fields if it's a string
         const requested = typeof requestedFields === 'string'
           ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
           : requestedFields;
-          
+
         for (const dep of computedDependencies) {
           // Only remove if it wasn't explicitly requested
           // Example: 'cost' is removed unless user explicitly asked for it
@@ -2311,8 +2273,23 @@ const validatePivotResource = (scopes, relDef, relName) => {
           }
         }
       }
-      
-      return finalAttributes;
+
+      // Create context for enrichAttributes hooks
+      Object.assign(context, {
+        parentContext,
+        attributes: finalAttributes,  // Use the final attributes after dependency removal
+        computedFields,
+        requestedComputedFields: fieldsToCompute,
+        scopeName,
+        helpers,
+        api
+      });
+
+      // Run enrichAttributes hooks for additional/override computations
+      await runHooks('enrichAttributes');
+
+      // Return the attributes from context, which hooks may have modified
+      return context.attributes;
     });
 
      /**
@@ -2321,12 +2298,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
      * 
      */
     addScopeMethod('checkPermissions', async ({ context, params, runHooks, scopeName, scopes, helpers }) => {
-      // Extract parameters passed to enrichAttributes
-      // - attributes: The raw attributes from database
-      // - parentContext: The context from the calling method (has queryParams, transaction, etc.)
-      // - requestedComputedFields: Which computed fields to calculate (from sparse fieldsets)
-      // - isMainResource: Whether this is the main resource or an included one
-      // - computedDependencies: Fields fetched only for computation (to be removed)
+     
       Object.assign(context, {
         method: params.method,
         isUpdate: params.isUpdate,
@@ -2336,7 +2308,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
         minimalRecord: params.minimalRecord
       })
       
-      // Run enrichAttributes hooks for additional/override computations
       await runHooks('checkPermissions');
     });
 

@@ -4,11 +4,10 @@ Session 1:
 
 Session 2:
 ✔ improve way in which jvt-auth works, no need for those vars and helpers @done(25-07-18 15:50)
-☐ Improve enrichAttributes, split into helpers <--- ???????????????
+✔ Improve enrichAttributes, split into helpers <--- ??????????????? @done(25-07-18 19:45)
 
 Sessoon 3:
-☐ Add 'created_at' module, maybe have 'protected' fields
-☐ Create ownership-filter-plugin.js for multihoming and user filtering
+✔ Add 'created_at' module, maybe have 'protected' fields @done(25-07-18 20:46)
 
 Sessions 4, 5, 6:
 ☐ Final checks

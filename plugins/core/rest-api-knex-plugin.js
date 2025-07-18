@@ -111,7 +111,7 @@ export const RestApiKnexPlugin = {
 
       const tableName = context.schemaInfo.tableName
       const idProperty = context.schemaInfo.idProperty
-      const db = transaction || knex;
+      const db = context.db;
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
@@ -141,7 +141,7 @@ export const RestApiKnexPlugin = {
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = transaction || knex;
+      const db = context.db;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
@@ -193,7 +193,7 @@ export const RestApiKnexPlugin = {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty;
-      const db = transaction || knex;
+      const db = context.db;
       
       log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
       
@@ -216,7 +216,7 @@ export const RestApiKnexPlugin = {
       const schema =  context.schemaInfo.schema;
       const searchSchema =  context.schemaInfo.searchSchema;
       const queryParams = context.queryParams
-      const db = transaction || knex;
+      const db = context.db;
       const sortableFields = context.sortableFields
       const idProperty = context.schemaInfo.idProperty
 
@@ -557,7 +557,7 @@ export const RestApiKnexPlugin = {
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = transaction || knex;
+      const db = context.db;
       const inputRecord = context.inputRecord      
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
@@ -579,7 +579,7 @@ export const RestApiKnexPlugin = {
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = transaction || knex;
+      const db = context.db;
       const inputRecord = context.inputRecord      
       const isCreate = context.isCreate
     
@@ -632,7 +632,7 @@ export const RestApiKnexPlugin = {
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
       const schema =  context.schemaInfo.schema;
-      const db = transaction || knex;
+      const db = context.db;
       const inputRecord = context.inputRecord      
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`);
@@ -676,7 +676,7 @@ export const RestApiKnexPlugin = {
 
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const db = transaction || knex;
+      const db = context.db;
       
       log.debug(`[Knex] DELETE ${tableName}/${id}`);
       
