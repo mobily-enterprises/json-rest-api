@@ -37,6 +37,7 @@ export const ExpressPlugin = {
     api.http.express = {};
     
     const expressOptions = pluginOptions['express'] || {};
+    
     const basePath = expressOptions.basePath || '';
     const strictContentType = expressOptions.strictContentType !== false;
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb';
@@ -44,7 +45,7 @@ export const ExpressPlugin = {
     // Set transport information for other plugins
     vars.transport = {
       type: 'express',
-      matchAll: '*'  // Express wildcard pattern for matching all routes
+      matchAll: '*' // Express wildcard pattern for matching all routes
     };
     
     // Register file detector if enabled
@@ -258,65 +259,109 @@ export const ExpressPlugin = {
       const beforeMiddleware = expressOptions.middleware?.beforeAll || [];
       
       // Create the Express route
-      const expressPath = basePath + path;
+      // Special handling for wildcard paths when basePath is set
+      let expressPath;
+      if (path === vars.transport.matchAll && basePath) {
+        // When we have a basePath and a wildcard, we need to use proper Express wildcard syntax
+        expressPath = basePath + '/*';
+      } else {
+        expressPath = basePath + path;
+      }
       
-      router[method.toLowerCase()](expressPath, ...beforeMiddleware, async (req, res) => {
-        try {
-          // Extract request data
-          const queryString = req.url.split('?')[1] || '';
-          const context = req.context || createContext(req, res, 'express');
-          
-          // Call the generic handler
-          const result = await handler({
-            queryString,
-            headers: req.headers,
-            params: req.params,
-            body: req.body,
-            context
-          });
-          
-          // Prepare response status
-          let responseStatus = 200;
-          if (result && typeof result.statusCode === 'number') {
-            responseStatus = result.statusCode;
-          } else if (method === 'DELETE' && !result) {
-            responseStatus = 204;
-          } else if (method === 'POST') {
-            responseStatus = 201;
-          }
-          
-          // Update hook context for response
-          if (req.hookContext) {
-            req.hookContext.response.status = responseStatus;
-            req.hookContext.response.body = result;
-            
-            // Run transport:response hook
-            await runHooks('transport:response', context, req.hookContext);
-            
-            // Apply response headers from hooks
-            if (req.hookContext.response.headers) {
-              res.set(req.hookContext.response.headers);
+      
+      try {
+      
+        // 1. Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
+        const expressHandler = async (req, res) => {
+          try {
+            // Extract request data
+            const queryString = req.url.split('?')[1] || '';
+            const context = req.context || createContext(req, res, 'express');
+
+            // Call the generic handler
+            const result = await handler({
+              queryString,
+              headers: req.headers,
+              params: req.params,
+              body: req.body,
+              context
+            });
+
+            // Prepare response status
+            let responseStatus = 200;
+            if (result && typeof result.statusCode === 'number') {
+              responseStatus = result.statusCode;
+            } else if (req.method === 'DELETE' && !result) {
+              responseStatus = 204;
+            } else if (req.method === 'POST') {
+              responseStatus = 201;
             }
-          }
-          
-          // Set content type
-          res.set('Content-Type', 'application/vnd.api+json');
-          
-          // Handle response based on status
-          if (responseStatus === 204) {
-            res.sendStatus(204);
-          } else {
-            if (method === 'POST' && result?.data?.id && helpers.getLocation) {
-              const scopeName = path.split('/')[2]; // Extract from /api/scopeName
-              const location = helpers.getLocation({ scopeName, id: result.data.id });
-              res.set('Location', `${basePath}/api${location}`);
+
+            // Apply headers from the handler result
+            if (result && result.headers) {
+              res.set(result.headers);
             }
-            res.status(responseStatus).json(result);
+
+            // Update hook context for response (if hook context exists)
+            if (req.hookContext) {
+              req.hookContext.response.status = responseStatus;
+              req.hookContext.response.body = result;
+              await runHooks('transport:response', context, req.hookContext);
+              if (req.hookContext.response.headers) {
+                res.set(req.hookContext.response.headers);
+              }
+            }
+
+            // Set content type
+            res.set('Content-Type', 'application/vnd.api+json');
+
+            // Handle response based on status
+            if (responseStatus === 204) {
+              res.sendStatus(204);
+            } else {
+              // If result has a body property, that's what we should send
+              // This happens when handler returns { statusCode, body, headers }
+              const responseBody = result && result.body !== undefined ? result.body : result;
+              
+              if (req.method === 'POST' && responseBody?.data?.id && helpers.getLocation) {
+                const scopeName = path.split('/')[2];
+                const location = helpers.getLocation({ scopeName, id: responseBody.data.id });
+                res.set('Location', `${basePath}/api${location}`);
+              }
+              res.status(responseStatus).json(responseBody);
+            }
+          } catch (error) {
+            handleError(error, req, res);
           }
-        } catch (error) {
-          handleError(error, req, res);
+        };
+
+        // 2. Check for the wildcard path and use the appropriate Express method.
+        if (path === vars.transport.matchAll) {
+          // For wildcard paths in Express 5, we need to use middleware approach
+          // Create a middleware that only responds to the specific method
+          const methodSpecificMiddleware = (req, res, next) => {
+            if (req.method.toLowerCase() === method.toLowerCase()) {
+              expressHandler(req, res);
+            } else {
+              next();
+            }
+          };
+          router.use(...beforeMiddleware, methodSpecificMiddleware);
+        } else {
+          // Use the specific method (get, post, all, etc.) for all other defined routes
+          router[method.toLowerCase()](expressPath, ...beforeMiddleware, expressHandler);
         }
-      });
+
+
+      } catch (routeError) {
+        console.log('[EXPRESS DEBUG] Error creating route:', {
+          error: routeError.message,
+          stack: routeError.stack,
+          path: expressPath,
+          method: method.toLowerCase()
+        });
+        throw routeError;
+      }
       
       log.trace(`Express route created: ${method} ${expressPath}`);
     });

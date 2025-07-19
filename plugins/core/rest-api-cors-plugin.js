@@ -73,6 +73,7 @@
         return;
       }
 
+
       // Register OPTIONS handler for all routes
       const optionsHandler = async ({ context, headers }) => {
         const origin = headers?.origin;
@@ -116,14 +117,22 @@
       };
 
       // Register OPTIONS route for all paths
-      await runHooks('addRoute', {}, {
+      await api.addRoute({
         method: 'OPTIONS',
         path: vars.transport.matchAll,
         handler: optionsHandler
       });
 
       // Hook to handle CORS headers for all responses
-      addHook('transport:response', 'cors-headers', { order: -1000 }, async ({ context, request, response }) => {
+      addHook('transport:response', 'cors-headers', { order: -1000 }, async ({ context, methodParams }) => {
+        // The Express plugin passes the hook context as methodParams
+        const { request, response } = methodParams || {};
+        
+        if (!request) {
+          log.error('CORS: request is undefined in transport:response hook');
+          return;
+        }
+        
         const origin = request.headers?.origin;
         const method = request.method?.toUpperCase();
 
