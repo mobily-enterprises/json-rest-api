@@ -41,6 +41,12 @@ export const ExpressPlugin = {
     const strictContentType = expressOptions.strictContentType !== false;
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb';
     
+    // Set transport information for other plugins
+    vars.transport = {
+      type: 'express',
+      matchAll: '*'  // Express wildcard pattern for matching all routes
+    };
+    
     // Register file detector if enabled
     if (expressOptions.enableFileUploads !== false && api.rest?.registerFileDetector) {
       const parserLib = expressOptions.fileParser || 'busboy';
@@ -95,11 +101,32 @@ export const ExpressPlugin = {
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express');
       
-      const hookParams = { req, res, url: req.url, method: req.method };
-      const shouldContinue = await runHooks('transport:request', context, hookParams);
+      // Standardized transport hook context
+      const hookContext = {
+        context,
+        request: {
+          method: req.method,
+          url: req.url,
+          path: req.path,
+          headers: req.headers,
+          body: req.body,
+          params: req.params,
+          query: req.query
+        },
+        response: {
+          headers: {},
+          status: null
+        }
+      };
+      
+      const shouldContinue = await runHooks('transport:request', context, hookContext);
       
       if (!shouldContinue || context.handled) {
         if (context.rejection) {
+          // Apply response headers from hooks
+          if (hookContext.response.headers) {
+            res.set(hookContext.response.headers);
+          }
           return res.status(context.rejection.status || 500).json({
             errors: [{
               status: String(context.rejection.status || 500),
@@ -111,6 +138,8 @@ export const ExpressPlugin = {
         return;
       }
       
+      // Store hook context for later use
+      req.hookContext = hookContext;
       req.context = context;
       next();
     });
@@ -139,11 +168,11 @@ export const ExpressPlugin = {
     /**
      * Error handler - maps REST API errors to HTTP responses
      */
-    const handleError = (error, res) => {
+    const handleError = async (error, req, res) => {
       enhancedLog.logError('HTTP request error', error, {
-        method: res.req?.method,
-        path: res.req?.path,
-        url: res.req?.url
+        method: req.method,
+        path: req.path,
+        url: req.url
       });
       
       let status = 500;
@@ -204,6 +233,18 @@ export const ExpressPlugin = {
         }];
       }
       
+      // Run transport:response hook for errors
+      if (req.hookContext) {
+        req.hookContext.response.status = status;
+        req.hookContext.response.body = errorResponse;
+        await runHooks('transport:response', req.context, req.hookContext);
+        
+        // Apply response headers from hooks
+        if (req.hookContext.response.headers) {
+          res.set(req.hookContext.response.headers);
+        }
+      }
+      
       res.status(status).json(errorResponse);
     };
     
@@ -234,27 +275,46 @@ export const ExpressPlugin = {
             context
           });
           
-          // Handle response based on method
+          // Prepare response status
+          let responseStatus = 200;
+          if (result && typeof result.statusCode === 'number') {
+            responseStatus = result.statusCode;
+          } else if (method === 'DELETE' && !result) {
+            responseStatus = 204;
+          } else if (method === 'POST') {
+            responseStatus = 201;
+          }
+          
+          // Update hook context for response
+          if (req.hookContext) {
+            req.hookContext.response.status = responseStatus;
+            req.hookContext.response.body = result;
+            
+            // Run transport:response hook
+            await runHooks('transport:response', context, req.hookContext);
+            
+            // Apply response headers from hooks
+            if (req.hookContext.response.headers) {
+              res.set(req.hookContext.response.headers);
+            }
+          }
+          
+          // Set content type
           res.set('Content-Type', 'application/vnd.api+json');
           
-          // Check if handler returned a specific status code
-          if (result && typeof result.statusCode === 'number') {
-            res.status(result.statusCode).json(result.body || result);
-          } else if (method === 'DELETE' && !result) {
+          // Handle response based on status
+          if (responseStatus === 204) {
             res.sendStatus(204);
-          } else if (method === 'POST') {
-            // Set Location header for created resources
-            if (result?.data?.id && helpers.getLocation) {
+          } else {
+            if (method === 'POST' && result?.data?.id && helpers.getLocation) {
               const scopeName = path.split('/')[2]; // Extract from /api/scopeName
               const location = helpers.getLocation({ scopeName, id: result.data.id });
               res.set('Location', `${basePath}/api${location}`);
             }
-            res.status(201).json(result);
-          } else {
-            res.json(result);
+            res.status(responseStatus).json(result);
           }
         } catch (error) {
-          handleError(error, res);
+          handleError(error, req, res);
         }
       });
       
@@ -272,15 +332,40 @@ export const ExpressPlugin = {
     
     // Set up 404 handler in separate router (unless disabled)
     if (expressOptions.handle404 !== false) {
-      notFoundRouter.use((req, res, next) => {
+      notFoundRouter.use(async (req, res, next) => {
         if (req.path.startsWith('/api')) {
-          res.status(404).json({
-            errors: [{
-              status: '404',
-              title: 'Not Found',
-              detail: `The requested endpoint ${req.method} ${req.path} does not exist`
-            }]
-          });
+          // Create minimal hook context for 404
+          const context = createContext(req, res, 'express');
+          const hookContext = {
+            context,
+            request: {
+              method: req.method,
+              url: req.url,
+              path: req.path,
+              headers: req.headers
+            },
+            response: {
+              headers: {},
+              status: 404,
+              body: {
+                errors: [{
+                  status: '404',
+                  title: 'Not Found',
+                  detail: `The requested endpoint ${req.method} ${req.path} does not exist`
+                }]
+              }
+            }
+          };
+          
+          // Run transport:response hook for 404
+          await runHooks('transport:response', context, hookContext);
+          
+          // Apply response headers from hooks
+          if (hookContext.response.headers) {
+            res.set(hookContext.response.headers);
+          }
+          
+          res.status(404).json(hookContext.response.body);
         } else {
           next();
         }
