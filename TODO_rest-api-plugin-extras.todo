@@ -16,6 +16,6 @@ Session 4:
 
 
 Sessions 4:
-☐ Final decision on parameters/usage of non-method hooks (parameters? Context?)
+✔ Final decision on parameters/usage of non-method hooks (parameters? Context?) @done(25-07-20 17:21)
 ☐ Final decision on the way plugins get the parameters; DO NOT get them their own namespace
 ☐ Document the lot properly
