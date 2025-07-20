@@ -70,29 +70,6 @@
         return false;
       }
 
-      // Create runtime configuration API
-      api.cors = {
-        getConfig() {
-          return { ...corsConfig };
-        },
-
-        updateOrigin(origin) {
-          corsConfig.origin = origin;
-        },
-
-        addAllowedHeader(header) {
-          if (!corsConfig.allowedHeaders.includes(header)) {
-            corsConfig.allowedHeaders.push(header);
-          }
-        },
-
-        addExposedHeader(header) {
-          if (!corsConfig.exposedHeaders.includes(header)) {
-            corsConfig.exposedHeaders.push(header);
-          }
-        }
-      };
-
       // Check if transport plugin is available
       if (!vars.transport) {
         log.error('CORS plugin requires a transport plugin (express, koa, etc.) to be installed');

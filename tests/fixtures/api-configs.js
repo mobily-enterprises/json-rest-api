@@ -9,6 +9,7 @@ import { createServer } from 'http';
  */
 export async function createBasicApi(knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || `basic-test-api`;
+  const tablePrefix = pluginOptions.tablePrefix || 'basic';
   const api = new Api({
     name: apiName,
     version: '1.0.0'
@@ -47,7 +48,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
       books: { hasMany: 'books', foreignKey: 'country_id' }
     },
-    tableName: 'basic_countries'
+    tableName: `${tablePrefix}_countries`
   });
   await api.resources.countries.createKnexTable();
 
@@ -61,7 +62,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     relationships: {
       books: { hasMany: 'books', foreignKey: 'publisher_id' }
     },
-    tableName: 'basic_publishers'
+    tableName: `${tablePrefix}_publishers`
   });
   await api.resources.publishers.createKnexTable();
 
@@ -74,7 +75,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     relationships: {
       books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
     },
-    tableName: 'basic_authors'
+    tableName: `${tablePrefix}_authors`
   });
   await api.resources.authors.createKnexTable();
 
@@ -89,7 +90,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     relationships: {
       authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
     },
-    tableName: 'basic_books'
+    tableName: `${tablePrefix}_books`
   });
   await api.resources.books.createKnexTable();
 
@@ -100,7 +101,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
       author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' }
     },
-    tableName: 'basic_book_authors'
+    tableName: `${tablePrefix}_book_authors`
   });
   await api.resources.book_authors.createKnexTable();
 
