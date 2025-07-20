@@ -632,7 +632,9 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
       title: { type: 'string', required: true, max: 200 },
       category_id: { type: 'number', nullable: true, belongsTo: 'categories', as: 'category', search: true },
       position: { type: 'string', max: 255, nullable: true },
-      beforeId: { type: 'string', virtual: true } // Virtual field for positioning
+      beforeId: { type: 'string', virtual: true }, // Virtual field for positioning
+      deleted_at: { type: 'dateTime', nullable: true, search: true }, // For soft delete tests
+      version: { type: 'number', defaultTo: 1, search: true } // For versioning tests
     },
     relationships: {
       category: { belongsTo: 'categories' }
@@ -657,10 +659,11 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
       project_id: { type: 'number', nullable: true, belongsTo: 'projects', as: 'project', search: true },
-      status: { type: 'string', defaultTo: 'active', search: true },
+      status: { type: 'string', defaultTo: 'active', nullable: true, search: true },
       position: { type: 'string', max: 255, nullable: true },
       sort_order: { type: 'string', max: 255, nullable: true }, // Alternative position field
-      beforeId: { type: 'string', virtual: true }
+      beforeId: { type: 'string', virtual: true },
+      priority: { type: 'string', defaultTo: 'medium', search: true } // For multi-filter tests
     },
     relationships: {
       project: { belongsTo: 'projects' }

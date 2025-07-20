@@ -93,9 +93,8 @@ export function rebalancePositions(items, positionField, maxLength = 50) {
   let prevKey = null;
   
   for (let i = 0; i < sorted.length; i++) {
-    // Generate keys with even spacing
-    const nextKey = i === sorted.length - 1 ? null : 'z';
-    const newPosition = generateKeyBetween(prevKey, nextKey);
+    // For even spacing, we generate keys sequentially
+    const newPosition = generateKeyBetween(prevKey, null);
     
     rebalanced.push({
       ...sorted[i],
@@ -159,13 +158,12 @@ export function assignInitialPositions(items, positionField, orderByField = null
   }
 
   // Get the last positioned item
-  const lastPositioned = positioned
-    .sort((a, b) => {
-      const posA = a[positionField] || '';
-      const posB = b[positionField] || '';
-      return posA < posB ? -1 : posA > posB ? 1 : 0;
-    })
-    .pop();
+  const sortedPositioned = [...positioned].sort((a, b) => {
+    const posA = a[positionField] || '';
+    const posB = b[positionField] || '';
+    return posA < posB ? -1 : posA > posB ? 1 : 0;
+  });
+  const lastPositioned = sortedPositioned[sortedPositioned.length - 1];
   
   let lastKey = lastPositioned ? lastPositioned[positionField] : null;
   

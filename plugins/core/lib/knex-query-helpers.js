@@ -692,18 +692,33 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
               if (Array.isArray(filterValue)) {
                 this.whereIn(dbField, filterValue);
               } else {
-                this.where(dbField, operator, filterValue);
+                // Handle null values for 'in' operator
+                if (filterValue === null) {
+                  this.whereNull(dbField);
+                } else {
+                  this.where(dbField, operator, filterValue);
+                }
               }
               break;
             case 'between':
               if (Array.isArray(filterValue) && filterValue.length === 2) {
                 this.whereBetween(dbField, filterValue);
               } else {
-                this.where(dbField, operator, filterValue);
+                // Handle null values for 'between' operator
+                if (filterValue === null) {
+                  this.whereNull(dbField);
+                } else {
+                  this.where(dbField, operator, filterValue);
+                }
               }
               break;
             default:
-              this.where(dbField, operator, filterValue);
+              // Handle null values specially
+              if (filterValue === null) {
+                this.whereNull(dbField);
+              } else {
+                this.where(dbField, operator, filterValue);
+              }
               break;
           }
           break;

@@ -22,7 +22,6 @@ export const PositioningPlugin = {
       strategy: positioningOptions.strategy || 'fractional',
       beforeIdField: positioningOptions.beforeIdField || 'beforeId',
       defaultPosition: positioningOptions.defaultPosition || 'last',
-      allowMissing: positioningOptions.allowMissing || false,
       autoIndex: positioningOptions.autoIndex !== undefined ? positioningOptions.autoIndex : true,
       rebalanceThreshold: positioningOptions.rebalanceThreshold || 50 // Max position string length
     };
@@ -74,18 +73,9 @@ export const PositioningPlugin = {
       // Check if schema has position field
       const schema = scopeOptions.schema;
       if (schema && !schema[vars.positioning.field]) {
-        if (vars.positioning.allowMissing) {
-          log.warn(`Resource ${scopeName} missing ${vars.positioning.field} field - positioning disabled for this resource`);
-        } else {
-          // Auto-add position field to schema
-          schema[vars.positioning.field] = {
-            type: 'string',
-            maxLength: 255,
-            nullable: true,
-            description: 'Fractional index position for ordering'
-          };
-          log.info(`Added ${vars.positioning.field} field to ${scopeName} schema`);
-        }
+        throw new Error(
+          `Resource '${scopeName}' must have '${vars.positioning.field}' field in schema to use positioning plugin`
+        );
       }
 
       // Validate filter fields exist
@@ -172,7 +162,7 @@ export const PositioningPlugin = {
       const scope = scopes[scopeName];
       const hasPositionField = scope?.vars?.schemaInfo?.schema?.structure?.[vars.positioning.field];
       
-      if (!hasPositionField && !vars.positioning.allowMissing) {
+      if (!hasPositionField) {
         return;
       }
 

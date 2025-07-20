@@ -8,7 +8,14 @@ Session 2:
 
 Sessoon 3:
 ✔ Add 'created_at' module, maybe have 'protected' fields @done(25-07-18 20:46)
+✔ Create cors module @done(25-07-19 22:15)
 
-Sessions 4, 5, 6:
-☐ Final checks
+Session 4:
+✔ Improve the CORS plugin documentation BY FAAAAR @done(25-07-20 08:35)
+☐ Write test/documentation for positioning plugin
+
+
+Sessions 4:
+☐ Final decision on parameters/usage of non-method hooks (parameters? Context?)
+☐ Final decision on the way plugins get the parameters; DO NOT get them their own namespace
 ☐ Document the lot properly
