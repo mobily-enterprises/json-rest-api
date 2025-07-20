@@ -426,7 +426,8 @@ export const JwtAuthPlugin = {
         };
         
         // Step 5: Allow other plugins to react to successful authentication
-        await runHooks('afterAuthentication', context, { payload });
+        context.authPayload = payload;
+        await runHooks('afterAuthentication', context);
         
       } catch (error) {
         // Invalid token - log for debugging but treat as anonymous
@@ -748,7 +749,8 @@ export const JwtAuthPlugin = {
         }
         
         // Run logout hooks
-        await runHooks('afterLogout', context, { userId: context.auth.userId });
+        context.logoutUserId = context.auth.userId;
+        await runHooks('afterLogout', context);
         
         return { success: true, message: 'Logged out successfully' };
       },

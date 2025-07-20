@@ -127,9 +127,9 @@
       });
 
       // Hook to handle CORS headers for all responses
-      addHook('transport:response', 'cors-headers', { order: -1000 }, async ({ context, methodParams }) => {
-        // The Express plugin passes the hook context as methodParams
-        const { request, response } = methodParams || {};
+      addHook('transport:response', 'cors-headers', { order: -1000 }, async ({ context }) => {
+        // Transport data is now nested in context
+        const { request, response } = context.transport || {};
         
         if (!request) {
           log.error('CORS: request is undefined in transport:response hook');

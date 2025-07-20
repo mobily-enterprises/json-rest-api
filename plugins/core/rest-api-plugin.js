@@ -2443,7 +2443,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
       }
       
       // Run the addRoute hook to notify transport plugins
-      await runHooks('addRoute', {}, params);
+      await runHooks('addRoute', params);
       
       return { registered: true, method, path };
     });

@@ -102,9 +102,8 @@ export const ExpressPlugin = {
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express');
       
-      // Standardized transport hook context
-      const hookContext = {
-        context,
+      // Transport-specific data for hooks
+      const transportData = {
         request: {
           method: req.method,
           url: req.url,
@@ -120,13 +119,15 @@ export const ExpressPlugin = {
         }
       };
       
-      const shouldContinue = await runHooks('transport:request', context, hookContext);
+      // Add transport data to context
+      context.transport = transportData;
+      const shouldContinue = await runHooks('transport:request', context);
       
       if (!shouldContinue || context.handled) {
         if (context.rejection) {
           // Apply response headers from hooks
-          if (hookContext.response.headers) {
-            res.set(hookContext.response.headers);
+          if (transportData.response.headers) {
+            res.set(transportData.response.headers);
           }
           return res.status(context.rejection.status || 500).json({
             errors: [{
@@ -139,8 +140,8 @@ export const ExpressPlugin = {
         return;
       }
       
-      // Store hook context for later use
-      req.hookContext = hookContext;
+      // Store transport data and context for later use
+      req.transportData = transportData;
       req.context = context;
       next();
     });
@@ -235,14 +236,15 @@ export const ExpressPlugin = {
       }
       
       // Run transport:response hook for errors
-      if (req.hookContext) {
-        req.hookContext.response.status = status;
-        req.hookContext.response.body = errorResponse;
-        await runHooks('transport:response', req.context, req.hookContext);
+      if (req.transportData && req.context) {
+        req.transportData.response.status = status;
+        req.transportData.response.body = errorResponse;
+        req.context.transport = req.transportData;
+        await runHooks('transport:response', req.context);
         
         // Apply response headers from hooks
-        if (req.hookContext.response.headers) {
-          res.set(req.hookContext.response.headers);
+        if (req.transportData.response.headers) {
+          res.set(req.transportData.response.headers);
         }
       }
       
@@ -252,8 +254,8 @@ export const ExpressPlugin = {
     /**
      * Listen to addRoute hook to create Express routes
      */
-    addHook('addRoute', 'expressRouteCreator', {}, async ({ methodParams }) => {
-      const { method, path, handler } = methodParams;
+    addHook('addRoute', 'expressRouteCreator', {}, async ({ context }) => {
+      const { method, path, handler } = context;
       
       // Apply any global before middleware
       const beforeMiddleware = expressOptions.middleware?.beforeAll || [];
@@ -302,13 +304,14 @@ export const ExpressPlugin = {
               res.set(result.headers);
             }
 
-            // Update hook context for response (if hook context exists)
-            if (req.hookContext) {
-              req.hookContext.response.status = responseStatus;
-              req.hookContext.response.body = result;
-              await runHooks('transport:response', context, req.hookContext);
-              if (req.hookContext.response.headers) {
-                res.set(req.hookContext.response.headers);
+            // Update transport data for response (if transport data exists)
+            if (req.transportData) {
+              req.transportData.response.status = responseStatus;
+              req.transportData.response.body = result;
+              context.transport = req.transportData;
+              await runHooks('transport:response', context);
+              if (req.transportData.response.headers) {
+                res.set(req.transportData.response.headers);
               }
             }
 
@@ -379,10 +382,9 @@ export const ExpressPlugin = {
     if (expressOptions.handle404 !== false) {
       notFoundRouter.use(async (req, res, next) => {
         if (req.path.startsWith('/api')) {
-          // Create minimal hook context for 404
+          // Create minimal context for 404
           const context = createContext(req, res, 'express');
-          const hookContext = {
-            context,
+          const transportData = {
             request: {
               method: req.method,
               url: req.url,
@@ -402,15 +404,18 @@ export const ExpressPlugin = {
             }
           };
           
+          // Add transport data to context
+          context.transport = transportData;
+          
           // Run transport:response hook for 404
-          await runHooks('transport:response', context, hookContext);
+          await runHooks('transport:response', context);
           
           // Apply response headers from hooks
-          if (hookContext.response.headers) {
-            res.set(hookContext.response.headers);
+          if (transportData.response.headers) {
+            res.set(transportData.response.headers);
           }
           
-          res.status(404).json(hookContext.response.body);
+          res.status(404).json(transportData.response.body);
         } else {
           next();
         }
