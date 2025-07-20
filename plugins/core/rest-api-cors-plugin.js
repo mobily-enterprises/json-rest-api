@@ -6,8 +6,8 @@
       // Get CORS configuration
       const corsOptions = pluginOptions?.['rest-api-cors'] || {};
 
-      // Store configuration in vars
-      vars.cors = {
+      // Store configuration - using a plain object for runtime updates
+      const corsConfig = {
         // Origin configuration
         origin: corsOptions.origin || '*', // Can be string, regex, array, or function
         credentials: corsOptions.credentials !== undefined ? corsOptions.credentials : true,
@@ -40,9 +40,12 @@
         optionsSuccessStatus: corsOptions.optionsSuccessStatus || 204
       };
 
+      // Store reference in vars for access in hooks
+      vars.cors = corsConfig;
+
       // Helper to check if origin is allowed
       function isOriginAllowed(origin, allowedOrigin) {
-        if (!origin) return !vars.cors.credentials; // No origin = same-origin request
+        if (!origin) return !corsConfig.credentials; // No origin = same-origin request
 
         // String match
         if (typeof allowedOrigin === 'string') {
@@ -67,6 +70,29 @@
         return false;
       }
 
+      // Create runtime configuration API
+      api.cors = {
+        getConfig() {
+          return { ...corsConfig };
+        },
+
+        updateOrigin(origin) {
+          corsConfig.origin = origin;
+        },
+
+        addAllowedHeader(header) {
+          if (!corsConfig.allowedHeaders.includes(header)) {
+            corsConfig.allowedHeaders.push(header);
+          }
+        },
+
+        addExposedHeader(header) {
+          if (!corsConfig.exposedHeaders.includes(header)) {
+            corsConfig.exposedHeaders.push(header);
+          }
+        }
+      };
+
       // Check if transport plugin is available
       if (!vars.transport) {
         log.error('CORS plugin requires a transport plugin (express, koa, etc.) to be installed');
@@ -81,15 +107,15 @@
         log.debug('CORS OPTIONS request', { origin });
 
         // Check if origin is allowed
-        if (isOriginAllowed(origin, vars.cors.origin)) {
+        if (isOriginAllowed(origin, corsConfig.origin)) {
           const responseHeaders = {
-            'Access-Control-Allow-Methods': vars.cors.methods.join(', '),
-            'Access-Control-Allow-Headers': vars.cors.allowedHeaders.join(', '),
-            'Access-Control-Max-Age': String(vars.cors.maxAge)
+            'Access-Control-Allow-Methods': corsConfig.methods.join(', '),
+            'Access-Control-Allow-Headers': corsConfig.allowedHeaders.join(', '),
+            'Access-Control-Max-Age': String(corsConfig.maxAge)
           };
 
           // Set origin header
-          if (vars.cors.origin === '*' && !vars.cors.credentials) {
+          if (corsConfig.origin === '*' && !corsConfig.credentials) {
             responseHeaders['Access-Control-Allow-Origin'] = '*';
           } else if (origin) {
             responseHeaders['Access-Control-Allow-Origin'] = origin;
@@ -97,12 +123,12 @@
           }
 
           // Set credentials if enabled
-          if (vars.cors.credentials) {
+          if (corsConfig.credentials) {
             responseHeaders['Access-Control-Allow-Credentials'] = 'true';
           }
 
           return {
-            statusCode: vars.cors.optionsSuccessStatus,
+            statusCode: corsConfig.optionsSuccessStatus,
             headers: responseHeaders,
             body: null
           };
@@ -148,9 +174,9 @@
         }
 
         // Check if origin is allowed
-        if (isOriginAllowed(origin, vars.cors.origin)) {
+        if (isOriginAllowed(origin, corsConfig.origin)) {
           // Set origin header
-          if (vars.cors.origin === '*' && !vars.cors.credentials) {
+          if (corsConfig.origin === '*' && !corsConfig.credentials) {
             response.headers['Access-Control-Allow-Origin'] = '*';
           } else if (origin) {
             response.headers['Access-Control-Allow-Origin'] = origin;
@@ -158,30 +184,27 @@
           }
 
           // Set credentials if enabled
-          if (vars.cors.credentials) {
+          if (corsConfig.credentials) {
             response.headers['Access-Control-Allow-Credentials'] = 'true';
           }
 
           // Set exposed headers
-          if (vars.cors.exposedHeaders.length > 0) {
-            response.headers['Access-Control-Expose-Headers'] = vars.cors.exposedHeaders.join(', ');
+          if (corsConfig.exposedHeaders.length > 0) {
+            response.headers['Access-Control-Expose-Headers'] = corsConfig.exposedHeaders.join(', ');
           }
         } else if (origin) {
           // Origin not allowed - don't set any CORS headers
           log.warn('CORS origin not allowed for response', {
             origin,
-            allowedOrigins: vars.cors.origin
+            allowedOrigins: corsConfig.origin
           });
         }
       });
 
-      // CORS configuration is now static and set during plugin initialization
-      // Dynamic updates are not supported to ensure consistency across multiple servers
-
       log.info('CORS plugin installed', {
-        origin: vars.cors.origin,
-        credentials: vars.cors.credentials,
-        methods: vars.cors.methods
+        origin: corsConfig.origin,
+        credentials: corsConfig.credentials,
+        methods: corsConfig.methods
       });
     }
   };
