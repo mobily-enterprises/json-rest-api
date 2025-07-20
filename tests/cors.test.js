@@ -349,26 +349,54 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
       assert.equal(response.headers['vary'], 'Origin');
     });
+
+     it('should handle PUT requests with CORS', async () => {
+      const putDoc = {
+        data: {
+          type: 'countries',
+          id: testCountryId,
+          attributes: {
+            name: 'Completely Replaced Country',
+            code: 'RC'
+          }
+        }
+      };
+
+      const response = await request(app)
+        .put(`/api/countries/${testCountryId}`)
+        .set('Origin', 'https://example.com')
+        .set('Accept', 'application/vnd.api+json')
+        .set('Content-Type', 'application/vnd.api+json')
+        .send(putDoc);
+      
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
+      assert.equal(response.headers['vary'], 'Origin');
+      assert.equal(response.headers['access-control-expose-headers'], 'X-Total-Count, X-Page-Count, Link');
+    });
   });
 
   describe('CORS with Array and Regex Origins', () => {
-    let originalOrigin;
-    
-    before(async () => {
-      // Save current config
-      originalOrigin = api.cors.getConfig().origin;
-    });
-    
-    after(async () => {
-      // Restore original config
-      api.cors.updateOrigin(originalOrigin);
-    });
-    
-     it('should support array of allowed origins', async () => {
-      api.cors.updateOrigin(['https://app1.com', 'https://app2.com', 'https://app3.com']);
+    it('should support array of allowed origins', async () => {
+      // Create a new API instance with array origin configuration
+      const arrayOriginApp = express();
+      const arrayOriginApi = await createBasicApi(knex, { 
+        apiName: 'cors-array-origins-test',
+        tablePrefix: 'cors_array',
+        includeExpress: true,
+        express: { app: arrayOriginApp }
+      });
+      
+      await arrayOriginApi.use(CorsPlugin, {
+        origin: ['https://app1.com', 'https://app2.com', 'https://app3.com'],
+        credentials: true
+      });
+      
+      // Mount routes after CORS plugin is installed
+      arrayOriginApi.http.express.mount(arrayOriginApp);
       
       // Test allowed origin
-      const response1 = await request(app)
+      const response1 = await request(arrayOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://app2.com')
         .set('Accept', 'application/vnd.api+json');
@@ -377,7 +405,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response1.headers['access-control-allow-origin'], 'https://app2.com');
       
       // Test disallowed origin
-      const response2 = await request(app)
+      const response2 = await request(arrayOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://app4.com')
         .set('Accept', 'application/vnd.api+json');
@@ -386,11 +414,26 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response2.headers['access-control-allow-origin'], undefined);
     });
     
-     it('should support regex origin matching', async () => {
-      api.cors.updateOrigin(/^https:\/\/.*\.example\.com$/);
+    it('should support regex origin matching', async () => {
+      // Create a new API instance with regex origin configuration
+      const regexOriginApp = express();
+      const regexOriginApi = await createBasicApi(knex, { 
+        apiName: 'cors-regex-origins-test',
+        tablePrefix: 'cors_regex',
+        includeExpress: true,
+        express: { app: regexOriginApp }
+      });
+      
+      await regexOriginApi.use(CorsPlugin, {
+        origin: /^https:\/\/.*\.example\.com$/,
+        credentials: true
+      });
+      
+      // Mount routes after CORS plugin is installed
+      regexOriginApi.http.express.mount(regexOriginApp);
       
       // Test matching subdomain
-      const response1 = await request(app)
+      const response1 = await request(regexOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://app.example.com')
         .set('Accept', 'application/vnd.api+json');
@@ -399,7 +442,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response1.headers['access-control-allow-origin'], 'https://app.example.com');
       
       // Test another matching subdomain
-      const response2 = await request(app)
+      const response2 = await request(regexOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://api.example.com')
         .set('Accept', 'application/vnd.api+json');
@@ -408,7 +451,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response2.headers['access-control-allow-origin'], 'https://api.example.com');
       
       // Test non-matching domain
-      const response3 = await request(app)
+      const response3 = await request(regexOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://example.org')
         .set('Accept', 'application/vnd.api+json');
@@ -417,12 +460,28 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response3.headers['access-control-allow-origin'], undefined);
     });
     
-     it('should support function-based origin validation', async () => {
+    it('should support function-based origin validation', async () => {
+      // Create a new API instance with function origin configuration
+      const functionOriginApp = express();
+      const functionOriginApi = await createBasicApi(knex, { 
+        apiName: 'cors-function-origins-test',
+        tablePrefix: 'cors_func',
+        includeExpress: true,
+        express: { app: functionOriginApp }
+      });
+      
       const allowedOrigins = new Set(['https://dynamic1.com', 'https://dynamic2.com']);
-      api.cors.updateOrigin((origin) => allowedOrigins.has(origin));
+      
+      await functionOriginApi.use(CorsPlugin, {
+        origin: (origin) => allowedOrigins.has(origin),
+        credentials: true
+      });
+      
+      // Mount routes after CORS plugin is installed
+      functionOriginApi.http.express.mount(functionOriginApp);
       
       // Test allowed origin
-      const response1 = await request(app)
+      const response1 = await request(functionOriginApp)
         .get('/api/countries')
         .set('Origin', 'https://dynamic1.com')
         .set('Accept', 'application/vnd.api+json');
@@ -431,9 +490,9 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response1.headers['access-control-allow-origin'], 'https://dynamic1.com');
       
       // Test disallowed origin
-      const response2 = await request(app)
+      const response2 = await request(functionOriginApp)
         .get('/api/countries')
-        .set('Origin', 'https://notallowed.com')
+        .set('Origin', 'https://dynamic3.com')
         .set('Accept', 'application/vnd.api+json');
       
       assert.equal(response2.status, 200);
@@ -443,10 +502,24 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
 
   describe('CORS Error Handling', () => {
      it('should reject preflight from disallowed origin', async () => {
-      // Temporarily set specific origin
-      api.cors.updateOrigin('https://allowed-only.com');
+      // Create a new API instance with specific allowed origin
+      const restrictedApp = express();
+      const restrictedApi = await createBasicApi(knex, { 
+        apiName: 'cors-restricted-test',
+        tablePrefix: 'cors_restrict',
+        includeExpress: true,
+        express: { app: restrictedApp }
+      });
       
-      const response = await request(app)
+      await restrictedApi.use(CorsPlugin, {
+        origin: 'https://allowed-only.com',
+        credentials: true
+      });
+      
+      // Mount routes after CORS plugin is installed
+      restrictedApi.http.express.mount(restrictedApp);
+      
+      const response = await request(restrictedApp)
         .options('/api/countries')
         .set('Origin', 'https://not-allowed.com')
         .set('Access-Control-Request-Method', 'POST');
@@ -454,9 +527,6 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 403);
       assert(response.body.error.includes('CORS origin not allowed'));
       assert.equal(response.headers['access-control-allow-origin'], undefined);
-      
-      // Reset to wildcard
-      api.cors.updateOrigin('*');
     });
     
      it('should handle lowercase HTTP methods', async () => {
@@ -506,6 +576,261 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       // CORS headers should be set for validation errors
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
       assert.equal(response.headers['vary'], 'Origin');
+    });
+  });
+
+  describe('CORS Configuration Options', () => {
+    it('should respect custom max-age configuration', async () => {
+      // Create API with custom max-age
+      const maxAgeApp = express();
+      const maxAgeApi = await createBasicApi(knex, {
+        apiName: 'cors-maxage-test',
+        tablePrefix: 'cors_maxage',
+        includeExpress: true,
+        express: { app: maxAgeApp }
+      });
+      
+      await maxAgeApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false,
+        maxAge: 3600 // 1 hour instead of default 24 hours
+      });
+      
+      maxAgeApi.http.express.mount(maxAgeApp);
+      
+      const response = await request(maxAgeApp)
+        .options('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Access-Control-Request-Method', 'POST');
+      
+      assert.equal(response.status, 204);
+      assert.equal(response.headers['access-control-max-age'], '3600');
+    });
+    
+    it('should respect custom exposed headers configuration', async () => {
+      // Create API with custom exposed headers
+      const exposedApp = express();
+      const exposedApi = await createBasicApi(knex, {
+        apiName: 'cors-exposed-test',
+        tablePrefix: 'cors_exposed',
+        includeExpress: true,
+        express: { app: exposedApp }
+      });
+      
+      await exposedApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false,
+        exposedHeaders: ['X-Custom-Header', 'X-Rate-Limit', 'X-Request-Id']
+      });
+      
+      exposedApi.http.express.mount(exposedApp);
+      
+      const response = await request(exposedApp)
+        .get('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Accept', 'application/vnd.api+json');
+      
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-expose-headers'], 'X-Custom-Header, X-Rate-Limit, X-Request-Id');
+    });
+    
+    it('should respect custom allowed methods configuration', async () => {
+      // Create API with limited methods
+      const methodsApp = express();
+      const methodsApi = await createBasicApi(knex, {
+        apiName: 'cors-methods-test',
+        tablePrefix: 'cors_methods',
+        includeExpress: true,
+        express: { app: methodsApp }
+      });
+      
+      await methodsApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false,
+        methods: ['GET', 'POST'] // Only allow GET and POST
+      });
+      
+      methodsApi.http.express.mount(methodsApp);
+      
+      const response = await request(methodsApp)
+        .options('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Access-Control-Request-Method', 'DELETE');
+      
+      assert.equal(response.status, 204);
+      assert.equal(response.headers['access-control-allow-methods'], 'GET, POST');
+    });
+    
+    it('should handle credentials false configuration', async () => {
+      // Create API with credentials disabled
+      const noCredApp = express();
+      const noCredApi = await createBasicApi(knex, {
+        apiName: 'cors-nocred-test',
+        tablePrefix: 'cors_nocred',
+        includeExpress: true,
+        express: { app: noCredApp }
+      });
+      
+      await noCredApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false
+      });
+      
+      noCredApi.http.express.mount(noCredApp);
+      
+      const response = await request(noCredApp)
+        .get('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Accept', 'application/vnd.api+json');
+      
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-allow-origin'], '*');
+      assert.equal(response.headers['access-control-allow-credentials'], undefined);
+      // No Vary header when using wildcard without credentials
+      assert.equal(response.headers['vary'], undefined);
+    });
+    
+    it('should handle custom allowed headers configuration', async () => {
+      // Create API with custom allowed headers
+      const headersApp = express();
+      const headersApi = await createBasicApi(knex, {
+        apiName: 'cors-headers-test',
+        tablePrefix: 'cors_headers',
+        includeExpress: true,
+        express: { app: headersApp }
+      });
+      
+      await headersApi.use(CorsPlugin, {
+        origin: 'https://app.example.com',
+        credentials: true,
+        allowedHeaders: ['Content-Type', 'X-API-Key', 'X-Session-Token']
+      });
+      
+      headersApi.http.express.mount(headersApp);
+      
+      const response = await request(headersApp)
+        .options('/api/countries')
+        .set('Origin', 'https://app.example.com')
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'X-API-Key, X-Session-Token');
+      
+      assert.equal(response.status, 204);
+      assert.equal(response.headers['access-control-allow-headers'], 'Content-Type, X-API-Key, X-Session-Token');
+    });
+  });
+
+  describe('CORS with PUT Requests', () => {
+    it('should handle PUT requests with proper CORS headers', async () => {
+      // The main api already has PUT in its allowed methods
+      // Create test data first
+      const doc = createJsonApiDocument('countries', {
+        name: 'Original Country',
+        code: 'OC'
+      });
+      
+      const createResult = await api.resources.countries.post({
+        inputRecord: doc,
+        simplified: false
+      });
+      
+      const countryId = createResult.data.id;
+      
+      // Now test PUT with CORS
+      const putDoc = {
+        data: {
+          type: 'countries',
+          id: String(countryId),
+          attributes: {
+            name: 'Replaced Country',
+            code: 'RC'
+          }
+        }
+      };
+      
+      const response = await request(app)
+        .put(`/api/countries/${countryId}`)
+        .send(putDoc)
+        .set('Origin', 'https://example.com')
+        .set('Content-Type', 'application/vnd.api+json')
+        .set('Accept', 'application/vnd.api+json');
+      
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
+      assert.equal(response.headers['access-control-allow-credentials'], 'true');
+      assert.equal(response.headers['vary'], 'Origin');
+      
+      // Note: PUT might not return the full record by default depending on returnFullRecord settings
+      // The important part for CORS testing is that the headers are correct, which we've verified above
+    });
+    
+    it('should handle PUT preflight requests', async () => {
+      const response = await request(app)
+        .options('/api/countries/123')
+        .set('Origin', 'https://example.com')
+        .set('Access-Control-Request-Method', 'PUT')
+        .set('Access-Control-Request-Headers', 'Content-Type');
+      
+      assert.equal(response.status, 204);
+      assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
+      assert.equal(response.headers['access-control-allow-methods'], 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      assert(response.headers['access-control-allow-methods'].includes('PUT'));
+    });
+  });
+
+  describe('CORS Edge Cases', () => {
+    it('should handle requests with no exposed headers configured', async () => {
+      // Create API with empty exposed headers
+      const noExposedApp = express();
+      const noExposedApi = await createBasicApi(knex, {
+        apiName: 'cors-noexposed-test',
+        tablePrefix: 'cors_noexposed',
+        includeExpress: true,
+        express: { app: noExposedApp }
+      });
+      
+      await noExposedApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false,
+        exposedHeaders: [] // Empty array
+      });
+      
+      noExposedApi.http.express.mount(noExposedApp);
+      
+      const response = await request(noExposedApp)
+        .get('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Accept', 'application/vnd.api+json');
+      
+      assert.equal(response.status, 200);
+      // Should not set exposed headers when array is empty
+      assert.equal(response.headers['access-control-expose-headers'], undefined);
+    });
+    
+    it('should handle optionsSuccessStatus configuration', async () => {
+      // Create API with custom options success status
+      const statusApp = express();
+      const statusApi = await createBasicApi(knex, {
+        apiName: 'cors-status-test',
+        tablePrefix: 'cors_status',
+        includeExpress: true,
+        express: { app: statusApp }
+      });
+      
+      await statusApi.use(CorsPlugin, {
+        origin: '*',
+        credentials: false,
+        optionsSuccessStatus: 200 // Use 200 instead of 204
+      });
+      
+      statusApi.http.express.mount(statusApp);
+      
+      const response = await request(statusApp)
+        .options('/api/countries')
+        .set('Origin', 'https://example.com')
+        .set('Access-Control-Request-Method', 'GET');
+      
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-allow-origin'], '*');
     });
   });
 });
