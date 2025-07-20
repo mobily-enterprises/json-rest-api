@@ -23,6 +23,7 @@
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
+    "fractional-indexing": "^3.2.0",
     "hooked-api": "^1.0.8",
     "json-rest-schema": "^1.0.6",
     "jsonwebtoken": "^9.0.2",

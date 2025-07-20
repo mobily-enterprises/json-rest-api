@@ -587,3 +587,87 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
 
   return api;
 }
+
+/**
+ * Creates an API with positioning support for testing
+ */
+export async function createPositioningApi(knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'positioning-test-api';
+  const tablePrefix = pluginOptions.tablePrefix || 'positioning';
+  const api = new Api({
+    name: apiName,
+    version: '1.0.0'
+  });
+
+  const restApiOptions = {
+    simplifiedApi: true,  // Changed to true to allow simplified API calls in tests
+    simplifiedTransport: false,
+    returnFullRecord: {
+      post: true,
+      put: true,
+      patch: true,
+      allowRemoteOverride: false
+    },
+    sortableFields: ['id', 'title', 'name', 'position', 'sort_order', 'category_id', 'project_id', 'status'],
+    ...pluginOptions['rest-api']
+  };
+
+  await api.use(RestApiPlugin, restApiOptions);
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Categories (for grouping tasks)
+  await api.addResource('categories', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 100 }
+    },
+    tableName: `${tablePrefix}_categories`
+  });
+  await api.resources.categories.createKnexTable();
+
+  // Tasks (main positioning test resource)
+  await api.addResource('tasks', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200 },
+      category_id: { type: 'number', nullable: true, belongsTo: 'categories', as: 'category', search: true },
+      position: { type: 'string', max: 255, nullable: true },
+      beforeId: { type: 'string', virtual: true } // Virtual field for positioning
+    },
+    relationships: {
+      category: { belongsTo: 'categories' }
+    },
+    tableName: `${tablePrefix}_tasks`
+  });
+  await api.resources.tasks.createKnexTable();
+
+  // Projects (for multi-filter testing)
+  await api.addResource('projects', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 100 }
+    },
+    tableName: `${tablePrefix}_projects`
+  });
+  await api.resources.projects.createKnexTable();
+
+  // Items (flexible resource for various positioning tests)
+  await api.addResource('items', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      project_id: { type: 'number', nullable: true, belongsTo: 'projects', as: 'project', search: true },
+      status: { type: 'string', defaultTo: 'active', search: true },
+      position: { type: 'string', max: 255, nullable: true },
+      sort_order: { type: 'string', max: 255, nullable: true }, // Alternative position field
+      beforeId: { type: 'string', virtual: true }
+    },
+    relationships: {
+      project: { belongsTo: 'projects' }
+    },
+    tableName: `${tablePrefix}_items`
+  });
+  await api.resources.items.createKnexTable();
+
+  return api;
+}
