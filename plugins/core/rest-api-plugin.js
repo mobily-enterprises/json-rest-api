@@ -947,9 +947,29 @@ const validatePivotResource = (scopes, relDef, relName) => {
           context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) };
       }
       
-      // Merge belongsTo updates with attributes BEFORE validation
+      // Get virtual fields from schema info
+      const virtualFields = context.schemaInfo?.virtual || {};
+      
+      // Separate virtual fields from regular attributes
+      const inputAttributes = context.inputRecord.data.attributes || {};
+      const virtualFieldValues = {};
+      const attributesForValidation = {};
+      
+      // Split attributes into virtual and regular
+      Object.entries(inputAttributes).forEach(([key, value]) => {
+        if (key in virtualFields) {
+          virtualFieldValues[key] = value;
+        } else {
+          attributesForValidation[key] = value;
+        }
+      });
+      
+      // Store virtual fields in context for later use
+      context.virtualFieldValues = virtualFieldValues;
+      
+      // Merge belongsTo updates with non-virtual attributes for validation
       const attributesToValidate = {
-          ...(context.inputRecord.data.attributes || {}),
+          ...attributesForValidation,
           ...belongsToUpdates
       };
 
@@ -993,7 +1013,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
               }
           );
       }
-      context.inputRecord.data.attributes = validatedObject;
+      
+      // Combine validated attributes with virtual fields
+      context.inputRecord.data.attributes = {
+          ...validatedObject,
+          ...virtualFieldValues
+      };
 
       await runHooks (`afterSchemaValidate${methodSpecificHookSuffix}`);
       await runHooks ('afterSchemaValidate');
@@ -2266,14 +2291,31 @@ const validatePivotResource = (scopes, relDef, relName) => {
         return {};
       }
 
-      // Get schema and computed field definitions
+      // Get schema, computed field, and virtual field definitions
       const schemaStructure = scopes[scopeName]?.vars?.schemaInfo?.schemaStructure || {};
       const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {};
+      const virtualFields = scopes[scopeName]?.vars?.schemaInfo?.virtual || {};
 
       // Filter hidden fields from attributes based on visibility rules
       // This removes hidden:true fields and normallyHidden:true fields (unless requested)
       const requestedFields = parentContext?.queryParams?.fields?.[scopeName];
       const filteredAttributes = filterHiddenFields(attributes, { structure: schemaStructure }, requestedFields);
+      
+      // Add virtual fields from context if they were provided in the request
+      // Virtual fields come from user input and are passed through the context
+      if (parentContext?.virtualFieldValues) {
+        // Only include virtual fields that are defined in the schema
+        Object.entries(parentContext.virtualFieldValues).forEach(([fieldName, value]) => {
+          if (fieldName in virtualFields) {
+            // Check if this virtual field should be included based on sparse fieldsets
+            if (!requestedFields || 
+                requestedFields.length === 0 || 
+                (typeof requestedFields === 'string' ? requestedFields.split(',').map(f => f.trim()) : requestedFields).includes(fieldName)) {
+              filteredAttributes[fieldName] = value;
+            }
+          }
+        });
+      }
 
       // Determine which computed fields to calculate
       // We only compute fields that are requested to optimize performance

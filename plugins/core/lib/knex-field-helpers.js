@@ -12,6 +12,17 @@ import { getForeignKeyFields, filterHiddenFields } from '../utils/field-utils.js
 export { getForeignKeyFields, filterHiddenFields } from '../utils/field-utils.js';
 
 /**
+ * Helper function to check if a field should be excluded from database operations
+ * @param {string} fieldName - The field name to check
+ * @param {Object} schemaInfo - The schema info object containing computed and virtual fields
+ * @returns {boolean} True if the field is non-database (computed or virtual)
+ */
+export const isNonDatabaseField = (fieldName, schemaInfo) => {
+  const { computed = {}, virtual = {} } = schemaInfo;
+  return fieldName in computed || fieldName in virtual;
+};
+
+/**
  * Builds the field selection list for database queries, handling sparse fieldsets.
  * 
  * This function constructs the SELECT clause fields based on JSON:API sparse fieldsets
@@ -62,7 +73,7 @@ export const buildFieldSelection = async (scope, deps) => {
   // Extract values from scope
   const { 
     vars: { 
-      schemaInfo: { schema, computed: computedFields = {} }
+      schemaInfo: { schema, computed: computedFields = {}, virtual: virtualFields = {} }
     }
   } = scope;
   
@@ -75,9 +86,12 @@ export const buildFieldSelection = async (scope, deps) => {
   // Always include the ID field - required for JSON:API
   fieldsToSelect.add(idProperty);
   
-  // Get computed fields definitions - these are virtual fields not in the database
-  // Example: { profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: ... } }
+  // Get computed and virtual fields - these are not stored in the database
+  // Computed: { profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: ... } }
+  // Virtual: { passwordConfirmation: { type: 'string' } }
   const computedFieldNames = new Set(Object.keys(computedFields));
+  const virtualFieldNames = new Set(Object.keys(virtualFields));
+  const nonDatabaseFields = new Set([...computedFieldNames, ...virtualFieldNames]);
   
   // Handle both Schema objects and plain objects
   const schemaStructure = schema?.structure || schema || {};
@@ -93,9 +107,10 @@ export const buildFieldSelection = async (scope, deps) => {
     // Sparse fieldsets requested - only select specified fields
     // Example: ?fields[products]=name,price,profit_margin
     requested.forEach(field => {
-      // Skip computed fields - they don't exist in database
-      // They'll be calculated later in enrichAttributes
-      if (computedFieldNames.has(field)) return;
+      // Skip computed and virtual fields - they don't exist in database
+      // Computed fields will be calculated later in enrichAttributes
+      // Virtual fields are handled separately (from request input)
+      if (nonDatabaseFields.has(field)) return;
       
       const fieldDef = schemaStructure[field];
       if (!fieldDef) return; // Unknown field, skip

@@ -96,9 +96,10 @@ export async function compileSchemas(scope, deps) {
   const { context, runHooks } = deps;
   const scopeName = context.scopeName;
 
-  // Get raw schema and computed fields
+  // Get raw schema, computed fields, and virtual fields
   const rawSchema = scope.scopeOptions?.schema || {};
   const computed = scope.scopeOptions?.computed || {};
+  const virtual = scope.scopeOptions?.virtual || {};
   
   // Validate computed fields to ensure they're properly defined
   // Example: profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: (ctx) => ... }
@@ -117,6 +118,21 @@ export async function compileSchemas(scope, deps) {
     // Dependencies are optional but recommended for automatic fetching
     // Example: dependencies: ['price', 'cost'] ensures these fields are 
     // fetched from DB even if not explicitly requested
+  });
+  
+  // Validate virtual fields to ensure they're properly defined
+  // Virtual fields accept input and are returned in output but not stored in DB
+  // Example: passwordConfirmation: { type: 'string', virtual: true }
+  Object.entries(virtual).forEach(([fieldName, fieldDef]) => {
+    // Every virtual field must have a type (for JSON:API serialization)
+    if (!fieldDef.type) {
+      throw new Error(`Virtual field '${fieldName}' in scope '${scopeName}' must have a type`);
+    }
+    
+    // Virtual fields shouldn't have compute functions
+    if (fieldDef.compute) {
+      throw new Error(`Virtual field '${fieldName}' should not have a compute function. Use 'computed' instead.`);
+    }
   });
   
   // Deep clone schema while preserving functions
@@ -220,6 +236,7 @@ export async function compileSchemas(scope, deps) {
     schema: schemaObject,
     schemaStructure: schemaContext.schema,
     computed: computed,
+    virtual: virtual,
     searchSchema: searchSchemaObject,
     schemaRelationships: schemaRelationships,
     tableName: scope.scopeOptions.tableName || scopeName,

@@ -4,6 +4,7 @@ import {
   RestApiPayloadError 
 } from '../../lib/rest-api-errors.js';
 import { createPivotRecords } from './lib/many-to-many-manipulations.js';
+import { parseJsonApiQuery } from './utils/connectors-query-parser.js';
 
 /**
  * Helper function to get relationship definition from either schemaRelationships or schema fields
@@ -644,7 +645,6 @@ export const RestApiRelationshipsPlugin = {
 
           // Add query params for getRelated
           if (methodName === 'getRelated' && queryString) {
-            const { parseJsonApiQuery } = await import('./utils/connectors-query-parser.js');
             methodParams.queryParams = parseJsonApiQuery(queryString);
           }
 

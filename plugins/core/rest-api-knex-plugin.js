@@ -1,6 +1,6 @@
 import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
-import { getForeignKeyFields, buildFieldSelection } from './lib/knex-field-helpers.js';
+import { getForeignKeyFields, buildFieldSelection, isNonDatabaseField } from './lib/knex-field-helpers.js';
 import { buildQuerySelection } from './utils/knex-query-helpers-base.js';
 import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships, toJsonApiRecordWithBelongsTo } from './lib/knex-json-api-transformers.js';
 import { processIncludes } from './lib/knex-process-includes.js';
@@ -19,6 +19,21 @@ import {
   buildCursorMeta,
   parseCursor
 } from './lib/knex-pagination-helpers.js';
+
+/**
+ * Strips non-database fields (computed and virtual) from attributes before database operations
+ * @param {Object} attributes - The attributes object
+ * @param {Object} schemaInfo - The schema info containing computed and virtual field definitions
+ * @returns {Object} Attributes with computed and virtual fields removed
+ */
+const stripNonDatabaseFields = (attributes, schemaInfo) => {
+  if (!attributes || !schemaInfo) return attributes || {};
+  
+  const { computed = {}, virtual = {} } = schemaInfo;
+  return Object.entries(attributes)
+    .filter(([key]) => !(key in computed || key in virtual))
+    .reduce((acc, [key, val]) => ({ ...acc, [key]: val }), {});
+};
 
 
 export const RestApiKnexPlugin = {
@@ -659,8 +674,11 @@ export const RestApiKnexPlugin = {
       // Extract attributes from JSON:API format
       const attributes = inputRecord.data.attributes;
       
+      // Strip non-database fields (computed and virtual) before insert
+      const dbAttributes = stripNonDatabaseFields(attributes, context.schemaInfo);
+      
       // Insert and get the new ID
-      const result = await db(tableName).insert(attributes).returning(idProperty);
+      const result = await db(tableName).insert(dbAttributes).returning(idProperty);
       
       // Extract the ID value (SQLite returns array of objects)
       const id = result[0]?.[idProperty] || result[0];
@@ -702,7 +720,10 @@ export const RestApiKnexPlugin = {
       // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
       const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
-      const finalAttributes = { ...attributes, ...foreignKeyUpdates };
+      const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
+      
+      // Strip non-database fields (computed and virtual) before database operation
+      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
       
       if (isCreate) {
         // Create mode - insert new record with specified ID
@@ -789,7 +810,10 @@ export const RestApiKnexPlugin = {
       // Extract attributes and process relationships using helper
       const attributes = inputRecord.data.attributes || {};
       const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
-      const finalAttributes = { ...attributes, ...foreignKeyUpdates };
+      const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
+      
+      // Strip non-database fields (computed and virtual) before database operation
+      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
       
       log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
       
