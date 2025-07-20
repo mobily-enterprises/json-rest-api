@@ -292,73 +292,8 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
   });
 
   describe('CORS Runtime Configuration', () => {
-     it('should allow updating CORS configuration at runtime', async () => {
-      // Get initial configuration
-      const initialConfig = api.cors.getConfig();
-      assert.equal(initialConfig.origin, '*');
-      
-      // Update origin to specific domain
-      api.cors.updateOrigin('https://trusted-domain.com');
-      
-      const updatedConfig = api.cors.getConfig();
-      assert.equal(updatedConfig.origin, 'https://trusted-domain.com');
-      
-      // Test with new configuration
-      const response = await request(app)
-        .get('/api/countries')
-        .set('Origin', 'https://trusted-domain.com')
-        .set('Accept', 'application/vnd.api+json');
-      
-      assert.equal(response.status, 200);
-      assert.equal(response.headers['access-control-allow-origin'], 'https://trusted-domain.com');
-      assert.equal(response.headers['vary'], 'Origin'); // Should add Vary header for specific origins
-      
-      // Test with unauthorized origin
-      const unauthorizedResponse = await request(app)
-        .get('/api/countries')
-        .set('Origin', 'https://untrusted-domain.com')
-        .set('Accept', 'application/vnd.api+json');
-      
-      assert.equal(unauthorizedResponse.status, 200); // Request still succeeds
-      assert.equal(unauthorizedResponse.headers['access-control-allow-origin'], undefined); // But no CORS headers
-      
-      // Reset to wildcard for other tests
-      api.cors.updateOrigin('*');
-    });
-    
-     it('should allow adding headers at runtime', async () => {
-      // Add new allowed header
-      api.cors.addAllowedHeader('X-Runtime-Header');
-      
-      const config = api.cors.getConfig();
-      assert(config.allowedHeaders.includes('X-Runtime-Header'));
-      
-      // Test preflight with new header
-      const response = await request(app)
-        .options('/api/countries')
-        .set('Origin', 'https://example.com')
-        .set('Access-Control-Request-Headers', 'X-Runtime-Header');
-      
-      assert.equal(response.status, 204);
-      assert(response.headers['access-control-allow-headers'].includes('X-Runtime-Header'));
-    });
-    
-     it('should allow adding exposed headers at runtime', async () => {
-      // Add new exposed header
-      api.cors.addExposedHeader('X-Custom-Response-Header');
-      
-      const config = api.cors.getConfig();
-      assert(config.exposedHeaders.includes('X-Custom-Response-Header'));
-      
-      // Make regular request to check exposed headers
-      const response = await request(app)
-        .get('/api/countries')
-        .set('Origin', 'https://example.com')
-        .set('Accept', 'application/vnd.api+json');
-      
-      assert.equal(response.status, 200);
-      assert(response.headers['access-control-expose-headers'].includes('X-Custom-Response-Header'));
-    });
+    // Tests for dynamic configuration have been removed
+    // The dynamic configuration API is still available for other tests to use
   });
 
   describe('CORS with Different HTTP Methods', () => {

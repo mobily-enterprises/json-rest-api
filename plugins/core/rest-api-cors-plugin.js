@@ -175,29 +175,8 @@
         }
       });
 
-      // API method to update CORS settings at runtime
-      api.cors = {
-        updateOrigin: (newOrigin) => {
-          vars.cors.origin = newOrigin;
-          log.info('CORS origin updated', { origin: newOrigin });
-        },
-
-        addAllowedHeader: (header) => {
-          if (!vars.cors.allowedHeaders.includes(header)) {
-            vars.cors.allowedHeaders.push(header);
-            log.info('CORS allowed header added', { header });
-          }
-        },
-
-        addExposedHeader: (header) => {
-          if (!vars.cors.exposedHeaders.includes(header)) {
-            vars.cors.exposedHeaders.push(header);
-            log.info('CORS exposed header added', { header });
-          }
-        },
-
-        getConfig: () => ({ ...vars.cors })
-      };
+      // CORS configuration is now static and set during plugin initialization
+      // Dynamic updates are not supported to ensure consistency across multiple servers
 
       log.info('CORS plugin installed', {
         origin: vars.cors.origin,
