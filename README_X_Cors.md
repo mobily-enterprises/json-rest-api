@@ -816,8 +816,8 @@ Since it works with headers, you can override or extend its behavior using hooks
 
 ```javascript
 // Add custom headers for specific routes
-api.addHook('transport:response', 'custom-cors', async ({ context, methodParams }) => {
-  const { request, response } = methodParams;
+api.addHook('transport:response', 'custom-cors', async ({ context }) => {
+  const { request, response } = context.transport;
   
   // Add extra CORS headers for admin routes
   if (request.path.startsWith('/api/admin')) {
@@ -839,8 +839,8 @@ api.addHook('transport:response', 'custom-cors', async ({ context, methodParams 
 // Different CORS policies for different route types
 api.addHook('transport:response', 'route-specific-cors', {
   order: -900 // Run after CORS plugin (which is -1000)
-}, async ({ context, methodParams }) => {
-  const { request, response } = methodParams;
+}, async ({ context }) => {
+  const { request, response } = context.transport;
   const path = request.path;
   
   // Public data endpoints - most permissive
@@ -1234,8 +1234,8 @@ const api = new Api({
 ```javascript
 // Add custom logging for deep debugging
 api.addHook('transport:response', 'cors-debug', { order: -999 }, 
-  async ({ context, methodParams }) => {
-    const { request, response } = methodParams;
+  async ({ context }) => {
+    const { request, response } = context.transport;
     console.log('CORS Debug:', {
       requestOrigin: request.headers.origin,
       responseHeaders: {
