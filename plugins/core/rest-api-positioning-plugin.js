@@ -12,7 +12,7 @@ export const PositioningPlugin = {
   install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
     
     // Get configuration - hooked-api namespaces options by plugin name
-    const positioningOptions = pluginOptions?.['positioning'] || pluginOptions || {};
+    const positioningOptions = pluginOptions || {};
 
     // Store configuration in vars (data only) - inspired by multihome pattern
     vars.positioning = {

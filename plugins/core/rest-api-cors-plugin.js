@@ -4,7 +4,7 @@
 
     async install({ api, addHook, vars, helpers, log, pluginOptions, runHooks }) {
       // Get CORS configuration
-      const corsOptions = pluginOptions?.['rest-api-cors'] || {};
+      const corsOptions = pluginOptions || {};
 
       // Store configuration - using a plain object for runtime updates
       const corsConfig = {

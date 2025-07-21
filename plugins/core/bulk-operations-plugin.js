@@ -5,7 +5,7 @@ export const BulkOperationsPlugin = {
   dependencies: ['rest-api'],
 
   async install({ api, log, addHook, addScopeMethod, helpers, pluginOptions }) {
-    const bulkOptions = pluginOptions['bulk-operations'] || {};
+    const bulkOptions = pluginOptions || {};
     const {
       maxBulkOperations = 100,
       defaultAtomic = true,

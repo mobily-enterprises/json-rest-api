@@ -5,7 +5,7 @@ export const MultiHomePlugin = {
     install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
 
       // Get configuration - hooked-api namespaces options by plugin name
-      const multihomeOptions = pluginOptions?.['multihome'] || pluginOptions || {};
+      const multihomeOptions = pluginOptions || {};
 
       // Store configuration in vars (data only)
       vars.multihome = {

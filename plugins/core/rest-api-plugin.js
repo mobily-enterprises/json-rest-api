@@ -175,7 +175,7 @@ export const RestApiPlugin = {
     // compileSchemas(eventData.scope, eventData.scopeName));
 
     // Initialize default vars for the plugin from pluginOptions
-    const restApiOptions = pluginOptions['rest-api'] || {};
+    const restApiOptions = pluginOptions || {};
 
     // These will be used as default fallbacks by the vars proxy if
     // they are not set in the scope options

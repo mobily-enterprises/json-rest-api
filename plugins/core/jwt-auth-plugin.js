@@ -42,8 +42,8 @@ export const JwtAuthPlugin = {
      * INITIALIZATION
      * ----------------------------------------------------------------------- */
     
-    // Extract JWT-specific options from pluginOptions
-    const jwtOptions = pluginOptions['jwt-auth'] || {};
+    // Use plugin options directly
+    const jwtOptions = pluginOptions || {};
     
     // Initialize plugin state
     // State is scoped to this install method and accessible via closure
