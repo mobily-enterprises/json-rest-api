@@ -15,7 +15,7 @@
  * - Providing helpers for programmatic auth checks
  */
 
-import jwksClient from 'jwks-rsa';
+import { requirePackage } from 'hooked-api';
 import { 
   verifyToken, 
   createRevocationResource, 
@@ -141,6 +141,15 @@ export const JwtAuthPlugin = {
     
     let jwksClientInstance;
     if (config.jwksUrl) {
+      // Dynamic import for jwks-rsa
+      let jwksClient;
+      try {
+        jwksClient = (await import('jwks-rsa')).default;
+      } catch (e) {
+        requirePackage('jwks-rsa', 'jwt-auth', 
+          'JWKS RSA support is required for dynamic key rotation with providers like Auth0, Supabase, etc. This is a peer dependency.');
+      }
+      
       jwksClientInstance = jwksClient({
         jwksUri: config.jwksUrl,
         cache: true,                    // Cache keys to reduce network calls

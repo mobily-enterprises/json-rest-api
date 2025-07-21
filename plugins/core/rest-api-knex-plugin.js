@@ -1,3 +1,4 @@
+import { requirePackage } from 'hooked-api';
 import { createSchema, createKnexTable } from 'json-rest-schema';
 import { createCrossTableSearchHelpers } from './lib/knex-cross-table-search.js';
 import { getForeignKeyFields, buildFieldSelection, isNonDatabaseField } from './lib/knex-field-helpers.js';
@@ -42,12 +43,17 @@ export const RestApiKnexPlugin = {
 
   async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     
-    // Get Knex instance from plugin options
-    const knexOptions = pluginOptions || {};
-    if (!knexOptions.knex) {
-      throw new Error('RestApiKnexPlugin requires a knex instance');
+    // Try to import knex dynamically
+    let knexLib;
+    try {
+      knexLib = await import('knex');
+    } catch (e) {
+      requirePackage('knex', 'rest-api-knex', 
+        'Knex.js is required for database operations. This is a peer dependency that allows you to control the version.');
     }
     
+    // Get Knex instance from plugin options
+    const knexOptions = pluginOptions || {};
     const knex = knexOptions.knex;
     
     // Expose Knex instance and helpers in a structured way

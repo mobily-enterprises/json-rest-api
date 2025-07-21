@@ -26,9 +26,17 @@
  * ```
  */
 
-import formidable from 'formidable';
+import { requirePackage } from 'hooked-api';
 import { promises as fs } from 'fs';
 import path from 'path';
+
+let formidable;
+try {
+  formidable = (await import('formidable')).default;
+} catch (e) {
+  requirePackage('formidable', 'express/http-connector', 
+    'Formidable is required for multipart/form-data file uploads with disk storage. This is a peer dependency.');
+}
 
 /**
  * Creates a formidable-based file detector

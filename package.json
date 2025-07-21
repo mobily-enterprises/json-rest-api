@@ -22,43 +22,71 @@
   "homepage": "https://github.com/mobily-enterprises/jsonrestapi#readme",
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
-    "@socket.io/redis-adapter": "^8.3.0",
-    "better-sqlite3": "^11.0.0",
-    "fractional-indexing": "^3.2.0",
     "hooked-api": "^1.0.8",
-    "json-rest-schema": "^1.0.6",
-    "jsonwebtoken": "^9.0.2",
-    "jwks-rsa": "^3.2.0",
-    "knex": "^3.1.0",
-    "redis": "^5.6.0",
-    "socket.io": "^4.8.1"
+    "json-rest-schema": "^1.0.6"
   },
   "peerDependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "busboy": "^1.0.0",
     "content-type": "^1.0.0",
     "express": "^4.0.0 || ^5.0.0",
     "formidable": "^3.0.0",
-    "raw-body": "^2.0.0"
+    "fractional-indexing": "^3.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
+    "knex": "^3.1.0",
+    "raw-body": "^2.0.0",
+    "redis": "^5.6.0",
+    "socket.io": "^4.8.1"
   },
   "peerDependenciesMeta": {
-    "express": {
-      "optional": true
-    },
-    "content-type": {
-      "optional": true
-    },
-    "raw-body": {
+    "@socket.io/redis-adapter": {
       "optional": true
     },
     "busboy": {
       "optional": true
     },
+    "content-type": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
     "formidable": {
+      "optional": true
+    },
+    "fractional-indexing": {
+      "optional": true
+    },
+    "jsonwebtoken": {
+      "optional": true
+    },
+    "jwks-rsa": {
+      "optional": true
+    },
+    "knex": {
+      "optional": true
+    },
+    "raw-body": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    },
+    "socket.io": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "better-sqlite3": "^11.0.0",
     "express": "^5.1.0",
+    "fractional-indexing": "^3.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
+    "knex": "^3.1.0",
+    "redis": "^5.6.0",
+    "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "supertest": "^7.1.3"
   }

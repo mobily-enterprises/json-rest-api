@@ -1,4 +1,12 @@
-import jwt from 'jsonwebtoken';
+import { requirePackage } from 'hooked-api';
+
+let jwt;
+try {
+  jwt = (await import('jsonwebtoken')).default;
+} catch (e) {
+  requirePackage('jsonwebtoken', 'jwt-auth', 
+    'JSON Web Token support is required for JWT authentication. This is a peer dependency.');
+}
 
 /**
  * Verify JWT token with multiple strategies

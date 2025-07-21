@@ -23,8 +23,16 @@
  * ```
  */
 
-import Busboy from 'busboy';
+import { requirePackage } from 'hooked-api';
 import { Readable } from 'stream';
+
+let Busboy;
+try {
+  Busboy = (await import('busboy')).default;
+} catch (e) {
+  requirePackage('busboy', 'express/http-connector', 
+    'Busboy is required for multipart/form-data file uploads. This is a peer dependency.');
+}
 
 /**
  * Creates a busboy-based file detector

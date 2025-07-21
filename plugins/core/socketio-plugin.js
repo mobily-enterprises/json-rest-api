@@ -1,6 +1,4 @@
-import { Server } from 'socket.io';
-import { createAdapter } from '@socket.io/redis-adapter';
-import { createClient } from 'redis';
+import { requirePackage } from 'hooked-api';
 
 // WeakMap to store pending broadcasts per transaction
 const pendingBroadcasts = new WeakMap();
@@ -10,6 +8,16 @@ export const SocketIOPlugin = {
   dependencies: ['rest-api', 'jwt-auth'],
 
   async install({ api, addHook, log, scopes, helpers, vars, runHooks }) {
+    // Dynamic imports for socket.io and related packages
+    let Server, createAdapter, createClient;
+    
+    try {
+      ({ Server } = await import('socket.io'));
+    } catch (e) {
+      requirePackage('socket.io', 'socketio', 
+        'Socket.IO is required for WebSocket support. This is a peer dependency.');
+    }
+    
     let io;
 
     // Helper function to match filters using searchSchema
@@ -221,6 +229,21 @@ export const SocketIOPlugin = {
 
       // Set up Redis adapter if configured
       if (redis) {
+        // Dynamic import for Redis dependencies
+        try {
+          ({ createClient } = await import('redis'));
+        } catch (e) {
+          requirePackage('redis', 'socketio', 
+            'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.');
+        }
+        
+        try {
+          ({ createAdapter } = await import('@socket.io/redis-adapter'));
+        } catch (e) {
+          requirePackage('@socket.io/redis-adapter', 'socketio', 
+            'Socket.IO Redis adapter is required for horizontal scaling. This is a peer dependency.');
+        }
+        
         const pubClient = createClient(redis);
         const subClient = pubClient.duplicate();
 

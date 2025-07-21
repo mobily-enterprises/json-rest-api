@@ -1,4 +1,12 @@
-import { generateKeyBetween } from 'fractional-indexing';
+import { requirePackage } from 'hooked-api';
+
+let generateKeyBetween;
+try {
+  ({ generateKeyBetween } = await import('fractional-indexing'));
+} catch (e) {
+  requirePackage('fractional-indexing', 'positioning', 
+    'Fractional indexing is required for the positioning plugin to generate sortable position keys. This is a peer dependency.');
+}
 
 /**
  * Helper functions for fractional positioning
