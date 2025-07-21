@@ -14,7 +14,7 @@
  * - File upload support with busboy or formidable
  */
 
-import express from 'express';
+import { requirePackage } from 'hooked-api';
 import { parseJsonApiQuery } from '../utils/connectors-query-parser.js';
 import { createContext } from './lib/request-helpers.js';
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js';
@@ -24,6 +24,14 @@ export const ExpressPlugin = {
   dependencies: ['rest-api'],
   
   async install({ on, vars, helpers, pluginOptions, log, scopes, api, runHooks, addHook }) {
+    // Dynamic import for Express
+    let express;
+    try {
+      express = (await import('express')).default;
+    } catch (e) {
+      requirePackage('express', 'express', 
+        'Express.js is required for HTTP server functionality. This is a peer dependency.');
+    }
     // Enhance the logger
     const enhancedLog = createEnhancedLogger(log, { 
       logFullErrors: true, 
