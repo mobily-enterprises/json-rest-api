@@ -7,7 +7,7 @@ import { PositioningPlugin } from '../plugins/core/rest-api-positioning-plugin.j
 
 // Create Knex instance for tests
 const knex = knexLib({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: {
     filename: ':memory:'
   },

@@ -13,7 +13,7 @@ import {
 
 // Create Knex instance for tests
 const knex = knexLib({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: {
     filename: ':memory:'
   },

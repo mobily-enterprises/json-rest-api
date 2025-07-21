@@ -8,7 +8,7 @@ import util from 'util';
 
 // Create a Knex instance connected to SQLite in-memory database
 const knex = knexLib({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: {
     filename: ':memory:'
   },

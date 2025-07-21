@@ -13,7 +13,7 @@ import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js';
 
 // Create Knex instance for tests - always use SQLite in-memory
 const knex = knexLib({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: {
     filename: ':memory:'
   },
