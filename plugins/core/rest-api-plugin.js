@@ -2441,9 +2441,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
       if (!method || !path || !handler) {
         throw new ValidationError('Route requires method, path, and handler');
       }
+
+      // This function converts the passed parameters into the hook's context
+      const context = params
       
       // Run the addRoute hook to notify transport plugins
-      await runHooks('addRoute', params);
+      await runHooks('addRoute', context);
       
       return { registered: true, method, path };
     });
