@@ -1,9 +1,9 @@
 
 ## Defining the Basic Tables
 
-This GUIDE uses a consistent example throughout - a book catalog system with authors, publishers, and countries.
+The documentation uses a consistent example throughout - a book catalog system with authors, publishers, and countries.
 
-**Important**: The five tables defined below (countries, publishers, authors, books, and book_authors) form the foundation for all examples, tests, and documentation in this guide. We'll consistently reference this same schema structure to demonstrate all features of the library.
+**Important**: The five tables defined below (countries, publishers, authors, books, and book_authors) form the foundation for all examples, tests, and documentation in this guide. We'll consistently reference this same schema structure to demonstrate all features of the library. At times, we will change the definition of some of them to show specific features.
 
 Also for brevity, the `inspect()` function will be assumed to be set:
 

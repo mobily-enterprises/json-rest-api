@@ -56,7 +56,7 @@ The API validates and normalizes date/time inputs:
     "type": "articles",
     "attributes": {
       "publishedDate": "2024-01-15",           // Valid date
-      "createdAt": "2024-01-15 14:30:00",      // Valid dateTime
+      "createdAt": "2024-01-15T14:30:00Z",     // Valid dateTime (ISO 8601)
       "dailyPostTime": "14:30:00"              // Valid time
     }
   }
@@ -64,12 +64,21 @@ The API validates and normalizes date/time inputs:
 ```
 
 **Accepted Input Formats:**
-- **date**: `YYYY-MM-DD`
+- **date**: 
+  - `YYYY-MM-DD` (parsed at UTC midnight)
+  - ISO 8601 date strings
+  - Any JavaScript Date parseable string
 - **dateTime**: 
-  - `YYYY-MM-DD HH:MM:SS`
-  - ISO 8601 strings (`2024-01-15T14:30:00Z`)
+  - ISO 8601 strings (`2024-01-15T14:30:00Z`) - recommended
+  - `YYYY-MM-DD HH:MM:SS` (assumed UTC)
   - JavaScript Date parseable strings
-- **time**: `HH:MM:SS` or `HH:MM`
+  - Unix timestamps (as numbers)
+- **time**: 
+  - `HH:MM:SS` or `HH:MM`
+  - Extracted from datetime strings
+
+**Storage Format:**
+All date/time values are converted to JavaScript Date objects before storage, allowing the database driver to handle the appropriate formatting for each database system.
 
 ## Output Normalization
 
@@ -206,11 +215,14 @@ The date/time handling is implemented in two key areas:
 
 1. **Input Validation** (`json-rest-schema`):
    - Validates format on write operations
-   - Converts to standard storage format
+   - Converts all date inputs to JavaScript Date objects
+   - Ensures date-only values parse at UTC midnight
+   - Returns Date objects for storage (Knex handles DB-specific formatting)
 
 2. **Output Normalization** (`database-value-normalizers.js`):
-   - Converts database values to JavaScript Date objects
-   - Handles database-specific quirks
-   - Ensures consistent API output
+   - Handles database-specific quirks (MySQL timezone issues)
+   - Ensures Date objects are properly created from database values
+   - Fixes MySQL datetime strings by assuming UTC
+   - Maintains consistency across different database engines
 
-This two-stage approach ensures data integrity on input and consistent formatting on output, regardless of the underlying database system.
+This two-stage approach ensures data integrity on input and consistent formatting on output, regardless of the underlying database system. The key insight is that JavaScript Date objects are used as the common format throughout the pipeline, with database drivers handling the conversion to/from their native formats.
