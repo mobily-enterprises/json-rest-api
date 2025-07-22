@@ -62,6 +62,9 @@ await api.addResource('countries', {
 });
 await api.resources.countries.createKnexTable()
 
+/*
+// These tables will be used in the next sections of this guide. For now they are commented out
+
 // Publishers table
 await api.addResource('publishers', {
   schema: {
@@ -137,6 +140,7 @@ await api.addResource('reviews', {
 });
 await api.resources.reviews.createKnexTable()
 
+*/
 
 /// *** ...programmatic calls here... ***
 
@@ -145,6 +149,8 @@ await knex.destroy();
 console.log('\nAll schemas created successfully!');
 console.log('Database connection closed.');
 ```
+
+This set of resources cover a lot of ground in terms of relationships etc. Those other tables will be covered in the next part of this guide.
 
 #### Loglevels
 
@@ -266,6 +272,7 @@ The database is populated, and the newly added record is then fetched.
 In the examples above, we're using the API in **simplified mode** (which is the default for programmatic usage). Simplified mode is a convenience feature that allows you to work with plain JavaScript objects instead of the full JSON:API document structure. However, it's important to understand that internally, everything is still processed as proper JSON:API documents.
 
 Simplified mode changes:
+
 - **Input**: You can pass plain objects with just the attributes
 - **Output**: You get back plain objects with id and attributes merged at the top level
 
@@ -330,7 +337,8 @@ For example:
 1. **Global default**: Set during plugin installation
    ```javascript
    await api.use(RestApiPlugin, {
-     simplifiedApi: false  // All API calls will use JSON:API format by default
+     simplifiedApi: false,      // All API calls will use JSON:API format by default
+     simplifiedTransport: true  // All HTTP calls will use simplified format by default
    });
    ```
 
@@ -341,9 +349,30 @@ For example:
        name: { type: 'string', required: true },
        code: { type: 'string', required: true }
      },
-     simplified: false  // This resource always uses JSON:API format
+     simplifiedApi: false,      // API calls to this resource use JSON:API format
+     simplifiedTransport: true  // HTTP calls to this resource use simplified format
    });
    ```
+
+NOTE: this can also be written as:
+
+   ```javascript
+   await api.addResource('countries', {
+     schema: {
+       name: { type: 'string', required: true },
+       code: { type: 'string', required: true }
+     },
+    
+    },{
+      // Parameters set directly into 'vars'
+      vars: {
+        simplifiedApi: false,      // API calls to this resource use JSON:API format
+        simplifiedTransport: true  // HTTP calls to this resource use simplified format
+      }
+    }
+   );
+   ```
+
 
 3. **Per-call override**: Set in individual method calls
    ```javascript
@@ -363,7 +392,9 @@ For example:
 
    ```
 
-The hierarchy is: **per-call → per-resource → global default**
+The hierarchy is: **per-call → per-resource (parameters or variables) → global default**
+
+**Important**: The resource-level configuration supports separate settings for API and transport modes, allowing you to have different behaviors for programmatic calls versus HTTP endpoints for the same resource.
 
 **Special case**: When passing attributes directly (without `inputRecord`), simplified mode is always `true` regardless of configuration:
 ```javascript
@@ -378,67 +409,72 @@ By default, `simplifiedApi` is `true` for programmatic usage, making it easier t
 
 #### API usage and returning records
 
-In the previous examples, each POST call returned the full record. However, this is not always the case -- especially since a re-fetch is a power-consuming operation. The **returnFullRecord** option controls what data is returned after write operations (POST, PUT, PATCH). This is useful for balancing between getting complete data and optimizing performance.
+When performing write operations (POST, PUT, PATCH), you can control what data is returned. This is useful for balancing between getting complete data and optimizing performance.
 
-`returnFullRecord` accepts three string values:
+There are TWO separate settings for this:
+
+1. **`returnRecordApi`** - Controls what **programmatic API calls** return (default: `'full'`)
+2. **`returnRecordTransport`** - Controls what **HTTP/REST endpoints** return (default: `'no'`)
+
+This separation allows you to have different behaviors for internal API usage versus external HTTP clients. For example, your internal code might want full records for convenience, while HTTP clients might prefer minimal responses for performance.
+
+Both settings accept three string values:
 - **`'full'`**: Returns the complete record with all attributes, relationships, computed fields, and links
 - **`'minimal'`**: Returns only the resource type and ID
 - **`'no'`**: Returns nothing (undefined in programmatic calls, 204 No Content in HTTP)
 
-Here's how the same POST operation behaves with different `returnFullRecord` settings:
+Here's how these settings work:
 
 ```javascript
-// Default behavior: 'no' - returns nothing
+// Example 1: Using defaults
 const api = new Api({ name: 'api', version: '1.0.0' });
-await api.use(RestApiPlugin); // Default is returnFullRecord: 'no'
+await api.use(RestApiPlugin); 
+// Default: returnRecordApi='full', returnRecordTransport='no'
 
-const countryNoReturn = await api.resources.countries.post({
+// Programmatic API call returns full record by default
+const country = await api.resources.countries.post({
   name: 'Canada',
   code: 'CA'
 });
-console.log('Created with no return:', countryNoReturn);
+console.log('API result:', country);
 // Expected Output:
-// Created with no return: undefined
+// API result: { id: '1', name: 'Canada', code: 'CA' }
 
-// Configure to return minimal record
+// But the same operation via HTTP returns 204 No Content by default
+// POST /api/countries -> 204 No Content (no body)
+
+// Example 2: Different settings for API and Transport
 await api.use(RestApiPlugin, {
-  returnFullRecord: {
-    post: 'minimal',
-    put: 'minimal',
-    patch: 'minimal'
-  }
+  returnRecordApi: 'minimal',      // API calls return minimal
+  returnRecordTransport: 'full'    // HTTP calls return full
 });
 
-const countryMinimal = await api.resources.countries.post({
-  inputRecord: {
-    name: 'Mexico',
-    code: 'MX'
-  }
+// API call returns minimal
+const apiResult = await api.resources.countries.post({
+  name: 'Mexico',
+  code: 'MX'
 });
-console.log('Created with minimal return:', inspect(countryMinimal));
+console.log('API result:', apiResult);
 // Expected Output:
-// Created with minimal return: { id: '2', type: 'countries' }
+// API result: { id: '2', type: 'countries' }
 
-// Configure to return full record
+// HTTP call returns full record
+// POST /api/countries -> 201 Created
+// Body: { data: { type: 'countries', id: '3', attributes: { name: 'Mexico', code: 'MX' } } }
+
+// Example 3: Per-method configuration
 await api.use(RestApiPlugin, {
-  returnFullRecord: {
-    post: 'full',
-    put: 'full',
-    patch: 'full'
+  returnRecordApi: {
+    post: 'full',     // API POST returns full
+    put: 'minimal',   // API PUT returns minimal
+    patch: 'no'       // API PATCH returns nothing
+  },
+  returnRecordTransport: {
+    post: 'minimal',  // HTTP POST returns minimal
+    put: 'no',        // HTTP PUT returns 204
+    patch: 'full'     // HTTP PATCH returns full
   }
 });
-
-const countryFull = await api.resources.countries.post({
-  name: 'United States',
-  code: 'US'
-});
-console.log('Created with full record:', inspect(countryFull));
-// Expected Output:
-// Created with full record: {
-//   id: '3',
-//   name: 'United States',
-//   code: 'US'
-// }
 ```
 
 When combined with non-simplified mode, the difference is even more apparent:
@@ -452,8 +488,7 @@ const fullJsonApi = await api.resources.countries.post({
       attributes: { name: 'France', code: 'FR' }
     }
   },
-  simplified: false,
-  returnFullRecord: 'full'
+  simplified: false
 });
 console.log('Full JSON:API response:', inspect(fullJsonApi));
 // Expected Output:
@@ -475,25 +510,31 @@ const minimalJsonApi = await api.resources.countries.post({
       attributes: { name: 'Germany', code: 'DE' }
     }
   },
-  simplified: false,
-  returnFullRecord: 'minimal'
+  simplified: false
 });
 console.log('Minimal JSON:API response:', inspect(minimalJsonApi));
 // Expected Output:
 // Minimal JSON:API response: { id: '5', type: 'countries' }
 ```
 
-**NOTE**: `returnFullRecord` defaults to `'no'` for all operations (POST, PUT, PATCH) but can be configured at multiple levels: globally when installing RestApiPlugin, per-resource when calling `addResource()`, or per-call in the method parameters, with the same hierarchy as simplified mode (per-call → per-resource → global default).
+**Configuration Levels**: Both `returnRecordApi` and `returnRecordTransport` can be configured at multiple levels, with the hierarchy being: per-call → per-resource → global default.
+
+**Important**: Like the simplified settings, the resource-level configuration supports separate settings for API and transport modes, allowing fine-grained control over what data is returned for programmatic calls versus HTTP endpoints.
 
 For example:
 
 1. **Global default**: Set during plugin installation
    ```javascript
    await api.use(RestApiPlugin, {
-     returnFullRecord: {
-       post: 'minimal',   // Return minimal response after POST
-       put: 'minimal',    // Return minimal response after PUT
-       patch: 'full'      // Return full records after PATCH
+     returnRecordApi: {
+       post: 'full',      // API POST returns full
+       put: 'minimal',    // API PUT returns minimal
+       patch: 'full'      // API PATCH returns full
+     },
+     returnRecordTransport: {
+       post: 'minimal',   // HTTP POST returns minimal
+       put: 'no',         // HTTP PUT returns 204
+       patch: 'minimal'   // HTTP PATCH returns minimal
      }
    });
    ```
@@ -505,32 +546,47 @@ For example:
        name: { type: 'string', required: true },
        code: { type: 'string', required: true }
      },
-     returnFullRecord: {
-       post: 'full',     // Return full records after POST
-       put: 'full',      // Return full records after PUT
-       patch: 'minimal'  // Return minimal response after PATCH
+     returnRecordApi: 'full',        // All API methods return full
+     returnRecordTransport: 'minimal' // All HTTP methods return minimal
+   });
+   
+   // Or with per-method granularity:
+   await api.addResource('products', {
+     schema: {
+       name: { type: 'string', required: true },
+       price: { type: 'number', required: true }
+     },
+     returnRecordApi: {
+       post: 'full',     // API POST returns full record
+       put: 'minimal',   // API PUT returns minimal
+       patch: 'no'       // API PATCH returns nothing
+     },
+     returnRecordTransport: {
+       post: 'minimal',  // HTTP POST returns minimal
+       put: 'no',        // HTTP PUT returns 204
+       patch: 'full'     // HTTP PATCH returns full record
      }
    });
    ```
 
 3. **Per-call override**: Set in individual method calls
    ```javascript
-   // Override to get minimal response for this specific call
+   // Override for a specific API call
    const result = await api.resources.countries.patch({
      inputRecord: {
        id: '1',
        name: 'United States of America'
      },
-     returnFullRecord: 'minimal'
+     returnFullRecord: 'minimal'  // Overrides the configured setting
    });
    // result = { id: '1', type: 'countries' }
    ```
 
-**Performance consideration**: When `returnFullRecord: 'full'`, the API performs an additional GET request internally after the write operation to fetch the complete record with all computed fields and relationships. Setting it to `'minimal'` or `'no'` skips this extra query, improving performance when you don't need the full data.
+**Performance consideration**: When using `'full'`, the API performs an additional GET request internally after the write operation to fetch the complete record with all computed fields and relationships. Using `'minimal'` or `'no'` skips this extra query, improving performance when you don't need the full data.
 
-By default, all operations return nothing (`'no'`), but you can set `returnFullRecord: 'minimal'` to get just the ID and type, or `'full'` to get the complete record with all fields.
-
-Note that the setting will affect **both** API usage **and** HTTP usage.
+**Remember the defaults**:
+- `returnRecordApi` defaults to `'full'` (convenient for development)
+- `returnRecordTransport` defaults to `'no'` (optimal for performance)
 
 ### REST Usage (HTTP Endpoints)
 
@@ -602,7 +658,7 @@ Once the server is running, you can interact with your API using tools like `cur
 **REST Example: Create a Country**
 
 ```bash
-curl -X POST -H "Content-Type: application/vnd.api+json" \
+curl -i -X POST -H "Content-Type: application/vnd.api+json" \
 -d '{
   "data": {
     "type": "countries",
@@ -614,10 +670,42 @@ curl -X POST -H "Content-Type: application/vnd.api+json" \
 }' http://localhost:3000/api/countries
 ```
 
+This will have no response (204 No Content) since by default resources won't return anything when using HTTP:
+
+```
+HTTP/1.1 204 No Content
+X-Powered-By: Express
+ETag: W/"a-bAsFyilMr4Ra1hIU5PyoyFRunpI"
+Date: Tue, 22 Jul 2025 14:54:45 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+```
+
 **REST Example: Get a Country by ID**
 
 ```bash
 curl -X GET http://localhost:3000/api/countries/2
+```
+
+The result:
+
+```json
+{
+  "data": {
+    "type": "countries",
+    "id": "1",
+    "attributes": {
+      "name": "United Kingdom",
+      "code": "UK"
+    },
+    "links": {
+      "self": "http://localhost:3000/api/countries/1"
+    }
+  },
+  "links": {
+    "self": "http://localhost:3000/api/countries/1"
+  }
+}
 ```
 
 **From now on, all examples will provide both programmatic usage and `curl` usage.** This ensures you understand how to interact with the API directly in your code and how it translates to standard HTTP requests.
@@ -631,9 +719,66 @@ The simplified mode concept works exactly the same way over HTTP as it does for 
 
 This means that by default, HTTP endpoints expect and return proper JSON:API format:
 
+Most production servers will keep `simplifiedTransport: false` to maintain JSON:API compliance for client applications. You can enable simplified mode for HTTP if needed:
+
+```javascript
+await api.use(RestApiPlugin, {
+  simplifiedTransport: true  // Enable simplified mode for HTTP (not recommended)
+});
+```
+
+The result:
+
+```json
+{
+  "id":"1",
+  "name":"United Kingdom",
+  "code":"UK"
+}
+```
+
+Keep in mind that to get this result you will need to:
+
+1) Amend your test file, adding `simplifiedTransport: true` to the RestApiPlugin
+2) Restart your server (CTRL-C and re-run it)
+3) Re-add a country with the POST Curl command shown earlier
+4) Finally, re-fetch it and see the record in simplified form.
+
+Once again, it will be uncommon to use the simplified version for the HTTP transport, but it can be used to satisfy legacy clients etc.
+
+### Return Record Settings for HTTP
+
+The `returnRecordTransport` setting controls what HTTP/REST endpoints return (see "API usage and returning records" above for full details). The HTTP status codes vary based on the operation and setting:
+
+**POST operations:**
+- `returnRecordTransport: 'full'` → Returns `201 Created` with the full record in the body
+- `returnRecordTransport: 'minimal'` → Returns `201 Created` with minimal response `{ id: '...', type: '...' }`
+- `returnRecordTransport: 'no'` → Returns `204 No Content` with no body
+
+**PUT/PATCH operations:**
+- `returnRecordTransport: 'full'` → Returns `200 OK` with the full record in the body
+- `returnRecordTransport: 'minimal'` → Returns `200 OK` with minimal response `{ id: '...', type: '...' }`
+- `returnRecordTransport: 'no'` → Returns `204 No Content` with no body
+
+**DELETE operations:**
+- Always returns `204 No Content` with no body (regardless of settings)
+
+**Remember**: The default for `returnRecordTransport` is `'no'`, which means HTTP write operations return 204 No Content by default. This is different from programmatic API calls which default to returning full records.
+
+# A practical example
+
+If you want your server to reply with a full record, you can set it this way:
+
+```javascript
+await api.use(RestApiPlugin, {
+  returnRecordTransport: 'full'
+});
+```
+
+Restart once again the server. Then add a country using cUrl:
+
 ```bash
-# POST request must use JSON:API format (simplified: false by default)
-curl -X POST -H "Content-Type: application/vnd.api+json" \
+curl -i -X POST -H "Content-Type: application/vnd.api+json" \
 -d '{
   "data": {
     "type": "countries",
@@ -644,33 +789,36 @@ curl -X POST -H "Content-Type: application/vnd.api+json" \
   }
 }' http://localhost:3000/api/countries
 ```
+The result:
 
-Most production servers will keep `simplifiedTransport: false` to maintain JSON:API compliance for client applications. You can enable simplified mode for HTTP if needed:
+```
+HTTP/1.1 201 Created
+X-Powered-By: Express
+Content-Type: application/vnd.api+json; charset=utf-8
+Location: http://localhost:3000/api/countries/1
+Content-Length: 203
+ETag: W/"cb-ycYSy+lmxv51HwwBAEPFd465J8M"
+Date: Tue, 22 Jul 2025 15:14:13 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
 
-```javascript
-await api.use(RestApiPlugin, {
-  simplifiedTransport: true  // Enable simplified mode for HTTP (not recommended)
-});
+{
+  "data": {
+    "type": "countries",
+    "id": "1",
+    "attributes": {
+      "name": "United Kingdom",
+      "code": "UK"
+    },
+    "links": {
+      "self": "http://localhost:3000/api/countries/1"
+    }
+  },
+  "links": {
+    "self": "http://localhost:3000/api/countries/1"
+  }
+}
 ```
 
-### Return Full Record
 
-The `returnFullRecord` behavior over HTTP is identical to programmatic usage (see "API usage and returning records" above), but the HTTP status codes vary based on the operation and setting:
-
-**POST operations:**
-- `returnFullRecord: 'full'` → Returns `201 Created` with the full record in the body
-- `returnFullRecord: 'minimal'` → Returns `201 Created` with minimal response `{ id: '...', type: '...' }`
-- `returnFullRecord: 'no'` → Returns `204 No Content` with no body
-
-**PUT/PATCH operations:**
-- `returnFullRecord: 'full'` → Returns `200 OK` with the full record in the body
-- `returnFullRecord: 'minimal'` → Returns `200 OK` with minimal response `{ id: '...', type: '...' }`
-- `returnFullRecord: 'no'` → Returns `204 No Content` with no body
-
-**DELETE operations:**
-- Always returns `204 No Content` with no body (regardless of `returnFullRecord`)
-
-
-
-TODO: Implement flag to decide if minimal records or no record is returned. Probably change the setting to responseRecord that can be 'full', 'minimal' or 'none'
 

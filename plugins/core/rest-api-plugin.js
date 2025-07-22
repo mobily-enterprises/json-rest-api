@@ -27,31 +27,6 @@ import { parseJsonApiQuery } from './utils/connectors-query-parser.js';
 const cascadeConfig = (settingName, sources, defaultValue) =>
   sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
 
-/**
- * Determines which simplified setting to use based on request context
- * @param {Object} params - Request parameters
- * @param {Object} scopeOptions - Scope-specific options
- * @param {Object} vars - Plugin variables
- * @returns {boolean} Whether to use simplified mode
- */
-const getSimplifiedSetting = (params, scopeOptions, vars) => {
-
-  // If there was no params.inputRecord, then simplified must be true regardless
-  // The rest of this function is based on `params` actually being `params`,
-  // so it will be skipped
-  const configSimplified = cascadeConfig('simplified', [scopeOptions], false)
-  if (!params.inputRecord && !configSimplified) return true
-
-  // Check if this request comes from a transport (HTTP/Express)
-  const isTransport = params.isTransport === true;
-  
-  // Determine which default to use
-  const defaultSetting = isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
-  
-  // Allow override at request/scope level
-  return cascadeConfig('simplified', [params, scopeOptions], defaultSetting);
-}
-
 export const RestApiPlugin = {
   name: 'rest-api',
 
@@ -149,6 +124,14 @@ export const RestApiPlugin = {
       if (typeof scopeOptions.publicBaseUrl !== 'undefined') vars.publicBaseUrl = scopeOptions.publicBaseUrl
       if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts
       
+      // Set simplified settings as scope vars
+      if (typeof scopeOptions.simplifiedApi !== 'undefined') vars.simplifiedApi = scopeOptions.simplifiedApi
+      if (typeof scopeOptions.simplifiedTransport !== 'undefined') vars.simplifiedTransport = scopeOptions.simplifiedTransport
+      
+      // Set returnRecord settings as scope vars
+      if (typeof scopeOptions.returnRecordApi !== 'undefined') vars.returnRecordApi = scopeOptions.returnRecordApi
+      if (typeof scopeOptions.returnRecordTransport !== 'undefined') vars.returnRecordTransport = scopeOptions.returnRecordTransport
+      
 
       // Add validation for query limits
       if (vars.queryDefaultLimit && vars.queryMaxLimit) {
@@ -197,27 +180,47 @@ export const RestApiPlugin = {
     
     vars.idProperty = restApiOptions.idProperty || 'id'
 
-    // Return full record configuration
-    // Support values: 'no', 'minimal', 'full' (default: 'no')
-    const normalizeReturnValue = (value) => {
+    // Return full record configuration for API and Transport
+    // Support values: 'no', 'minimal', 'full'
+    const normalizeReturnValue = (value, defaultValue) => {
       if (['no', 'minimal', 'full'].includes(value)) return value;
-      return 'no'; // default
+      return defaultValue;
     };
 
-    // Process returnFullRecord options
-    if (typeof restApiOptions.returnFullRecord === 'object' && restApiOptions.returnFullRecord !== null) {
-      vars.returnFullRecord = {
-        post: normalizeReturnValue(restApiOptions.returnFullRecord.post),
-        put: normalizeReturnValue(restApiOptions.returnFullRecord.put),
-        patch: normalizeReturnValue(restApiOptions.returnFullRecord.patch),
+    // Process returnRecordApi options (default: 'full' for better DX)
+    if (typeof restApiOptions.returnRecordApi === 'object' && restApiOptions.returnRecordApi !== null) {
+      vars.returnRecordApi = {
+        post: normalizeReturnValue(restApiOptions.returnRecordApi.post, 'full'),
+        put: normalizeReturnValue(restApiOptions.returnRecordApi.put, 'full'),
+        patch: normalizeReturnValue(restApiOptions.returnRecordApi.patch, 'full'),
       };
-    } else {
+    } else if (restApiOptions.returnRecordApi !== undefined) {
       // Single string value applies to all methods
-      const normalized = normalizeReturnValue(restApiOptions.returnFullRecord);
-      vars.returnFullRecord = { post: normalized, put: normalized, patch: normalized };
+      const normalized = normalizeReturnValue(restApiOptions.returnRecordApi, 'full');
+      vars.returnRecordApi = { post: normalized, put: normalized, patch: normalized };
+    } else {
+      // Default to 'full' for all methods
+      vars.returnRecordApi = { post: 'full', put: 'full', patch: 'full' };
+    }
+
+    // Process returnRecordTransport options (default: 'no' for performance)
+    if (typeof restApiOptions.returnRecordTransport === 'object' && restApiOptions.returnRecordTransport !== null) {
+      vars.returnRecordTransport = {
+        post: normalizeReturnValue(restApiOptions.returnRecordTransport.post, 'no'),
+        put: normalizeReturnValue(restApiOptions.returnRecordTransport.put, 'no'),
+        patch: normalizeReturnValue(restApiOptions.returnRecordTransport.patch, 'no'),
+      };
+    } else if (restApiOptions.returnRecordTransport !== undefined) {
+      // Single string value applies to all methods
+      const normalized = normalizeReturnValue(restApiOptions.returnRecordTransport, 'no');
+      vars.returnRecordTransport = { post: normalized, put: normalized, patch: normalized };
+    } else {
+      // Default to 'no' for all methods
+      vars.returnRecordTransport = { post: 'no', put: 'no', patch: 'no' };
     }
     
-    log.debug('ReturnFullRecord configuration:', vars.returnFullRecord);
+    log.debug('returnRecordApi configuration:', vars.returnRecordApi);
+    log.debug('returnRecordTransport configuration:', vars.returnRecordTransport);
 
     // Schema cache vars
     vars.schemaProcessed = false;
@@ -363,8 +366,14 @@ export const RestApiPlugin = {
     addScopeMethod('query', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName, log }) => {
       context.method = 'query'
             
-      const defaultSimplifiedSetting = params.isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions], defaultSimplifiedSetting);
+      // Determine which simplified setting to use based on transport
+      const isTransport = params.isTransport === true;
+      
+      // Use vars which automatically cascade from scope to global
+      const defaultSimplified = isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+      
+      // Get simplified setting - from params only (per-call override) or use default
+      context.simplified = params.simplified !== undefined ? params.simplified : defaultSimplified;
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
@@ -597,8 +606,14 @@ export const RestApiPlugin = {
     addScopeMethod('get', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'get'
 
-      const defaultSimplifiedSetting = params.isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
-      context.simplified = cascadeConfig('simplified', [params, scopeOptions], defaultSimplifiedSetting);
+      // Determine which simplified setting to use based on transport
+      const isTransport = params.isTransport === true;
+      
+      // Use vars which automatically cascade from scope to global
+      const defaultSimplified = isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+      
+      // Get simplified setting - from params only (per-call override) or use default
+      context.simplified = params.simplified !== undefined ? params.simplified : defaultSimplified;
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
@@ -762,32 +777,50 @@ export const RestApiPlugin = {
      * @returns {object} An object containing schema-related shortcuts.
      */
     async function setupCommonRequest({ params, context, vars, scopes, scopeOptions, scopeName }) {
-        // Get configuration values using new helper
-        context.simplified = getSimplifiedSetting(params, scopeOptions, vars);
+        // Determine which simplified setting to use based on transport
+        const isTransport = params.isTransport === true;
+        
+        // Use vars which automatically cascade from scope to global
+        const defaultSimplified = isTransport ? vars.simplifiedTransport : vars.simplifiedApi;
+        
+        // Get simplified setting - from params only (per-call override) or use default
+        context.simplified = params.simplified !== undefined ? params.simplified : defaultSimplified;
+        
+        // Special case: if no inputRecord provided, force simplified mode
+        if (!params.inputRecord && context.simplified === false) {
+            context.simplified = true;
+        }
 
         // Params is totally bypassed in simplified mode
         if (context.simplified) {
             if (params.inputRecord) {
                 context.inputRecord = params.inputRecord;
-                context.params = params; // Ensure params is an empty object if simplified
+                context.params = params;
             } else {
                 context.inputRecord = params;
-                context.params = {}; // Ensure params is an empty object if simplified
+                // Preserve returnFullRecord if specified in params
+                context.params = params.returnFullRecord ? { returnFullRecord: params.returnFullRecord } : {};
             }
         } else {
             context.inputRecord = params.inputRecord;
+            context.params = params;
         }
 
         // Assign common context properties
         context.schemaInfo = scopes[scopeName].vars.schemaInfo;
         
-        // Get returnFullRecord setting - could be from params, scopeOptions, or vars
-        const returnFullRecordRaw = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], 'no');
+        // Use vars which automatically cascade from scope to global
+        const defaultReturnFullRecord = isTransport ? vars.returnRecordTransport : vars.returnRecordApi;
         
-        // Normalize returnFullRecord to always be an object with method keys
+        // Get return record setting - from params only (per-call override) or use default
+        const returnFullRecordRaw = context.params.returnFullRecord !== undefined 
+            ? context.params.returnFullRecord 
+            : defaultReturnFullRecord;
+        
+        // Normalize return record setting to always be an object with method keys
         if (typeof returnFullRecordRaw === 'object' && returnFullRecordRaw !== null) {
             // It's already an object, normalize the values
-            context.returnFullRecord = {
+            context.returnRecordSetting = {
                 post: normalizeReturnValue(returnFullRecordRaw.post),
                 put: normalizeReturnValue(returnFullRecordRaw.put),
                 patch: normalizeReturnValue(returnFullRecordRaw.patch)
@@ -795,7 +828,7 @@ export const RestApiPlugin = {
         } else {
             // It's a single value (string or boolean), apply to all methods
             const normalized = normalizeReturnValue(returnFullRecordRaw);
-            context.returnFullRecord = {
+            context.returnRecordSetting = {
                 post: normalized,
                 put: normalized,
                 patch: normalized
@@ -1173,11 +1206,11 @@ const validatePivotResource = (scopes, relDef, relName) => {
         }
 
         // Step 2: Determine what to return based on configuration
-        const returnMode = context.returnFullRecord[context.method];
+        const returnMode = context.returnRecordSetting[context.method];
         
         // Case 1: Return nothing (204 No Content)
         if (returnMode === 'no') {
-            context.returnRecord = undefined;
+            context.responseRecord = undefined;
             await runHooks('finish');
             await runHooks(`finish${methodSpecificHookSuffix}`);
             return undefined;
@@ -1186,12 +1219,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
         // Case 2: Return minimal record (just type and id)
         if (returnMode === 'minimal') {
             if (context.simplified) {
-                context.returnRecord = { 
+                context.responseRecord = { 
                     id: String(context.id), 
                     type: scopeName 
                 };
             } else {
-                context.returnRecord = {
+                context.responseRecord = {
                     data: {
                         type: scopeName,
                         id: String(context.id)
@@ -1200,7 +1233,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
             }
             await runHooks('finish');
             await runHooks(`finish${methodSpecificHookSuffix}`);
-            return context.returnRecord;
+            return context.responseRecord;
         }
         
         // Case 3: Return full record
@@ -1213,21 +1246,21 @@ const validatePivotResource = (scopes, relDef, relName) => {
                 simplified: context.simplified
             });
             
-            context.returnRecord = fullRecord || undefined;
+            context.responseRecord = fullRecord || undefined;
             
             // Run finish hooks
             await runHooks('finish');
             await runHooks(`finish${methodSpecificHookSuffix}`);
             
             // Transform to simplified format if needed
-            if (context.simplified && context.returnRecord) {
+            if (context.simplified && context.responseRecord) {
                 return transformJsonApiToSimplified(
-                    { record: context.returnRecord },
+                    { record: context.responseRecord },
                     { context: { schemaStructure, schemaRelationships } }
                 );
             }
             
-            return context.returnRecord;
+            return context.responseRecord;
         }
         
         // This should never be reached, but just in case
