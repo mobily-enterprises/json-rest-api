@@ -109,6 +109,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -172,6 +173,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -235,6 +237,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -265,6 +268,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -317,6 +321,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -373,6 +378,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -436,6 +442,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -494,6 +501,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -552,6 +560,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -621,6 +630,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
@@ -680,6 +690,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
         auth: { token }
       });
 
