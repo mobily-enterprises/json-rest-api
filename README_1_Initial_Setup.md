@@ -675,6 +675,7 @@ This will have no response (204 No Content) since by default resources won't ret
 ```
 HTTP/1.1 204 No Content
 X-Powered-By: Express
+Location: http://localhost:3000/api/countries/1
 ETag: W/"a-bAsFyilMr4Ra1hIU5PyoyFRunpI"
 Date: Tue, 22 Jul 2025 14:54:45 GMT
 Connection: keep-alive
@@ -820,5 +821,49 @@ Keep-Alive: timeout=5
 }
 ```
 
+# Plugin and resource variables
 
+When passing a parameter, `rest-api-plugin` normalises them (when needed) and stores them into plugin variables. This means that these two ways of defining `returnRecordApi` is identical:
+
+```javascript
+await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0',  returnRecordTransport: 'minimal'});
+
+// ...or...
+
+await api.use(RestApiPlugin, { 
+  publicBaseUrl: '/api/1.0', 
+  vars: {
+    returnRecordTransport: 'minimal'
+  }
+});
+```
+
+Here is a full list of parameters and their respective variables:
+
+| Parameter | Variable Name | Default Value | Description | Scope Override |
+|-----------|--------------|---------------|-------------|----------------|
+| `queryDefaultLimit` | `vars.queryDefaultLimit` | `25` | Default number of records returned in query results | ✓ |
+| `queryMaxLimit` | `vars.queryMaxLimit` | `100` | Maximum allowed limit for query results | ✓ |
+| `includeDepthLimit` | `vars.includeDepthLimit` | `3` | Maximum depth for nested relationship includes | ✓ |
+| `publicBaseUrl` | `vars.publicBaseUrl` | `''` | Base URL for generated links (e.g., `https://api.example.com/v1`) | ✓ |
+| `enablePaginationCounts` | `vars.enablePaginationCounts` | `true` | Whether to include total count in pagination metadata | ✓ |
+| `simplifiedApi` | `vars.simplifiedApi` | `true` | Use simplified format for programmatic API calls | ✓ |
+| `simplifiedTransport` | `vars.simplifiedTransport` | `false` | Use simplified format for HTTP/REST endpoints | ✓ |
+| `idProperty` | `vars.idProperty` | `'id'` | Name of the ID field in resources | ✓ |
+| `returnRecordApi` | `vars.returnRecordApi` | `{ post: 'full', put: 'full', patch: 'full' }` | What to return for programmatic API write operations | ✓ |
+| `returnRecordTransport` | `vars.returnRecordTransport` | `{ post: 'no', put: 'no', patch: 'no' }` | What to return for HTTP/REST write operations | ✓ |
+
+**Resource-specific parameters** (only available at resource level, not plugin level):
+
+| Parameter | Variable Name | Default Value | Description |
+|-----------|--------------|---------------|-------------|
+| `sortableFields` | `vars.sortableFields` | `[]` | Array of field names that can be used for sorting |
+| `defaultSort` | `vars.defaultSort` | `null` | Default sort order for queries (e.g., `['-createdAt', 'name']`) |
+
+**Notes:**
+- "Scope Override" indicates whether the parameter can be overridden at the resource (scope) level
+- `returnRecordApi` and `returnRecordTransport` can be either:
+  - A string: `'no'`, `'minimal'`, or `'full'` (applies to all methods)
+  - An object: `{ post: 'full', put: 'minimal', patch: 'no' }` (per-method configuration)
+- All parameters support the cascade: per-call → resource-level → plugin-level default
 

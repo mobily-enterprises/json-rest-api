@@ -303,12 +303,18 @@ export const ExpressPlugin = {
             let responseStatus = 200;
             if (result && typeof result.statusCode === 'number') {
               responseStatus = result.statusCode;
-            } else if ((req.method === 'DELETE' || req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && !result) {
-              // No content response for DELETE and write operations with returnFullRecord: 'no'
-              responseStatus = 204;
             } else if (req.method === 'POST' && result) {
-              // Default 201 for POST when we have content
+              // POST with content returns 201 Created
               responseStatus = 201;
+            } else if (req.method === 'POST' && !result) {
+              // POST without content returns 204 No Content
+              responseStatus = 204;
+            } else if (req.method === 'DELETE') {
+              // DELETE always returns 204 No Content
+              responseStatus = 204;
+            } else if ((req.method === 'PUT' || req.method === 'PATCH') && !result) {
+              // PUT/PATCH return 204 when no content is returned
+              responseStatus = 204;
             }
 
             // Apply headers from the handler result
@@ -330,6 +336,20 @@ export const ExpressPlugin = {
             // Set content type
             res.set('Content-Type', 'application/vnd.api+json');
 
+            // Set Location header for successful POST requests
+            if (req.method === 'POST' && context.id) {
+              // Extract scopeName from the path (e.g., /api/countries -> countries)
+              const pathParts = path.split('/');
+              const scopeName = pathParts[pathParts.length - 1];
+              
+              // Set Location header for any successful POST (201 or 204)
+              if (helpers.getLocation) {
+                const location = helpers.getLocation({ scopeName, id: context.id });
+                const baseUrl = vars.publicBaseUrl || basePath;
+                res.set('Location', `${baseUrl}${location}`);
+              }
+            }
+
             // Handle response based on status
             if (responseStatus === 204) {
               res.sendStatus(204);
@@ -337,13 +357,6 @@ export const ExpressPlugin = {
               // If result has a body property, that's what we should send
               // This happens when handler returns { statusCode, body, headers }
               const responseBody = result && result.body !== undefined ? result.body : result;
-              
-              if (req.method === 'POST' && responseBody?.data?.id && helpers.getLocation) {
-                const scopeName = path.split('/')[2];
-                const location = helpers.getLocation({ scopeName, id: responseBody.data.id });
-                const baseUrl = vars.publicBaseUrl || basePath;
-                res.set('Location', `${baseUrl}${location}`);
-              }
               res.status(responseStatus).json(responseBody);
             }
           } catch (error) {

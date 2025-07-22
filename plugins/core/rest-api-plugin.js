@@ -132,6 +132,8 @@ export const RestApiPlugin = {
       if (typeof scopeOptions.returnRecordApi !== 'undefined') vars.returnRecordApi = scopeOptions.returnRecordApi
       if (typeof scopeOptions.returnRecordTransport !== 'undefined') vars.returnRecordTransport = scopeOptions.returnRecordTransport
       
+      // Set idProperty as scope var
+      if (typeof scopeOptions.idProperty !== 'undefined') vars.idProperty = scopeOptions.idProperty
 
       // Add validation for query limits
       if (vars.queryDefaultLimit && vars.queryMaxLimit) {
