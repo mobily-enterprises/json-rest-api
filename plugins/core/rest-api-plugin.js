@@ -146,7 +146,6 @@ export const RestApiPlugin = {
       if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit
       if (typeof scopeOptions.queryMaxLimit !== 'undefined') vars.queryMaxLimit = scopeOptions.queryMaxLimit
       if (typeof scopeOptions.includeDepthLimit !== 'undefined') vars.includeDepthLimit = scopeOptions.includeDepthLimit
-      if (typeof scopeOptions.mountPath !== 'undefined') vars.mountPath = scopeOptions.mountPath
       if (typeof scopeOptions.publicBaseUrl !== 'undefined') vars.publicBaseUrl = scopeOptions.publicBaseUrl
       if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts
       
@@ -183,7 +182,6 @@ export const RestApiPlugin = {
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
-    vars.mountPath = restApiOptions.mountPath || ''
     vars.publicBaseUrl = restApiOptions.publicBaseUrl || ''
     vars.enablePaginationCounts = restApiOptions.enablePaginationCounts || true
 
@@ -204,7 +202,6 @@ export const RestApiPlugin = {
       post: restApiOptions.returnFullRecord?.post ?? true,
       put: restApiOptions.returnFullRecord?.put ?? true,
       patch: restApiOptions.returnFullRecord?.patch ?? true,
-      allowRemoteOverride: restApiOptions.returnFullRecord?.allowRemoteOverride ?? false
     };
 
     // Schema cache vars
@@ -356,7 +353,6 @@ export const RestApiPlugin = {
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo; // This is the object variable created by compileSchemas
-      context.returnFullRecord = cascadeConfig('returnFullRecord', [params, scopeOptions, vars], false);
       context.queryParams = params.queryParams || {};
 
       // These only make sense as parameter per query
@@ -591,7 +587,6 @@ export const RestApiPlugin = {
 
       // Assign common context properties
       context.schemaInfo = scopes[scopeName].vars.schemaInfo;
-      context.returnFullRecord = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], false);
       context.queryParams = params.queryParams || {};
     
       // These only make sense as parameter per query
@@ -759,6 +754,7 @@ export const RestApiPlugin = {
         if (context.simplified) {
             if (params.inputRecord) {
                 context.inputRecord = params.inputRecord;
+                context.params = params; // Ensure params is an empty object if simplified
             } else {
                 context.inputRecord = params;
                 context.params = {}; // Ensure params is an empty object if simplified
@@ -770,6 +766,17 @@ export const RestApiPlugin = {
         // Assign common context properties
         context.schemaInfo = scopes[scopeName].vars.schemaInfo;
         context.returnFullRecord = cascadeConfig('returnFullRecord',  [context.params, scopeOptions, vars], false);
+        
+        // Normalize returnFullRecord to always be an object with method keys
+        // If it's a boolean (from per-call override), convert it to object format
+        if (typeof context.returnFullRecord === 'boolean') {
+            const boolValue = context.returnFullRecord;
+            context.returnFullRecord = {
+                post: boolValue,
+                put: boolValue,
+                patch: boolValue
+            };
+        }
 
         // These only make sense as parameter per query, not in vars etc.
         context.queryParams = params.queryParams || {};
@@ -2434,8 +2441,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
     
     // Helper to get the URL prefix for generating links
     helpers.getUrlPrefix = ({ scope, context }) => {
-      // Check for publicBaseUrl first, then fall back to mountPath
-      return scope?.vars?.publicBaseUrl || vars.publicBaseUrl || scope?.vars?.mountPath || vars.mountPath || '';
+      // Check for publicBaseUrl first, then fall back to mountPath from transport
+      return scope?.vars?.publicBaseUrl || vars.publicBaseUrl || vars.transport?.mountPath || '';
     };
 
     /**
@@ -2462,7 +2469,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Listen for scope additions to register routes
     addHook('scope:added', 'registerScopeRoutes', {}, async ({ context }) => {
       const { scopeName } = context;
-      const basePath = vars.mountPath || '';
+      const basePath = vars.transport?.mountPath || '';
       
       // Helper to create route handlers
       const createRouteHandler = (scopeName, methodName) => {

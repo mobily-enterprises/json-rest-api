@@ -213,7 +213,7 @@ export const SocketIOPlugin = {
     // Create Socket.IO server
     api.startSocketServer = async (server, options = {}) => {
       // Default path respects mountPath for consistency with REST API
-      const defaultPath = vars.mountPath ? `${vars.mountPath}/socket.io` : '/socket.io';
+      const defaultPath = vars.transport?.mountPath ? `${vars.transport.mountPath}/socket.io` : '/socket.io';
       
       const {
         path = defaultPath,

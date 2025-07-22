@@ -43,13 +43,12 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       
       // Install plugins
       await baseUrlApi.use((await import('../plugins/core/rest-api-plugin.js')).RestApiPlugin, {
-        simplifiedApi: false,
-        mountPath: '/v1/api'
+        simplifiedApi: false
       });
       await baseUrlApi.use((await import('../plugins/core/rest-api-knex-plugin.js')).RestApiKnexPlugin, { knex });
       await baseUrlApi.use((await import('../plugins/core/connectors/express-plugin.js')).ExpressPlugin, {
-        app: baseUrlApp
-        // basePath is now configured via vars.mountPath
+        app: baseUrlApp,
+        mountPath: '/v1/api'
       });
       
       // Add basic scope
@@ -75,7 +74,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       } catch (error) {
         console.log('[TEST] CORS installation error:', error.message);
         console.log('[TEST] vars.transport.matchAll:', baseUrlApi.vars.transport?.matchAll);
-        console.log('[TEST] mountPath from vars:', baseUrlApi.vars.mountPath);
+        console.log('[TEST] mountPath from transport:', baseUrlApi.vars.transport?.mountPath);
         console.log('[TEST] Full wildcard path would be:', '/v1' + (baseUrlApi.vars.transport?.matchAll || '*'));
         throw error;
       }

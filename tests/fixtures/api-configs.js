@@ -25,7 +25,6 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       allowRemoteOverride: false
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
-    mountPath: '/api',  // Default mount path for tests
     ...pluginOptions['rest-api']  // Merge any custom options for rest-api plugin
   };
 
@@ -35,7 +34,10 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   
   // Add Express plugin if requested
   if (pluginOptions.includeExpress) {
-    await api.use(ExpressPlugin, pluginOptions.express || {});
+    await api.use(ExpressPlugin, {
+      mountPath: '/api',  // Default mount path for tests
+      ...(pluginOptions.express || {})
+    });
   }
 
   // Countries table

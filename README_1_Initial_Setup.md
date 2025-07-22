@@ -44,7 +44,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
 
 // Install plugins
-await api.use(RestApiPlugin);
+await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0' });
 await api.use(RestApiKnexPlugin, { knex });
 
 // Define schemas for our book catalog system
@@ -226,13 +226,11 @@ const knex = knexLib({
 
 Remember to install the corresponding `knex` driver for your chosen database (e.g., `npm install pg` for PostgreSQL, `npm install mysql2` for MySQL) just as we had to `npm install` the `better-sqlite3` package to make the first example work. 
 
-## Basic Usage
+### Programmatic Usage
 
 The `json-rest-api` plugin extends your `hooked-api` instance with powerful RESTful capabilities, allowing you to interact with your defined resources both programmatically within your application code and via standard HTTP requests.
 
 The instanced object becomes a fully-fledged, database and schema aware API.
-
-### Programmatic Usage
 
 Once your resources are defined using `api.addResource()`, you can directly call CRUD (Create, Read, Update, Delete) methods on `api.resources.<resourceName>`.
 
@@ -260,6 +258,253 @@ console.log('Refetched Country:', inspect(countryUsRefetched));
 // Expected Output:
 // Refetched Country: { id: '1', name: 'United States', code: 'US' }
 ```
+
+The database is populated, and the newly added record is then fetched.
+
+#### API usage and simplified mode
+
+In the examples above, we're using the API in **simplified mode** (which is the default for programmatic usage). Simplified mode is a convenience feature that allows you to work with plain JavaScript objects instead of the full JSON:API document structure. However, it's important to understand that internally, everything is still processed as proper JSON:API documents.
+
+Simplified mode changes:
+- **Input**: You can pass plain objects with just the attributes
+- **Output**: You get back plain objects with id and attributes merged at the top level
+
+Here's how the same operations look when **NOT** using simplified mode:
+
+```javascript
+// Create a country (non-simplified mode)
+const countryUs = await api.resources.countries.post({
+  inputRecord: {
+    data: {
+      type: 'countries',
+      attributes: {
+        name: 'United States',
+        code: 'US'
+      }
+    }
+  },
+  simplified: false
+});
+console.log('Created Country:', inspect(countryUs));
+// Expected Output:
+// Created Country: {
+//   data: {
+//     type: 'countries',
+//     id: '1',
+//     attributes: { name: 'United States', code: 'US' },
+//     links: { self: '/api/1.0/countries/1' }
+//   },
+//   links: { self: '/api/1.0/countries/1' }
+// }
+
+// Fetch a country by ID (non-simplified mode)
+const countryUsRefetched = await api.resources.countries.get({
+  id: countryUs.data.id,
+  simplified: false
+});
+console.log('Refetched Country:', inspect(countryUsRefetched));
+// Expected Output (a  full JSON:API record):
+// Refetched Country: {
+//   data: {
+//     type: 'countries',
+//     id: '1',
+//     attributes: { name: 'United States', code: 'US' },
+//     links: { self: '/api/1.0/countries/1' }
+//   },
+//   links: { self: '/api/1.0/countries/1' }
+// }
+```
+
+(Note that the full JSON:API record includes links to resources, which use `publicBaseUrl` set in when `use()`ing the `json-rest-api` plugin.)
+
+As you can see, when `simplified: false` is used:
+
+- Input requires the full JSON:API document structure with `data`, `type`, and `attributes`
+- Output returns the full JSON:API response with the same nested structure (and links)
+- You need to access the ID as `result.data.id` instead of just `result.id`
+
+**NOTE**: For programmatic API calls, simplified mode defaults to true but can be configured at multiple levels: globally via `simplifiedApi: true/false` when installing RestApiPlugin, per-resource when calling `addResource()`, or per-call by setting `simplified: true/false` in the call parameters, with the hierarchy being per-call → per-resource → global default; additionally, when passing attributes directly (without inputRecord), simplified mode is always true regardless of configuration.
+
+For example:
+
+1. **Global default**: Set during plugin installation
+   ```javascript
+   await api.use(RestApiPlugin, {
+     simplifiedApi: false  // All API calls will use JSON:API format by default
+   });
+   ```
+
+2. **Per-resource override**: Set when defining a resource
+   ```javascript
+   await api.addResource('countries', {
+     schema: {
+       name: { type: 'string', required: true },
+       code: { type: 'string', required: true }
+     },
+     simplified: false  // This resource always uses JSON:API format
+   });
+   ```
+
+3. **Per-call override**: Set in individual method calls
+   ```javascript
+   // Force non-simplified for this call only
+  const result = await api.resources.countries.post({
+    inputRecord: {
+      data: {
+        type: 'countries',
+        attributes: {
+          name: 'United States',
+          code: 'US'
+        }
+      }
+    },
+    simplified: false
+  });
+
+   ```
+
+The hierarchy is: **per-call → per-resource → global default**
+
+**Special case**: When passing attributes directly (without `inputRecord`), simplified mode is always `true` regardless of configuration:
+```javascript
+// This ALWAYS uses simplified mode, even if global/resource setting is false
+const result = await api.resources.countries.post({
+  name: 'United States',
+  code: 'US'
+});
+```
+
+By default, `simplifiedApi` is `true` for programmatic usage, making it easier to work with the API in your code while still maintaining full JSON:API compliance internally.
+
+#### API usage and returning records
+
+In the previous examples, each POST call returned the full record. However, this is not always the case -- especially since a re-fetch is a power-consuming operation. The **returnFullRecord** option controls whether you get back the complete record or just the ID (especially useful in POST calls). This is useful for balancing between getting complete data and optimizing performance.
+
+`returnFullRecord` controls what you get back:
+- **When `true`**: Returns the full record with all attributes, relationships, computed fields, and links
+- **When `false`**: Returns only the ID in a minimal response
+
+Here's how the same POST operation behaves with different `returnFullRecord` settings:
+
+```javascript
+// Create a country with full record returned (default behavior)
+// (returnFullRecord: true is the default)
+const countryWithFullRecord = await api.resources.countries.post({
+  name: 'Canada',
+  code: 'CA'
+});
+console.log('Created with full record:', inspect(countryWithFullRecord));
+// Expected Output:
+// Created with full record: {
+//   id: '2',
+//   name: 'Canada',
+//   code: 'CA'
+// }
+
+// Create a country with only ID returned
+// When specifying parameters like returnFullRecord, you must use inputRecord
+const countryIdOnly = await api.resources.countries.post({
+  inputRecord: {
+    name: 'Mexico',
+    code: 'MX'
+  },
+  returnFullRecord: true
+});
+console.log('Created with ID only:', inspect(countryIdOnly));
+// Expected Output:
+// Created with ID only: { id: '3' }
+```
+
+When combined with non-simplified mode, the difference is even more apparent:
+
+```javascript
+// Non-simplified mode with full record
+const fullJsonApi = await api.resources.countries.post({
+  inputRecord: {
+    data: {
+      type: 'countries',
+      attributes: { name: 'France', code: 'FR' }
+    }
+  },
+  simplified: false,
+  returnFullRecord: true
+});
+console.log('Full JSON:API response:', inspect(fullJsonApi));
+// Expected Output:
+// Full JSON:API response: {
+//   data: {
+//     type: 'countries',
+//     id: '4',
+//     attributes: { name: 'France', code: 'FR' },
+//     links: { self: '/api/1.0/countries/4' }
+//   },
+//   links: { self: '/api/1.0/countries/4' }
+// }
+
+// Non-simplified mode with ID only
+const minimalJsonApi = await api.resources.countries.post({
+  inputRecord: {
+    data: {
+      type: 'countries',
+      attributes: { name: 'Germany', code: 'DE' }
+    }
+  },
+  simplified: false,
+  returnFullRecord: false
+});
+console.log('Minimal JSON:API response:', inspect(minimalJsonApi));
+// Expected Output:
+// Minimal JSON:API response: { id: '5' }
+```
+
+**NOTE**: `returnFullRecord` defaults to `true` for all operations (POST, PUT, PATCH) but can be configured at multiple levels: globally when installing RestApiPlugin, per-resource when calling `addResource()`, or per-call in the method parameters, with the same hierarchy as simplified mode (per-call → per-resource → global default).
+
+For example:
+
+1. **Global default**: Set during plugin installation
+   ```javascript
+   await api.use(RestApiPlugin, {
+     returnFullRecord: {
+       post: false,   // Only return IDs after POST
+       put: false,    // Only return IDs after PUT
+       patch: true    // Return full records after PATCH
+     }
+   });
+   ```
+
+2. **Per-resource override**: Set when defining a resource
+   ```javascript
+   await api.addResource('countries', {
+     schema: {
+       name: { type: 'string', required: true },
+       code: { type: 'string', required: true }
+     },
+     returnFullRecord: {
+       post: true,   // Return full records after POST
+       put: true,    // Return full records after PUT
+       patch: false  // Return only ID after PATCH
+     }
+   });
+   ```
+
+3. **Per-call override**: Set in individual method calls
+   ```javascript
+   // Override to get just the ID for this specific call
+   const result = await api.resources.countries.patch({
+     inputRecord: {
+       id: '1',
+       name: 'United States of America'
+     },
+     returnFullRecord: false
+   });
+   // result = { id: '1' }
+   ```
+
+**Performance consideration**: When `returnFullRecord: true`, the API performs an additional GET request internally after the write operation to fetch the complete record with all computed fields and relationships. Setting it to `false` skips this extra query, improving performance when you don't need the full data.
+
+By default, all operations return full records for developer convenience, but you can optimize performance by setting `returnFullRecord: false` when you only need confirmation that the operation succeeded.
+
+Note that the setting will affect **both** API usage **and** HTTP usage.
 
 ### REST Usage (HTTP Endpoints)
 
@@ -300,7 +545,7 @@ const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
 // Install plugins
 await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin);
+await api.use(ExpressPlugin, {  mountPath: '/api' });
 
 // *** ...schema definitions as above... ***
 
@@ -349,131 +594,55 @@ curl -X POST -H "Content-Type: application/vnd.api+json" \
 curl -X GET http://localhost:3000/api/countries/2
 ```
 
-
 **From now on, all examples will provide both programmatic usage and `curl` usage.** This ensures you understand how to interact with the API directly in your code and how it translates to standard HTTP requests.
 
 ### Simplified Mode
 
-TODO: Explain what simplified mode is, and what its defaults are. API use is simplified, online use is non-simplified.
-Explain where the settings come from
+The simplified mode concept works exactly the same way over HTTP as it does for programmatic API calls (see "API usage and simplified mode" above). However, there's an important difference in the defaults:
 
-TODO: Explain how to declare 'books' simplified, and show that it will work in simplified mode. Note: cover simplifiedApi
-and simplifiedTransport (as options).
+- **Programmatic API**: `simplifiedApi` defaults to `true` (convenient for developers)
+- **HTTP/REST**: `simplifiedTransport` defaults to `false` (JSON:API compliance)
 
-In "simplified mode":
+This means that by default, HTTP endpoints expect and return proper JSON:API format:
 
-* **Input:** You can pass plain JavaScript objects directly for attributes, and related resource IDs for relationships.
+```bash
+# POST request must use JSON:API format (simplified: false by default)
+curl -X POST -H "Content-Type: application/vnd.api+json" \
+-d '{
+  "data": {
+    "type": "countries",
+    "attributes": {
+      "name": "United Kingdom",
+      "code": "UK"
+    }
+  }
+}' http://localhost:3000/api/countries
+```
 
-* **Output:** Responses are flattened, with `id` and `attributes` merged directly into the top-level object, and `belongsTo` relationships are represented as foreign key IDs. <--- TODO: check this
+Most production servers will keep `simplifiedTransport: false` to maintain JSON:API compliance for client applications. You can enable simplified mode for HTTP if needed:
 
-The `simplified` mode is controlled by options passed during plugin installation or directly to method calls. It cascades, meaning a setting at a lower level overrides a higher one:
-
-TODO: Redo the next bit, since now we have two different flags, one of the API and one for the network connections 
-1. **Global (default):** `RestApiPlugin`'s options (`simplified: true/false`).
-
-2. **Per-Resource:** `addResource()` options (`simplified: true/false`).
-
-3. **Per-Method Call:** The `params` object passed to individual `api.resources.<resource>.method()` calls.
-
-By default, `simplifiedApi` is `true` and simplifiedTransport is `false` for HTTP calls (to maintain JSON:API compliance on the wire).
-
+```javascript
+await api.use(RestApiPlugin, {
+  simplifiedTransport: true  // Enable simplified mode for HTTP (not recommended)
+});
+```
 
 ### Return Full Record
 
-TODO: Explain the returnFullRecord option in detail 
+The `returnFullRecord` behavior over HTTP is identical to programmatic usage (see "API usage and returning records" above), but the HTTP status codes vary based on the operation and setting:
+
+**POST operations:**
+- `returnFullRecord: true` → Returns `201 Created` with the full record in the body
+- `returnFullRecord: false` → Returns `201 Created` with minimal response `{ id: '...' }`
+
+**PUT/PATCH operations:**
+- `returnFullRecord: true` → Returns `200 OK` with the full record in the body
+- `returnFullRecord: false` → Returns `200 OK` with minimal response `{ id: '...' }`
+
+**DELETE operations:**
+- Always returns `204 No Content` with no body (regardless of `returnFullRecord`)
 
 
 
-
-### Search (Filtering)
-
-TODO
-
-### Sparse Fields
-
-The JSON:API specification allows clients to request only a subset of fields for a given resource, a feature known as "sparse fieldsets". This is crucial for optimizing network traffic by reducing the size of the response payload, especially when dealing with large records.
-
-You can specify which fields to return using the `fields[resourceType]=field1,field2` query parameter.
-
-**Programmatic Example: Get only `name` for `countries`**
-
-```javascript
-TODO
-```
-
-**HTTP Example: Get Books with only `title` and `isbn`**
-
-TODO
-
-Sparse fieldsets also apply to `included` resources. If you request related data, you can specify which fields of those related resources should be returned as well.
-
-
-## belongsTo records
-
-### Search (belongsTo)
-
-### Sparse fields (belongsTo)
-
-### Computed and hidden fields
-
-
-
-
-## hasMany records
-
-### Search (hasMany)
-
-### Sparse fields (hasMany)
-
-### Computed and hidden fields
-
-
-
-
-## hasMany records (polymorphic)
-
-### Search (hasMany)
-
-### Sparse fields (hasMany)
-
-### Computed and hidden fields
-
-
-
-
-## Many to many (hasMany with through records)
-
-### Search (many to many)
-
-### Sparse fields (many to many)
-
-### Computed and hidden fields
-
-
-
-
-
-
-## Next Steps
-
-- [Schema Definition Guide](docs/schemas.md) - Learn about all field types and validation rules
-- [Relationships Guide](docs/relationships.md) - Deep dive into relationship configuration
-- [Querying Guide](docs/querying.md) - Advanced filtering, sorting, and pagination
-- [File Uploads Guide](docs/file-uploads.md) - Handle file uploads with various storage backends
-- [Authentication Guide](docs/authentication.md) - Add authentication and authorization
-- [Testing Guide](docs/testing.md) - Write tests for your API
-
-## License
-
-GPL-3.0-or-later
-
-
-
-
-
-
-
-
-
-
+TODO: Implement flag to decide if minimal records or no record is returned. Probably change the setting to responseRecord that can be 'full', 'minimal' or 'none'
 

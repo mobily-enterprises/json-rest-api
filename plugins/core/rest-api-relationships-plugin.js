@@ -100,8 +100,8 @@ export const RestApiRelationshipsPlugin = {
       // Build response with links
       return {
         links: {
-          self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/relationships/${context.relationshipName}`,
-          related: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
+          self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/relationships/${context.relationshipName}`,
+          related: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
         },
         data: relationshipData?.data || (relDef.hasMany || relDef.manyToMany ? [] : null)
       };
@@ -201,7 +201,7 @@ export const RestApiRelationshipsPlugin = {
           const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id;
           if (!relatedId) {
             return {
-              links: { self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+              links: { self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
               data: null
             };
           }
@@ -216,7 +216,7 @@ export const RestApiRelationshipsPlugin = {
           });
 
           return {
-            links: { self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+            links: { self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
             data: related.data,
             included: related.included
           };
@@ -240,7 +240,7 @@ export const RestApiRelationshipsPlugin = {
           const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id;
           if (!relatedId) {
             return {
-              links: { self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+              links: { self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
               data: null
             };
           }
@@ -252,7 +252,7 @@ export const RestApiRelationshipsPlugin = {
           );
 
           return {
-            links: { self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+            links: { self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
             data: relatedResource || null
           };
         }
@@ -275,7 +275,7 @@ export const RestApiRelationshipsPlugin = {
         if (!result.links) {
           result.links = {};
         }
-        result.links.self = `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`;
+        result.links.self = `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`;
         return result;
       }
 
@@ -349,7 +349,7 @@ export const RestApiRelationshipsPlugin = {
         // Build the response
         return {
           links: {
-            self: `${vars.publicBaseUrl || vars.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
+            self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
           },
           data: includedResources,
           meta: pivotResult.meta
@@ -629,7 +629,7 @@ export const RestApiRelationshipsPlugin = {
     // Listen for scope additions to register relationship routes
     addHook('scope:added', 'registerRelationshipRoutes', {}, async ({ context }) => {
       const { scopeName } = context;
-      const basePath = api.scopes[scopeName].vars.mountPath || '';
+      const basePath = api.scopes[scopeName].vars.transport?.mountPath || '';
       const scopePath = `${basePath}/${scopeName}`;
 
       // Helper to create route handlers

@@ -46,14 +46,17 @@ export const ExpressPlugin = {
     
     const expressOptions = pluginOptions || {};
     
-    const basePath = vars.mountPath || '';
+    // Get mountPath from options (this is now a transport concern)
+    const mountPath = expressOptions.mountPath || '';
+    const basePath = mountPath; // Keep basePath for internal use
     const strictContentType = expressOptions.strictContentType !== false;
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb';
     
     // Set transport information for other plugins
     vars.transport = {
       type: 'express',
-      matchAll: '*' // Express wildcard pattern for matching all routes
+      matchAll: '*', // Express wildcard pattern for matching all routes
+      mountPath: mountPath // Transport-specific mount path
     };
     
     // Register file detector if enabled

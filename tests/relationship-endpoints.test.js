@@ -29,9 +29,10 @@ describe('Relationship Endpoints Plugin', () => {
   before(async () => {
     // Initialize API with the relationships plugin
     api = await createBasicApi(knex, {
-      'rest-api': {
+      express: {
         mountPath: ''  // No mount path for this test
-      }
+      },
+      includeExpress: true
     });
     
     // Add the relationships plugin

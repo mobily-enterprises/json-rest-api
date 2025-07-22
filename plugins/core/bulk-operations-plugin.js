@@ -348,7 +348,7 @@ export const BulkOperationsPlugin = {
 
     // Hook into scope creation to add bulk routes
     addHook('afterAddScope', 'bulkOperationsRoutes', {}, async ({ scopeName }) => {
-      const urlPrefix = api.vars.mountPath || '';
+      const urlPrefix = api.vars.transport?.mountPath || '';
       const scopePath = `${urlPrefix}/${scopeName}`;
 
       // Create route handlers
