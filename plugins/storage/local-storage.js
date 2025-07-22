@@ -11,7 +11,7 @@ import crypto from 'crypto';
 export class LocalStorage {
   constructor(options = {}) {
     this.directory = path.resolve(options.directory || './uploads');
-    this.baseUrl = options.baseUrl || '/uploads';
+    this.fileBaseUrl = options.fileBaseUrl || '/uploads';
     this.nameStrategy = options.nameStrategy || 'hash'; // 'hash', 'timestamp', 'original', 'custom'
     this.nameGenerator = options.nameGenerator; // Custom function
     this.preserveExtension = options.preserveExtension !== false;
@@ -190,7 +190,7 @@ export class LocalStorage {
     }
     
     // Return public URL
-    return `${this.baseUrl}/${filename}`;
+    return `${this.fileBaseUrl}/${filename}`;
   }
   
   /**

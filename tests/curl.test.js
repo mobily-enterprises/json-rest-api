@@ -429,7 +429,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       validateJsonApiStructure(response, true);
       
       assert.equal(response.data.length, 3, 'Should return 3 books per page');
-      // Note: Links are only included if resourceUrlPrefix is configured, which it isn't in basicApi
+      // Note: Links are now always included, using relative URLs when publicBaseUrl isn't configured
     });
 
     it('should handle sorting using CURL', async () => {

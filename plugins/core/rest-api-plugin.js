@@ -146,7 +146,8 @@ export const RestApiPlugin = {
       if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit
       if (typeof scopeOptions.queryMaxLimit !== 'undefined') vars.queryMaxLimit = scopeOptions.queryMaxLimit
       if (typeof scopeOptions.includeDepthLimit !== 'undefined') vars.includeDepthLimit = scopeOptions.includeDepthLimit
-      if (typeof scopeOptions.resourceUrlPrefix !== 'undefined') vars.resourceUrlPrefix = scopeOptions.resourceUrlPrefix
+      if (typeof scopeOptions.mountPath !== 'undefined') vars.mountPath = scopeOptions.mountPath
+      if (typeof scopeOptions.publicBaseUrl !== 'undefined') vars.publicBaseUrl = scopeOptions.publicBaseUrl
       if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts
       
 
@@ -182,7 +183,8 @@ export const RestApiPlugin = {
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
-    vars.resourceUrlPrefix = restApiOptions.resourceUrlPrefix || ''
+    vars.mountPath = restApiOptions.mountPath || ''
+    vars.publicBaseUrl = restApiOptions.publicBaseUrl || ''
     vars.enablePaginationCounts = restApiOptions.enablePaginationCounts || true
 
 
@@ -2429,6 +2431,12 @@ const validatePivotResource = (scopes, relDef, relName) => {
     helpers.getLocation = ({ scopeName, id }) => {
       return `/${scopeName}/${id}`;
     };
+    
+    // Helper to get the URL prefix for generating links
+    helpers.getUrlPrefix = ({ scope, context }) => {
+      // Check for publicBaseUrl first, then fall back to mountPath
+      return scope?.vars?.publicBaseUrl || vars.publicBaseUrl || scope?.vars?.mountPath || vars.mountPath || '';
+    };
 
     /**
      * Route registration for transport plugins
@@ -2454,7 +2462,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
     // Listen for scope additions to register routes
     addHook('scope:added', 'registerScopeRoutes', {}, async ({ context }) => {
       const { scopeName } = context;
-      const basePath = vars.resourceUrlPrefix || '';
+      const basePath = vars.mountPath || '';
       
       // Helper to create route handlers
       const createRouteHandler = (scopeName, methodName) => {
@@ -2504,7 +2512,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
         };
       };
       
-      const scopePath = `${basePath}/api/${scopeName}`;
+      const scopePath = `${basePath}/${scopeName}`;
       
       // Register routes for each HTTP method
       // GET /api/{scope} - Query collection

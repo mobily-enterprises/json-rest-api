@@ -596,8 +596,9 @@ export const RestApiKnexPlugin = {
         }
         
         // Generate links 
+        const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
         scope.vars.paginationLinks = generatePaginationLinks(
-          scope.vars.resourceUrlPrefix,
+          urlPrefix,
           scopeName,
           queryParams,
           scope.vars.paginationMeta
@@ -626,8 +627,9 @@ export const RestApiKnexPlugin = {
         }
         
         scope.vars.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields);
+        const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
         scope.vars.paginationLinks = generateCursorPaginationLinks(
-          scope.vars.resourceUrlPrefix,
+          urlPrefix,
           scopeName,
           queryParams,
           records,

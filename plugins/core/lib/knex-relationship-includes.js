@@ -288,8 +288,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: null };
         
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-        if (urlPrefix && scopeName) {
+        const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+        if (scopeName) {
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
             related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
@@ -361,8 +361,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: { type: targetScope, id: String(targetId) } };
         
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-        if (urlPrefix && scopeName) {
+        const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+        if (scopeName) {
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
             related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
@@ -385,8 +385,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: null };
         
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-        if (urlPrefix && scopeName) {
+        const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+        if (scopeName) {
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
             related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
@@ -499,8 +499,8 @@ export const loadHasMany = async (scope, deps) => {
         const relationshipObject = { data: [] };
         
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-        if (urlPrefix && scopeName) {
+        const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+        if (scopeName) {
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
             related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
@@ -656,8 +656,8 @@ export const loadHasMany = async (scope, deps) => {
       const relationshipObject = { data: relData };
       
       // Add links if urlPrefix is configured
-      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-      if (urlPrefix && scopeName) {
+      const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+      if (scopeName) {
         relationshipObject.links = {
           self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
           related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
@@ -820,8 +820,8 @@ export const loadHasMany = async (scope, deps) => {
       const relationshipObject = { data: relData };
       
       // Add links if urlPrefix is configured
-      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-      if (urlPrefix && scopeName) {
+      const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+      if (scopeName) {
         relationshipObject.links = {
           self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
           related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
@@ -998,8 +998,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
           };
           
           // Add links if urlPrefix is configured
-          const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-          if (urlPrefix && scopeName) {
+          const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+          if (scopeName) {
             relationshipObject.links = {
               self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
               related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
@@ -1011,8 +1011,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
           const relationshipObject = { data: null };
           
           // Add links if urlPrefix is configured
-          const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-          if (urlPrefix && scopeName) {
+          const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+          if (scopeName) {
             relationshipObject.links = {
               self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
               related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
@@ -1043,8 +1043,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       const relationshipObject = { data: null };
       
       // Add links if urlPrefix is configured
-      const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-      if (urlPrefix && scopeName) {
+      const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+      if (scopeName) {
         relationshipObject.links = {
           self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
           related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
@@ -1214,8 +1214,8 @@ export const loadReversePolymorphic = async (scope, deps) => {
     const relationshipObject = { data: relData };
     
     // Add links if urlPrefix is configured
-    const urlPrefix = scopes[scopeName]?.vars?.resourceUrlPrefix;
-    if (urlPrefix && scopeName) {
+    const urlPrefix = scopes[scopeName]?.vars?.publicBaseUrl || scopes[scopeName]?.vars?.mountPath || '';
+    if (scopeName) {
       relationshipObject.links = {
         self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
         related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`

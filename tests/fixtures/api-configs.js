@@ -25,6 +25,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       allowRemoteOverride: false
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
+    mountPath: '/api',  // Default mount path for tests
     ...pluginOptions['rest-api']  // Merge any custom options for rest-api plugin
   };
 
@@ -394,7 +395,7 @@ export async function createPaginationApi(knex, options = {}) {
       allowRemoteOverride: false
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
-    ...options  // Allow overriding options like resourceUrlPrefix, enablePaginationCounts
+    ...options  // Allow overriding options like publicBaseUrl, enablePaginationCounts
   };
 
   await api.use(RestApiPlugin, restApiOptions);

@@ -46,7 +46,7 @@ export const ExpressPlugin = {
     
     const expressOptions = pluginOptions || {};
     
-    const basePath = expressOptions.basePath || '';
+    const basePath = vars.mountPath || '';
     const strictContentType = expressOptions.strictContentType !== false;
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb';
     
@@ -109,6 +109,16 @@ export const ExpressPlugin = {
     // Add transport hook middleware
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express');
+      
+      // Auto-detect publicBaseUrl if not explicitly set
+      if (!vars.publicBaseUrl) {
+        // Use protocol from X-Forwarded-Proto if behind proxy, otherwise req.protocol
+        const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+        const host = req.get('x-forwarded-host') || req.get('host');
+        if (host) {
+          vars.publicBaseUrl = `${protocol}://${host}${basePath}`;
+        }
+      }
       
       // Transport-specific data for hooks
       const transportData = {
@@ -268,20 +278,9 @@ export const ExpressPlugin = {
       // Apply any global before middleware
       const beforeMiddleware = expressOptions.middleware?.beforeAll || [];
       
-      // Create the Express route
-      // Special handling for wildcard paths when basePath is set
-      let expressPath;
-      if (path === vars.transport.matchAll && basePath) {
-        // When we have a basePath and a wildcard, we need to use proper Express wildcard syntax
-        expressPath = basePath + '/*';
-      } else {
-        expressPath = basePath + path;
-      }
-      
-      
       try {
       
-        // 1. Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
+        // Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
         const expressHandler = async (req, res) => {
           try {
             // Extract request data
@@ -337,7 +336,8 @@ export const ExpressPlugin = {
               if (req.method === 'POST' && responseBody?.data?.id && helpers.getLocation) {
                 const scopeName = path.split('/')[2];
                 const location = helpers.getLocation({ scopeName, id: responseBody.data.id });
-                res.set('Location', `${basePath}/api${location}`);
+                const baseUrl = vars.publicBaseUrl || basePath;
+                res.set('Location', `${baseUrl}${location}`);
               }
               res.status(responseStatus).json(responseBody);
             }
@@ -346,21 +346,55 @@ export const ExpressPlugin = {
           }
         };
 
-        // 2. Check for the wildcard path and use the appropriate Express method.
+        // CRITICAL: Express routing method selection - wildcard vs specific routes
+        // 
+        // Express provides two different ways to register routes:
+        // 1. router.METHOD(path, handler) - e.g., router.get('/users', handler)
+        //    - Only responds to the SPECIFIC HTTP method
+        //    - Perfect for normal REST endpoints
+        // 
+        // 2. router.use(path, handler) 
+        //    - Responds to ALL HTTP methods
+        //    - Needed for wildcard paths that must handle any method
+        //
+        // The CORS plugin needs wildcard routes because it must handle OPTIONS 
+        // requests for ANY path under the API prefix, even paths that don't exist
+        // as defined routes. For example:
+        // - Defined route: GET /api/users
+        // - Browser might send: OPTIONS /api/users/invalid/path
+        // - CORS must still respond with proper headers
+        //
         if (path === vars.transport.matchAll) {
-          // For wildcard paths in Express 5, we need to use middleware approach
-          // Create a middleware that only responds to the specific method
+          // This is a wildcard route (path = '*')
+          // We MUST use router.use() because:
+          // - We need to catch ALL paths (using '*' or '/api/*')
+          // - We need to handle a SPECIFIC method (e.g., OPTIONS)
+          // - router.options('*') would NOT work for paths like '/api/some/nested/path'
+          
+          // Since router.use() responds to ALL methods, we need a wrapper
+          // that only handles our specific method (e.g., OPTIONS)
           const methodSpecificMiddleware = (req, res, next) => {
             if (req.method.toLowerCase() === method.toLowerCase()) {
               expressHandler(req, res);
             } else {
+              // Not our method, pass to next middleware
               next();
             }
           };
+          // IMPORTANT: We do NOT need to pass a path to router.use() here!
+          // When no path is provided, router.use() matches ALL requests
+          // This is exactly what we want for wildcard routes
           router.use(...beforeMiddleware, methodSpecificMiddleware);
         } else {
-          // Use the specific method (get, post, all, etc.) for all other defined routes
-          router[method.toLowerCase()](expressPath, ...beforeMiddleware, expressHandler);
+          // This is a normal route with a specific path (e.g., '/api/users')
+          // We use router.METHOD() because:
+          // - We want to respond to ONLY this specific HTTP method
+          // - The path is exact, not a wildcard
+          // - This is more efficient than router.use() with method checking
+          //
+          // Note: Routes from RestApiPlugin already include the full path with mountPath
+          // So we use them as-is without adding basePath to avoid double-prefixing
+          router[method.toLowerCase()](path, ...beforeMiddleware, expressHandler);
         }
 
 
@@ -368,13 +402,16 @@ export const ExpressPlugin = {
         console.log('[EXPRESS DEBUG] Error creating route:', {
           error: routeError.message,
           stack: routeError.stack,
-          path: expressPath,
+          path: path,
           method: method.toLowerCase()
         });
         throw routeError;
       }
       
-      log.trace(`Express route created: ${method} ${expressPath}`);
+      const logPath = path === vars.transport.matchAll 
+        ? '(all paths)'  // router.use() with no path matches everything
+        : path;
+      log.trace(`Express route created: ${method} ${logPath}`);
     });
     
     // Apply global middleware if configured
@@ -389,7 +426,7 @@ export const ExpressPlugin = {
     // Set up 404 handler in separate router (unless disabled)
     if (expressOptions.handle404 !== false) {
       notFoundRouter.use(async (req, res, next) => {
-        if (req.path.startsWith('/api')) {
+        if (basePath && req.path.startsWith(basePath)) {
           // Create minimal context for 404
           const context = createContext(req, res, 'express');
           const transportData = {

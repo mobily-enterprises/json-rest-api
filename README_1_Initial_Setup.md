@@ -1,3 +1,6 @@
+# Basic usage and basic configuration
+
+This section explains how to set up `json-rest-api` in your code.
 
 ## Defining the Basic Tables
 
@@ -5,7 +8,19 @@ The documentation uses a consistent example throughout - a book catalog system w
 
 **Important**: The five tables defined below (countries, publishers, authors, books, and book_authors) form the foundation for all examples, tests, and documentation in this guide. We'll consistently reference this same schema structure to demonstrate all features of the library. At times, we will change the definition of some of them to show specific features.
 
-Also for brevity, the `inspect()` function will be assumed to be set:
+Also for brevity, the `inspect()` function will be assumed to be set.
+
+Also, since we are using them, you will need to install:
+
+```bash
+npm install json-rest-api
+npm install knex
+npm install better-sqlite3
+```
+
+You won't need to install `hooned-api` since it's already a dependency of json-rest-api.
+
+So this is the first basic script:
 
 ```javascript
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
@@ -18,7 +33,7 @@ const inspect = (obj) => util.inspect(obj, { depth: 5 })
 
 // Create a Knex instance connected to SQLite in-memory database
 const knex = knexLib({
-  client: 'sqlite3',
+  client: 'better-sqlite3',
   connection: {
     filename: ':memory:'
   },
@@ -26,10 +41,7 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({
-  name: 'book-catalog-api',
-  version: '1.0.0'
-});
+const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
 
 // Install plugins
 await api.use(RestApiPlugin);
@@ -40,7 +52,6 @@ await api.use(RestApiKnexPlugin, { knex });
 // Countries table
 await api.addResource('countries', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 100, search: true },
     code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
   },
@@ -54,7 +65,6 @@ await api.resources.countries.createKnexTable()
 // Publishers table
 await api.addResource('publishers', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 200, search: true },
     country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
   },
@@ -68,7 +78,6 @@ await api.resources.publishers.createKnexTable()
 // Authors table
 await api.addResource('authors', {
   schema: {
-    id: { type: 'id' },
     name: { type: 'string', required: true, max: 200, search: true },
   },
   relationships: {
@@ -81,7 +90,6 @@ await api.resources.authors.createKnexTable()
 // Books table
 await api.addResource('books', {
   schema: {
-    id: { type: 'id' },
     title: { type: 'string', required: true, max: 300, search: true },
     country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
     publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
@@ -102,7 +110,6 @@ await api.resources.books.createKnexTable()
 // Book-Authors pivot table (many-to-many relationship)
 await api.addResource('book_authors', {
   schema: {
-    id: { type: 'id' },
     book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
     author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
   }
@@ -112,7 +119,6 @@ await api.resources.book_authors.createKnexTable()
 // Reviews table (polymorphic - can review books, authors, or publishers)
 await api.addResource('reviews', {
   schema: {
-    id: { type: 'id' },
     review_author: { type: 'string', required: true, max: 100 },
     review_text: { type: 'string', required: true, max: 5000 },
     review_rating: { type: 'number', required: true, min: 1, max: 5 },
@@ -130,11 +136,52 @@ await api.addResource('reviews', {
   }
 });
 await api.resources.reviews.createKnexTable()
+
+
+/// *** ...programmatic calls here... ***
+
+// Close the database connection (since there is no server waiting)
+await knex.destroy();
+console.log('\nAll schemas created successfully!');
+console.log('Database connection closed.');
 ```
+
+#### Loglevels
+
+The available log levels in hooked-api are (from most verbose to least verbose):
+
+  1. 'trace' - Most verbose, shows everything including internal operations
+  2. 'debug' - Debug information for development
+  3. 'info' - Informational messages (DEFAULT)
+  4. 'warn' - Only warnings and errors
+  5. 'error' - Only error messages
+  6. 'silent' - No logging at all
+
+To change loglevels, pass a logLevel option to the API:
+
+```javascript
+const api = new Api({ 
+  name: 'book-catalog-api', 
+  version: '1.0.0',
+  logLevel: 'warn'  // Only show warnings and errors
+});
+```
+
+By default, the INFO level logs you're seeing are the default. To reduce them, you could use:
+
+- logLevel: 'warn' - Only see warnings and errors
+- logLevel: 'error' - Only see errors
+- logLevel: 'silent' - No logs at all
+
+To see more detail for debugging:
+
+- logLevel: 'debug' - More detailed information
+- logLevel: 'trace' - Everything, including hook executions and internal operations
 
 ### Database Options
 
-The `json-rest-api` library uses `knex` as its database abstraction layer, which supports a wide variety of SQL databases. In the example above, we configured `knex` to use an in-memory SQLite database for simplicity:
+The `json-rest-knex-plugin` plugin uses `knex` as its database abstraction layer, which supports a wide variety of SQL databases.
+In the example above, we configured `knex` to use an in-memory SQLite database for simplicity:
 
 ```javascript
 const knex = knexLib({
@@ -177,11 +224,13 @@ const knex = knexLib({
 });
 ```
 
-Remember to install the corresponding `knex` driver for your chosen database (e.g., `npm install pg` for PostgreSQL, `npm install mysql2` for MySQL).
+Remember to install the corresponding `knex` driver for your chosen database (e.g., `npm install pg` for PostgreSQL, `npm install mysql2` for MySQL) just as we had to `npm install` the `better-sqlite3` package to make the first example work. 
 
 ## Basic Usage
 
 The `json-rest-api` plugin extends your `hooked-api` instance with powerful RESTful capabilities, allowing you to interact with your defined resources both programmatically within your application code and via standard HTTP requests.
+
+The instanced object becomes a fully-fledged, database and schema aware API.
 
 ### Programmatic Usage
 
@@ -197,7 +246,7 @@ const countryUs = await api.resources.countries.post({
 });
 console.log('Created Country:', inspect(countryUs));
 // Expected Output:
-// TODO: Check what this will return
+// Created Country: { id: '1', name: 'United States', code: 'US' }
 ```
 
 Now, let's retrieve this country data using its ID:
@@ -205,50 +254,77 @@ Now, let's retrieve this country data using its ID:
 ```javascript
 // Example: Refetch a country by ID
 const countryUsRefetched = await api.resources.countries.get({
-  id: countryUs.data.id, // Use the ID returned from the POST operation
+  id: countryUs.id, // Use the ID returned from the POST operation
 });
 console.log('Refetched Country:', inspect(countryUsRefetched));
 // Expected Output:
-// TODO: Check
+// Refetched Country: { id: '1', name: 'United States', code: 'US' }
 ```
 
 ### REST Usage (HTTP Endpoints)
 
+Since this is a REST API, its main purpose is to be used with a REST interface over HTTP.
 To expose your API resources via HTTP, you need to install one of the connector plugins:
 
 * **`ExpressPlugin`**: If you are using `Express.js` in your application.
 
 * **`(Coming soon)`**: Fastify and Koa are planned and coming soon
 
-Thanks to the ExpressPlugin, json-rest-api is able to export an Express router that you can just `use()` in Express:
+Thanks to the ExpressPlugin, `json-rest-api` is able to export an Express router that you can just `use()` in Express.
+
+Just modify the example above so that it looks like this:
 
 ```javascript
-// In your main application file (e.g., app.js)
-import { ExpressPlugin, RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
 import { Api } from 'hooked-api';
-import express from 'express';
 import knexLib from 'knex';
 import util from 'util';
-
-// ... (Knex and API instance setup as shown in "Defining the Basic Tables")
-
+import express from 'express';
 const app = express();
 
-// Install the Express Plugin
-await api.use(ExpressPlugin, {
-  basePath: '/api' // All API routes will be under /api
+// Utility used throughout this guide
+const inspect = (obj) => util.inspect(obj, { depth: 5 })
+
+// Create a Knex instance connected to SQLite in-memory database
+const knex = knexLib({
+  client: 'better-sqlite3',
+  connection: {
+    filename: ':memory:'
+  },
+  useNullAsDefault: true
 });
 
-// Mount the API router
-app.use(api.http.express.router); // Mounts the router generated by ExpressPlugin
-// Alternatively, for more control: app.use('/my-custom-path', api.http.express.router);
+// Create API instance
+const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
+
+// Install plugins
+await api.use(RestApiPlugin);
+await api.use(RestApiKnexPlugin, { knex });
+await api.use(ExpressPlugin);
+
+// *** ...schema definitions as above... ***
+
+app.use(api.http.express.router);
+app.use(api.http.express.notFoundRouter);
 
 app.listen(3000, () => {
   console.log('Express server started on port 3000. API available at http://localhost:3000/api');
 });
+
+// Close the database connection // no longer happening
+// await knex.destroy();
+// console.log('\n✅ All schemas created successfully!');
+// console.log('Database connection closed.');
+
 ```
 
-### Making the CURL calls
+Since you added `express`, you will need to install it:
+
+```bash
+npm install express
+```
+
+Note how the `HttpPlugin` doesn't actually add any routes to the server. All it does, is expose `api.http.express.router` which is a 
 
 Once the server is running, you can interact with your API using tools like `curl`.
 
@@ -306,6 +382,9 @@ By default, `simplifiedApi` is `true` and simplifiedTransport is `false` for HTT
 
 TODO: Explain the returnFullRecord option in detail 
 
+
+
+
 ### Search (Filtering)
 
 TODO
@@ -329,21 +408,13 @@ TODO
 Sparse fieldsets also apply to `included` resources. If you request related data, you can specify which fields of those related resources should be returned as well.
 
 
-
 ## belongsTo records
 
 ### Search (belongsTo)
 
 ### Sparse fields (belongsTo)
 
-
-
-
-## hasMany records
-
-### Search (hasMany)
-
-### Sparse fields (hasMany)
+### Computed and hidden fields
 
 
 
@@ -353,6 +424,19 @@ Sparse fieldsets also apply to `included` resources. If you request related data
 ### Search (hasMany)
 
 ### Sparse fields (hasMany)
+
+### Computed and hidden fields
+
+
+
+
+## hasMany records (polymorphic)
+
+### Search (hasMany)
+
+### Sparse fields (hasMany)
+
+### Computed and hidden fields
 
 
 
@@ -362,6 +446,8 @@ Sparse fieldsets also apply to `included` resources. If you request related data
 ### Search (many to many)
 
 ### Sparse fields (many to many)
+
+### Computed and hidden fields
 
 
 

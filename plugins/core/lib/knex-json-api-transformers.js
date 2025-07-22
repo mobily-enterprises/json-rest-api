@@ -151,14 +151,12 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               }
             };
             
-            // Add links if urlPrefix is configured
-            const urlPrefix = scope.vars.resourceUrlPrefix;
-            if (urlPrefix) {
-              relationshipObject.links = {
-                self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
-                related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
-              };
-            }
+            // Always add links
+            const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
+              related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+            };
             
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
           } else {
@@ -167,14 +165,12 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               data: null
             };
             
-            // Add links even for null relationships
-            const urlPrefix = scope.vars.resourceUrlPrefix;
-            if (urlPrefix) {
-              relationshipObject.links = {
-                self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
-                related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
-              };
-            }
+            // Always add links even for null relationships
+            const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
+            relationshipObject.links = {
+              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
+              related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+            };
             
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
           }
@@ -197,14 +193,12 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             }
           };
           
-          // Add links if urlPrefix is configured
-          const urlPrefix = scope.vars.resourceUrlPrefix;
-          if (urlPrefix) {
-            relationshipObject.links = {
-              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
-              related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
-            };
-          }
+          // Always add links
+          const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
+            related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+          };
           
           jsonApiRecord.relationships[relName] = relationshipObject;
         } else if (typeValue === null || idValue === null) {
@@ -214,14 +208,12 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             data: null
           };
           
-          // Add links even for null relationships
-          const urlPrefix = scope.vars.resourceUrlPrefix;
-          if (urlPrefix) {
-            relationshipObject.links = {
-              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
-              related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
-            };
-          }
+          // Always add links even for null relationships
+          const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
+          relationshipObject.links = {
+            self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
+            related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+          };
           
           jsonApiRecord.relationships[relName] = relationshipObject;
         }
@@ -231,11 +223,11 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
     return jsonApiRecord;
   });
   
-  // Add self links to individual resources if urlPrefix is configured
-  const urlPrefix = scope.vars.resourceUrlPrefix;
+  // Always add self links to individual resources
+  const urlPrefix = scope.vars.publicBaseUrl || scope.vars.mountPath || '';
   const normalizedData = isSingle ? processedRecords[0] : processedRecords;
   
-  if (urlPrefix && normalizedData) {
+  if (normalizedData) {
     if (Array.isArray(normalizedData)) {
       // Collection: add self link to each item
       normalizedData.forEach(item => {
@@ -256,13 +248,11 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
 
   // Add included resources if any
   if (included.length > 0) {
-    // Add self links to included resources
-    if (urlPrefix) {
-      included.forEach(item => {
-        if (!item.links) item.links = {};
-        item.links.self = `${urlPrefix}/${item.type}/${item.id}`;
-      });
-    }
+    // Always add self links to included resources
+    included.forEach(item => {
+      if (!item.links) item.links = {};
+      item.links.self = `${urlPrefix}/${item.type}/${item.id}`;
+    });
     
     response.included = included;
   }
@@ -277,8 +267,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
   // Add links to response
   if (scope.vars.paginationLinks) {
     response.links = scope.vars.paginationLinks;
-  } else if (urlPrefix) {
-    // Add basic self link for the response when no pagination links
+  } else {
+    // Always add basic self link for the response when no pagination links
     response.links = {
       self: isSingle 
         ? `${urlPrefix}/${scopeName}/${normalizedData.id}`
