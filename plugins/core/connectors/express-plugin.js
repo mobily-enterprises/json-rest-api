@@ -303,9 +303,11 @@ export const ExpressPlugin = {
             let responseStatus = 200;
             if (result && typeof result.statusCode === 'number') {
               responseStatus = result.statusCode;
-            } else if (req.method === 'DELETE' && !result) {
+            } else if ((req.method === 'DELETE' || req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && !result) {
+              // No content response for DELETE and write operations with returnFullRecord: 'no'
               responseStatus = 204;
-            } else if (req.method === 'POST') {
+            } else if (req.method === 'POST' && result) {
+              // Default 201 for POST when we have content
               responseStatus = 201;
             }
 

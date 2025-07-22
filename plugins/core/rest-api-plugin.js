@@ -198,11 +198,26 @@ export const RestApiPlugin = {
     vars.idProperty = restApiOptions.idProperty || 'id'
 
     // Return full record configuration
-    vars.returnFullRecord = {
-      post: restApiOptions.returnFullRecord?.post ?? true,
-      put: restApiOptions.returnFullRecord?.put ?? true,
-      patch: restApiOptions.returnFullRecord?.patch ?? true,
+    // Support values: 'no', 'minimal', 'full' (default: 'no')
+    const normalizeReturnValue = (value) => {
+      if (['no', 'minimal', 'full'].includes(value)) return value;
+      return 'no'; // default
     };
+
+    // Process returnFullRecord options
+    if (typeof restApiOptions.returnFullRecord === 'object' && restApiOptions.returnFullRecord !== null) {
+      vars.returnFullRecord = {
+        post: normalizeReturnValue(restApiOptions.returnFullRecord.post),
+        put: normalizeReturnValue(restApiOptions.returnFullRecord.put),
+        patch: normalizeReturnValue(restApiOptions.returnFullRecord.patch),
+      };
+    } else {
+      // Single string value applies to all methods
+      const normalized = normalizeReturnValue(restApiOptions.returnFullRecord);
+      vars.returnFullRecord = { post: normalized, put: normalized, patch: normalized };
+    }
+    
+    log.debug('ReturnFullRecord configuration:', vars.returnFullRecord);
 
     // Schema cache vars
     vars.schemaProcessed = false;
@@ -765,17 +780,32 @@ export const RestApiPlugin = {
 
         // Assign common context properties
         context.schemaInfo = scopes[scopeName].vars.schemaInfo;
-        context.returnFullRecord = cascadeConfig('returnFullRecord',  [context.params, scopeOptions, vars], false);
+        
+        // Get returnFullRecord setting - could be from params, scopeOptions, or vars
+        const returnFullRecordRaw = cascadeConfig('returnFullRecord', [context.params, scopeOptions, vars], 'no');
         
         // Normalize returnFullRecord to always be an object with method keys
-        // If it's a boolean (from per-call override), convert it to object format
-        if (typeof context.returnFullRecord === 'boolean') {
-            const boolValue = context.returnFullRecord;
+        if (typeof returnFullRecordRaw === 'object' && returnFullRecordRaw !== null) {
+            // It's already an object, normalize the values
             context.returnFullRecord = {
-                post: boolValue,
-                put: boolValue,
-                patch: boolValue
+                post: normalizeReturnValue(returnFullRecordRaw.post),
+                put: normalizeReturnValue(returnFullRecordRaw.put),
+                patch: normalizeReturnValue(returnFullRecordRaw.patch)
             };
+        } else {
+            // It's a single value (string or boolean), apply to all methods
+            const normalized = normalizeReturnValue(returnFullRecordRaw);
+            context.returnFullRecord = {
+                post: normalized,
+                put: normalized,
+                patch: normalized
+            };
+        }
+        
+        // Helper function to normalize return values (same as above)
+        function normalizeReturnValue(value) {
+            if (['no', 'minimal', 'full'].includes(value)) return value;
+            return 'no'; // default
         }
 
         // These only make sense as parameter per query, not in vars etc.
@@ -1105,34 +1135,31 @@ const validatePivotResource = (scopes, relDef, relName) => {
         context,
         scopeName,
         api,
-        scopes, // Required because api.resources[scopeName].get() uses 'scopes' internally.
+        scopes,
         schemaStructure,
         schemaRelationships,
-        scopeOptions, // Used for cascadeConfig
-        vars,         // Used for cascadeConfig
-        runHooks,      // Used to run finish hooks
-        helpers,       // Used to fetch minimal records
-        enhancedLog    // Used for logging warnings
+        scopeOptions,
+        vars,
+        runHooks,
+        helpers,
+        enhancedLog
     }) {
         const methodSpecificHookSuffix = getMethodHookSuffix(context.method);
         
-        // Set up originalMinimalRecord and minimalRecord for hooks
-        // Based on the method type and operation
+        // Step 1: Set up record state for hooks
+        // Handle originalMinimalRecord and minimalRecord based on method type
         if (context.method === 'DELETE') {
-            // For DELETE, rename existing minimalRecord to originalMinimalRecord
-            // and keep minimalRecord as the same (deleted record)
+            // For DELETE, keep the deleted record reference
             if (context.minimalRecord) {
                 context.originalMinimalRecord = context.minimalRecord;
-                // minimalRecord stays the same for DELETE
             }
         } else {
-            // For POST, PUT, PATCH - handle record state
+            // For POST, PUT, PATCH - save the original state if it exists
             if (context.minimalRecord) {
-                // This means we have a pre-existing record (PUT update or PATCH)
                 context.originalMinimalRecord = context.minimalRecord;
             }
             
-            // Fetch the current/created record for POST, PUT, PATCH
+            // Fetch the current state of the record after the write operation
             try {
                 const currentRecord = await helpers.dataGetMinimal({
                     scopeName,
@@ -1141,65 +1168,70 @@ const validatePivotResource = (scopes, relDef, relName) => {
                 });
                 context.minimalRecord = currentRecord;
             } catch (error) {
-                // If we can't fetch the record, keep the existing minimalRecord
-                // This handles edge cases where the record might not exist
                 enhancedLog.warn(`Could not fetch minimal record after ${context.method} operation`, { error, id: context.id });
             }
         }
 
-        // Determine if we should return the full record based on configurations.
-        const shouldReturnRecord = context.returnFullRecord[context.method]
+        // Step 2: Determine what to return based on configuration
+        const returnMode = context.returnFullRecord[context.method];
         
-        if (shouldReturnRecord) {
-            // If a full record is requested, use the API's own 'get' method.
-            // The 'get' method itself is responsible for fetching the data,
-            // applying its own enrichment hooks, and formatting to JSON:API.
-            // Therefore, NO further enrichment is needed here.
-            context.returnRecord = await api.resources[scopeName].get({
-                id: context.id, // context.id is now reliably set by POST, PUT, and PATCH
-                queryParams: context.queryParams,
-                transaction: context.transaction,
-                simplified: false // Request the full JSON:API format from GET for internal processing
-            }, {...context });
-            
-            // If the 'get' method returns null/undefined (e.g., resource was deleted between write and read),
-            // we might still need to handle a potential 404 or just return undefined.
-            // For this specific flow (POST/PUT/PATCH response), the record *should* exist.
-            // If it doesn't, it implies a deeper issue or a race condition.
-            if (!context.returnRecord) {
-                // Decide how to handle this edge case. Returning undefined is consistent with
-                // the 'else' branch if nothing is supposed to be returned.
-                // Or you could throw an error if a record *must* be returned.
-                context.returnRecord = undefined;
+        // Case 1: Return nothing (204 No Content)
+        if (returnMode === 'no') {
+            context.returnRecord = undefined;
+            await runHooks('finish');
+            await runHooks(`finish${methodSpecificHookSuffix}`);
+            return undefined;
+        }
+        
+        // Case 2: Return minimal record (just type and id)
+        if (returnMode === 'minimal') {
+            if (context.simplified) {
+                context.returnRecord = { 
+                    id: String(context.id), 
+                    type: scopeName 
+                };
+            } else {
+                context.returnRecord = {
+                    data: {
+                        type: scopeName,
+                        id: String(context.id)
+                    }
+                };
             }
-
-        } else {
-            // If 'shouldReturnRecord' is false, return minimal response with just the ID
-            // Always return in simplified format for consistency - transport can use result.id
-            context.returnRecord = { id: context.id };
-            // Early return to skip transformation logic below
             await runHooks('finish');
             await runHooks(`finish${methodSpecificHookSuffix}`);
             return context.returnRecord;
         }
-
-        // Run common finish hooks.
-        await runHooks('finish');
-        // Dynamically call method-specific finish hooks (e.g., 'finishPost', 'finishPut', 'finishPatch').
-        await runHooks(`finish${methodSpecificHookSuffix}`);
-
-        // Transform output if in simplified mode and there is a record to transform.
-        if (context.simplified && context.returnRecord) {
-            // Ensure we are transforming the 'returnRecord' which comes from the 'get' call,
-            // as it contains the fully enriched and structured JSON:API data.
-            return transformJsonApiToSimplified(
-                { record: context.returnRecord },
-                { context: { schemaStructure, schemaRelationships } }
-            );
+        
+        // Case 3: Return full record
+        if (returnMode === 'full') {
+            // Fetch the complete record using the GET method
+            const fullRecord = await api.resources[scopeName].get({
+                id: context.id,
+                queryParams: context.queryParams,
+                transaction: context.transaction,
+                simplified: context.simplified
+            });
+            
+            context.returnRecord = fullRecord || undefined;
+            
+            // Run finish hooks
+            await runHooks('finish');
+            await runHooks(`finish${methodSpecificHookSuffix}`);
+            
+            // Transform to simplified format if needed
+            if (context.simplified && context.returnRecord) {
+                return transformJsonApiToSimplified(
+                    { record: context.returnRecord },
+                    { context: { schemaStructure, schemaRelationships } }
+                );
+            }
+            
+            return context.returnRecord;
         }
         
-        // Return the final record (will be undefined if shouldReturnRecord was false).
-        return context.returnRecord;
+        // This should never be reached, but just in case
+        throw new Error(`Invalid returnMode: ${returnMode}`);
     }
 
 

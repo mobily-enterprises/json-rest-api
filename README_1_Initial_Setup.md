@@ -378,41 +378,67 @@ By default, `simplifiedApi` is `true` for programmatic usage, making it easier t
 
 #### API usage and returning records
 
-In the previous examples, each POST call returned the full record. However, this is not always the case -- especially since a re-fetch is a power-consuming operation. The **returnFullRecord** option controls whether you get back the complete record or just the ID (especially useful in POST calls). This is useful for balancing between getting complete data and optimizing performance.
+In the previous examples, each POST call returned the full record. However, this is not always the case -- especially since a re-fetch is a power-consuming operation. The **returnFullRecord** option controls what data is returned after write operations (POST, PUT, PATCH). This is useful for balancing between getting complete data and optimizing performance.
 
-`returnFullRecord` controls what you get back:
-- **When `true`**: Returns the full record with all attributes, relationships, computed fields, and links
-- **When `false`**: Returns only the ID in a minimal response
+`returnFullRecord` accepts three string values:
+- **`'full'`**: Returns the complete record with all attributes, relationships, computed fields, and links
+- **`'minimal'`**: Returns only the resource type and ID
+- **`'no'`**: Returns nothing (undefined in programmatic calls, 204 No Content in HTTP)
 
 Here's how the same POST operation behaves with different `returnFullRecord` settings:
 
 ```javascript
-// Create a country with full record returned (default behavior)
-// (returnFullRecord: true is the default)
-const countryWithFullRecord = await api.resources.countries.post({
+// Default behavior: 'no' - returns nothing
+const api = new Api({ name: 'api', version: '1.0.0' });
+await api.use(RestApiPlugin); // Default is returnFullRecord: 'no'
+
+const countryNoReturn = await api.resources.countries.post({
   name: 'Canada',
   code: 'CA'
 });
-console.log('Created with full record:', inspect(countryWithFullRecord));
+console.log('Created with no return:', countryNoReturn);
 // Expected Output:
-// Created with full record: {
-//   id: '2',
-//   name: 'Canada',
-//   code: 'CA'
-// }
+// Created with no return: undefined
 
-// Create a country with only ID returned
-// When specifying parameters like returnFullRecord, you must use inputRecord
-const countryIdOnly = await api.resources.countries.post({
+// Configure to return minimal record
+await api.use(RestApiPlugin, {
+  returnFullRecord: {
+    post: 'minimal',
+    put: 'minimal',
+    patch: 'minimal'
+  }
+});
+
+const countryMinimal = await api.resources.countries.post({
   inputRecord: {
     name: 'Mexico',
     code: 'MX'
-  },
-  returnFullRecord: true
+  }
 });
-console.log('Created with ID only:', inspect(countryIdOnly));
+console.log('Created with minimal return:', inspect(countryMinimal));
 // Expected Output:
-// Created with ID only: { id: '3' }
+// Created with minimal return: { id: '2', type: 'countries' }
+
+// Configure to return full record
+await api.use(RestApiPlugin, {
+  returnFullRecord: {
+    post: 'full',
+    put: 'full',
+    patch: 'full'
+  }
+});
+
+const countryFull = await api.resources.countries.post({
+  name: 'United States',
+  code: 'US'
+});
+console.log('Created with full record:', inspect(countryFull));
+// Expected Output:
+// Created with full record: {
+//   id: '3',
+//   name: 'United States',
+//   code: 'US'
+// }
 ```
 
 When combined with non-simplified mode, the difference is even more apparent:
@@ -427,7 +453,7 @@ const fullJsonApi = await api.resources.countries.post({
     }
   },
   simplified: false,
-  returnFullRecord: true
+  returnFullRecord: 'full'
 });
 console.log('Full JSON:API response:', inspect(fullJsonApi));
 // Expected Output:
@@ -441,7 +467,7 @@ console.log('Full JSON:API response:', inspect(fullJsonApi));
 //   links: { self: '/api/1.0/countries/4' }
 // }
 
-// Non-simplified mode with ID only
+// Non-simplified mode with minimal return
 const minimalJsonApi = await api.resources.countries.post({
   inputRecord: {
     data: {
@@ -450,14 +476,14 @@ const minimalJsonApi = await api.resources.countries.post({
     }
   },
   simplified: false,
-  returnFullRecord: false
+  returnFullRecord: 'minimal'
 });
 console.log('Minimal JSON:API response:', inspect(minimalJsonApi));
 // Expected Output:
-// Minimal JSON:API response: { id: '5' }
+// Minimal JSON:API response: { id: '5', type: 'countries' }
 ```
 
-**NOTE**: `returnFullRecord` defaults to `true` for all operations (POST, PUT, PATCH) but can be configured at multiple levels: globally when installing RestApiPlugin, per-resource when calling `addResource()`, or per-call in the method parameters, with the same hierarchy as simplified mode (per-call → per-resource → global default).
+**NOTE**: `returnFullRecord` defaults to `'no'` for all operations (POST, PUT, PATCH) but can be configured at multiple levels: globally when installing RestApiPlugin, per-resource when calling `addResource()`, or per-call in the method parameters, with the same hierarchy as simplified mode (per-call → per-resource → global default).
 
 For example:
 
@@ -465,9 +491,9 @@ For example:
    ```javascript
    await api.use(RestApiPlugin, {
      returnFullRecord: {
-       post: false,   // Only return IDs after POST
-       put: false,    // Only return IDs after PUT
-       patch: true    // Return full records after PATCH
+       post: 'minimal',   // Return minimal response after POST
+       put: 'minimal',    // Return minimal response after PUT
+       patch: 'full'      // Return full records after PATCH
      }
    });
    ```
@@ -480,29 +506,29 @@ For example:
        code: { type: 'string', required: true }
      },
      returnFullRecord: {
-       post: true,   // Return full records after POST
-       put: true,    // Return full records after PUT
-       patch: false  // Return only ID after PATCH
+       post: 'full',     // Return full records after POST
+       put: 'full',      // Return full records after PUT
+       patch: 'minimal'  // Return minimal response after PATCH
      }
    });
    ```
 
 3. **Per-call override**: Set in individual method calls
    ```javascript
-   // Override to get just the ID for this specific call
+   // Override to get minimal response for this specific call
    const result = await api.resources.countries.patch({
      inputRecord: {
        id: '1',
        name: 'United States of America'
      },
-     returnFullRecord: false
+     returnFullRecord: 'minimal'
    });
-   // result = { id: '1' }
+   // result = { id: '1', type: 'countries' }
    ```
 
-**Performance consideration**: When `returnFullRecord: true`, the API performs an additional GET request internally after the write operation to fetch the complete record with all computed fields and relationships. Setting it to `false` skips this extra query, improving performance when you don't need the full data.
+**Performance consideration**: When `returnFullRecord: 'full'`, the API performs an additional GET request internally after the write operation to fetch the complete record with all computed fields and relationships. Setting it to `'minimal'` or `'no'` skips this extra query, improving performance when you don't need the full data.
 
-By default, all operations return full records for developer convenience, but you can optimize performance by setting `returnFullRecord: false` when you only need confirmation that the operation succeeded.
+By default, all operations return nothing (`'no'`), but you can set `returnFullRecord: 'minimal'` to get just the ID and type, or `'full'` to get the complete record with all fields.
 
 Note that the setting will affect **both** API usage **and** HTTP usage.
 
@@ -632,12 +658,14 @@ await api.use(RestApiPlugin, {
 The `returnFullRecord` behavior over HTTP is identical to programmatic usage (see "API usage and returning records" above), but the HTTP status codes vary based on the operation and setting:
 
 **POST operations:**
-- `returnFullRecord: true` → Returns `201 Created` with the full record in the body
-- `returnFullRecord: false` → Returns `201 Created` with minimal response `{ id: '...' }`
+- `returnFullRecord: 'full'` → Returns `201 Created` with the full record in the body
+- `returnFullRecord: 'minimal'` → Returns `201 Created` with minimal response `{ id: '...', type: '...' }`
+- `returnFullRecord: 'no'` → Returns `204 No Content` with no body
 
 **PUT/PATCH operations:**
-- `returnFullRecord: true` → Returns `200 OK` with the full record in the body
-- `returnFullRecord: false` → Returns `200 OK` with minimal response `{ id: '...' }`
+- `returnFullRecord: 'full'` → Returns `200 OK` with the full record in the body
+- `returnFullRecord: 'minimal'` → Returns `200 OK` with minimal response `{ id: '...', type: '...' }`
+- `returnFullRecord: 'no'` → Returns `204 No Content` with no body
 
 **DELETE operations:**
 - Always returns `204 No Content` with no body (regardless of `returnFullRecord`)
