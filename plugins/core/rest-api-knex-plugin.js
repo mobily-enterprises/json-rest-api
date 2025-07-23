@@ -114,7 +114,7 @@ export const RestApiKnexPlugin = {
 
     // Helper scope method to get all schema-related information
       addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {   
-        await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, vars.schemaInfo.schema)
+        await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, vars.schemaInfo.schema, vars.schemaInfo.idProperty)
       })
     
       helpers.newTransaction = async () => {
@@ -149,9 +149,12 @@ export const RestApiKnexPlugin = {
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
+      // Select with alias if idProperty is not 'id'
+      const selectClause = idProperty !== 'id' ? `${idProperty} as id` : 'id';
+      
       const record = await db(tableName)
         .where(idProperty, id)
-        .select(idProperty)
+        .select(selectClause)
         .first();
       
       return !!record;
@@ -268,7 +271,12 @@ export const RestApiKnexPlugin = {
       
       // Build query - no filtering hooks for single records
       // Permission checks will handle access control
-      const query = db(tableName).where(idProperty, id);
+      let query = db(tableName).where(idProperty, id);
+      
+      // Add alias if idProperty is not 'id'
+      if (idProperty !== 'id') {
+        query = query.select('*', `${idProperty} as id`);
+      }
       
       // Execute query
       const record = await query.first();
@@ -732,7 +740,12 @@ export const RestApiKnexPlugin = {
       
       // Strip non-database fields (computed and virtual) before database operation
       const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
-      
+        
+      // Map 'id' to actual idProperty if needed (for PUT with specific ID)
+      if (idProperty !== 'id' && inputRecord.data.id) {
+        finalAttributes[idProperty] = inputRecord.data.id;
+      }
+
       if (isCreate) {
         // Create mode - insert new record with specified ID
         const recordData = {

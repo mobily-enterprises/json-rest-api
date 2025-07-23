@@ -49,7 +49,14 @@ export const buildQuerySelection = (query, tableName, fieldsToSelect, useTablePr
     return useTablePrefix ? query.select(`${tableName}.*`) : query;
   } else {
     const fields = useTablePrefix 
-      ? fieldsToSelect.map(field => `${tableName}.${field}`)
+      ? fieldsToSelect.map(field => {
+          // Handle aliased fields (e.g., "user_id as id")
+          if (field.includes(' as ')) {
+            const [realField, alias] = field.split(' as ');
+            return `${tableName}.${realField.trim()} as ${alias.trim()}`;
+          }
+          return `${tableName}.${field}`;
+        })
       : fieldsToSelect;
     return query.select(fields);
   }

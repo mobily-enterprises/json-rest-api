@@ -292,7 +292,7 @@ describe('Nested Include Operations', () => {
       const result = await api.resources.authors.query({
         queryParams: {
           include: ['books', 'books.authors'],
-          filter: { name: 'Author 1' }
+          filters: { name: 'Author 1' }
         },
         simplified: false
       });

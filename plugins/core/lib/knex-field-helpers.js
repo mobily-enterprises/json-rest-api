@@ -84,7 +84,12 @@ export const buildFieldSelection = async (scope, deps) => {
   const idProperty = context.schemaInfo.idProperty;
   
   // Always include the ID field - required for JSON:API
-  fieldsToSelect.add(idProperty);
+  // Handle aliasing if idProperty is not 'id'
+  if (idProperty !== 'id') {
+    fieldsToSelect.add(`${idProperty} as id`);
+  } else {
+    fieldsToSelect.add('id');
+  }
   
   // Get computed and virtual fields - these are not stored in the database
   // Computed: { profit_margin: { type: 'number', dependencies: ['price', 'cost'], compute: ... } }
@@ -222,7 +227,8 @@ export const buildFieldSelection = async (scope, deps) => {
   return {
     fieldsToSelect: Array.from(fieldsToSelect),      // Fields to SELECT from database
     requestedFields: requested,                       // Fields explicitly requested by user
-    computedDependencies: Array.from(computedDependencies)  // Dependencies to remove from response
+    computedDependencies: Array.from(computedDependencies),  // Dependencies to remove from response
+    idProperty                                        // Pass idProperty for reference
   };
 };
 

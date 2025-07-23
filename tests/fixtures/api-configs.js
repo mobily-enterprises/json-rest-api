@@ -333,7 +333,7 @@ export async function createLimitedDepthApi(knex) {
       publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
       books: { hasMany: 'books', foreignKey: 'country_id' }
     },
-    tableName: 'limited_countries'
+    tableName: 'limited_countries',
   });
   await api.resources.countries.createKnexTable();
 
@@ -699,6 +699,156 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_items`
   });
   await api.resources.items.createKnexTable();
+
+  return api;
+}
+
+/**
+ * Creates an API with custom idProperty for all resources to test idProperty functionality
+ * Uses 'custom_id_' prefix for all tables to avoid conflicts
+ */
+export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || `custom-id-test-api`;
+  const tablePrefix = pluginOptions.tablePrefix || 'custom_id';
+  const api = new Api({
+    name: apiName,
+    version: '1.0.0',
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  });
+
+  const restApiOptions = {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: 'full',
+      put: 'full',
+      patch: 'full'
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'full',
+      patch: 'full'
+    },
+    sortableFields: ['country_id', 'publisher_id', 'author_id', 'book_id', 'title', 'name', 'code'],
+    ...pluginOptions['rest-api']  // Merge any custom options for rest-api plugin
+  };
+
+  await api.use(RestApiPlugin, restApiOptions);
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Countries table with custom idProperty
+  await api.addResource('countries', {
+    schema: {
+      // NO id: { type: 'id' } - this is key!
+      name: { type: 'string', required: true, max: 100, search: true },
+      code: { type: 'string', max: 2, unique: true }
+    },
+    relationships: {
+      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
+      books: { hasMany: 'books', foreignKey: 'country_id' }
+    },
+    tableName: `${tablePrefix}_countries`,
+    idProperty: 'country_id'  // Custom ID property
+  });
+  await api.resources.countries.createKnexTable();
+
+  // Publishers table with custom idProperty
+  await api.addResource('publishers', {
+    schema: {
+      name: { type: 'string', required: true, max: 200 },
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
+    },
+    relationships: {
+      books: { hasMany: 'books', foreignKey: 'publisher_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
+    },
+    tableName: `${tablePrefix}_publishers`,
+    idProperty: 'publisher_id'
+  });
+  await api.resources.publishers.createKnexTable();
+
+  // Authors table with custom idProperty
+  await api.addResource('authors', {
+    schema: {
+      name: { type: 'string', required: true, max: 200 },
+      biography: { type: 'string', max: 5000 },
+      country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
+    },
+    relationships: {
+      books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
+    },
+    tableName: `${tablePrefix}_authors`,
+    idProperty: 'author_id'
+  });
+  await api.resources.authors.createKnexTable();
+
+  // Books table with custom idProperty
+  await api.addResource('books', {
+    schema: {
+      title: { type: 'string', required: true, max: 300, search: true },
+      isbn: { type: 'string', max: 13 },
+      pages: { type: 'number' },
+      published_date: { type: 'date' },
+      country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country', search: true },
+      publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher', search: true }
+    },
+    relationships: {
+      authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' },
+      reviews: { 
+        hasMany: 'reviews', 
+        via: 'reviewable'
+      }
+    },
+    tableName: `${tablePrefix}_books`,
+    idProperty: 'book_id'
+  });
+  await api.resources.books.createKnexTable();
+
+  // Book-Authors pivot table with custom idProperty
+  await api.addResource('book_authors', {
+    schema: {
+      book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
+      author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
+      contribution_type: { type: 'string', max: 50 },
+      order: { type: 'number' }
+    },
+    tableName: `${tablePrefix}_book_authors`,
+    idProperty: 'book_author_id'
+  });
+  await api.resources.book_authors.createKnexTable();
+
+  // Polymorphic reviews with custom idProperty
+  await api.addResource('reviews', {
+    schema: {
+      rating: { type: 'number', required: true, min: 1, max: 5 },
+      title: { type: 'string', max: 200 },
+      content: { type: 'string', required: true, max: 5000 },
+      reviewer_name: { type: 'string', required: true, max: 100 },
+      review_date: { type: 'dateTime', default: 'now()' },
+      reviewable_type: { type: 'string', required: true, search: true },
+      reviewable_id: { type: 'number', required: true },
+      // Define the polymorphic field in schema
+      reviewable: {
+        belongsToPolymorphic: {
+          types: ['books', 'authors', 'publishers'],
+          typeField: 'reviewable_type',
+          idField: 'reviewable_id'
+        },
+        as: 'reviewable'
+      }
+    },
+    relationships: {},
+    tableName: `${tablePrefix}_reviews`,
+    idProperty: 'review_id'
+  });
+  await api.resources.reviews.createKnexTable();
 
   return api;
 }

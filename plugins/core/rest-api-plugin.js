@@ -1134,7 +1134,8 @@ const validatePivotResource = (scopes, relDef, relName) => {
             method: 'get', // We're checking read permission
             isUpdate: false
           };
-          
+
+      
           // Get the minimal record
           const record = await helpers.dataGetMinimal({ 
             scopeName: item.type, 

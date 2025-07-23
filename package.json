@@ -80,7 +80,7 @@
   },
   "devDependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^11.10.0",
     "express": "^5.1.0",
     "fractional-indexing": "^3.2.0",
     "jsonwebtoken": "^9.0.2",

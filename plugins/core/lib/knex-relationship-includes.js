@@ -322,6 +322,9 @@ export const loadBelongsTo = async (scope, deps) => {
     let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds);
     if (fieldSelectionInfo) {
       query = query.select(fieldSelectionInfo.fieldsToSelect);
+    } else if (targetIdProperty !== 'id') {
+      // If no field selection but custom idProperty, we need to alias it
+      query = query.select('*', `${targetIdProperty} as id`);
     }
     const targetRecords = await query;
     
@@ -331,7 +334,7 @@ export const loadBelongsTo = async (scope, deps) => {
     // Create lookup map
     const targetById = {};
     targetRecords.forEach(record => {
-      targetById[record[targetIdProperty]] = record;
+      targetById[record.id || record[targetIdProperty]] = record;
     });
     
     // Set relationships on original records
@@ -556,18 +559,25 @@ export const loadHasMany = async (scope, deps) => {
         });
       }
       
+      const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id';
       const windowQuery = knex
-        .select(`${targetTable}.*`)
-        .select(
+        .select(`${targetTable}.*`);
+      
+      // Add id alias if needed
+      if (targetIdProperty !== 'id') {
+        windowQuery.select(`${targetTable}.${targetIdProperty} as id`);
+      }
+      
+      windowQuery.select(
           knex.raw(
             'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' + 
-            buildOrderByClause(relDef.include?.orderBy || ['id'], targetTable) + 
+            buildOrderByClause(relDef.include?.orderBy || [targetIdProperty], targetTable) + 
             ') as ' + ROW_NUMBER_KEY,
             [foreignKey]
           )
         )
         .from(targetTable)
-        .join(`${pivotTable} as pivot`, `${targetTable}.id`, 'pivot.' + otherKey)
+        .join(`${pivotTable} as pivot`, `${targetTable}.${targetIdProperty}`, 'pivot.' + otherKey)
         .whereIn(`pivot.${foreignKey}`, mainIds);
         
       
@@ -584,10 +594,14 @@ export const loadHasMany = async (scope, deps) => {
       
     } else {
       // Standard query without per-parent limits
-      let query = knex(targetTable).whereIn('id', targetIds);
+      const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id';
+      let query = knex(targetTable).whereIn(targetIdProperty, targetIds);
       
       if (fieldSelectionInfo) {
         query = query.select(fieldSelectionInfo.fieldsToSelect);
+      } else if (targetIdProperty !== 'id') {
+        // If no field selection but custom idProperty, we need to alias it
+        query = query.select('*', `${targetIdProperty} as id`);
       }
       
       // Apply standard include config (global limits)
@@ -933,7 +947,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetType];
-    const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
+    // const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetType] ? 
       await buildFieldSelection(targetScopeObject, {
         context: {
@@ -950,9 +964,13 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     });
     
     // Query for this type
-    let query = knex(targetTable).whereIn('id', targetIds);
+    const targetIdProperty = scopes[targetType]?.vars?.schemaInfo?.idProperty || 'id';
+    let query = knex(targetTable).whereIn(targetIdProperty, targetIds);
     if (fieldSelectionInfo) {
       query = query.select(fieldSelectionInfo.fieldsToSelect);
+    } else if (targetIdProperty !== 'id') {
+      // If no field selection but custom idProperty, we need to alias it
+      query = query.select('*', `${targetIdProperty} as id`);
     }
     const targetRecords = await query;
     
@@ -1154,6 +1172,9 @@ export const loadReversePolymorphic = async (scope, deps) => {
     
   if (fieldSelectionInfo) {
     query = query.select(fieldSelectionInfo.fieldsToSelect);
+  } else if (targetIdProperty !== 'id') {
+    // If no field selection but custom idProperty, we need to alias it
+    query = query.select('*', `${targetIdProperty} as id`);
   }
   
   // Apply include configuration (limits, ordering, etc.)

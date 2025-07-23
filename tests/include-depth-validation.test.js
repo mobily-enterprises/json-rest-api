@@ -215,6 +215,7 @@ describe('Include Depth Validation', () => {
         }
       });
 
+      debugger
       const publisher = await limitedApi.resources.publishers.post({
         inputRecord: {
           data: {

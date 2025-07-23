@@ -56,7 +56,8 @@ export const toJsonApi = (scope, record, deps) => {
   const idProperty = context.schemaInfo?.idProperty || 'id';
   const polymorphicFields = context.polymorphicFields || new Set();
   
-  const { [idProperty]: id, ...allAttributes } = record;
+  // With aliasing approach, the record always has 'id' (even if DB column is different)
+  const { id, ...allAttributes } = record;
   
   // Get foreign keys to filter out
   const foreignKeys = schema ? getForeignKeyFields(schema) : new Set();
@@ -68,10 +69,11 @@ export const toJsonApi = (scope, record, deps) => {
     ROW_NUMBER_KEY            // '__$jsonrestapi_rn$__'
   ]);
   
-  // Build attributes excluding foreign keys, polymorphic fields, and internal fields
+  // Build attributes excluding foreign keys, polymorphic fields, internal fields, and custom idProperty
   const attributes = {};
   Object.entries(allAttributes).forEach(([key, value]) => {
-    if (!foreignKeys.has(key) && !polymorphicFields.has(key) && !internalFields.has(key)) {
+    // Also exclude the custom idProperty field (e.g., 'country_id' for countries table)
+    if (!foreignKeys.has(key) && !polymorphicFields.has(key) && !internalFields.has(key) && key !== idProperty) {
       attributes[key] = value;
     }
   });
