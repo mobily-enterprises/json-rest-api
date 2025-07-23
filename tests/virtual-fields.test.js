@@ -35,7 +35,12 @@ describe('Virtual Fields Tests', () => {
     // Install plugins
     await api.use(RestApiPlugin, {
       simplifiedApi: false,
-      simplifiedTransport: false
+      simplifiedTransport: false,
+      returnRecordApi: {
+        post: 'full',
+        put: 'full',
+        patch: 'full'
+      }
     });
     await api.use(RestApiKnexPlugin, { knex });
     

@@ -12,17 +12,22 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   const tablePrefix = pluginOptions.tablePrefix || 'basic';
   const api = new Api({
     name: apiName,
-    version: '1.0.0'
+    version: '1.0.0',
+    log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
   const restApiOptions = {
     simplifiedApi: false,
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,  // Need to return record to get ID for tests
       put: false,
-      patch: false,
-      allowRemoteOverride: false
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',  // Tests expect full JSON:API response
+      put: 'no',
+      patch: 'minimal'  // Tests expect minimal response with ID
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
     ...pluginOptions['rest-api']  // Merge any custom options for rest-api plugin
@@ -145,11 +150,15 @@ export async function createExtendedApi(knex) {
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,  // Need to return record to get ID for tests
       put: false,
-      patch: false,
-      allowRemoteOverride: false
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',  // Tests expect full JSON:API response
+      put: 'no',
+      patch: 'minimal'  // Tests expect minimal response with ID
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'price', 'language', 'population', 'name', 'code']
   });
@@ -297,11 +306,15 @@ export async function createLimitedDepthApi(knex) {
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,
       put: false,
-      patch: false,
-      allowRemoteOverride: false
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
     includeDepthLimit: 2  // Key difference: limit is 2 instead of default 3
@@ -390,11 +403,15 @@ export async function createPaginationApi(knex, options = {}) {
   const restApiOptions = {
     simplifiedApi: false,
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,
       put: false,
-      patch: false,
-      allowRemoteOverride: false
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
     ...options  // Allow overriding options like publicBaseUrl, enablePaginationCounts
@@ -509,11 +526,15 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,
       put: false,
-      patch: false,
-      allowRemoteOverride: false
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
     },
     sortableFields: ['id', 'title', 'name', 'tenant_id']
   });
@@ -605,11 +626,15 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
   const restApiOptions = {
     simplifiedApi: true,  // Changed to true to allow simplified API calls in tests
     simplifiedTransport: false,
-    returnFullRecord: {
+    returnRecordApi: {
       post: true,
       put: true,
-      patch: true,
-      allowRemoteOverride: false
+      patch: true
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'full',
+      patch: 'full'
     },
     sortableFields: ['id', 'title', 'name', 'position', 'sort_order', 'category_id', 'project_id', 'status'],
     ...pluginOptions['rest-api']

@@ -181,9 +181,10 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       
       const response = JSON.parse(result.stdout);
       
-      // PATCH is configured to return only ID, not full record
-      assert(response.id, 'Should return ID');
-      assert.equal(response.id, String(testData.country.id), 'Should return correct ID');
+      // PATCH is configured to return minimal JSON:API response
+      assert(response.data, 'Should have data');
+      assert.equal(response.data.type, 'countries', 'Should have correct type');
+      assert.equal(response.data.id, String(testData.country.id), 'Should return correct ID');
       
       // Verify the update by fetching the record
       const verifyResult = await basicApi.resources.countries.get({

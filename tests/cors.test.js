@@ -369,7 +369,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         .set('Content-Type', 'application/vnd.api+json')
         .send(putDoc);
       
-      assert.equal(response.status, 200);
+      assert.equal(response.status, 204);
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
       assert.equal(response.headers['vary'], 'Origin');
       assert.equal(response.headers['access-control-expose-headers'], 'X-Total-Count, X-Page-Count, Link');
@@ -754,7 +754,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         .set('Content-Type', 'application/vnd.api+json')
         .set('Accept', 'application/vnd.api+json');
       
-      assert.equal(response.status, 200);
+      assert.equal(response.status, 204);
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com');
       assert.equal(response.headers['access-control-allow-credentials'], 'true');
       assert.equal(response.headers['vary'], 'Origin');

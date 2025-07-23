@@ -1246,7 +1246,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
                 queryParams: context.queryParams,
                 transaction: context.transaction,
                 simplified: context.simplified
-            });
+            }, {...context });
             
             context.responseRecord = fullRecord || undefined;
             

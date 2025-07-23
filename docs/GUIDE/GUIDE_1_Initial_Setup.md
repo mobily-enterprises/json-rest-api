@@ -459,7 +459,7 @@ console.log('API result:', apiResult);
 // API result: { id: '2', type: 'countries' }
 
 // HTTP call returns full record
-// POST /api/countries -> 201 Created
+// POST /api/countries -> 204 No Content
 // Body: { data: { type: 'countries', id: '3', attributes: { name: 'Mexico', code: 'MX' } } }
 
 // Example 3: Per-method configuration
@@ -752,13 +752,13 @@ Once again, it will be uncommon to use the simplified version for the HTTP trans
 The `returnRecordTransport` setting controls what HTTP/REST endpoints return (see "API usage and returning records" above for full details). The HTTP status codes vary based on the operation and setting:
 
 **POST operations:**
-- `returnRecordTransport: 'full'` → Returns `201 Created` with the full record in the body
-- `returnRecordTransport: 'minimal'` → Returns `201 Created` with minimal response `{ id: '...', type: '...' }`
+- `returnRecordTransport: 'full'` → Returns `204 No Content` with the full record in the body
+- `returnRecordTransport: 'minimal'` → Returns `204 No Content` with minimal response `{ id: '...', type: '...' }`
 - `returnRecordTransport: 'no'` → Returns `204 No Content` with no body
 
 **PUT/PATCH operations:**
-- `returnRecordTransport: 'full'` → Returns `200 OK` with the full record in the body
-- `returnRecordTransport: 'minimal'` → Returns `200 OK` with minimal response `{ id: '...', type: '...' }`
+- `returnRecordTransport: 'full'` → Returns `204 No Content` with the full record in the body
+- `returnRecordTransport: 'minimal'` → Returns `204 No Content` with minimal response `{ id: '...', type: '...' }`
 - `returnRecordTransport: 'no'` → Returns `204 No Content` with no body
 
 **DELETE operations:**
@@ -793,7 +793,7 @@ curl -i -X POST -H "Content-Type: application/vnd.api+json" \
 The result:
 
 ```
-HTTP/1.1 201 Created
+HTTP/1.1 204 No Content
 X-Powered-By: Express
 Content-Type: application/vnd.api+json; charset=utf-8
 Location: http://localhost:3000/api/countries/1
@@ -867,3 +867,151 @@ Here is a full list of parameters and their respective variables:
   - An object: `{ post: 'full', put: 'minimal', patch: 'no' }` (per-method configuration)
 - All parameters support the cascade: per-call → resource-level → plugin-level default
 
+# Helpers and Methods Provided by REST API Plugins
+
+The REST API plugins extend your API instance with various helpers and methods at different levels. Here's what becomes available:
+
+## API-Level Helpers
+
+When you install the REST API plugins, the following helpers are added to `api.helpers`:
+
+### From RestApiPlugin
+
+- **`api.helpers.getLocation(scopeName, id)`** - Generates the full URL for a resource
+  ```javascript
+  const url = api.helpers.getLocation('countries', '1');
+  // Returns: 'http://localhost:3000/api/countries/1'
+  ```
+
+- **`api.helpers.getUrlPrefix(scope, context)`** - Gets the URL prefix for generating links
+  ```javascript
+  const prefix = api.helpers.getUrlPrefix(scope, context);
+  // Returns: 'http://localhost:3000/api'
+  ```
+
+### From RestApiKnexPlugin
+
+- **`api.helpers.newTransaction()`** - Creates a new database transaction for atomic operations
+  ```javascript
+  const trx = await api.helpers.newTransaction();
+  try {
+    // Use transaction in multiple operations
+    await api.resources.countries.post({ name: 'France', code: 'FR' }, { transaction: trx });
+    await api.resources.publishers.post({ name: 'French Press', country_id: 1 }, { transaction: trx });
+    await trx.commit();
+  } catch (error) {
+    await trx.rollback();
+    throw error;
+  }
+  ```
+
+## API Namespaces
+
+The plugins also create organized namespaces on the API instance:
+
+### `api.knex` Namespace (from RestApiKnexPlugin)
+
+- **`api.knex.instance`** - Direct access to the Knex database instance
+  ```javascript
+  // Run raw queries when needed
+  const result = await api.knex.instance.raw('SELECT COUNT(*) FROM countries');
+  ```
+
+- **`api.knex.capabilities`** - Information about database capabilities
+  ```javascript
+  console.log(api.knex.capabilities);
+  // { windowFunctions: true, dbInfo: { client: 'sqlite3', version: '3.36.0' } }
+  ```
+
+### `api.http` Namespace (from connector plugins)
+
+When using ExpressPlugin:
+
+- **`api.http.express.router`** - The Express router containing all API endpoints
+- **`api.http.express.notFoundRouter`** - Express middleware for handling 404 errors
+
+```javascript
+// In your Express app
+app.use(api.http.express.router);
+app.use(api.http.express.notFoundRouter);
+```
+
+## Resource-Level Methods
+
+Each resource (added via `api.addResource()`) gets these methods automatically:
+
+### CRUD Operations
+
+- **`api.resources.{resourceName}.query(params)`** - List resources with filtering, sorting, pagination
+  ```javascript
+  const countries = await api.resources.countries.query({
+    queryParams: {
+      filters: { name: 'United' },
+      sort: ['name'],
+      page: { size: 10, number: 1 }
+    }
+  });
+  ```
+
+- **`api.resources.{resourceName}.get(params)`** - Retrieve a single resource by ID
+  ```javascript
+  const country = await api.resources.countries.get({ id: '1' });
+  ```
+
+- **`api.resources.{resourceName}.post(params)`** - Create a new resource
+  ```javascript
+  const newCountry = await api.resources.countries.post({
+    name: 'Canada',
+    code: 'CA'
+  });
+  ```
+
+- **`api.resources.{resourceName}.put(params)`** - Replace an entire resource
+  ```javascript
+  const updated = await api.resources.countries.put({
+    id: '1',
+    name: 'United States of America',
+    code: 'USA'
+  });
+  ```
+
+- **`api.resources.{resourceName}.patch(params)`** - Partially update a resource
+  ```javascript
+  const patched = await api.resources.countries.patch({
+    id: '1',
+    name: 'USA'
+  });
+  ```
+
+- **`api.resources.{resourceName}.delete(params)`** - Delete a resource
+  ```javascript
+  await api.resources.countries.delete({ id: '1' });
+  ```
+
+### Database Operations
+
+- **`api.resources.{resourceName}.createKnexTable()`** - Creates the database table for this resource
+  ```javascript
+  // Create the table based on the schema definition
+  await api.resources.countries.createKnexTable();
+  ```
+
+
+## API Namespaces (internal, for plugin developers)
+
+### `api.rest` Namespace (from RestApiPlugin)
+
+- **`api.rest.registerFileDetector(detector)`** - Registers file upload detectors (requires FileHandlingPlugin)
+- **`api.rest.fileDetectors`** - Registry of file detectors for handling uploads
+- **`api.knex.helpers.crossTableSearch`** - Utilities for searching across related tables
+
+## Summary
+
+These helpers and methods provide a complete toolkit for:
+- Building RESTful APIs with full CRUD support
+- Managing database transactions
+- Generating proper URLs and links
+- Accessing the underlying database when needed
+- Integrating with web frameworks like Express
+
+The architecture ensures clean separation between HTTP transport, business logic, and data persistence layers.

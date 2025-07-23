@@ -745,7 +745,7 @@ curl -X POST http://localhost:3000/api/books \
     }
   }'
 
-# Returns (201 Created):
+# Returns (204 No Content):
 {
   "data": {
     "type": "books",

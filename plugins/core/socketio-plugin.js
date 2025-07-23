@@ -137,6 +137,13 @@ export const SocketIOPlugin = {
 
     // Main broadcast function
     async function performBroadcast({ method, scopeName, id, context }) {
+      console.log(`[SOCKETIO DEBUG] performBroadcast called:`, { 
+        method, 
+        scopeName, 
+        id,
+        hasMinimalRecord: !!context.minimalRecord
+      });
+      
       const scope = api.resources[scopeName];
       if (!scope) {
         log.error(`Scope ${scopeName} not found for broadcasting`);
@@ -608,23 +615,35 @@ subscriptions`
     addHook('finish', 'socketio-broadcast', {}, async ({ context }) => {
       const { method, scopeName, id } = context;
 
+      console.log(`[SOCKETIO DEBUG] finish hook called:`, { 
+        method, 
+        scopeName, 
+        id, 
+        hasMinimalRecord: !!context.minimalRecord,
+        hasTransaction: !!context.transaction 
+      });
+
       // Only broadcast for write operations
       if (!['post', 'put', 'patch', 'delete'].includes(method)) {
+        log.debug(`[SOCKETIO DEBUG] Skipping broadcast for method: ${method}`);
         return;
       }
 
       // Skip if no ID (might happen in error cases)
       if (!id && method !== 'delete') {
+        log.debug(`[SOCKETIO DEBUG] Skipping broadcast - no ID for method: ${method}`);
         return;
       }
 
       // Skip if io not initialized
       if (!io) {
+        log.debug(`[SOCKETIO DEBUG] Skipping broadcast - io not initialized`);
         return;
       }
 
       // If there's a transaction, defer broadcasting
       if (context.transaction) {
+        console.log(`[SOCKETIO DEBUG] Deferring broadcast until transaction commit`);
         // Store broadcast info in WeakMap
         if (!pendingBroadcasts.has(context.transaction)) {
           pendingBroadcasts.set(context.transaction, []);
@@ -636,6 +655,7 @@ subscriptions`
       }
 
       // No transaction, broadcast immediately
+      console.log(`[SOCKETIO DEBUG] Broadcasting immediately (no transaction)`);
       await performBroadcast({ method, scopeName, id, context });
     });
 

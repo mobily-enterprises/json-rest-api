@@ -745,7 +745,7 @@ curl -X POST http://localhost:3000/api/books \
     }
   }'
 
-# Returns (201 Created):
+# Returns (204 No Content):
 {
   "data": {
     "type": "books",
@@ -1713,7 +1713,7 @@ These filters will be combined with AND, ensuring that security filters cannot b
 
 Many-to-many relationships require a pivot table. In the JSON REST API system, the pivot table is treated as a full resource with its own schema and endpoints.
 
-### Understanding Relationships and Including Related Data
+### Understanding Relationships and Including Related Resources
 
 Before diving into many-to-many relationships, it's important to understand how relationships work in the JSON REST API system.
 
@@ -1727,7 +1727,7 @@ The system supports three types of relationships:
 
 #### Including Related Resources with the Include Parameter
 
-You can fetch related resources in a single request using the `include` query parameter. This follows the JSON:API specification and helps prevent N+1 query problems.
+You can fetch related resources in a single request using the `include` query parameter. This follows the JSON:API specification and helps prevent N+1 query problems. All relationships can be included using this parameter.
 
 ```javascript
 // Example: Get a book with its author included
@@ -1753,6 +1753,7 @@ api.addResource('books', {
 
 // This allows:
 // GET /api/books?include=author
+// GET /api/books?filter[authorName]=Tolkien (with appropriate searchSchema)
 ```
 
 ##### For hasMany Relationships
@@ -1773,11 +1774,12 @@ api.addResource('authors', {
 
 // This allows:
 // GET /api/authors/1?include=books
+// GET /api/authors?filter[bookTitle]=Hobbit (with appropriate searchSchema)
 ```
 
 ##### For Many-to-Many Relationships
 
-Many-to-many relationships use `hasMany` with `through` to specify the pivot table:
+Many-to-many relationships using `hasMany` with `through`:
 
 ```javascript
 api.addResource('books', {
@@ -1789,8 +1791,8 @@ api.addResource('books', {
     tags: {
       hasMany: 'tags',
       through: 'book_tags',    // Pivot table
-      foreignKey: 'book_id',   // Key for this resource
-      otherKey: 'tag_id'       // Key for related resource
+      foreignKey: 'book_id',
+      otherKey: 'tag_id'
     }
   }
 });
@@ -1799,9 +1801,9 @@ api.addResource('books', {
 // GET /api/books/1?include=tags
 ```
 
-#### Important Notes on Including Relationships
+#### Important Notes on Including Related Resources
 
-1. **Performance Consideration**: Including many related resources can impact performance. Be mindful when including hasMany relationships.
+1. **Performance Consideration**: When including many related resources, be mindful of performance impacts. Consider pagination and filtering to limit the data returned.
 
 2. **Nested Includes**: You can include nested relationships using dot notation:
    ```
