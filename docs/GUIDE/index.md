@@ -21,6 +21,13 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 5. **[Non-Database Stores](GUIDE_5_Non-Db_Stores.md)**  
    Connect your API to alternative data sources beyond traditional databases.
 
+6. **[Relationship Plugin](GUIDE_6_Relationship_Plugin.md)**  
+  Advanced relationship handling and custom relationship types.
+
+7. **[Positioning and Ordering](GUIDE_7_Positioning.md)**  
+  Implement drag-and-drop functionality with automatic position management.
+
+
 ### Advanced Topics
 
 - **[Bulk Operations](GUIDE_X_Bulk_Operations.md)**  
@@ -32,16 +39,10 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[Multihome Support](GUIDE_X_Multihome.md)**  
   Run multiple API instances or serve different domains from a single server.
 
-- **[Positioning and Ordering](GUIDE_X_Positioning.md)**  
-  Implement drag-and-drop functionality with automatic position management.
-
-- **[Relationship Plugin](GUIDE_X_Relationship_Plugin.md)**  
-  Advanced relationship handling and custom relationship types.
-
 - **[Socket.IO Integration](GUIDE_X_SocketIO.md)**  
   Add real-time capabilities to your API with WebSocket support.
 
-- **[Appendices](GUIDE_X_Appendices.md)**  
+- **[Appendices](GUIDE_Y_Appendices.md)**  
   Reference material, troubleshooting, and additional resources.
 
 ## Prerequisites

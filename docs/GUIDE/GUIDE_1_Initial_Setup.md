@@ -62,85 +62,6 @@ await api.addResource('countries', {
 });
 await api.resources.countries.createKnexTable()
 
-/*
-// These tables will be used in the next sections of this guide. For now they are commented out
-
-// Publishers table
-await api.addResource('publishers', {
-  schema: {
-    name: { type: 'string', required: true, max: 200, search: true },
-    country_id: { type: 'number',  belongsTo: 'countries', as: 'country' },
-  },
-  relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' },
-    reviews: { hasMany: 'reviews', via: 'reviewable' }
-  }
-});
-await api.resources.publishers.createKnexTable()
-
-// Authors table
-await api.addResource('authors', {
-  schema: {
-    name: { type: 'string', required: true, max: 200, search: true },
-  },
-  relationships: {
-    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
-    reviews: { hasMany: 'reviews', via: 'reviewable' }
-  }
-});
-await api.resources.authors.createKnexTable()
-
-// Books table
-await api.addResource('books', {
-  schema: {
-    title: { type: 'string', required: true, max: 300, search: true },
-    country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
-    publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' },
-    year: { type: 'number', search: true },
-    isbn: { type: 'string', search: true },
-    inStock: { type: 'boolean', default: true },
-    rating: { type: 'number', default: 0 },
-    tags: { type: 'array', default: [] },
-    metadata: { type: 'object', default: {} }
-  },
-  relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' },
-    reviews: { hasMany: 'reviews', via: 'reviewable' }
-  }
-});
-await api.resources.books.createKnexTable()
-
-// Book-Authors pivot table (many-to-many relationship)
-await api.addResource('book_authors', {
-  schema: {
-    book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
-    author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' },
-  }
-});
-await api.resources.book_authors.createKnexTable()
-
-// Reviews table (polymorphic - can review books, authors, or publishers)
-await api.addResource('reviews', {
-  schema: {
-    review_author: { type: 'string', required: true, max: 100 },
-    review_text: { type: 'string', required: true, max: 5000 },
-    review_rating: { type: 'number', required: true, min: 1, max: 5 },
-    reviewable_type: { type: 'string', required: true },
-    reviewable_id: { type: 'number', required: true },
-    // Define the polymorphic field
-    reviewable: {
-      belongsToPolymorphic: {
-        types: ['books', 'authors', 'publishers'],
-        typeField: 'reviewable_type',
-        idField: 'reviewable_id'
-      },
-      as: 'reviewable'
-    }
-  }
-});
-await api.resources.reviews.createKnexTable()
-
-*/
 
 /// *** ...programmatic calls here... ***
 
@@ -156,12 +77,12 @@ This set of resources cover a lot of ground in terms of relationships etc. Those
 
 The available log levels in hooked-api are (from most verbose to least verbose):
 
-  1. 'trace' - Most verbose, shows everything including internal operations
-  2. 'debug' - Debug information for development
-  3. 'info' - Informational messages (DEFAULT)
-  4. 'warn' - Only warnings and errors
-  5. 'error' - Only error messages
-  6. 'silent' - No logging at all
+  1. `trace` - Most verbose, shows everything including internal operations
+  2. `debug` - Debug information for development
+  3. `info` - Informational messages (DEFAULT)
+  4. `warn` - Only warnings and errors
+  5. `error` - Only error messages
+  6. `silent` - No logging at all
 
 To change loglevels, pass a logLevel option to the API:
 
@@ -175,14 +96,14 @@ const api = new Api({
 
 By default, the INFO level logs you're seeing are the default. To reduce them, you could use:
 
-- logLevel: 'warn' - Only see warnings and errors
-- logLevel: 'error' - Only see errors
-- logLevel: 'silent' - No logs at all
+- logLevel: `warn` - Only see warnings and errors
+- logLevel: `error` - Only see errors
+- logLevel: `silent` - No logs at all
 
 To see more detail for debugging:
 
-- logLevel: 'debug' - More detailed information
-- logLevel: 'trace' - Everything, including hook executions and internal operations
+- logLevel: `debug` - More detailed information
+- logLevel: `trace` - Everything, including hook executions and internal operations
 
 ### Database Options
 
@@ -602,12 +523,11 @@ Thanks to the ExpressPlugin, `json-rest-api` is able to export an Express router
 Just modify the example above so that it looks like this:
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'; // Added: ExpressPlugin
 import { Api } from 'hooked-api';
 import knexLib from 'knex';
 import util from 'util';
-import express from 'express';
-const app = express();
+import express from 'express'; // Added: Express
 
 // Utility used throughout this guide
 const inspect = (obj) => util.inspect(obj, { depth: 5 })
@@ -625,12 +545,27 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
 
 // Install plugins
-await api.use(RestApiPlugin);
+await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0' });
 await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, {  mountPath: '/api' });
+await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 
-// *** ...schema definitions as above... ***
+// Countries table
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true, max: 100, search: true },
+    code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
+  },
+  relationships: {
+    publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
+    books: { hasMany: 'books', foreignKey: 'country_id' }
+  },
+});
+await api.resources.countries.createKnexTable()
 
+/// *** ...programmatic calls here... ***
+
+// Createthe express server and add the API's routes 
+const app = express();
 app.use(api.http.express.router);
 app.use(api.http.express.notFoundRouter);
 
@@ -638,11 +573,10 @@ app.listen(3000, () => {
   console.log('Express server started on port 3000. API available at http://localhost:3000/api');
 });
 
-// Close the database connection // no longer happening
+// Close the database connection // no longer happening since the server stays on
 // await knex.destroy();
 // console.log('\n✅ All schemas created successfully!');
 // console.log('Database connection closed.');
-
 ```
 
 Since you added `express`, you will need to install it:
@@ -866,6 +800,10 @@ Here is a full list of parameters and their respective variables:
   - A string: `'no'`, `'minimal'`, or `'full'` (applies to all methods)
   - An object: `{ post: 'full', put: 'minimal', patch: 'no' }` (per-method configuration)
 - All parameters support the cascade: per-call → resource-level → plugin-level default
+
+# Custom ID parameter
+
+TODO: Explain how idParam works, clarify that for the api it's always 'id' and there is no ID in the attributes
 
 # Helpers and Methods Provided by REST API Plugins
 
