@@ -50,6 +50,7 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
     <p>Follow industry standards with native JSON:API support. Compatible with any JSON:API client library.</p>
   </div>
   
+  <!--
   <div class="feature-card">
     <h3>🌐 Microservices Ready</h3>
     <p>Build distributed systems with native microservices support. Multiple transports, service discovery, and more.</p>
@@ -64,6 +65,7 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
     <h3>🔄 API Gateway</h3>
     <p>Transform into an API gateway to orchestrate external services with circuit breakers and saga support.</p>
   </div>
+  -->
 </div>
 
 ## Quick Example
