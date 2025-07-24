@@ -191,6 +191,7 @@ const it = await api.resources.countries.post({ name: 'Italy', code: 'IT' });
 const de = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
 const au = await api.resources.countries.post({ name: 'Australia', code: 'AU' });
 const at = await api.resources.countries.post({ name: 'Austria', code: 'AT' });
+const ge = await api.resources.countries.post({ name: 'Georgia', code: 'GE' });
 
 const searchAustralia = await api.resources.countries.query({
   queryParams: {
@@ -265,6 +266,7 @@ await api.addResource('countries', {
 });
 await api.resources.countries.createKnexTable()
 
+await api.resources.countries.post({ name: 'Georgia', code: 'GE' });
 await api.resources.countries.post({ name: 'France', code: 'FR' });
 await api.resources.countries.post({ name: 'Italy', code: 'IT' });
 await api.resources.countries.post({ name: 'Germany', code: 'DE' });
@@ -328,19 +330,206 @@ The `searchSchema` gives you:
 `searchSchema` also gives you the ability to define a search field that will search in multiple fields. For example:
 
 ```javascript
+searchSchema: {
+  search: {
+    type: 'string',
+    oneOf: ['name', 'code'],
+    filterUsing: 'like'
+  }
+}
+
+const searchGe = await api.resources.countries.query({
+  queryParams: {
+    filters: {
+      search: 'ge'
+    }
+  }
+});
+console.log('Search for "ge":', inspect(searchGe))
+```
+
+Will return:
+
+```
+Search for "ge": [
+  { id: '3', name: 'Georgia', code: 'GE' },
+  { id: '6', name: 'Germany', code: 'DE' }
+]
+```
+
+This common pattern will give you the ability to create "global" search fields that will look in multiple fields.
+
+#### Multi-word Search with AND Logic
+
+The `oneOf` search feature becomes even more powerful when combined with `splitBy` and `matchAll` options. This allows you to search for multiple words where ALL must appear somewhere in the specified fields.
+
+```javascript
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true },
+    code: { type: 'string', unique: true }
+  },
   searchSchema: {
     search: {
       type: 'string',
       oneOf: ['name', 'code'],
-      filterUsing: 'like'
+      filterUsing: 'like',
+      splitBy: ' ',      // Split search terms by space
+      matchAll: true     // Require ALL terms to match (AND logic)
     }
   }
+});
 ```
 
+With this configuration, searching becomes much more precise:
 
+```javascript
+// Add some countries
+await api.resources.countries.post({ name: 'United States', code: 'US' });
+await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+await api.resources.countries.post({ name: 'United Arab Emirates', code: 'AE' });
+await api.resources.countries.post({ name: 'South Africa', code: 'ZA' });
 
+// Search for "united states" - both words must appear
+const results = await api.resources.countries.query({
+  queryParams: {
+    filters: {
+      search: 'united states'
+    }
+  }
+});
+console.log('Found:', results);
+// Returns: [{ id: '1', name: 'United States', code: 'US' }]
+// Does NOT return United Kingdom or United Arab Emirates
+```
 
-enrich the knex query in whichever way you want. This means that you can easily create a `search` field that will do multi-field search:
+**How it works:**
+
+1. The search term "united states" is split by space into ["united", "states"]
+2. With `matchAll: true`, the query requires BOTH terms to appear
+3. Each term can appear in ANY of the fields listed in `oneOf`
+4. The SQL generated looks like:
+
+```sql
+WHERE (
+  (countries.name LIKE '%united%' OR countries.code LIKE '%united%')
+  AND
+  (countries.name LIKE '%states%' OR countries.code LIKE '%states%')
+)
+```
+
+**More examples:**
+
+```javascript
+// Search for "south africa" - finds only South Africa
+const southAfrica = await api.resources.countries.query({
+  queryParams: { filters: { search: 'south africa' } }
+});
+// Returns: [{ name: 'South Africa', code: 'ZA' }]
+
+// Search for "united arab" - finds only United Arab Emirates
+const uae = await api.resources.countries.query({
+  queryParams: { filters: { search: 'united arab' } }
+});
+// Returns: [{ name: 'United Arab Emirates', code: 'AE' }]
+
+// Single word searches still work normally
+const allUnited = await api.resources.countries.query({
+  queryParams: { filters: { search: 'united' } }
+});
+// Returns all countries with "united" in name or code
+```
+
+**Alternative configurations:**
+
+You can also use different separators and OR logic:
+
+```javascript
+searchSchema: {
+  // Comma-separated OR search
+  tags: {
+    type: 'string',
+    oneOf: ['tags', 'categories', 'keywords'],
+    filterUsing: 'like',
+    splitBy: ',',       // Split by comma
+    matchAll: false     // OR logic (default) - match ANY term
+  },
+  
+  // Exact match with AND logic
+  codes: {
+    type: 'string',
+    oneOf: ['primary_code', 'secondary_code'],
+    filterUsing: '=',   // Exact match
+    splitBy: ' ',
+    matchAll: true      // All codes must match exactly
+  }
+}
+```
+
+This feature is particularly useful for:
+- Full-text search functionality where users type multiple words
+- Tag or keyword searches where all terms must be present
+- Product searches matching multiple criteria
+- Finding records that match complex multi-word queries
+
+#### Custom Search Functions
+
+If you need even more complex searches, you can use `searchSchema` to define search fields with custom query logic:
+
+```javascript
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true },
+    code: { type: 'string', unique: true }
+  },
+  searchSchema: {
+    // Standard fields
+    name: { type: 'string', filterUsing: '=' },
+    code: { type: 'string', filterUsing: '=' },
+    
+    // Custom search using a function
+    nameOrCode: {
+      type: 'string',
+      filterUsing: function(query, filterValue) {
+        // Custom SQL logic: case-insensitive search in name OR exact match on code
+        query.where(function() {
+          this.whereRaw('LOWER(name) LIKE LOWER(?)', [`%${filterValue}%`])
+              .orWhereRaw('LOWER(code) = LOWER(?)', [filterValue]);
+        });
+      }
+    }
+  }
+});
+```
+
+When `filterUsing` is a function instead of an operator string, it receives:
+- `query` - The Knex query builder instance
+- `filterValue` - The search value from the user
+- `fieldName` - The name of the search field (optional third parameter)
+
+This gives you complete control over the SQL generated for that search field.
+
+**Example usage:**
+
+```javascript
+// This custom search will find both:
+// - Countries with "at" in the name (United States, United Kingdom, United Arab Emirates)
+// - Countries with code "at"
+const results = await api.resources.countries.query({
+  queryParams: {
+    filters: {
+      nameOrCode: 'at'
+    }
+  }
+});
+```
+
+The function approach is powerful for:
+- Case-insensitive searches
+- Complex conditions combining multiple fields
+- Database-specific functions
+- Custom business logic in searches
+
 
 
 
@@ -349,112 +538,165 @@ enrich the knex query in whichever way you want. This means that you can easily 
 
 The JSON:API response will contain an array of matching resources.
 
-#### Sparse fields fetch and queries
+#### Sparse Fieldsets
 
-You can combine filtering with sparse fieldsets to get precisely the data you need.
+The JSON:API specification includes a powerful feature called "sparse fieldsets" that allows you to request only specific fields from a resource. This is essential for optimizing API performance by reducing payload sizes and network traffic.
 
+**How Sparse Fieldsets Work:**
 
-**Programmatic Example: Get only `name` for `countries` matching a search**
+By default, API responses include all fields defined in the schema. With sparse fieldsets, you can specify exactly which fields you want returned. The `id` field is always included automatically as it's required by JSON:API.
+
+Let's work with our countries table:
 
 ```javascript
-const searchResultSparse = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      name: 'United'
-    },
-    fields: {
-      countries: 'name'
-    }
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true, max: 100 },
+    code: { type: 'string', max: 2, unique: true }
   }
 });
 
-console.log('Sparse search result:', inspect(searchResultSparse));
+// Add some test data
+await api.resources.countries.post({ name: 'France', code: 'FR' });
+await api.resources.countries.post({ name: 'Germany', code: 'DE' });
+await api.resources.countries.post({ name: 'Italy', code: 'IT' });
+await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+await api.resources.countries.post({ name: 'United States', code: 'US' });
 ```
 
-This will fetch all countries with "United" in their name, but only return their `id` and `name` fields:
-
-```text
-Sparse search result: [
-  { id: '2', name: 'United Kingdom' },
-  { id: '4', name: 'United States' },
-  { id: '5', name: 'United Arab Emirates' }
-]
-```
-
-**HTTP Example:**
-
-Combine `filter` and `fields` parameters in the URL:
-
-```bash
-$ curl -i -X GET "http://localhost:3000/api/countries?filter[name]=United&fields[countries]=name"
-```
-
-The response will be a collection of countries, each with only the `name` attribute.
-
-Sparse fieldsets also apply to `included` resources. If you request related data, you can specify which fields of those related resources should be returned as well. We will see more on this in the following sections.
-
-
-
-
-
-#### Sparse fields on get calls
-
-The JSON:API specification allows clients to request only a subset of fields for a given resource, a feature known as "sparse fieldsets". This is crucial for optimizing network traffic by reducing the size of the response payload, especially when dealing with large records.
-
-You can specify which fields to return using the `fields[resourceType]=field1,field2` query parameter.
-
-**Programmatic Example: Get only `name` for `countries`**
-
-When using the programmatic API, you can use the `fields` option to specify the desired fields.
+**Sparse Fieldsets with `get()` - Single Record:**
 
 ```javascript
-const addedGermany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const fetchedGermanyNameOnly = await api.resources.countries.get({
-  id: addedGermany.id,
+// Fetch a single country with all fields (default behavior)
+const fullCountry = await api.resources.countries.get({ id: '1' });
+console.log('Full record:', inspect(fullCountry));
+// Output: { id: '1', name: 'France', code: 'FR' }
+
+// Fetch only the name field
+const nameOnly = await api.resources.countries.get({ 
+  id: '1',
   fields: { countries: ['name'] }
 });
-console.log('Fetched only name:', inspect(fetchedGermanyNameOnly));
+console.log('Name only:', inspect(nameOnly));
+// Output: { id: '1', name: 'France' }
+
+// Fetch only the code field
+const codeOnly = await api.resources.countries.get({ 
+  id: '1',
+  fields: { countries: ['code'] }
+});
+console.log('Code only:', inspect(codeOnly));
+// Output: { id: '1', code: 'FR' }
 ```
 
-This will output:
-```text
-Fetched only name: { id: '3', name: 'Germany' }
-```
+**Sparse Fieldsets with `query()` - Multiple Records:**
 
-**HTTP Example: Get only the `code` for a country**
+Sparse fieldsets become even more valuable when fetching collections, as they can significantly reduce the response size:
 
-To request only a single field, you would format the `fields` parameter in the URL like this:
-
-```bash
-$ curl -i -X GET "http://localhost:3000/api/countries/3?fields[countries]=code"
-```
-
-The response will only contain the requested `code` field:
-
-```text
-HTTP/1.1 200 OK
-X-Powered-By: Express
-Content-Type: application/vnd.api+json; charset=utf-8
-Content-Length: 155
-ETag: W/"9b-..."
-Date: Wed, 23 Jul 2025 08:05:00 GMT
-Connection: keep-alive
-
-{
-  "data": {
-    "type": "countries",
-    "id": "3",
-    "attributes": {
-      "code": "DE"
-    },
-    "links": {
-      "self": "/api/1.0/countries/3"
-    }
-  },
-  "links": {
-    "self": "/api/1.0/countries/3"
+```javascript
+// Query all countries starting with 'United' - full records
+const fullRecords = await api.resources.countries.query({
+  queryParams: {
+    filters: { name: 'United' }
   }
-}
+});
+console.log('Full records:', inspect(fullRecords));
+// Output: [
+//   { id: '4', name: 'United Kingdom', code: 'UK' },
+//   { id: '5', name: 'United States', code: 'US' }
+// ]
+
+// Query with only names returned
+const namesOnly = await api.resources.countries.query({
+  queryParams: {
+    filters: { name: 'United' },
+    fields: { countries: ['name'] }
+  }
+});
+console.log('Names only:', inspect(namesOnly));
+// Output: [
+//   { id: '4', name: 'United Kingdom' },
+//   { id: '5', name: 'United States' }
+// ]
+
+// Query with only codes returned
+const codesOnly = await api.resources.countries.query({
+  queryParams: {
+    filters: { name: 'United' },
+    fields: { countries: ['code'] }
+  }
+});
+console.log('Codes only:', inspect(codesOnly));
+// Output: [
+//   { id: '4', code: 'UK' },
+//   { id: '5', code: 'US' }
+// ]
+```
+
+**Combining Sparse Fieldsets with Complex Searches:**
+
+Sparse fieldsets work seamlessly with all search features, including our new multi-word search:
+
+```javascript
+// Define a countries resource with multi-word search
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true },
+    code: { type: 'string', unique: true },
+    population: { type: 'integer' },
+    continent: { type: 'string' }
+  },
+  searchSchema: {
+    search: {
+      type: 'string',
+      oneOf: ['name', 'continent'],
+      filterUsing: 'like',
+      splitBy: ' ',
+      matchAll: true
+    }
+  }
+});
+
+// Add countries with more fields
+await api.resources.countries.post({ 
+  name: 'South Africa', 
+  code: 'ZA', 
+  population: 59308690,
+  continent: 'Africa'
+});
+await api.resources.countries.post({ 
+  name: 'South Korea', 
+  code: 'KR', 
+  population: 51269185,
+  continent: 'Asia'
+});
+
+// Search for "south africa" but return only name and population
+const sparseSearch = await api.resources.countries.query({
+  queryParams: {
+    filters: { search: 'south africa' },
+    fields: { countries: ['name', 'population'] }
+  }
+});
+console.log('Sparse search result:', inspect(sparseSearch));
+// Output: [{ id: '1', name: 'South Africa', population: 59308690 }]
+```
+
+**Important Notes:**
+
+1. **The `id` field is always included** - This is required by the JSON:API specification
+2. **Field names must match schema** - Requesting non-existent fields will be ignored
+3. **Improves performance** - Especially important for large records or when fetching many records
+4. **Works with relationships** - When we cover relationships, you'll see how to apply sparse fieldsets to related resources too
+
+**HTTP API Usage:**
+
+When using the HTTP API, sparse fieldsets are specified as comma-separated values:
+
+```
+GET /api/countries?fields[countries]=name,code
+GET /api/countries/1?fields[countries]=name
+GET /api/countries?filter[search]=united+states&fields[countries]=code
 ```
 
 

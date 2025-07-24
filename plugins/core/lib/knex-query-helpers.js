@@ -472,30 +472,66 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
 
       // Process cross-table filters
       switch (true) {
-        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf):
+        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
           const operator = fieldDef.filterUsing || '=';
+          
+          // Handle split search terms
+          let searchTerms = [filterValue];
+          if (fieldDef.splitBy && typeof filterValue === 'string') {
+            searchTerms = filterValue.split(fieldDef.splitBy).filter(term => term.trim());
+          }
+          
           this.where(function() {
-            fieldDef.oneOf.forEach((field, index) => {
-              const dbField = fieldPathMap.get(field) ||
-                             (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
-              
-              if (operator === 'like') {
-                const condition = `%${filterValue}%`;
-                if (index === 0) {
-                  this.where(dbField, 'like', condition);
+            if (fieldDef.matchAll && searchTerms.length > 1) {
+              // AND logic - all terms must match
+              searchTerms.forEach(term => {
+                this.andWhere(function() {
+                  fieldDef.oneOf.forEach((field, index) => {
+                    const dbField = fieldPathMap.get(field) ||
+                                   (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
+                    
+                    if (operator === 'like') {
+                      const condition = `%${term}%`;
+                      if (index === 0) {
+                        this.where(dbField, 'like', condition);
+                      } else {
+                        this.orWhere(dbField, 'like', condition);
+                      }
+                    } else {
+                      if (index === 0) {
+                        this.where(dbField, operator, term);
+                      } else {
+                        this.orWhere(dbField, operator, term);
+                      }
+                    }
+                  });
+                });
+              });
+            } else {
+              // OR logic for single term or matchAll=false
+              fieldDef.oneOf.forEach((field, index) => {
+                const dbField = fieldPathMap.get(field) ||
+                               (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
+                
+                if (operator === 'like') {
+                  const condition = `%${filterValue}%`;
+                  if (index === 0) {
+                    this.where(dbField, 'like', condition);
+                  } else {
+                    this.orWhere(dbField, 'like', condition);
+                  }
                 } else {
-                  this.orWhere(dbField, 'like', condition);
+                  if (index === 0) {
+                    this.where(dbField, operator, filterValue);
+                  } else {
+                    this.orWhere(dbField, operator, filterValue);
+                  }
                 }
-              } else {
-                if (index === 0) {
-                  this.where(dbField, operator, filterValue);
-                } else {
-                  this.orWhere(dbField, operator, filterValue);
-                }
-              }
-            });
+              });
+            }
           });
           break;
+        }
 
         case fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function':
           fieldDef.applyFilter.call(this, this, filterValue);
@@ -678,31 +714,67 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
 
       // Process basic filters
       switch (true) {
-        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf):
+        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
           // Multi-field OR search
           const operator = fieldDef.filterUsing || '=';
+          
+          // Handle split search terms
+          let searchTerms = [filterValue];
+          if (fieldDef.splitBy && typeof filterValue === 'string') {
+            searchTerms = filterValue.split(fieldDef.splitBy).filter(term => term.trim());
+          }
+          
           this.where(function() {
-            fieldDef.oneOf.forEach((field, index) => {
-              // Always qualify field names
-              const dbField = qualifyField(field);
-              
-              if (operator === 'like') {
-                const condition = `%${filterValue}%`;
-                if (index === 0) {
-                  this.where(dbField, 'like', condition);
+            if (fieldDef.matchAll && searchTerms.length > 1) {
+              // AND logic - all terms must match
+              searchTerms.forEach(term => {
+                this.andWhere(function() {
+                  fieldDef.oneOf.forEach((field, index) => {
+                    // Always qualify field names
+                    const dbField = qualifyField(field);
+                    
+                    if (operator === 'like') {
+                      const condition = `%${term}%`;
+                      if (index === 0) {
+                        this.where(dbField, 'like', condition);
+                      } else {
+                        this.orWhere(dbField, 'like', condition);
+                      }
+                    } else {
+                      if (index === 0) {
+                        this.where(dbField, operator, term);
+                      } else {
+                        this.orWhere(dbField, operator, term);
+                      }
+                    }
+                  });
+                });
+              });
+            } else {
+              // OR logic for single term or matchAll=false
+              fieldDef.oneOf.forEach((field, index) => {
+                // Always qualify field names
+                const dbField = qualifyField(field);
+                
+                if (operator === 'like') {
+                  const condition = `%${filterValue}%`;
+                  if (index === 0) {
+                    this.where(dbField, 'like', condition);
+                  } else {
+                    this.orWhere(dbField, 'like', condition);
+                  }
                 } else {
-                  this.orWhere(dbField, 'like', condition);
+                  if (index === 0) {
+                    this.where(dbField, operator, filterValue);
+                  } else {
+                    this.orWhere(dbField, operator, filterValue);
+                  }
                 }
-              } else {
-                if (index === 0) {
-                  this.where(dbField, operator, filterValue);
-                } else {
-                  this.orWhere(dbField, operator, filterValue);
-                }
-              }
-            });
+              });
+            }
           });
           break;
+        }
 
         case fieldDef.applyFilter && typeof fieldDef.applyFilter === 'function':
           // Custom filter
