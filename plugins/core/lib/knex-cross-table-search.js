@@ -344,14 +344,14 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    *     filterUsing: 'like'
    *   },
    *   search: {
-   *     likeOneOf: ['name', 'email', 'companies.name']
+   *     oneOf: ['name', 'email', 'companies.name']
    *   }
    * };
    * 
    * const requiredIndexes = analyzeRequiredIndexes('people', searchSchema);
    * // Returns: [
    * //   { scope: 'companies', field: 'name', reason: 'Cross-table search from people.companyName' },
-   * //   { scope: 'companies', field: 'name', reason: 'Cross-table likeOneOf search from people.search' }
+   * //   { scope: 'companies', field: 'name', reason: 'Cross-table oneOf search from people.search' }
    * // ]
    */
   const analyzeRequiredIndexes = (scopeName, searchSchema) => {
@@ -371,15 +371,15 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
         });
       }
       
-      // Check for likeOneOf cross-table references
-      if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-        fieldDef.likeOneOf.forEach(field => {
+      // Check for oneOf cross-table references
+      if (fieldDef.oneOf && Array.isArray(fieldDef.oneOf)) {
+        fieldDef.oneOf.forEach(field => {
           if (field.includes('.')) {
             const [targetScopeName, targetFieldName] = field.split('.');
             requiredIndexes.push({
               scope: targetScopeName,
               field: targetFieldName,
-              reason: `Cross-table likeOneOf search from ${scopeName}.${filterKey}`
+              reason: `Cross-table oneOf search from ${scopeName}.${filterKey}`
             });
           }
         });

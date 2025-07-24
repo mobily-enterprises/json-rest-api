@@ -310,11 +310,11 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  * // LEFT JOIN users AS articles_author ON articles.author_id = articles_author.id
  * // WHERE articles_author.name LIKE '%Smith%'
  * 
- * @example <caption>Multi-field search across tables with likeOneOf</caption>
+ * @example <caption>Multi-field search across tables with oneOf</caption>
  * searchSchema: {
  *   search: {
  *     type: 'string',
- *     likeOneOf: [
+ *     oneOf: [
  *       'title',           // Search in articles.title
  *       'content',         // Search in articles.content
  *       'author.name',     // Search in joined users.name
@@ -390,12 +390,12 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
       fieldPathMap.set(fieldDef.actualField, `${joinInfo.joinAlias}.${joinInfo.targetField}`);
     }
 
-    // Check likeOneOf for cross-table references
-    if (fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf)) {
-      for (const field of fieldDef.likeOneOf) {
+    // Check oneOf for cross-table references
+    if (fieldDef.oneOf && Array.isArray(fieldDef.oneOf)) {
+      for (const field of fieldDef.oneOf) {
         if (field.includes('.')) {
           hasCrossTableFilters = true;
-          log.trace('[JOIN-DETECTION] Cross-table likeOneOf field found', { filterKey, field, scopeName });
+          log.trace('[JOIN-DETECTION] Cross-table oneOf field found', { filterKey, field, scopeName });
           const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, field);
           if (!joinMap.has(joinInfo.joinAlias)) {
             joinMap.set(joinInfo.joinAlias, joinInfo);
@@ -466,23 +466,32 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
       // Skip non-cross-table and polymorphic filters
       if (fieldDef.polymorphicField) continue;
       if (!fieldDef.actualField?.includes('.') &&
-          !fieldDef.likeOneOf?.some(f => f.includes('.'))) {
+          !fieldDef.oneOf?.some(f => f.includes('.'))) {
         continue;
       }
 
       // Process cross-table filters
       switch (true) {
-        case fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf):
+        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf):
+          const operator = fieldDef.filterUsing || '=';
           this.where(function() {
-            fieldDef.likeOneOf.forEach((field, index) => {
+            fieldDef.oneOf.forEach((field, index) => {
               const dbField = fieldPathMap.get(field) ||
                              (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
-              const condition = `%${filterValue}%`;
-
-              if (index === 0) {
-                this.where(dbField, 'like', condition);
+              
+              if (operator === 'like') {
+                const condition = `%${filterValue}%`;
+                if (index === 0) {
+                  this.where(dbField, 'like', condition);
+                } else {
+                  this.orWhere(dbField, 'like', condition);
+                }
               } else {
-                this.orWhere(dbField, 'like', condition);
+                if (index === 0) {
+                  this.where(dbField, operator, filterValue);
+                } else {
+                  this.orWhere(dbField, operator, filterValue);
+                }
               }
             });
           });
@@ -560,11 +569,11 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  * // For filter: { title: 'JavaScript' }
  * // Generates: WHERE articles.title LIKE '%JavaScript%'
  * 
- * @example <caption>Multi-field OR search with likeOneOf</caption>
+ * @example <caption>Multi-field OR search with oneOf</caption>
  * searchSchema: {
  *   search: {
  *     type: 'string',
- *     likeOneOf: ['title', 'content', 'summary']
+ *     oneOf: ['title', 'content', 'summary']
  *   }
  * }
  * // For filter: { search: 'API' }
@@ -614,7 +623,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  * // 1. Implement standard SQL filtering operations safely
  * // 2. Automatically qualify fields to prevent ambiguous column errors
  * // 3. Support multiple filter operators (=, like, in, between, etc.)
- * // 4. Enable multi-field OR searches with likeOneOf
+ * // 4. Enable multi-field OR searches with oneOf
  * // 5. Allow custom filter logic through applyFilter functions
  * // 6. Maintain SQL injection safety through Knex query builder
  */
@@ -661,7 +670,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
 
       // Skip if this is a cross-table filter
       if (fieldDef.actualField?.includes('.') ||
-          fieldDef.likeOneOf?.some(f => f.includes('.')) ||
+          fieldDef.oneOf?.some(f => f.includes('.')) ||
           fieldDef.polymorphicField) {
         console.log(`[DEBUG basicFiltersHook] Skipping filter ${filterKey} - is cross-table or polymorphic`);
         continue;
@@ -669,18 +678,27 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
 
       // Process basic filters
       switch (true) {
-        case fieldDef.likeOneOf && Array.isArray(fieldDef.likeOneOf):
+        case fieldDef.oneOf && Array.isArray(fieldDef.oneOf):
           // Multi-field OR search
+          const operator = fieldDef.filterUsing || '=';
           this.where(function() {
-            fieldDef.likeOneOf.forEach((field, index) => {
+            fieldDef.oneOf.forEach((field, index) => {
               // Always qualify field names
               const dbField = qualifyField(field);
-              const condition = `%${filterValue}%`;
-
-              if (index === 0) {
-                this.where(dbField, 'like', condition);
+              
+              if (operator === 'like') {
+                const condition = `%${filterValue}%`;
+                if (index === 0) {
+                  this.where(dbField, 'like', condition);
+                } else {
+                  this.orWhere(dbField, 'like', condition);
+                }
               } else {
-                this.orWhere(dbField, 'like', condition);
+                if (index === 0) {
+                  this.where(dbField, operator, filterValue);
+                } else {
+                  this.orWhere(dbField, operator, filterValue);
+                }
               }
             });
           });
