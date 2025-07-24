@@ -771,6 +771,9 @@ export const RestApiKnexPlugin = {
           );
         }
         
+        // Remove the idProperty from attributes to prevent updating the primary key
+        delete finalAttributes[idProperty];
+        
         // Update the record (replace all fields)
         if (Object.keys(finalAttributes).length > 0) {
           await db(tableName)
@@ -837,6 +840,9 @@ export const RestApiKnexPlugin = {
       const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
       
       log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
+      
+      // Remove the idProperty from attributes to prevent updating the primary key
+      delete finalAttributes[idProperty];
       
       // Update only if there are changes
       if (Object.keys(finalAttributes).length > 0) {

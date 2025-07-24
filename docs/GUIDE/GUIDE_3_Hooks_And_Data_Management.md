@@ -1,5 +1,24 @@
 # Hook System Guide
 
+
+ 
+### Default values, required fields, computed/virtual fields
+
+Change the definition of the `countries` resource with this:
+
+```javascript
+// Countries table
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true, max: 100, search: true, filterUsing: 'like' },
+    code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
+    screenName: { type: 'string', computed: true },
+  }
+});
+await api.resources.countries.createKnexTable()
+```
+
+
 The hook system in JSON REST API provides a powerful way to extend and customize API behavior at various points in the request lifecycle. This guide explains how to use hooks effectively.
 
 ## Table of Contents

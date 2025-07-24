@@ -22,8 +22,8 @@
   "homepage": "https://github.com/mobily-enterprises/jsonrestapi#readme",
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
-    "hooked-api": "^1.0.8",
-    "json-rest-schema": "^1.0.6",
+    "hooked-api": "^1.0.14",
+    "json-rest-schema": "^1.0.8",
     "semver": "^7.7.2"
   },
   "peerDependencies": {
