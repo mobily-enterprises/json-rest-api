@@ -5,6 +5,7 @@ import { getForeignKeyFields, buildFieldSelection, isNonDatabaseField } from './
 import { buildQuerySelection } from './utils/knex-query-helpers-base.js';
 import { toJsonApiRecord, buildJsonApiResponse, processBelongsToRelationships, toJsonApiRecordWithBelongsTo } from './lib/knex-json-api-transformers.js';
 import { processIncludes } from './lib/knex-process-includes.js';
+import { loadRelationshipIdentifiers } from './lib/knex-relationship-includes.js';
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
@@ -234,8 +235,11 @@ export const RestApiKnexPlugin = {
         );
       }
       
-      // Process includes
+      // Load relationship identifiers for all hasMany relationships
       const records = [record]; // Wrap in array for processing
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db);
+      
+      // Process includes
       const included = await processIncludes(scope, records, {
         log,
         scopes,
@@ -648,6 +652,9 @@ export const RestApiKnexPlugin = {
           sortFields
         );
       }
+      
+      // Load relationship identifiers for all hasMany relationships
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db);
       
       // Process includes
       const included = await processIncludes(scope, records, {

@@ -173,7 +173,7 @@ console.log('Added review in simplified mode:', inspect(review5_simplified));
 const germanAuthorWithReviews = await api.resources.authors.get({
     id: germanAuthor_ns.id,
     queryParams: {
-      include: ['reviews']
+      include: []
     },
     simplified: false
 })

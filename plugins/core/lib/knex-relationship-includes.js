@@ -1517,3 +1517,145 @@ export const buildIncludedResources = async (scope, deps) => {
     throw enhancedError;
   }
 };
+
+/**
+ * Loads relationship identifiers for all hasMany relationships without fetching full related records.
+ * 
+ * ## Purpose
+ * This function ensures that all hasMany relationships (one-to-many, many-to-many, and polymorphic) 
+ * always return resource identifiers in the JSON:API response, even when the related resources 
+ * are not included via the ?include parameter.
+ * 
+ * ## Why this is needed
+ * 1. **JSON:API Consistency**: The JSON:API spec allows servers to include relationship identifiers
+ *    without including the full related resources. This provides a consistent API surface where
+ *    clients always know what relationships exist and their IDs.
+ * 
+ * 2. **Simplified Mode Support**: In simplified mode, relationship IDs are transformed into `_ids` 
+ *    arrays (e.g., `reviews_ids: ['1', '2', '3']`). Without this function, these arrays only 
+ *    appear when using ?include, creating an inconsistent API where fields appear/disappear.
+ * 
+ * 3. **Performance Balance**: Loading just IDs is much cheaper than loading full records. This gives
+ *    clients the ability to know what relationships exist without the cost of fetching all data.
+ * 
+ * ## What it does
+ * - Runs ONE query per relationship type (not per record) to fetch all related IDs
+ * - Populates the relationship data with resource identifiers: `{ type: 'resource', id: '123' }`
+ * - Handles all relationship types: one-to-many, many-to-many, and polymorphic
+ * - Works for both JSON:API and simplified modes (transformation happens elsewhere)
+ * 
+ * ## When it runs
+ * This runs after the main records are fetched but before includes are processed.
+ * If includes ARE specified, they will overwrite these IDs with full data.
+ * 
+ * @param {Array<Object>} records - The parent records to load relationships for
+ * @param {string} scopeName - The parent scope name (e.g., 'authors')
+ * @param {Object} scopes - All available scopes with their schemas
+ * @param {Object} knex - Knex instance for database queries
+ * @returns {Promise<void>} Modifies records in place by adding relationship data
+ */
+export const loadRelationshipIdentifiers = async (records, scopeName, scopes, knex) => {
+  if (!records.length) return;
+  
+  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
+  if (!schemaInfo) return;
+  
+  const relationships = schemaInfo.schemaRelationships || {};
+  const recordIds = records.map(r => r.id);
+  
+  // Process each hasMany relationship
+  for (const [relName, relDef] of Object.entries(relationships)) {
+    let idsMap = {};
+    
+    if (relDef.hasMany && !relDef.through && !relDef.via) {
+      // Regular one-to-many
+      // Example: publisher hasMany authors
+      const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
+      const results = await knex(relDef.hasMany)
+        .whereIn(foreignKey, recordIds)
+        .select('id', foreignKey);
+      
+      results.forEach(row => {
+        const parentId = String(row[foreignKey]);
+        if (!idsMap[parentId]) idsMap[parentId] = [];
+        idsMap[parentId].push(String(row.id));
+      });
+      
+    } else if (relDef.hasMany && relDef.through) {
+      // Many-to-many with through
+      // Example: authors hasMany books through book_authors
+      const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
+      const otherKey = relDef.otherKey || `${relDef.hasMany.slice(0, -1)}_id`;
+      
+      const results = await knex(relDef.through)
+        .whereIn(foreignKey, recordIds)
+        .select(foreignKey, otherKey);
+      
+      results.forEach(row => {
+        const parentId = String(row[foreignKey]);
+        const childId = String(row[otherKey]);
+        if (!idsMap[parentId]) idsMap[parentId] = [];
+        idsMap[parentId].push(childId);
+      });
+      
+    } else if (relDef.manyToMany) {
+      // Many-to-many (alternate syntax)
+      // Example: { manyToMany: { through: 'article_tags', foreignKey: 'article_id', otherKey: 'tag_id' } }
+      const { through, foreignKey, otherKey } = relDef.manyToMany;
+      const fk = foreignKey || `${scopeName.slice(0, -1)}_id`;
+      const ok = otherKey || `${relName.slice(0, -1)}_id`;
+      
+      const results = await knex(through)
+        .whereIn(fk, recordIds)
+        .select(fk, ok);
+      
+      results.forEach(row => {
+        const parentId = String(row[fk]);
+        const childId = String(row[ok]);
+        if (!idsMap[parentId]) idsMap[parentId] = [];
+        idsMap[parentId].push(childId);
+      });
+      
+    } else if (relDef.hasMany && relDef.via) {
+      // Polymorphic reverse (via)
+      // Example: publishers hasMany reviews via reviewable (where reviews.reviewable_type = 'publishers')
+      const targetScope = relDef.hasMany;
+      const targetRelationships = scopes[targetScope]?.vars?.schemaInfo?.schemaRelationships;
+      const viaRel = targetRelationships?.[relDef.via];
+      
+      if (viaRel?.belongsToPolymorphic) {
+        const { typeField, idField } = viaRel.belongsToPolymorphic;
+        
+        const results = await knex(targetScope)
+          .where(typeField, scopeName)
+          .whereIn(idField, recordIds)
+          .select('id', idField);
+        
+        results.forEach(row => {
+          const parentId = String(row[idField]);
+          if (!idsMap[parentId]) idsMap[parentId] = [];
+          idsMap[parentId].push(String(row.id));
+        });
+      }
+    }
+    
+    // Apply the collected IDs to all records
+    if (Object.keys(idsMap).length > 0 || relDef.hasMany || relDef.manyToMany) {
+      records.forEach(record => {
+        if (!record[RELATIONSHIPS_KEY]) {
+          record[RELATIONSHIPS_KEY] = {};
+        }
+        
+        const ids = idsMap[String(record.id)] || [];
+        const targetType = relDef.hasMany || (relDef.manyToMany ? relName : null);
+        
+        record[RELATIONSHIPS_KEY][relName] = {
+          data: ids.map(id => ({ 
+            type: targetType, 
+            id 
+          }))
+        };
+      });
+    }
+  }
+};
