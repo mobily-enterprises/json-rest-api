@@ -1563,6 +1563,7 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
   const relationships = schemaInfo.schemaRelationships || {};
   const recordIds = records.map(r => r.id);
   
+  
   // Process each hasMany relationship
   for (const [relName, relDef] of Object.entries(relationships)) {
     let idsMap = {};
@@ -1571,9 +1572,13 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       // Regular one-to-many
       // Example: publisher hasMany authors
       const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
-      const results = await knex(relDef.hasMany)
+      const targetScope = scopes[relDef.hasMany];
+      const targetTable = targetScope?.vars?.schemaInfo?.tableName || relDef.hasMany;
+      const targetIdProperty = targetScope?.vars?.schemaInfo?.idProperty || 'id';
+      
+      const results = await knex(targetTable)
         .whereIn(foreignKey, recordIds)
-        .select('id', foreignKey);
+        .select(targetIdProperty !== 'id' ? `${targetIdProperty} as id` : 'id', foreignKey);
       
       results.forEach(row => {
         const parentId = String(row[foreignKey]);
@@ -1587,7 +1592,11 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       const foreignKey = relDef.foreignKey || `${scopeName.slice(0, -1)}_id`;
       const otherKey = relDef.otherKey || `${relDef.hasMany.slice(0, -1)}_id`;
       
-      const results = await knex(relDef.through)
+      // Get the actual table name from the pivot scope
+      const pivotScope = scopes[relDef.through];
+      const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || relDef.through;
+      
+      const results = await knex(pivotTable)
         .whereIn(foreignKey, recordIds)
         .select(foreignKey, otherKey);
       
@@ -1605,7 +1614,11 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       const fk = foreignKey || `${scopeName.slice(0, -1)}_id`;
       const ok = otherKey || `${relName.slice(0, -1)}_id`;
       
-      const results = await knex(through)
+      // Get the actual table name from the pivot scope
+      const pivotScope = scopes[through];
+      const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || through;
+      
+      const results = await knex(pivotTable)
         .whereIn(fk, recordIds)
         .select(fk, ok);
       
@@ -1626,10 +1639,14 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       if (viaRel?.belongsToPolymorphic) {
         const { typeField, idField } = viaRel.belongsToPolymorphic;
         
-        const results = await knex(targetScope)
+        // Get the actual table name
+        const targetTable = scopes[targetScope]?.vars?.schemaInfo?.tableName || targetScope;
+        const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id';
+        
+        const results = await knex(targetTable)
           .where(typeField, scopeName)
           .whereIn(idField, recordIds)
-          .select('id', idField);
+          .select(targetIdProperty !== 'id' ? `${targetIdProperty} as id` : 'id', idField);
         
         results.forEach(row => {
           const parentId = String(row[idField]);

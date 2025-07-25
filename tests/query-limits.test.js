@@ -131,15 +131,17 @@ describe('Query Limits and Include Limits', () => {
         id: { type: 'id' },
         content: { type: 'string', required: true },
         rating: { type: 'number', required: true },
+        reviewer_name: { type: 'string', required: true },
         reviewable_type: { type: 'string', required: true },
-        reviewable_id: { type: 'number', required: true },
+        reviewable_id: { type: 'number', required: true }
+      },
+      relationships: {
         reviewable: {
           belongsToPolymorphic: {
             types: ['books', 'authors', 'publishers'],
             typeField: 'reviewable_type',
             idField: 'reviewable_id'
-          },
-          as: 'reviewable'
+          }
         }
       }
     });
@@ -318,10 +320,19 @@ describe('Query Limits and Include Limits', () => {
 
   describe('Include Limits - Polymorphic Relationships', () => {
     beforeEach(async () => {
-      // Create a publisher first
+      // Create a country first
+      const country = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        })
+      });
+
+      // Create a publisher with country
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
-          name: 'Test Publisher'
+          name: 'Test Publisher',
+          country_id: parseInt(country.id)
         })
       });
 
@@ -349,13 +360,17 @@ describe('Query Limits and Include Limits', () => {
                 type: 'reviews',
                 attributes: {
                   content: `Review ${i} for Book ${bookNum}`,
-                  rating: Math.floor(Math.random() * 5) + 1
+                  rating: Math.floor(Math.random() * 5) + 1,
+                  reviewer_name: `Reviewer ${i}`
                 },
                 relationships: {
-                  reviewable: { data: { type: 'books', id: book.id } }
+                  reviewable: {
+                    data: { type: 'books', id: book.id }
+                  }
                 }
               }
-            }
+            },
+            simplified: false
           });
         }
       }

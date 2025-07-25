@@ -1496,6 +1496,14 @@ const validatePivotResource = (scopes, relDef, relName) => {
           { context }
         );
 
+        // Merge belongsTo updates into attributes before validation (like PUT/PATCH do)
+        if (Object.keys(belongsToUpdates).length > 0) {
+          context.inputRecord.data.attributes = {
+            ...context.inputRecord.data.attributes,
+            ...belongsToUpdates
+          };
+        }
+
         await validateResourceAttributesBeforeWrite({ 
             context, 
             schema, 
@@ -1509,14 +1517,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
           auth: context.auth,
           transaction: context.transaction
         })
-
-        // Merge belongsTo updates into attributes before creating the record
-        if (Object.keys(belongsToUpdates).length > 0) {
-          context.inputRecord.data.attributes = {
-            ...context.inputRecord.data.attributes,
-            ...belongsToUpdates
-          };
-        }
 
         await runHooks ('beforeDataCall')
         await runHooks ('beforeDataCallPost')
