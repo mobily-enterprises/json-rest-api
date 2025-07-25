@@ -331,7 +331,6 @@ describe('Relationship Operations', () => {
         }
       };
       console.log('THE NEXT LINE WILL BLOCK THE TEST')
-      debugger
       await basicApi.resources.books.put({
         id: bookResult.data.id,
         inputRecord: putDoc,

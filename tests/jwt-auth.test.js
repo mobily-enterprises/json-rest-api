@@ -341,7 +341,6 @@ describe('JWT Auth Plugin', () => {
         inputRecord: countryDoc,
         simplified: false
       });
-      if (!countryResult.data) debugger
       countryId = countryResult.data.id;
     });
     
@@ -510,7 +509,6 @@ describe('JWT Auth Plugin', () => {
     });
     
     it('should deny non-owner non-admin from updating', async () => {
-      debugger
       // Create post as user
       const postDoc = createJsonApiDocument('posts', {
         title: 'User Post',

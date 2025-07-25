@@ -273,18 +273,17 @@ export async function createExtendedApi(knex) {
       review_date: { type: 'dateTime', default: 'now()' },
       helpful_count: { type: 'number', default: 0 },
       reviewable_type: { type: 'string', required: true },
-      reviewable_id: { type: 'number', required: true },
-      // Define the polymorphic field in schema
+      reviewable_id: { type: 'number', required: true }
+    },
+    relationships: {
       reviewable: {
         belongsToPolymorphic: {
           types: ['books', 'authors', 'publishers'],
           typeField: 'reviewable_type',
           idField: 'reviewable_id'
-        },
-        as: 'reviewable'
+        }
       }
     },
-    relationships: {},
     tableName: 'ext_reviews'
   });
   await api.resources.reviews.createKnexTable();

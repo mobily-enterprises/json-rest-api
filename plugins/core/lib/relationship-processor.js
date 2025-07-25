@@ -214,41 +214,42 @@ export const processRelationships = (scope, deps) => {
       const [fieldName, fieldDef] = schemaField;
       
       // Handle regular belongsTo (1:1)
-      if (fieldDef.belongsTo && !fieldDef.belongsToPolymorphic) {
+      if (fieldDef.belongsTo) {
         if (relData.data === null) {
           belongsToUpdates[fieldName] = null;
         } else if (relData.data?.id) {
           belongsToUpdates[fieldName] = relData.data.id;
         }
       }
-      // Handle polymorphic belongsTo
-      else if (fieldDef.belongsToPolymorphic) {
-        if (relData.data === null) {
-          const { typeField, idField } = fieldDef.belongsToPolymorphic;
-          belongsToUpdates[typeField] = null;
-          belongsToUpdates[idField] = null;
-        } else if (relData.data) {
-          const { type, id } = relData.data;
-          const { types, typeField, idField } = fieldDef.belongsToPolymorphic;
-          
-          // Validate type is allowed
-          if (!types.includes(type)) {
-            throw new RestApiValidationError(
-              `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-              { 
-                fields: [`data.relationships.${relName}.data.type`],
-                violations: [{
-                  field: `data.relationships.${relName}.data.type`,
-                  rule: 'polymorphic_type',
-                  message: `Type must be one of: ${types.join(', ')}`
-                }]
-              }
-            );
-          }
-          
-          belongsToUpdates[typeField] = type;
-          belongsToUpdates[idField] = id;
+    }
+    
+    // Check for polymorphic belongsTo defined in relationships object (not as schema field)
+    if (!schemaField && relDef?.belongsToPolymorphic && relData.data !== undefined) {
+      if (relData.data === null) {
+        const { typeField, idField } = relDef.belongsToPolymorphic;
+        belongsToUpdates[typeField] = null;
+        belongsToUpdates[idField] = null;
+      } else if (relData.data) {
+        const { type, id } = relData.data;
+        const { types, typeField, idField } = relDef.belongsToPolymorphic;
+        
+        // Validate type is allowed
+        if (!types.includes(type)) {
+          throw new RestApiValidationError(
+            `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
+            { 
+              fields: [`data.relationships.${relName}.data.type`],
+              violations: [{
+                field: `data.relationships.${relName}.data.type`,
+                rule: 'polymorphic_type',
+                message: `Type must be one of: ${types.join(', ')}`
+              }]
+            }
+          );
         }
+        
+        belongsToUpdates[typeField] = type;
+        belongsToUpdates[idField] = id;
       }
     }
     

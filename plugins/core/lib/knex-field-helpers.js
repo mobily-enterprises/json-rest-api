@@ -69,7 +69,7 @@ export const isNonDatabaseField = (fieldName, schemaInfo) => {
 export const buildFieldSelection = async (scope, deps) => {
   let fieldsToSelect = new Set();
   let computedDependencies = new Set();
-  
+
   // Extract values from scope
   const { 
     vars: { 
@@ -118,7 +118,7 @@ export const buildFieldSelection = async (scope, deps) => {
       if (nonDatabaseFields.has(field)) return;
       
       const fieldDef = schemaStructure[field];
-      if (!fieldDef) return; // Unknown field, skip
+      if (!fieldDef) throw new Error(`Unknown sparse field '${field}' requested for '${scopeName}'`);
       
       // NEVER include hidden fields, even if explicitly requested
       // Example: password_hash with hidden:true is never returned

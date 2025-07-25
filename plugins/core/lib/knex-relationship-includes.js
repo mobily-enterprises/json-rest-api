@@ -197,22 +197,18 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
         if (relDef.hasMany) {
           // Add empty relationship data - will be populated if explicitly included
           record[RELATIONSHIP_METADATA_KEY][relName] = { data: [] };
-        }
-      }
-      
-      // Process belongsToPolymorphic relationships from schema
-      for (const [fieldName, fieldDef] of Object.entries(schema)) {
-        if (fieldDef.belongsToPolymorphic && fieldDef.as) {
-          const { typeField, idField } = fieldDef.belongsToPolymorphic;
+        } else if (relDef.belongsToPolymorphic) {
+          // Process polymorphic relationships defined in relationships section
+          const { typeField, idField } = relDef.belongsToPolymorphic;
           const type = record[typeField];
           const id = record[idField];
           
           if (type && id) {
-            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = {
+            record[RELATIONSHIP_METADATA_KEY][relName] = {
               data: { type, id: String(id) }
             };
           } else {
-            record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = { data: null };
+            record[RELATIONSHIP_METADATA_KEY][relName] = { data: null };
           }
         }
       }

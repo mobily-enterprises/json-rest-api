@@ -432,7 +432,7 @@ export const RestApiPlugin = {
         const { validatedObject, errors } = await searchSchema.validate(context.queryParams.filters, { 
           onlyObjectValues: true // Partial validation for filters
         });
-        
+
         // If there are validation errors, throw an error
         if (Object.keys(errors).length > 0) {
           const violations = Object.entries(errors).map(([field, error]) => ({
@@ -881,7 +881,6 @@ export const RestApiPlugin = {
             }
         }
 
-        if (!context.inputRecord) debugger
         if (context.inputRecord.data.type !== scopeName) {
           throw new RestApiValidationError(
             `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
@@ -1051,6 +1050,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
       const { validatedObject, errors } = await schema.validate(attributesToValidate, validationOptions);
 
+      debugger
       if (Object.keys(errors).length > 0) {
         // --- START OF MODIFICATION ---
         const schemaStructure = context.schemaInfo.schema.structure; // Get the schema structure for lookup
@@ -1060,7 +1060,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
         // Check if this field is a foreign key that has an 'as' alias
         const fieldDef = schemaStructure[field];
-        if (fieldDef && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic) && fieldDef.as) {
+        if (fieldDef && fieldDef.belongsTo && fieldDef.as) {
           // If it's a belongsTo field with an alias, rewrite the path to the relationship alias
           fieldPath = `data.relationships.${fieldDef.as}.data.id`;
         }
@@ -1467,7 +1467,7 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
     addScopeMethod('post', async ({ params, context, vars, helpers, scope, scopes, runHooks, apiOptions, pluginOptions, scopeOptions, scopeName }) => {
       context.method = 'post'
-      
+
       try {
         const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
             params, context, vars, scopes, scopeOptions, scopeName, helpers
@@ -1509,6 +1509,14 @@ const validatePivotResource = (scopes, relDef, relName) => {
           auth: context.auth,
           transaction: context.transaction
         })
+
+        // Merge belongsTo updates into attributes before creating the record
+        if (Object.keys(belongsToUpdates).length > 0) {
+          context.inputRecord.data.attributes = {
+            ...context.inputRecord.data.attributes,
+            ...belongsToUpdates
+          };
+        }
 
         await runHooks ('beforeDataCall')
         await runHooks ('beforeDataCallPost')
@@ -1831,9 +1839,9 @@ const validatePivotResource = (scopes, relDef, relName) => {
     
     // Also check schema fields for belongsTo relationships
     for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-      if (fieldDef.as && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic)) {
+      if (fieldDef.as && fieldDef.belongsTo) {
         allRelationships[fieldDef.as] = { 
-          type: fieldDef.belongsToPolymorphic ? 'polymorphic' : 'belongsTo',
+          type: 'belongsTo',
           fieldName,
           fieldDef 
         };
@@ -1850,10 +1858,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
         if (!providedRelationships.has(relName)) {
           if (relInfo.type === 'belongsTo') {
             belongsToUpdates[relInfo.fieldName] = null;
-          } else if (relInfo.type === 'polymorphic') {
-            const { typeField, idField } = relInfo.fieldDef.belongsToPolymorphic;
-            belongsToUpdates[typeField] = null;
-            belongsToUpdates[idField] = null;
           } else if (relInfo.type === 'manyToMany') {
             // Add to manyToManyRelationships with empty array
             manyToManyRelationships.push({
@@ -2164,6 +2168,14 @@ const validatePivotResource = (scopes, relDef, relName) => {
           minimalRecord: context.minimalRecord,
           transaction: context.transaction
         })
+
+        // Merge belongsTo updates into attributes before patching the record
+        if (Object.keys(belongsToUpdates).length > 0) {
+          context.inputRecord.data.attributes = {
+            ...context.inputRecord.data.attributes,
+            ...belongsToUpdates
+          };
+        }
 
         await runHooks ('beforeDataCall')
         await runHooks ('beforeDataCallPatch')

@@ -674,7 +674,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
 
-  console.log('[DEBUG basicFiltersHook] Called with:', {
+  log.trace('[DEBUG basicFiltersHook] Called with:', {
     scopeName,
     hasFilters: !!filters,
     filters,
@@ -684,7 +684,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   });
 
   if (!filters || !searchSchema) {
-    console.log('[DEBUG basicFiltersHook] Returning early - no filters or searchSchema');
+    log.trace('[DEBUG basicFiltersHook] Returning early - no filters or searchSchema');
     return;
   }
 
@@ -699,16 +699,16 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
     for (const [filterKey, filterValue] of Object.entries(filters)) {
       const fieldDef = searchSchema.structure[filterKey];
       if (!fieldDef) {
-        console.log(`[DEBUG basicFiltersHook] No field definition for filter key: ${filterKey}`);
+        log.trace(`[DEBUG basicFiltersHook] No field definition for filter key: ${filterKey}`);
         continue;
       }
-      console.log(`[DEBUG basicFiltersHook] Processing filter: ${filterKey} = ${filterValue}, fieldDef:`, fieldDef);
+      log.trace(`[DEBUG basicFiltersHook] Processing filter: ${filterKey} = ${filterValue}, fieldDef:`, fieldDef);
 
       // Skip if this is a cross-table filter
       if (fieldDef.actualField?.includes('.') ||
           fieldDef.oneOf?.some(f => f.includes('.')) ||
           fieldDef.polymorphicField) {
-        console.log(`[DEBUG basicFiltersHook] Skipping filter ${filterKey} - is cross-table or polymorphic`);
+        log.trace(`[DEBUG basicFiltersHook] Skipping filter ${filterKey} - is cross-table or polymorphic`);
         continue;
       }
 
@@ -788,7 +788,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           const dbField = qualifyField(actualField);
 
           const operator = fieldDef.filterUsing || '=';
-          console.log(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`);
+          log.trace(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`);
 
           switch (operator) {
             case 'like':

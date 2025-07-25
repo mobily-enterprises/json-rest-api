@@ -315,17 +315,14 @@ await api.addResource('countries', {
 
 Note that the definition above is functionally _identical_ to the one provided a few paragraphs above.
 
-**Important: When you define a `searchSchema`, it completely replaces the search configuration from the main schema.** Only fields defined in the `searchSchema` are searchable.
+**Important: When you define a `searchSchema`, it completely replaces the search configuration from the main schema.** Only fields defined in the `searchSchema` are searchable if `searchSchema` is defined.
 
 The `searchSchema` gives you:
 
 * complete control and isolation: With searchSchema, you define the search interface completely separately from the data schema. This can be cleaner when you have complex search requirements.
-* No mixing of concerns: Your data schema stays focused on data validation and storage, while searchSchema handles search
-  behavior.
+* No mixing of concerns: Your data schema stays focused on data validation and storage, while searchSchema handles search behavior.
 * Easier to see all searchable fields at once: Everything is in one place rather than scattered across field definitions.
-* Flexibility to completely diverge from the data schema: You might have 20 fields in your schema but only expose 3 for
-  searching, or create 10 search fields from 3 data fields.
-
+* Flexibility to completely diverge from the data schema: You might have 20 fields in your schema but only expose 3 for searching, or create 10 search fields from 3 data fields.
 
 `searchSchema` also gives you the ability to define a search field that will search in multiple fields. For example:
 
@@ -701,47 +698,1438 @@ GET /api/countries?filter[search]=united+states&fields[countries]=code
 
 
 
+## `belongsTo` Relationships
 
-## belongsTo records
+`belongsTo` relationships represent a one-to-one or many-to-one association where the current resource "belongs to" another resource. For example, a `book` belongs to an `author`, or an `author` belongs to a `country`. These relationships are typically managed by a **foreign key** on the "belonging" resource's table.
 
-### Search (belongsTo)
+Let's expand our schema definitions to include `publishers` and link them to `countries`. These schemas will be defined **once** here and reused throughout this section.
 
-### Sparse fields (belongsTo)
+```javascript
+// Define countries resource
+await api.addResource('countries', {
+  schema: {
+    name: { type: 'string', required: true, max: 100, search: true },
+    code: { type: 'string', max: 2, unique: true, search: true, indexed: true },
+  }
+});
+await api.resources.countries.createKnexTable();
 
-### Computed and hidden fields
+// Define publishers resource
+await api.addResource('publishers', {
+  schema: {
+    name: { type: 'string', required: true, max: 255 },
+    country_id: { type: 'id', belongsTo: 'countries', as: 'country', nullable: true }
+  },
+  // searchSchema completely defines all filterable fields for this resource
+  searchSchema: {
+    name: { type: 'string' },
+    country: { type: 'id', actualField: 'country_id', nullable: true },
+    countryCode: { type: 'string', actualField: 'countries.code' }
+  }
+});
+await api.resources.publishers.createKnexTable();
+```
+
+Now, let's add some data. Notice the flexibility of using either the foreign key field `country_id` or the relationship alias `country` when linking a publisher to a country in simplified mode.
+
+```javascript
+const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
+const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
+const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+
+// Create a publisher linking via the relationship alias (simplified syntax)
+const frenchPublisher = await api.resources.publishers.post({
+  name: 'French Books Inc.',
+  country: france.id
+});
+
+// Create a publisher linking via the foreign key field directly
+const germanPublisher = await api.resources.publishers.post({
+  name: 'German Press GmbH',
+  country_id: germany.id
+});
+
+const ukPublisher = await api.resources.publishers.post({
+  name: 'UK Books Ltd.',
+  country: uk.id
+});
+
+const internationalPublisher = await api.resources.publishers.post({
+  name: 'Global Publishing',
+  country_id: null
+});
 
 
+console.log('Added French Publisher:', inspect(frenchPublisher));
+console.log('Added German Publisher:', inspect(germanPublisher));
+console.log('Added UK Publisher:', inspect(ukPublisher));
+console.log('Added International Publisher:', inspect(internationalPublisher));
+```
 
+**Explanation of Interchangeability (`country_id` vs. `country`):**
+
+When defining a `belongsTo` relationship with an `as` alias (e.g., `country_id: { ..., as: 'country' }`), `json-rest-api` provides flexibility in how you provide the related resource's ID during `post`, `put`, or `patch` operations in **simplified mode**:
+
+* You can use the **relationship alias** (the `as` value) directly with the ID of the related resource (e.g., `country: france.id`). This is generally recommended for clarity and aligns with the relationship concept.
+* You can use the direct **foreign key field name** (e.g., `country_id: germany.id`). The system is flexible enough to recognize this as a foreign key and process it correctly.
+
+Both approaches achieve the same result of setting the underlying foreign key in the database.
+
+**Expected Output (Illustrative, IDs may vary):**
+
+```text
+Added French Publisher: { id: '1', name: 'French Books Inc.', country_id: '1' }
+Added German Publisher: { id: '2', name: 'German Press GmbH', country_id: '2' }
+Added UK Publisher: { id: '3', name: 'UK Books Ltd.', country_id: '3' }
+Added International Publisher: { id: '4', name: 'Global Publishing', country_id: null }
+```
+
+### Including `belongsTo` Records (`include`)
+
+To retrieve related `belongsTo` resources, use the `include` query parameter.
+
+When fetching data programmatically, `simplified` mode is `true` by default. This means that instead of a separate `included` array (as in full JSON:API), related `belongsTo` resources are **denormalized and embedded directly** within the main resource's object structure, providing a very convenient and flat data structure for immediate use.
+
+#### Programmatic Usage:
+
+```javascript
+// Re-add data for a fresh start (schemas are reused from above)
+const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
+const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
+const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+
+await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
+await api.resources.publishers.post({ name: 'Another French Books Inc.', country: france.id });
+await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
+await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+
+
+// Get a publisher and include its country (simplified mode output)
+const publisherWithCountry = await api.resources.publishers.get({
+  id: '1', // ID of French Books Inc.
+  queryParams: {
+    include: ['country'] // Use the 'as' alias defined in the schema
+  }
+});
+console.log('Publisher with Country:', inspect(publisherWithCountry));
+
+// Query all publishers and include their countries (simplified mode output)
+const allPublishersWithCountries = await api.resources.publishers.query({
+  queryParams: {
+    include: ['country']
+  }
+});
+console.log('All Publishers with Countries:', inspect(allPublishersWithCountries));
+
+// Query all publishers and include their countries (simplified mode output)
+const allPublishersWithCountriesNotSimplified = await api.resources.publishers.query({
+  queryParams: {
+    include: ['country']
+  },
+  simplified: false
+});
+console.log('All Publishers with Countries (not simplified):', inspect(allPublishersWithCountriesNotSimplified));
+```
+
+Here is the expected output. Notice how the last call shows the non-simplified version of the response, which is muc more verbose. However, it has one _major_ advantage: it only includes the information about France _once_. It might seem like a small gain here, but when you have complex queries where the `belongsTo` table has a lot of data, the saving is much more evident.
+
+**Expected Output**
+
+```text
+Publisher with Country: {
+  id: '1',
+  name: 'French Books Inc.',
+  country_id: '1',
+  country: { id: '1', name: 'France', code: 'FR' }
+}
+All Publishers with Countries: [
+  {
+    id: '1',
+    name: 'French Books Inc.',
+    country_id: '1',
+    country: { id: '1', name: 'France', code: 'FR' }
+  },
+  {
+    id: '2',
+    name: 'Another French Books Inc.',
+    country_id: '1',
+    country: { id: '1', name: 'France', code: 'FR' }
+  },
+  {
+    id: '3',
+    name: 'UK Books Ltd.',
+    country_id: '3',
+    country: { id: '3', name: 'United Kingdom', code: 'UK' }
+  },
+  {
+    id: '4',
+    name: 'German Press GmbH',
+    country_id: '2',
+    country: { id: '2', name: 'Germany', code: 'DE' }
+  },
+  { id: '5', name: 'Global Publishing' }
+]
+All Publishers with Countries (not simplified): {
+  data: [
+    {
+      type: 'publishers',
+      id: '1',
+      attributes: { name: 'French Books Inc.' },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: '1' },
+          links: {
+            self: '/api/1.0/publishers/1/relationships/country',
+            related: '/api/1.0/publishers/1/country'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/1' }
+    },
+    {
+      type: 'publishers',
+      id: '2',
+      attributes: { name: 'Another French Books Inc.' },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: '1' },
+          links: {
+            self: '/api/1.0/publishers/2/relationships/country',
+            related: '/api/1.0/publishers/2/country'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/2' }
+    },
+    {
+      type: 'publishers',
+      id: '3',
+      attributes: { name: 'UK Books Ltd.' },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: '3' },
+          links: {
+            self: '/api/1.0/publishers/3/relationships/country',
+            related: '/api/1.0/publishers/3/country'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/3' }
+    },
+    {
+      type: 'publishers',
+      id: '4',
+      attributes: { name: 'German Press GmbH' },
+      relationships: {
+        country: {
+          data: { type: 'countries', id: '2' },
+          links: {
+            self: '/api/1.0/publishers/4/relationships/country',
+            related: '/api/1.0/publishers/4/country'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/4' }
+    },
+    {
+      type: 'publishers',
+      id: '5',
+      attributes: { name: 'Global Publishing' },
+      relationships: {
+        country: {
+          data: null,
+          links: {
+            self: '/api/1.0/publishers/5/relationships/country',
+            related: '/api/1.0/publishers/5/country'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/5' }
+    }
+  ],
+  included: [
+    {
+      type: 'countries',
+      id: '1',
+      attributes: { name: 'France', code: 'FR' },
+      relationships: {},
+      links: { self: '/api/1.0/countries/1' }
+    },
+    {
+      type: 'countries',
+      id: '3',
+      attributes: { name: 'United Kingdom', code: 'UK' },
+      relationships: {},
+      links: { self: '/api/1.0/countries/3' }
+    },
+    {
+      type: 'countries',
+      id: '2',
+      attributes: { name: 'Germany', code: 'DE' },
+      relationships: {},
+      links: { self: '/api/1.0/countries/2' }
+    }
+  ],
+  links: { self: '/api/1.0/publishers?include=country' }
+}
+```
+
+---
+
+### Sparse Fieldsets with `belongsTo` Relations
+
+You can apply **sparse fieldsets** not only to the primary resource but also to the included `belongsTo` resources. This is powerful for fine-tuning your API responses and reducing payload sizes.
+
+#### Programmatic Usage:
+
+```javascript
+// Re-add data for a fresh start (schemas are reused from above)
+
+const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
+const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
+const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+
+await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
+await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
+await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+
+
+// Get a publisher, include its country, but only retrieve publisher name and country code
+const sparsePublisher = await api.resources.publishers.get({
+  id: '1',
+  queryParams: {
+    include: ['country'],
+    fields: {
+      publishers: 'name',       // Only name for publishers
+      countries: 'code'         // Only code for countries
+    }
+  }
+  // simplified: true is default for programmatic fetches
+});
+console.log('Sparse Publisher and Country:', inspect(sparsePublisher));
+
+
+// Query all publishers, include their countries, but only retrieve publisher name and country code
+const sparsePublishersQuery = await api.resources.publishers.query({
+  queryParams: {
+    include: ['country'],
+    fields: {
+      publishers: 'name',       // Only name for publishers
+      countries: 'code,name'    // BOTH code and name for countries
+    }
+  }
+  // simplified: true is default for programmatic fetches
+});
+console.log('Sparse Publishers Query (all results):', inspect(sparsePublishersQuery));
+```
+
+Note that you can specify multiple fields for countries, and that they need to be comma separated.
+
+**Important Note on Sparse Fieldsets for Related Resources:**
+When you specify `fields: { countries: ['code'] }`, this instruction applies to *all* `country` resources present in the API response, whether `country` is the primary resource you are querying directly, or if it's included as a related resource. This ensures consistent data representation across the entire response.
+
+**Expected Output (Sparse Publisher and Country - Illustrative, IDs may vary):**
+
+```text
+{
+  id: '1',
+  name: 'French Books Inc.',
+  country_id: '1',
+  country: { id: '1', code: 'FR' }
+}
+Sparse Publishers Query (all results): [
+  {
+    id: '1',
+    name: 'French Books Inc.',
+    country_id: '1',
+    country: { id: '1', code: 'FR', name: 'France' }
+  },
+  {
+    id: '2',
+    name: 'UK Books Ltd.',
+    country_id: '3',
+    country: { id: '3', code: 'UK', name: 'United Kingdom' }
+  },
+  {
+    id: '3',
+    name: 'German Press GmbH',
+    country_id: '2',
+    country: { id: '2', code: 'DE', name: 'Germany' }
+  },
+  { id: '4', name: 'Global Publishing' }
+]
+```
+
+
+---
+
+### Filtering by `belongsTo` Relationships
+
+You can filter resources based on conditions applied to their `belongsTo` relationships. This is achieved by defining filterable fields in the `searchSchema` that map to either the foreign key or fields on the related resource.
+
+The `searchSchema` offers a clean way to define filters, abstracting away the underlying database structure and relationship navigation from the client. Clients simply use the filter field names defined in `searchSchema` (e.g., `countryCode` instead of `country.code`).
+
+#### Programmatic Usage:
+
+```javascript
+// Re-add data for a fresh start (schemas are reused from above)
+const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
+const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
+const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+
+await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
+await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
+await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+
+
+// Programmatic search: Find publishers from France using the country ID alias in searchSchema
+const publishersFromFrance = await api.resources.publishers.query({
+  queryParams: {
+    filters: {
+      country: france.id // Using 'country' filter field defined in searchSchema
+    }
+  }
+  // simplified: true is default for programmatic fetches
+});
+console.log('Publishers from France (by country ID):', inspect(publishersFromFrance));
+
+// Programmatic search: Find publishers with no associated country
+const publishersNoCountry = await api.resources.publishers.query({
+  queryParams: {
+    filters: {
+      country: null // Filtering by null for the 'country' ID filter
+    }
+  }
+  // simplified: true is default for programmatic fetches
+});
+console.log('Publishers with No Country (by country ID: null):', inspect(publishersNoCountry));
+
+// Programmatic search: Find publishers where the associated country's code is 'UK'
+const publishersFromUK = await api.resources.publishers.query({
+  queryParams: {
+    filters: {
+      countryCode: 'UK' // Using 'countryCode' filter field defined in searchSchema
+    }
+  }
+  // simplified: true is default for programmatic fetches
+});
+console.log('Publishers from UK (by countryCode):', inspect(publishersFromUK));
+```
+
+**Expected Output (Publishers from France by country ID - Illustrative, IDs may vary):**
+
+```text
+Publishers from France (by country ID): [
+  {
+    id: '1',
+    name: 'French Books Inc.',
+    country_id: '1',
+    country: { id: '1', name: 'France', code: 'FR' }
+  }
+```
 
 ## hasMany records
 
-### Search (hasMany)
+`hasMany` relationships represent a one-to-many association, where one resource can have multiple associated resources. For example, a `publisher` can have many `authors` (if we consider authors working for specific publishers). Unlike `belongsTo` relationships, the foreign key for a `hasMany` relationship resides on the *related* resource's table, not the primary resource.
 
-### Sparse fields (hasMany)
+This is why when defining a schema the `belongsTo` keys are in the main schema, whereas `hasMany` belongs to the `relationships` paramter. This is a design decision that marks the distinction between the two types of relationships. 
 
-### Computed and hidden fields
+To demonstrate `hasMany` relationships with just two tables, we'll use `publishers` as our "one" side and `authors` as our "many" side, assuming authors are directly associated with a single publisher.
+
+```javascript
+// Define publishers resource
+await api.addResource('publishers', {
+  schema: {
+    name: { type: 'string', required: true, max: 255, search: true },
+  },
+  relationships: {
+    // A publisher has many authors
+    authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
+  },
+  searchSchema: { // Adding search schema for publishers
+    name: { type: 'string', filterUsing: 'like' }
+  }
+});
+await api.resources.publishers.createKnexTable();
+
+// Define authors resource, which belongs to a publisher
+await api.addResource('authors', {
+  schema: {
+    name: { type: 'string', required: true, max: 100, search: true },
+    surname: { type: 'string', required: true, max: 100, search: true },
+    publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
+  },
+  searchSchema: { // Adding search schema for authors
+    name: { type: 'string', filterUsing: 'like' },
+    surname: { type: 'string', filterUsing: 'like' },
+    publisher: { type: 'id', actualField: 'publisher_id', nullable: true },
+    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' } // Cross-table search
+  }
+});
+await api.resources.authors.createKnexTable();
+```
+
+Now, let's add some data to reflect these `hasMany` connections. We'll create publishers and then associate authors with them using the `publisher_id` foreign key.
+
+```javascript
+// Re-add publishers for a fresh start
+const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
+const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
+const internationalPublisher = await api.resources.publishers.post({ name: 'Global Publishing' });
+
+// Add authors, linking them to publishers
+const frenchAuthor1 = await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
+const frenchAuthor2 = await api.resources.authors.post({ name: 'Émile', surname: 'Zola', publisher: frenchPublisher.id });
+const germanAuthor = await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
+const unassignedAuthor = await api.resources.authors.post({ name: 'Unknown', surname: 'Author', publisher: null });
+
+
+console.log('Added French Publisher:', inspect(frenchPublisher));
+console.log('Added Victor Hugo:', inspect(frenchAuthor1));
+console.log('Added Émile Zola:', inspect(frenchAuthor2));
+console.log('Added German Publisher:', inspect(germanPublisher));
+// ... and so on for other data.
+```
+
+### Including `hasMany` Records (`include`)
+
+To retrieve related `hasMany` resources, you'll use the `include` query parameter from the "one" side of the one-to-many relationship (e.g., fetching a publisher and including its authors).
+
+When fetching data programmatically in **simplified mode** (which is the default), `hasMany` relationships will appear as **arrays of child objects** embedded directly within the parent resource. This denormalized structure is convenient for immediate use in your application code.
+
+#### Programmatic Usage:
+
+```javascript
+// Re-add data for a fresh start (schemas are reused from above)
+const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
+const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
+const internationalPublisher = await api.resources.publishers.post({ name: 'Global Publishing' });
+
+await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
+await api.resources.authors.post({ name: 'Émile', surname: 'Zola', publisher: frenchPublisher.id });
+await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
+await api.resources.authors.post({ name: 'Unknown', surname: 'Author', publisher: null });
+
+
+// Get the French publisher and include its authors (simplified mode output)
+const frenchPublisherWithAuthors = await api.resources.publishers.get({
+  id: frenchPublisher.id,
+  queryParams: {
+    include: ['authors'] // Use the relationship name 'authors' defined in the publishers schema
+  }
+});
+console.log('French Publisher with Authors:', inspect(frenchPublisherWithAuthors));
+
+// Query all publishers and include their authors (simplified mode output)
+const allPublishersWithAuthors = await api.resources.publishers.query({
+  queryParams: {
+    include: ['authors']
+  }
+});
+console.log('All Publishers with Authors:', inspect(allPublishersWithAuthors));
+
+// Query all publishers and include their authors (non-simplified, full JSON:API output)
+const allPublishersWithAuthorsNotSimplified = await api.resources.publishers.query({
+  queryParams: {
+    include: ['authors']
+  },
+  simplified: false
+});
+console.log('All Publishers with Authors (not simplified):', inspect(allPublishersWithAuthorsNotSimplified));
+```
+
+**Expected Output (Illustrative, IDs and content may vary based on `post` order):**
+
+```text
+French Publisher with Authors: {
+  id: '1',
+  name: 'French Books Inc.',
+  authors_ids: [ '1', '2' ],
+  authors: [
+    { id: '1', name: 'Victor', surname: 'Hugo' },
+    { id: '2', name: 'Émile', surname: 'Zola' }
+  ]
+}
+All Publishers with Authors: [
+  {
+    id: '1',
+    name: 'French Books Inc.',
+    authors_ids: [ '1', '2' ],
+    authors: [
+      { id: '1', name: 'Victor', surname: 'Hugo' },
+      { id: '2', name: 'Émile', surname: 'Zola' }
+    ]
+  },
+  {
+    id: '2',
+    name: 'German Press GmbH',
+    authors_ids: [ '3' ],
+    authors: [ { id: '3', name: 'Johann', surname: 'Goethe' } ]
+  },
+  { id: '3', name: 'Global Publishing', authors_ids: [] }
+]
+All Publishers with Authors (not simplified): {
+  data: [
+    {
+      type: 'publishers',
+      id: '1',
+      attributes: { name: 'French Books Inc.' },
+      relationships: {
+        authors: {
+          data: [ [Object], [Object] ],
+          links: {
+            self: '/api/1.0/publishers/1/relationships/authors',
+            related: '/api/1.0/publishers/1/authors'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/1' }
+    },
+    {
+      type: 'publishers',
+      id: '2',
+      attributes: { name: 'German Press GmbH' },
+      relationships: {
+        authors: {
+          data: [ [Object] ],
+          links: {
+            self: '/api/1.0/publishers/2/relationships/authors',
+            related: '/api/1.0/publishers/2/authors'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/2' }
+    },
+    {
+      type: 'publishers',
+      id: '3',
+      attributes: { name: 'Global Publishing' },
+      relationships: {
+        authors: {
+          data: [],
+          links: {
+            self: '/api/1.0/publishers/3/relationships/authors',
+            related: '/api/1.0/publishers/3/authors'
+          }
+        }
+      },
+      links: { self: '/api/1.0/publishers/3' }
+    }
+  ],
+  included: [
+    {
+      type: 'authors',
+      id: '1',
+      attributes: { name: 'Victor', surname: 'Hugo' },
+      relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
+      links: { self: '/api/1.0/authors/1' }
+    },
+    {
+      type: 'authors',
+      id: '2',
+      attributes: { name: 'Émile', surname: 'Zola' },
+      relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
+      links: { self: '/api/1.0/authors/2' }
+    },
+    {
+      type: 'authors',
+      id: '3',
+      attributes: { name: 'Johann', surname: 'Goethe' },
+      relationships: { publisher: { data: { type: 'publishers', id: '2' } } },
+      links: { self: '/api/1.0/authors/3' }
+    }
+  ],
+  links: { self: '/api/1.0/publishers?include=authors' }
+}
+```
+
+**Important Note on `hasMany` in Non-Simplified Mode:**
+
+In non-simplified (full JSON:API) mode, `hasMany` relationships in the `data` section of the parent resource only contain an empty `data` array or `links` to the related endpoint (e.g., `authors: { links: { related: '/api/1.0/publishers/1/authors' } }`). The actual related `author` resources are placed in the top-level `included` array. This is standard JSON:API behavior to avoid duplicating large amounts of data. The `included` array ensures that each included resource appears only once, even if referenced by multiple parent resources.
+
+### Filtering by `hasMany` Relationships
+
+Filtering resources based on conditions applied to their `hasMany` relationships is a common requirement. For example, finding all publishers that have an author whose surname starts with 'Hu'. This is achieved by leveraging the `searchSchema` and defining fields that traverse the relationship to the child resource.
+
+The `RestApiKnexPlugin` handles the necessary SQL `JOIN` operations automatically when you define `actualField` in your `searchSchema` to point to a field on a related `hasMany` table.
+
+#### Programmatic Usage:
+
+```javascript
+
+// Filter authors by publisher name (cross-table search defined in authors' searchSchema)
+const authorsFromGermanPress = await api.resources.authors.query({
+  queryParams: {
+    filters: {
+      publisherName: 'German' // Using the alias 'publisherName' from authors' searchSchema
+    }
+  }
+});
+console.log('Authors from German Press:', inspect(authorsFromGermanPress));
+```
+
+The output will be:
+
+```text
+Authors from German Press: [ { id: '3', name: 'Johann', surname: 'Goethe', publisher_id: '2' } ]
+```
+
+Once again, the search logic is always define on the `schema` -- that is, it's handled by the server -- and not by the client.
+
+
+
+
+
+
 
 
 
 
 ## hasMany records (polymorphic)
 
-### Search (hasMany)
+Polymorphic relationships are a special type of one-to-many association where a single resource can belong to *one of several different* resource types. For example, a `review` might be associated with an `author` *or* a `publisher*. This differs from a standard `belongsTo` where a resource belongs to only one specific type.
 
-### Sparse fields (hasMany)
+To implement this, the "belonging" resource (e.g., `review`) needs two foreign key fields:
+1.  An **`idField`** (e.g., `reviewable_id`) to store the ID of the related resource.
+2.  A **`typeField`** (e.g., `reviewable_type`) to store the *type* of the related resource (e.g., 'authors' or 'publishers').
 
-### Computed and hidden fields
+`json-rest-api` supports polymorphic relationships via the **`belongsToPolymorphic`** definition on the *child* resource. To establish the reverse `hasMany` link from the parent, you simply use the **`via`** keyword, pointing to the name of the `belongsToPolymorphic` field on the child.
+
+For this section, we'll use our existing `publishers` and `authors` tables, and introduce a new `reviews` table that can give reviews to both authors and publishers.
+
+```javascript
 
 
+// Define publishers resource
+await api.addResource('publishers', {
+  schema: {
+    name: { type: 'string', required: true, max: 255, search: true },
+  },
+  relationships: {
+    authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
+    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
+  },
+  searchSchema: {
+    name: { type: 'string', filterUsing: 'like' }
+  }
+});
+await api.resources.publishers.createKnexTable();
+
+// Define authors resource
+await api.addResource('authors', {
+  schema: {
+    name: { type: 'string', required: true, max: 100, search: true },
+    surname: { type: 'string', required: true, max: 100, search: true },
+    publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
+  },
+  relationships: {
+    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
+  },
+  searchSchema: {
+    name: { type: 'string', filterUsing: 'like' },
+    surname: { type: 'string', filterUsing: 'like' },
+    publisher: { type: 'id', actualField: 'publisher_id', nullable: true },
+    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' }
+  }
+});
+await api.resources.authors.createKnexTable();
+
+// Define reviews resource with a polymorphic relationship
+await api.addResource('reviews', {
+  schema: {
+    rating: { type: 'number', required: true, min: 1, max: 5 },
+    comment: { type: 'string', max: 500, nullable: true },
+    // These two fields store the polymorphic relationship data in the database
+    reviewable_type: { type: 'string', max: 50 }, // Stores 'publishers' or 'authors' - not required when using relationships
+    reviewable_id: { type: 'id' }, // Stores the ID of the publisher or author - not required when using relationships
+    // This defines the polymorphic relationship for API consumption
+  },
+  relationships: {
+    reviewable: {
+      belongsToPolymorphic: {
+        types: ['publishers', 'authors'], // The possible resource types this review can belong to
+        typeField: 'reviewable_type', // The field in 'reviews' schema storing the parent's type
+        idField: 'reviewable_id'      // The field in 'reviews' schema storing the parent's ID
+      }
+    }
+  },
+  searchSchema: {
+    rating: { type: 'number', filterUsing: '=' },
+    comment: { type: 'string', filterUsing: 'like' },
+    reviewableType: { type: 'string', actualField: 'reviewable_type' }, // Allows filtering by parent type
+    reviewableId: { type: 'id', actualField: 'reviewable_id' },         // Allows filtering by parent ID
+    // Allows filtering reviews by the name of the associated publisher or author.
+    // 'oneOf' with dot notation enables cross-table polymorphic search.
+    reviewableName: {
+      type: 'string',
+      oneOf: ['publishers.name', 'authors.name'],
+      filterUsing: 'like'
+    }
+  }
+});
+await api.resources.reviews.createKnexTable();
+```
+
+Now, let's add some data to reflect these `hasMany` connections. We'll create publishers and authors, and then create reviews, linking them polymorphically to both.
+
+---
+
+### Creating Reviews (Simplified vs. Non-Simplified Input)
+
+`json-rest-api` provides flexibility in how you provide data for polymorphic relationships when creating new records, depending on whether you're using the simplified API mode (default for programmatic calls) or the strict JSON:API format.
+
+#### Programmatic Usage (Simplified Input)
+
+In **simplified mode**, you can pass the `reviewable_type` and `reviewable_id` directly as attributes, and the library automatically handles the mapping to the polymorphic relationship. This is often more convenient for internal application logic.
+
+```javascript
+// Re-add publishers and authors for a fresh start
+const frenchPublisher_ns = await api.resources.publishers.post({ name: 'French Books Inc. (NS)' });
+const germanPublisher_ns = await api.resources.publishers.post({ name: 'German Press GmbH (NS)' });
+
+const frenchAuthor1_ns = await api.resources.authors.post({ name: 'Victor (NS)', surname: 'Hugo (NS)', publisher: frenchPublisher_ns.id });
+const germanAuthor_ns = await api.resources.authors.post({ name: 'Johann (NS)', surname: 'Goethe (NS)', publisher: germanPublisher_ns.id });
+
+// Add reviews using non-simplified (JSON:API standard) input with relationships object
+const review3_non_simplified = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        rating: 3,
+        comment: 'Decent publisher, some good titles (NS).'
+      },
+      relationships: { // Explicitly define the polymorphic relationship here
+        reviewable: {
+          data: { type: 'publishers', id: frenchPublisher_ns.id } // Resource identifier object
+        }
+      }
+    }
+  },
+  simplified: false // Ensure non-simplified mode for this call
+});
+
+const review4_non_simplified = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        rating: 5,
+        comment: 'Hugo is a master storyteller! (NS)'
+      },
+      relationships: {
+        reviewable: {
+          data: { type: 'authors', id: frenchAuthor1_ns.id }
+        }
+      }
+    }
+  },
+  simplified: false
+});
+
+console.log('Added Publisher Review (Non-Simplified Input):', inspect(review3_non_simplified));
+console.log('Added Author Review (Non-Simplified Input):', inspect(review4_non_simplified));
+
+// Test simplified mode
+console.log('\n=== Testing Simplified Mode ===');
+const review5_simplified = await api.resources.reviews.post({
+  rating: 4,
+  comment: 'Great German author! (Simplified)',
+  reviewable_type: 'authors',
+  reviewable_id: germanAuthor_ns.id
+});
+
+console.log('Added review in simplified mode:', inspect(review5_simplified));
+```
+
+**Expected Output (Simplified Input):**
+
+```text
+Added Publisher Review (Non-Simplified Input): {
+  data: {
+    type: 'reviews',
+    id: '1',
+    attributes: {
+      rating: 3,
+      comment: 'Decent publisher, some good titles (NS).',
+      reviewable_type: 'publishers',
+      reviewable_id: 1
+    },
+    links: { self: '/api/1.0/reviews/1' }
+  },
+  links: { self: '/api/1.0/reviews/1' }
+}
+Added Author Review (Non-Simplified Input): {
+  data: {
+    type: 'reviews',
+    id: '2',
+    attributes: {
+      rating: 5,
+      comment: 'Hugo is a master storyteller! (NS)',
+      reviewable_type: 'authors',
+      reviewable_id: 1
+    },
+    links: { self: '/api/1.0/reviews/2' }
+  },
+  links: { self: '/api/1.0/reviews/2' }
+}
+All reviews in database: [
+  {
+    id: 1,
+    rating: 3,
+    comment: 'Decent publisher, some good titles (NS).',
+    reviewable_type: 'publishers',
+    reviewable_id: 1
+  },
+  {
+    id: 2,
+    rating: 5,
+    comment: 'Hugo is a master storyteller! (NS)',
+    reviewable_type: 'authors',
+    reviewable_id: 1
+  }
+]
+
+=== Testing Simplified Mode ===
+Added review in simplified mode: {
+  id: '3',
+  rating: 4,
+  comment: 'Great German author! (Simplified)',
+  reviewable_type: 'authors',
+  reviewable_id: 2
+}
+Final reviews in database: [
+  {
+    id: 1,
+    rating: 3,
+    comment: 'Decent publisher, some good titles (NS).',
+    reviewable_type: 'publishers',
+    reviewable_id: 1
+  },
+  {
+    id: 2,
+    rating: 5,
+    comment: 'Hugo is a master storyteller! (NS)',
+    reviewable_type: 'authors',
+    reviewable_id: 1
+  },
+  {
+    id: 3,
+    rating: 4,
+    comment: 'Great German author! (Simplified)',
+    reviewable_type: 'authors',
+    reviewable_id: 2
+  }
+]
+```
+
+#### Programmatic Usage (Non-Simplified / JSON:API Standard Input)
+
+For strict **JSON:API compliance**, you define the polymorphic relationship within the **`relationships` object** of your `inputRecord`. This is the recommended approach for API clients interacting with your HTTP endpoints.
+
+```javascript
+// Re-add data for a fresh start (schemas are reused from above)
+const frenchPublisher_ns = await api.resources.publishers.post({ name: 'French Books Inc. (NS)' });
+const germanPublisher_ns = await api.resources.publishers.post({ name: 'German Press GmbH (NS)' });
+
+const frenchAuthor1_ns = await api.resources.authors.post({ name: 'Victor (NS)', surname: 'Hugo (NS)', publisher: frenchPublisher_ns.id });
+const germanAuthor_ns = await api.resources.authors.post({ name: 'Johann (NS)', surname: 'Goethe (NS)', publisher: germanPublisher_ns.id });
+
+// Add reviews using non-simplified (JSON:API standard) input with relationships object
+const review3_non_simplified = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        rating: 3,
+        comment: 'Decent publisher, some good titles (NS).'
+      },
+      relationships: { // Explicitly define the polymorphic relationship here
+        reviewable: {
+          data: { type: 'publishers', id: frenchPublisher_ns.id } // Resource identifier object
+        }
+      }
+    }
+  },
+  simplified: false // Ensure non-simplified mode for this call
+});
+
+const review4_non_simplified = await api.resources.reviews.post({
+  inputRecord: {
+    data: {
+      type: 'reviews',
+      attributes: {
+        rating: 5,
+        comment: 'Hugo is a master storyteller! (NS)'
+      },
+      relationships: {
+        reviewable: {
+          data: { type: 'authors', id: frenchAuthor1_ns.id }
+        }
+      }
+    }
+  },
+  simplified: false
+});
+
+console.log('Added Publisher Review (Non-Simplified Input):', inspect(review3_non_simplified));
+console.log('Added Author Review (Non-Simplified Input):', inspect(review4_non_simplified));
+```
+
+**Explanation of Input Formats:**
+
+* **Simplified Mode:** `json-rest-api` automatically recognizes `reviewable_type` and `reviewable_id` attributes as foreign keys for polymorphic relationships defined with `belongsToPolymorphic`. This provides a flattened, convenient syntax for programmatic use.
+* **Non-Simplified Mode (JSON:API Standard):** This adheres to the JSON:API specification, where relationships are explicitly defined in the `relationships` object with a resource identifier object (`{ type: 'resourceType', id: 'resourceId' }`). This is typically used when interacting with the API via HTTP or when strict JSON:API compliance is required.
+
+**Expected Output (Non-Simplified Input):**
+
+```text
+Added Publisher Review (Non-Simplified Input): {
+  data: {
+    type: 'reviews',
+    id: '3',
+    attributes: { rating: 3, comment: 'Decent publisher, some good titles (NS).' },
+    relationships: {
+      reviewable: {
+        data: { type: 'publishers', id: '1' }, // ID will match frenchPublisher_ns.id
+        links: {
+          self: '/api/1.0/reviews/3/relationships/reviewable',
+          related: '/api/1.0/reviews/3/reviewable'
+        }
+      }
+    },
+    links: { self: '/api/1.0/reviews/3' }
+  },
+  links: { self: '/api/1.0/reviews/3' }
+}
+Added Author Review (Non-Simplified Input): {
+  data: {
+    type: 'reviews',
+    id: '4',
+    attributes: { rating: 5, comment: 'Hugo is a master storyteller! (NS)' },
+    relationships: {
+      reviewable: {
+        data: { type: 'authors', id: '1' }, // ID will match frenchAuthor1_ns.id
+        links: {
+          self: '/api/1.0/reviews/4/relationships/reviewable',
+          related: '/api/1.0/reviews/4/reviewable'
+        }
+      }
+    },
+    links: { self: '/api/1.0/reviews/4' }
+  },
+  links: { self: '/api/1.0/reviews/4' }
+}
+```
+
+---
+
+### Including Polymorphic Records (`include`)
+
+To retrieve related polymorphic `` resources (e.g., getting a publisher and including all its reviews, or getting an author and including all their reviews), you'll use the **`include` query parameter** from the "one" side of the polymorphic relationship.
+
+The output format (simplified vs. non-simplified) will depend on the `simplified` parameter of your `get` or `query` call, or the default `simplifiedApi` setting.
+
+#### Programmatic Usage (Simplified Output)
+
+When fetching data programmatically in **simplified mode** (which is the default), polymorphic `hasMany` relationships will appear as **arrays of child objects** embedded directly within the parent resource, just like regular `hasMany` relationships.
+
+```javascript
+// Re-add data for a fresh start (schemas and data from previous sections)
+const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
+const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
+const frenchAuthor1 = await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
+const germanAuthor = await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
+
+await api.resources.reviews.post({ rating: 5, comment: 'Excellent publisher, great selection!', reviewable_type: 'publishers', reviewable_id: frenchPublisher.id });
+await api.resources.reviews.post({ rating: 4, comment: 'Goethe is a profound thinker.', reviewable_type: 'authors', reviewable_id: germanAuthor.id });
+await api.resources.reviews.post({ rating: 3, comment: 'Decent publisher, some good titles.', reviewable_type: 'publishers', reviewable_id: germanPublisher.id });
+await api.resources.reviews.post({ rating: 5, comment: 'Hugo is a master storyteller!', reviewable_type: 'authors', reviewable_id: frenchAuthor1.id });
+
+
+// Get the French publisher and include its reviews (simplified mode output)
+const frenchPublisherWithReviews_simplified = await api.resources.publishers.get({
+  id: frenchPublisher.id,
+  queryParams: {
+    include: ['reviews'] // Use the relationship name 'reviews' defined in the publishers schema
+  }
+});
+console.log('French Publisher with Reviews (Simplified Output):', inspect(frenchPublisherWithReviews_simplified));
+
+// Get the German author and include their reviews (simplified mode output)
+const germanAuthorWithReviews_simplified = await api.resources.authors.get({
+  id: germanAuthor.id,
+  queryParams: {
+    include: ['reviews'] // Use the relationship name 'reviews' defined in the authors schema
+  }
+});
+console.log('German Author with Reviews (Simplified Output):', inspect(germanAuthorWithReviews_simplified));
+```
+
+**Expected Output (Simplified Output - Illustrative, IDs and content may vary based on `post` order):**
+
+```text
+French Publisher with Reviews (Simplified Output): {
+  id: '1',
+  name: 'French Books Inc.',
+  // Note: authors_ids and authors array come from the 'hasMany authors' relationship defined on publishers
+  authors_ids: [ '1', '2' ],
+  authors: [
+    { id: '1', name: 'Victor', surname: 'Hugo', publisher_id: '1' },
+    { id: '2', name: 'Émile', surname: 'Zola', publisher_id: '1' }
+  ],
+  reviews: [
+    {
+      id: '1',
+      rating: 5,
+      comment: 'Excellent publisher, great selection!',
+      reviewable_type: 'publishers',
+      reviewable_id: '1'
+    }
+  ]
+}
+German Author with Reviews (Simplified Output): {
+  id: '2',
+  name: 'Johann',
+  surname: 'Goethe',
+  publisher_id: '2',
+  publisher: { id: '2', name: 'German Press GmbH' },
+  reviews: [
+    {
+      id: '2',
+      rating: 4,
+      comment: 'Goethe is a profound thinker.',
+      reviewable_type: 'authors',
+      reviewable_id: '2'
+    }
+  ]
+}
+```
+
+#### Programmatic Usage (Non-Simplified / JSON:API Standard Output)
+
+When you explicitly request **non-simplified output**, the polymorphic `hasMany` relationships will appear in the **`included` array** at the top level of the JSON:API document. The parent resource's `relationships` object will contain links to the related endpoint but not the full related data itself.
+
+```javascript
+// Re-add data for a fresh start (schemas and data from previous sections)
+const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
+const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
+const frenchAuthor1 = await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
+const germanAuthor = await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
+
+await api.resources.reviews.post({ rating: 5, comment: 'Excellent publisher, great selection!', reviewable_type: 'publishers', reviewable_id: frenchPublisher.id });
+await api.resources.reviews.post({ rating: 4, comment: 'Goethe is a profound thinker.', reviewable_type: 'authors', reviewable_id: germanAuthor.id });
+await api.resources.reviews.post({ rating: 3, comment: 'Decent publisher, some good titles.', reviewable_type: 'publishers', reviewable_id: germanPublisher.id });
+await api.resources.reviews.post({ rating: 5, comment: 'Hugo is a master storyteller!', reviewable_type: 'authors', reviewable_id: frenchAuthor1.id });
+
+
+// Query all publishers and include their reviews (non-simplified, full JSON:API output)
+const allPublishersWithReviewsNotSimplified = await api.resources.publishers.query({
+  queryParams: {
+    include: ['reviews']
+  },
+  simplified: false
+});
+console.log('All Publishers with Reviews (Non-Simplified Output):', inspect(allPublishersWithReviewsNotSimplified));
+
+// Query all authors and include their reviews (non-simplified, full JSON:API output)
+const allAuthorsWithReviewsNotSimplified = await api.resources.authors.query({
+  queryParams: {
+    include: ['reviews']
+  },
+  simplified: false
+});
+console.log('All Authors with Reviews (Non-Simplified Output):', inspect(allAuthorsWithReviewsNotSimplified));
+```
+
+**Important Note on Polymorphic `hasMany` in Non-Simplified Mode:**
+
+In non-simplified (full JSON:API) mode, the `reviews` in the `data` section of the parent resource (publisher or author) will only contain links to their related endpoints. The actual `review` resources will be found in the top-level `included` array. This is standard JSON:API behavior to avoid duplicating large amounts of data. The `included` array ensures that each included resource appears only once, even if referenced by multiple parent resources.
+
+**Expected Output (Non-Simplified Output - Illustrative, IDs and content may vary based on `post` order):**
+
+```text
+All Publishers with Reviews (Non-Simplified Output): {
+  data: [
+    {
+      type: 'publishers',
+      id: '1',
+      attributes: { name: 'French Books Inc.' },
+      relationships: {
+        authors: { links: { related: '/api/1.0/publishers/1/authors' } },
+        reviews: { links: { related: '/api/1.0/publishers/1/reviews' } }
+      },
+      links: { self: '/api/1.0/publishers/1' }
+    },
+    {
+      type: 'publishers',
+      id: '2',
+      attributes: { name: 'German Press GmbH' },
+      relationships: {
+        authors: { links: { related: '/api/1.0/publishers/2/authors' } },
+        reviews: { links: { related: '/api/1.0/publishers/2/reviews' } }
+      },
+      links: { self: '/api/1.0/publishers/2' }
+    },
+    {
+      type: 'publishers',
+      id: '3',
+      attributes: { name: 'Global Publishing' },
+      relationships: {
+        authors: { links: { related: '/api/1.0/publishers/3/authors' } },
+        reviews: { links: { related: '/api/1.0/publishers/3/reviews' } }
+      },
+      links: { self: '/api/1.0/publishers/3' }
+    }
+  ],
+  included: [
+    {
+      type: 'reviews',
+      id: '1',
+      attributes: { rating: 5, comment: 'Excellent publisher, great selection!' },
+      relationships: {
+        reviewable: { data: { type: 'publishers', id: '1' } }
+      },
+      links: { self: '/api/1.0/reviews/1' }
+    },
+    {
+      type: 'reviews',
+      id: '3',
+      attributes: { rating: 3, comment: 'Decent publisher, some good titles.' },
+      relationships: {
+        reviewable: { data: { type: 'publishers', id: '2' } }
+      },
+      links: { self: '/api/1.0/reviews/3' }
+    }
+  ],
+  links: { self: '/api/1.0/publishers?include=reviews' }
+}
+All Authors with Reviews (Non-Simplified Output): {
+  data: [
+    {
+      type: 'authors',
+      id: '1',
+      attributes: { name: 'Victor', surname: 'Hugo' },
+      relationships: {
+        publisher: { data: { type: 'publishers', id: '1' } },
+        reviews: { links: { related: '/api/1.0/authors/1/reviews' } }
+      },
+      links: { self: '/api/1.0/authors/1' }
+    },
+    {
+      type: 'authors',
+      id: '2',
+      attributes: { name: 'Émile', surname: 'Zola' },
+      relationships: {
+        publisher: { data: { type: 'publishers', id: '1' } },
+        reviews: { links: { related: '/api/1.0/authors/2/reviews' } }
+      },
+      links: { self: '/api/1.0/authors/2' }
+    },
+    {
+      type: 'authors',
+      id: '3',
+      attributes: { name: 'Johann', surname: 'Goethe' },
+      relationships: {
+        publisher: { data: { type: 'publishers', id: '2' } }
+      },
+      links: { self: '/api/1.0/authors/3' }
+    },
+    {
+      type: 'authors',
+      id: '4',
+      attributes: { name: 'Unknown', surname: 'Author' },
+      relationships: {
+        publisher: { data: null },
+        reviews: { links: { related: '/api/1.0/authors/4/reviews' } }
+      },
+      links: { self: '/api/1.0/authors/4' }
+    }
+  ],
+  included: [
+    {
+      type: 'reviews',
+      id: '4',
+      attributes: { rating: 5, comment: 'Hugo is a master storyteller!' },
+      relationships: {
+        reviewable: { data: { type: 'authors', id: '1' } }
+      },
+      links: { self: '/api/1.0/reviews/4' }
+    },
+    {
+      type: 'reviews',
+      id: '2',
+      attributes: { rating: 4, comment: 'Goethe is a profound thinker.' },
+      relationships: {
+        reviewable: { data: { type: 'authors', id: '3' } }
+      },
+      links: { self: '/api/1.0/reviews/2' }
+    }
+  ],
+  links: { self: '/api/1.0/authors?include=reviews' }
+}
+```
+
+---
+
+### Filtering by Polymorphic Relationships
+
+Filtering resources based on conditions applied to their polymorphic `hasMany` relationships is a powerful capability. You can filter reviews by their `reviewable_type` or `reviewable_id`, or even filter the parent resources (publishers/authors) based on properties of their associated reviews. You can also filter reviews by properties of the *polymorphic parent* (e.g., filter reviews for entities named 'French Books Inc.').
+
+The `RestApiKnexPlugin` handles the necessary SQL `JOIN` operations automatically when you define `actualField` in your `searchSchema` to point to a field on a related polymorphic table.
+
+#### Programmatic Usage:
+
+```javascript
+// Re-add data for a fresh start (schemas and data from previous sections)
+const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
+const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
+const internationalPublisher = await api.resources.publishers.post({ name: 'Global Publishing' });
+
+const frenchAuthor1 = await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
+const germanAuthor = await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
+
+await api.resources.reviews.post({ rating: 5, comment: 'Excellent publisher, great selection!', reviewable_type: 'publishers', reviewable_id: frenchPublisher.id });
+await api.resources.reviews.post({ rating: 4, comment: 'Goethe is a profound thinker.', reviewable_type: 'authors', reviewable_id: germanAuthor.id });
+await api.resources.reviews.post({ rating: 3, comment: 'Decent publisher, some good titles.', reviewable_type: 'publishers', reviewable_id: germanPublisher.id });
+await api.resources.reviews.post({ rating: 5, comment: 'Hugo is a master storyteller!', reviewable_type: 'authors', reviewable_id: frenchAuthor1.id });
+
+
+// Filter reviews to find only those for publishers
+const reviewsForPublishers = await api.resources.reviews.query({
+  queryParams: {
+    filters: {
+      reviewableType: 'publishers' // Filter by the reviewable_type field
+    }
+  }
+});
+console.log('Reviews for Publishers:', inspect(reviewsForPublishers));
+
+// Filter reviews to find those for a specific author (e.g., Goethe)
+const reviewsForGoethe = await api.resources.reviews.query({
+  queryParams: {
+    filters: {
+      reviewableId: germanAuthor.id, // Filter by the reviewable_id field
+      reviewableType: 'authors' // Always combine with type for specificity
+    }
+  }
+});
+console.log('Reviews for Goethe:', inspect(reviewsForGoethe));
+
+// Filter publishers to find those with reviews having a rating of 5
+const publishersWithFiveStarReviews = await api.resources.publishers.query({
+  queryParams: {
+    filters: {
+      'reviews.rating': 5 // Filter on a field of the hasMany polymorphic relationship
+    }
+  }
+});
+console.log('Publishers with 5-star reviews:', inspect(publishersWithFiveStarReviews));
+
+// Filter authors to find those with reviews containing "master storyteller"
+const authorsWithSpecificReviewComment = await api.resources.authors.query({
+  queryParams: {
+    filters: {
+      'reviews.comment': '%master storyteller%' // Filter on a field of the hasMany polymorphic relationship
+    }
+  }
+});
+console.log('Authors with "master storyteller" review:', inspect(authorsWithSpecificReviewComment));
+
+// Filter reviews by the name of the reviewable entity (using reviewableName from reviews' searchSchema)
+const reviewsForFrenchEntities = await api.resources.reviews.query({
+  queryParams: {
+    filters: {
+      reviewableName: 'French%' // Filters reviews where the associated publisher or author name starts with 'French'
+    }
+  }
+});
+console.log('Reviews for "French" entities:', inspect(reviewsForFrenchEntities));
+```
+
+**Explanation of Filtering Polymorphic Relationships:**
+
+* **Filtering the polymorphic resource itself (e.g., `reviews`):**
+    * You can directly filter by `reviewable_type` and `reviewable_id` if these fields are exposed in the `reviews`' `searchSchema`.
+    * For cross-table filtering based on the *name* of the `reviewable` entity, the `reviews`' `searchSchema` defines `reviewableName` with `oneOf: ['publishers.name', 'authors.name']`. This tells `RestApiKnexPlugin` to perform a `LEFT JOIN` to both `publishers` and `authors` tables, and then apply the filter to their respective `name` columns. The `oneOf` ensures that a match in *either* related table will return the review.
+
+* **Filtering the parent resource (e.g., `publishers` or `authors`) by its polymorphic `hasMany` children (`reviews`):**
+    * You can filter `publishers` by `reviews.rating` or `authors` by `reviews.comment`. The system automatically handles the necessary `JOIN` to the `reviews` table and applies the filter.
+
+**Expected Output (Illustrative, IDs may vary):**
+
+```text
+Reviews for Publishers: [
+  {
+    id: '1',
+    rating: 5,
+    comment: 'Excellent publisher, great selection!',
+    reviewable_type: 'publishers',
+    reviewable_id: '1'
+  },
+  {
+    id: '3',
+    rating: 3,
+    comment: 'Decent publisher, some good titles.',
+    reviewable_type: 'publishers',
+    reviewable_id: '2'
+  }
+]
+Reviews for Goethe: [
+  {
+    id: '2',
+    rating: 4,
+    comment: 'Goethe is a profound thinker.',
+    reviewable_type: 'authors',
+    reviewable_id: '3' // Assuming Goethe's ID is 3 from previous data
+  }
+]
+Publishers with 5-star reviews: [
+  {
+    id: '1',
+    name: 'French Books Inc.'
+  }
+]
+Authors with "master storyteller" review: [
+  {
+    id: '1', // Victor Hugo's ID
+    name: 'Victor',
+    surname: 'Hugo',
+    publisher_id: '1'
+  }
+]
+Reviews for "French" entities: [
+  {
+    id: '1',
+    rating: 5,
+    comment: 'Excellent publisher, great selection!',
+    reviewable_type: 'publishers',
+    reviewable_id: '1'
+  },
+  {
+    id: '4',
+    rating: 5,
+    comment: 'Hugo is a master storyteller!',
+    reviewable_type: 'authors',
+    reviewable_id: '1'
+  }
+]
+```
 
 
 ## Many to many (hasMany with through records)
 
 ### Search (many to many)
 
-### Sparse fields (many to many)
 
-### Computed and hidden fields
+
+## Pagination on queries
+
+
+
 
 
 ## Next Steps

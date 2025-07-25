@@ -18,7 +18,7 @@ const findRelationshipDefinition = (schemaInfo, relationshipName) => {
   
   // Then check schema fields for belongsTo relationships with matching 'as' property
   for (const [fieldName, fieldDef] of Object.entries(schemaInfo.schemaStructure || {})) {
-    if (fieldDef.as === relationshipName && (fieldDef.belongsTo || fieldDef.belongsToPolymorphic)) {
+    if (fieldDef.as === relationshipName && fieldDef.belongsTo) {
       return fieldDef;
     }
   }
