@@ -334,7 +334,6 @@ export const RestApiKnexPlugin = {
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
-      debugger
       // Build field selection for sparse fieldsets
       // This determines which fields to SELECT from database
       // and tracks dependencies needed for computed fields

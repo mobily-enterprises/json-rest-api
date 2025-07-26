@@ -311,6 +311,7 @@ await api.addResource('countries', {
     nameLike: { type: 'string', actualField: 'name', filterUsing: 'like' }
   }
 });
+await api.resources.countries.createKnexTable()
 ```
 
 Note that the definition above is functionally _identical_ to the one provided a few paragraphs above.
@@ -376,6 +377,7 @@ await api.addResource('countries', {
     }
   }
 });
+await api.resources.countries.createKnexTable()
 ```
 
 With this configuration, searching becomes much more precise:
@@ -487,7 +489,7 @@ await api.addResource('countries', {
     // Custom search using a function
     nameOrCode: {
       type: 'string',
-      filterUsing: function(query, filterValue) {
+      applyFilter: function(query, filterValue) {
         // Custom SQL logic: case-insensitive search in name OR exact match on code
         query.where(function() {
           this.whereRaw('LOWER(name) LIKE LOWER(?)', [`%${filterValue}%`])
@@ -497,6 +499,12 @@ await api.addResource('countries', {
     }
   }
 });
+await api.resources.countries.createKnexTable()
+
+await api.resources.countries.post({ name: 'United States', code: 'US' });
+await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+await api.resources.countries.post({ name: 'United Arab Emirates', code: 'AE' });
+await api.resources.countries.post({ name: 'South Africa', code: 'ZA' });
 ```
 
 When `filterUsing` is a function instead of an operator string, it receives:
@@ -521,19 +529,22 @@ const results = await api.resources.countries.query({
 });
 ```
 
+The result is:
+
+```text
+Query results: [
+  { id: '1', name: 'United States', code: 'US' },
+  { id: '3', name: 'United Arab Emirates', code: 'AE' }
+]
+```
+
 The function approach is powerful for:
 - Case-insensitive searches
 - Complex conditions combining multiple fields
 - Database-specific functions
 - Custom business logic in searches
 
-
-
-
-
-
-
-The JSON:API response will contain an array of matching resources.
+Since `applyFilter` functions tend to be database-dependent, it's best to avoid using it unless necessary.
 
 #### Sparse Fieldsets
 
@@ -548,10 +559,11 @@ Let's work with our countries table:
 ```javascript
 await api.addResource('countries', {
   schema: {
-    name: { type: 'string', required: true, max: 100 },
-    code: { type: 'string', max: 2, unique: true }
+    name: { type: 'string', required: true, max: 100, search: true },
+    code: { type: 'string', max: 2, unique: true, search: true }
   }
 });
+await api.resources.countries.createKnexTable()
 
 // Add some test data
 await api.resources.countries.post({ name: 'France', code: 'FR' });
@@ -567,23 +579,28 @@ await api.resources.countries.post({ name: 'United States', code: 'US' });
 // Fetch a single country with all fields (default behavior)
 const fullCountry = await api.resources.countries.get({ id: '1' });
 console.log('Full record:', inspect(fullCountry));
-// Output: { id: '1', name: 'France', code: 'FR' }
 
 // Fetch only the name field
 const nameOnly = await api.resources.countries.get({ 
   id: '1',
-  fields: { countries: ['name'] }
+  queryParams: { fields: { countries: 'name' } }
 });
 console.log('Name only:', inspect(nameOnly));
-// Output: { id: '1', name: 'France' }
 
 // Fetch only the code field
 const codeOnly = await api.resources.countries.get({ 
   id: '1',
-  fields: { countries: ['code'] }
+  queryParams: { fields: { countries: 'code' } }
 });
 console.log('Code only:', inspect(codeOnly));
-// Output: { id: '1', code: 'FR' }
+```
+
+The output will be:
+
+```text
+Full record: { id: '1', name: 'France', code: 'FR' }
+Name only: { id: '1', name: 'France' }
+Code only: { id: '1', code: 'FR' }
 ```
 
 **Sparse Fieldsets with `query()` - Multiple Records:**
@@ -607,7 +624,7 @@ console.log('Full records:', inspect(fullRecords));
 const namesOnly = await api.resources.countries.query({
   queryParams: {
     filters: { name: 'United' },
-    fields: { countries: ['name'] }
+    fields: { countries: 'name' }
   }
 });
 console.log('Names only:', inspect(namesOnly));
@@ -620,7 +637,7 @@ console.log('Names only:', inspect(namesOnly));
 const codesOnly = await api.resources.countries.query({
   queryParams: {
     filters: { name: 'United' },
-    fields: { countries: ['code'] }
+    fields: { countries: 'code' }
   }
 });
 console.log('Codes only:', inspect(codesOnly));
@@ -672,7 +689,7 @@ await api.resources.countries.post({
 const sparseSearch = await api.resources.countries.query({
   queryParams: {
     filters: { search: 'south africa' },
-    fields: { countries: ['name', 'population'] }
+    fields: { countries: 'name,population'] }
   }
 });
 console.log('Sparse search result:', inspect(sparseSearch));
@@ -1062,9 +1079,6 @@ Sparse Publishers Query (all results): [
 ]
 ```
 
-
----
-
 ### Filtering by `belongsTo` Relationships
 
 You can filter resources based on conditions applied to their `belongsTo` relationships. This is achieved by defining filterable fields in the `searchSchema` that map to either the foreign key or fields on the related resource.
@@ -1119,16 +1133,12 @@ const publishersFromUK = await api.resources.publishers.query({
 console.log('Publishers from UK (by countryCode):', inspect(publishersFromUK));
 ```
 
-**Expected Output (Publishers from France by country ID - Illustrative, IDs may vary):**
+**Expected Output**
 
 ```text
-Publishers from France (by country ID): [
-  {
-    id: '1',
-    name: 'French Books Inc.',
-    country_id: '1',
-    country: { id: '1', name: 'France', code: 'FR' }
-  }
+Publishers from France (by country ID): [ { id: '1', name: 'French Books Inc.', country_id: '1' } ]
+Publishers with No Country (by country ID: null): [ { id: '4', name: 'Global Publishing' } ]
+Publishers from UK (by countryCode): [ { id: '2', name: 'UK Books Ltd.', country_id: '3' } ]
 ```
 
 ## hasMany records
@@ -1379,13 +1389,15 @@ Authors from German Press: [ { id: '3', name: 'Johann', surname: 'Goethe', publi
 
 Once again, the search logic is always define on the `schema` -- that is, it's handled by the server -- and not by the client.
 
+This is the part of the searchSchema that does the trick:
 
+```javascript
+    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' } // Cross-table search
+```
 
+The query will automatically add all of the necessary joins to the query so that `publishers.name` will be searched.
 
-
-
-
-
+The difference with a normal serach on a field of the main table is in the fact that we provided the full path (`publisher.name`). All of the other search options ( `oneOf`, `filterUsing`, `splitBy`) are available
 
 
 ## hasMany records (polymorphic)
@@ -2119,8 +2131,9 @@ Reviews for "French" entities: [
 ]
 ```
 
-
 ## Many to many (hasMany with through records)
+
+
 
 ### Search (many to many)
 

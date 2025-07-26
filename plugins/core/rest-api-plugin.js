@@ -1050,7 +1050,6 @@ const validatePivotResource = (scopes, relDef, relName) => {
 
       const { validatedObject, errors } = await schema.validate(attributesToValidate, validationOptions);
 
-      debugger
       if (Object.keys(errors).length > 0) {
         // --- START OF MODIFICATION ---
         const schemaStructure = context.schemaInfo.schema.structure; // Get the schema structure for lookup
