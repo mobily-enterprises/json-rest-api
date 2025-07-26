@@ -1560,7 +1560,7 @@ api.addResource('books', {
     title: { 
       type: 'string', 
       required: true,
-      search: { filterUsing: 'like' }  // Enable LIKE filtering
+      search: { filterOperator: 'like' }  // Enable LIKE filtering
     },
     author: { 
       type: 'string', 
@@ -1570,8 +1570,8 @@ api.addResource('books', {
     year: { 
       type: 'number',
       search: {
-        year_min: { filterUsing: '>=' },
-        year_max: { filterUsing: '<=' }
+        year_min: { filterOperator: '>=' },
+        year_max: { filterOperator: '<=' }
       }
     },
     price: { 
@@ -1821,7 +1821,7 @@ api.addResource('books', {
        authorName: {
          type: 'string',
          actualField: 'authors.name',  // Reference field in related table
-         filterUsing: 'like'
+         filterOperator: 'like'
        }
      }
    });
@@ -1856,13 +1856,13 @@ api.addResource('book_authors', {
     bookTitle: {
       type: 'string',
       actualField: 'books.title',
-      filterUsing: 'like'
+      filterOperator: 'like'
     },
     // Search by author name
     authorName: {
       type: 'string',
       actualField: 'people.name',
-      filterUsing: 'like'
+      filterOperator: 'like'
     }
   }
 });
@@ -2119,7 +2119,7 @@ api.addResource('comments', {
     // Search by title of the commented item
     commentableTitle: {
       type: 'string',
-      filterUsing: 'like',
+      filterOperator: 'like',
       polymorphicField: 'commentable',
       targetFields: {
         books: 'title',

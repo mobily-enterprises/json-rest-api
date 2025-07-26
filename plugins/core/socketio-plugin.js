@@ -58,15 +58,15 @@ export const SocketIOPlugin = {
           continue;
         }
 
-        // Check if filterUsing is a function
-        if (typeof fieldDef.filterUsing === 'function') {
+        // Check if filterOperator is a function
+        if (typeof fieldDef.filterOperator === 'function') {
           // Must use filterRecord (validated during subscription)
           if (!fieldDef.filterRecord(record, filterValue)) {
             return false;
           }
         } else {
           // Use simple operator logic
-          const operator = fieldDef.filterUsing || '=';
+          const operator = fieldDef.filterOperator || '=';
 
           switch (operator) {
             case 'like':
@@ -355,7 +355,7 @@ export const SocketIOPlugin = {
               for (const filterKey of Object.keys(filters)) {
                 const fieldDef = searchSchema.structure[filterKey];
 
-                if (fieldDef && typeof fieldDef.filterUsing === 'function' && !fieldDef.filterRecord) {
+                if (fieldDef && typeof fieldDef.filterOperator === 'function' && !fieldDef.filterRecord) {
                   const error = {
                     code: 'UNSUPPORTED_FILTER',
                     message: `Filter '${filterKey}' uses custom SQL logic and requires 'filterRecord' for real-time 

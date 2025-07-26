@@ -44,7 +44,7 @@
  *       videos: 'title',     // When commentable_type='videos', search videos.title
  *       articles: 'headline' // When commentable_type='articles', search articles.headline
  *     },
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * }
  * 
@@ -263,7 +263,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
                 finalAlias = `${finalAlias}_${pathParts[i]}`;
               }
 
-              const operator = searchInfo.fieldDef.filterUsing || '=';
+              const operator = searchInfo.fieldDef.filterOperator || '=';
               if (operator === 'like') {
                 this.where(`${finalAlias}.${fieldName}`, 'like', `%${searchInfo.filterValue}%`);
               } else {
@@ -271,7 +271,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
               }
             } else {
               // Direct field
-              const operator = searchInfo.fieldDef.filterUsing || '=';
+              const operator = searchInfo.fieldDef.filterOperator || '=';
               if (operator === 'like') {
                 this.where(`${baseAlias}.${targetFieldPath}`, 'like', `%${searchInfo.filterValue}%`);
               } else {
@@ -303,7 +303,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  *   author_name: {
  *     type: 'string',
  *     actualField: 'author.name',  // Dot notation for cross-table access
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * }
  * // Generates:
@@ -330,7 +330,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  *   company_country: {
  *     type: 'string',
  *     actualField: 'author.company.country.name',  // 3-level deep
- *     filterUsing: '='
+ *     filterOperator: '='
  *   }
  * }
  * // Generates chain of JOINs:
@@ -473,7 +473,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
       // Process cross-table filters
       switch (true) {
         case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
-          const operator = fieldDef.filterUsing || '=';
+          const operator = fieldDef.filterOperator || '=';
           
           // Handle split search terms
           let searchTerms = [filterValue];
@@ -543,7 +543,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
             dbField = fieldPathMap.get(dbField) || dbField;
           }
 
-          const operator = fieldDef.filterUsing || '=';
+          const operator = fieldDef.filterOperator || '=';
 
           switch (operator) {
             case 'like':
@@ -589,7 +589,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  * searchSchema: {
  *   status: {
  *     type: 'string',
- *     filterUsing: '='  // Exact match
+ *     filterOperator: '='  // Exact match
  *   }
  * }
  * // For filter: { status: 'published' }
@@ -599,7 +599,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  * searchSchema: {
  *   title: {
  *     type: 'string',
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * }
  * // For filter: { title: 'JavaScript' }
@@ -623,11 +623,11 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  * searchSchema: {
  *   category_id: {
  *     type: 'array',
- *     filterUsing: 'in'
+ *     filterOperator: 'in'
  *   },
  *   created_at: {
  *     type: 'array',
- *     filterUsing: 'between'
+ *     filterOperator: 'between'
  *   }
  * }
  * // For filters: { 
@@ -716,7 +716,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
       switch (true) {
         case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
           // Multi-field OR search
-          const operator = fieldDef.filterUsing || '=';
+          const operator = fieldDef.filterOperator || '=';
           
           // Handle split search terms
           let searchTerms = [filterValue];
@@ -787,7 +787,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           // Always qualify field names
           const dbField = qualifyField(actualField);
 
-          const operator = fieldDef.filterUsing || '=';
+          const operator = fieldDef.filterOperator || '=';
           log.trace(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`);
 
           switch (operator) {

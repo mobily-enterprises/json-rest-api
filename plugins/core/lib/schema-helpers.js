@@ -28,27 +28,27 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * @example
  * // Example 1: Basic searchSchema indexing
  * const searchSchema = {
- *   title: { type: 'string', filterUsing: 'contains' },
- *   status: { type: 'string', filterUsing: '=' },
- *   created_at: { type: 'datetime', filterUsing: '>=' }
+ *   title: { type: 'string', filterOperator: 'contains' },
+ *   status: { type: 'string', filterOperator: '=' },
+ *   created_at: { type: 'datetime', filterOperator: '>=' }
  * };
  * ensureSearchFieldsAreIndexed(searchSchema);
  * // After processing:
  * // {
- * //   title: { type: 'string', filterUsing: 'contains', indexed: true },
- * //   status: { type: 'string', filterUsing: '=', indexed: true },
- * //   created_at: { type: 'datetime', filterUsing: '>=', indexed: true }
+ * //   title: { type: 'string', filterOperator: 'contains', indexed: true },
+ * //   status: { type: 'string', filterOperator: '=', indexed: true },
+ * //   created_at: { type: 'datetime', filterOperator: '>=', indexed: true }
  * // }
  * 
  * @example
  * // Example 2: Virtual fields for cross-table search
  * const searchSchema = {
  *   // Regular field
- *   name: { type: 'string', filterUsing: 'contains' },
+ *   name: { type: 'string', filterOperator: 'contains' },
  *   // Virtual field that searches in related table
  *   author_name: {
  *     type: 'string',
- *     filterUsing: 'contains',
+ *     filterOperator: 'contains',
  *     virtualField: {
  *       joinTo: 'users',
  *       joinOn: ['author_id', 'id'],
@@ -62,14 +62,14 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
  * @example
  * // Example 3: Already indexed fields are not modified
  * const searchSchema = {
- *   email: { type: 'string', filterUsing: '=', indexed: false },  // Explicitly false
- *   username: { type: 'string', filterUsing: '=', indexed: true }  // Already true
+ *   email: { type: 'string', filterOperator: '=', indexed: false },  // Explicitly false
+ *   username: { type: 'string', filterOperator: '=', indexed: true }  // Already true
  * };
  * ensureSearchFieldsAreIndexed(searchSchema);
  * // Results in:
  * // {
- * //   email: { type: 'string', filterUsing: '=', indexed: true },     // Overridden to true
- * //   username: { type: 'string', filterUsing: '=', indexed: true }   // Unchanged
+ * //   email: { type: 'string', filterOperator: '=', indexed: true },     // Overridden to true
+ * //   username: { type: 'string', filterOperator: '=', indexed: true }   // Unchanged
  * // }
  * 
  * @example
@@ -124,13 +124,13 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * const schema = {
  *   title: { type: 'string', search: true },              // Simple search
  *   content: { type: 'text' },                            // Not searchable
- *   status: { type: 'string', search: { filterUsing: '=' } }  // Custom operator
+ *   status: { type: 'string', search: { filterOperator: '=' } }  // Custom operator
  * };
  * const searchSchema = generateSearchSchemaFromSchema(schema, null);
  * // Returns:
  * // {
- * //   title: { type: 'string', filterUsing: '=' },
- * //   status: { type: 'string', filterUsing: '=' }
+ * //   title: { type: 'string', filterOperator: '=' },
+ * //   status: { type: 'string', filterOperator: '=' }
  * // }
  * 
  * @example
@@ -139,8 +139,8 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  *   published_at: {
  *     type: 'datetime',
  *     search: {
- *       published_after: { filterUsing: '>=', type: 'datetime' },
- *       published_before: { filterUsing: '<=', type: 'datetime' }
+ *       published_after: { filterOperator: '>=', type: 'datetime' },
+ *       published_before: { filterOperator: '<=', type: 'datetime' }
  *     }
  *   }
  * };
@@ -150,12 +150,12 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * //   published_after: { 
  * //     type: 'datetime', 
  * //     actualField: 'published_at',  // Maps to real field
- * //     filterUsing: '>=' 
+ * //     filterOperator: '>=' 
  * //   },
  * //   published_before: { 
  * //     type: 'datetime', 
  * //     actualField: 'published_at', 
- * //     filterUsing: '<=' 
+ * //     filterOperator: '<=' 
  * //   }
  * // }
  * 
@@ -165,15 +165,15 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  *   name: { type: 'string', search: true }
  * };
  * const explicitSearchSchema = {
- *   email: { type: 'string', filterUsing: '=' },
- *   age: { type: 'number', filterUsing: '>=' }
+ *   email: { type: 'string', filterOperator: '=' },
+ *   age: { type: 'number', filterOperator: '>=' }
  * };
  * const searchSchema = generateSearchSchemaFromSchema(schema, explicitSearchSchema);
  * // Returns:
  * // {
- * //   email: { type: 'string', filterUsing: '=' },    // From explicit
- * //   age: { type: 'number', filterUsing: '>=' },     // From explicit
- * //   name: { type: 'string', filterUsing: '=' }      // From schema
+ * //   email: { type: 'string', filterOperator: '=' },    // From explicit
+ * //   age: { type: 'number', filterOperator: '>=' },     // From explicit
+ * //   name: { type: 'string', filterOperator: '=' }      // From schema
  * // }
  * 
  * @example
@@ -182,7 +182,7 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  *   email: { type: 'string', search: true }
  * };
  * const explicitSearchSchema = {
- *   email: { type: 'string', filterUsing: 'contains' }
+ *   email: { type: 'string', filterOperator: 'contains' }
  * };
  * generateSearchSchemaFromSchema(schema, explicitSearchSchema);
  * // Throws RestApiValidationError:
@@ -196,7 +196,7 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  *     search: {
  *       category_name: {
  *         type: 'string',
- *         filterUsing: 'contains',
+ *         filterOperator: 'contains',
  *         virtualField: {
  *           joinTo: 'categories',
  *           joinOn: ['category_id', 'id'],
@@ -211,7 +211,7 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * // {
  * //   category_name: {
  * //     type: 'string',
- * //     filterUsing: 'contains',
+ * //     filterOperator: 'contains',
  * //     virtualField: { ... }  // Virtual field config for cross-table search
  * //   }
  * // }
@@ -254,17 +254,17 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
           );
         }
         
-        // Simple boolean - copy entire field definition (except search) and add filterUsing
+        // Simple boolean - copy entire field definition (except search) and add filterOperator
         const { search, ...fieldDefWithoutSearch } = fieldDef;
         searchSchema[fieldName] = {
           ...fieldDefWithoutSearch,
           // Default filter behavior based on type
-          filterUsing: fieldDef.type === 'string' ? '=' : '='
+          filterOperator: fieldDef.type === 'string' ? '=' : '='
         };
       } else if (typeof effectiveSearch === 'object') {
         // Check if search defines multiple filter fields
         const hasNestedFilters = Object.values(effectiveSearch).some(
-          v => typeof v === 'object' && v.filterUsing
+          v => typeof v === 'object' && v.filterOperator
         );
         
         if (hasNestedFilters) {

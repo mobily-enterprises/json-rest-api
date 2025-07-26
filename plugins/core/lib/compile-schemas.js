@@ -71,11 +71,11 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema } from './
  * 
  * // Explicit searchSchema can override:
  * const searchSchema = {
- *   title: { type: 'string', filterUsing: 'contains' },
- *   status: { type: 'string', filterUsing: '=' },
+ *   title: { type: 'string', filterOperator: 'contains' },
+ *   status: { type: 'string', filterOperator: '=' },
  *   author_name: {  // Virtual field for joins
  *     type: 'string',
- *     filterUsing: 'contains',
+ *     filterOperator: 'contains',
  *     actualTable: 'users',
  *     actualField: 'name'
  *   }
@@ -185,7 +185,7 @@ export async function compileSchemas(scope, deps) {
   // in the main schema, or provide an explicit searchSchema with more control over filtering.
   // The explicit searchSchema takes precedence and can define virtual fields for joins.
   // Example: title: {search: true} auto-generates a searchable field with sensible defaults,
-  // while searchSchema can specify filterUsing: 'contains' or complex join configurations.
+  // while searchSchema can specify filterOperator: 'contains' or complex join configurations.
   let rawSearchSchema = scope.scopeOptions.searchSchema ||
   generateSearchSchemaFromSchema(schemaContext.schema);
   

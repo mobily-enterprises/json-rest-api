@@ -269,7 +269,7 @@ await api.addResource('reviews', {
     // Search by the title of the reviewed item
     reviewableTitle: {
       type: 'string',
-      filterUsing: 'like',
+      filterOperator: 'like',
       polymorphicField: 'reviewable',
       targetFields: {
         books: 'title',

@@ -223,13 +223,13 @@ api.addResource('users', {
 ```javascript
 searchSchema: {
   // Simple field search
-  title: { type: 'string', filterUsing: 'like' },
+  title: { type: 'string', filterOperator: 'like' },
   
   // Cross-table search
   authorName: {
     type: 'string',
     actualField: 'users.name',  // Table.field notation
-    filterUsing: 'like'
+    filterOperator: 'like'
   },
   
   // Multi-field search
@@ -254,7 +254,7 @@ searchSchema: {
 searchSchema: {
   trackableTitle: {
     type: 'string',
-    filterUsing: 'like',
+    filterOperator: 'like',
     polymorphicField: 'trackable',  // References relationship name
     targetFields: {
       articles: 'title',      // When type=articles, search title

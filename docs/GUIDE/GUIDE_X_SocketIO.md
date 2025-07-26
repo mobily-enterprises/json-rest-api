@@ -150,10 +150,10 @@ await api.addResource('posts', {
   
   searchSchema: {
     // These filters work for both REST and WebSocket
-    status: { type: 'string', filterUsing: '=' },
-    author_id: { type: 'id', filterUsing: '=' },
-    published_at: { type: 'dateTime', filterUsing: '>=' },
-    view_count: { type: 'number', filterUsing: '>' }
+    status: { type: 'string', filterOperator: '=' },
+    author_id: { type: 'id', filterOperator: '=' },
+    published_at: { type: 'dateTime', filterOperator: '>=' },
+    view_count: { type: 'number', filterOperator: '>' }
   }
 });
 
@@ -203,20 +203,20 @@ Filters using simple operators (`=`, `>`, `>=`, `<`, `<=`, `!=`, `like`, `in`, `
 ```javascript
 searchSchema: {
   // Equality
-  status: { type: 'string', filterUsing: '=' },
+  status: { type: 'string', filterOperator: '=' },
   
   // Comparison
-  price: { type: 'number', filterUsing: '>=' },
-  stock: { type: 'number', filterUsing: '>' },
+  price: { type: 'number', filterOperator: '>=' },
+  stock: { type: 'number', filterOperator: '>' },
   
   // Pattern matching
-  title: { type: 'string', filterUsing: 'like' },
+  title: { type: 'string', filterOperator: 'like' },
   
   // Multiple values
-  category_id: { type: 'array', filterUsing: 'in' },
+  category_id: { type: 'array', filterOperator: 'in' },
   
   // Range
-  created_at: { type: 'date', filterUsing: 'between' }
+  created_at: { type: 'date', filterOperator: 'between' }
 }
 
 // These work for both REST and WebSocket
@@ -234,7 +234,7 @@ socket.emit('subscribe', {
 
 ### Complex Filters with filterRecord
 
-When `filterUsing` is a function (for complex SQL queries), you must provide `filterRecord` for WebSocket support:
+When `filterOperator` is a function (for complex SQL queries), you must provide `filterRecord` for WebSocket support:
 
 ```javascript
 searchSchema: {
@@ -243,7 +243,7 @@ searchSchema: {
     type: 'string',
     
     // For REST API - builds SQL query
-    filterUsing: function(query, value, { tableName }) {
+    filterOperator: function(query, value, { tableName }) {
       query.where(function() {
         this.where(`${tableName}.title`, 'like', `%${value}%`)
             .orWhere(`${tableName}.description`, 'like', `%${value}%`)
@@ -269,7 +269,7 @@ searchSchema: {
     type: 'object',
     
     // REST: Haversine formula in SQL
-    filterUsing: function(query, value, { tableName }) {
+    filterOperator: function(query, value, { tableName }) {
       const { lat, lng, radius = 10 } = value;
       query.whereRaw(`
         (6371 * acos(
@@ -296,7 +296,7 @@ searchSchema: {
     type: 'object',
     
     // REST: Complex JOIN with user permissions
-    filterUsing: function(query, value, { tableName }) {
+    filterOperator: function(query, value, { tableName }) {
       const { user_id, include_private } = value;
       query.where(`${tableName}.owner_id`, user_id);
       if (!include_private) {
@@ -937,14 +937,14 @@ Check:
 
 **2. "UNSUPPORTED_FILTER" errors**
 
-If using custom filterUsing functions, you must provide filterRecord:
+If using custom filterOperator functions, you must provide filterRecord:
 
 ```javascript
 // ❌ This will error for WebSocket
 searchSchema: {
   complex_search: {
     type: 'string',
-    filterUsing: function(query, value) { /* SQL */ }
+    filterOperator: function(query, value) { /* SQL */ }
   }
 }
 
@@ -952,7 +952,7 @@ searchSchema: {
 searchSchema: {
   complex_search: {
     type: 'string',
-    filterUsing: function(query, value) { /* SQL */ },
+    filterOperator: function(query, value) { /* SQL */ },
     filterRecord: function(record, value) { /* JavaScript */ }
   }
 }

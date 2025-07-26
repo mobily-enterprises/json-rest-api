@@ -6,7 +6,7 @@ The format you're using with `indexed: true` is not recognized by the REST API p
 ```javascript
 // INCORRECT - This won't work for filtering
 {
-  title: { type: 'string', indexed: true, search: { filterUsing: 'like' } },
+  title: { type: 'string', indexed: true, search: { filterOperator: 'like' } },
   status: { type: 'string', indexed: true, search: true }
 }
 ```
@@ -43,13 +43,13 @@ For partial string matching:
   title: { 
     type: 'string',
     search: {
-      filterUsing: 'like'  // Enables LIKE filtering
+      filterOperator: 'like'  // Enables LIKE filtering
     }
   },
   body: {
     type: 'string',
     search: {
-      filterUsing: 'like'
+      filterOperator: 'like'
     }
   }
 }
@@ -67,10 +67,10 @@ For creating multiple filter parameters from a single field:
     type: 'datetime',
     search: {
       published_after: {
-        filterUsing: '>='
+        filterOperator: '>='
       },
       published_before: {
-        filterUsing: '<='
+        filterOperator: '<='
       }
     }
   }
@@ -119,7 +119,7 @@ api.addResource('products', {
   searchSchema: {
     name: {
       type: 'string',
-      filterUsing: 'like'
+      filterOperator: 'like'
     },
     category: {
       type: 'string'  // Exact match
@@ -127,12 +127,12 @@ api.addResource('products', {
     price_min: {
       type: 'number',
       actualField: 'price',
-      filterUsing: '>='
+      filterOperator: '>='
     },
     price_max: {
       type: 'number',
       actualField: 'price',
-      filterUsing: '<='
+      filterOperator: '<='
     }
   }
 });
@@ -151,7 +151,7 @@ const articlesSchema = {
     type: 'string', 
     required: true,
     search: {
-      filterUsing: 'like'  // Enables contains/LIKE search
+      filterOperator: 'like'  // Enables contains/LIKE search
     }
   },
   
@@ -173,10 +173,10 @@ const articlesSchema = {
     type: 'datetime',
     search: {
       created_after: {
-        filterUsing: '>='
+        filterOperator: '>='
       },
       created_before: {
-        filterUsing: '<='
+        filterOperator: '<='
       }
     }
   },
@@ -199,8 +199,8 @@ api.addResource('articles', {
 
 1. **Remove `indexed: true`** - This property is not used by the REST API plugin for filtering
 2. **Use `search: true`** for simple equality filters
-3. **Use `search: { filterUsing: 'like' }`** for contains/partial matching
-4. **Use `search: { field_name: { filterUsing: 'operator' } }`** for custom filter names
+3. **Use `search: { filterOperator: 'like' }`** for contains/partial matching
+4. **Use `search: { field_name: { filterOperator: 'operator' } }`** for custom filter names
 5. The filter validation happens in the `query` method of the REST API plugin
 6. If no `searchSchema` is provided, it's automatically generated from fields with the `search` property
 

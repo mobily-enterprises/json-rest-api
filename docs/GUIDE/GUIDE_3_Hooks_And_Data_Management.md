@@ -10,7 +10,7 @@ Change the definition of the `countries` resource with this:
 // Countries table
 await api.addResource('countries', {
   schema: {
-    name: { type: 'string', required: true, max: 100, search: true, filterUsing: 'like' },
+    name: { type: 'string', required: true, max: 100, search: true, filterOperator: 'like' },
     code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
     screenName: { type: 'string', computed: true },
   }

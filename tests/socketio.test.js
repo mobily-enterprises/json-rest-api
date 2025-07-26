@@ -289,7 +289,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           simplified: false
         });
 
-        // Assuming we add a complex filter to the schema that uses filterUsing function
+        // Assuming we add a complex filter to the schema that uses filterOperator function
         // For now, test with country_id which is a simple filter
         const response = await new Promise((resolve) => {
           socket.emit('subscribe', {

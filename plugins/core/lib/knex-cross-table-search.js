@@ -27,7 +27,7 @@
  *   companyName: {
  *     type: 'string',
  *     actualField: 'companies.name',  // Cross-table reference
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * };
  * 
@@ -37,7 +37,7 @@
  *   companyName: {
  *     type: 'string',
  *     actualField: 'companies.name',  // articles → people → companies
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * };
  * 
@@ -47,7 +47,7 @@
  *   articleTitle: {
  *     type: 'string',
  *     actualField: 'articles.title',
- *     filterUsing: 'like'
+ *     filterOperator: 'like'
  *   }
  * };
  * 
@@ -341,7 +341,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * const searchSchema = {
    *   companyName: {
    *     actualField: 'companies.name',
-   *     filterUsing: 'like'
+   *     filterOperator: 'like'
    *   },
    *   search: {
    *     oneOf: ['name', 'email', 'companies.name']

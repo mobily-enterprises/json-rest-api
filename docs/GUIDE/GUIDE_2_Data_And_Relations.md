@@ -14,7 +14,7 @@ import util from 'util';
 import express from 'express'; // Added: Express
 
 // Utility used throughout this guide
-const inspect = (obj) => util.inspect(obj, { depth: 5 })
+const inspect = (obj) => util.inspect(obj, { depth: 8 })
 
 // Create a Knex instance connected to SQLite in-memory database
 const knex = knexLib({
@@ -145,7 +145,7 @@ Replace the data commands with these:
 await api.addResource('countries', {
   schema: {
     id: { type: 'string' },
-    name: { type: 'string', required: true, max: 100, search: true, filterUsing: 'like' },
+    name: { type: 'string', required: true, max: 100, search: true, filterOperator: 'like' },
     code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
   }
 });
@@ -227,7 +227,7 @@ However, rather than `true` or `false`, `search` can also be an object.
 Changing the definition of `name` in the `countries` resource to this:
 
 ```javascript
-    name: { type: 'string', required: true, max: 100, search: { filterUsing: 'like' } },
+    name: { type: 'string', required: true, max: 100, search: { filterOperator: 'like' } },
 ```
 
 Will give you the expected results:
@@ -242,7 +242,7 @@ Search for "Austr": [
 
 This is the 
 
-**Available operators for `filterUsing`:**
+**Available operators for `filterOperator`:**
 - `'='` - Exact match (default)
 - `'like'` - Partial match with % wildcards automatically added on both sides
 - `'>'`, `'>='`, `'<'`, `'<='` - Comparison operators for numeric/date fields
@@ -257,8 +257,8 @@ await api.addResource('countries', {
   schema: {
     name: {
       type: 'string', required: true, search: {
-        name: { filterUsing: '=', type: 'string' },
-        nameLike: { filterUsing: 'like', type: 'string' }
+        name: { filterOperator: '=', type: 'string' },
+        nameLike: { filterOperator: 'like', type: 'string' }
       }
     },
     code: { type: 'string', unique: true, search: true }
@@ -306,9 +306,9 @@ await api.addResource('countries', {
   },
   searchSchema: {
     // Define searchable fields explicitly
-    name: { type: 'string', filterUsing: '=' },
-    code: { type: 'string', filterUsing: '=' },
-    nameLike: { type: 'string', actualField: 'name', filterUsing: 'like' }
+    name: { type: 'string', filterOperator: '=' },
+    code: { type: 'string', filterOperator: '=' },
+    nameLike: { type: 'string', actualField: 'name', filterOperator: 'like' }
   }
 });
 await api.resources.countries.createKnexTable()
@@ -332,7 +332,7 @@ searchSchema: {
   search: {
     type: 'string',
     oneOf: ['name', 'code'],
-    filterUsing: 'like'
+    filterOperator: 'like'
   }
 }
 
@@ -371,7 +371,7 @@ await api.addResource('countries', {
     search: {
       type: 'string',
       oneOf: ['name', 'code'],
-      filterUsing: 'like',
+      filterOperator: 'like',
       splitBy: ' ',      // Split search terms by space
       matchAll: true     // Require ALL terms to match (AND logic)
     }
@@ -449,7 +449,7 @@ searchSchema: {
   tags: {
     type: 'string',
     oneOf: ['tags', 'categories', 'keywords'],
-    filterUsing: 'like',
+    filterOperator: 'like',
     splitBy: ',',       // Split by comma
     matchAll: false     // OR logic (default) - match ANY term
   },
@@ -458,7 +458,7 @@ searchSchema: {
   codes: {
     type: 'string',
     oneOf: ['primary_code', 'secondary_code'],
-    filterUsing: '=',   // Exact match
+    filterOperator: '=',   // Exact match
     splitBy: ' ',
     matchAll: true      // All codes must match exactly
   }
@@ -483,8 +483,8 @@ await api.addResource('countries', {
   },
   searchSchema: {
     // Standard fields
-    name: { type: 'string', filterUsing: '=' },
-    code: { type: 'string', filterUsing: '=' },
+    name: { type: 'string', filterOperator: '=' },
+    code: { type: 'string', filterOperator: '=' },
     
     // Custom search using a function
     nameOrCode: {
@@ -507,7 +507,7 @@ await api.resources.countries.post({ name: 'United Arab Emirates', code: 'AE' })
 await api.resources.countries.post({ name: 'South Africa', code: 'ZA' });
 ```
 
-When `filterUsing` is a function instead of an operator string, it receives:
+When `filterOperator` is a function instead of an operator string, it receives:
 - `query` - The Knex query builder instance
 - `filterValue` - The search value from the user
 - `fieldName` - The name of the search field (optional third parameter)
@@ -664,7 +664,7 @@ await api.addResource('countries', {
     search: {
       type: 'string',
       oneOf: ['name', 'continent'],
-      filterUsing: 'like',
+      filterOperator: 'like',
       splitBy: ' ',
       matchAll: true
     }
@@ -1153,14 +1153,14 @@ To demonstrate `hasMany` relationships with just two tables, we'll use `publishe
 // Define publishers resource
 await api.addResource('publishers', {
   schema: {
-    name: { type: 'string', required: true, max: 255, search: true },
+    name: { type: 'string', required: true, max: 255, search: true, indexed: true },
   },
   relationships: {
     // A publisher has many authors
     authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
   },
   searchSchema: { // Adding search schema for publishers
-    name: { type: 'string', filterUsing: 'like' }
+    name: { type: 'string', filterOperator: 'like' }
   }
 });
 await api.resources.publishers.createKnexTable();
@@ -1173,10 +1173,10 @@ await api.addResource('authors', {
     publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
   },
   searchSchema: { // Adding search schema for authors
-    name: { type: 'string', filterUsing: 'like' },
-    surname: { type: 'string', filterUsing: 'like' },
+    name: { type: 'string', filterOperator: 'like' },
+    surname: { type: 'string', filterOperator: 'like' },
     publisher: { type: 'id', actualField: 'publisher_id', nullable: true },
-    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' } // Cross-table search
+    publisherName: { type: 'string', actualField: 'publishers.name', filterOperator: 'like' } // Cross-table search
   }
 });
 await api.resources.authors.createKnexTable();
@@ -1201,8 +1201,49 @@ console.log('Added French Publisher:', inspect(frenchPublisher));
 console.log('Added Victor Hugo:', inspect(frenchAuthor1));
 console.log('Added Émile Zola:', inspect(frenchAuthor2));
 console.log('Added German Publisher:', inspect(germanPublisher));
-// ... and so on for other data.
+
+// Get the French publisher and include its authors (simplified mode output)
+const frenchPublisherWithAuthorIdss = await api.resources.publishers.get({
+  id: frenchPublisher.id,
+  queryParams: {
+    include: ['authors'] // Use the relationship name 'authors' defined in the publishers schema
+  }
+});
+console.log('French publisher  Authors (ids only):', inspect(allPublishersWithAuthorIds));
+
+const frenchPublisherWithAuthorIds = await api.resources.publishers.get({ id: frenchPublisher.id, });
+console.log('French publisher  Authors (author ids only, simplified):', inspect(frenchPublisherWithAuthorIds));
+
+const frenchPublisherWithAuthorIdsFull = await api.resources.publishers.get({ id: frenchPublisher.id, simplified: false });
+console.log('French publisher  Authors (author ids only, NOT simplified):', inspect(frenchPublisherWithAuthorIdsFull));
 ```
+
+The output:
+
+```text
+Added French Publisher: { id: '1', name: 'French Books Inc.', authors_ids: [] }
+Added Victor Hugo: { id: '1', name: 'Victor', surname: 'Hugo', publisher_id: '1' }
+Added Émile Zola: { id: '2', name: 'Émile', surname: 'Zola', publisher_id: '1' }
+Added German Publisher: { id: '2', name: 'German Press GmbH', authors_ids: [] }
+French publisher  Authors (ids only, simplified): { id: '1', name: 'French Books Inc.', authors_ids: [ '1', '2' ] }
+French publisher  Authors (ids only, NOT simplified): {
+  data: {
+    type: 'publishers',
+    id: '1',
+    attributes: { name: 'French Books Inc.' },
+    relationships: {
+      authors: {
+        data: [ { type: 'authors', id: '1' }, { type: 'authors', id: '2' } ]
+      }
+    },
+    links: { self: '/api/1.0/publishers/1' }
+  },
+  links: { self: '/api/1.0/publishers/1' }
+}
+```
+
+Note that the fresh publisher has the IDs of the French authors, both in simplified and non-simplified mode. This is a very important feature. `json-rest-api` will minimise the number of queries needed to fetch the extra IDS, but having the relation will incur an extra computational cost; however, it will enable discoverability.
+
 
 ### Including `hasMany` Records (`include`)
 
@@ -1212,26 +1253,71 @@ When fetching data programmatically in **simplified mode** (which is the default
 
 #### Programmatic Usage:
 
+Using the exact same data as before, you can change the query to `include` countries:
+
 ```javascript
-// Re-add data for a fresh start (schemas are reused from above)
-const frenchPublisher = await api.resources.publishers.post({ name: 'French Books Inc.' });
-const germanPublisher = await api.resources.publishers.post({ name: 'German Press GmbH' });
-const internationalPublisher = await api.resources.publishers.post({ name: 'Global Publishing' });
-
-await api.resources.authors.post({ name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id });
-await api.resources.authors.post({ name: 'Émile', surname: 'Zola', publisher: frenchPublisher.id });
-await api.resources.authors.post({ name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id });
-await api.resources.authors.post({ name: 'Unknown', surname: 'Author', publisher: null });
-
-
 // Get the French publisher and include its authors (simplified mode output)
-const frenchPublisherWithAuthors = await api.resources.publishers.get({
+const frenchPublisherWithAuthorInfo = await api.resources.publishers.get({
   id: frenchPublisher.id,
   queryParams: {
     include: ['authors'] // Use the relationship name 'authors' defined in the publishers schema
   }
 });
-console.log('French Publisher with Authors:', inspect(frenchPublisherWithAuthors));
+console.log('French publisher Authors (with authors, only, simplified):', inspect(frenchPublisherWithAuthorInfo));
+
+// Get the French publisher and include its authors (simplified mode output)
+const frenchPublisherWithAuthorInfoFull = await api.resources.publishers.get({
+  id: frenchPublisher.id,
+  queryParams: {
+    include: ['authors'] // Use the relationship name 'authors' defined in the publishers schema
+  },
+  simplified: false
+});
+console.log('French publisher  Authors (with authors, NOT simplified):', inspect(frenchPublisherWithAuthorInfoFull));
+```
+
+This is the result:
+
+```text
+French publisher  Authors (with authors, NOT simplified): {
+  data: {
+    type: 'publishers',
+    id: '1',
+    attributes: { name: 'French Books Inc.' },
+    relationships: {
+      authors: {
+        data: [ { type: 'authors', id: '1' }, { type: 'authors', id: '2' } ],
+        links: {
+          self: '/api/1.0/publishers/1/relationships/authors',
+          related: '/api/1.0/publishers/1/authors'
+        }
+      }
+    },
+    links: { self: '/api/1.0/publishers/1' }
+  },
+  included: [
+    {
+      type: 'authors',
+      id: '1',
+      attributes: { name: 'Victor', surname: 'Hugo' },
+      relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
+      links: { self: '/api/1.0/authors/1' }
+    },
+    {
+      type: 'authors',
+      id: '2',
+      attributes: { name: 'Émile', surname: 'Zola' },
+      relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
+      links: { self: '/api/1.0/authors/2' }
+    }
+  ],
+  links: { self: '/api/1.0/publishers/1' }
+}
+```
+
+
+
+```javascript
 
 // Query all publishers and include their authors (simplified mode output)
 const allPublishersWithAuthors = await api.resources.publishers.query({
@@ -1251,18 +1337,9 @@ const allPublishersWithAuthorsNotSimplified = await api.resources.publishers.que
 console.log('All Publishers with Authors (not simplified):', inspect(allPublishersWithAuthorsNotSimplified));
 ```
 
-**Expected Output (Illustrative, IDs and content may vary based on `post` order):**
+**Expected Output:**
 
 ```text
-French Publisher with Authors: {
-  id: '1',
-  name: 'French Books Inc.',
-  authors_ids: [ '1', '2' ],
-  authors: [
-    { id: '1', name: 'Victor', surname: 'Hugo' },
-    { id: '2', name: 'Émile', surname: 'Zola' }
-  ]
-}
 All Publishers with Authors: [
   {
     id: '1',
@@ -1289,7 +1366,10 @@ All Publishers with Authors (not simplified): {
       attributes: { name: 'French Books Inc.' },
       relationships: {
         authors: {
-          data: [ [Object], [Object] ],
+          data: [
+            { type: 'authors', id: '1' },
+            { type: 'authors', id: '2' }
+          ],
           links: {
             self: '/api/1.0/publishers/1/relationships/authors',
             related: '/api/1.0/publishers/1/authors'
@@ -1304,7 +1384,7 @@ All Publishers with Authors (not simplified): {
       attributes: { name: 'German Press GmbH' },
       relationships: {
         authors: {
-          data: [ [Object] ],
+          data: [ { type: 'authors', id: '3' } ],
           links: {
             self: '/api/1.0/publishers/2/relationships/authors',
             related: '/api/1.0/publishers/2/authors'
@@ -1356,6 +1436,7 @@ All Publishers with Authors (not simplified): {
 }
 ```
 
+
 **Important Note on `hasMany` in Non-Simplified Mode:**
 
 In non-simplified (full JSON:API) mode, `hasMany` relationships in the `data` section of the parent resource only contain an empty `data` array or `links` to the related endpoint (e.g., `authors: { links: { related: '/api/1.0/publishers/1/authors' } }`). The actual related `author` resources are placed in the top-level `included` array. This is standard JSON:API behavior to avoid duplicating large amounts of data. The `included` array ensures that each included resource appears only once, even if referenced by multiple parent resources.
@@ -1392,12 +1473,12 @@ Once again, the search logic is always define on the `schema` -- that is, it's h
 This is the part of the searchSchema that does the trick:
 
 ```javascript
-    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' } // Cross-table search
+    publisherName: { type: 'string', actualField: 'publishers.name', filterOperator: 'like' } // Cross-table search
 ```
 
 The query will automatically add all of the necessary joins to the query so that `publishers.name` will be searched.
 
-The difference with a normal serach on a field of the main table is in the fact that we provided the full path (`publisher.name`). All of the other search options ( `oneOf`, `filterUsing`, `splitBy`) are available
+The difference with a normal serach on a field of the main table is in the fact that we provided the full path (`publisher.name`). All of the other search options ( `oneOf`, `filterOperator`, `splitBy`) are available
 
 
 ## hasMany records (polymorphic)
@@ -1413,19 +1494,17 @@ To implement this, the "belonging" resource (e.g., `review`) needs two foreign k
 For this section, we'll use our existing `publishers` and `authors` tables, and introduce a new `reviews` table that can give reviews to both authors and publishers.
 
 ```javascript
-
-
 // Define publishers resource
 await api.addResource('publishers', {
   schema: {
-    name: { type: 'string', required: true, max: 255, search: true },
+    name: { type: 'string', required: true, max: 255, search: true, indexed: true},
   },
   relationships: {
     authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
     reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
   },
   searchSchema: {
-    name: { type: 'string', filterUsing: 'like' }
+    name: { type: 'string', filterOperator: 'like' }
   }
 });
 await api.resources.publishers.createKnexTable();
@@ -1441,10 +1520,10 @@ await api.addResource('authors', {
     reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
   },
   searchSchema: {
-    name: { type: 'string', filterUsing: 'like' },
-    surname: { type: 'string', filterUsing: 'like' },
+    name: { type: 'string', filterOperator: 'like' },
+    surname: { type: 'string', filterOperator: 'like' },
     publisher: { type: 'id', actualField: 'publisher_id', nullable: true },
-    publisherName: { type: 'string', actualField: 'publishers.name', filterUsing: 'like' }
+    publisherName: { type: 'string', actualField: 'publishers.name', filterOperator: 'like' }
   }
 });
 await api.resources.authors.createKnexTable();
@@ -1455,9 +1534,8 @@ await api.addResource('reviews', {
     rating: { type: 'number', required: true, min: 1, max: 5 },
     comment: { type: 'string', max: 500, nullable: true },
     // These two fields store the polymorphic relationship data in the database
-    reviewable_type: { type: 'string', max: 50 }, // Stores 'publishers' or 'authors' - not required when using relationships
-    reviewable_id: { type: 'id' }, // Stores the ID of the publisher or author - not required when using relationships
-    // This defines the polymorphic relationship for API consumption
+    reviewable_type: { type: 'string', max: 50 }, 
+    reviewable_id: { type: 'id' }, 
   },
   relationships: {
     reviewable: {
@@ -1469,16 +1547,14 @@ await api.addResource('reviews', {
     }
   },
   searchSchema: {
-    rating: { type: 'number', filterUsing: '=' },
-    comment: { type: 'string', filterUsing: 'like' },
+    rating: { type: 'number', filterOperator: '=' },
+    comment: { type: 'string', filterOperator: 'like' },
     reviewableType: { type: 'string', actualField: 'reviewable_type' }, // Allows filtering by parent type
     reviewableId: { type: 'id', actualField: 'reviewable_id' },         // Allows filtering by parent ID
-    // Allows filtering reviews by the name of the associated publisher or author.
-    // 'oneOf' with dot notation enables cross-table polymorphic search.
     reviewableName: {
       type: 'string',
       oneOf: ['publishers.name', 'authors.name'],
-      filterUsing: 'like'
+      filterOperator: 'like'
     }
   }
 });
@@ -1498,7 +1574,6 @@ Now, let's add some data to reflect these `hasMany` connections. We'll create pu
 In **simplified mode**, you can pass the `reviewable_type` and `reviewable_id` directly as attributes, and the library automatically handles the mapping to the polymorphic relationship. This is often more convenient for internal application logic.
 
 ```javascript
-// Re-add publishers and authors for a fresh start
 const frenchPublisher_ns = await api.resources.publishers.post({ name: 'French Books Inc. (NS)' });
 const germanPublisher_ns = await api.resources.publishers.post({ name: 'German Press GmbH (NS)' });
 
@@ -1545,16 +1620,6 @@ const review4_non_simplified = await api.resources.reviews.post({
 console.log('Added Publisher Review (Non-Simplified Input):', inspect(review3_non_simplified));
 console.log('Added Author Review (Non-Simplified Input):', inspect(review4_non_simplified));
 
-// Test simplified mode
-console.log('\n=== Testing Simplified Mode ===');
-const review5_simplified = await api.resources.reviews.post({
-  rating: 4,
-  comment: 'Great German author! (Simplified)',
-  reviewable_type: 'authors',
-  reviewable_id: germanAuthor_ns.id
-});
-
-console.log('Added review in simplified mode:', inspect(review5_simplified));
 ```
 
 **Expected Output (Simplified Input):**
