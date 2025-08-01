@@ -1,0 +1,91 @@
+{
+  "name": "json-rest-api",
+  "version": "1.0.8",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "docs": "node scripts/run-docs.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mobily-enterprises/jsonrestapi.git"
+  },
+  "author": "Tony Mobily",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/mobily-enterprises/jsonrestapi/issues"
+  },
+  "homepage": "https://mobily-enterprises.github.io/json-rest-api",
+  "description": "REST API plugin for hooked-api with JSON:API compliance",
+  "dependencies": {
+    "hooked-api": "^1.0.14",
+    "json-rest-schema": "^1.0.8",
+    "semver": "^7.7.2"
+  },
+  "peerDependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "busboy": "^1.0.0",
+    "content-type": "^1.0.0",
+    "express": "^4.0.0 || ^5.0.0",
+    "formidable": "^3.0.0",
+    "fractional-indexing": "^3.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
+    "knex": "^3.1.0",
+    "raw-body": "^2.0.0",
+    "redis": "^5.6.0",
+    "socket.io": "^4.8.1"
+  },
+  "peerDependenciesMeta": {
+    "@socket.io/redis-adapter": {
+      "optional": true
+    },
+    "busboy": {
+      "optional": true
+    },
+    "content-type": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "formidable": {
+      "optional": true
+    },
+    "fractional-indexing": {
+      "optional": true
+    },
+    "jsonwebtoken": {
+      "optional": true
+    },
+    "jwks-rsa": {
+      "optional": true
+    },
+    "knex": {
+      "optional": true
+    },
+    "raw-body": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    },
+    "socket.io": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "better-sqlite3": "^11.10.0",
+    "express": "^5.1.0",
+    "fractional-indexing": "^3.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.2.0",
+    "knex": "^3.1.0",
+    "redis": "^5.6.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "supertest": "^7.1.3"
+  }
+}
