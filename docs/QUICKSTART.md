@@ -330,7 +330,7 @@ curl "http://localhost:3000/api/authors?sort=-surname"
 
 You've successfully set up a basic JSON REST API! This quickstart covered the essentials, but there's much more to explore.
 
-Check out the [full guide](./GUIDE.md) to learn about:
+Check out the [full guide](./GUIDE) to learn about:
 - Advanced relationships (many-to-many, polymorphic)
 - Authentication and authorization
 - Hooks and middleware
