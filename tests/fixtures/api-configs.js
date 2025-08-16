@@ -1446,3 +1446,90 @@ export async function createVirtualFieldsApi(knex, pluginOptions = {}) {
 
   return api;
 }
+
+/**
+ * Creates an API configuration for testing searchSchema merge behavior
+ */
+export async function createSearchSchemaMergeApi(knex, pluginOptions = {}) {
+  const api = new Api({
+    name: 'searchschema-merge-test-api',
+    version: '1.0.0',
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  });
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    ...pluginOptions['rest-api']
+  });
+  
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Test resource with both search:true and searchSchema
+  await api.addResource('products', {
+    schema: {
+      name: { type: 'string', search: true },        // Should be added to searchSchema
+      description: { type: 'string', search: true }, // Should be added to searchSchema
+      price: { type: 'number', search: true },       // Should be overridden by searchSchema
+      category_id: { type: 'number' },               // Not searchable
+      sku: { type: 'string', search: true },         // Should be added to searchSchema
+      status: { type: 'string' }                     // Not searchable but added via searchSchema
+    },
+    searchSchema: {
+      // This should override the price field from search:true
+      // 'between' operator requires array type for validation [min, max]
+      price: { 
+        type: 'array',
+        filterOperator: 'between'
+      },
+      // This is a virtual field
+      category_name: {
+        type: 'string',
+        actualField: 'category.name',
+        filterOperator: 'like'
+      },
+      // This is an explicit field not marked with search:true
+      // 'in' operator requires array type for validation
+      status: {
+        type: 'array',
+        filterOperator: 'in'
+      }
+    },
+    tableName: 'searchmerge_products'
+  });
+  await api.resources.products.createKnexTable();
+
+  // Test resource with only search:true fields
+  await api.addResource('users', {
+    schema: {
+      username: { type: 'string', search: true },
+      email: { type: 'string', search: true },
+      age: { type: 'number' },
+      bio: { type: 'string', search: { filterOperator: 'like' } }
+    },
+    tableName: 'searchmerge_users'
+  });
+  await api.resources.users.createKnexTable();
+
+  // Test resource with only explicit searchSchema
+  await api.addResource('orders', {
+    schema: {
+      order_number: { type: 'string' },
+      total: { type: 'number' },
+      status: { type: 'string' }
+    },
+    searchSchema: {
+      order_number: { type: 'string', filterOperator: '=' },
+      status: { type: 'array', filterOperator: 'in' }  // 'in' operator requires array type
+    },
+    tableName: 'searchmerge_orders'
+  });
+  await api.resources.orders.createKnexTable();
+
+  return api;
+}

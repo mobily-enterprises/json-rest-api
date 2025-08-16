@@ -195,11 +195,15 @@ export async function compileSchemas(scope, deps) {
   // Generate searchSchema by merging explicit searchSchema with fields marked search:true.
   // This allows two ways to define searchable fields: either mark fields with search:true
   // in the main schema, or provide an explicit searchSchema with more control over filtering.
-  // The explicit searchSchema takes precedence and can define virtual fields for joins.
+  // The explicit searchSchema takes precedence when there are conflicts - it can override
+  // fields marked with search:true. Fields with search:true that are NOT in the explicit
+  // searchSchema will be added automatically.
   // Example: title: {search: true} auto-generates a searchable field with sensible defaults,
   // while searchSchema can specify filterOperator: 'contains' or complex join configurations.
-  let rawSearchSchema = scope.scopeOptions.searchSchema ||
-  generateSearchSchemaFromSchema(schemaContext.schema);
+  let rawSearchSchema = generateSearchSchemaFromSchema(
+    schemaContext.schema,
+    scope.scopeOptions.searchSchema
+  );
   
   if (rawSearchSchema) {
     // Mark all search fields as indexed for database optimization.
