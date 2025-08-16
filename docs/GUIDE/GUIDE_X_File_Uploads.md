@@ -37,7 +37,7 @@ import { RestApiPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api'
 import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 
 // Create API
-const api = new Api({ name: 'my-api', version: '1.0.0' });
+const api = new Api({ name: 'my-api'});
 
 // Create storage
 const storage = new LocalStorage({
@@ -416,7 +416,7 @@ import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js';
 import express from 'express';
 
 // Setup
-const api = new Api({ name: 'image-api', version: '1.0.0' });
+const api = new Api({ name: 'image-api' });
 const storage = new LocalStorage({
   directory: './uploads/images',
   baseUrl: 'http://localhost:3000/uploads/images'
@@ -641,7 +641,6 @@ Enable debug logging to see what's happening:
 ```javascript
 const api = new Api({
   name: 'my-api',
-  version: '1.0.0',
   logLevel: 'debug'  // or 'trace' for more detail
 });
 ```

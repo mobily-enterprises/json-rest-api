@@ -115,7 +115,7 @@ import express from 'express';
 import knex from 'knex';
 
 // Create API instance
-const api = new Api({ name: 'my-api', version: '1.0.0' });
+const api = new Api({ name: 'my-api' });
 
 // Set up database
 const db = knex({
@@ -502,13 +502,11 @@ await api.use(CorsPlugin, {
     allowedHeaders: [
       'Content-Type',
       'Authorization',
-      'X-API-Version',        // Client specifies API version
       'X-Request-ID',         // For request tracking
       'X-Client-ID',          // Identify different client apps
       'X-Feature-Flags'       // Client-specific features
     ],
     exposedHeaders: [
-      'X-API-Version',        // Confirm which version was used
       'X-Deprecated',         // Warn about deprecated endpoints
       'X-Request-ID',         // For debugging
       'X-Cache-Status',       // Was this cached?
@@ -1155,7 +1153,7 @@ await apiV2.use(ExpressPlugin, {
 await apiV2.use(CorsPlugin, {
   'rest-api-cors': {
     origin: 'https://app.example.com', // v2 doesn't support legacy
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Version']
+    allowedHeaders: ['Content-Type', 'Authorization']
   }
 });
 
@@ -1468,7 +1466,6 @@ headers['Access-Control-Expose-Headers'] = [
   'X-RateLimit-Reset',
   
   // API Info
-  'X-API-Version',
   'X-Response-Time',
   'X-Request-ID'
 ].join(', ');

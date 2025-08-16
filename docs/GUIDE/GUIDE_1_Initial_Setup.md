@@ -41,10 +41,10 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
+const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0' });
+await api.use(RestApiPlugin, {returnBasePath: '/api' });
 await api.use(RestApiKnexPlugin, { knex });
 
 // Define schemas for our book catalog system
@@ -89,7 +89,6 @@ To change loglevels, pass a logLevel option to the API:
 ```javascript
 const api = new Api({ 
   name: 'book-catalog-api', 
-  version: '1.0.0',
   logLevel: 'warn'  // Only show warnings and errors
 });
 ```
@@ -220,9 +219,9 @@ console.log('Created Country:', inspect(countryUs));
 //     type: 'countries',
 //     id: '1',
 //     attributes: { name: 'United States', code: 'US' },
-//     links: { self: '/api/1.0/countries/1' }
+//     links: { self: '/api/countries/1' }
 //   },
-//   links: { self: '/api/1.0/countries/1' }
+//   links: { self: '/api/countries/1' }
 // }
 
 // Fetch a country by ID (non-simplified mode)
@@ -237,13 +236,13 @@ console.log('Refetched Country:', inspect(countryUsRefetched));
 //     type: 'countries',
 //     id: '1',
 //     attributes: { name: 'United States', code: 'US' },
-//     links: { self: '/api/1.0/countries/1' }
+//     links: { self: '/api/countries/1' }
 //   },
-//   links: { self: '/api/1.0/countries/1' }
+//   links: { self: '/api/countries/1' }
 // }
 ```
 
-(Note that the full JSON:API record includes links to resources, which use `publicBaseUrl` set in when `use()`ing the `json-rest-api` plugin.)
+(Note that the full JSON:API record includes links to resources, which use `returnBasePath` set in when `use()`ing the `json-rest-api` plugin.)
 
 As you can see, when `simplified: false` is used:
 
@@ -348,7 +347,7 @@ Here's how these settings work:
 
 ```javascript
 // Example 1: Using defaults
-const api = new Api({ name: 'api', version: '1.0.0' });
+const api = new Api({ name: 'api' });
 await api.use(RestApiPlugin); 
 // Default: returnRecordApi='full', returnRecordTransport='no'
 
@@ -418,9 +417,9 @@ console.log('Full JSON:API response:', inspect(fullJsonApi));
 //     type: 'countries',
 //     id: '4',
 //     attributes: { name: 'France', code: 'FR' },
-//     links: { self: '/api/1.0/countries/4' }
+//     links: { self: '/api/countries/4' }
 //   },
-//   links: { self: '/api/1.0/countries/4' }
+//   links: { self: '/api/countries/4' }
 // }
 
 // Non-simplified mode with minimal return
@@ -542,10 +541,10 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
+const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0' });
+await api.use(RestApiPlugin, {returnBasePath: '/api' });
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 
@@ -757,12 +756,12 @@ Keep-Alive: timeout=5
 When passing a parameter, `rest-api-plugin` normalises them (when needed) and stores them into plugin variables. This means that these two ways of defining `returnRecordApi` is identical:
 
 ```javascript
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0',  returnRecordTransport: 'minimal'});
+await api.use(RestApiPlugin, {returnBasePath: '/api',  returnRecordTransport: 'minimal'});
 
 // ...or...
 
 await api.use(RestApiPlugin, { 
-  publicBaseUrl: '/api/1.0', 
+ returnBasePath: '/api', 
   vars: {
     returnRecordTransport: 'minimal'
   }
@@ -776,7 +775,7 @@ Here is a full list of parameters and their respective variables:
 | `queryDefaultLimit` | `vars.queryDefaultLimit` | `25` | Default number of records returned in query results | ✓ |
 | `queryMaxLimit` | `vars.queryMaxLimit` | `100` | Maximum allowed limit for query results | ✓ |
 | `includeDepthLimit` | `vars.includeDepthLimit` | `3` | Maximum depth for nested relationship includes | ✓ |
-| `publicBaseUrl` | `vars.publicBaseUrl` | `''` | Base URL for generated links (e.g., `https://api.example.com/v1`) | ✓ |
+| `returnBasePath` | `vars.returnBasePath` | `''` | Base URL for generated links (e.g., `https://api.example.com/api`) | ✓ |
 | `enablePaginationCounts` | `vars.enablePaginationCounts` | `true` | Whether to include total count in pagination metadata | ✓ |
 | `simplifiedApi` | `vars.simplifiedApi` | `true` | Use simplified format for programmatic API calls | ✓ |
 | `simplifiedTransport` | `vars.simplifiedTransport` | `false` | Use simplified format for HTTP/REST endpoints | ✓ |

@@ -67,8 +67,8 @@ const BookSerializer = new JSONAPISerializer('books', {
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
 
-const api = new Api({ name: 'bookstore-api', version: '1.0.0' });
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/v1' });
+const api = new Api({ name: 'bookstore-api'});
+await api.use(RestApiPlugin, {returnBasePath: '/api' });
 await api.use(RestApiKnexPlugin, { knex });
 
 await api.addResource('books', {
@@ -109,7 +109,7 @@ export class BookEntity {
 import { Api } from 'hooked-api';
 import { RestApiPlugin, ExpressPlugin, SocketIOPlugin } from 'json-rest-api';
 
-const api = new Api({ name: 'books-api', version: '1.0.0' });
+const api = new Api({ name: 'books-api' });
 await api.use(RestApiPlugin);
 await api.use(ExpressPlugin);    // HTTP transport
 await api.use(SocketIOPlugin);   // WebSocket transport
@@ -201,10 +201,10 @@ import {
   SocketIOPlugin
 } from 'json-rest-api';
 
-const api = new Api({ name: 'full-featured-api', version: '1.0.0' });
+const api = new Api({ name: 'full-featured-api' });
 
 // Core functionality
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/v1' });
+await api.use(RestApiPlugin, {returnBasePath: '/api' });
 await api.use(RestApiKnexPlugin, { knex: connection });
 
 // Transport layer
@@ -362,7 +362,7 @@ app.get('/books', async (req, res) => {
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
 
-const api = new Api({ name: 'books-api', version: '1.0.0' });
+const api = new Api({ name: 'books-api' });
 await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex: db });
 await api.use(ExpressPlugin, { mountPath: '/api' });
@@ -398,7 +398,7 @@ export class BooksController {
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
 
-const api = new Api({ name: 'books-api', version: '1.0.0' });
+const api = new Api({ name: 'books-api' });
 await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
 

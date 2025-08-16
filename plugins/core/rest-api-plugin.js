@@ -54,7 +54,7 @@ export const RestApiPlugin = {
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
-    vars.publicBaseUrl = restApiOptions.publicBaseUrl || ''
+    vars.returnBasePath = restApiOptions.returnBasePath || ''
     vars.enablePaginationCounts = restApiOptions.enablePaginationCounts || true
 
     // New simplified settings
@@ -163,6 +163,6 @@ export const RestApiPlugin = {
     helpers.getLocation = ({ scopeName, id }) => `/${scopeName}/${id}`
     
     // Helper to get the URL prefix for generating links
-    helpers.getUrlPrefix = ({ scope }) => scope?.vars?.publicBaseUrl || vars.publicBaseUrl || vars.transport?.mountPath || ''
+    helpers.getUrlPrefix = ({ scope }) => scope?.vars?.returnBasePath || vars.returnBasePath || vars.transport?.mountPath || ''
   }
 };

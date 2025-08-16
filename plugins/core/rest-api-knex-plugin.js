@@ -1,5 +1,6 @@
 import { requirePackage } from 'hooked-api';
-import { createSchema, createKnexTable } from 'json-rest-schema';
+import { createSchema }  from 'json-rest-schema';
+import { createKnexTable, addKnexField, alterKnexField, dropKnexField } from './lib/dbTablesOperations.js';
 import { createCrossTableSearchHelpers } from './lib/querying/knex-cross-table-search.js';
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
@@ -55,7 +56,6 @@ export const RestApiKnexPlugin = {
   dependencies: ['rest-api'],
 
   async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
-    
     // Try to import knex dynamically
     let knexLib;
     try {
@@ -125,28 +125,52 @@ export const RestApiKnexPlugin = {
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
 
-    // Helper scope method to get all schema-related information
-      addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-        // Create a filtered schema that excludes virtual fields
-        const schemaStructure = vars.schemaInfo.schemaStructure || {};
-        const filteredSchema = {};
-        
-        // Copy only non-virtual fields to the filtered schema
-        Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
-          if (!fieldDef.virtual) {
-            filteredSchema[fieldName] = fieldDef;
-          }
-        });
-        
-        // Create schema object from filtered fields
-        const tableSchema = createSchema(filteredSchema);
-        
-        await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, tableSchema, vars.schemaInfo.idProperty)
-      })
-    
-      helpers.newTransaction = async () => {
-        return knex.transaction()
-      }
+  // Helper scope method to get all schema-related information
+    addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+      // Create a filtered schema that excludes virtual fields
+      const schemaStructure = vars.schemaInfo.schemaStructure || {};
+      const filteredSchema = {};
+      
+      // Copy only non-virtual fields to the filtered schema
+      Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
+        if (!fieldDef.virtual) {
+          filteredSchema[fieldName] = fieldDef;
+        }
+      });
+      
+      // Create schema object from filtered fields
+      const tableSchema = createSchema(filteredSchema);
+      
+      await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, tableSchema, vars.schemaInfo.idProperty)
+    })
+
+    // Helper scope method to add a field to an existing table
+    addScopeMethod('addKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+      const { fieldName, fieldDefinition } = scopeOptions;
+      const tableName = vars.schemaInfo.tableName;
+      
+      await addKnexField(api.knex.instance, tableName, fieldName, fieldDefinition);
+    })
+
+    // Helper scope method to alter an existing field
+    addScopeMethod('alterKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+      const { fieldName, newDefinition } = scopeOptions;
+      const tableName = vars.schemaInfo.tableName;
+      
+      await alterKnexField(api.knex.instance, tableName, fieldName, newDefinition);
+    })
+
+    // Helper scope method to drop a field
+    addScopeMethod('dropKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+      const { fieldName } = scopeOptions;
+      const tableName = vars.schemaInfo.tableName;
+      
+      await dropKnexField(api.knex.instance, tableName, fieldName);
+    })
+  
+    helpers.newTransaction = async () => {
+      return knex.transaction()
+    }
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                    DATA OPERATION METHODS                           ║
@@ -700,7 +724,7 @@ export const RestApiKnexPlugin = {
         }
         
         // Generate links 
-        const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+        const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
         context.returnMeta.paginationLinks = generatePaginationLinks(
           urlPrefix,
           scopeName,
@@ -732,7 +756,7 @@ export const RestApiKnexPlugin = {
         }
         
         context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields);
-        const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+        const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
           scopeName,

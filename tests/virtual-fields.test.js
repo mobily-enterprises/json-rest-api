@@ -29,7 +29,6 @@ describe('Virtual Fields Tests', () => {
     // Create a custom API with virtual fields
     api = new Api({
       name: 'virtual-fields-test',
-      version: '1.0.0'
     });
     
     // Install plugins

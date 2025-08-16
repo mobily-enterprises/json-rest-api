@@ -80,8 +80,7 @@ import { MultiHomePlugin } from './plugins/core/multihome-plugin.js';
 
 ```javascript
 const api = new Api({ 
-  name: 'my-multi-tenant-api', 
-  version: '1.0.0' 
+  name: 'my-multi-tenant-api',
 });
 
 // Install required plugins first
@@ -471,7 +470,6 @@ Enable detailed logging to troubleshoot:
 ```javascript
 const api = new Api({
   name: 'my-api',
-  version: '1.0.0',
   logging: { level: 'trace' }
 });
 ```
@@ -589,7 +587,6 @@ const db = knex({
 // Create API
 const api = new Api({ 
   name: 'saas-api', 
-  version: '1.0.0',
   logging: { level: 'info' }
 });
 

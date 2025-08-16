@@ -417,9 +417,9 @@ First page: {
     }
   },
   links: {
-    self: '/api/1.0/posts?sort=-created_at&&&page[size]=5',
-    first: '/api/1.0/posts?sort=-created_at&&&page[size]=5',
-    next: '/api/1.0/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599811'
+    self: '/api/posts?sort=-created_at&&&page[size]=5',
+    first: '/api/posts?sort=-created_at&&&page[size]=5',
+    next: '/api/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599811'
   }
 }
 
@@ -484,9 +484,9 @@ Second page: {
     }
   },
   links: {
-    self: '/api/1.0/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599811',
-    first: '/api/1.0/posts?sort=-created_at&&&page[size]=5',
-    next: '/api/1.0/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599797'
+    self: '/api/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599811',
+    first: '/api/posts?sort=-created_at&&&page[size]=5',
+    next: '/api/posts?sort=-created_at&&&page[size]=5&page[after]=created_at:1753675599797'
   }
 }
 ```
@@ -587,9 +587,9 @@ First multiField page: {
     }
   },
   links: {
-    self: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5',
-    first: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5',
-    next: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:74,created_at:1753676192069'
+    self: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5',
+    first: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5',
+    next: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:74,created_at:1753676192069'
   }
 }
 Next multiField page: {
@@ -658,9 +658,9 @@ Next multiField page: {
     }
   },
   links: {
-    self: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:74,created_at:1753676192069',
-    first: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5',
-    next: '/api/1.0/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:290,created_at:1753676192056'
+    self: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:74,created_at:1753676192069',
+    first: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5',
+    next: '/api/posts?sort=view_count&sort=-created_at&&&page[size]=5&page[after]=view_count:290,created_at:1753676192056'
   }
 }
 ```
@@ -778,10 +778,10 @@ Popular sort: {
     pagination: { page: 1, pageSize: 5, pageCount: 5, total: 25, hasMore: true }
   },
   links: {
-    self: '/api/1.0/posts?sort=-view_count&&&page[number]=1&page[size]=5',
-    first: '/api/1.0/posts?sort=-view_count&&&page[number]=1&page[size]=5',
-    last: '/api/1.0/posts?sort=-view_count&&&page[number]=5&page[size]=5',
-    next: '/api/1.0/posts?sort=-view_count&&&page[number]=2&page[size]=5'
+    self: '/api/posts?sort=-view_count&&&page[number]=1&page[size]=5',
+    first: '/api/posts?sort=-view_count&&&page[number]=1&page[size]=5',
+    last: '/api/posts?sort=-view_count&&&page[number]=5&page[size]=5',
+    next: '/api/posts?sort=-view_count&&&page[number]=2&page[size]=5'
   }
 }
 Multisort: {
@@ -865,10 +865,10 @@ Multisort: {
     pagination: { page: 1, pageSize: 5, pageCount: 5, total: 25, hasMore: true }
   },
   links: {
-    self: '/api/1.0/posts?sort=published_at&sort=-view_count&&&page[number]=1&page[size]=5',
-    first: '/api/1.0/posts?sort=published_at&sort=-view_count&&&page[number]=1&page[size]=5',
-    last: '/api/1.0/posts?sort=published_at&sort=-view_count&&&page[number]=5&page[size]=5',
-    next: '/api/1.0/posts?sort=published_at&sort=-view_count&&&page[number]=2&page[size]=5'
+    self: '/api/posts?sort=published_at&sort=-view_count&&&page[number]=1&page[size]=5',
+    first: '/api/posts?sort=published_at&sort=-view_count&&&page[number]=1&page[size]=5',
+    last: '/api/posts?sort=published_at&sort=-view_count&&&page[number]=5&page[size]=5',
+    next: '/api/posts?sort=published_at&sort=-view_count&&&page[number]=2&page[size]=5'
   }
 }
 ```
@@ -966,10 +966,10 @@ Posts with comments: {
     pagination: { page: 1, pageSize: 3, pageCount: 9, total: 25, hasMore: true }
   },
   links: {
-    self: '/api/1.0/posts?include=comments&&sort=-created_at&page[number]=1&page[size]=3',
-    first: '/api/1.0/posts?include=comments&&sort=-created_at&page[number]=1&page[size]=3',
-    last: '/api/1.0/posts?include=comments&&sort=-created_at&page[number]=9&page[size]=3',
-    next: '/api/1.0/posts?include=comments&&sort=-created_at&page[number]=2&page[size]=3'
+    self: '/api/posts?include=comments&&sort=-created_at&page[number]=1&page[size]=3',
+    first: '/api/posts?include=comments&&sort=-created_at&page[number]=1&page[size]=3',
+    last: '/api/posts?include=comments&&sort=-created_at&page[number]=9&page[size]=3',
+    next: '/api/posts?include=comments&&sort=-created_at&page[number]=2&page[size]=3'
   }
 }
 
@@ -1012,10 +1012,10 @@ Posts with all relationships: {
     pagination: { page: 1, pageSize: 2, pageCount: 13, total: 25, hasMore: true }
   },
   links: {
-    self: '/api/1.0/posts?include=comments&include=tags&&sort=-created_at&page[number]=1&page[size]=2',
-    first: '/api/1.0/posts?include=comments&include=tags&&sort=-created_at&page[number]=1&page[size]=2',
-    last: '/api/1.0/posts?include=comments&include=tags&&sort=-created_at&page[number]=13&page[size]=2',
-    next: '/api/1.0/posts?include=comments&include=tags&&sort=-created_at&page[number]=2&page[size]=2'
+    self: '/api/posts?include=comments&include=tags&&sort=-created_at&page[number]=1&page[size]=2',
+    first: '/api/posts?include=comments&include=tags&&sort=-created_at&page[number]=1&page[size]=2',
+    last: '/api/posts?include=comments&include=tags&&sort=-created_at&page[number]=13&page[size]=2',
+    next: '/api/posts?include=comments&include=tags&&sort=-created_at&page[number]=2&page[size]=2'
   }
 }
 ```
@@ -1060,11 +1060,11 @@ console.log('Pagination meta:', JSON.stringify(pagedResult.meta, null, 2));
 
 ```text
 Pagination links: {
-  "self": "/api/1.0/posts?sort=-published_at&&&page[number]=2&page[size]=5",
-  "first": "/api/1.0/posts?sort=-published_at&&&page[number]=1&page[size]=5",
-  "last": "/api/1.0/posts?sort=-published_at&&&page[number]=5&page[size]=5",
-  "prev": "/api/1.0/posts?sort=-published_at&&&page[number]=1&page[size]=5",
-  "next": "/api/1.0/posts?sort=-published_at&&&page[number]=3&page[size]=5"
+  "self": "/api/posts?sort=-published_at&&&page[number]=2&page[size]=5",
+  "first": "/api/posts?sort=-published_at&&&page[number]=1&page[size]=5",
+  "last": "/api/posts?sort=-published_at&&&page[number]=5&page[size]=5",
+  "prev": "/api/posts?sort=-published_at&&&page[number]=1&page[size]=5",
+  "next": "/api/posts?sort=-published_at&&&page[number]=3&page[size]=5"
 }
 Pagination meta: {
   "pagination": {
@@ -1214,10 +1214,10 @@ Complex query results: {
     pagination: { page: 1, pageSize: 3, pageCount: 4, total: 12, hasMore: true }
   },
   links: {
-    self: '/api/1.0/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=1&page[size]=3',
-    first: '/api/1.0/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=1&page[size]=3',
-    last: '/api/1.0/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=4&page[size]=3',
-    next: '/api/1.0/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=2&page[size]=3'
+    self: '/api/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=1&page[size]=3',
+    first: '/api/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=1&page[size]=3',
+    last: '/api/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=4&page[size]=3',
+    next: '/api/posts?filters[title]=Even&sort=-view_count&sort=published_at&include=comments&include=tags&&page[number]=2&page[size]=3'
   }
 }
 ```

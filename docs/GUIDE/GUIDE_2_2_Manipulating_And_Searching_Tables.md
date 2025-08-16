@@ -56,7 +56,7 @@ $ curl -i -X POST -H "Content-Type: application/vnd.api+json" -d '{
 ```text
 HTTP/1.1 204 No Content
 X-Powered-By: Express
-Location: /api/1.0/countries/2
+Location: /api/countries/2
 ETag: W/"a-bAsFyilMr4Ra1hIU5PyoyFRunpI"
 Date: Wed, 23 Jul 2025 07:54:09 GMT
 Connection: keep-alive
@@ -75,7 +75,7 @@ Date: Wed, 23 Jul 2025 07:54:12 GMT
 Connection: keep-alive
 Keep-Alive: timeout=5
 
-{"data":{"type":"countries","id":"2","attributes":{"name":"United Kingdom","code":"UK"},"links":{"self":"/api/1.0/countries/2"}},"links":{"self":"/api/1.0/countries/2"}}
+{"data":{"type":"countries","id":"2","attributes":{"name":"United Kingdom","code":"UK"},"links":{"self":"/api/countries/2"}},"links":{"self":"/api/countries/2"}}
 ```
 
 Note that in "transport" mode after the POST the record was not returned to the client: instead, a status `204 No Content` was returned. However, the client will be aware of the ID of the newly created record thanks to the `Location` header.
@@ -294,14 +294,17 @@ await api.resources.countries.createKnexTable()
 
 Note that the definition above is functionally _identical_ to the one provided a few paragraphs above.
 
-**Important: When you define a `searchSchema`, it completely replaces the search configuration from the main schema.** Only fields defined in the `searchSchema` are searchable if `searchSchema` is defined.
+**Important: When you define a `searchSchema`, it takes precedence over fields marked with `search: true` in the main schema.** However, fields marked with `search: true` that are NOT in the explicit `searchSchema` will be automatically added to enable searching. This allows you to:
+- Use `searchSchema` to override specific field behaviors
+- Still benefit from `search: true` markers for additional fields  
+- Have the explicit `searchSchema` always win in case of conflicts
 
 The `searchSchema` gives you:
 
-* complete control and isolation: With searchSchema, you define the search interface completely separately from the data schema. This can be cleaner when you have complex search requirements.
-* No mixing of concerns: Your data schema stays focused on data validation and storage, while searchSchema handles search behavior.
-* Easier to see all searchable fields at once: Everything is in one place rather than scattered across field definitions.
-* Flexibility to completely diverge from the data schema: You might have 20 fields in your schema but only expose 3 for searching, or create 10 search fields from 3 data fields.
+* Complete control where needed: Override specific fields while keeping the convenience of `search: true` for others
+* No mixing of concerns: Your data schema stays focused on data validation and storage, while searchSchema handles complex search behavior
+* Flexibility to extend: Add virtual fields or complex filters via searchSchema while basic fields use `search: true`
+* Best of both worlds: Explicit control for complex cases, automatic setup for simple ones
 
 `searchSchema` also gives you the ability to define a search field that will search in multiple fields. For example:
 
@@ -339,6 +342,57 @@ Search for "ge": { data: [
 ```
 
 This common pattern will give you the ability to create "global" search fields that will look in multiple fields.
+
+### Merging searchSchema with search:true Fields
+
+When you combine `searchSchema` with fields marked `search: true`, the library intelligently merges them:
+
+```javascript
+await api.addResource('products', {
+  schema: {
+    name: { type: 'string', search: true },        // Will be added to searchSchema
+    description: { type: 'string', search: true }, // Will be added to searchSchema  
+    price: { type: 'number', search: true },       // Overridden by searchSchema below
+    category_id: { type: 'number' },               // Not searchable
+    sku: { type: 'string', search: true }          // Will be added to searchSchema
+  },
+  searchSchema: {
+    // Explicit searchSchema entries take precedence
+    price: { 
+      type: 'number', 
+      filterOperator: 'between'  // Overrides the search:true with custom operator
+    },
+    category_name: {              // Virtual field (doesn't exist in schema)
+      type: 'string',
+      actualField: 'category.name',
+      filterOperator: 'like'
+    }
+  }
+});
+
+// Result: The effective searchSchema includes:
+// - name (from search:true, uses default '=' operator)
+// - description (from search:true, uses default '=' operator)  
+// - sku (from search:true, uses default '=' operator)
+// - price (from explicit searchSchema, uses 'between' operator)
+// - category_name (from explicit searchSchema, virtual field)
+
+// You can now search using all these fields:
+const results = await api.resources.products.query({
+  queryParams: {
+    filters: {
+      name: 'Widget',           // From search:true
+      price: [10, 100],         // From searchSchema with 'between'
+      category_name: 'Electronics' // Virtual field from searchSchema
+    }
+  }
+});
+```
+
+This merge behavior gives you the best of both worlds:
+- Quick setup with `search: true` for simple fields
+- Precise control with `searchSchema` for complex requirements
+- No need to repeat fields in searchSchema that already have `search: true`
 
 ### Multi-word Search with AND Logic
 

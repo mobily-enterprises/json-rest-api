@@ -937,7 +937,7 @@ const db = knex({
 });
 
 // Create API instance
-const api = new Api({ name: 'blog-api', version: '1.0.0' });
+const api = new Api({ name: 'blog-api' });
 
 // Install plugins
 await api.use(RestApiPlugin);

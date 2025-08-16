@@ -113,13 +113,13 @@ export const ExpressPlugin = {
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express');
       
-      // Auto-detect publicBaseUrl if not explicitly set
-      if (!vars.publicBaseUrl) {
+      // Auto-detect returnBasePath if not explicitly set
+      if (!vars.returnBasePath) {
         // Use protocol from X-Forwarded-Proto if behind proxy, otherwise req.protocol
         const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
         const host = req.get('x-forwarded-host') || req.get('host');
         if (host) {
-          vars.publicBaseUrl = `${protocol}://${host}${basePath}`;
+          vars.returnBasePath = `${protocol}://${host}${basePath}`;
         }
       }
       
@@ -345,7 +345,7 @@ export const ExpressPlugin = {
               // Set Location header for any successful POST (201 or 204)
               if (helpers.getLocation) {
                 const location = helpers.getLocation({ scopeName, id: context.id });
-                const baseUrl = vars.publicBaseUrl || basePath;
+                const baseUrl = vars.returnBasePath || basePath;
                 res.set('Location', `${baseUrl}${location}`);
               }
             }

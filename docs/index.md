@@ -84,10 +84,10 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api', version: '1.0.0' });
+const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, { publicBaseUrl: '/api/1.0' }); // Basic REST plugin
+await api.use(RestApiPlugin, {returnBasePath: '/api' }); // Basic REST plugin
 await api.use(RestApiKnexPlugin, { knex }); // Knex connector
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Express plugin
 

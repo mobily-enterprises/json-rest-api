@@ -234,9 +234,9 @@ Book without includes (non-simplified):
         ]
       }
     },
-    links: { self: '/api/1.0/books/1' }
+    links: { self: '/api/books/1' }
   },
-  links: { self: '/api/1.0/books/1' }
+  links: { self: '/api/books/1' }
 }
 ```
 
@@ -312,12 +312,12 @@ Book with authors (non-simplified): {
       authors: {
         data: [ { type: 'authors', id: '1' }, { type: 'authors', id: '2' } ],
         links: {
-          self: '/api/1.0/books/1/relationships/authors',
-          related: '/api/1.0/books/1/authors'
+          self: '/api/books/1/relationships/authors',
+          related: '/api/books/1/authors'
         }
       }
     },
-    links: { self: '/api/1.0/books/1' }
+    links: { self: '/api/books/1' }
   },
   included: [
     {
@@ -329,7 +329,7 @@ Book with authors (non-simplified): {
         bio: 'British author of fiction, horror, and fantasy'
       },
       relationships: { books: { data: [] } },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
@@ -340,10 +340,10 @@ Book with authors (non-simplified): {
         bio: 'English humorist and fantasy author'
       },
       relationships: { books: { data: [] } },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     }
   ],
-  links: { self: '/api/1.0/books/1' }
+  links: { self: '/api/books/1' }
 }
 Books with authors (simplified): {
   data: [
@@ -403,7 +403,7 @@ Books with authors (simplified): {
       ]
     }
   ],
-  links: { self: '/api/1.0/books?include=authors' }
+  links: { self: '/api/books?include=authors' }
 }
 Books with authors (non-simplified): {
   data: [
@@ -422,12 +422,12 @@ Books with authors (non-simplified): {
             { type: 'authors', id: '2' }
           ],
           links: {
-            self: '/api/1.0/books/1/relationships/authors',
-            related: '/api/1.0/books/1/authors'
+            self: '/api/books/1/relationships/authors',
+            related: '/api/books/1/authors'
           }
         }
       },
-      links: { self: '/api/1.0/books/1' }
+      links: { self: '/api/books/1' }
     },
     {
       type: 'books',
@@ -441,12 +441,12 @@ Books with authors (non-simplified): {
         authors: {
           data: [ { type: 'authors', id: '1' } ],
           links: {
-            self: '/api/1.0/books/2/relationships/authors',
-            related: '/api/1.0/books/2/authors'
+            self: '/api/books/2/relationships/authors',
+            related: '/api/books/2/authors'
           }
         }
       },
-      links: { self: '/api/1.0/books/2' }
+      links: { self: '/api/books/2' }
     },
     {
       type: 'books',
@@ -460,12 +460,12 @@ Books with authors (non-simplified): {
         authors: {
           data: [ { type: 'authors', id: '3' } ],
           links: {
-            self: '/api/1.0/books/3/relationships/authors',
-            related: '/api/1.0/books/3/authors'
+            self: '/api/books/3/relationships/authors',
+            related: '/api/books/3/authors'
           }
         }
       },
-      links: { self: '/api/1.0/books/3' }
+      links: { self: '/api/books/3' }
     }
   ],
   included: [
@@ -478,7 +478,7 @@ Books with authors (non-simplified): {
         bio: 'British author of fiction, horror, and fantasy'
       },
       relationships: { books: { data: [] } },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
@@ -489,7 +489,7 @@ Books with authors (non-simplified): {
         bio: 'English humorist and fantasy author'
       },
       relationships: { books: { data: [] } },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     },
     {
       type: 'authors',
@@ -500,10 +500,10 @@ Books with authors (non-simplified): {
         bio: 'American author of horror and supernatural fiction'
       },
       relationships: { books: { data: [] } },
-      links: { self: '/api/1.0/authors/3' }
+      links: { self: '/api/authors/3' }
     }
   ],
-  links: { self: '/api/1.0/books?include=authors' }
+  links: { self: '/api/books?include=authors' }
 }
 
 ```
@@ -572,7 +572,7 @@ Books by Neil (simplified): {
       authors_ids: [ '1' ]
     }
   ],
-  links: { self: '/api/1.0/books?filters[authorName]=Neil' }
+  links: { self: '/api/books?filters[authorName]=Neil' }
 }
 Books by Neil (non-simplified): {
   data: [
@@ -592,7 +592,7 @@ Books by Neil (non-simplified): {
           ]
         }
       },
-      links: { self: '/api/1.0/books/1' }
+      links: { self: '/api/books/1' }
     },
     {
       type: 'books',
@@ -605,10 +605,10 @@ Books by Neil (non-simplified): {
       relationships: {
         authors: { data: [ { type: 'authors', id: '1' } ] }
       },
-      links: { self: '/api/1.0/books/2' }
+      links: { self: '/api/books/2' }
     }
   ],
-  links: { self: '/api/1.0/books?filters[authorName]=Neil' }
+  links: { self: '/api/books?filters[authorName]=Neil' }
 }
 Authors who wrote books with "Gods" (simplified): {
   data: [
@@ -620,7 +620,7 @@ Authors who wrote books with "Gods" (simplified): {
       books_ids: [ '1', '2' ]
     }
   ],
-  links: { self: '/api/1.0/authors?filters[bookTitle]=Gods' }
+  links: { self: '/api/authors?filters[bookTitle]=Gods' }
 }
 Authors who wrote books with "Gods" (non-simplified): {
   data: [
@@ -637,10 +637,10 @@ Authors who wrote books with "Gods" (non-simplified): {
           data: [ { type: 'books', id: '1' }, { type: 'books', id: '2' } ]
         }
       },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     }
   ],
-  links: { self: '/api/1.0/authors?filters[bookTitle]=Gods' }
+  links: { self: '/api/authors?filters[bookTitle]=Gods' }
 }
 Neil books with full author data: {
   data: [
@@ -684,7 +684,7 @@ Neil books with full author data: {
       ]
     }
   ],
-  links: { self: '/api/1.0/books?filters[authorName]=Neil&include=authors' }
+  links: { self: '/api/books?filters[authorName]=Neil&include=authors' }
 }
 ```
 

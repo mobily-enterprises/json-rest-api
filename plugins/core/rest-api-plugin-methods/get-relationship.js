@@ -53,8 +53,8 @@ export default async function getRelationshipMethod ({ params, context, vars, he
   // Build response with links
   return {
     links: {
-      self: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/relationships/${context.relationshipName}`,
-      related: `${vars.publicBaseUrl || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
+      self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/relationships/${context.relationshipName}`,
+      related: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
     },
     data: relationshipData?.data || (relDef.hasMany || relDef.manyToMany ? [] : null)
   };

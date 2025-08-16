@@ -12,7 +12,7 @@ export default async function turnScopeInitIntoVars({ context, scopes, vars: api
   if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit;
   if (typeof scopeOptions.queryMaxLimit !== 'undefined') vars.queryMaxLimit = scopeOptions.queryMaxLimit;
   if (typeof scopeOptions.includeDepthLimit !== 'undefined') vars.includeDepthLimit = scopeOptions.includeDepthLimit;
-  if (typeof scopeOptions.publicBaseUrl !== 'undefined') vars.publicBaseUrl = scopeOptions.publicBaseUrl;
+  if (typeof scopeOptions.returnBasePath !== 'undefined') vars.returnBasePath = scopeOptions.returnBasePath;
   if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts;
   
   // Set simplified settings as scope vars

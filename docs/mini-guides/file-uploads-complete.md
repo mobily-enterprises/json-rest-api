@@ -17,7 +17,6 @@ import express from 'express';
 // Create API
 const api = new Api({
   name: 'my-library-api',
-  version: '1.0.0'
 });
 
 // Create storage for different file types

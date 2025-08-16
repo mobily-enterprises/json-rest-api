@@ -109,7 +109,6 @@ api.customize({
   apiMethods: {
     healthCheck: async ({ vars, scopes }) => ({
       status: 'ok',
-      version: vars.apiVersion || '1.0.0',
       environment: vars.environment,
       timestamp: new Date().toISOString(),
       resources: Object.keys(scopes)

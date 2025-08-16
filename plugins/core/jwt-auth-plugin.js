@@ -33,7 +33,6 @@ import {
 
 export const JwtAuthPlugin = {
   name: 'jwt-auth',
-  version: '1.0.0',
   dependencies: ['rest-api'], // Requires REST API plugin for resource operations
   
   async install({ api, addHook, log, runHooks, helpers, vars, on, pluginOptions }) {

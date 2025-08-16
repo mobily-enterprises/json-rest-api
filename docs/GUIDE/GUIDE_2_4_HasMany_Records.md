@@ -95,9 +95,9 @@ French publisher  Authors (ids only, NOT simplified): {
         data: [ { type: 'authors', id: '1' }, { type: 'authors', id: '2' } ]
       }
     },
-    links: { self: '/api/1.0/publishers/1' }
+    links: { self: '/api/publishers/1' }
   },
-  links: { self: '/api/1.0/publishers/1' }
+  links: { self: '/api/publishers/1' }
 }
 ```
 
@@ -145,12 +145,12 @@ French publisher  Authors (with authors, NOT simplified): {
       authors: {
         data: [ { type: 'authors', id: '1' }, { type: 'authors', id: '2' } ],
         links: {
-          self: '/api/1.0/publishers/1/relationships/authors',
-          related: '/api/1.0/publishers/1/authors'
+          self: '/api/publishers/1/relationships/authors',
+          related: '/api/publishers/1/authors'
         }
       }
     },
-    links: { self: '/api/1.0/publishers/1' }
+    links: { self: '/api/publishers/1' }
   },
   included: [
     {
@@ -158,17 +158,17 @@ French publisher  Authors (with authors, NOT simplified): {
       id: '1',
       attributes: { name: 'Victor', surname: 'Hugo' },
       relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
       id: '2',
       attributes: { name: 'Émile', surname: 'Zola' },
       relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     }
   ],
-  links: { self: '/api/1.0/publishers/1' }
+  links: { self: '/api/publishers/1' }
 }
 ```
 
@@ -279,12 +279,12 @@ All Publishers with Authors (not simplified): {
             { type: 'authors', id: '2' }
           ],
           links: {
-            self: '/api/1.0/publishers/1/relationships/authors',
-            related: '/api/1.0/publishers/1/authors'
+            self: '/api/publishers/1/relationships/authors',
+            related: '/api/publishers/1/authors'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/1' }
+      links: { self: '/api/publishers/1' }
     },
     {
       type: 'publishers',
@@ -294,12 +294,12 @@ All Publishers with Authors (not simplified): {
         authors: {
           data: [ { type: 'authors', id: '3' } ],
           links: {
-            self: '/api/1.0/publishers/2/relationships/authors',
-            related: '/api/1.0/publishers/2/authors'
+            self: '/api/publishers/2/relationships/authors',
+            related: '/api/publishers/2/authors'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/2' }
+      links: { self: '/api/publishers/2' }
     },
     {
       type: 'publishers',
@@ -309,12 +309,12 @@ All Publishers with Authors (not simplified): {
         authors: {
           data: [],
           links: {
-            self: '/api/1.0/publishers/3/relationships/authors',
-            related: '/api/1.0/publishers/3/authors'
+            self: '/api/publishers/3/relationships/authors',
+            related: '/api/publishers/3/authors'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/3' }
+      links: { self: '/api/publishers/3' }
     }
   ],
   included: [
@@ -323,30 +323,30 @@ All Publishers with Authors (not simplified): {
       id: '1',
       attributes: { name: 'Victor', surname: 'Hugo' },
       relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
       id: '2',
       attributes: { name: 'Émile', surname: 'Zola' },
       relationships: { publisher: { data: { type: 'publishers', id: '1' } } },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     },
     {
       type: 'authors',
       id: '3',
       attributes: { name: 'Johann', surname: 'Goethe' },
       relationships: { publisher: { data: { type: 'publishers', id: '2' } } },
-      links: { self: '/api/1.0/authors/3' }
+      links: { self: '/api/authors/3' }
     }
   ],
-  links: { self: '/api/1.0/publishers?include=authors' }
+  links: { self: '/api/publishers?include=authors' }
 }
 ```
 
 **Important Note on `hasMany` in Non-Simplified Mode:**
 
-In non-simplified (full JSON:API) mode, `hasMany` relationships in the `data` section of the parent resource only contain an empty `data` array or `links` to the related endpoint (e.g., `authors: { links: { related: '/api/1.0/publishers/1/authors' } }`). The actual related `author` resources are placed in the top-level `included` array. This is standard JSON:API behavior to avoid duplicating large amounts of data. The `included` array ensures that each included resource appears only once, even if referenced by multiple parent resources.
+In non-simplified (full JSON:API) mode, `hasMany` relationships in the `data` section of the parent resource only contain an empty `data` array or `links` to the related endpoint (e.g., `authors: { links: { related: '/api/publishers/1/authors' } }`). The actual related `author` resources are placed in the top-level `included` array. This is standard JSON:API behavior to avoid duplicating large amounts of data. The `included` array ensures that each included resource appears only once, even if referenced by multiple parent resources.
 
 ## Filtering by `hasMany` Relationships
 

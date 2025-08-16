@@ -12,7 +12,6 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   const tablePrefix = pluginOptions.tablePrefix || 'basic';
   const api = new Api({
     name: apiName,
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -144,7 +143,6 @@ export async function createBulkOperationsApi(knex, pluginOptions = {}) {
 export async function createExtendedApi(knex) {
   const api = new Api({
     name: 'extended-test-api',
-    version: '1.0.0'
   });
 
   await api.use(RestApiPlugin, {
@@ -299,7 +297,6 @@ export async function createExtendedApi(knex) {
 export async function createLimitedDepthApi(knex) {
   const api = new Api({
     name: 'limited-depth-api',
-    version: '1.0.0'
   });
 
   await api.use(RestApiPlugin, {
@@ -396,7 +393,6 @@ export async function createLimitedDepthApi(knex) {
 export async function createPaginationApi(knex, options = {}) {
   const api = new Api({
     name: 'pagination-test-api',
-    version: '1.0.0'
   });
 
   const restApiOptions = {
@@ -413,7 +409,7 @@ export async function createPaginationApi(knex, options = {}) {
       patch: 'minimal'
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
-    ...options  // Allow overriding options like publicBaseUrl, enablePaginationCounts
+    ...options  // Allow overriding options likereturnBasePath, enablePaginationCounts
   };
 
   await api.use(RestApiPlugin, restApiOptions);
@@ -517,7 +513,6 @@ export async function createWebSocketApi(knex, pluginOptions = {}) {
 export async function createComputedFieldsApi(knex, pluginOptions = {}) {
   const api = new Api({
     name: 'computed-fields-test-api',
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -605,7 +600,6 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
 export async function createFieldGettersApi(knex, pluginOptions = {}) {
   const api = new Api({
     name: 'field-getters-test-api',
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -795,7 +789,6 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
 export async function createFieldSettersApi(knex, pluginOptions = {}) {
   const api = new Api({
     name: 'field-setters-test-api',
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -1001,7 +994,6 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
   
   const api = new Api({
     name: 'multihome-test-api',
-    version: '1.0.0'
   });
 
   await api.use(RestApiPlugin, {
@@ -1101,7 +1093,6 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
   const tablePrefix = pluginOptions.tablePrefix || 'positioning';
   const api = new Api({
     name: apiName,
-    version: '1.0.0'
   });
 
   const restApiOptions = {
@@ -1193,7 +1184,6 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
   const tablePrefix = pluginOptions.tablePrefix || 'custom_id';
   const api = new Api({
     name: apiName,
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -1341,7 +1331,6 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
 export async function createCursorPaginationApi(knex) {
   const api = new Api({
     name: 'cursor-pagination-test-api',
-    version: '1.0.0'
   });
 
   const restApiOptions = {
@@ -1354,7 +1343,7 @@ export async function createCursorPaginationApi(knex) {
     sortableFields: ['id', 'name', 'category', 'brand', 'price', 'sku', 'created_at', 'code', 'status', 'type'],
     queryDefaultLimit: 20,
     queryMaxLimit: 100,
-    publicBaseUrl: 'https://api.example.com/v1'
+   returnBasePath: 'https://api.example.com'
   };
   
   await api.use(RestApiPlugin, restApiOptions);
@@ -1400,7 +1389,6 @@ export async function createVirtualFieldsApi(knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'virtual-fields-test-api';
   const api = new Api({
     name: apiName,
-    version: '1.0.0',
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
@@ -1443,6 +1431,92 @@ export async function createVirtualFieldsApi(knex, pluginOptions = {}) {
   });
   
   await api.resources.users.createKnexTable();
+
+  return api;
+}
+
+/**
+ * Creates an API configuration for testing searchSchema merge behavior
+ */
+export async function createSearchSchemaMergeApi(knex, pluginOptions = {}) {
+  const api = new Api({
+    name: 'searchschema-merge-test-api',
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  });
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    ...pluginOptions['rest-api']
+  });
+  
+  await api.use(RestApiKnexPlugin, { knex });
+
+  // Test resource with both search:true and searchSchema
+  await api.addResource('products', {
+    schema: {
+      name: { type: 'string', search: true },        // Should be added to searchSchema
+      description: { type: 'string', search: true }, // Should be added to searchSchema
+      price: { type: 'number', search: true },       // Should be overridden by searchSchema
+      category_id: { type: 'number' },               // Not searchable
+      sku: { type: 'string', search: true },         // Should be added to searchSchema
+      status: { type: 'string' }                     // Not searchable but added via searchSchema
+    },
+    searchSchema: {
+      // This should override the price field from search:true
+      // 'between' operator requires array type for validation [min, max]
+      price: { 
+        type: 'array',
+        filterOperator: 'between'
+      },
+      // This is a virtual field
+      category_name: {
+        type: 'string',
+        actualField: 'category.name',
+        filterOperator: 'like'
+      },
+      // This is an explicit field not marked with search:true
+      // 'in' operator requires array type for validation
+      status: {
+        type: 'array',
+        filterOperator: 'in'
+      }
+    },
+    tableName: 'searchmerge_products'
+  });
+  await api.resources.products.createKnexTable();
+
+  // Test resource with only search:true fields
+  await api.addResource('users', {
+    schema: {
+      username: { type: 'string', search: true },
+      email: { type: 'string', search: true },
+      age: { type: 'number' },
+      bio: { type: 'string', search: { filterOperator: 'like' } }
+    },
+    tableName: 'searchmerge_users'
+  });
+  await api.resources.users.createKnexTable();
+
+  // Test resource with only explicit searchSchema
+  await api.addResource('orders', {
+    schema: {
+      order_number: { type: 'string' },
+      total: { type: 'number' },
+      status: { type: 'string' }
+    },
+    searchSchema: {
+      order_number: { type: 'string', filterOperator: '=' },
+      status: { type: 'array', filterOperator: 'in' }  // 'in' operator requires array type
+    },
+    tableName: 'searchmerge_orders'
+  });
+  await api.resources.orders.createKnexTable();
 
   return api;
 }

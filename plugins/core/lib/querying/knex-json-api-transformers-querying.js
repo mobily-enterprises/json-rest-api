@@ -378,7 +378,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               }
             };
             
-            const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+            const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
             relationshipObject.links = {
               self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
               related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
@@ -390,7 +390,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               data: null
             };
             
-            const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+            const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
             relationshipObject.links = {
               self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
               related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
@@ -416,7 +416,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             }
           };
           
-          const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+          const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
             related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
@@ -429,7 +429,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             data: null
           };
           
-          const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+          const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
           relationshipObject.links = {
             self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
             related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
@@ -443,7 +443,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
     return jsonApiRecord;
   });
   
-  const urlPrefix = scope.vars.publicBaseUrl || scope.vars.transport?.mountPath || '';
+  const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
   const normalizedData = isSingle ? processedRecords[0] : processedRecords;
   
   if (normalizedData) {

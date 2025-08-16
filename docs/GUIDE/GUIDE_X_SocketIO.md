@@ -47,7 +47,6 @@ import { JWTAuthPlugin } from 'json-rest-api/plugins/jwt-auth';
 // Create your API instance
 const api = new Api({
   name: 'my-api',
-  version: '1.0.0'
 });
 
 // Add required plugins
@@ -983,7 +982,6 @@ Enable debug logging to troubleshoot:
 // Server-side
 const api = new Api({
   name: 'my-api',
-  version: '1.0.0',
   logging: { level: 'debug' }
 });
 

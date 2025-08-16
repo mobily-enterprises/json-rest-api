@@ -1633,7 +1633,6 @@ api.resource('articles').hook('finish', async (context) => {
   context.response.meta = {
     ...context.response.meta,
     generated_at: new Date().toISOString(),
-    api_version: '1.0'
   };
 });
 ```

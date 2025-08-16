@@ -99,11 +99,11 @@ export const calculatePaginationMeta = (total, page, pageSize) => {
  * 
  * // Output - complete URLs with all parameters preserved:
  * // {
- * //   self: '/api/v1/articles?filter[status]=published&sort=-created_at&page[number]=2&page[size]=20',
- * //   first: '/api/v1/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
- * //   last: '/api/v1/articles?filter[status]=published&sort=-created_at&page[number]=5&page[size]=20',
- * //   prev: '/api/v1/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
- * //   next: '/api/v1/articles?filter[status]=published&sort=-created_at&page[number]=3&page[size]=20'
+ * //   self: '/api/articles?filter[status]=published&sort=-created_at&page[number]=2&page[size]=20',
+ * //   first: '/api/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
+ * //   last: '/api/articles?filter[status]=published&sort=-created_at&page[number]=5&page[size]=20',
+ * //   prev: '/api/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
+ * //   next: '/api/articles?filter[status]=published&sort=-created_at&page[number]=3&page[size]=20'
  * // }
  * 
  * @example

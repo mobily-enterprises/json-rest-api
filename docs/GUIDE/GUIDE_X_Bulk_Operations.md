@@ -39,7 +39,6 @@ const knex = knexLib({
 // Create API instance
 const api = new Api({
   name: 'book-catalog-api',
-  version: '1.0.0'
 });
 
 // Install plugins in order

@@ -167,16 +167,18 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * // }
  * 
  * @example
- * // Input: Conflict detection
+ * // Input: Explicit searchSchema takes precedence
  * const schema = {
  *   email: { type: 'string', search: true }
  * };
  * const explicitSearchSchema = {
  *   email: { type: 'string', filterOperator: 'contains' }
  * };
- * generateSearchSchemaFromSchema(schema, explicitSearchSchema);
- * // Throws: RestApiValidationError
- * // "Field 'email' is defined in both schema (with search: true) and explicit searchSchema."
+ * const result = generateSearchSchemaFromSchema(schema, explicitSearchSchema);
+ * // Output: Explicit searchSchema wins
+ * // {
+ * //   email: { type: 'string', filterOperator: 'contains' }  // Uses explicit definition
+ * // }
  * 
  * @example
  * // Input: Virtual search fields
@@ -215,15 +217,16 @@ export function ensureSearchFieldsAreIndexed(searchSchema) {
  * - Provides flexible search configuration options
  * - Enables virtual fields for cross-table searches
  * - Supports range queries (before/after patterns)
- * - Validates no duplicate definitions exist
+ * - Merges search:true fields with explicit searchSchema
+ * - Explicit searchSchema always takes precedence
  * - Allows storage plugins to optimize queries
  * 
  * Data flow:
  * 1. Starts with explicit searchSchema (if any)
  * 2. Processes schema fields with 'search' property
- * 3. Handles multiple filters from single field
- * 4. Processes virtual search definitions
- * 5. Detects and throws on conflicts
+ * 3. Skips fields already in explicit searchSchema (no conflicts)
+ * 4. Handles multiple filters from single field
+ * 5. Processes virtual search definitions
  * 6. Returns merged searchSchema or null
  */
 export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => {
@@ -240,19 +243,11 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
     
     if (effectiveSearch) {
       if (effectiveSearch === true) {
-        // Check for conflicts with explicit searchSchema
+        // Check if field already exists in explicit searchSchema
         if (searchSchema[fieldName]) {
-          throw new RestApiValidationError(
-            `Field '${fieldName}' is defined in both schema (with search: true) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-            { 
-              fields: [fieldName],
-              violations: [{
-                field: fieldName,
-                rule: 'duplicate_search_field',
-                message: 'Field cannot be defined in both schema and searchSchema'
-              }]
-            }
-          );
+          // Skip - explicit searchSchema takes precedence
+          // This allows searchSchema to override fields marked with search:true
+          return;
         }
         
         // Simple boolean - copy entire field definition (except search) and add filterOperator
@@ -271,19 +266,10 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
         if (hasNestedFilters) {
           // Multiple filters from one field (like published_after/before)
           Object.entries(effectiveSearch).forEach(([filterName, filterDef]) => {
-            // Check for conflicts
+            // Check if filter already exists in explicit searchSchema
             if (searchSchema[filterName]) {
-              throw new RestApiValidationError(
-                `Field '${filterName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-                { 
-                  fields: [filterName],
-                  violations: [{
-                    field: filterName,
-                    rule: 'duplicate_search_field',
-                    message: 'Field cannot be defined in both schema and searchSchema'
-                  }]
-                }
-              );
+              // Skip - explicit searchSchema takes precedence
+              return;
             }
             
             searchSchema[filterName] = {
@@ -293,19 +279,10 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
             };
           });
         } else {
-          // Check for conflicts
+          // Check if field already exists in explicit searchSchema
           if (searchSchema[fieldName]) {
-            throw new RestApiValidationError(
-              `Field '${fieldName}' is defined in both schema (with search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-              { 
-                fields: [fieldName],
-                violations: [{
-                  field: fieldName,
-                  rule: 'duplicate_search_field',
-                  message: 'Field cannot be defined in both schema and searchSchema'
-                }]
-              }
-            );
+            // Skip - explicit searchSchema takes precedence
+            return;
           }
           
           // Single filter with config
@@ -321,19 +298,10 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
   // Handle _virtual search definitions
   if (schema._virtual?.search) {
     Object.entries(schema._virtual.search).forEach(([filterName, filterDef]) => {
-      // Check for conflicts
+      // Check if filter already exists in explicit searchSchema
       if (searchSchema[filterName]) {
-        throw new RestApiValidationError(
-          `Field '${filterName}' is defined in both schema (_virtual.search) and explicit searchSchema. Remove one definition to avoid conflicts.`,
-          { 
-            fields: [filterName],
-            violations: [{
-              field: filterName,
-              rule: 'duplicate_search_field',
-              message: 'Field cannot be defined in both schema and searchSchema'
-            }]
-          }
-        );
+        // Skip - explicit searchSchema takes precedence
+        return;
       }
       
       searchSchema[filterName] = filterDef;

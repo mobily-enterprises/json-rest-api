@@ -199,18 +199,18 @@ Added Publisher Review (non-Simplified): {
     type: 'reviews',
     id: '3',
     attributes: { rating: 3, comment: 'Decent publisher, some good titles (NS).' },
-    links: { self: '/api/1.0/reviews/3' }
+    links: { self: '/api/reviews/3' }
   },
-  links: { self: '/api/1.0/reviews/3' }
+  links: { self: '/api/reviews/3' }
 }
 Added Author Review (non-Simplified): {
   data: {
     type: 'reviews',
     id: '4',
     attributes: { rating: 5, comment: 'Hugo is a master storyteller! (NS)' },
-    links: { self: '/api/1.0/reviews/4' }
+    links: { self: '/api/reviews/4' }
   },
-  links: { self: '/api/1.0/reviews/4' }
+  links: { self: '/api/reviews/4' }
 }
 French author with the newly added reviews (simplified):
 {
@@ -231,14 +231,14 @@ French author with the newly added reviews (non-simplified):
       publisher: {
         data: { type: 'publishers', id: '1' },
         links: {
-          self: '/api/1.0/authors/1/relationships/publisher',
-          related: '/api/1.0/authors/1/publisher'
+          self: '/api/authors/1/relationships/publisher',
+          related: '/api/authors/1/publisher'
         }
       }
     },
-    links: { self: '/api/1.0/authors/1' }
+    links: { self: '/api/authors/1' }
   },
-  links: { self: '/api/1.0/authors/1' }
+  links: { self: '/api/authors/1' }
 }
 French authors with the newly added reviews (simplified):
 [
@@ -269,12 +269,12 @@ French authors with the newly added reviews (non-simplified):
         publisher: {
           data: { type: 'publishers', id: '1' },
           links: {
-            self: '/api/1.0/authors/1/relationships/publisher',
-            related: '/api/1.0/authors/1/publisher'
+            self: '/api/authors/1/relationships/publisher',
+            related: '/api/authors/1/publisher'
           }
         }
       },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
@@ -285,15 +285,15 @@ French authors with the newly added reviews (non-simplified):
         publisher: {
           data: { type: 'publishers', id: '2' },
           links: {
-            self: '/api/1.0/authors/2/relationships/publisher',
-            related: '/api/1.0/authors/2/publisher'
+            self: '/api/authors/2/relationships/publisher',
+            related: '/api/authors/2/publisher'
           }
         }
       },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     }
   ],
-  links: { self: '/api/1.0/authors' }
+  links: { self: '/api/authors' }
 }
 ```
 
@@ -379,19 +379,19 @@ French author with the newly added reviews (non-simplified):
       reviews: {
         data: [ { type: 'reviews', id: '4' } ],
         links: {
-          self: '/api/1.0/authors/1/relationships/reviews',
-          related: '/api/1.0/authors/1/reviews'
+          self: '/api/authors/1/relationships/reviews',
+          related: '/api/authors/1/reviews'
         }
       },
       publisher: {
         data: { type: 'publishers', id: '1' },
         links: {
-          self: '/api/1.0/authors/1/relationships/publisher',
-          related: '/api/1.0/authors/1/publisher'
+          self: '/api/authors/1/relationships/publisher',
+          related: '/api/authors/1/publisher'
         }
       }
     },
-    links: { self: '/api/1.0/authors/1' }
+    links: { self: '/api/authors/1' }
   },
   included: [
     {
@@ -399,10 +399,10 @@ French author with the newly added reviews (non-simplified):
       id: '4',
       attributes: { rating: 5, comment: 'Hugo is a master storyteller! (NS)' },
       relationships: { reviewable: { data: { type: 'authors', id: '1' } } },
-      links: { self: '/api/1.0/reviews/4' }
+      links: { self: '/api/reviews/4' }
     }
   ],
-  links: { self: '/api/1.0/authors/1' }
+  links: { self: '/api/authors/1' }
 }
 French authors with the newly added reviews (simplified):
 [
@@ -450,19 +450,19 @@ French authors with the newly added reviews (non-simplified):
         reviews: {
           data: [ { type: 'reviews', id: '4' } ],
           links: {
-            self: '/api/1.0/authors/1/relationships/reviews',
-            related: '/api/1.0/authors/1/reviews'
+            self: '/api/authors/1/relationships/reviews',
+            related: '/api/authors/1/reviews'
           }
         },
         publisher: {
           data: { type: 'publishers', id: '1' },
           links: {
-            self: '/api/1.0/authors/1/relationships/publisher',
-            related: '/api/1.0/authors/1/publisher'
+            self: '/api/authors/1/relationships/publisher',
+            related: '/api/authors/1/publisher'
           }
         }
       },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     },
     {
       type: 'authors',
@@ -472,19 +472,19 @@ French authors with the newly added reviews (non-simplified):
         reviews: {
           data: [ { type: 'reviews', id: '1' } ],
           links: {
-            self: '/api/1.0/authors/2/relationships/reviews',
-            related: '/api/1.0/authors/2/reviews'
+            self: '/api/authors/2/relationships/reviews',
+            related: '/api/authors/2/reviews'
           }
         },
         publisher: {
           data: { type: 'publishers', id: '2' },
           links: {
-            self: '/api/1.0/authors/2/relationships/publisher',
-            related: '/api/1.0/authors/2/publisher'
+            self: '/api/authors/2/relationships/publisher',
+            related: '/api/authors/2/publisher'
           }
         }
       },
-      links: { self: '/api/1.0/authors/2' }
+      links: { self: '/api/authors/2' }
     }
   ],
   included: [
@@ -493,17 +493,17 @@ French authors with the newly added reviews (non-simplified):
       id: '4',
       attributes: { rating: 5, comment: 'Hugo is a master storyteller! (NS)' },
       relationships: { reviewable: { data: { type: 'authors', id: '1' } } },
-      links: { self: '/api/1.0/reviews/4' }
+      links: { self: '/api/reviews/4' }
     },
     {
       type: 'reviews',
       id: '1',
       attributes: { rating: 4, comment: 'Great German author! (Simplified)' },
       relationships: { reviewable: { data: { type: 'authors', id: '2' } } },
-      links: { self: '/api/1.0/reviews/1' }
+      links: { self: '/api/reviews/1' }
     }
   ],
-  links: { self: '/api/1.0/authors?include=reviews' }
+  links: { self: '/api/authors?include=reviews' }
 }
 ```
 
@@ -759,15 +759,15 @@ Reviews FILTERED (non-simplified):
         reviewable: {
           data: { type: 'authors', id: '1' },
           links: {
-            self: '/api/1.0/reviews/4/relationships/reviewable',
-            related: '/api/1.0/reviews/4/reviewable'
+            self: '/api/reviews/4/relationships/reviewable',
+            related: '/api/reviews/4/reviewable'
           }
         }
       },
-      links: { self: '/api/1.0/reviews/4' }
+      links: { self: '/api/reviews/4' }
     }
   ],
-  links: { self: '/api/1.0/reviews?filters[reviewableName]=Victor' }
+  links: { self: '/api/reviews?filters[reviewableName]=Victor' }
 }
 Authors FILTERED (simplified):
 {
@@ -795,15 +795,15 @@ Authors FILTERED (non-simplified):
         publisher: {
           data: { type: 'publishers', id: '1' },
           links: {
-            self: '/api/1.0/authors/1/relationships/publisher',
-            related: '/api/1.0/authors/1/publisher'
+            self: '/api/authors/1/relationships/publisher',
+            related: '/api/authors/1/publisher'
           }
         }
       },
-      links: { self: '/api/1.0/authors/1' }
+      links: { self: '/api/authors/1' }
     }
   ],
-  links: { self: '/api/1.0/authors?filters[reviewComment]=storyteller' }
+  links: { self: '/api/authors?filters[reviewComment]=storyteller' }
 }
 Publishers FILTERED (simplified):
 {
@@ -834,10 +834,10 @@ Publishers FILTERED (non-simplified):
           ]
         }
       },
-      links: { self: '/api/1.0/publishers/1' }
+      links: { self: '/api/publishers/1' }
     }
   ],
-  links: { self: '/api/1.0/publishers?filters[reviewComment]=enjoy' }
+  links: { self: '/api/publishers?filters[reviewComment]=enjoy' }
 }
 ```
 

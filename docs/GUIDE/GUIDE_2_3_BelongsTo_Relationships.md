@@ -217,12 +217,12 @@ All Publishers with Countries (not simplified): {
         country: {
           data: { type: 'countries', id: '1' },
           links: {
-            self: '/api/1.0/publishers/1/relationships/country',
-            related: '/api/1.0/publishers/1/country'
+            self: '/api/publishers/1/relationships/country',
+            related: '/api/publishers/1/country'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/1' }
+      links: { self: '/api/publishers/1' }
     },
     {
       type: 'publishers',
@@ -232,12 +232,12 @@ All Publishers with Countries (not simplified): {
         country: {
           data: { type: 'countries', id: '1' },
           links: {
-            self: '/api/1.0/publishers/2/relationships/country',
-            related: '/api/1.0/publishers/2/country'
+            self: '/api/publishers/2/relationships/country',
+            related: '/api/publishers/2/country'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/2' }
+      links: { self: '/api/publishers/2' }
     },
     {
       type: 'publishers',
@@ -247,12 +247,12 @@ All Publishers with Countries (not simplified): {
         country: {
           data: { type: 'countries', id: '3' },
           links: {
-            self: '/api/1.0/publishers/3/relationships/country',
-            related: '/api/1.0/publishers/3/country'
+            self: '/api/publishers/3/relationships/country',
+            related: '/api/publishers/3/country'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/3' }
+      links: { self: '/api/publishers/3' }
     },
     {
       type: 'publishers',
@@ -262,11 +262,11 @@ All Publishers with Countries (not simplified): {
         country: {
           data: { type: 'countries', id: '2' },
           links: {
-            self: '/api/1.0/publishers/4/relationships/country',
-          related: '/api/1.0/publishers/4/country'
+            self: '/api/publishers/4/relationships/country',
+          related: '/api/publishers/4/country'
         }
       },
-      links: { self: '/api/1.0/publishers/4' }
+      links: { self: '/api/publishers/4' }
     },
     {
       type: 'publishers',
@@ -276,12 +276,12 @@ All Publishers with Countries (not simplified): {
         country: {
           data: null,
           links: {
-            self: '/api/1.0/publishers/5/relationships/country',
-            related: '/api/1.0/publishers/5/country'
+            self: '/api/publishers/5/relationships/country',
+            related: '/api/publishers/5/country'
           }
         }
       },
-      links: { self: '/api/1.0/publishers/5' }
+      links: { self: '/api/publishers/5' }
     }
   ],
   included: [
@@ -290,24 +290,24 @@ All Publishers with Countries (not simplified): {
       id: '1',
       attributes: { name: 'France', code: 'FR' },
       relationships: {},
-      links: { self: '/api/1.0/countries/1' }
+      links: { self: '/api/countries/1' }
     },
     {
       type: 'countries',
       id: '3',
       attributes: { name: 'United Kingdom', code: 'UK' },
       relationships: {},
-      links: { self: '/api/1.0/countries/3' }
+      links: { self: '/api/countries/3' }
     },
     {
       type: 'countries',
       id: '2',
       attributes: { name: 'Germany', code: 'DE' },
       relationships: {},
-      links: { self: '/api/1.0/countries/2' }
+      links: { self: '/api/countries/2' }
     }
   ],
-  links: { self: '/api/1.0/publishers?include=country' }
+  links: { self: '/api/publishers?include=country' }
 }
 ```
 

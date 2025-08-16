@@ -60,8 +60,7 @@ import { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
 import { PositioningPlugin } from './plugins/core/rest-api-positioning-plugin.js';
 
 const api = new Api({
-  name: 'my-api',
-  version: '1.0.0'
+  name: 'my-api'
 });
 
 // Core plugins
@@ -657,7 +656,6 @@ Enable debug logging to see position calculations:
 ```javascript
 const api = new Api({
   name: 'my-api',
-  version: '1.0.0',
   logging: { level: 'debug' }
 });
 ```

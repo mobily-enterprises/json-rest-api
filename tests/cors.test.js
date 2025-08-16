@@ -37,7 +37,6 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       const Api = (await import('hooked-api')).Api;
       baseUrlApi = new Api({ 
         name: 'cors-baseurl-test-api',
-        version: '1.0.0',
         log: { level: 'info' }
       });
       
@@ -48,7 +47,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       await baseUrlApi.use((await import('../plugins/core/rest-api-knex-plugin.js')).RestApiKnexPlugin, { knex });
       await baseUrlApi.use((await import('../plugins/core/connectors/express-plugin.js')).ExpressPlugin, {
         app: baseUrlApp,
-        mountPath: '/v1/api'
+        mountPath: '/api'
       });
       
       // Add basic scope
@@ -75,7 +74,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         console.log('[TEST] CORS installation error:', error.message);
         console.log('[TEST] vars.transport.matchAll:', baseUrlApi.vars.transport?.matchAll);
         console.log('[TEST] mountPath from transport:', baseUrlApi.vars.transport?.mountPath);
-        console.log('[TEST] Full wildcard path would be:', '/v1' + (baseUrlApi.vars.transport?.matchAll || '*'));
+        console.log('[TEST] Full wildcard path would be:', '' + (baseUrlApi.vars.transport?.matchAll || '*'));
         throw error;
       }
       
@@ -85,7 +84,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
     
     it('should handle OPTIONS preflight with baseUrl', async () => {
       const response = await request(baseUrlApp)
-        .options('/v1/api/countries')
+        .options('/api/countries')
         .set('Origin', 'https://example.com')
         .set('Access-Control-Request-Method', 'POST')
         .set('Access-Control-Request-Headers', 'Content-Type');
@@ -105,7 +104,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       // Just test the GET endpoint without creating data first
       // This tests CORS headers on the response regardless of data
       const response = await request(baseUrlApp)
-        .get('/v1/api/countries')
+        .get('/api/countries')
         .set('Origin', 'https://example.com')
         .set('Accept', 'application/vnd.api+json');
       
@@ -124,7 +123,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
     it('should handle wildcard OPTIONS route with baseUrl', async () => {
       // Test a non-existent endpoint to check if wildcard OPTIONS still works
       const response = await request(baseUrlApp)
-        .options('/v1/api/non-existent-endpoint')
+        .options('/api/non-existent-endpoint')
         .set('Origin', 'https://example.com')
         .set('Access-Control-Request-Method', 'POST');
       
