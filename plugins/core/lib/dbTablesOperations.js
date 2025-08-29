@@ -149,47 +149,12 @@ export async function createKnexTable(knex, tableName, schema, idProperty = 'id'
   });
 }
 
-/**
- * Adds a field to an existing table
- * @param {object} knex - The Knex instance
- * @param {string} tableName - The name of the table
- * @param {string} fieldName - The name of the field to add
- * @param {object} definition - The schema definition for the field
- * @returns {Promise} A promise that resolves when the field is added
- */
-export async function addKnexField(knex, tableName, fieldName, definition) {
+export async function addKnexFields(knex, tableName, schema) {  
   return knex.schema.alterTable(tableName, (table) => {
-    const column = mapTypeToKnex(table, fieldName, definition);
-    applyConstraints(column, definition);
-  });
-}
-
-/**
- * Alters an existing field in a table
- * @param {object} knex - The Knex instance
- * @param {string} tableName - The name of the table
- * @param {string} fieldName - The name of the field to alter
- * @param {object} newDefinition - The new schema definition for the field
- * @returns {Promise} A promise that resolves when the field is altered
- */
-export async function alterKnexField(knex, tableName, fieldName, newDefinition) {
-  return knex.schema.alterTable(tableName, (table) => {
-    const column = mapTypeToKnex(table, fieldName, newDefinition);
-    applyConstraints(column, newDefinition);
-    column.alter();
-  });
-}
-
-/**
- * Drops a field from a table
- * @param {object} knex - The Knex instance
- * @param {string} tableName - The name of the table
- * @param {string} fieldName - The name of the field to drop
- * @returns {Promise} A promise that resolves when the field is dropped
- */
-export async function dropKnexField(knex, tableName, fieldName) {
-  return knex.schema.alterTable(tableName, (table) => {
-    table.dropColumn(fieldName);
+    for (const [fieldName, definition] of Object.entries(schema.structure)) {   
+      const column = mapTypeToKnex(table, fieldName, definition);      
+      applyConstraints(column, definition);
+    }
   });
 }
 

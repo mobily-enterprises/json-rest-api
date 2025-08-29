@@ -1,6 +1,6 @@
 import { requirePackage } from 'hooked-api';
 import { createSchema }  from 'json-rest-schema';
-import { createKnexTable, addKnexField, alterKnexField, dropKnexField } from './lib/dbTablesOperations.js';
+import { createKnexTable, addKnexFields } from './lib/dbTablesOperations.js';
 import { createCrossTableSearchHelpers } from './lib/querying/knex-cross-table-search.js';
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
@@ -145,29 +145,14 @@ export const RestApiKnexPlugin = {
     })
 
     // Helper scope method to add a field to an existing table
-    addScopeMethod('addKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-      const { fieldName, fieldDefinition } = scopeOptions;
-      const tableName = vars.schemaInfo.tableName;
+    addScopeMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
       
-      await addKnexField(api.knex.instance, tableName, fieldName, fieldDefinition);
+      // Create schema object from filtered fields
+      const partialTableSchema = createSchema(params.fields);
+      
+      await addKnexFields(api.knex.instance, vars.schemaInfo.tableName, partialTableSchema)
     })
 
-    // Helper scope method to alter an existing field
-    addScopeMethod('alterKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-      const { fieldName, newDefinition } = scopeOptions;
-      const tableName = vars.schemaInfo.tableName;
-      
-      await alterKnexField(api.knex.instance, tableName, fieldName, newDefinition);
-    })
-
-    // Helper scope method to drop a field
-    addScopeMethod('dropKnexField', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-      const { fieldName } = scopeOptions;
-      const tableName = vars.schemaInfo.tableName;
-      
-      await dropKnexField(api.knex.instance, tableName, fieldName);
-    })
-  
     helpers.newTransaction = async () => {
       return knex.transaction()
     }
