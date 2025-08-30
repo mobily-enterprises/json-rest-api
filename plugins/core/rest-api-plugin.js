@@ -17,6 +17,7 @@ import deleteMethod from './rest-api-plugin-methods/delete.js';
 import enrichAttributesMethod from './rest-api-plugin-methods/enrich-attributes.js';
 import checkPermissionsMethod from './rest-api-plugin-methods/check-permissions.js';
 import addRouteMethod from './rest-api-plugin-methods/add-route.js';
+import releaseMethod from './rest-api-plugin-methods/release.js';
 import { defaultDataHelpers } from './lib/querying-writing/default-data-helpers.js';
 import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT } from './lib/querying-writing/knex-constants.js';
 
@@ -126,6 +127,8 @@ export const RestApiPlugin = {
     // *********
 
     addApiMethod('addRoute', addRouteMethod);
+
+    addApiMethod('release', releaseMethod);
 
     // Main REST methods
     addScopeMethod('query', queryMethod);

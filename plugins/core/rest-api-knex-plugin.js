@@ -121,7 +121,12 @@ export const RestApiKnexPlugin = {
     addHook('knexQueryFiltering', 'basicFiltersHook', {}, 
       async (hookParams) => basicFiltersHook(hookParams, polymorphicFiltersHookParams)
     );
-    
+
+        // 3. Basic filters (processes simple main table filters)
+    addHook('release', 'releaseHook', {}, 
+       async ({ api }) => api.knex.instance.destroy() 
+    );
+
     // Expose helpers under api.knex.helpers
     api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
 

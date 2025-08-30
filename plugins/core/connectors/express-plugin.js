@@ -24,6 +24,13 @@ export const ExpressPlugin = {
   dependencies: ['rest-api'],
   
   async install({ on, vars, helpers, pluginOptions, log, scopes, api, runHooks, addHook }) {
+
+
+    addHook('release', 'releaseHook', {}, 
+       async ({ api }) => {} // TODO: Anything to do here? 
+    );
+
+
     // Dynamic import for Express
     let express;
     try {
