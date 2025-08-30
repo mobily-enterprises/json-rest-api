@@ -101,8 +101,9 @@ export const supportsWindowFunctions = async (knex) => {
       case 'mysql':
       case 'mysql2':
         try {
-          versionString = await knex.raw('SELECT VERSION() as version');
-          const mysqlVersion = parseVersion(versionString[0].version);
+          const row = await knex.first(knex.raw('VERSION() as version'));
+          const mysqlVersion = parseVersion(row.version);
+
           return mysqlVersion && mysqlVersion.major >= 8;
         } catch (dbError) {
           console.warn(`[supportsWindowFunctions] Failed to get MySQL version: ${dbError.message}`);
@@ -216,13 +217,13 @@ export const getDatabaseInfo = async (knex) => {
     switch (client) {
       case 'mysql':
       case 'mysql2':
-        try {
-          versionString = await knex.raw('SELECT VERSION() as version');
-          return { client: 'MySQL', version: versionString[0].version };
-        } catch (dbError) {
-          console.warn(`[getDatabaseInfo] Failed to get MySQL version: ${dbError.message}`);
-          return { client: 'MySQL', version: 'unknown', error: dbError.message };
-        }
+      try {
+        const row = await knex.first(knex.raw('VERSION() as version'));
+        return { client: 'MySQL', version: row.version };
+      } catch (dbError) {
+        console.warn(`[getDatabaseInfo] Failed to get MySQL version: ${dbError.message}`);
+        return { client: 'MySQL', version: 'unknown', error: dbError.message };
+      }
         
       case 'sqlite3':
       case 'better-sqlite3':
