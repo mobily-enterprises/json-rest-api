@@ -160,7 +160,7 @@ export const SocketIOPlugin = {
       }
 
       // Get searchSchema for filter matching
-      const searchSchema = scope.vars.schemaInfo?.searchSchema;
+      const searchSchema = scope.vars.schemaInfo?.searchSchemaInstance;
 
       // Use context.minimalRecord - it's GUARANTEED to be there!
       const recordForFiltering = context.minimalRecord;
@@ -339,7 +339,7 @@ export const SocketIOPlugin = {
 
             // Validate and modify filters
             if (filters && Object.keys(filters).length > 0) {
-              const searchSchema = scope.vars.schemaInfo?.searchSchema;
+              const searchSchema = scope.vars.schemaInfo?.searchSchemaInstance;
 
               if (!searchSchema) {
                 const error = {

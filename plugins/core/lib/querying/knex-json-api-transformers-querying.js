@@ -74,7 +74,7 @@ import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_
 const toJsonApi = (scope, record, deps) => {
   if (!record) return null;
   
-  const schemaInstance = scope.vars.schemaInfo.instance
+  const schemaInstance = scope.vars.schemaInfo.schemaInstance
   
   const { context } = deps;
   const scopeName = context.scopeName;
@@ -346,7 +346,7 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
 export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName, context) => {
   const { 
     vars: { 
-      schemaInfo: { instance: schemaInstance, schemaRelationships: relationships, idProperty }
+      schemaInfo: { schemaInstance: schemaInstance, schemaRelationships: relationships, idProperty }
     }
   } = scope;
   

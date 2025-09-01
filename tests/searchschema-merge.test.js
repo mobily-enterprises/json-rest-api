@@ -43,7 +43,7 @@ describe('SearchSchema Merge Behavior', () => {
     
     // Get the compiled searchSchema for products (has both search:true and searchSchema)
     const scope = api.resources.products;
-    const searchSchema = scope.vars.schemaInfo.searchSchema;
+    const searchSchema = scope.vars.schemaInfo.searchSchemaInstance;
     
     // Verify searchSchema exists
     assert.ok(searchSchema, 'searchSchema should exist');
@@ -84,7 +84,7 @@ describe('SearchSchema Merge Behavior', () => {
     
     // Get the compiled searchSchema for users (only search:true fields)
     const scope = api.resources.users;
-    const searchSchema = scope.vars.schemaInfo.searchSchema;
+    const searchSchema = scope.vars.schemaInfo.searchSchemaInstance;
     
     assert.ok(searchSchema, 'searchSchema should exist');
     assert.ok(searchSchema.structure.username, 'username should be searchable');
@@ -102,7 +102,7 @@ describe('SearchSchema Merge Behavior', () => {
     
     // Get the compiled searchSchema for orders (only explicit searchSchema)
     const scope = api.resources.orders;
-    const searchSchema = scope.vars.schemaInfo.searchSchema;
+    const searchSchema = scope.vars.schemaInfo.searchSchemaInstance;
     
     assert.ok(searchSchema, 'searchSchema should exist');
     assert.ok(searchSchema.structure.order_number, 'order_number should be searchable');

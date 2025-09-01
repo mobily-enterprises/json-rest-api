@@ -145,7 +145,7 @@ export const buildFieldSelection = async (scope, deps) => {
   // Extract values from scope
   const { 
     vars: { 
-      schemaInfo: { instance: schemaInstance, computed: computedFields = {}, schemaStructure }
+      schemaInfo: { schemaInstance: schemaInstance, computed: computedFields = {}, schemaStructure }
     }
   } = scope;
   

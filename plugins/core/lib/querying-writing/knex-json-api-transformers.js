@@ -98,7 +98,7 @@ export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
   // Extract schema info from scope
   const { 
     vars: { 
-      schemaInfo: { instance: schemaInstance, schemaRelationships: relationships, idProperty }
+      schemaInfo: { schemaInstance: schemaInstance, schemaRelationships: relationships, idProperty }
     }
   } = scope;
   

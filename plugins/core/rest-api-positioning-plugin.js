@@ -160,7 +160,7 @@ export const PositioningPlugin = {
 
       // Check if resource has position field
       const scope = scopes[scopeName];
-      const hasPositionField = scope?.vars?.schemaInfo?.instance?.structure?.[vars.positioning.field];
+      const hasPositionField = scope?.vars?.schemaInfo?.schemaInstance?.structure?.[vars.positioning.field];
       
       if (!hasPositionField) {
         return;

@@ -61,8 +61,8 @@ export default async function queryMethod({
   context.scopeName = scopeName;
 
   // These are just shortcuts used in this function and will be returned
-  const searchSchema = context.schemaInfo.searchSchema;
-  const schemaStructure = context.schemaInfo.instance.structure;
+  const searchSchema = context.schemaInfo.searchSchemaInstance;
+  const schemaStructure = context.schemaInfo.schemaInstance.structure;
   const schemaRelationships = context.schemaInfo.schemaRelationships;
 
   // Sortable fields and sort (mab)

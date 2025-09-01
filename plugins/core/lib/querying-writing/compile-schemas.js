@@ -318,9 +318,8 @@ export async function compileSchemas(scope, deps) {
   // Cache everything
   scope.vars.schemaInfo = {
 
-    instance: schemaObject,
-    searchSchema: searchSchemaObject,
-
+    schemaInstance: schemaObject,
+    searchSchemaInstance: searchSchemaObject,
 
     // schema: schemaObject,
     schemaStructure: schemaContext.fields,

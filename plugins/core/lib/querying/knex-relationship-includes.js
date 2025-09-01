@@ -263,7 +263,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
     const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
     if (!schemaInfo) return;
 
-    const schema = schemaInfo.instance.structure || schemaInfo.instance;
+    const schema = schemaInfo.schemaInstance.structure || schemaInfo.schemaInstance;
     const relationships = schemaInfo.schemaRelationships || {};
 
     // Process each record
@@ -395,7 +395,7 @@ export const loadBelongsTo = async (scope, deps) => {
     // Get target table info
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
     const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty 
-    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
     
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope];
@@ -624,7 +624,7 @@ export const loadHasMany = async (scope, deps) => {
     });
     
     // Step 3: Build field selection for sparse fieldsets
-    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
     const targetScopeObject = scopes[targetScope];
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -823,7 +823,7 @@ export const loadHasMany = async (scope, deps) => {
     });
     
     // Build field selection for sparse fieldsets
-    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
     const targetScopeObject = scopes[targetScope];
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -1274,7 +1274,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
   });
   
   // Build field selection for sparse fieldsets
-  const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
+  const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
   const targetScopeObject = scopes[targetScope];
   const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -1443,7 +1443,7 @@ export const processIncludes = async (scope, deps) => {
       return;
     }
     
-    const { instance: schemaInstance, schemaRelationships } = schemaInfo;
+    const { schemaInstance: schemaInstance, schemaRelationships } = schemaInfo;
     
     // Process each include
     for (const [includeName, subIncludes] of Object.entries(includeTree)) {

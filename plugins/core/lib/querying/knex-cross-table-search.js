@@ -54,7 +54,7 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
     log.trace('[VALIDATE] Getting target schema for:', targetScopeName);
     let targetSchemaInstance;
     try {
-      targetSchemaInstance = scopes[targetScopeName].vars.schemaInfo.instance;;
+      targetSchemaInstance = scopes[targetScopeName].vars.schemaInfo.schemaInstance;;
       log.trace('[VALIDATE] Got target schema:', { scopeName: targetScopeName, schemaKeys: Object.keys(targetSchemaInstance || {}) });
     } catch (error) {
       log.trace('[VALIDATE] Error getting target schema:', error.message);
@@ -202,7 +202,7 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
       searchedScopes.add(currentScope);
       
       const schemaInfo = scopes[currentScope].vars.schemaInfo
-      const currentSchema = schemaInfo.instance;
+      const currentSchema = schemaInfo.schemaInstance;
       const currentRelationships = schemaInfo.schemaRelationships;
       
       let foundRelationship = null;
@@ -282,9 +282,9 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
         );
       }
       
-      const sourceSchema = scopes[currentScope].vars.schemaInfo.instance;
+      const sourceSchema = scopes[currentScope].vars.schemaInfo.schemaInstance;
       const sourceTableName = scopes[currentScope].vars.schemaInfo.tableName
-      const targetSchemaInstance = scopes[targetScope].vars.schemaInfo.instance;
+      const targetSchemaInstance = scopes[targetScope].vars.schemaInfo.schemaInstance;
       const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
       
       if (relationshipType === 'manyToMany') {

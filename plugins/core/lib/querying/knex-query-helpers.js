@@ -137,7 +137,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
       
       // Skip if we already added this JOIN
       if (!polymorphicJoins.has(baseAlias)) {
-        const targetSchema = scopes[targetType].vars.schemaInfo.instance;;
+        const targetSchema = scopes[targetType].vars.schemaInfo.schemaInstance;;
         const targetTable = targetSchema?.tableName || targetType;
         
         log.trace('[POLYMORPHIC-SEARCH] Adding conditional JOIN:', { 
@@ -170,7 +170,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
             const relationshipName = pathParts[i];
             
             // Find the foreign key for this relationship
-            const currentSchema = scopes[currentScope].vars.schemaInfo.instance;
+            const currentSchema = scopes[currentScope].vars.schemaInfo.schemaInstance;
             let foreignKeyField = null;
             let nextScope = null;
             
@@ -201,7 +201,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
             
             // Build next JOIN
             const nextAlias = `${currentAlias}_${relationshipName}`;
-            const nextSchema = scopes[nextScope].vars.schemaInfo.instance;
+            const nextSchema = scopes[nextScope].vars.schemaInfo.schemaInstance;
             const nextTable = nextSchema?.tableName || nextScope;
             
             log.trace('[POLYMORPHIC-SEARCH] Adding cross-table JOIN:', { 
