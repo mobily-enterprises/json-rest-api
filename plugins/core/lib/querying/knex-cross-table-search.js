@@ -49,7 +49,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * @param {string} targetScopeName - The scope containing the field to validate
    * @param {string} fieldName - The field name to check
    * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
-   * @returns {Promise<{targetSchema: Object, fieldDef: Object}>} The validated schema and field definition
+   * @returns {Promise<{targetSchemaInstance: Object, fieldDef: Object}>} The validated schema and field definition
    * @throws {Error} If scope not found, field not found, field not indexed, or circular reference detected
    * 
    * @example
@@ -59,7 +59,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * 
    * // Output: Successfully returns schema and field definition
    * // {
-   * //   targetSchema: { structure: { name: { type: 'string', indexed: true }, ... } },
+   * //   targetSchemaInstance: { structure: { name: { type: 'string', indexed: true }, ... } },
    * //   fieldDef: { type: 'string', indexed: true }
    * // }
    * 
@@ -96,21 +96,21 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     }
     
     log.trace('[VALIDATE] Getting target schema for:', targetScopeName);
-    let targetSchema;
+    let targetSchemaInstance;
     try {
-      targetSchema = scopes[targetScopeName].vars.schemaInfo.schema;;
-      log.trace('[VALIDATE] Got target schema:', { scopeName: targetScopeName, schemaKeys: Object.keys(targetSchema || {}) });
+      targetSchemaInstance = scopes[targetScopeName].vars.schemaInfo.instance;;
+      log.trace('[VALIDATE] Got target schema:', { scopeName: targetScopeName, schemaKeys: Object.keys(targetSchemaInstance || {}) });
     } catch (error) {
       log.trace('[VALIDATE] Error getting target schema:', error.message);
       throw new Error(`Target scope '${targetScopeName}' not found`);
     }
     
-    if (!targetSchema) {
+    if (!targetSchemaInstance) {
       log.trace('[VALIDATE] Target schema is null/undefined');
       throw new Error(`Target scope '${targetScopeName}' has no schema`);
     }
     
-    const fieldDef = targetSchema.structure[fieldName];
+    const fieldDef = targetSchemaInstance.structure[fieldName];
     log.trace('[VALIDATE] Field lookup result:', { fieldName, fieldExists: !!fieldDef });
     if (!fieldDef) {
       throw new Error(`Field '${fieldName}' not found in scope '${targetScopeName}'`);
@@ -121,7 +121,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       throw new Error(`Field '${targetScopeName}.${fieldName}' is not indexed. Add 'indexed: true' to allow cross-table search`);
     }
     
-    const result = { targetSchema, fieldDef };
+    const result = { targetSchemaInstance, fieldDef };
     log.trace('[VALIDATE] Validation successful for field:', `${targetScopeName}.${fieldName}`);
     return result;
   };
@@ -246,7 +246,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
       searchedScopes.add(currentScope);
       
       const schemaInfo = scopes[currentScope].vars.schemaInfo
-      const currentSchema = schemaInfo.schema;
+      const currentSchema = schemaInfo.instance;
       const currentRelationships = schemaInfo.schemaRelationships;
       
       let foundRelationship = null;
@@ -326,9 +326,9 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
         );
       }
       
-      const sourceSchema = scopes[currentScope].vars.schemaInfo.schema;
+      const sourceSchema = scopes[currentScope].vars.schemaInfo.instance;
       const sourceTableName = scopes[currentScope].vars.schemaInfo.tableName
-      const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+      const targetSchemaInstance = scopes[targetScope].vars.schemaInfo.instance;
       const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
       
       if (relationshipType === 'manyToMany') {
@@ -579,7 +579,6 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     
     for (const indexInfo of requiredIndexes) {
       const { scope, field } = indexInfo;
-      const schema = scopes[scope].vars.schemaInfo.schema;
       const tableName = scopes[scope].vars.schemaInfo.tableName
       const indexName = `idx_${tableName}_${field}_search`;
       

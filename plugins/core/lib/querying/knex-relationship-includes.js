@@ -263,7 +263,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
     const schemaInfo = scopes[scopeName]?.vars?.schemaInfo;
     if (!schemaInfo) return;
 
-    const schema = schemaInfo.schema.structure || schemaInfo.schema;
+    const schema = schemaInfo.instance.structure || schemaInfo.instance;
     const relationships = schemaInfo.schemaRelationships || {};
 
     // Process each record
@@ -395,7 +395,7 @@ export const loadBelongsTo = async (scope, deps) => {
     // Get target table info
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
     const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty 
-    const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
     
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope];
@@ -624,7 +624,7 @@ export const loadHasMany = async (scope, deps) => {
     });
     
     // Step 3: Build field selection for sparse fieldsets
-    const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
     const targetScopeObject = scopes[targetScope];
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -823,7 +823,7 @@ export const loadHasMany = async (scope, deps) => {
     });
     
     // Build field selection for sparse fieldsets
-    const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+    const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
     const targetScopeObject = scopes[targetScope];
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -1274,7 +1274,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
   });
   
   // Build field selection for sparse fieldsets
-  const targetSchema = scopes[targetScope].vars.schemaInfo.schema;
+  const targetSchema = scopes[targetScope].vars.schemaInfo.instance;
   const targetScopeObject = scopes[targetScope];
   const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   const fieldSelectionInfo = fields?.[targetScope] ? 
@@ -1443,7 +1443,7 @@ export const processIncludes = async (scope, deps) => {
       return;
     }
     
-    const { schema, schemaRelationships } = schemaInfo;
+    const { instance: schemaInstance, schemaRelationships } = schemaInfo;
     
     // Process each include
     for (const [includeName, subIncludes] of Object.entries(includeTree)) {
@@ -1461,7 +1461,7 @@ export const processIncludes = async (scope, deps) => {
       
       try {
         // Look for belongsTo relationships in schema fields
-        for (const [fieldName, fieldDef] of Object.entries(schema.structure || {})) {
+        for (const [fieldName, fieldDef] of Object.entries(schemaInstance.structure || {})) {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
             await loadBelongsTo(
               { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
@@ -1516,7 +1516,7 @@ export const processIncludes = async (scope, deps) => {
         log.warn('[INCLUDE] Unknown relationship:', { 
           scopeName, 
           includeName,
-          availableFields: Object.keys(schema.structure || {}).filter(k => schema.structure[k].as),
+          availableFields: Object.keys(schemaInstance.structure || {}).filter(k => schemaInstance.structure[k].as),
           availableRelationships: Object.keys(schemaRelationships || {})
         });
       }

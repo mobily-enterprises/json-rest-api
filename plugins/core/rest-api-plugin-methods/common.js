@@ -130,8 +130,8 @@ export async function setupCommonRequest({ params, context, vars, scopes, scopeO
   context.db = context.transaction || api.knex.instance;
 
   // These are just shortcuts used in this function and will be returned
-  const schema = context.schemaInfo.schema;
-  const schemaStructure = context.schemaInfo.schema.structure;
+  const schema = context.schemaInfo.instance;
+  const schemaStructure = context.schemaInfo.instance.structure;
   const schemaRelationships = context.schemaInfo.schemaRelationships;
 
   // Transform input if in simplified mode
@@ -332,7 +332,7 @@ export const validateResourceAttributesBeforeWrite = async ({
 
   if (Object.keys(errors).length > 0) {
     // --- START OF MODIFICATION ---
-    const schemaStructure = context.schemaInfo.schema.structure; // Get the schema structure for lookup
+    const schemaStructure = context.schemaInfo.instance.structure; // Get the schema structure for lookup
 
     const violations = Object.entries(errors).map(([field, error]) => {
     let fieldPath = `data.attributes.${field}`; // Default path for attributes

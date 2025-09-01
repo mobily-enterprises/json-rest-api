@@ -53,7 +53,7 @@ export default async function getMethod({
   context.scopeName = scopeName;
 
   // These are just shortcuts used in this function and will be returned
-  const schemaStructure = context.schemaInfo.schema.structure;
+  const schemaStructure = context.schemaInfo.instance.structure;
   const schemaRelationships = context.schemaInfo.schemaRelationships;
 
   context.id = params.id;

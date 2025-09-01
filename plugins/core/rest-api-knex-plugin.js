@@ -211,7 +211,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.schemaInfo - Schema information for the resource
      * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
      * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
-     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.instance - The full schema definition for the resource
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @param {Object} [params.context.queryParams] - Query parameters for sparse fieldsets and includes
      * @param {Object} [params.context.queryParams.fields] - Sparse fieldset selections
@@ -237,7 +237,6 @@ export const RestApiKnexPlugin = {
       const id = context.id;      
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schema;
       const db = context.db;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
@@ -341,7 +340,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context - The context object containing request-specific data
      * @param {Object} params.context.schemaInfo - Schema information for the resource
      * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
-     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.instance - The full schema definition for the resource
      * @param {Object} params.context.schemaInfo.searchSchema - Search schema for filtering capabilities
      * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
      * @param {Object} params.context.queryParams - Query parameters object
@@ -364,7 +363,7 @@ export const RestApiKnexPlugin = {
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {    
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
-      const schema =  context.schemaInfo.schema;
+      const schema =  context.schemaInfo.instance;
       const searchSchema =  context.schemaInfo.searchSchema;
       const queryParams = context.queryParams
       const db = context.db;
@@ -784,7 +783,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.schemaInfo - Schema information for the resource
      * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
      * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
-     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.instance - The full schema definition for the resource
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @param {Object} params.context.inputRecord - JSON:API formatted input record
      * @param {Object} params.context.inputRecord.data - The resource data
@@ -795,7 +794,7 @@ export const RestApiKnexPlugin = {
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schema;
+      const schema =  context.schemaInfo.instance;
       const db = context.db;
       const inputRecord = context.inputRecord      
       
@@ -825,7 +824,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.schemaInfo - Schema information for the resource
      * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
      * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
-     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.instance - The full schema definition for the resource
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @param {Object} params.context.inputRecord - JSON:API formatted input record
      * @param {Object} params.context.inputRecord.data - The resource data
@@ -840,7 +839,7 @@ export const RestApiKnexPlugin = {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schema;
+      const schema =  context.schemaInfo.instance;
       const db = context.db;
       const inputRecord = context.inputRecord      
       const isCreate = context.isCreate
@@ -909,7 +908,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.schemaInfo - Schema information for the resource
      * @param {string} params.context.schemaInfo.tableName - The database table name (e.g., 'basic_books')
      * @param {string} params.context.schemaInfo.idProperty - The primary key field name (e.g., 'id')
-     * @param {Object} params.context.schemaInfo.schema - The full schema definition for the resource
+     * @param {Object} params.context.schemaInfo.instance - The full schema definition for the resource
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @param {Object} params.context.inputRecord - JSON:API formatted input record with partial updates
      * @param {Object} params.context.inputRecord.data - The resource data
@@ -923,7 +922,6 @@ export const RestApiKnexPlugin = {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schema;
       const db = context.db;
       const inputRecord = context.inputRecord      
       

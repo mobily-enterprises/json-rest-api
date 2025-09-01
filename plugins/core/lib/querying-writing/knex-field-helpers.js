@@ -145,7 +145,7 @@ export const buildFieldSelection = async (scope, deps) => {
   // Extract values from scope
   const { 
     vars: { 
-      schemaInfo: { schema, computed: computedFields = {}, schemaStructure }
+      schemaInfo: { instance: schemaInstance, computed: computedFields = {}, schemaStructure }
     }
   } = scope;
   
@@ -165,7 +165,7 @@ export const buildFieldSelection = async (scope, deps) => {
   
   // Handle both Schema objects and plain objects
   if (!schemaStructure) {
-    schemaStructure = schema?.structure || schema || {};
+    schemaStructure = schemaInstance?.structure || schemaInstance || {};
   }
   
   // Get computed fields and virtual fields from schema

@@ -74,11 +74,7 @@ import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_
 const toJsonApi = (scope, record, deps) => {
   if (!record) return null;
   
-  const { 
-    vars: { 
-      schemaInfo: { schema }
-    }
-  } = scope;
+  const schemaInstance = scope.vars.schemaInfo.instance
   
   const { context } = deps;
   const scopeName = context.scopeName;
@@ -87,7 +83,7 @@ const toJsonApi = (scope, record, deps) => {
   
   const { id, ...allAttributes } = record;
   
-  const foreignKeys = schema ? getForeignKeyFieldsFromUtils(schema) : new Set();
+  const foreignKeys = schemaInstance ? getForeignKeyFieldsFromUtils(schemaInstance) : new Set();
   
   const internalFields = new Set([
     RELATIONSHIPS_KEY,
@@ -187,10 +183,10 @@ const toJsonApi = (scope, record, deps) => {
 export const toJsonApiRecord = (scope, record, scopeName) => {
   const { 
     vars: { 
-      schemaInfo: { schema, schemaRelationships: relationships, idProperty }
+      schemaInfo: { schemaRelationships: relationships, idProperty }
     }
   } = scope;
-  
+    
   const polymorphicFields = new Set();
   try {
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
@@ -350,13 +346,13 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
 export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName, context) => {
   const { 
     vars: { 
-      schemaInfo: { schema, schemaRelationships: relationships, idProperty }
+      schemaInfo: { instance: schemaInstance, schemaRelationships: relationships, idProperty }
     }
   } = scope;
   
   const idField = idProperty || 'id';
   
-  const schemaStructure = getSchemaStructure(schema);
+  const schemaStructure = getSchemaStructure(schemaInstance);
   
   const processedRecords = records.map(record => {
     const { [RELATIONSHIPS_KEY]: _relationships, ...cleanRecord } = record;
