@@ -200,30 +200,30 @@ export async function compileSchemas(scope, deps) {
   // searchSchema will be added automatically.
   // Example: title: {search: true} auto-generates a searchable field with sensible defaults,
   // while searchSchema can specify filterOperator: 'contains' or complex join configurations.
-  let rawSearchSchema = generateSearchSchemaFromSchema(
+  let rawSearchFields = generateSearchSchemaFromSchema(
     schemaContext.fields,
     scope.scopeOptions.searchSchema
   );
   
-  if (rawSearchSchema) {
+  if (rawSearchFields) {
     // Mark all search fields as indexed for database optimization.
     // This ensures that any field used for filtering will have a database index created,
     // dramatically improving query performance. Without indexes, filtering large tables
     // would require full table scans. The storage plugin uses these hints to create indexes.
     // Example: A status field marked for search gets indexed: true, enabling efficient
     // WHERE status = 'published' queries that can use index lookups instead of scanning all rows.
-    ensureSearchFieldsAreIndexed(rawSearchSchema);
+    ensureSearchFieldsAreIndexed(rawSearchFields);
     
     // Hook: searchSchema:enrich
     const searchSchemaContext = {
-      searchSchema: rawSearchSchema,    // Mutable
-      schema: schemaContext.fields,     // Read-only enriched schema
+      fields: schemaContext.fields,       // Mutable
+      originalFields: rawSearchFields,    // Read-only enriched schema
       scopeName
     };
     await runHooks('searchSchema:enrich', searchSchemaContext);
     
     // Create searchSchema object
-    var searchSchemaObject = createSchema(searchSchemaContext.searchSchema);
+    var searchSchemaObject = createSchema(rawSearchFields);
   } else {
     var searchSchemaObject = null;
   }
@@ -319,12 +319,12 @@ export async function compileSchemas(scope, deps) {
   scope.vars.schemaInfo = {
 
     instance: schemaObject,
+    searchSchema: searchSchemaObject,
 
 
     // schema: schemaObject,
     schemaStructure: schemaContext.fields,
     computed: computedFields,
-    searchSchema: searchSchemaObject,
     schemaRelationships: schemaRelationships,
     tableName: scope.scopeOptions.tableName || scopeName,
     idProperty: scope.scopeOptions.idProperty || scope.vars.idProperty,
