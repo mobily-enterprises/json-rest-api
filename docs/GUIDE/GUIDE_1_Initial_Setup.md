@@ -937,7 +937,6 @@ Each resource (added via `api.addResource()`) gets these methods automatically:
 
 - **`api.rest.registerFileDetector(detector)`** - Registers file upload detectors (requires FileHandlingPlugin)
 - **`api.rest.fileDetectors`** - Registry of file detectors for handling uploads
-- **`api.knex.helpers.crossTableSearch`** - Utilities for searching across related tables
 
 ## Summary
 

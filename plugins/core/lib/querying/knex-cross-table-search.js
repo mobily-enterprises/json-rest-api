@@ -9,19 +9,15 @@
  * @param {string} targetScopeName - The scope containing the field to validate
  * @param {string} fieldName - The field name to check
  * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
- * @returns {Promise<{targetSchemaInstance: Object, fieldDef: Object}>} The validated schema and field definition
+ * @returns {Promise<void>}
  * @throws {Error} If scope not found, field not found, field not indexed, or circular reference detected
    * 
    * @example
    * // Input: Validate indexed field
    * // Schema has: companies.name with indexed: true
-   * const result = await validateCrossTableField('companies', 'name');
+   * await validateCrossTableField(scopes, log, 'companies', 'name');
    * 
-   * // Output: Successfully returns schema and field definition
-   * // {
-   * //   targetSchemaInstance: { structure: { name: { type: 'string', indexed: true }, ... } },
-   * //   fieldDef: { type: 'string', indexed: true }
-   * // }
+   * // Output: Validation succeeds (no error thrown)
    * 
    * @example
    * // Input: Non-indexed field
@@ -81,9 +77,7 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
       throw new Error(`Field '${targetScopeName}.${fieldName}' is not indexed. Add 'indexed: true' to allow cross-table search`);
     }
     
-    const result = { targetSchemaInstance, fieldDef };
     log.trace('[VALIDATE] Validation successful for field:', `${targetScopeName}.${fieldName}`);
-    return result;
   };
 
 /**

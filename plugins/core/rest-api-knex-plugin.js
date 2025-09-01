@@ -1,7 +1,6 @@
 import { requirePackage } from 'hooked-api';
 import { createSchema }  from 'json-rest-schema';
 import { createKnexTable, addKnexFields } from './lib/dbTablesOperations.js';
-import { validateCrossTableField, buildJoinChain, analyzeRequiredIndexes, createRequiredIndexes } from './lib/querying/knex-cross-table-search.js';
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
 import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js';
@@ -126,13 +125,6 @@ export const RestApiKnexPlugin = {
        async ({ api }) => api.knex.instance.destroy() 
     );
 
-    // Expose helpers under api.knex.helpers with proper signatures
-    api.knex.helpers.crossTableSearch = {
-      validateCrossTableField,
-      buildJoinChain,
-      analyzeRequiredIndexes,
-      createRequiredIndexes
-    };
 
   // Helper scope method to get all schema-related information
     addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
