@@ -10,7 +10,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema, sortField
  * 
  * @example
  * // Input: Raw schema with computed field
- * const rawSchema = {
+ * const rawFields = {
  *   title: { type: 'string', required: true },
  *   content: { type: 'string' },
  *   author_id: { belongsTo: 'users', as: 'author' },  // Missing type
@@ -39,7 +39,7 @@ import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema, sortField
  * 
  * @example
  * // Input: Schema with search fields
- * const rawSchema = {
+ * const rawFields = {
  *   title: { type: 'string', search: true },    // Searchable
  *   status: { type: 'string' },                 // Not searchable
  *   author_id: { belongsTo: 'users', as: 'author' }
@@ -127,13 +127,13 @@ export async function compileSchemas(scope, deps) {
   const scopeName = context.scopeName;
 
   // Get raw schema
-  const rawSchema = scope.scopeOptions?.schema || {};
+  const rawFields = scope.scopeOptions?.schema || {};
   
   // Extract computed fields from schema and build enriched schema
   const computedFields = {};
-  const enrichedSchema = {};
+  const enrichedFields = {};
   
-  for (const [fieldName, fieldDef] of Object.entries(rawSchema)) {
+  for (const [fieldName, fieldDef] of Object.entries(rawFields)) {
     if (fieldDef.computed === true) {
       // Extract computed field - copy entire definition
       computedFields[fieldName] = { ...fieldDef };
@@ -149,12 +149,12 @@ export async function compileSchemas(scope, deps) {
       
       // Don't include computed fields in the validation schema
     } else {
-      enrichedSchema[fieldName] = { ...fieldDef };
+      enrichedFields[fieldName] = { ...fieldDef };
     }
   }
   
   // Default enrichment: Add type to belongsTo fields
-  for (const [fieldName, fieldDef] of Object.entries(enrichedSchema)) {
+  for (const [fieldName, fieldDef] of Object.entries(enrichedFields)) {
     if (fieldDef.belongsTo && !fieldDef.type) {
       fieldDef.type = 'id';
     }
@@ -163,7 +163,7 @@ export async function compileSchemas(scope, deps) {
   // ADD LOGIC TO MAKE FIELDS SEARCHABLE HERE
   // Auto-detect pivot tables and make their foreign key fields searchable
   // This is critical for many-to-many relationship operations which need to filter pivot records
-  const fields = Object.entries(enrichedSchema);
+  const fields = Object.entries(enrichedFields);
   const belongsToFields = fields.filter(([_, def]) => def.belongsTo);
   
   // If 2+ belongsTo fields and they make up 40%+ of non-id fields, likely a pivot table
@@ -183,14 +183,14 @@ export async function compileSchemas(scope, deps) {
 
   // Hook: schema:enrich
   const schemaContext = {
-    schema: enrichedSchema,    // Mutable
-    originalSchema: rawSchema,  // Read-only
+    fields: enrichedFields,    // Mutable
+    originalFields: rawFields,  // Read-only
     scopeName
   };
   await runHooks('schema:enrich', schemaContext);
   
   // Create schema object
-  const schemaObject = createSchema(schemaContext.schema);
+  const schemaObject = createSchema(schemaContext.fields);
   
   // Generate searchSchema by merging explicit searchSchema with fields marked search:true.
   // This allows two ways to define searchable fields: either mark fields with search:true
@@ -201,7 +201,7 @@ export async function compileSchemas(scope, deps) {
   // Example: title: {search: true} auto-generates a searchable field with sensible defaults,
   // while searchSchema can specify filterOperator: 'contains' or complex join configurations.
   let rawSearchSchema = generateSearchSchemaFromSchema(
-    schemaContext.schema,
+    schemaContext.fields,
     scope.scopeOptions.searchSchema
   );
   
@@ -217,7 +217,7 @@ export async function compileSchemas(scope, deps) {
     // Hook: searchSchema:enrich
     const searchSchemaContext = {
       searchSchema: rawSearchSchema,    // Mutable
-      schema: schemaContext.schema,     // Read-only enriched schema
+      schema: schemaContext.fields,     // Read-only enriched schema
       scopeName
     };
     await runHooks('searchSchema:enrich', searchSchemaContext);
@@ -232,7 +232,7 @@ export async function compileSchemas(scope, deps) {
   const schemaRelationships = { ...(scope.scopeOptions.relationships || {}) };
   
   // Validate belongsTo fields
-  for (const [fieldName, fieldDef] of Object.entries(schemaContext.schema)) {
+  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
     // Validate that belongsTo fields have 'as' property
     if (fieldDef.belongsTo && !fieldDef.as) {
       throw new Error(
@@ -247,7 +247,7 @@ export async function compileSchemas(scope, deps) {
   const fieldGetters = {};
   const getterFields = [];
   
-  for (const [fieldName, fieldDef] of Object.entries(schemaContext.schema)) {
+  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
     if (fieldDef.getter && typeof fieldDef.getter === 'function') {
       fieldGetters[fieldName] = {
         getter: fieldDef.getter,
@@ -259,7 +259,7 @@ export async function compileSchemas(scope, deps) {
       // Validate dependencies exist
       if (fieldDef.runGetterAfter && Array.isArray(fieldDef.runGetterAfter)) {
         for (const dep of fieldDef.runGetterAfter) {
-          if (!schemaContext.schema[dep]) {
+          if (!schemaContext.fields[dep]) {
             throw new Error(
               `Field '${fieldName}' in resource '${scopeName}' has getter dependency '${dep}' that does not exist in schema`
             );
@@ -283,7 +283,7 @@ export async function compileSchemas(scope, deps) {
   const fieldSetters = {};
   const setterFields = [];
   
-  for (const [fieldName, fieldDef] of Object.entries(schemaContext.schema)) {
+  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
     if (fieldDef.setter && typeof fieldDef.setter === 'function') {
       fieldSetters[fieldName] = {
         setter: fieldDef.setter,
@@ -295,7 +295,7 @@ export async function compileSchemas(scope, deps) {
       // Validate dependencies exist
       if (fieldDef.runSetterAfter && Array.isArray(fieldDef.runSetterAfter)) {
         for (const dep of fieldDef.runSetterAfter) {
-          if (!schemaContext.schema[dep]) {
+          if (!schemaContext.fields[dep]) {
             throw new Error(
               `Field '${fieldName}' in resource '${scopeName}' has setter dependency '${dep}' that does not exist in schema`
             );
@@ -322,7 +322,7 @@ export async function compileSchemas(scope, deps) {
 
 
     // schema: schemaObject,
-    schemaStructure: schemaContext.schema,
+    schemaStructure: schemaContext.fields,
     computed: computedFields,
     searchSchema: searchSchemaObject,
     schemaRelationships: schemaRelationships,
