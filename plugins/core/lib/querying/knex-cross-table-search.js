@@ -1,56 +1,16 @@
+// Cross-table search helper functions that enable filtering across related database tables
+  
 /**
- * Creates cross-table search helper functions that enable filtering across related database tables
+ * Validates that a field exists and is indexed for cross-table search
  * 
+ * @async
  * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
  * @param {Object} log - Logger instance for debug and trace output
- * @returns {Object} Object containing validateCrossTableField, buildJoinChain, analyzeRequiredIndexes, and createRequiredIndexes functions
- * 
- * @example
- * // Input: API scopes with relationships defined
- * const scopes = {
- *   articles: { vars: { schemaInfo: { schema: articlesSchema, tableName: 'articles' } } },
- *   authors: { vars: { schemaInfo: { schema: authorsSchema, tableName: 'authors' } } },
- *   companies: { vars: { schemaInfo: { schema: companiesSchema, tableName: 'companies' } } }
- * };
- * 
- * const helpers = createCrossTableSearchHelpers(scopes, logger);
- * 
- * // Output: Object with helper functions
- * // {
- * //   validateCrossTableField: [Function],
- * //   buildJoinChain: [Function],
- * //   analyzeRequiredIndexes: [Function],
- * //   createRequiredIndexes: [Function]
- * // }
- * 
- * @description
- * Used by:
- * - rest-api-knex-plugin uses this during dataQuery to enable cross-table filtering
- * - Called when filter parameters reference fields from related tables (e.g., filter[author.name]=John)
- * 
- * Purpose:
- * - Enables powerful filtering across relationships without exposing SQL complexity to API consumers
- * - Automatically builds optimal JOIN chains based on schema relationships
- * - Prevents N+1 queries by using efficient SQL JOINs instead of multiple queries
- * 
- * Data flow:
- * 1. API receives filter like filter[author.company.name]=Acme
- * 2. rest-api-knex-plugin detects cross-table reference (contains dots)
- * 3. Calls buildJoinChain to construct SQL JOIN path from articles → authors → companies
- * 4. Adds JOINs to main query, enabling filtering on company name while querying articles
- * 5. Returns articles where author's company name matches 'Acme'
- */
-export const createCrossTableSearchHelpers = (scopes, log) => {
-  
-  /**
-   * Validates that a field exists and is indexed for cross-table search
-   * 
-   * @async
-   * @param {string} targetScopeName - The scope containing the field to validate
-   * @param {string} fieldName - The field name to check
-   * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
-   * @returns {Promise<{targetSchemaInstance: Object, fieldDef: Object}>} The validated schema and field definition
-   * @throws {Error} If scope not found, field not found, field not indexed, or circular reference detected
+ * @param {string} targetScopeName - The scope containing the field to validate
+ * @param {string} fieldName - The field name to check
+ * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
+ * @returns {Promise<{targetSchemaInstance: Object, fieldDef: Object}>} The validated schema and field definition
+ * @throws {Error} If scope not found, field not found, field not indexed, or circular reference detected
    * 
    * @example
    * // Input: Validate indexed field
@@ -88,7 +48,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * - Ensures performance by requiring indexes on searchable fields
    * - Part of the validation phase before expensive JOIN operations
    */
-  const validateCrossTableField = async (targetScopeName, fieldName, searchedScopes = new Set()) => {
+export const validateCrossTableField = async (scopes, log, targetScopeName, fieldName, searchedScopes = new Set()) => {
     log.trace('[VALIDATE] Starting validateCrossTableField:', { targetScopeName, fieldName, searchedScopes: Array.from(searchedScopes) });
     
     if (searchedScopes.has(targetScopeName)) {
@@ -126,15 +86,17 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     return result;
   };
 
-  /**
-   * Builds a chain of SQL JOINs to reach a field in a related table
-   * 
-   * @async
-   * @param {string} fromScopeName - Starting scope (e.g., 'articles')
-   * @param {string} targetPath - Dot-separated path to target field (e.g., 'author.company.name')
-   * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
-   * @returns {Promise<Object>} JOIN information for query builder
-   * @throws {Error} If path is invalid or relationships not properly configured
+/**
+ * Builds a chain of SQL JOINs to reach a field in a related table
+ * 
+ * @async
+ * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} log - Logger instance for debug and trace output
+ * @param {string} fromScopeName - Starting scope (e.g., 'articles')
+ * @param {string} targetPath - Dot-separated path to target field (e.g., 'author.company.name')
+ * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
+ * @returns {Promise<Object>} JOIN information for query builder
+ * @throws {Error} If path is invalid or relationships not properly configured
    * 
    * @example
    * // Input: Simple belongsTo relationship
@@ -219,7 +181,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * 5. Returns complete JOIN information for SQL query builder
    * 6. Query builder adds these JOINs to enable filtering on related data
    */
-  const buildJoinChain = async (fromScopeName, targetPath, searchedScopes = new Set()) => {
+export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, searchedScopes = new Set()) => {
     log.trace('[BUILD-JOIN] Starting buildJoinChain:', { fromScopeName, targetPath });
     
     const pathSegments = targetPath.split('.');
@@ -392,7 +354,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     }
     
     const finalScope = relationshipPath[relationshipPath.length - 1];
-    await validateCrossTableField(finalScope, targetFieldName, searchedScopes);
+    await validateCrossTableField(scopes, log, finalScope, targetFieldName, searchedScopes);
     
     if (joinChain.length === 0) {
       throw new Error(`Invalid path '${targetPath}': no relationships to traverse`);
@@ -423,12 +385,14 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     }
   };
 
-  /**
-   * Analyzes a search schema to identify which fields need database indexes
-   * 
-   * @param {string} scopeName - The scope being analyzed
-   * @param {Object} searchSchema - Search schema definition with filter fields
-   * @returns {Array<Object>} Array of required indexes with scope, field, and reason
+/**
+ * Analyzes a search schema to identify which fields need database indexes
+ * 
+ * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} log - Logger instance for debug and trace output
+ * @param {string} scopeName - The scope being analyzed
+ * @param {Object} searchSchema - Search schema definition with filter fields
+ * @returns {Array<Object>} Array of required indexes with scope, field, and reason
    * 
    * @example
    * // Input: Search schema with cross-table references
@@ -486,7 +450,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * - Output can be used to create indexes manually or automatically
    * - Prevents performance issues before queries are executed
    */
-  const analyzeRequiredIndexes = (scopeName, searchSchema) => {
+export const analyzeRequiredIndexes = (scopes, log, scopeName, searchSchema) => {
     const requiredIndexes = [];
     
     const schemaToAnalyze = searchSchema.structure || searchSchema;
@@ -518,13 +482,15 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     return requiredIndexes;
   };
 
-  /**
-   * Creates database indexes for fields identified by analyzeRequiredIndexes
-   * 
-   * @async
-   * @param {Array<Object>} requiredIndexes - Index requirements from analyzeRequiredIndexes
-   * @param {Object} knex - Knex database connection instance
-   * @returns {Promise<Array<Object>>} Array of successfully created indexes
+/**
+ * Creates database indexes for fields identified by analyzeRequiredIndexes
+ * 
+ * @async
+ * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} log - Logger instance for debug and trace output
+ * @param {Array<Object>} requiredIndexes - Index requirements from analyzeRequiredIndexes
+ * @param {Object} knex - Knex database connection instance
+ * @returns {Promise<Array<Object>>} Array of successfully created indexes
    * 
    * @example
    * // Input: Required indexes from analysis
@@ -574,7 +540,7 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
    * - Improves query performance for cross-table searches
    * - Part of the database optimization phase
    */
-  const createRequiredIndexes = async (requiredIndexes, knex) => {
+export const createRequiredIndexes = async (scopes, log, requiredIndexes, knex) => {
     const createdIndexes = [];
     
     for (const indexInfo of requiredIndexes) {
@@ -598,11 +564,3 @@ export const createCrossTableSearchHelpers = (scopes, log) => {
     
     return createdIndexes;
   };
-
-  return {
-    validateCrossTableField,
-    buildJoinChain,
-    analyzeRequiredIndexes,
-    createRequiredIndexes
-  };
-};

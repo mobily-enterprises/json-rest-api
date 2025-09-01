@@ -1,7 +1,7 @@
 import { requirePackage } from 'hooked-api';
 import { createSchema }  from 'json-rest-schema';
 import { createKnexTable, addKnexFields } from './lib/dbTablesOperations.js';
-import { createCrossTableSearchHelpers } from './lib/querying/knex-cross-table-search.js';
+import { validateCrossTableField, buildJoinChain, analyzeRequiredIndexes, createRequiredIndexes } from './lib/querying/knex-cross-table-search.js';
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
 import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js';
@@ -91,8 +91,7 @@ export const RestApiKnexPlugin = {
       windowFunctions: hasWindowFunctions
     });
 
-    // Initialize cross-table search helpers
-    const crossTableSearchHelpers = createCrossTableSearchHelpers(scopes, log);
+    // Cross-table search functions are now imported directly and used with full signatures
     
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                  MAIN QUERY FILTERING HOOK                              ║
@@ -102,7 +101,7 @@ export const RestApiKnexPlugin = {
     
     // Register the three separate filter hooks
     // Dependencies object for the hooks
-    const polymorphicFiltersHookParams  = { log, scopes, knex, crossTableSearchHelpers };
+    const polymorphicFiltersHookParams  = { log, scopes, knex };
     
     // Register in specific order: polymorphic → cross-table → basic
     // This ensures proper field qualification when JOINs are present
@@ -127,8 +126,13 @@ export const RestApiKnexPlugin = {
        async ({ api }) => api.knex.instance.destroy() 
     );
 
-    // Expose helpers under api.knex.helpers
-    api.knex.helpers.crossTableSearch = crossTableSearchHelpers;
+    // Expose helpers under api.knex.helpers with proper signatures
+    api.knex.helpers.crossTableSearch = {
+      validateCrossTableField,
+      buildJoinChain,
+      analyzeRequiredIndexes,
+      createRequiredIndexes
+    };
 
   // Helper scope method to get all schema-related information
     addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {

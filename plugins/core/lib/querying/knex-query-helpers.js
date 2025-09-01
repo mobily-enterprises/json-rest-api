@@ -1,3 +1,5 @@
+import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-search.js';
+
 /**
  * Processes filters that target polymorphic relationships where a single relationship can point to different types of resources
  * 
@@ -381,7 +383,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  * 6. Sets hasJoins flag for basicFiltersHook to use
  */
 export const crossTableFiltersHook = async (hookParams, dependencies) => {
-  const { log, scopes, knex, crossTableSearchHelpers } = dependencies;
+  const { log, scopes, knex } = dependencies;
   
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
@@ -396,7 +398,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   }
 
   // Step 1: Analyze indexes
-  const requiredIndexes = crossTableSearchHelpers.analyzeRequiredIndexes(scopeName, searchSchema);
+  const requiredIndexes = analyzeRequiredIndexes(scopes, log, scopeName, searchSchema);
   if (requiredIndexes.length > 0) {
     log.debug(`Cross-table search requires indexes:`, requiredIndexes);
   }
@@ -416,7 +418,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
     if (fieldDef.actualField?.includes('.')) {
       hasCrossTableFilters = true;
       log.trace('[JOIN-DETECTION] Cross-table actualField found', { filterKey, actualField: fieldDef.actualField, scopeName });
-      const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, fieldDef.actualField);
+      const joinInfo = await buildJoinChain(scopes, log, scopeName, fieldDef.actualField);
       if (!joinMap.has(joinInfo.joinAlias)) {
         joinMap.set(joinInfo.joinAlias, joinInfo);
       }
@@ -429,7 +431,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
         if (field.includes('.')) {
           hasCrossTableFilters = true;
           log.trace('[JOIN-DETECTION] Cross-table oneOf field found', { filterKey, field, scopeName });
-          const joinInfo = await crossTableSearchHelpers.buildJoinChain(scopeName, field);
+          const joinInfo = await buildJoinChain(scopes, log, scopeName, field);
           if (!joinMap.has(joinInfo.joinAlias)) {
             joinMap.set(joinInfo.joinAlias, joinInfo);
           }
