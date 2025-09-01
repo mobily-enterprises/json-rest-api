@@ -359,14 +359,12 @@ export const RestApiKnexPlugin = {
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {    
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
-      const schema =  context.schemaInfo.schemaInstance;
-      const searchSchema =  context.schemaInfo.searchSchemaInstance;
+      const searchSchemaInstance =  context.schemaInfo.searchSchemaInstance;
       const queryParams = context.queryParams
       const db = context.db;
       const sortableFields = context.sortableFields
-      const idProperty = context.schemaInfo.idProperty
 
-      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchema });
+      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchemaInstance });
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
       // Build field selection for sparse fieldsets
@@ -406,7 +404,7 @@ export const RestApiKnexPlugin = {
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filters, searchSchema, scopeName, tableName, db };
+        context.knexQuery = { query, filters: queryParams.filters, searchSchema: searchSchemaInstance, scopeName, tableName, db };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
       }
@@ -681,7 +679,7 @@ export const RestApiKnexPlugin = {
           if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
             // Store query data in context for hooks
             if (context) {
-              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchema, scopeName, tableName, db };
+              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchema: searchSchemaInstance, scopeName, tableName, db };
             }
             
             // Run the same filtering hooks
@@ -790,7 +788,6 @@ export const RestApiKnexPlugin = {
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schemaInstance;
       const db = context.db;
       const inputRecord = context.inputRecord      
       
@@ -835,7 +832,6 @@ export const RestApiKnexPlugin = {
       const id = context.id;
       const tableName = context.schemaInfo.tableName;
       const idProperty = context.schemaInfo.idProperty
-      const schema =  context.schemaInfo.schemaInstance;
       const db = context.db;
       const inputRecord = context.inputRecord      
       const isCreate = context.isCreate

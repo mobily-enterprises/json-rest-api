@@ -225,7 +225,7 @@ export async function compileSchemas(scope, deps) {
     // Create searchSchema object
     var searchSchemaObject = createSchema(rawSearchFields);
   } else {
-    var searchSchemaObject = null;
+    var searchSchemaObject = createSchema({});
   }
 
   // Build schemaRelationships including polymorphic fields from schema
@@ -322,7 +322,9 @@ export async function compileSchemas(scope, deps) {
     searchSchemaInstance: searchSchemaObject,
 
     // schema: schemaObject,
-    schemaStructure: schemaContext.fields,
+    schemaStructure: schemaObject.structure,
+    searchSchemaStructure: searchSchemaObject.structure,
+       
     computed: computedFields,
     schemaRelationships: schemaRelationships,
     tableName: scope.scopeOptions.tableName || scopeName,
