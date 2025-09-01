@@ -5,13 +5,13 @@ import { RestApiValidationError, RestApiPayloadError } from '../../../../lib/res
  * 
  * @param {string[]} includes - Array of include paths to validate
  * @param {number} maxDepth - Maximum allowed depth
- * @returns {boolean} True if valid
+ * @returns {void}
  * @throws {RestApiValidationError} If depth is exceeded
  * 
  * @example
  * // Input: Valid include paths
  * validateIncludeDepth(['author', 'comments.author'], 3);
- * // Output: true (depths are 1 and 2, both under limit)
+ * // Output: Validation succeeds (no error thrown)
  * 
  * @example
  * // Input: Path exceeding depth limit
@@ -23,7 +23,7 @@ import { RestApiValidationError, RestApiPayloadError } from '../../../../lib/res
  */
 function validateIncludeDepth(includes, maxDepth) {
   if (!includes || !Array.isArray(includes)) {
-    return true;
+    return;
   }
   
   for (const includePath of includes) {
@@ -46,8 +46,6 @@ function validateIncludeDepth(includes, maxDepth) {
       );
     }
   }
-  
-  return true;
 }
 
 /**
@@ -140,8 +138,6 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
       { path: `${context}.id`, expected: 'string, number, or null', received: typeof identifier.id }
     );
   }
-  
-  return true;
 }
 
 /**
@@ -150,7 +146,7 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
  * @param {Object} relationship - Relationship object to validate
  * @param {string} relationshipName - Name for error context
  * @param {Object} scopes - Scopes proxy to verify resource types
- * @returns {boolean} True if valid
+ * @returns {void}
  * @throws {RestApiPayloadError} If validation fails
  * 
  * @example
@@ -160,7 +156,7 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
  *   'author',
  *   scopes
  * );
- * // Output: true
+ * // Output: Validation succeeds (no error thrown)
  * 
  * @example
  * // Input: To-many relationship  
@@ -174,7 +170,7 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
  *   'tags',
  *   scopes
  * );
- * // Output: true
+ * // Output: Validation succeeds (no error thrown)
  * 
  * @example
  * // Input: Null relationship (remove association)
@@ -183,7 +179,7 @@ function validateResourceIdentifier(identifier, context, scopes = null) {
  *   'featuredImage',
  *   scopes
  * );
- * // Output: true (null is valid for clearing)
+ * // Output: Validation succeeds (null is valid for clearing)
  * 
  * @example
  * // Input: Missing data property
@@ -228,25 +224,23 @@ function validateRelationship(relationship, relationshipName, scopes = null) {
   
   // data can be null (empty to-one relationship)
   if (data === null) {
-    return true;
+    return;
   }
   
   // data can be a single resource identifier (to-one)
   if (!Array.isArray(data)) {
     validateResourceIdentifier(data, `Relationship '${relationshipName}'`, scopes);
-    return true;
+    return;
   }
   
   // data can be an array of resource identifiers (to-many)
   if (data.length === 0) {
-    return true; // Empty to-many relationship is valid
+    return; // Empty to-many relationship is valid
   }
   
   data.forEach((identifier, index) => {
     validateResourceIdentifier(identifier, `Relationship '${relationshipName}[${index}]'`, scopes);
   });
-  
-  return true;
 }
 
 /**
