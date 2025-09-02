@@ -348,6 +348,8 @@ export const BulkOperationsPlugin = {
 
     // Hook into scope creation to add bulk routes
     addHook('afterAddScope', 'bulkOperationsRoutes', {}, async ({ scopeName }) => {
+      // Note: context is not available here during route registration
+      // The urlPrefix will be calculated per-request in the handler
       const urlPrefix = api.vars.transport?.mountPath || '';
       const scopePath = `${urlPrefix}/${scopeName}`;
 

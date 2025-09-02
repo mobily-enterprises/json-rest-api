@@ -23,7 +23,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected from request headers
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 

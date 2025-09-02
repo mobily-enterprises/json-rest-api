@@ -1,6 +1,7 @@
 
 import { RestApiResourceError } from "../../../lib/rest-api-errors.js";
 import { findRelationshipDefinition } from "./common.js";
+import { buildRelationshipUrl } from "../lib/querying/url-helpers.js";
 
 /**
  * GET RELATIONSHIP
@@ -53,8 +54,8 @@ export default async function getRelationshipMethod ({ params, context, vars, he
   // Build response with links
   return {
     links: {
-      self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/relationships/${context.relationshipName}`,
-      related: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
+      self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, true),
+      related: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
     },
     data: relationshipData?.data || (relDef.hasMany || relDef.manyToMany ? [] : null)
   };

@@ -45,6 +45,9 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[Socket.IO Integration](GUIDE_X_SocketIO.md)**  
   Add real-time capabilities to your API with WebSocket support.
 
+- **[URL Management](GUIDE_X_URL_Management.md)**  
+  Configure URL generation for proxies, CDNs, and multi-tenant scenarios.
+
 - **[Appendices](GUIDE_Y_Appendices.md)**  
   Reference material, troubleshooting, and additional resources.
 

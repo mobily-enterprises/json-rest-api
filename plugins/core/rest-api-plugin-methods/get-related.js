@@ -1,5 +1,6 @@
 import { RestApiResourceError } from "../../../lib/rest-api-errors.js";
 import { findRelationshipDefinition } from "./common.js";
+import { buildRelationshipUrl } from "../lib/querying/url-helpers.js";
 
 /**
  * GET RELATED
@@ -95,7 +96,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id;
       if (!relatedId) {
         return {
-          links: { self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+          links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
           data: null
         };
       }
@@ -110,7 +111,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       });
 
       return {
-        links: { self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+        links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
         data: related.data,
         included: related.included
       };
@@ -134,7 +135,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id;
       if (!relatedId) {
         return {
-          links: { self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+          links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
           data: null
         };
       }
@@ -146,7 +147,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       );
 
       return {
-        links: { self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}` },
+        links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
         data: relatedResource || null
       };
     }
@@ -187,7 +188,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       if (!result.links) {
         result.links = {};
       }
-      result.links.self = `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`;
+      result.links.self = buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false);
       return result;
     } else {
       // Regular hasMany with foreignKey
@@ -206,7 +207,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       if (!result.links) {
         result.links = {};
       }
-      result.links.self = `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`;
+      result.links.self = buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false);
       return result;
     }
   }
@@ -286,7 +287,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     // Build the response
     return {
       links: {
-        self: `${vars.returnBasePath || vars.transport?.mountPath || ''}/${scopeName}/${context.id}/${context.relationshipName}`
+        self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
       },
       data: includedResources,
       meta: pivotResult.meta

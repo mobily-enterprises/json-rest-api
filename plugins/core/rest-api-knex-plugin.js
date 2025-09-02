@@ -24,6 +24,7 @@ import {
   buildCursorMeta,
   parseCursor
 } from './lib/querying/knex-pagination-helpers.js';
+import { getUrlPrefix } from './lib/querying/url-helpers.js';
 
 /**
  * Strips non-database fields (computed and virtual) from attributes before database operations
@@ -709,7 +710,7 @@ export const RestApiKnexPlugin = {
         }
         
         // Generate links 
-        const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
+        const urlPrefix = getUrlPrefix(context, scope);
         context.returnMeta.paginationLinks = generatePaginationLinks(
           urlPrefix,
           scopeName,
@@ -741,7 +742,7 @@ export const RestApiKnexPlugin = {
         }
         
         context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields);
-        const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
+        const urlPrefix = getUrlPrefix(context, scope);
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
           scopeName,

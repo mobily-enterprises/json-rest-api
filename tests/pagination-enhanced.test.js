@@ -25,9 +25,7 @@ let api;
 describe('Enhanced Pagination Features', () => {
   before(async () => {
     // Initialize API once with pagination features
-    api = await createPaginationApi(knex, {
-     returnBasePath: 'https://api.example.com'
-    });
+    api = await createPaginationApi(knex);
   });
 
   after(async () => {
@@ -69,9 +67,9 @@ describe('Enhanced Pagination Features', () => {
 
       validateJsonApiStructure(result, false);
       assert(result.data.links, 'Resource should have links');
-      assert.equal(result.data.links.self, 'https://api.example.com/books/1');
+      assert.equal(result.data.links.self, '/books/1');
       assert(result.links, 'Response should have top-level links');
-      assert.equal(result.links.self, 'https://api.example.com/books/1');
+      assert.equal(result.links.self, '/books/1');
     });
 
     it('should add self links to collection resources', async () => {
@@ -86,12 +84,12 @@ describe('Enhanced Pagination Features', () => {
       result.data.forEach(book => {
         assert(book.links, 'Each resource should have links');
         assert(book.links.self, 'Each resource should have self link');
-        assert(book.links.self.startsWith('https://api.example.com/books/'));
+        assert(book.links.self.startsWith('/books/'));
       });
 
       // Check top-level links
       assert(result.links, 'Response should have top-level links');
-      assert.equal(result.links.self, 'https://api.example.com/books');
+      assert.equal(result.links.self, '/books');
     });
 
     it('should add self links to included resources', async () => {
@@ -108,15 +106,12 @@ describe('Enhanced Pagination Features', () => {
       result.included.forEach(resource => {
         assert(resource.links, 'Included resource should have links');
         assert(resource.links.self, 'Included resource should have self link');
-        assert(resource.links.self.startsWith('https://api.example.com/'));
+        assert(resource.links.self.startsWith('/'));
       });
     });
 
-    it('should add relative self links whenreturnBasePath is not configured', async () => {
-      // Temporarily clear thereturnBasePath
-      const originalPrefix = api.vars.returnBasePath;
-      api.vars.returnBasePath = '';
-      
+    it('should add relative self links when no URL prefix configured', async () => {
+      // URLs are now always relative unless overridden via context
       const result = await api.resources.books.query({
         queryParams: {},
         simplified: false
@@ -124,17 +119,14 @@ describe('Enhanced Pagination Features', () => {
 
       validateJsonApiStructure(result, true);
       
-      // Links should be present but relative
+      // Links should be present and relative
       result.data.forEach(book => {
-        assert(book.links, 'Resources should have links even withoutreturnBasePath');
-        assert(book.links.self, 'Resources should have self link');
+        assert(book.links, 'Resources should have links');
+        assert(book.links.self, 'Each resource should have self link');
         assert(book.links.self.startsWith('/books/'), 'Self link should be relative');
       });
-      assert(result.links, 'Response should have top-level links even withoutreturnBasePath');
+      assert(result.links, 'Response should have top-level links');
       assert(result.links.self.startsWith('/books'), 'Top-level self link should be relative');
-      
-      // Restore the prefix
-      api.vars.returnBasePath = originalPrefix;
     });
   });
 

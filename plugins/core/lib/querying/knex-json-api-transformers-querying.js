@@ -1,5 +1,6 @@
 import { getForeignKeyFields as getForeignKeyFieldsFromUtils } from '../querying-writing/field-utils.js';
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, getSchemaStructure } from '../querying-writing/knex-constants.js';
+import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-helpers.js';
 
 /**
  * Transforms a flat database record into JSON:API resource format
@@ -374,10 +375,9 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               }
             };
             
-            const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
             relationshipObject.links = {
-              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
-              related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+              self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
+              related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
             };
             
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
@@ -386,10 +386,9 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
               data: null
             };
             
-            const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
             relationshipObject.links = {
-              self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${fieldDef.as}`,
-              related: `${urlPrefix}/${scopeName}/${record[idField]}/${fieldDef.as}`
+              self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
+              related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
             };
             
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
@@ -412,10 +411,9 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             }
           };
           
-          const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
           relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
-            related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+            self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
+            related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
           };
           
           jsonApiRecord.relationships[relName] = relationshipObject;
@@ -425,10 +423,9 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             data: null
           };
           
-          const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
           relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record[idField]}/relationships/${relName}`,
-            related: `${urlPrefix}/${scopeName}/${record[idField]}/${relName}`
+            self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
+            related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
           };
           
           jsonApiRecord.relationships[relName] = relationshipObject;
@@ -439,18 +436,18 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
     return jsonApiRecord;
   });
   
-  const urlPrefix = scope.vars.returnBasePath || scope.vars.transport?.mountPath || '';
+  const urlPrefix = context.urlPrefix || scope.vars.transport?.mountPath || '';
   const normalizedData = isSingle ? processedRecords[0] : processedRecords;
   
   if (normalizedData) {
     if (Array.isArray(normalizedData)) {
       normalizedData.forEach(item => {
         if (!item.links) item.links = {};
-        item.links.self = `${urlPrefix}/${scopeName}/${item.id}`;
+        item.links.self = buildResourceUrl(context, scope, scopeName, item.id);
       });
     } else {
       if (!normalizedData.links) normalizedData.links = {};
-      normalizedData.links.self = `${urlPrefix}/${scopeName}/${normalizedData.id}`;
+      normalizedData.links.self = buildResourceUrl(context, scope, scopeName, normalizedData.id);
     }
   }
 
@@ -461,7 +458,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
   if (included.length > 0) {
     included.forEach(item => {
       if (!item.links) item.links = {};
-      item.links.self = `${urlPrefix}/${item.type}/${item.id}`;
+      item.links.self = buildResourceUrl(context, scope, item.type, item.id);
     });
     
     response.included = included;
@@ -476,9 +473,10 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
   if (context?.returnMeta?.paginationLinks) {
     response.links = context.returnMeta.paginationLinks;
   } else {
+    const urlPrefix = getUrlPrefix(context, scope);
     response.links = {
       self: isSingle 
-        ? `${urlPrefix}/${scopeName}/${normalizedData.id}`
+        ? buildResourceUrl(context, scope, scopeName, normalizedData.id)
         : `${urlPrefix}/${scopeName}${context?.returnMeta?.queryString || ''}`
     };
   }

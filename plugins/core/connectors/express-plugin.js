@@ -120,15 +120,14 @@ export const ExpressPlugin = {
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express');
       
-      // Auto-detect returnBasePath if not explicitly set
-      if (!vars.returnBasePath) {
-        // Use protocol from X-Forwarded-Proto if behind proxy, otherwise req.protocol
-        const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-        const host = req.get('x-forwarded-host') || req.get('host');
-        if (host) {
-          vars.returnBasePath = `${protocol}://${host}${basePath}`;
-        }
+      // Check for Express middleware override first
+      if (req.urlPrefixOverride) {
+        context.urlPrefixOverride = req.urlPrefixOverride;
       }
+      
+      // Calculate and cache URL prefix (getUrlPrefix handles all logic)
+      const { getUrlPrefix } = await import('../lib/querying/url-helpers.js');
+      context.urlPrefix = getUrlPrefix(context, { vars: { transport: { mountPath: basePath } } }, req);
       
       // Transport-specific data for hooks
       const transportData = {
@@ -352,7 +351,7 @@ export const ExpressPlugin = {
               // Set Location header for any successful POST (201 or 204)
               if (helpers.getLocation) {
                 const location = helpers.getLocation({ scopeName, id: context.id });
-                const baseUrl = vars.returnBasePath || basePath;
+                const baseUrl = context.urlPrefix || basePath;
                 res.set('Location', `${baseUrl}${location}`);
               }
             }

@@ -137,7 +137,8 @@ export const calculatePaginationMeta = (total, page, pageSize) => {
  * 4. Added to response.links for client navigation
  */
 export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, paginationMeta) => {
-  if (!urlPrefix) return null;
+  // Allow empty urlPrefix to generate relative links
+  // if (!urlPrefix) return null;
   
   const { page, pageCount, pageSize } = paginationMeta;
   const links = {};
@@ -420,7 +421,8 @@ export const parseCursor = (cursor) => {
  * 5. Client uses next link to fetch subsequent pages
  */
 export const generateCursorPaginationLinks = (urlPrefix, scopeName, queryParams, records, pageSize, hasMore, sortFields = ['id']) => {
-  if (!urlPrefix || !records.length) return null;
+  // Allow empty urlPrefix to generate relative links
+  if (!records.length) return null;
   
   const links = {};
   const baseUrl = `${urlPrefix}/${scopeName}`;

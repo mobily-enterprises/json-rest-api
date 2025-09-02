@@ -68,7 +68,7 @@ import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
 
 const api = new Api({ name: 'bookstore-api'});
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex });
 
 await api.addResource('books', {
@@ -204,7 +204,7 @@ import {
 const api = new Api({ name: 'full-featured-api' });
 
 // Core functionality
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex: connection });
 
 // Transport layer

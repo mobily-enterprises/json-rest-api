@@ -44,7 +44,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
 
 // Define schemas for our book catalog system
@@ -242,7 +242,7 @@ console.log('Refetched Country:', inspect(countryUsRefetched));
 // }
 ```
 
-(Note that the full JSON:API record includes links to resources, which use `returnBasePath` set in when `use()`ing the `json-rest-api` plugin.)
+(Note that the full JSON:API record includes links to resources, which are automatically generated based on the request headers.)
 
 As you can see, when `simplified: false` is used:
 
@@ -544,9 +544,9 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
+await api.use(ExpressPlugin, { mountPath: '/api' }); // Added: Express Plugin
 
 // Countries table
 await api.addResource('countries', {
@@ -756,12 +756,11 @@ Keep-Alive: timeout=5
 When passing a parameter, `rest-api-plugin` normalises them (when needed) and stores them into plugin variables. This means that these two ways of defining `returnRecordApi` is identical:
 
 ```javascript
-await api.use(RestApiPlugin, {returnBasePath: '/api',  returnRecordTransport: 'minimal'});
+await api.use(RestApiPlugin, { returnRecordTransport: 'minimal' });
 
 // ...or...
 
 await api.use(RestApiPlugin, { 
- returnBasePath: '/api', 
   vars: {
     returnRecordTransport: 'minimal'
   }
@@ -775,7 +774,6 @@ Here is a full list of parameters and their respective variables:
 | `queryDefaultLimit` | `vars.queryDefaultLimit` | `25` | Default number of records returned in query results | ✓ |
 | `queryMaxLimit` | `vars.queryMaxLimit` | `100` | Maximum allowed limit for query results | ✓ |
 | `includeDepthLimit` | `vars.includeDepthLimit` | `3` | Maximum depth for nested relationship includes | ✓ |
-| `returnBasePath` | `vars.returnBasePath` | `''` | Base URL for generated links (e.g., `https://api.example.com/api`) | ✓ |
 | `enablePaginationCounts` | `vars.enablePaginationCounts` | `true` | Whether to include total count in pagination metadata | ✓ |
 | `simplifiedApi` | `vars.simplifiedApi` | `true` | Use simplified format for programmatic API calls | ✓ |
 | `simplifiedTransport` | `vars.simplifiedTransport` | `false` | Use simplified format for HTTP/REST endpoints | ✓ |

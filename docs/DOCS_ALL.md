@@ -68,7 +68,7 @@ import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
 
 const api = new Api({ name: 'bookstore-api' });
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex });
 
 await api.addResource('books', {
@@ -204,7 +204,7 @@ import {
 const api = new Api({ name: 'full-featured-api' });
 
 // Core functionality
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex: connection });
 
 // Transport layer
@@ -988,7 +988,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' }); // Basic REST plugin
+await api.use(RestApiPlugin); // URLs auto-detected // Basic REST plugin
 await api.use(RestApiKnexPlugin, { knex }); // Knex connector
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Express plugin
 
@@ -4084,7 +4084,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api'});
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex });
 
 // Define schemas for our book catalog system
@@ -4282,7 +4282,7 @@ console.log('Refetched Country:', inspect(countryUsRefetched));
 // }
 ```
 
-(Note that the full JSON:API record includes links to resources, which use `returnBasePath` set in when `use()`ing the `json-rest-api` plugin.)
+(Note that the full JSON:API record includes links to resources, which are auto-detected from request headers.)
 
 As you can see, when `simplified: false` is used:
 
@@ -4584,7 +4584,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 
@@ -4796,12 +4796,12 @@ Keep-Alive: timeout=5
 When passing a parameter, `rest-api-plugin` normalises them (when needed) and stores them into plugin variables. This means that these two ways of defining `returnRecordApi` is identical:
 
 ```javascript
-await api.use(RestApiPlugin, {returnBasePath: '/api',  returnRecordTransport: 'minimal'});
+await api.use(RestApiPlugin, { returnRecordTransport: 'minimal' }); // URLs auto-detected
 
 // ...or...
 
 await api.use(RestApiPlugin, { 
- returnBasePath: '/api', 
+
   vars: {
     returnRecordTransport: 'minimal'
   }
@@ -4815,7 +4815,6 @@ Here is a full list of parameters and their respective variables:
 | `queryDefaultLimit` | `vars.queryDefaultLimit` | `25` | Default number of records returned in query results | ✓ |
 | `queryMaxLimit` | `vars.queryMaxLimit` | `100` | Maximum allowed limit for query results | ✓ |
 | `includeDepthLimit` | `vars.includeDepthLimit` | `3` | Maximum depth for nested relationship includes | ✓ |
-| `returnBasePath` | `vars.returnBasePath` | `''` | Base URL for generated links (e.g., `https://api.example.com/api`) | ✓ |
 | `enablePaginationCounts` | `vars.enablePaginationCounts` | `true` | Whether to include total count in pagination metadata | ✓ |
 | `simplifiedApi` | `vars.simplifiedApi` | `true` | Use simplified format for programmatic API calls | ✓ |
 | `simplifiedTransport` | `vars.simplifiedTransport` | `false` | Use simplified format for HTTP/REST endpoints | ✓ |
@@ -10010,7 +10009,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin); // URLs auto-detected
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 
@@ -21582,7 +21581,7 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' }); // Public URL might be different in case of proxies etc.
+await api.use(RestApiPlugin); // URLs auto-detected // Public URL might be different in case of proxies etc.
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
 
@@ -21642,7 +21641,7 @@ await api.resources.authors.createKnexTable();
 
 ```bash
 $ node index.js 
-2025-08-01T00:25:50.730Z [INFO] [book-catalog-api] Installing plugin 'rest-api' { options: {returnBasePath: '/api' } }
+2025-08-01T00:25:50.730Z [INFO] [book-catalog-api] Installing plugin 'rest-api'
 2025-08-01T00:25:50.736Z [INFO] [book-catalog-api] Plugin 'rest-api' installed successfully { duration: '2ms' }
 2025-08-01T00:25:50.736Z [INFO] [book-catalog-api] Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
 2025-08-01T00:25:50.745Z [INFO] [book-catalog-api:plugin:rest-api-knex] Database capabilities detected: { database: 'SQLite', version: '3.50.2', windowFunctions: true }

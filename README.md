@@ -40,9 +40,9 @@ const knex = knexLib({
 const api = new Api({ name: 'book-catalog-api', logLevel: 'trace' });
 
 // Install plugins
-await api.use(RestApiPlugin, {returnBasePath: '/api' });
+await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
+await api.use(ExpressPlugin, { mountPath: '/api' }); // Express connector
 
 
 // Define authors resource, which belongs to a publisher

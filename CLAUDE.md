@@ -50,11 +50,18 @@ JSON REST API is a powerful REST API plugin for hooked-api that provides JSON:AP
    - Each plugin can hook into the request lifecycle for customization
 
 4. **Key Libraries in `plugins/core/lib/`**
-   - `knex-json-api-helpers.js` - Core JSON:API transformations
+   - `url-helpers.js` - Centralized URL generation functions
+   - `knex-json-api-transformers-querying.js` - JSON:API transformations
    - `relationship-processor.js` - Handles relationship updates
    - `payload-validators.js` - Request validation
    - `knex-query-helpers.js` - Database query building
    - `simplified-helpers.js` - Simplified API mode transformations
+
+5. **URL Management**
+   - URLs are automatically generated per-request based on headers
+   - No static configuration needed - detects from `Host`, `X-Forwarded-*` headers
+   - Override capability via `context.urlPrefixOverride` for complex deployments
+   - See `docs/GUIDE/GUIDE_URL_Management.md` for details
 
 ## Testing Guidelines
 
