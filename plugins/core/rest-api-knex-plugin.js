@@ -681,7 +681,7 @@ export const RestApiKnexPlugin = {
           if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
             // Store query data in context for hooks
             if (context) {
-              context.knexQuery = { query: countQuery, filters: queryParams.filters, schemaInfo, scopeName, tableName, db };
+              context.knexQuery = { query: countQuery, filters: queryParams.filters, scopeName, db };
             }
             
             // Run the same filtering hooks

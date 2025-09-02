@@ -79,10 +79,12 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
-  const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
+
+  const schemaInfo = scopes[scopeName].vars.schemaInfo;
+  const tableName = schemaInfo.tableName;
+
 
   if (!filters) {
     return;
@@ -388,10 +390,11 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
-  const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
+  
+  const schemaInfo = scopes[scopeName].vars.schemaInfo;
+  const tableName = schemaInfo.tableName;
 
   if (!filters) {
     return;
@@ -801,10 +804,11 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
-  const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
+  
+  const schemaInfo = scopes[scopeName].vars.schemaInfo;
+  const tableName = schemaInfo.tableName;
 
   log.trace('[DEBUG basicFiltersHook] Called with:', {
     scopeName,
