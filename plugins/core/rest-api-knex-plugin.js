@@ -401,10 +401,12 @@ export const RestApiKnexPlugin = {
       
       log.trace('[DATA-QUERY] Storing query data in context before calling runHooks');
       
+      // YOU ARE HERE: pass 'sesrchSchemaInstance' in the context below
+
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filters, searchSchema: searchSchemaInstance, scopeName, tableName, db };
+        context.knexQuery = { query, filters: queryParams.filters, searchSchemaInstance, scopeName, tableName, db };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
       }
@@ -679,7 +681,7 @@ export const RestApiKnexPlugin = {
           if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
             // Store query data in context for hooks
             if (context) {
-              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchema: searchSchemaInstance, scopeName, tableName, db };
+              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchemaInstance, scopeName, tableName, db };
             }
             
             // Run the same filtering hooks

@@ -444,10 +444,10 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
    * - Output can be used to create indexes manually or automatically
    * - Prevents performance issues before queries are executed
    */
-export const analyzeRequiredIndexes = (scopes, log, scopeName, searchSchema) => {
+export const analyzeRequiredIndexes = (scopes, log, scopeName, searchSchemaInstance) => {
     const requiredIndexes = [];
     
-    const schemaToAnalyze = searchSchema.structure || searchSchema;
+    const schemaToAnalyze = searchSchemaInstance.structure || searchSchemaInstance;
     
     Object.entries(schemaToAnalyze).forEach(([filterKey, fieldDef]) => {
       if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
