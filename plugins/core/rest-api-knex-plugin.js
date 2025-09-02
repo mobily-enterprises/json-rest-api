@@ -359,12 +359,12 @@ export const RestApiKnexPlugin = {
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {    
       const scope = api.resources[scopeName];
       const tableName = context.schemaInfo.tableName;
-      const searchSchemaInstance =  context.schemaInfo.searchSchemaInstance;
+      const schemaInfo =  context.schemaInfo;
       const queryParams = context.queryParams
       const db = context.db;
       const sortableFields = context.sortableFields
 
-      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName, hasSearchSchema: !!searchSchemaInstance });
+      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName });
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
       
       // Build field selection for sparse fieldsets
@@ -406,7 +406,7 @@ export const RestApiKnexPlugin = {
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filters, searchSchemaInstance, scopeName, tableName, db };
+        context.knexQuery = { query, filters: queryParams.filters, schemaInfo, scopeName, tableName, db };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
       }
@@ -681,7 +681,7 @@ export const RestApiKnexPlugin = {
           if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
             // Store query data in context for hooks
             if (context) {
-              context.knexQuery = { query: countQuery, filters: queryParams.filters, searchSchemaInstance, scopeName, tableName, db };
+              context.knexQuery = { query: countQuery, filters: queryParams.filters, schemaInfo, scopeName, tableName, db };
             }
             
             // Run the same filtering hooks

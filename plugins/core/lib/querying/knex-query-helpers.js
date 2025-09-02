@@ -79,12 +79,12 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const searchSchemaInstance = hookParams.context?.knexQuery?.searchSchemaInstance;
+  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
   const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
 
-  if (!filters || !searchSchemaInstance) {
+  if (!filters) {
     return;
   }
 
@@ -93,7 +93,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   const polymorphicJoins = new Map();
 
   for (const [filterKey, filterValue] of Object.entries(filters)) {
-    const fieldDef = searchSchemaInstance.structure[filterKey];
+    const fieldDef = schemaInfo.searchSchemaStructure[filterKey];
 
     if (fieldDef?.polymorphicField && fieldDef?.targetFields && filterValue !== undefined) {
       log.trace('[POLYMORPHIC-SEARCH] Found polymorphic search:', { 
@@ -388,17 +388,17 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const searchSchemaInstance = hookParams.context?.knexQuery?.searchSchemaInstance;
+  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
   const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
 
-  if (!filters || !searchSchemaInstance) {
+  if (!filters) {
     return;
   }
 
   // Step 1: Analyze indexes
-  const requiredIndexes = analyzeRequiredIndexes(scopes, log, scopeName, searchSchemaInstance);
+  const requiredIndexes = analyzeRequiredIndexes(scopes, log, scopeName, schemaInfo);
   if (requiredIndexes.length > 0) {
     log.debug(`Cross-table search requires indexes:`, requiredIndexes);
   }
@@ -408,7 +408,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   const fieldPathMap = new Map();
   let hasCrossTableFilters = false;
 
-  for (const [filterKey, fieldDef] of Object.entries(searchSchemaInstance.structure)) {
+  for (const [filterKey, fieldDef] of Object.entries(schemaInfo.searchSchemaStructure)) {
     if (filters[filterKey] === undefined) continue;
 
     // Skip polymorphic filters
@@ -541,7 +541,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   // Step 5: Apply WHERE conditions for cross-table filters
   query.where(function() {
     for (const [filterKey, filterValue] of Object.entries(filters)) {
-      const fieldDef = searchSchemaInstance.structure[filterKey];
+      const fieldDef = searchSchemaStructure[filterKey];
       if (!fieldDef) continue;
 
       // Skip non-cross-table and polymorphic filters
@@ -801,7 +801,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
   const filters = hookParams.context?.knexQuery?.filters;
-  const searchSchemaInstance = hookParams.context?.knexQuery?.searchSchemaInstance;
+  const schemaInfo = hookParams.context?.knexQuery?.schemaInfo;
   const query = hookParams.context?.knexQuery?.query;
   const tableName = hookParams.context?.knexQuery?.tableName;
   const db = hookParams.context?.knexQuery?.db || knex;
@@ -810,13 +810,12 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
     scopeName,
     hasFilters: !!filters,
     filters,
-    hasSearchSchema: !!searchSchemaInstance,
-    searchSchemaKeys: searchSchemaInstance ? Object.keys(searchSchemaInstance.structure || {}) : [],
+    searchSchemaKeys: Object.keys(schemaInfo.searchSchemaStructure || {}),
     tableName
   });
 
-  if (!filters || !searchSchemaInstance) {
-    log.trace('[DEBUG basicFiltersHook] Returning early - no filters or searchSchema');
+  if (!filters) {
+    log.trace('[DEBUG basicFiltersHook] Returning early - no filters');
     return;
   }
 
@@ -829,7 +828,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   // Main WHERE group
   query.where(function() {
     for (const [filterKey, filterValue] of Object.entries(filters)) {
-      const fieldDef = searchSchemaInstance.structure[filterKey];
+      const fieldDef = schemaInfo.searchSchemaStructure[filterKey];
       if (!fieldDef) {
         log.trace(`[DEBUG basicFiltersHook] No field definition for filter key: ${filterKey}`);
         continue;
