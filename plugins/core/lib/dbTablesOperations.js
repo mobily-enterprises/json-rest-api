@@ -116,12 +116,17 @@ function applyConstraints(column, definition) {
  * @param {boolean} [options.timestamps=false] - Whether to add created_at/updated_at columns
  * @returns {Promise} A promise that resolves when the table is created
  */
-export async function createKnexTable(knex, tableName, schema, idProperty = 'id', options = {}) {
+export async function createKnexTable(knex, schemaInfo, tableSchemaInstance,  options = {}) {
   const { autoIncrement = true, timestamps = false } = options;
   
+
+  const tableName = schemaInfo.tableName
+  const idProperty = schemaInfo.idProperty
+  const tableSchemaStructure = tableSchemaInstance.structure
+
   return knex.schema.createTable(tableName, (table) => {
     // Check if schema has the idProperty field with primary key
-    const hasIdField = schema.structure[idProperty] && schema.structure[idProperty].primary === true;
+    const hasIdField = tableSchemaStructure[idProperty] && tableSchemaStructure[idProperty].primary === true;
     
     // Add auto-incrementing ID if no primary key is defined and autoIncrement is true
     if (!hasIdField && autoIncrement) {
@@ -129,7 +134,7 @@ export async function createKnexTable(knex, tableName, schema, idProperty = 'id'
     }
     
     // Process each field in the schema
-    for (const [fieldName, definition] of Object.entries(schema.structure)) {
+    for (const [fieldName, definition] of Object.entries(tableSchemaStructure)) {
       // Skip if this is the ID field and we already handled it
       if (fieldName === idProperty && !hasIdField && autoIncrement) {
         continue;

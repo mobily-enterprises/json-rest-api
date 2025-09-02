@@ -140,9 +140,9 @@ export const RestApiKnexPlugin = {
       });
       
       // Create schema object from filtered fields
-      const tableSchema = createSchema(filteredSchema);
+      const tableSchemaInstance = createSchema(filteredSchema);
       
-      await createKnexTable(api.knex.instance, vars.schemaInfo.tableName, tableSchema, vars.schemaInfo.idProperty)
+      await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
     })
 
     // Helper scope method to add a field to an existing table
