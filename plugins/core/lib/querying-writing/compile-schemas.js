@@ -319,10 +319,9 @@ export async function compileSchemas(scope, deps) {
   scope.vars.schemaInfo = {
 
     schemaInstance: schemaObject,
-    searchSchemaInstance: searchSchemaObject,
-
-    // schema: schemaObject,
     schemaStructure: schemaObject.structure,
+
+    searchSchemaInstance: searchSchemaObject,
     searchSchemaStructure: searchSchemaObject.structure,
        
     computed: computedFields,
