@@ -21,18 +21,18 @@ export const SocketIOPlugin = {
     let io;
 
     // Helper function to match filters using searchSchema
-    function matchesFilters(record, filters, searchSchema) {
+    function matchesFilters(record, filters, searchSchemaStructure) {
       if (!filters || Object.keys(filters).length === 0) {
         return true;
       }
 
-      if (!searchSchema) {
+      if (!Object.keys(searchSchemaStructure).length) {
         return true; // No schema means no filtering
       }
 
       // Check each filter
       for (const [filterKey, filterValue] of Object.entries(filters)) {
-        const fieldDef = searchSchema.structure[filterKey];
+        const fieldDef = searchSchemaStructure[filterKey];
         if (!fieldDef) continue; // Skip unknown filters
 
         // Get the actual field name and value
@@ -160,7 +160,7 @@ export const SocketIOPlugin = {
       }
 
       // Get searchSchema for filter matching
-      const searchSchema = scope.vars.schemaInfo?.searchSchemaInstance;
+      const searchSchemaStructure = scope.vars.schemaInfo?.searchSchemaStructure;
 
       // Use context.minimalRecord - it's GUARANTEED to be there!
       const recordForFiltering = context.minimalRecord;
@@ -181,7 +181,7 @@ export const SocketIOPlugin = {
 
           for (const subscription of matchingSubscriptions) {
             // Check if record matches filters using searchSchema
-            if (!matchesFilters(recordForFiltering, subscription.filters, searchSchema)) {
+            if (!matchesFilters(recordForFiltering, subscription.filters, searchSchemaStructure)) {
               continue;
             }
 
@@ -339,9 +339,10 @@ export const SocketIOPlugin = {
 
             // Validate and modify filters
             if (filters && Object.keys(filters).length > 0) {
-              const searchSchema = scope.vars.schemaInfo?.searchSchemaInstance;
+              const searchSchemaInstance = scope.vars.schemaInfo?.searchSchemaInstance;
+              const searchSchemaStructure = scope.vars.schemaInfo?.searchSchemaStructure;
 
-              if (!searchSchema) {
+              if (!Object.keys(searchSchemaStructure)) {
                 const error = {
                   code: 'FILTERING_NOT_ENABLED',
                   message: `Filtering is not enabled for resource '${resource}'`
@@ -353,7 +354,7 @@ export const SocketIOPlugin = {
 
               // Check for function-based filters without filterRecord
               for (const filterKey of Object.keys(filters)) {
-                const fieldDef = searchSchema.structure[filterKey];
+                const fieldDef = searchSchemaStructure[filterKey];
 
                 if (fieldDef && typeof fieldDef.filterOperator === 'function' && !fieldDef.filterRecord) {
                   const error = {
@@ -368,7 +369,7 @@ subscriptions`
               }
 
               // Validate filter values using searchSchema
-              const { validatedObject, errors } = await searchSchema.validate(filters, {
+              const { validatedObject, errors } = await searchSchemaInstance.validate(filters, {
                 onlyObjectValues: true
               });
 

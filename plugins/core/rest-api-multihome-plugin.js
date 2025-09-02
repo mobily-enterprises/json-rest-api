@@ -100,7 +100,7 @@ export const MultiHomePlugin = {
 
         // Check if this resource has multihome field
         const scope = scopes[scopeName];
-        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaInstance?.structure?.[vars.multihome.field];
+        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaStructure?.[vars.multihome.field];
 
         if (!hasMultihomeField) {
           if (vars.multihome.allowMissing) {
@@ -141,7 +141,7 @@ export const MultiHomePlugin = {
 
         // Check if this resource has multihome field
         const scope = scopes[scopeName];
-        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaInstance?.structure?.[vars.multihome.field];
+        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaStructure?.[vars.multihome.field];
 
         if (!hasMultihomeField) {
           if (!vars.multihome.allowMissing) {
@@ -192,7 +192,7 @@ export const MultiHomePlugin = {
         
         // Get the scope to check if it has multihome field
         const scope = scopes[scopeName];
-        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaInstance?.structure?.[vars.multihome.field];
+        const hasMultihomeField = scope?.vars?.schemaInfo?.schemaStructure?.[vars.multihome.field];
         
         if (!hasMultihomeField) {
           return; // Resource doesn't support multihome
