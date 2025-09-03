@@ -11,6 +11,7 @@
 // Core plugins
 export { RestApiPlugin } from './plugins/core/rest-api-plugin.js';
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js';
+export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js';
 
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
@@ -33,3 +34,6 @@ export {
 
 // Re-export everything for backward compatibility
 export * from './lib/rest-api-errors.js';
+
+// URL helper function for generating API URL prefix
+export { getUrlPrefix } from './plugins/core/lib/querying/url-helpers.js';
