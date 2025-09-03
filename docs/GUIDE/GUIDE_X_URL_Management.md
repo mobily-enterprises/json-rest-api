@@ -74,7 +74,7 @@ const api = new Api({
   
   // Define hooks at API creation time
   hooks: {
-    'transport:request:start': [
+    'transport:request': [
       async (payload) => {
         const { context, req } = payload;
         
@@ -133,7 +133,7 @@ app.use(api.http.express.router);
 1. **API Gateway with Path Rewriting**
    ```javascript
    hooks: {
-     'transport:request:start': [async (payload) => {
+     'transport:request': [async (payload) => {
        if (payload.req?.headers?.['x-forwarded-prefix'] === '/v2') {
          payload.context.urlPrefixOverride = 'https://api.company.com/v2';
        }
@@ -145,7 +145,7 @@ app.use(api.http.express.router);
 2. **CDN with Different Public URL**
    ```javascript
    hooks: {
-     'transport:request:start': [async (payload) => {
+     'transport:request': [async (payload) => {
        if (payload.req?.headers?.['x-cdn-host']) {
          payload.context.urlPrefixOverride = `https://${payload.req.headers['x-cdn-host']}/api`;
        }
@@ -157,7 +157,7 @@ app.use(api.http.express.router);
 3. **Multi-Tenant SaaS**
    ```javascript
    hooks: {
-     'transport:request:start': [async (payload) => {
+     'transport:request': [async (payload) => {
        const { context, req } = payload;
        const tenant = req?.hostname?.split('.')[0];
        if (tenant && tenant !== 'api') {
@@ -171,7 +171,7 @@ app.use(api.http.express.router);
 4. **Environment-Based URLs**
    ```javascript
    hooks: {
-     'transport:request:start': [async (payload) => {
+     'transport:request': [async (payload) => {
        // Force production URLs in staging for testing
        if (process.env.NODE_ENV === 'staging' && process.env.PRODUCTION_URL) {
          payload.context.urlPrefixOverride = process.env.PRODUCTION_URL;
@@ -273,7 +273,7 @@ import express from 'express';
 const api = new Api({ 
   name: 'my-api',
   hooks: {
-    'transport:request:start': [
+    'transport:request': [
       async (payload) => {
         const { context, req } = payload;
         

@@ -27,7 +27,7 @@ const api = new Api({
   // Define hooks at API creation time
   hooks: {
     // This hook runs at the start of each request
-    'transport:request:start': [
+    'transport:request': [
       async (payload) => {
         const { context, req } = payload;
         

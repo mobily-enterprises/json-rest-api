@@ -163,8 +163,5 @@ export const RestApiPlugin = {
     // Add default getLocation helper for generating resource URLs
     // This can be overridden by storage plugins if needed
     helpers.getLocation = ({ scopeName, id }) => `/${scopeName}/${id}`
-    
-    // Helper to get the URL prefix for generating links
-    helpers.getUrlPrefix = ({ scope }) => scope?.vars?.transport?.mountPath || vars.transport?.mountPath || ''
   }
 };
