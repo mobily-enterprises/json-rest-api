@@ -48,7 +48,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * // }
  * 
  * @example
- * // Input: Object with foreign key (traditional way)
+ * // Input: Object with relationship name (required)
  * const schema = {
  *   title: { type: 'string' },
  *   author_id: { 
@@ -60,19 +60,19 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * const input = {
  *   id: '456',
  *   title: 'Another Article',
- *   author_id: 789                      // Using foreign key name
+ *   author: 789                         // Using relationship name (from 'as')
  * };
  * 
- * // Output: Foreign key becomes relationship
+ * // Output: Relationship in JSON:API format
  * // {
  * //   data: {
  * //     type: 'articles',
  * //     id: '456',
  * //     attributes: {
- * //       title: 'Another Article'       // author_id removed
+ * //       title: 'Another Article'
  * //     },
  * //     relationships: {
- * //       author: {                      // Uses 'as' name
+ * //       author: {
  * //         data: { type: 'users', id: '789' }
  * //       }
  * //     }
@@ -177,38 +177,14 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
   // 1. Process belongsTo relationships (from schema fields)
   // Iterate through the schema structure to find belongsTo fields
   for (const [fieldName, fieldDef] of Object.entries(schema)) {
-    if (fieldDef.belongsTo) {
-      const relAlias = fieldDef.as || fieldName; // Use 'as' alias or foreign key name as default alias
-      let valueToProcess = undefined;
-
-      // Check if both foreign key and alias are provided - this is an error
-      if (fieldDef.as && tempInput[fieldName] !== undefined && tempInput[fieldDef.as] !== undefined) {
-        throw new RestApiValidationError(
-          `Cannot specify both '${fieldName}' and '${fieldDef.as}' for the same relationship. ` +
-          `Use either '${fieldName}' (foreign key) or '${fieldDef.as}' (relationship name), not both.`,
-          {
-            fields: [fieldName, fieldDef.as],
-            violations: [{
-              field: 'input',
-              rule: 'duplicate_relationship_specification',
-              message: `Both '${fieldName}' and '${fieldDef.as}' were provided for the same relationship`
-            }]
-          }
-        );
-      }
-
-      // Check if the user provided the foreign key name (e.g., country_id)
-      if (tempInput[fieldName] !== undefined) {
-        valueToProcess = tempInput[fieldName];
-        delete tempInput[fieldName]; // Remove from tempInput once processed
-      }
-      // Check if the user provided the 'as' alias (e.g., country)
-      else if (fieldDef.as && tempInput[fieldDef.as] !== undefined) {
-        valueToProcess = tempInput[fieldDef.as];
-        delete tempInput[fieldDef.as]; // Remove from tempInput once processed
-      }
-
-      if (valueToProcess !== undefined) {
+    if (fieldDef.belongsTo && fieldDef.as) {
+      const relAlias = fieldDef.as; // Only use the 'as' alias (relationship name)
+      
+      // Only check for the relationship name (e.g., 'country'), not the foreign key (e.g., 'country_id')
+      if (tempInput[relAlias] !== undefined) {
+        const valueToProcess = tempInput[relAlias];
+        delete tempInput[relAlias]; // Remove from tempInput once processed
+        
         relationshipsData[relAlias] = {
           data: valueToProcess ? { type: fieldDef.belongsTo, id: String(valueToProcess) } : null
         };
@@ -311,7 +287,7 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
  * // {
  * //   id: '456',
  * //   title: 'Article with Author',
- * //   author_id: '789'              // Restored from relationship
+ * //   author: '789'                 // Using relationship name, not foreign key
  * // }
  * 
  * @example
@@ -385,13 +361,11 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
  * // {
  * //   id: '400',
  * //   title: 'JavaScript Guide',
- * //   author_id: '75',
- * //   author: {                    // Expanded from included
+ * //   author: {                    // Expanded from included (or just '75' if not included)
  * //     id: '75',
  * //     name: 'Jane Smith'
  * //   },
- * //   chapters_ids: ['1001', '1002'],
- * //   chapters: [                  // Expanded array
+ * //   chapters: [                  // Expanded array (or ['1001', '1002'] if not included)
  * //     { id: '1001', number: 1, title: 'Introduction' },
  * //     { id: '1002', number: 2, title: 'Basics' }
  * //   ]
@@ -502,8 +476,8 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * //   id: '100',
  * //   text: 'Great article!',
  * //   created_at: '2024-01-15',
- * //   author_id: '50',          // From relationships.author
- * //   article_id: '200'         // From relationships.article
+ * //   author: '50',              // From relationships.author
+ * //   article: '200'             // From relationships.article
  * // }
  * 
  * @example
@@ -526,11 +500,11 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  *   tags: { manyToMany: { via: 'article_tags' } }
  * };
  * 
- * // Output: Array of IDs with _ids suffix
+ * // Output: Array of IDs using relationship name
  * // {
  * //   id: '300',
  * //   title: 'My Article',
- * //   tags_ids: ['1', '2', '3']   // Relationship name + _ids
+ * //   tags: ['1', '2', '3']        // Relationship name directly, no _ids suffix
  * // }
  * 
  * @example
@@ -574,17 +548,15 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  *   }
  * ];
  * 
- * // Output: Recursively expanded (note author.company_id)
+ * // Output: Recursively expanded (note author.company)
  * // {
  * //   id: '400',
  * //   title: 'JavaScript Guide',
- * //   author_id: '75',
  * //   author: {                    // Expanded and transformed
  * //     id: '75',
  * //     name: 'Jane Smith',
- * //     company_id: '5'            // Author's relationships processed!
+ * //     company: '5'               // Author's relationships processed!
  * //   },
- * //   chapters_ids: ['1001', '1002'],
  * //   chapters: [
  * //     { id: '1001', number: 1, title: 'Introduction' },
  * //     { id: '1002', number: 2, title: 'Basics' }
@@ -598,17 +570,17 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * 
  * Purpose:
  * - Core transformation logic for single resources
- * - Restores foreign keys from relationships
- * - Creates _ids arrays for to-many relationships
+ * - Uses relationship names (not foreign keys)
+ * - Creates arrays for to-many relationships (no _ids suffix)
  * - Recursively expands and transforms included data
  * - Handles polymorphic relationships
  * 
  * Data flow:
  * 1. Copies ID and attributes to result
  * 2. Processes each relationship:
- *    - BelongsTo: restores foreign key field
- *    - Polymorphic: restores type and ID fields
- *    - HasMany/ManyToMany: creates _ids array
+ *    - BelongsTo: stores ID using relationship name
+ *    - Polymorphic: stores as {type, id} object
+ *    - HasMany/ManyToMany: creates array of IDs
  * 3. If included data exists:
  *    - Finds matching included resources
  *    - Recursively transforms them (preserving their relationships!)
@@ -634,7 +606,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
   // Add attributes
   Object.assign(simplified, data.attributes || {});
 
-  // Extract foreign keys from relationships
+  // Process relationships using relationship names (not foreign keys)
   if (data.relationships) {
     for (const [relName, relData] of Object.entries(data.relationships)) {
       // Find schema field for this belongsTo relationship
@@ -643,23 +615,26 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
       if (schemaEntry) {
         const [fieldName, fieldDef] = schemaEntry;
         if (fieldDef.belongsTo && relData.data) {
-          simplified[fieldName] = relData.data.id;
+          // Use relationship name, not foreign key field name
+          simplified[relName] = relData.data.id;
         }
       }
 
       // Check if this is a polymorphic relationship from the relationships config
       const rel = relationships?.[relName];
       if (rel?.belongsToPolymorphic && relData.data) {
-        // For polymorphic relationships, restore both the type and id fields
-        const { typeField, idField } = rel.belongsToPolymorphic;
-        simplified[typeField] = relData.data.type;
-        simplified[idField] = relData.data.id;
+        // For polymorphic relationships, keep as object with type and id
+        simplified[relName] = {
+          type: relData.data.type,
+          id: relData.data.id
+        };
       }
 
-      // Handle many-to-many (just IDs, not nested)
+      // Handle many-to-many and hasMany (arrays without _ids suffix)
       if (rel?.hasMany || rel?.manyToMany) {
         if (relData.data && Array.isArray(relData.data)) {
-          simplified[`${relName}_ids`] = relData.data.map(item => item.id);
+          // Use relationship name directly, no _ids suffix
+          simplified[relName] = relData.data.map(item => item.id);
         }
       }
 
