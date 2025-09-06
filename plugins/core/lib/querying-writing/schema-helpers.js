@@ -243,24 +243,19 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
     
     if (effectiveSearch) {
       if (effectiveSearch === true) {
-        // For belongsTo fields, use the 'as' value as the searchSchema key
-        const searchFieldName = fieldDef.belongsTo && fieldDef.as ? fieldDef.as : fieldName;
-        
         // Check if field already exists in explicit searchSchema
-        if (searchSchema[searchFieldName]) {
+        if (searchSchema[fieldName]) {
           // Skip - explicit searchSchema takes precedence
           // This allows searchSchema to override fields marked with search:true
           return;
         }
         
-        // Simple boolean - copy field definition (except search and belongsTo-specific props) and add filterOperator
-        const { search, belongsTo, as, ...fieldDefWithoutSearch } = fieldDef;
-        searchSchema[searchFieldName] = {
+        // Simple boolean - copy entire field definition (except search) and add filterOperator
+        const { search, ...fieldDefWithoutSearch } = fieldDef;
+        searchSchema[fieldName] = {
           ...fieldDefWithoutSearch,
           // Preserve existing filterOperator or default to '='
-          filterOperator: fieldDefWithoutSearch.filterOperator || '=',
-          // For belongsTo fields, keep track of the actual database field
-          ...(fieldDef.belongsTo ? { actualField: fieldName } : {})
+          filterOperator: fieldDefWithoutSearch.filterOperator || '='
         };
       } else if (typeof effectiveSearch === 'object') {
         // Check if search defines multiple filter fields
