@@ -30,6 +30,9 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 
 ### Additional Topics
 
+- **[Client Integration](GUIDE_X_Client_Integration.md)**  
+  Learn about the relationMap and how to build clients that work with JSON:API format.
+
 - **[File Uploads](GUIDE_X_File_Uploads.md)**  
   Handle file uploads with multiple backends (file system, S3).
 
