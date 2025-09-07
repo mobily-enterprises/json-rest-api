@@ -134,6 +134,57 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  *   }
  * };
  * // Output: Returned unchanged (detected by data.type)
+ *
+ * @example
+ * // Input: Polymorphic relationship with minimal object format
+ * const relationships = {
+ *   commentable: {
+ *     belongsToPolymorphic: {
+ *       types: ['posts', 'videos'],
+ *       typeField: 'commentable_type',
+ *       idField: 'commentable_id'
+ *     }
+ *   }
+ * };
+ * const input = {
+ *   text: 'Great content!',
+ *   commentable: { id: '456', _type: 'posts' }  // Minimal object format
+ * };
+ * 
+ * // Output: Proper JSON:API structure for polymorphic
+ * // {
+ * //   data: {
+ * //     type: 'comments',
+ * //     attributes: {
+ * //       text: 'Great content!'
+ * //     },
+ * //     relationships: {
+ * //       commentable: {
+ * //         data: { type: 'posts', id: '456' }
+ * //       }
+ * //     }
+ * //   }
+ * // }
+ *
+ * @example
+ * // Input: Clearing polymorphic relationship
+ * const input = {
+ *   text: 'Updated comment',
+ *   commentable: null  // Clear the relationship
+ * };
+ * 
+ * // Output: Relationship set to null
+ * // {
+ * //   data: {
+ * //     type: 'comments',
+ * //     attributes: {
+ * //       text: 'Updated comment'
+ * //     },
+ * //     relationships: {
+ * //       commentable: { data: null }
+ * //     }
+ * //   }
+ * // }
  * 
  * @description
  * Used by:
@@ -144,6 +195,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * - Provides developer-friendly plain object API
  * - Automatically detects and converts relationships
  * - Supports relationship alias notation
+ * - Supports polymorphic relationships with minimal object format
  * - Maintains JSON:API compliance internally
  * - Allows gradual migration from simple to JSON:API
  * 
@@ -152,7 +204,8 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * 2. Extracts ID from input object
  * 3. Processes belongsTo relationships from schema
  * 4. Processes hasMany/manyToMany from relationships
- * 5. Remaining fields become attributes
+ * 5. Processes polymorphic belongsTo from relationships
+ * 6. Remaining fields become attributes
  * 6. Builds proper JSON:API document structure
  */
 export const transformSimplifiedToJsonApi = (scope, deps) => {
@@ -236,6 +289,28 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
           relationshipsData[relName] = {
               data: value ? { type: relConfig.belongsTo, id: String(value) } : null
           };
+      }
+      // Handle polymorphic belongsTo relationships with minimal object format
+      else if (relConfig.belongsToPolymorphic && value !== undefined) {
+        if (value === null) {
+          relationshipsData[relName] = { data: null };
+        } else if (typeof value === 'object' && value !== null && value.id && value._type) {
+          relationshipsData[relName] = {
+            data: { type: value._type, id: String(value.id) }
+          };
+        } else {
+          throw new RestApiValidationError(
+            `Invalid format for polymorphic relationship '${relName}'. Expected { id: 'value', _type: 'type' } or null`,
+            {
+              fields: [relName],
+              violations: [{
+                field: relName,
+                rule: 'polymorphic_format',
+                message: 'Must be an object with id and _type properties, or null'
+              }]
+            }
+          );
+        }
       }
     }
   }
