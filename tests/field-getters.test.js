@@ -215,13 +215,13 @@ describe('Field Getters', () => {
 
       // Add reviews
       await api.resources.reviews.post({
-        product_id: product.id,
+        product: product.id,
         content: 'Great product!',
         rating: 5
       });
 
       await api.resources.reviews.post({
-        product_id: product.id,
+        product: product.id,
         content: 'Not bad',
         rating: 3
       });
@@ -252,7 +252,7 @@ describe('Field Getters', () => {
       });
 
       await api.resources.reviews.post({
-        product_id: product.id,
+        product: product.id,
         content: 'Review text',
         rating: 4
       });

@@ -64,9 +64,9 @@ describe('Polymorphic Relationships - Basic Tests', () => {
         rating: 5,
         title: 'Great book!',
         content: 'This is an excellent book about testing.',
-        reviewer_name: 'John Doe',
-        reviewable_type: 'books',
-        reviewable_id: book.data.id
+        reviewer_name: 'John Doe'
+      }, {
+        reviewable: { data: { type: 'books', id: book.data.id } }
       })
     });
 
@@ -114,9 +114,9 @@ describe('Polymorphic Relationships - Basic Tests', () => {
         rating: 5,
         title: 'Great book',
         content: 'Love it',
-        reviewer_name: 'Reader 1',
-        reviewable_type: 'books',
-        reviewable_id: book.data.id
+        reviewer_name: 'Reader 1'
+      }, {
+        reviewable: { data: { type: 'books', id: book.data.id } }
       })
     });
 
@@ -125,9 +125,9 @@ describe('Polymorphic Relationships - Basic Tests', () => {
         rating: 4,
         title: 'Good author',
         content: 'Nice writing',
-        reviewer_name: 'Reader 2',
-        reviewable_type: 'authors',
-        reviewable_id: author.data.id
+        reviewer_name: 'Reader 2'
+      }, {
+        reviewable: { data: { type: 'authors', id: author.data.id } }
       })
     });
 

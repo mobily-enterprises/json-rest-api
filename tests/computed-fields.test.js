@@ -38,7 +38,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     testData.product = product;
 
     const review1 = await api.resources.reviews.post({
-      product_id: product.id,
+      product: product.id,
       reviewer_name: 'Alice',
       rating: 5,
       comment: 'Excellent product!',
@@ -49,7 +49,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     testData.review1 = review1;
 
     const review2 = await api.resources.reviews.post({
-      product_id: product.id,
+      product: product.id,
       reviewer_name: 'Bob',
       rating: 4,
       comment: 'Good value',
@@ -88,7 +88,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
 
     it('should handle null values in computed fields', async () => {
       const review = await api.resources.reviews.post({
-        product_id: testData.product.id,
+        product: testData.product.id,
         reviewer_name: 'Charlie',
         rating: 3,
         comment: 'Average',

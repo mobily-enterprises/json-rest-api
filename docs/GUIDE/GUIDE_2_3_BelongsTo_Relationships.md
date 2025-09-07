@@ -30,23 +30,22 @@ await api.addResource('publishers', {
 await api.resources.publishers.createKnexTable();
 ```
 
-Now, let's add some data. Notice the flexibility of using either the foreign key field `country_id` or the relationship alias `country` when linking a publisher to a country in simplified mode.
+Now, let's add some data. Use the relationship name `country` when linking a publisher to a country in simplified mode.
 
 ```javascript
 const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
 const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
 const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
 
-// Create a publisher linking via the relationship alias (simplified syntax)
+// Create publishers linking via the relationship name (simplified syntax)
 const frenchPublisher = await api.resources.publishers.post({
   name: 'French Books Inc.',
   country: france.id
 });
 
-// Create a publisher linking via the foreign key field directly
 const germanPublisher = await api.resources.publishers.post({
   name: 'German Press GmbH',
-  country_id: germany.id
+  country: germany.id
 });
 
 const ukPublisher = await api.resources.publishers.post({
@@ -56,7 +55,7 @@ const ukPublisher = await api.resources.publishers.post({
 
 const internationalPublisher = await api.resources.publishers.post({
   name: 'Global Publishing',
-  country_id: null
+  country: null
 });
 
 
@@ -66,14 +65,12 @@ console.log('Added UK Publisher:', inspect(ukPublisher));
 console.log('Added International Publisher:', inspect(internationalPublisher));
 ```
 
-**Explanation of Interchangeability (`country_id` vs. `country`):**
+**Using Relationship Names:**
 
-When defining a `belongsTo` relationship with an `as` alias (e.g., `country_id: { ..., as: 'country' }`), `json-rest-api` provides flexibility in how you provide the related resource's ID during `post`, `put`, or `patch` operations in **simplified mode**:
+When defining a `belongsTo` relationship with an `as` alias (e.g., `country_id: { ..., as: 'country' }`), use the relationship name `country` when providing the related resource's ID during `post`, `put`, or `patch` operations in **simplified mode**:
 
-* You can use the **relationship alias** (the `as` value) directly with the ID of the related resource (e.g., `country: france.id`). This is generally recommended for clarity and aligns with the relationship concept.
-* You can use the direct **foreign key field name** (e.g., `country_id: germany.id`). The system is flexible enough to recognize this as a foreign key and process it correctly.
-
-Both approaches achieve the same result of setting the underlying foreign key in the database.
+* Use the **relationship name** (the `as` value) directly with the ID of the related resource (e.g., `country: france.id`). This provides clarity and aligns with the relationship concept.
+* Foreign key field names (e.g., `country_id`) are no longer supported for relationship input to maintain consistency across all relationship types.
 
 **Expected Output (Illustrative, IDs may vary):**
 
@@ -101,8 +98,8 @@ const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'U
 await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
 await api.resources.publishers.post({ name: 'Another French Books Inc.', country: france.id });
 await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country: null });
 
 await api.resources.publishers.post({ 
   name: 'UK Books Ltd.', 
@@ -328,8 +325,8 @@ const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'U
 
 await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
 await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country: null });
 
 
 // Get a publisher, include its country, but only retrieve publisher name and country code
@@ -425,8 +422,8 @@ const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'U
 
 await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
 await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country_id: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country_id: null });
+await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
+await api.resources.publishers.post({ name: 'Global Publishing', country: null });
 
 
 // Programmatic search: Find publishers from France using the country ID alias in searchSchema

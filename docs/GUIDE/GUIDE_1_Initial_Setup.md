@@ -829,7 +829,7 @@ When you install the REST API plugins, the following helpers are added to `api.h
   try {
     // Use transaction in multiple operations
     await api.resources.countries.post({ name: 'France', code: 'FR' }, { transaction: trx });
-    await api.resources.publishers.post({ name: 'French Press', country_id: 1 }, { transaction: trx });
+    await api.resources.publishers.post({ name: 'French Press', country: 1 }, { transaction: trx });
     await trx.commit();
   } catch (error) {
     await trx.rollback();

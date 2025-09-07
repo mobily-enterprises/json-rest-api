@@ -162,7 +162,7 @@ console.log('JSON:API response:', inspect(oxfordResult));
 const authorResult = await api.resources.authors.post({
   name: 'George',
   surname: 'Orwell',
-  publisher_id: penguinResult.id
+  publisher: penguinResult.id
 });
 console.log('Created author:', inspect(authorResult));
 

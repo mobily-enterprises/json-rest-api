@@ -48,7 +48,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * // }
  * 
  * @example
- * // Input: Object with foreign key (traditional way)
+ * // Input: Object with relationship name (preferred way)
  * const schema = {
  *   title: { type: 'string' },
  *   author_id: { 
@@ -60,19 +60,19 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * const input = {
  *   id: '456',
  *   title: 'Another Article',
- *   author_id: 789                      // Using foreign key name
+ *   author: 789                         // Using relationship name
  * };
  * 
- * // Output: Foreign key becomes relationship
+ * // Output: Relationship becomes JSON:API relationship
  * // {
  * //   data: {
  * //     type: 'articles',
  * //     id: '456',
  * //     attributes: {
- * //       title: 'Another Article'       // author_id removed
+ * //       title: 'Another Article'       // author removed from attributes
  * //     },
  * //     relationships: {
- * //       author: {                      // Uses 'as' name
+ * //       author: {                      
  * //         data: { type: 'users', id: '789' }
  * //       }
  * //     }
@@ -80,11 +80,11 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * // }
  *
  * @example
- * // Input: Object with relationship alias (preferred way)
+ * // Input: Object with relationship name (only supported way)
  * const input = {
  *   id: '456',
  *   title: 'Another Article',
- *   author: 789                         // Using 'as' alias directly
+ *   author: 789                         // Using relationship name
  * };
  * // Output: Same JSON:API structure as above
  *
@@ -234,31 +234,27 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
       const relAlias = fieldDef.as || fieldName; // Use 'as' alias or foreign key name as default alias
       let valueToProcess = undefined;
 
-      // Check if both foreign key and alias are provided - this is an error
-      if (fieldDef.as && tempInput[fieldName] !== undefined && tempInput[fieldDef.as] !== undefined) {
+      // Check if the user provided the foreign key name (e.g., country_id) - NO LONGER ALLOWED
+      if (tempInput[fieldName] !== undefined) {
         throw new RestApiValidationError(
-          `Cannot specify both '${fieldName}' and '${fieldDef.as}' for the same relationship. ` +
-          `Use either '${fieldName}' (foreign key) or '${fieldDef.as}' (relationship name), not both.`,
+          `Foreign key field '${fieldName}' is no longer supported for relationship input. ` +
+          `Use the relationship name '${fieldDef.as || fieldName}' instead.`,
           {
-            fields: [fieldName, fieldDef.as],
+            fields: [fieldName],
             violations: [{
-              field: 'input',
-              rule: 'duplicate_relationship_specification',
-              message: `Both '${fieldName}' and '${fieldDef.as}' were provided for the same relationship`
+              field: fieldName,
+              rule: 'deprecated_foreign_key',
+              message: `Use relationship name instead of foreign key field`
             }]
           }
         );
       }
-
-      // Check if the user provided the foreign key name (e.g., country_id)
-      if (tempInput[fieldName] !== undefined) {
-        valueToProcess = tempInput[fieldName];
-        delete tempInput[fieldName]; // Remove from tempInput once processed
-      }
-      // Check if the user provided the 'as' alias (e.g., country)
-      else if (fieldDef.as && tempInput[fieldDef.as] !== undefined) {
-        valueToProcess = tempInput[fieldDef.as];
-        delete tempInput[fieldDef.as]; // Remove from tempInput once processed
+      
+      // Check if the user provided the relationship name (e.g., country)
+      const relName = fieldDef.as || fieldName;
+      if (tempInput[relName] !== undefined) {
+        valueToProcess = tempInput[relName];
+        delete tempInput[relName]; // Remove from tempInput once processed
       }
 
       if (valueToProcess !== undefined) {
