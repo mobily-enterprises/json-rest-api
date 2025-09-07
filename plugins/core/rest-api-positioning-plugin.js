@@ -47,12 +47,45 @@ export const PositioningPlugin = {
       log.debug('*** buildPositionFilterConditions', { 
         filters: vars.positioning.filters,
         record: record,
-        recordKeys: Object.keys(record)
+        recordKeys: Object.keys(record),
+        searchSchema: schemaInfo.searchSchemaStructure
       });
       
       vars.positioning.filters.forEach(filterField => {
-        if (record[filterField] !== undefined) {
-          conditions[filterField] = record[filterField];
+        // The filter field should be in the searchSchema if it's searchable
+        const searchField = schemaInfo.searchSchemaStructure?.[filterField];
+        
+        if (!searchField) {
+          // If not in searchSchema, it might be a direct database field
+          // Check if it exists in the main schema
+          if (schemaInfo.schemaStructure[filterField]) {
+            // It's a direct database field, use it as-is
+            if (record[filterField] !== undefined) {
+              conditions[filterField] = record[filterField];
+            }
+          } else {
+            log.warn(`Filter field '${filterField}' not found in searchSchema or main schema for positioning`);
+          }
+        } else {
+          // It's in the searchSchema - use the actualField if it exists
+          const dbField = searchField.actualField || filterField;
+          
+          // For relationship fields, the record will have the relationship name as the key
+          // For regular fields, the record will have the field name as the key
+          let value;
+          if (searchField.isRelationship) {
+            // This is a relationship - the filter field is the relationship name
+            // The record should have the foreign key value under the dbField name
+            value = record[dbField];
+          } else {
+            // Regular field - check both the filter field and db field names
+            value = record[filterField] !== undefined ? record[filterField] : record[dbField];
+          }
+          
+          if (value !== undefined) {
+            // Always use the database field name in the query conditions
+            conditions[dbField] = value;
+          }
         }
       });
 
@@ -78,11 +111,27 @@ export const PositioningPlugin = {
         );
       }
 
-      // Validate filter fields exist
+      // Validate filter fields exist (check both relationship names and actual field names)
       vars.positioning.filters.forEach(filterField => {
-        if (!schema[filterField]) {
+        // Check if it's a relationship field by looking for a field with matching 'as' property
+        let fieldExists = false;
+        
+        // First check if the field exists directly in the schema
+        if (schema[filterField]) {
+          fieldExists = true;
+        } else {
+          // Check if it's a relationship name (as property)
+          for (const [fieldName, fieldDef] of Object.entries(schema)) {
+            if (fieldDef.as === filterField) {
+              fieldExists = true;
+              break;
+            }
+          }
+        }
+        
+        if (!fieldExists) {
           throw new Error(
-            `Resource '${scopeName}' must have '${filterField}' field in schema for position filtering`
+            `Resource '${scopeName}' must have '${filterField}' field or relationship in schema for position filtering`
           );
         }
       });
@@ -114,11 +163,24 @@ export const PositioningPlugin = {
           return;
         }
         
-        // Build index columns: filters + position field
-        const indexColumns = [
-          ...vars.positioning.filters,
-          vars.positioning.field
-        ];
+        // Build index columns: map filter fields to actual database columns
+        const indexColumns = [];
+        
+        // Map each filter field to its database column
+        vars.positioning.filters.forEach(filterField => {
+          const searchField = schemaInfo.searchSchemaStructure?.[filterField];
+          if (searchField) {
+            // Use actualField if it exists (for relationships)
+            const dbField = searchField.actualField || filterField;
+            indexColumns.push(dbField);
+          } else if (schemaInfo.schemaStructure[filterField]) {
+            // Direct database field
+            indexColumns.push(filterField);
+          }
+        });
+        
+        // Add the position field
+        indexColumns.push(vars.positioning.field);
         
         const indexName = `idx_${tableName}_positioning`;
         

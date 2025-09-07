@@ -38,12 +38,12 @@ export const SocketIOPlugin = {
         // Get the actual field name and value
         const fieldName = fieldDef.actualField || filterKey;
         
-        // Check if this is a foreign key field (ends with _id and has belongsTo)
+        // Check if this is a relationship filter using searchSchema metadata
         let recordValue;
-        if (filterKey.endsWith('_id') && fieldDef.belongsTo) {
-          // For foreign keys, check the relationship
-          const relationName = fieldDef.as || fieldDef.belongsTo;
-          const relationshipData = record.relationships?.[relationName]?.data;
+        if (fieldDef.isRelationship) {
+          // For relationship filters, check the relationship data
+          // The filterKey is already the relationship name (e.g., 'author')
+          const relationshipData = record.relationships?.[filterKey]?.data;
           recordValue = relationshipData?.id;
         } else {
           // Handle both JSON:API structure (attributes nested) and flat structure (minimal records)
@@ -95,7 +95,7 @@ export const SocketIOPlugin = {
 
             case '=':
               // For ID comparisons, convert both to strings to handle JSON:API string IDs
-              if (filterKey.endsWith('_id') && fieldDef.belongsTo) {
+              if (fieldDef.isRelationship) {
                 if (String(recordValue) !== String(filterValue)) {
                   return false;
                 }

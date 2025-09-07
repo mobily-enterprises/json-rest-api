@@ -125,7 +125,7 @@ describe('Query Operations', () => {
     it('should filter by simple field', async () => {
       const result = await basicApi.resources.books.query({
         queryParams: {
-          filters: { country_id: testData.countries[0].id }
+          filters: { country: testData.countries[0].id }
         },
         simplified: false
       });
@@ -147,8 +147,8 @@ describe('Query Operations', () => {
       const result = await basicApi.resources.books.query({
         queryParams: {
           filters: {
-            country_id: testData.countries[0].id,
-            publisher_id: testData.publishers[0].id
+            country: testData.countries[0].id,
+            publisher: testData.publishers[0].id
           }
         },
         simplified: false
@@ -162,7 +162,7 @@ describe('Query Operations', () => {
     it('should return empty array when no matches', async () => {
       const result = await basicApi.resources.books.query({
         queryParams: {
-          filters: { country_id: 99999 }
+          filters: { country: 99999 }
         },
         simplified: false
       });
@@ -285,7 +285,7 @@ describe('Query Operations', () => {
       // Sort by country_id ascending, then title descending
       const result = await basicApi.resources.books.query({
         queryParams: {
-          sort: ['country_id', '-title']
+          sort: ['country', '-title']
         },
         simplified: false
       });

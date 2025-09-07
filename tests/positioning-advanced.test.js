@@ -28,7 +28,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
     // Install positioning plugin with default configuration
     await api.use(PositioningPlugin, {
       field: 'position',
-      filters: ['category_id'],
+      filters: ['category'],
       defaultPosition: 'last',
       autoIndex: true
     });
@@ -172,7 +172,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await api.use(PositioningPlugin, {
         field: 'position',
-        filters: ['category_id'],
+        filters: ['category'],
         defaultPosition: 'first' // New items go to beginning
       });
 
@@ -197,7 +197,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query tasks
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -222,7 +222,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await api.use(PositioningPlugin, {
         field: 'position',
-        filters: ['category_id'],
+        filters: ['category'],
         defaultPosition: 'first'
       });
 
@@ -247,7 +247,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -269,7 +269,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await api.use(PositioningPlugin, {
         field: 'sort_order', // Custom field name
-        filters: ['project_id'],
+        filters: ['project'],
         defaultPosition: 'last'
       });
 
@@ -297,7 +297,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query should work with custom field
       const { data: items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id },
+          filters: { project: project.id },
           sort: ['sort_order']
         }
       });
@@ -315,7 +315,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await api.use(PositioningPlugin, {
         field: 'position',
-        filters: ['project_id'],
+        filters: ['project'],
         beforeIdField: 'insertBefore', // Custom virtual field name
         defaultPosition: 'last'
       });
@@ -341,7 +341,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       const { data: items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id },
+          filters: { project: project.id },
           sort: ['position']
         }
       });
@@ -389,7 +389,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query all tasks
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -455,7 +455,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify final state
       const { data: finalTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -501,7 +501,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       const { data: allTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -517,7 +517,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       const { data: updatedTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -550,7 +550,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -569,7 +569,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await softDeleteApi.use(PositioningPlugin, {
         field: 'position',
-        filters: ['category_id'],
+        filters: ['category'],
         defaultPosition: 'last',
         excludeResources: ['system_migrations', 'system_logs', 'categories', 'projects']
       });
@@ -603,7 +603,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       const { data: activeTasks } = await softDeleteApi.resources.tasks.query({
         queryParams: {
           filters: { 
-            category_id: category.id,
+            category: category.id,
             deleted_at: null
           },
           sort: ['position']
@@ -627,7 +627,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       await versionApi.use(PositioningPlugin, {
         field: 'position',
-        filters: ['category_id', 'version'],
+        filters: ['category', 'version'],
         defaultPosition: 'last',
         excludeResources: ['system_migrations', 'system_logs', 'categories', 'projects']
       });
@@ -662,7 +662,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query v1 tasks
       const { data: v1Items } = await versionApi.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id, version: 1 },
+          filters: { category: category.id, version: 1 },
           sort: ['position']
         }
       });
@@ -675,7 +675,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query v2 tasks
       const { data: v2Items } = await versionApi.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id, version: 2 },
+          filters: { category: category.id, version: 2 },
           sort: ['position']
         }
       });

@@ -294,7 +294,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         const response = await new Promise((resolve) => {
           socket.emit('subscribe', {
             resource: 'books',
-            filters: { country_id: countryResult.data.id }
+            filters: { country: countryResult.data.id }
           }, resolve);
         });
 
@@ -721,7 +721,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         await new Promise((resolve) => {
           socket.emit('subscribe', {
             resource: 'books',
-            filters: { publisher_id: publisherResult.data.id }
+            filters: { publisher: publisherResult.data.id }
           }, resolve);
         });
 

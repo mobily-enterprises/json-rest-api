@@ -756,7 +756,7 @@ describe('Custom idProperty Relationship Operations', () => {
       // Complex query: US books with their publishers and authors
       const result = await api.resources.books.query({
         queryParams: {
-          filters: { country_id: usa.data.id },
+          filters: { country: usa.data.id },
           include: ['publisher.country', 'authors'],
           sort: ['title']
         }

@@ -53,7 +53,7 @@ describe('Nested Include Operations', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
+        country: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
         books: { 
@@ -70,7 +70,7 @@ describe('Nested Include Operations', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true, search: true },
-        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
+        country: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
         books: { 
@@ -93,7 +93,7 @@ describe('Nested Include Operations', () => {
       schema: {
         id: { type: 'id' },
         title: { type: 'string', required: true },
-        publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
+        publisher: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
       },
       relationships: {
         authors: { 
@@ -116,8 +116,8 @@ describe('Nested Include Operations', () => {
     await api.addResource('book_authors', {
       schema: {
         id: { type: 'id' },
-        book_id: { type: 'number', belongsTo: 'books', as: 'book' },
-        author_id: { type: 'number', belongsTo: 'authors', as: 'author' }
+        book: { type: 'number', belongsTo: 'books', as: 'book' },
+        author: { type: 'number', belongsTo: 'authors', as: 'author' }
       }
     });
     await api.resources.book_authors.createKnexTable();
@@ -128,7 +128,7 @@ describe('Nested Include Operations', () => {
         id: { type: 'id' },
         content: { type: 'string', required: true },
         rating: { type: 'number', required: true },
-        book_id: { type: 'number', belongsTo: 'books', as: 'book' }
+        book: { type: 'number', belongsTo: 'books', as: 'book' }
       }
     });
     await api.resources.reviews.createKnexTable();
@@ -157,7 +157,7 @@ describe('Nested Include Operations', () => {
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
@@ -165,14 +165,14 @@ describe('Nested Include Operations', () => {
       const author1 = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author 1',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
       const author2 = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author 2',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
@@ -180,21 +180,21 @@ describe('Nested Include Operations', () => {
       const book1 = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 1',
-          publisher_id: parseInt(publisher.id)
+          publisher: parseInt(publisher.id)
         })
       });
 
       const book2 = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 2',
-          publisher_id: parseInt(publisher.id)
+          publisher: parseInt(publisher.id)
         })
       });
 
       const book3 = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 3',
-          publisher_id: parseInt(publisher.id)
+          publisher: parseInt(publisher.id)
         })
       });
 
@@ -202,30 +202,30 @@ describe('Nested Include Operations', () => {
       // Book 1 - Author 1 only
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book1.id),
-          author_id: parseInt(author1.id)
+          book: parseInt(book1.id),
+          author: parseInt(author1.id)
         })
       });
 
       // Book 2 - Both authors
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book2.id),
-          author_id: parseInt(author1.id)
+          book: parseInt(book2.id),
+          author: parseInt(author1.id)
         })
       });
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book2.id),
-          author_id: parseInt(author2.id)
+          book: parseInt(book2.id),
+          author: parseInt(author2.id)
         })
       });
 
       // Book 3 - Author 2 only
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book3.id),
-          author_id: parseInt(author2.id)
+          book: parseInt(book3.id),
+          author: parseInt(author2.id)
         })
       });
     });
@@ -276,15 +276,15 @@ describe('Nested Include Operations', () => {
         const book = await api.resources.books.post({
           inputRecord: createJsonApiDocument('books', {
             title: `Book ${i}`,
-            publisher_id: parseInt(publisherId)
+            publisher: parseInt(publisherId)
           })
         });
         
         // Associate all new books with Author 1
         await api.resources.book_authors.post({
           inputRecord: createJsonApiDocument('book_authors', {
-            book_id: parseInt(book.id),
-            author_id: 1
+            book: parseInt(book.id),
+            author: 1
           })
         });
       }
@@ -335,50 +335,50 @@ describe('Nested Include Operations', () => {
       const publisher1 = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'US Publisher',
-          country_id: parseInt(usa.id)
+          country: parseInt(usa.id)
         })
       });
 
       const publisher2 = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'UK Publisher',
-          country_id: parseInt(uk.id)
+          country: parseInt(uk.id)
         })
       });
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'International Author',
-          country_id: parseInt(usa.id)
+          country: parseInt(usa.id)
         })
       });
 
       const book1 = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'US Book',
-          publisher_id: parseInt(publisher1.id)
+          publisher: parseInt(publisher1.id)
         })
       });
 
       const book2 = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'UK Book',
-          publisher_id: parseInt(publisher2.id)
+          publisher: parseInt(publisher2.id)
         })
       });
 
       // Associate both books with the author
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book1.id),
-          author_id: parseInt(author.id)
+          book: parseInt(book1.id),
+          author: parseInt(author.id)
         })
       });
 
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book2.id),
-          author_id: parseInt(author.id)
+          book: parseInt(book2.id),
+          author: parseInt(author.id)
         })
       });
     });
@@ -446,28 +446,28 @@ describe('Nested Include Operations', () => {
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Publisher',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
       const book = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book with Reviews',
-          publisher_id: parseInt(publisher.id)
+          publisher: parseInt(publisher.id)
         })
       });
 
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book.id),
-          author_id: parseInt(author.id)
+          book: parseInt(book.id),
+          author: parseInt(author.id)
         })
       });
 
@@ -476,7 +476,7 @@ describe('Nested Include Operations', () => {
         inputRecord: createJsonApiDocument('reviews', {
           content: 'Great book!',
           rating: 5,
-          book_id: parseInt(book.id)
+          book: parseInt(book.id)
         })
       });
 
@@ -484,7 +484,7 @@ describe('Nested Include Operations', () => {
         inputRecord: createJsonApiDocument('reviews', {
           content: 'Good read',
           rating: 4,
-          book_id: parseInt(book.id)
+          book: parseInt(book.id)
         })
       });
     });
@@ -534,28 +534,28 @@ describe('Nested Include Operations', () => {
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Publisher',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author',
-          country_id: parseInt(country.id)
+          country: parseInt(country.id)
         })
       });
 
       const book = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book',
-          publisher_id: parseInt(publisher.id)
+          publisher: parseInt(publisher.id)
         })
       });
 
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {
-          book_id: parseInt(book.id),
-          author_id: parseInt(author.id)
+          book: parseInt(book.id),
+          author: parseInt(author.id)
         })
       });
     });

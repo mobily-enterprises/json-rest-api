@@ -1463,7 +1463,7 @@ export async function createSearchSchemaMergeApi(knex, pluginOptions = {}) {
       name: { type: 'string', search: true },        // Should be added to searchSchema
       description: { type: 'string', search: true }, // Should be added to searchSchema
       price: { type: 'number', search: true },       // Should be overridden by searchSchema
-      category_id: { type: 'number' },               // Not searchable
+      category: { type: 'number' },               // Not searchable
       sku: { type: 'string', search: true },         // Should be added to searchSchema
       status: { type: 'string' }                     // Not searchable but added via searchSchema
     },

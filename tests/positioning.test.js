@@ -26,7 +26,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
     // Install positioning plugin with default configuration
     await api.use(PositioningPlugin, {
       field: 'position',
-      filters: ['category_id'], // Tasks will be grouped by category
+      filters: ['category'], // Tasks will be grouped by category
       defaultPosition: 'last',
       autoIndex: true
     });
@@ -225,7 +225,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Get fresh data
       const { data: allTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -312,7 +312,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       
       await customApi.use(PositioningPlugin, {
         field: 'sort_order', // Different field name
-        filters: ['project_id'],
+        filters: ['project'],
         defaultPosition: 'last'
       });
       
@@ -339,7 +339,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       
       await multiFilterApi.use(PositioningPlugin, {
         field: 'position',
-        filters: ['project_id', 'status'], // Multiple filters
+        filters: ['project', 'status'], // Multiple filters
         defaultPosition: 'last'
       });
       
@@ -381,7 +381,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       
       await firstApi.use(PositioningPlugin, {
         field: 'position',
-        filters: ['category_id'],
+        filters: ['category'],
         defaultPosition: 'first' // Items go to beginning by default
       });
       
@@ -531,7 +531,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query with position sort
       const { data: sorted } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -546,7 +546,7 @@ describe('Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query with reverse position sort
       const { data: reverseSorted } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['-position']
         }
       });

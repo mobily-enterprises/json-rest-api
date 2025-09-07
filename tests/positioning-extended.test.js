@@ -25,7 +25,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     // Install positioning plugin with default configuration
     await api.use(PositioningPlugin, {
       field: 'position',
-      filters: ['category_id'],
+      filters: ['category'],
       defaultPosition: 'last',
       autoIndex: true
     });
@@ -76,7 +76,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query and verify order
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -122,7 +122,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query and verify all are properly ordered
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -154,7 +154,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Should position at end since beforeId doesn't exist
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -182,7 +182,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Task 2 should be positioned normally in its category (ignoring beforeId from other category)
       const { data: cat2Tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category2.id },
+          filters: { category: category2.id },
           sort: ['position']
         }
       });
@@ -228,7 +228,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query final order
       const { data: finalTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -272,7 +272,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify category 1 only has task 2
       const { data: cat1Tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category1.id },
+          filters: { category: category1.id },
           sort: ['position']
         }
       });
@@ -283,7 +283,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify category 2 has tasks in correct order
       const { data: cat2Tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category2.id },
+          filters: { category: category2.id },
           sort: ['position']
         }
       });
@@ -322,7 +322,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify order is maintained
       const { data: allTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -357,7 +357,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query all tasks
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -404,7 +404,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query all tasks
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -461,7 +461,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query with ascending sort
       const { data: ascTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -472,7 +472,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query with descending sort
       const { data: descTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['-position']
         }
       });
@@ -495,7 +495,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query first page
       const { data: page1 } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position'],
           page: { size: 5, number: 1 }
         }
@@ -508,7 +508,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query second page
       const { data: page2 } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position'],
           page: { size: 5, number: 2 }
         }
@@ -546,7 +546,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Sort by title then position
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['title', 'position']
         }
       });
@@ -589,7 +589,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query all and verify ordering
       const { data: allTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position'],
           page: { size: 100 }
         }
@@ -654,7 +654,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify final state
       const { data: finalTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -704,7 +704,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query tasks with category
       const { data: tasksWithCat } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -715,7 +715,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query tasks without category
       const { data: tasksNoCat } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: null },
+          filters: { category: null },
           sort: ['position']
         }
       });
@@ -726,7 +726,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
           sort: ['position']
         }
       });
-      console.log('All tasks:', allTasks.map(t => ({ title: t.title, category_id: t.category_id })));
+      console.log('All tasks:', allTasks.map(t => ({ title: t.title, category: t.category_id })));
       console.log('Tasks with null category:', tasksNoCat.length);
       
       // Try querying without filter
@@ -803,7 +803,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });
@@ -831,7 +831,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Query with position sort
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position'],
           page: { size: 100 }
         }
@@ -854,7 +854,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify it's positioned correctly
       const { data: updatedTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position'],
           page: { size: 102 }
         }
@@ -893,7 +893,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       // Verify final state
       const { data: finalTasks } = await api.resources.tasks.query({
         queryParams: {
-          filters: { category_id: category.id },
+          filters: { category: category.id },
           sort: ['position']
         }
       });

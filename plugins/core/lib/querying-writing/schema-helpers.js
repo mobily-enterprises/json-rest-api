@@ -243,8 +243,11 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
     
     if (effectiveSearch) {
       if (effectiveSearch === true) {
+        // For belongsTo relationships, use the relationship name (as property) instead of the field name
+        const searchFieldName = (fieldDef.belongsTo && fieldDef.as) ? fieldDef.as : fieldName;
+        
         // Check if field already exists in explicit searchSchema
-        if (searchSchema[fieldName]) {
+        if (searchSchema[searchFieldName]) {
           // Skip - explicit searchSchema takes precedence
           // This allows searchSchema to override fields marked with search:true
           return;
@@ -252,11 +255,20 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
         
         // Simple boolean - copy entire field definition (except search) and add filterOperator
         const { search, ...fieldDefWithoutSearch } = fieldDef;
-        searchSchema[fieldName] = {
+        const searchEntry = {
           ...fieldDefWithoutSearch,
           // Preserve existing filterOperator or default to '='
           filterOperator: fieldDefWithoutSearch.filterOperator || '='
         };
+        
+        // For belongsTo relationships, add metadata to map back to the actual field
+        if (fieldDef.belongsTo && fieldDef.as) {
+          searchEntry.actualField = fieldName;  // Maps to the DB column
+          searchEntry.isRelationship = true;
+          searchEntry.targetResource = fieldDef.belongsTo;
+        }
+        
+        searchSchema[searchFieldName] = searchEntry;
       } else if (typeof effectiveSearch === 'object') {
         // Check if search defines multiple filter fields
         const hasNestedFilters = Object.values(effectiveSearch).some(
@@ -279,17 +291,29 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
             };
           });
         } else {
+          // For belongsTo relationships, use the relationship name (as property) instead of the field name
+          const searchFieldName = (fieldDef.belongsTo && fieldDef.as) ? fieldDef.as : fieldName;
+          
           // Check if field already exists in explicit searchSchema
-          if (searchSchema[fieldName]) {
+          if (searchSchema[searchFieldName]) {
             // Skip - explicit searchSchema takes precedence
             return;
           }
           
           // Single filter with config
-          searchSchema[fieldName] = {
+          const searchEntry = {
             type: fieldDef.type,
             ...effectiveSearch
           };
+          
+          // For belongsTo relationships, add metadata to map back to the actual field
+          if (fieldDef.belongsTo && fieldDef.as) {
+            searchEntry.actualField = fieldName;  // Maps to the DB column
+            searchEntry.isRelationship = true;
+            searchEntry.targetResource = fieldDef.belongsTo;
+          }
+          
+          searchSchema[searchFieldName] = searchEntry;
         }
       }
     }

@@ -24,7 +24,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
     // Install positioning plugin with default configuration
     await api.use(PositioningPlugin, {
       field: 'position',
-      filters: ['project_id', 'status'], // Default filters for most tests
+      filters: ['project', 'status'], // Default filters for most tests
       defaultPosition: 'last'
     });
   });
@@ -100,7 +100,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query each combination
       const { data: p1ActiveItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'active' },
+          filters: { project: project1.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -111,7 +111,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p1ArchivedItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'archived' },
+          filters: { project: project1.id, status: 'archived' },
           sort: ['position']
         }
       });
@@ -122,7 +122,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p2ActiveItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project2.id, status: 'active' },
+          filters: { project: project2.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -172,7 +172,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query different combinations
       const { data: projectActiveItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: 'active' },
+          filters: { project: project.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -181,7 +181,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: projectNullStatusItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: null },
+          filters: { project: project.id, status: null },
           sort: ['position']
         }
       });
@@ -190,7 +190,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: nullProjectActiveItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: null, status: 'active' },
+          filters: { project: null, status: 'active' },
           sort: ['position']
         }
       });
@@ -199,7 +199,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: bothNullItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: null, status: null },
+          filters: { project: null, status: null },
           sort: ['position']
         }
       });
@@ -242,7 +242,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Item 4 should be first in its filter group
       const { data: archivedItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: 'archived' },
+          filters: { project: project.id, status: 'archived' },
           sort: ['position']
         }
       });
@@ -261,7 +261,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: activeItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: 'active' },
+          filters: { project: project.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -314,7 +314,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Verify project 1 now has 2 items
       const { data: p1Items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'active' },
+          filters: { project: project1.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -326,7 +326,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Verify project 2 has items in correct order
       const { data: p2Items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project2.id, status: 'active' },
+          filters: { project: project2.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -344,7 +344,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Verify it's now in a different filter group
       const { data: p1ActiveItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'active' },
+          filters: { project: project1.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -354,7 +354,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p1ArchivedItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'archived' },
+          filters: { project: project1.id, status: 'archived' },
           sort: ['position']
         }
       });
@@ -379,7 +379,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       await multiApi.use(PositioningPlugin, {
         field: 'position',
-        filters: ['project_id', 'status', 'priority'],
+        filters: ['project', 'status', 'priority'],
         defaultPosition: 'last'
       });
 
@@ -547,7 +547,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Verify distributions
       const { data: p1Active } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'active' },
+          filters: { project: project1.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -555,7 +555,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p1Archived } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project1.id, status: 'archived' },
+          filters: { project: project1.id, status: 'archived' },
           sort: ['position']
         }
       });
@@ -563,7 +563,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p2Active } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project2.id, status: 'active' },
+          filters: { project: project2.id, status: 'active' },
           sort: ['position']
         }
       });
@@ -571,7 +571,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
 
       const { data: p2Archived } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project2.id, status: 'archived' },
+          filters: { project: project2.id, status: 'archived' },
           sort: ['position']
         }
       });
@@ -621,7 +621,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query with empty string filter
       const { data: emptyStatusItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: '' },
+          filters: { project: project.id, status: '' },
           sort: ['position']
         }
       });
@@ -632,7 +632,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query with null filter
       const { data: nullStatusItems } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: null },
+          filters: { project: project.id, status: null },
           sort: ['position']
         }
       });
@@ -673,7 +673,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query with string '1'
       const { data: status1Items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: '1' },
+          filters: { project: project.id, status: '1' },
           sort: ['position']
         }
       });
@@ -686,7 +686,7 @@ describe('Multi-Filter Positioning Tests', { timeout: 30000 }, () => {
       // Query with string '01'
       const { data: status01Items } = await api.resources.items.query({
         queryParams: {
-          filters: { project_id: project.id, status: '01' },
+          filters: { project: project.id, status: '01' },
           sort: ['position']
         }
       });

@@ -471,7 +471,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 1, size: 5 },
           filters: {
-            country_id: parseInt(usCountryId)
+            country: parseInt(usCountryId)
           },
           include: ['country'],
           sort: ['title']
