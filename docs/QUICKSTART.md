@@ -211,25 +211,25 @@ JSON:API response: {
   },
   links: { self: '/api/publishers/3' }
 }
-Created author: { id: '1', name: 'George', surname: 'Orwell', publisher_id: '1' }
+Created author: { id: '1', name: 'George', surname: 'Orwell', publisher: { id: '1' } }
 All publishers: {
   data: [
-    { id: '1', name: 'Penguin Random House', authors_ids: [ '1' ] },
-    { id: '2', name: 'HarperCollins', authors_ids: [] },
-    { id: '3', name: 'Oxford University Press', authors_ids: [] }
+    { id: '1', name: 'Penguin Random House', authors: [ { id: '1' } ] },
+    { id: '2', name: 'HarperCollins', authors: [] },
+    { id: '3', name: 'Oxford University Press', authors: [] }
   ],
   links: { self: '/api/publishers' }
 }
-Publisher with authors: { id: '1', name: 'Penguin Random House', authors_ids: [ '1' ] }
+Publisher with authors: { id: '1', name: 'Penguin Random House', authors: [ { id: '1' } ] }
 Search results: {
-  data: [ { id: '1', name: 'George', surname: 'Orwell', publisher_id: '1' } ],
+  data: [ { id: '1', name: 'George', surname: 'Orwell', publisher: { id: '1' } } ],
   links: { self: '/api/authors' }
 }
 Updated author: {
   id: '1',
   name: 'George',
   surname: 'Orwell (Eric Blair)',
-  publisher_id: '1'
+  publisher: { id: '1' }
 }
 ```
 

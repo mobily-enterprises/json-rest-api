@@ -80,11 +80,11 @@ console.log('French publisher  Authors (author ids only, NOT simplified):', insp
 The output:
 
 ```text
-Added French Publisher: { id: '1', name: 'French Books Inc.', authors_ids: [] }
-Added Victor Hugo: { id: '1', name: 'Victor', surname: 'Hugo', publisher_id: '1' }
-Added Émile Zola: { id: '2', name: 'Émile', surname: 'Zola', publisher_id: '1' }
-Added German Publisher: { id: '2', name: 'German Press GmbH', authors_ids: [] }
-French publisher  Authors (ids only, simplified): { id: '1', name: 'French Books Inc.', authors_ids: [ '1', '2' ] }
+Added French Publisher: { id: '1', name: 'French Books Inc.', authors: [] }
+Added Victor Hugo: { id: '1', name: 'Victor', surname: 'Hugo', publisher: { id: '1' } }
+Added Émile Zola: { id: '2', name: 'Émile', surname: 'Zola', publisher: { id: '1' } }
+Added German Publisher: { id: '2', name: 'German Press GmbH', authors: [] }
+French publisher  Authors (ids only, simplified): { id: '1', name: 'French Books Inc.', authors: [ { id: '1' }, { id: '2' } ] }
 French publisher  Authors (ids only, NOT simplified): {
   data: {
     type: 'publishers',
@@ -184,19 +184,19 @@ const allPublishersWithAuthors = await api.resources.publishers.query({
 });
 // HTTP: GET /api/publishers?include=authors
 // Returns (simplified): [
-//   { id: '1', name: 'French Books Inc.', country_id: '1', 
+//   { id: '1', name: 'French Books Inc.', country: { id: '1' }, 
 //     authors: [
-//       { id: '1', name: 'Victor Hugo', publisher_id: '1' },
-//       { id: '2', name: 'Alexandre Dumas', publisher_id: '1' }
+//       { id: '1', name: 'Victor Hugo', publisher: { id: '1' } },
+//       { id: '2', name: 'Alexandre Dumas', publisher: { id: '1' } }
 //     ]
 //   },
-//   { id: '2', name: 'German Press GmbH', country_id: '2', 
+//   { id: '2', name: 'German Press GmbH', country: { id: '2' }, 
 //     authors: [
-//       { id: '3', name: 'Johann Wolfgang von Goethe', publisher_id: '2' }
+//       { id: '3', name: 'Johann Wolfgang von Goethe', publisher: { id: '2' } }
 //     ]
 //   },
-//   { id: '3', name: 'UK Books Ltd.', country_id: '3', authors: [] },
-//   { id: '4', name: 'Global Publishing', country_id: null, authors: [] }
+//   { id: '3', name: 'UK Books Ltd.', country: { id: '3' }, authors: [] },
+//   { id: '4', name: 'Global Publishing', country: null, authors: [] }
 // ]
 
 console.log('All Publishers with Authors:', inspect(allPublishersWithAuthors));
@@ -368,7 +368,7 @@ const authorsFromGermanPress = await api.resources.authors.query({
 });
 // HTTP: GET /api/authors?filter[publisherName]=German
 // Returns: {
-//   data: [{ id: '3', name: 'Johann Wolfgang von Goethe', publisher_id: '2' }]
+//   data: [{ id: '3', name: 'Johann Wolfgang von Goethe', publisher: { id: '2' } }]
 // }
 
 console.log('Authors from German Press:', inspect(authorsFromGermanPress));
@@ -378,7 +378,7 @@ console.log('Authors from German Press:', inspect(authorsFromGermanPress));
 The output will be:
 
 ```text
-Authors from German Press: [ { id: '3', name: 'Johann', surname: 'Goethe', publisher_id: '2' } ]
+Authors from German Press: [ { id: '3', name: 'Johann', surname: 'Goethe', publisher: { id: '2' } } ]
 ```
 
 Once again, the search logic is always define on the `schema` -- that is, it's handled by the server -- and not by the client.

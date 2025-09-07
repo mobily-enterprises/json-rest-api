@@ -139,7 +139,7 @@ All parameters are passed within a single `params` object:
       id: '1',
       title: 'First Article',
       content: 'Article content...',
-      author_id: '10',
+      author: '10',
       author: {
         id: '10',
         name: 'John Doe'
@@ -181,13 +181,13 @@ const result = await api.resources.articles.query({
   queryParams: {
     filters: {
       status: 'published',
-      author_id: '10'
+      author: '10'
     }
   }
 });
 
 // HTTP equivalent
-// GET /articles?filter[status]=published&filter[author_id]=10
+// GET /articles?filter[status]=published&filter[author]=10
 ```
 
 **Query with Sorting and Pagination:**
@@ -325,7 +325,7 @@ const result = await api.resources.[resourceType].get(params, context)
   id: '1',
   title: 'Article Title',
   content: 'Full article content...',
-  author_id: '10',
+  author: '10',
   author: {
     id: '10',
     name: 'John Doe'
@@ -483,7 +483,7 @@ const result = await api.resources.articles.post({
     title: 'New Article',
     content: 'Article content...',
     status: 'draft',
-    author_id: '10'
+    author: '10'
   }
 });
 
@@ -520,8 +520,8 @@ const result = await api.resources.articles.post({
   inputRecord: {
     title: 'New Article',
     content: 'Article content...',
-    author_id: '10',
-    tag_ids: ['1', '2', '3']
+    author: '10',
+    tags: ['1', '2', '3']
   },
   queryParams: {
     include: ['author', 'tags']
@@ -639,7 +639,7 @@ const result = await api.resources.articles.put({
     title: 'Completely New Title',
     content: 'Entirely new content',
     status: 'published',
-    author_id: '10'
+    author: '10'
     // Note: All attributes must be provided
   }
 });
@@ -681,8 +681,8 @@ const result = await api.resources.articles.put({
     title: 'Article Without Author',
     content: 'Content...',
     status: 'draft',
-    author_id: null,  // Remove author
-    tag_ids: []       // Remove all tags
+    author: null,  // Remove author
+    tags: []       // Remove all tags
   }
 });
 ```
@@ -805,8 +805,8 @@ const result = await api.resources.articles.patch({
 const result = await api.resources.articles.patch({
   inputRecord: {
     id: '1',
-    author_id: '30',
-    tag_ids: ['3', '4', '5']
+    author: '30',
+    tags: ['3', '4', '5']
   }
 });
 ```
@@ -1496,7 +1496,7 @@ api.resource('articles').hook('afterSchemaValidate', async (context) => {
 ```javascript
 api.resource('articles').hook('checkDataPermissionsDelete', async (context) => {
   // Only author or admin can delete
-  if (context.auth.userId !== context.existingRecord.author_id && 
+  if (context.auth.userId !== context.existingRecord.relationships?.author?.data?.id && 
       !context.auth.isAdmin) {
     throw new Error('Unauthorized to delete this article');
   }
@@ -1533,7 +1533,7 @@ api.resource('articles').hook('beforeDataQuery', async (context) => {
   if (context.auth.userId && !context.auth.isAdmin) {
     context.storageParams.filters = {
       ...context.storageParams.filters,
-      author_id: context.auth.userId
+      author: context.auth.userId
     };
   }
 });
@@ -1740,13 +1740,13 @@ const result = await api.resources.articles.query({
   queryParams: {
     filters: {
       status: 'published',
-      author_id: '10'
+      author: '10'
     }
   }
 });
 
 // HTTP equivalent
-// GET /articles?filter[status]=published&filter[author_id]=10
+// GET /articles?filter[status]=published&filter[author]=10
 ```
 
 #### Operator-based Filtering
@@ -2233,7 +2233,7 @@ api.addResource({
         type: 'datetime',
         operators: ['gt', 'gte', 'lt', 'lte']
       },
-      author_id: {
+      author: {
         type: 'number',
         operators: ['eq', 'in']
       },

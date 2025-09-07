@@ -30,6 +30,24 @@ npm run docs:dev
 ### Project Overview
 JSON REST API is a powerful REST API plugin for hooked-api that provides JSON:API-compliant endpoints. It follows a plugin-based architecture where functionality is composed through plugins that extend the core API capabilities.
 
+### Database-First Design Philosophy
+JSON REST API embraces a **database-first** approach that provides different abstraction levels for different audiences:
+
+**For Backend Developers:**
+- Schema definitions directly map to database columns (e.g., `author_id`, `category_id`)
+- Hooks operate at the database level with access to actual field names via `context.belongsToUpdates`
+- Search schemas can reference exact database columns and table joins
+- Full access to write raw Knex queries when needed
+- No abstraction layers hiding database implementation details
+
+**For API Consumers:**
+- Relationship names abstract away foreign key fields (use `author` instead of `author_id`)
+- Simplified API mode returns clean objects without database implementation details
+- Foreign key fields are automatically filtered from API responses
+- Consistent interface regardless of underlying database structure
+
+This separation ensures backend developers have full control and visibility into database operations while API consumers enjoy a clean, intuitive interface.
+
 ### Core Architecture Components
 
 1. **Plugin System (hooked-api based)**

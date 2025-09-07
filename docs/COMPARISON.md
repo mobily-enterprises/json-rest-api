@@ -173,9 +173,9 @@ const response = await fetch('/api/books', {
 // Simplified mode (for internal/programmatic use)
 const book = await api.resources.books.post({
   title: 'My Book',
-  author_id: 1
+  author: 1
 });
-// Returns: { id: '1', title: 'My Book', author_id: 1 }
+// Returns: { id: '1', title: 'My Book', author: { id: 1 } }
 
 // Configure both modes simultaneously
 await api.use(RestApiPlugin, {

@@ -72,13 +72,22 @@ When defining a `belongsTo` relationship with an `as` alias (e.g., `country_id: 
 * Use the **relationship name** (the `as` value) directly with the ID of the related resource (e.g., `country: france.id`). This provides clarity and aligns with the relationship concept.
 * Foreign key field names (e.g., `country_id`) are no longer supported for relationship input to maintain consistency across all relationship types.
 
+**Field Visibility and Database-First Design:**
+
+Note that while the schema defines `country_id` (the actual database column), the API layer abstracts this away:
+- **API Input**: Use `country` (the relationship name)
+- **API Output**: Returns `country: { id: '1' }` (relationship object)
+- **Internal/Hooks**: Work with `country_id` (actual database field via `context.belongsToUpdates`)
+
+This separation ensures API consumers never see database implementation details like foreign key fields, while backend developers retain full control over the database structure.
+
 **Expected Output (Illustrative, IDs may vary):**
 
 ```text
-Added French Publisher: { id: '1', name: 'French Books Inc.', country_id: '1' }
-Added German Publisher: { id: '2', name: 'German Press GmbH', country_id: '2' }
-Added UK Publisher: { id: '3', name: 'UK Books Ltd.', country_id: '3' }
-Added International Publisher: { id: '4', name: 'Global Publishing', country_id: null }
+Added French Publisher: { id: '1', name: 'French Books Inc.', country: { id: '1' } }
+Added German Publisher: { id: '2', name: 'German Press GmbH', country: { id: '2' } }
+Added UK Publisher: { id: '3', name: 'UK Books Ltd.', country: { id: '3' } }
+Added International Publisher: { id: '4', name: 'Global Publishing', country: null }
 ```
 
 ## Including `belongsTo` Records (`include`)
@@ -124,10 +133,10 @@ const allPublishersWithCountries = await api.resources.publishers.query({
 });
 // HTTP: GET /api/publishers?include=country
 // Returns (simplified): [
-//   { id: '1', name: 'French Books Inc.', country_id: '1', country: { id: '1', name: 'France', code: 'FR' } },
-//   { id: '2', name: 'German Press GmbH', country_id: '2', country: { id: '2', name: 'Germany', code: 'DE' } },
-//   { id: '3', name: 'UK Books Ltd.', country_id: '3', country: { id: '3', name: 'United Kingdom', code: 'UK' } },
-//   { id: '4', name: 'Global Publishing', country_id: null, country: null }
+//   { id: '1', name: 'French Books Inc.', country: { id: '1', name: 'France', code: 'FR' } },
+//   { id: '2', name: 'German Press GmbH', country: { id: '2', name: 'Germany', code: 'DE' } },
+//   { id: '3', name: 'UK Books Ltd.', country: { id: '3', name: 'United Kingdom', code: 'UK' } },
+//   { id: '4', name: 'Global Publishing', country: null }
 // ]
 
 console.log('All Publishers with Countries:', inspect(allPublishersWithCountries));
@@ -170,7 +179,6 @@ Here is the expected output. Notice how the last call shows the non-simplified v
 Publisher with Country: {
   id: '1',
   name: 'French Books Inc.',
-  country_id: '1',
   country: { id: '1', name: 'France', code: 'FR' }
 }
 All Publishers with Countries: {
@@ -178,27 +186,23 @@ All Publishers with Countries: {
     {
       id: '1',
       name: 'French Books Inc.',
-      country_id: '1',
       country: { id: '1', name: 'France', code: 'FR' }
     },
     {
       id: '2',
       name: 'Another French Books Inc.',
-      country_id: '1',
       country: { id: '1', name: 'France', code: 'FR' }
     },
     {
       id: '3',
       name: 'UK Books Ltd.',
-    country_id: '3',
-    country: { id: '3', name: 'United Kingdom', code: 'UK' }
-  },
-  {
-    id: '4',
-    name: 'German Press GmbH',
-    country_id: '2',
-    country: { id: '2', name: 'Germany', code: 'DE' }
-  },
+      country: { id: '3', name: 'United Kingdom', code: 'UK' }
+    },
+    {
+      id: '4',
+      name: 'German Press GmbH',
+      country: { id: '2', name: 'Germany', code: 'DE' }
+    },
     { id: '5', name: 'Global Publishing' }
   ],
   meta: {...},
@@ -376,7 +380,6 @@ When you specify `fields: { countries: ['code'] }`, this instruction applies to 
 {
   id: '1',
   name: 'French Books Inc.',
-  country_id: '1',
   country: { id: '1', code: 'FR' }
 }
 Sparse Publishers Query (all results): {
@@ -384,19 +387,16 @@ Sparse Publishers Query (all results): {
     {
       id: '1',
       name: 'French Books Inc.',
-      country_id: '1',
       country: { id: '1', code: 'FR', name: 'France' }
     },
     {
       id: '2',
       name: 'UK Books Ltd.',
-      country_id: '3',
       country: { id: '3', code: 'UK', name: 'United Kingdom' }
     },
     {
       id: '3',
       name: 'German Press GmbH',
-      country_id: '2',
       country: { id: '2', code: 'DE', name: 'Germany' }
     },
     { id: '4', name: 'Global Publishing' }
@@ -481,9 +481,9 @@ console.log('Publishers from UK (by countryCode):', inspect(publishersFromUK));
 **Expected Output**
 
 ```text
-Publishers from France (by country ID): [ { id: '1', name: 'French Books Inc.', country_id: '1' } ]
+Publishers from France (by country ID): [ { id: '1', name: 'French Books Inc.', country: { id: '1' } } ]
 Publishers with No Country (by country ID: null): [ { id: '4', name: 'Global Publishing' } ]
-Publishers from UK (by countryCode): [ { id: '2', name: 'UK Books Ltd.', country_id: '3' } ]
+Publishers from UK (by countryCode): [ { id: '2', name: 'UK Books Ltd.', country: { id: '3' } } ]
 ```
 
 ---

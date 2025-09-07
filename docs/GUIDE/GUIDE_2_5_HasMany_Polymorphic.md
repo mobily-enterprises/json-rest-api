@@ -82,6 +82,22 @@ So when the parent defines the relationship, they just have to mention `reviewab
   },
 ```
 
+## Field Visibility and Polymorphic Relationships
+
+Polymorphic relationships are a prime example of json-rest-api's database-first philosophy and field abstraction:
+
+**Database Reality (What Backend Developers Define):**
+- Schema includes `reviewable_type` and `reviewable_id` fields
+- These are actual database columns that store the polymorphic relationship
+- Hooks receive these field names in `context.belongsToUpdates`
+
+**API Abstraction (What Consumers See):**
+- Input: Use `reviewable` relationship object instead of type/id fields
+- Output: Returns `reviewable: { id: '123', _type: 'authors' }` 
+- The `reviewable_type` and `reviewable_id` fields are hidden from API responses
+
+This ensures API consumers work with clean relationship objects while backend developers maintain full control over the database implementation.
+
 `json-rest-api` provides flexibility in how you provide data for polymorphic relationships when creating new records, depending on whether you're using the simplified API mode (default for programmatic calls) or the strict JSON:API format.
 
 Here is how to add reviews, both in simplified and non-simplified mode:
@@ -96,15 +112,13 @@ const germanAuthor_ns = await api.resources.authors.post({ name: 'Johann (NS)', 
 const review1_simplified = await api.resources.reviews.post({
   rating: 4,
   comment: 'Great German author! (Simplified)',
-  reviewable_type: 'authors',
-  reviewable_id: germanAuthor_ns.id
+  reviewable: { id: germanAuthor_ns.id, _type: 'authors' }
 });
 
 const review2_simplified = await api.resources.reviews.post({
   rating: 1,
   comment: 'I do not enjoy their books',
-  reviewable_type: 'publishers',
-  reviewable_id: frenchPublisher_ns.id 
+  reviewable: { id: frenchPublisher_ns.id, _type: 'publishers' }
 });
 
 
@@ -151,8 +165,8 @@ const frenchAuthor1_with_reviews_non_simplified = await api.resources.authors.ge
 const french_authors_simplified = await api.resources.authors.query({});
 // HTTP: GET /api/authors
 // Returns (simplified): [
-//   { id: '1', name: 'Victor Hugo', publisher_id: '1' },
-//   { id: '2', name: 'Alexandre Dumas', publisher_id: '1' }
+//   { id: '1', name: 'Victor Hugo', surname: 'Hugo', publisher: { id: '1' } },
+//   { id: '2', name: 'Alexandre Dumas', surname: 'Dumas', publisher: { id: '1' } }
 // ]
 
 const french_authors_non_simplified = await api.resources.authors.query({simplified: false });
@@ -217,8 +231,8 @@ French author with the newly added reviews (simplified):
   id: '1',
   name: 'Victor (NS)',
   surname: 'Hugo (NS)',
-  reviews_ids: [ '4' ],
-  publisher_id: '1'
+  reviews: [ { id: '4' } ],
+  publisher: { id: '1' }
 }
 French author with the newly added reviews (non-simplified):
 {
@@ -246,15 +260,15 @@ French authors with the newly added reviews (simplified):
     id: '1',
     name: 'Victor (NS)',
     surname: 'Hugo (NS)',
-    reviews_ids: [ '4' ],
-    publisher_id: '1'
+    reviews: [ { id: '4' } ],
+    publisher: { id: '1' }
   },
   {
     id: '2',
     name: 'Johann (NS)',
     surname: 'Goethe (NS)',
-    reviews_ids: [ '1' ],
-    publisher_id: '2'
+    reviews: [ { id: '1' } ],
+    publisher: { id: '2' }
   }
 ]
 French authors with the newly added reviews (non-simplified):
@@ -314,10 +328,10 @@ const frenchAuthor1_with_reviews_and_includes_non_simplified = await api.resourc
 const french_authors_with_includes_simplified = await api.resources.authors.query({queryParams: { include: ['reviews'] } });
 // HTTP: GET /api/authors?include=reviews
 // Returns (simplified): [
-//   { id: '1', name: 'Victor Hugo', publisher_id: '1', 
-//     reviews: [{ id: '2', comment: 'A master storyteller', rating: 5, reviewable_type: 'authors', reviewable_id: '1' }]
+//   { id: '1', name: 'Victor Hugo', surname: 'Hugo', publisher: { id: '1' }, 
+//     reviews: [{ id: '2', comment: 'A master storyteller', rating: 5, reviewable: { id: '1', _type: 'authors' } }]
 //   },
-//   { id: '2', name: 'Alexandre Dumas', publisher_id: '1', reviews: [] }
+//   { id: '2', name: 'Alexandre Dumas', surname: 'Dumas', publisher: { id: '1' }, reviews: [] }
 // ]
 
 const french_authors_with_includes_non_simplified = await api.resources.authors.query({queryParams: { include: ['reviews'] }, simplified: false });
@@ -363,11 +377,10 @@ French author with the newly added reviews (simplified):
       id: '4',
       rating: 5,
       comment: 'Hugo is a master storyteller! (NS)',
-      reviewable_type: 'authors',
-      reviewable_id: '1'
+      reviewable: { id: '1', _type: 'authors' }
     }
   ],
-  publisher_id: '1'
+  publisher: { id: '1' }
 }
 French author with the newly added reviews (non-simplified):
 {
@@ -416,27 +429,24 @@ French authors with the newly added reviews (simplified):
         id: '4',
         rating: 5,
         comment: 'Hugo is a master storyteller! (NS)',
-        reviewable_type: 'authors',
-        reviewable_id: '1'
+        reviewable: { id: '1', _type: 'authors' }
       }
     ],
-    publisher_id: '1'
+    publisher: { id: '1' }
   },
   {
     id: '2',
     name: 'Johann (NS)',
     surname: 'Goethe (NS)',
-    reviews_ids: [ '1' ],
     reviews: [
       {
         id: '1',
         rating: 4,
         comment: 'Great German author! (Simplified)',
-        reviewable_type: 'authors',
-        reviewable_id: '2'
+        reviewable: { id: '2', _type: 'authors' }
       }
     ],
-    publisher_id: '2'
+    publisher: { id: '2' }
   }
 ]
 French authors with the newly added reviews (non-simplified):
@@ -682,19 +692,26 @@ With the same data, run these queries:
 // This searches across BOTH publishers and authors tables based on reviewable_type
 const reviews_filtered_simplified = await api.resources.reviews.query({ queryParams: { filters: {reviewableName: 'Victor'} }})
 // HTTP: GET /api/reviews?filter[reviewableName]=Victor
-// Returns: [{ id: '2', comment: 'A master storyteller', rating: 5, reviewable_type: 'authors', reviewable_id: '1' }]
+// Returns: [{ id: '2', comment: 'A master storyteller', rating: 5, reviewable: { id: '1', _type: 'authors' } }]
 
 const reviews_filtered_non_simplified = await api.resources.reviews.query({queryParams: { filters: {reviewableName: 'Victor'} }, simplified: false })
 // HTTP: GET /api/reviews?filter[reviewableName]=Victor
 // Returns (JSON:API): {
-//   data: [{ type: 'reviews', id: '2', attributes: { comment: 'A master storyteller', rating: 5, reviewable_type: 'authors', reviewable_id: '1' } }]
+//   data: [{ 
+//     type: 'reviews', 
+//     id: '2', 
+//     attributes: { comment: 'A master storyteller', rating: 5 },
+//     relationships: {
+//       reviewable: { data: { type: 'authors', id: '1' } }
+//     }
+//   }]
 // }
 
 // 2. Reverse polymorphic search: Find parents (authors) by their children's (reviews) fields
 // This uses a polymorphic JOIN: reviews.reviewable_type = 'authors' AND reviews.reviewable_id = authors.id
 const authors_filtered_simplified = await api.resources.authors.query({queryParams: { filters: {reviewComment: 'storyteller'} }})
 // HTTP: GET /api/authors?filter[reviewComment]=storyteller
-// Returns: [{ id: '1', name: 'Victor Hugo', publisher_id: '1' }]
+// Returns: [{ id: '1', name: 'Victor Hugo', surname: 'Hugo', publisher: { id: '1' } }]
 
 const authors_filtered_non_simplified = await api.resources.authors.query({queryParams: { filters: {reviewComment: 'storyteller'} }, simplified: false })
 // HTTP: GET /api/authors?filter[reviewComment]=storyteller
@@ -706,7 +723,7 @@ const authors_filtered_non_simplified = await api.resources.authors.query({query
 // This uses a polymorphic JOIN: reviews.reviewable_type = 'publishers' AND reviews.reviewable_id = publishers.id
 const publishers_filtered_simplified = await api.resources.publishers.query({queryParams: { filters: {reviewComment: 'enjoy'} }})
 // HTTP: GET /api/publishers?filter[reviewComment]=enjoy
-// Returns: [{ id: '1', name: 'French Books Inc.', country_id: '1' }]
+// Returns: [{ id: '1', name: 'French Books Inc.' }]
 
 const publishers_filtered_non_simplified = await api.resources.publishers.query({queryParams: { filters: {reviewComment: 'enjoy'} }, simplified: false })
 // HTTP: GET /api/publishers?filter[reviewComment]=enjoy
@@ -741,8 +758,7 @@ Reviews FILTERED (simplified):
       id: '4',
       rating: 5,
       comment: 'Hugo is a master storyteller! (NS)',
-      reviewable_type: 'authors',
-      reviewable_id: '1'
+      reviewable: { id: '1', _type: 'authors' }
     }
   ],
   meta: {...},
@@ -776,8 +792,8 @@ Authors FILTERED (simplified):
       id: '1',
       name: 'Victor (NS)',
       surname: 'Hugo (NS)',
-      reviews_ids: [ '4' ],
-      publisher_id: '1'
+      reviews: [ { id: '4' } ],
+      publisher: { id: '1' }
     }
   ],
   meta: {...},
