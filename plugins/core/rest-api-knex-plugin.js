@@ -433,7 +433,16 @@ export const RestApiKnexPlugin = {
             return; // Skip non-sortable fields
           }
           
-          query.orderBy(field, desc ? 'desc' : 'asc');
+          // Map relationship names to actual database columns for sorting
+          // Check if this is a relationship field that needs to be mapped
+          let dbField = field;
+          const searchField = schemaInfo.searchSchemaStructure?.[field];
+          if (searchField?.actualField) {
+            // This is a relationship field, use the actual database column
+            dbField = searchField.actualField;
+          }
+          
+          query.orderBy(dbField, desc ? 'desc' : 'asc');
         });
       }
       

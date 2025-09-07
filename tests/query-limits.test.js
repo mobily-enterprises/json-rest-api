@@ -57,7 +57,7 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country: { type: 'number', belongsTo: 'countries', as: 'country' }
+        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
         books: { 
@@ -77,7 +77,7 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         name: { type: 'string', required: true },
-        country: { type: 'number', belongsTo: 'countries', as: 'country' }
+        country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
         books: { 
@@ -100,7 +100,7 @@ describe('Query Limits and Include Limits', () => {
       schema: {
         id: { type: 'id' },
         title: { type: 'string', required: true },
-        publisher: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
+        publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
       },
       relationships: {
         authors: { 
@@ -119,8 +119,8 @@ describe('Query Limits and Include Limits', () => {
     await api.addResource('book_authors', {
       schema: {
         id: { type: 'id' },
-        book: { type: 'number', belongsTo: 'books', as: 'book' },
-        author: { type: 'number', belongsTo: 'authors', as: 'author' }
+        book_id: { type: 'number', belongsTo: 'books', as: 'book' },
+        author_id: { type: 'number', belongsTo: 'authors', as: 'author' }
       }
     });
     await api.resources.book_authors.createKnexTable();
@@ -220,7 +220,7 @@ describe('Query Limits and Include Limits', () => {
             type: 'publishers',
             attributes: {
               name: 'Test Publisher',
-              country: parseInt(country.id)
+              country_id: parseInt(country.id)
             }
           }
         }
@@ -234,7 +234,7 @@ describe('Query Limits and Include Limits', () => {
               type: 'books',
               attributes: {
                 title: `Book ${i}`,
-                publisher: parseInt(publisher.id)
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -266,7 +266,7 @@ describe('Query Limits and Include Limits', () => {
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher',
-          country: 1
+          country_id: 1
         })
       });
 
@@ -277,7 +277,7 @@ describe('Query Limits and Include Limits', () => {
             type: 'authors',
             attributes: {
               name: 'Test Author',
-              country: 1
+              country_id: 1
             }
           }
         }
@@ -291,7 +291,7 @@ describe('Query Limits and Include Limits', () => {
               type: 'books',
               attributes: {
                 title: `Book ${i}`,
-                publisher: parseInt(publisher.id)
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -299,8 +299,8 @@ describe('Query Limits and Include Limits', () => {
 
         await api.resources.book_authors.post({
           inputRecord: createJsonApiDocument('book_authors', {
-            book: parseInt(book.id),
-            author: parseInt(author.id)
+            book_id: parseInt(book.id),
+            author_id: parseInt(author.id)
           })
         });
       }
@@ -332,7 +332,7 @@ describe('Query Limits and Include Limits', () => {
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher',
-          country: parseInt(country.id)
+          country_id: parseInt(country.id)
         })
       });
 
@@ -452,7 +452,7 @@ describe('Query Limits and Include Limits', () => {
               type: 'publishers',
               attributes: {
                 name: `Publisher ${pubNum}`,
-                country: 1
+                country_id: 1
               }
             }
           }
@@ -523,7 +523,7 @@ describe('Query Limits and Include Limits', () => {
             type: 'publishers',
             attributes: {
               name: 'Test Publisher',
-              country: parseInt(country.id)
+              country_id: parseInt(country.id)
             }
           }
         }
@@ -538,7 +538,7 @@ describe('Query Limits and Include Limits', () => {
               type: 'authors',
               attributes: {
                 name: `Author ${i}`,
-                country: parseInt(country.id)
+                country_id: parseInt(country.id)
               }
             }
           }
@@ -554,7 +554,7 @@ describe('Query Limits and Include Limits', () => {
               type: 'books',
               attributes: {
                 title: `Book ${i}`,
-                publisher: parseInt(publisher.id)
+                publisher_id: parseInt(publisher.id)
               }
             }
           }
@@ -564,8 +564,8 @@ describe('Query Limits and Include Limits', () => {
         for (const author of authors) {
           await api.resources.book_authors.post({
             inputRecord: createJsonApiDocument('book_authors', {
-              book: parseInt(book.id),
-              author: parseInt(author.id)
+              book_id: parseInt(book.id),
+              author_id: parseInt(author.id)
             })
           });
         }

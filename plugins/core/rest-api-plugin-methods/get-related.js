@@ -192,9 +192,24 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       return result;
     } else {
       // Regular hasMany with foreignKey
+      // Need to find the relationship name in the target resource that points back to this resource
+      const targetSchema = scopes[targetType].vars.schemaInfo.schemaStructure;
+      let relationshipFilterName = null;
+      
+      // Find the field in target schema that has the foreign key and get its relationship name
+      for (const [fieldName, fieldDef] of Object.entries(targetSchema)) {
+        if (fieldName === relDef.foreignKey && fieldDef.belongsTo === scopeName && fieldDef.as) {
+          relationshipFilterName = fieldDef.as;
+          break;
+        }
+      }
+      
+      // Fall back to foreign key if no relationship name found (shouldn't happen with proper schema)
+      const filterKey = relationshipFilterName || relDef.foreignKey;
+      
       const filters = {
         ...context.queryParams.filters,
-        [relDef.foreignKey]: context.id
+        [filterKey]: context.id
       };
 
       const result = await api.resources[targetType].query({
@@ -262,8 +277,19 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     }
     
     // Build filters for the pivot table
+    // Need to find the relationship name that corresponds to the foreignKey
+    let parentRelationshipName = null;
+    for (const [fieldName, fieldDef] of Object.entries(pivotSchema)) {
+      if (fieldName === foreignKey && fieldDef.belongsTo === scopeName && fieldDef.as) {
+        parentRelationshipName = fieldDef.as;
+        break;
+      }
+    }
+    
+    // Use relationship name if found, otherwise fall back to foreign key
+    const filterKey = parentRelationshipName || foreignKey;
     const pivotFilters = {
-      [foreignKey]: context.id
+      [filterKey]: context.id
     };
     
     // Query the pivot table with the target included

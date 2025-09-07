@@ -501,7 +501,7 @@ describe('Enhanced Pagination Features', () => {
       });
       
       // Check pagination links include all parameters
-      assert(result.links.next.includes(`filters[country_id]=${usCountryId}`));
+      assert(result.links.next.includes(`filters[country]=${usCountryId}`));
       assert(result.links.next.includes('include=country'));
       assert(result.links.next.includes('sort=title'));
     });
