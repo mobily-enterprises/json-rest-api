@@ -8,6 +8,7 @@ import {
   cleanTables,
   countRecords,
   createJsonApiDocument,
+  createRelationship,
   validateJsonApiStructure
 } from './helpers/test-utils.js';
 
@@ -215,29 +216,21 @@ describe('Query Limits and Include Limits', () => {
       });
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: {
-          data: {
-            type: 'publishers',
-            attributes: {
-              name: 'Test Publisher',
-              country_id: parseInt(country.id)
-            }
-          }
-        }
+        inputRecord: createJsonApiDocument('publishers', {
+          name: 'Test Publisher'
+        }, {
+            country: createRelationship({ type: 'countries', id: String(country.id) })
+          })
       });
 
       // Create 25 books for the publisher
       for (let i = 1; i <= 25; i++) {
         await api.resources.books.post({
-          inputRecord: {
-            data: {
-              type: 'books',
-              attributes: {
-                title: `Book ${i}`,
-                publisher_id: parseInt(publisher.id)
-              }
-            }
-          }
+          inputRecord: createJsonApiDocument('books', {
+              title: `Book ${i}`
+            }, {
+                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+              })
         });
       }
     });
@@ -262,46 +255,47 @@ describe('Query Limits and Include Limits', () => {
     });
 
     it('should respect explicit limit in relationship config', async () => {
-      // Create a publisher first
+      // Create a country first
+      const country = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', {
+          name: 'Test Country',
+          code: 'TC'
+        })
+      });
+      
+      // Create a publisher
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
-          name: 'Test Publisher',
-          country_id: 1
+          name: 'Test Publisher'
+        }, {
+          country: createRelationship({ type: 'countries', id: String(country.id) })
         })
       });
 
       // Create authors with many books
       const author = await api.resources.authors.post({
-        inputRecord: {
-          data: {
-            type: 'authors',
-            attributes: {
-              name: 'Test Author',
-              country_id: 1
-            }
-          }
-        }
+        inputRecord: createJsonApiDocument('authors', {
+          name: 'Test Author'
+        }, {
+            country: createRelationship({ type: 'countries', id: String(country.id) })
+          })
       });
 
       // Create 10 books and associate with author
       for (let i = 1; i <= 10; i++) {
         const book = await api.resources.books.post({
-          inputRecord: {
-            data: {
-              type: 'books',
-              attributes: {
-                title: `Book ${i}`,
-                publisher_id: parseInt(publisher.id)
-              }
-            }
-          }
+          inputRecord: createJsonApiDocument('books', {
+              title: `Book ${i}`
+            }, {
+                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+              })
         });
 
         await api.resources.book_authors.post({
-          inputRecord: createJsonApiDocument('book_authors', {
-            book_id: parseInt(book.id),
-            author_id: parseInt(author.id)
-          })
+          inputRecord: createJsonApiDocument('book_authors', {}, {
+              book: createRelationship({ type: 'books', id: String(book.id) }),
+              author: createRelationship({ type: 'authors', id: String(author.id) })
+            })
         });
       }
 
@@ -331,9 +325,10 @@ describe('Query Limits and Include Limits', () => {
       // Create a publisher with country
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
-          name: 'Test Publisher',
-          country_id: parseInt(country.id)
-        })
+          name: 'Test Publisher'
+        }, {
+            country: createRelationship({ type: 'countries', id: String(country.id) })
+          })
       });
 
       // Create books with reviews
@@ -428,7 +423,9 @@ describe('Query Limits and Include Limits', () => {
             }
           });
         },
-        /limit.*exceeds queryMaxLimit/,
+        (err) => {
+          return err.message && err.message.includes('limit') && err.message.includes('exceeds queryMaxLimit');
+        },
         'Should throw error for excessive include limit'
       );
     });
@@ -437,7 +434,7 @@ describe('Query Limits and Include Limits', () => {
   describe('Window Strategy with Defaults', () => {
     beforeEach(async () => {
       // Create a country first
-      await api.resources.countries.post({
+      const country = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', {
           name: 'USA',
           code: 'US'
@@ -448,15 +445,13 @@ describe('Query Limits and Include Limits', () => {
       for (let pubNum = 1; pubNum <= 3; pubNum++) {
         const publisher = await api.resources.publishers.post({
           inputRecord: {
-            data: {
-              type: 'publishers',
-              attributes: {
-                name: `Publisher ${pubNum}`,
-                country_id: 1
-              }
-            }
+            data: createJsonApiDocument('publishers', {
+              name: `Publisher ${pubNum}`
+            }, {
+                country: createRelationship({ type: 'countries', id: String(country.id) })
+              }).data
           }
-        });
+        })
 
         // Create different number of books for each publisher
         const bookCount = pubNum * 8; // 8, 16, 24 books
@@ -518,30 +513,22 @@ describe('Query Limits and Include Limits', () => {
       });
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: {
-          data: {
-            type: 'publishers',
-            attributes: {
-              name: 'Test Publisher',
-              country_id: parseInt(country.id)
-            }
-          }
-        }
+        inputRecord: createJsonApiDocument('publishers', {
+          name: 'Test Publisher'
+        }, {
+            country: createRelationship({ type: 'countries', id: String(country.id) })
+          })
       });
 
       // Create 2 authors
       const authors = [];
       for (let i = 1; i <= 2; i++) {
         const author = await api.resources.authors.post({
-          inputRecord: {
-            data: {
-              type: 'authors',
-              attributes: {
-                name: `Author ${i}`,
-                country_id: parseInt(country.id)
-              }
-            }
-          }
+          inputRecord: createJsonApiDocument('authors', {
+            name: `Author ${i}`
+          }, {
+              country: createRelationship({ type: 'countries', id: String(country.id) })
+            })
         });
         authors.push(author);
       }
@@ -549,23 +536,19 @@ describe('Query Limits and Include Limits', () => {
       // Create 10 books and associate ALL with BOTH authors
       for (let i = 1; i <= 10; i++) {
         const book = await api.resources.books.post({
-          inputRecord: {
-            data: {
-              type: 'books',
-              attributes: {
-                title: `Book ${i}`,
-                publisher_id: parseInt(publisher.id)
-              }
-            }
-          }
+          inputRecord: createJsonApiDocument('books', {
+              title: `Book ${i}`
+            }, {
+                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+              })
         });
 
         // Associate with both authors
         for (const author of authors) {
           await api.resources.book_authors.post({
-            inputRecord: createJsonApiDocument('book_authors', {
-              book_id: parseInt(book.id),
-              author_id: parseInt(author.id)
+            inputRecord: createJsonApiDocument('book_authors', {}, {
+              book: createRelationship({ type: 'books', id: String(book.id) }),
+              author: createRelationship({ type: 'authors', id: String(author.id) })
             })
           });
         }

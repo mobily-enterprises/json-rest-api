@@ -297,14 +297,21 @@ export const validateResourceAttributesBeforeWrite = async ({
       ...belongsToUpdates
   };
   
-  // Extract computed fields before validation (they should be rejected)
+  // Extract computed fields and foreign key fields before validation
   const computedFields = {};
+  const foreignKeyFields = {};
   const schemaStructure = context.schemaInfo.schemaStructure || {};
   Object.entries(attributesToValidate).forEach(([key, value]) => {
     const fieldDef = schemaStructure[key];
     // Computed fields should be stripped from input
     if (fieldDef && fieldDef.computed === true && value !== undefined) {
       computedFields[key] = value;
+    }
+    // Foreign key fields (belongsTo with 'as' property) should NOT be in attributes
+    // They should only come through relationships or belongsToUpdates
+    // Check if key exists in belongsToUpdates (not just truthy value)
+    if (fieldDef && fieldDef.belongsTo && fieldDef.as && value !== undefined && !(key in belongsToUpdates)) {
+      foreignKeyFields[key] = value;
     }
   });
   
@@ -314,12 +321,40 @@ export const validateResourceAttributesBeforeWrite = async ({
     console.warn(`Computed fields [${fieldNames}] were sent in input for resource '${context.scopeName}' but will be ignored as they are output-only`);
   }
   
-  // Filter out ONLY computed fields from validation
+  // Reject if foreign key fields were sent directly in attributes
+  if (Object.keys(foreignKeyFields).length > 0) {
+    const violations = Object.keys(foreignKeyFields).map(field => {
+      const fieldDef = schemaStructure[field];
+      return {
+        field: `data.attributes.${field}`,
+        rule: 'foreign_key_in_attributes',
+        message: `Foreign key field '${field}' should not be in attributes. Use 'data.relationships.${fieldDef.as}' instead.`
+      };
+    });
+    
+    throw new RestApiValidationError(
+      'Foreign key fields cannot be set directly in attributes',
+      { 
+        fields: violations.map(v => v.field),
+        violations
+      }
+    );
+  }
+  
+  // Filter out computed fields and foreign key fields from validation
   // Virtual fields MUST go through validation
   const attributesForValidation = Object.entries(attributesToValidate)
     .filter(([key, _]) => {
       const fieldDef = schemaStructure[key];
-      return !fieldDef || fieldDef.computed !== true;
+      // Exclude computed fields
+      if (fieldDef && fieldDef.computed === true) {
+        return false;
+      }
+      // Exclude foreign key fields that weren't provided via belongsToUpdates
+      if (fieldDef && fieldDef.belongsTo && fieldDef.as && !belongsToUpdates[key]) {
+        return false;
+      }
+      return true;
     })
     .reduce((acc, [key, value]) => {
       acc[key] = value;
