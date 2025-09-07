@@ -1659,9 +1659,9 @@ export const buildIncludedResources = async (scope, deps) => {
  *    without including the full related resources. This provides a consistent API surface where
  *    clients always know what relationships exist and their IDs.
  * 
- * 2. **Simplified Mode Support**: In simplified mode, relationship IDs are transformed into `_ids` 
- *    arrays (e.g., `reviews_ids: ['1', '2', '3']`). Without this function, these arrays only 
- *    appear when using ?include, creating an inconsistent API where fields appear/disappear.
+ * 2. **Simplified Mode Support**: In simplified mode, relationship IDs are transformed into 
+ *    minimal objects (e.g., `reviews: [{id: '1'}, {id: '2'}, {id: '3'}]`). Without this function, 
+ *    these objects only appear when using ?include, creating an inconsistent API where fields appear/disappear.
  * 
  * 3. **Performance Balance**: Loading just IDs is much cheaper than loading full records. This gives
  *    clients the ability to know what relationships exist without the cost of fetching all data.

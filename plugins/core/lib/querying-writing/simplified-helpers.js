@@ -390,7 +390,7 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
  * //     id: '75',
  * //     name: 'Jane Smith'
  * //   },
- * //   chapters_ids: ['1001', '1002'],
+ * //   chapters: [{ id: '1001' }, { id: '1002' }],
  * //   chapters: [                  // Expanded array
  * //     { id: '1001', number: 1, title: 'Introduction' },
  * //     { id: '1002', number: 2, title: 'Basics' }
@@ -526,11 +526,11 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  *   tags: { manyToMany: { via: 'article_tags' } }
  * };
  * 
- * // Output: Array of IDs with _ids suffix
+ * // Output: Minimal relationship objects
  * // {
  * //   id: '300',
  * //   title: 'My Article',
- * //   tags_ids: ['1', '2', '3']   // Relationship name + _ids
+ * //   tags: [{ id: '1' }, { id: '2' }, { id: '3' }]   // Minimal objects
  * // }
  * 
  * @example
@@ -584,7 +584,7 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * //     name: 'Jane Smith',
  * //     company_id: '5'            // Author's relationships processed!
  * //   },
- * //   chapters_ids: ['1001', '1002'],
+ * //   chapters: [{ id: '1001' }, { id: '1002' }],
  * //   chapters: [
  * //     { id: '1001', number: 1, title: 'Introduction' },
  * //     { id: '1002', number: 2, title: 'Basics' }
@@ -599,7 +599,7 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * Purpose:
  * - Core transformation logic for single resources
  * - Restores foreign keys from relationships
- * - Creates _ids arrays for to-many relationships
+ * - Creates minimal relationship objects for to-many relationships
  * - Recursively expands and transforms included data
  * - Handles polymorphic relationships
  * 
@@ -608,7 +608,7 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * 2. Processes each relationship:
  *    - BelongsTo: restores foreign key field
  *    - Polymorphic: restores type and ID fields
- *    - HasMany/ManyToMany: creates _ids array
+ *    - HasMany/ManyToMany: creates minimal relationship objects
  * 3. If included data exists:
  *    - Finds matching included resources
  *    - Recursively transforms them (preserving their relationships!)
@@ -643,23 +643,22 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
       if (schemaEntry) {
         const [fieldName, fieldDef] = schemaEntry;
         if (fieldDef.belongsTo && relData.data) {
-          simplified[fieldName] = relData.data.id;
+          // Create minimal relationship object (no more foreign key field)
+          simplified[relName] = { id: relData.data.id };
         }
       }
 
       // Check if this is a polymorphic relationship from the relationships config
       const rel = relationships?.[relName];
       if (rel?.belongsToPolymorphic && relData.data) {
-        // For polymorphic relationships, restore both the type and id fields
-        const { typeField, idField } = rel.belongsToPolymorphic;
-        simplified[typeField] = relData.data.type;
-        simplified[idField] = relData.data.id;
+        // Create minimal relationship object for polymorphic (no more type/id fields)
+        simplified[relName] = { id: relData.data.id, type: relData.data.type };
       }
 
-      // Handle many-to-many (just IDs, not nested)
+      // Handle to-many relationships (create minimal objects with just IDs)
       if (rel?.hasMany || rel?.manyToMany) {
         if (relData.data && Array.isArray(relData.data)) {
-          simplified[`${relName}_ids`] = relData.data.map(item => item.id);
+          simplified[relName] = relData.data.map(item => ({ id: item.id }));
         }
       }
 

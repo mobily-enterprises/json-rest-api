@@ -288,8 +288,8 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     });
   });
 
-  describe('Relationship _ids Fields', () => {
-    it('should always include _ids fields regardless of sparse fieldsets', async () => {
+  describe('Relationship Fields', () => {
+    it('should always include minimal relationship objects regardless of sparse fieldsets', async () => {
       const product = await api.resources.products.get({
         id: testData.product.id,
         queryParams: {
@@ -297,12 +297,17 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         }
       });
 
-      // Relationship _ids should still be included
-      assert.ok(Array.isArray(product.reviews_ids));
-      assert.equal(product.reviews_ids.length, 2);
+      // Minimal relationship objects should still be included
+      assert.ok(Array.isArray(product.reviews));
+      assert.equal(product.reviews.length, 2);
+      assert.equal(product.reviews[0].id, testData.review1.id);
+      assert.equal(product.reviews[1].id, testData.review2.id);
+      // Should only have id property (minimal object)
+      assert.equal(Object.keys(product.reviews[0]).length, 1);
+      assert.equal(Object.keys(product.reviews[1]).length, 1);
     });
 
-    it('should include _ids for empty relationships', async () => {
+    it('should include empty arrays for empty relationships', async () => {
       const newProduct = await api.resources.products.post({
         name: 'New Product',
         price: 50,
@@ -316,8 +321,8 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         }
       });
 
-      assert.ok(Array.isArray(fetched.reviews_ids));
-      assert.equal(fetched.reviews_ids.length, 0);
+      assert.ok(Array.isArray(fetched.reviews));
+      assert.equal(fetched.reviews.length, 0);
     });
   });
 
