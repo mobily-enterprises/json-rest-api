@@ -143,7 +143,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * Purpose:
  * - Provides developer-friendly plain object API
  * - Automatically detects and converts relationships
- * - Supports both foreign key and alias notation
+ * - Supports relationship alias notation
  * - Maintains JSON:API compliance internally
  * - Allows gradual migration from simple to JSON:API
  * 
@@ -404,7 +404,7 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
  * 
  * Purpose:
  * - Provides cleaner response format for clients
- * - Restores foreign keys from relationships
+ * - Creates minimal relationship objects from relationships
  * - Expands included resources for convenience
  * - Maintains compatibility with collection metadata
  * - Handles both single and array responses
@@ -497,13 +497,13 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  *   { context: { schemaStructure: schema } }
  * );
  * 
- * // Output: Flattened with foreign keys restored
+ * // Output: Minimal relationship objects
  * // {
  * //   id: '100',
  * //   text: 'Great article!',
  * //   created_at: '2024-01-15',
- * //   author_id: '50',          // From relationships.author
- * //   article_id: '200'         // From relationships.article
+ * //   author: { id: '50' },          // Minimal object from relationships.author
+ * //   article: { id: '200' }         // Minimal object from relationships.article
  * // }
  * 
  * @example
@@ -531,6 +531,68 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * //   id: '300',
  * //   title: 'My Article',
  * //   tags: [{ id: '1' }, { id: '2' }, { id: '3' }]   // Minimal objects
+ * // }
+ * 
+ * @example
+ * // Input: Polymorphic relationship
+ * const data = {
+ *   type: 'reviews',
+ *   id: '500',
+ *   attributes: { rating: 5, comment: 'Great!' },
+ *   relationships: {
+ *     reviewable: {
+ *       data: { type: 'authors', id: '75' }
+ *     }
+ *   }
+ * };
+ * const relationships = {
+ *   reviewable: {
+ *     belongsToPolymorphic: {
+ *       types: ['authors', 'publishers'],
+ *       typeField: 'reviewable_type',
+ *       idField: 'reviewable_id'
+ *     }
+ *   }
+ * };
+ * 
+ * // Output: Minimal polymorphic object with type
+ * // {
+ * //   id: '500',
+ * //   rating: 5,
+ * //   comment: 'Great!',
+ * //   reviewable: { id: '75', type: 'authors' }   // Minimal object with type
+ * // }
+ * 
+ * @example
+ * // Input: Polymorphic relationship with included resource
+ * const dataWithInclude = {
+ *   type: 'reviews',
+ *   id: '500',
+ *   attributes: { rating: 5, comment: 'Great!' },
+ *   relationships: {
+ *     reviewable: {
+ *       data: { type: 'authors', id: '75' }
+ *     }
+ *   }
+ * };
+ * const included = [
+ *   {
+ *     type: 'authors',
+ *     id: '75',
+ *     attributes: { name: 'Jane Smith', bio: 'Fantastic author' }
+ *   }
+ * ];
+ * 
+ * // Output: Full polymorphic object (type field removed as redundant)
+ * // {
+ * //   id: '500',
+ * //   rating: 5,
+ * //   comment: 'Great!',
+ * //   reviewable: {                // Full object when included
+ * //     id: '75',
+ * //     name: 'Jane Smith',
+ * //     bio: 'Fantastic author'
+ * //   }
  * // }
  * 
  * @example
@@ -574,17 +636,15 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  *   }
  * ];
  * 
- * // Output: Recursively expanded (note author.company_id)
+ * // Output: Recursively expanded
  * // {
  * //   id: '400',
  * //   title: 'JavaScript Guide',
- * //   author_id: '75',
  * //   author: {                    // Expanded and transformed
  * //     id: '75',
  * //     name: 'Jane Smith',
- * //     company_id: '5'            // Author's relationships processed!
+ * //     company: { id: '5' }       // Author's relationships processed as minimal objects!
  * //   },
- * //   chapters: [{ id: '1001' }, { id: '1002' }],
  * //   chapters: [
  * //     { id: '1001', number: 1, title: 'Introduction' },
  * //     { id: '1002', number: 2, title: 'Basics' }
@@ -598,17 +658,17 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * 
  * Purpose:
  * - Core transformation logic for single resources
- * - Restores foreign keys from relationships
- * - Creates minimal relationship objects for to-many relationships
+ * - Creates minimal relationship objects from relationships
+ * - Creates arrays of minimal relationship objects for to-many relationships
  * - Recursively expands and transforms included data
  * - Handles polymorphic relationships
  * 
  * Data flow:
  * 1. Copies ID and attributes to result
  * 2. Processes each relationship:
- *    - BelongsTo: restores foreign key field
- *    - Polymorphic: restores type and ID fields
- *    - HasMany/ManyToMany: creates minimal relationship objects
+ *    - BelongsTo: creates minimal relationship object
+ *    - Polymorphic: creates minimal relationship object with type
+ *    - HasMany/ManyToMany: creates array of minimal relationship objects
  * 3. If included data exists:
  *    - Finds matching included resources
  *    - Recursively transforms them (preserving their relationships!)
@@ -634,7 +694,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
   // Add attributes
   Object.assign(simplified, data.attributes || {});
 
-  // Extract foreign keys from relationships
+  // Process relationships to create minimal objects
   if (data.relationships) {
     for (const [relName, relData] of Object.entries(data.relationships)) {
       // Find schema field for this belongsTo relationship
@@ -652,7 +712,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
       const rel = relationships?.[relName];
       if (rel?.belongsToPolymorphic && relData.data) {
         // Create minimal relationship object for polymorphic (no more type/id fields)
-        simplified[relName] = { id: relData.data.id, type: relData.data.type };
+        simplified[relName] = { id: relData.data.id, _type: relData.data.type };
       }
 
       // Handle to-many relationships (create minimal objects with just IDs)
@@ -680,6 +740,10 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
                   scopes
                 } }
               );
+              // For polymorphic relationships, add _type field to identify the resource type
+              if (rel?.belongsToPolymorphic) {
+                itemSimplified._type = item.type;
+              }
               return itemSimplified;
             });
           }
@@ -687,7 +751,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
           const nestedData = findIncluded(relData.data);
           if (nestedData) {
             // Transform the single included record to restore its relationship fields
-            simplified[relName] = transformSingleJsonApiToSimplified(
+            const itemSimplified = transformSingleJsonApiToSimplified(
               { data: nestedData, included: null },
               { context: { 
                 schemaStructure: scopes?.[nestedData.type]?.vars?.schemaInfo?.schema || {},
@@ -695,6 +759,11 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
                 scopes
               } }
             );
+            // For polymorphic relationships, add _type field to identify the resource type
+            if (rel?.belongsToPolymorphic) {
+              itemSimplified._type = nestedData.type;
+            }
+            simplified[relName] = itemSimplified;
           }
         }
       }
