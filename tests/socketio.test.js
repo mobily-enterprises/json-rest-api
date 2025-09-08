@@ -2,7 +2,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import knexLib from 'knex';
 import { io as ioClient } from 'socket.io-client';
-import jwt from 'jsonwebtoken';
+import { SignJWT } from 'jose';
 import { 
   validateJsonApiStructure, 
   cleanTables, 
@@ -12,6 +12,25 @@ import {
   resourceIdentifier
 } from './helpers/test-utils.js';
 import { createWebSocketApi } from './fixtures/api-configs.js';
+
+// Create JWT token using jose
+async function createToken(payload = {}, secret = 'test-secret') {
+  const encoder = new TextEncoder();
+  const key = encoder.encode(secret);
+  
+  const jwt = new SignJWT({
+    sub: '123',
+    email: 'test@example.com',
+    roles: ['user'],
+    ...payload,
+    jti: `test-${Date.now()}`
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h');
+  
+  return await jwt.sign(key);
+}
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -106,7 +125,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
   describe('Basic Subscription and Notifications', () => {
     it('should receive minimal notifications for subscribed resources', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -170,7 +189,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
     it('should not receive notifications for non-matching filters', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -234,7 +253,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
   describe('Filter Validation', () => {
     it('should validate filters against searchSchema', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -265,7 +284,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
     it('should reject function filters without filterRecord', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -318,7 +337,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       // This test verifies that broadcasts don't happen when operations fail
       // The library should rollback transactions and not send notifications
       
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -375,7 +394,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       // The library handles transactions internally and uses afterCommit hook
       // to ensure broadcasts happen only after successful commit
       
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -439,7 +458,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
   describe('Multiple Subscriptions', () => {
     it('should handle multiple subscriptions from same client', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -498,7 +517,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
     it('should unsubscribe correctly', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -557,7 +576,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
   describe('Update and Delete Notifications', () => {
     it('should receive notifications for updates', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -627,7 +646,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
     it('should receive notifications for deletes', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',
@@ -687,7 +706,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
   describe('Relationship Filters', () => {
     it('should filter by relationship fields', async () => {
       // Generate a real JWT token for testing
-      const token = jwt.sign({ userId: 'test-user', role: 'user' }, 'test-secret-key', { expiresIn: '1h' });
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key');
       
       const socket = ioClient(`http://localhost:${server.address().port}`, {
         path: '/api/socket.io',

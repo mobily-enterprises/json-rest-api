@@ -1,6 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import jwt from 'jsonwebtoken';
+import { SignJWT, importSPKI } from 'jose';
 import knexLib from 'knex';
 import express from 'express';
 import request from 'supertest';
@@ -23,18 +23,20 @@ const TEST_USER = {
   roles: ['user']
 };
 
-function createToken(payload, options = {}) {
-  return jwt.sign(
-    { 
-      ...TEST_USER, 
-      ...payload,
-      jti: options.jti || `test-${Date.now()}`,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (options.expiresIn || 3600)
-    },
-    TEST_SECRET,
-    { algorithm: 'HS256' }
-  );
+async function createToken(payload, options = {}) {
+  const encoder = new TextEncoder();
+  const secret = encoder.encode(TEST_SECRET);
+  
+  const jwt = new SignJWT({ 
+    ...TEST_USER, 
+    ...payload,
+    jti: options.jti || `test-${Date.now()}`
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(options.expiresIn === -1 ? '0s' : (options.expiresIn || '1h'));
+  
+  return await jwt.sign(secret);
 }
 
 // Create Knex instance for tests
@@ -135,7 +137,7 @@ describe('JWT Auth Plugin', () => {
     });
     
     it('should populate context.auth for valid tokens', async () => {
-      const token = createToken();
+      const token = await createToken();
       
       // First test that the API works without auth
       const testResponse = await request(app)
@@ -172,7 +174,7 @@ describe('JWT Auth Plugin', () => {
     });
     
     it('should not populate context.auth for expired tokens', async () => {
-      const token = createToken({}, { expiresIn: -1 }); // Already expired
+      const token = await createToken({}, { expiresIn: -1 }); // Already expired
       
       // Try to access protected resource with expired token
       const response = await request(app)
@@ -186,7 +188,15 @@ describe('JWT Auth Plugin', () => {
     });
     
     it('should not populate context.auth for invalid signatures', async () => {
-      const token = jwt.sign(TEST_USER, 'wrong-secret');
+      // Create token with wrong secret
+      const encoder = new TextEncoder();
+      const wrongSecret = encoder.encode('wrong-secret');
+      
+      const token = await new SignJWT(TEST_USER)
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('1h')
+        .sign(wrongSecret);
       
       const response = await request(app)
         .get('/api/countries')
@@ -210,7 +220,7 @@ describe('JWT Auth Plugin', () => {
   describe('JWT Helper Functions', () => {
     it('should verify valid tokens', async () => {
       const { verifyToken } = await import('../plugins/core/lib/jwt-auth-helpers.js');
-      const token = createToken();
+      const token = await createToken();
       
       const decoded = await verifyToken(token, {
         secret: TEST_SECRET,
@@ -224,7 +234,7 @@ describe('JWT Auth Plugin', () => {
     
     it('should reject expired tokens', async () => {
       const { verifyToken } = await import('../plugins/core/lib/jwt-auth-helpers.js');
-      const token = createToken({}, { expiresIn: -1 });
+      const token = await createToken({}, { expiresIn: -1 });
       
       await assert.rejects(
         async () => {
@@ -239,7 +249,14 @@ describe('JWT Auth Plugin', () => {
     
     it('should reject tokens with invalid signature', async () => {
       const { verifyToken } = await import('../plugins/core/lib/jwt-auth-helpers.js');
-      const token = jwt.sign(TEST_USER, 'wrong-secret');
+      const encoder = new TextEncoder();
+      const wrongSecret = encoder.encode('wrong-secret');
+      
+      const token = await new SignJWT(TEST_USER)
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('1h')
+        .sign(wrongSecret);
       
       await assert.rejects(
         async () => {
@@ -264,7 +281,7 @@ describe('JWT Auth Plugin', () => {
     
     it('should revoke tokens on logout', async () => {
       const jti = 'test-token-123';
-      const token = createToken({}, { jti });
+      const token = await createToken({}, { jti });
       
       // First, create some data with the token
       await api.resources.countries.post({
@@ -302,7 +319,7 @@ describe('JWT Auth Plugin', () => {
     
     it('should not populate auth for revoked tokens', async () => {
       const jti = 'test-token-456';
-      const token = createToken({}, { jti });
+      const token = await createToken({}, { jti });
       
       // Manually insert into revoked_tokens table
       await knex('revoked_tokens').insert({

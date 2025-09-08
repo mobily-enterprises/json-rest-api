@@ -190,20 +190,21 @@ If you're generating your own JWTs:
 #### Step 1: Generate tokens in your auth server
 ```javascript
 // In your auth server
-import jwt from 'jsonwebtoken'
+import { SignJWT } from 'jose'
 
-const token = jwt.sign(
-  {
-    sub: user.id,           // User ID
-    email: user.email,
-    roles: ['user', 'editor'],
-    jti: generateUniqueId(), // For revocation
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600 // 1 hour
-  },
-  process.env.JWT_SECRET,
-  { algorithm: 'HS256' }
-)
+const encoder = new TextEncoder()
+const secret = encoder.encode(process.env.JWT_SECRET)
+
+const token = await new SignJWT({
+  sub: user.id,           // User ID
+  email: user.email,
+  roles: ['user', 'editor'],
+  jti: generateUniqueId() // For revocation
+})
+  .setProtectedHeader({ alg: 'HS256' })
+  .setIssuedAt()
+  .setExpirationTime('1h')
+  .sign(secret)
 ```
 
 #### Step 2: Configure plugin with secret
@@ -219,6 +220,14 @@ await api.use(JwtAuthPlugin, {
 
 ## Installation and Setup
 
+The JWT Auth Plugin uses the `jose` library for JWT verification and JWKS support.
+
+### Installation
+```bash
+npm install jose
+```
+
+### Basic Setup
 ```javascript
 import { JwtAuthPlugin } from 'json-rest-api/plugins/core/jwt-auth-plugin.js';
 

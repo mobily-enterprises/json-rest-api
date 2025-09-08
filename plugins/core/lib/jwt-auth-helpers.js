@@ -1,50 +1,83 @@
 import { requirePackage } from 'hooked-api';
+import { jwtVerify, decodeProtectedHeader, decodeJwt, createRemoteJWKSet, importSPKI } from 'jose';
 
-let jwt;
-try {
-  jwt = (await import('jsonwebtoken')).default;
-} catch (e) {
-  requirePackage('jsonwebtoken', 'jwt-auth', 
-    'JSON Web Token support is required for JWT authentication. This is a peer dependency.');
+/**
+ * Verify JWT token with multiple strategies using jose
+ */
+export async function verifyToken(token, options) {
+  const { secret, publicKey, algorithms, audience, issuer, jwksUrl } = options;
+  
+  // Decode token header to get kid if needed
+  const header = decodeProtectedHeader(token);
+  
+  // Prepare verification options
+  const verifyOptions = {};
+  if (algorithms) verifyOptions.algorithms = algorithms;
+  if (audience) verifyOptions.audience = audience;
+  if (issuer) verifyOptions.issuer = issuer;
+  
+  try {
+    let result;
+    
+    if (jwksUrl) {
+      // Use JWKS URL with jose's built-in support
+      const JWKS = createRemoteJWKSet(new URL(jwksUrl), {
+        cacheMaxAge: 600000, // 10 minutes cache
+        cooldownDuration: 30000 // 30 seconds cooldown on errors
+      });
+      
+      result = await jwtVerify(token, JWKS, verifyOptions);
+    } else if (publicKey) {
+      // Import public key
+      const key = await importSPKI(publicKey, algorithms?.[0] || 'RS256');
+      result = await jwtVerify(token, key, verifyOptions);
+    } else if (secret) {
+      // Use secret for symmetric algorithms
+      const encoder = new TextEncoder();
+      const key = encoder.encode(secret);
+      result = await jwtVerify(token, key, verifyOptions);
+    } else {
+      throw new Error('No signing key available');
+    }
+    
+    // Return the payload (jose returns {payload, protectedHeader})
+    return result.payload;
+  } catch (error) {
+    // Map jose errors to match existing error handling
+    if (error.code === 'ERR_JWT_EXPIRED') {
+      const expiredError = new Error('jwt expired');
+      expiredError.name = 'TokenExpiredError';
+      throw expiredError;
+    }
+    if (error.code === 'ERR_JWS_INVALID' || error.code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+      const invalidError = new Error('invalid signature');
+      invalidError.name = 'JsonWebTokenError';
+      throw invalidError;
+    }
+    if (error.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+      const validationError = new Error(error.message);
+      validationError.name = 'JsonWebTokenError';
+      throw validationError;
+    }
+    throw error;
+  }
 }
 
 /**
- * Verify JWT token with multiple strategies
+ * Decode JWT without verification (for getting header/payload info)
  */
-export async function verifyToken(token, options) {
-  const { secret, publicKey, algorithms, audience, issuer, jwksClient } = options;
-  
-  // Decode token to get header
-  const decoded = jwt.decode(token, { complete: true });
-  if (!decoded) {
-    throw new Error('Invalid token format');
+export function decodeToken(token, options = {}) {
+  try {
+    if (options.complete) {
+      return {
+        header: decodeProtectedHeader(token),
+        payload: decodeJwt(token)
+      };
+    }
+    return decodeJwt(token);
+  } catch (error) {
+    return null;
   }
-  
-  let verifyOptions = {
-    algorithms,
-    audience,
-    issuer
-  };
-  
-  // Get the signing key
-  let signingKey;
-  
-  if (jwksClient && decoded.header.kid) {
-    // Use JWKS
-    const key = await jwksClient.getSigningKey(decoded.header.kid);
-    signingKey = key.getPublicKey();
-  } else if (publicKey) {
-    // Use public key
-    signingKey = publicKey;
-  } else if (secret) {
-    // Use secret
-    signingKey = secret;
-  } else {
-    throw new Error('No signing key available');
-  }
-  
-  // Verify token
-  return jwt.verify(token, signingKey, verifyOptions);
 }
 
 /**

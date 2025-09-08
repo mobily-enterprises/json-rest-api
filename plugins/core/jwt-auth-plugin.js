@@ -18,6 +18,7 @@
 import { requirePackage } from 'hooked-api';
 import { 
   verifyToken, 
+  decodeToken,
   createRevocationResource, 
   checkRevocation,
   cleanupExpiredTokens 
@@ -138,25 +139,9 @@ export const JwtAuthPlugin = {
      * - Rate limits to prevent abuse
      * ----------------------------------------------------------------------- */
     
-    let jwksClientInstance;
-    if (config.jwksUrl) {
-      // Dynamic import for jwks-rsa
-      let jwksClient;
-      try {
-        jwksClient = (await import('jwks-rsa')).default;
-      } catch (e) {
-        requirePackage('jwks-rsa', 'jwt-auth', 
-          'JWKS RSA support is required for dynamic key rotation with providers like Auth0, Supabase, etc. This is a peer dependency.');
-      }
-      
-      jwksClientInstance = jwksClient({
-        jwksUri: config.jwksUrl,
-        cache: true,                    // Cache keys to reduce network calls
-        cacheMaxAge: 600000,           // Cache for 10 minutes
-        rateLimit: true,               // Prevent abuse
-        jwksRequestsPerMinute: 5       // Max 5 key fetches per minute
-      });
-    }
+    /* -----------------------------------------------------------------------
+     * NO MORE JWKS CLIENT SETUP - jose handles this internally
+     * ----------------------------------------------------------------------- */
     
     /* -----------------------------------------------------------------------
      * TOKEN REVOCATION SETUP
@@ -376,7 +361,7 @@ export const JwtAuthPlugin = {
           algorithms: config.algorithms,
           audience: config.audience,
           issuer: config.issuer,
-          jwksClient: jwksClientInstance
+          jwksUrl: config.jwksUrl
         });
         
         // Step 2: Check if token has been revoked (logout functionality)
