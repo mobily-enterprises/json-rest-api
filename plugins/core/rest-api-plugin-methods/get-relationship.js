@@ -57,7 +57,7 @@ export default async function getRelationshipMethod ({ params, context, vars, he
       self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, true),
       related: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
     },
-    data: relationshipData?.data || (relDef.hasMany || relDef.manyToMany ? [] : null)
+    data: relationshipData?.data || (relDef.type === 'hasMany' || relDef.type === 'manyToMany' ? [] : null)
   };
 };
 

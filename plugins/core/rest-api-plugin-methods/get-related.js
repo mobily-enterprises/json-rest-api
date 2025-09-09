@@ -160,7 +160,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
   }
 
   // Handle simple hasMany (one-to-many, NOT many-to-many)
-  if (relDef.hasMany) {
+  if (relDef.type === 'hasMany') {
     // Check if this is a polymorphic relationship using 'via'
     if (relDef.via) {
       // Polymorphic hasMany relationship
@@ -235,7 +235,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
 
   // Handle many-to-many relationships
   // For example: GET /api/authors/1/books (where authors and books are linked via book_authors)
-  if (relDef.manyToMany) {
+  if (relDef.type === 'manyToMany') {
     // APPROACH: Query the pivot table directly
     //
     // Instead of:
@@ -246,9 +246,9 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     // and include the target resources. This is simpler and uses existing
     // API functionality without needing special array filter support.
     
-    const pivotResource = relDef.manyToMany.through;
-    const foreignKey = relDef.manyToMany.foreignKey;
-    const otherKey = relDef.manyToMany.otherKey;
+    const pivotResource = relDef.through;
+    const foreignKey = relDef.foreignKey;
+    const otherKey = relDef.otherKey;
     
     // These should already be validated by scope-validations.js
     if (!foreignKey || !otherKey) {

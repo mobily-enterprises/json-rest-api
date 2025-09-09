@@ -1,6 +1,6 @@
 
-import { RestApiResourceError } from "../../../lib/rest-api-errors.js";
-import { findRelationshipDefinition } from "./common.js";
+import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from "../../../lib/rest-api-errors.js";
+import { findRelationshipDefinition, handleWriteMethodError } from "./common.js";
 
 /**
  * DELETE RELATIONSHIP
@@ -12,7 +12,7 @@ import { findRelationshipDefinition } from "./common.js";
  * @param {array} relationshipData - Array of resource identifiers to remove
  * @returns {Promise<void>} 204 No Content
  */
-export default async function deleteRelationshipMethod({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api }) {
+export default async function deleteRelationshipMethod({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api, log }) {
   context.method = 'deleteRelationship';
   context.id = params.id;
   context.relationshipName = params.relationshipName;
@@ -34,7 +34,7 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
       );
     }
 
-    if (!relDef.hasMany && !relDef.manyToMany) {
+    if (relDef.type !== 'hasMany' && relDef.type !== 'manyToMany') {
       throw new RestApiValidationError(
         `Cannot DELETE from to-one relationship '${context.relationshipName}'`,
         { fields: ['data'] }
@@ -77,7 +77,7 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
       }
     } else {
       // Null out foreign keys for hasMany
-      const targetType = relDef.hasMany;
+      const targetType = relDef.target;
       for (const identifier of params.relationshipData) {
         await api.resources[targetType].patch({
           id: identifier.id,
@@ -104,6 +104,6 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
     return; // 204 No Content
 
   } catch (error) {
-    await handleWriteMethodError(error, context, 'DELETE_RELATIONSHIP', scopeName, log);
+    await handleWriteMethodError(error, context, 'DELETE_RELATIONSHIP', scopeName, log, runHooks);
   }
 }

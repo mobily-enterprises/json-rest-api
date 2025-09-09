@@ -212,7 +212,7 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
       
       if (currentRelationships) {
         for (const [relName, relDef] of Object.entries(currentRelationships)) {
-          if (relDef.hasMany === targetScope) {
+          if (relDef.type === 'hasMany' && relDef.target === targetScope) {
             if (relDef.via) {
               const targetRelationships = scopes[targetScope].vars.schemaInfo.schemaRelationships;
               const viaRel = targetRelationships?.[relDef.via];

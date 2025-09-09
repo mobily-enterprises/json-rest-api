@@ -1518,7 +1518,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
       scopeName,
       includeName,
       via: relDef?.via,
-      targetScope: relDef?.hasMany,
+      targetScope: relDef?.target,
       recordCount: records?.length || 0,
       error: error.message,
       stack: error.stack
@@ -1529,7 +1529,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
       `Failed to load reverse polymorphic relationship '${includeName}' via '${relDef?.via}' for scope '${scopeName}': ${error.message}`
     );
     enhancedError.originalError = error;
-    enhancedError.context = { scopeName, includeName, via: relDef?.via, targetScope: relDef?.hasMany };
+    enhancedError.context = { scopeName, includeName, via: relDef?.via, targetScope: relDef?.target };
     throw enhancedError;
   }
 };

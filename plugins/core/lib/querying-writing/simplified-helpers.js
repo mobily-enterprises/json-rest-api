@@ -795,7 +795,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
       }
 
       // Handle to-many relationships (create minimal objects with just IDs)
-      if (rel?.hasMany || rel?.manyToMany) {
+      if (rel?.type === 'hasMany' || rel?.type === 'manyToMany') {
         if (relData.data && Array.isArray(relData.data)) {
           simplified[relName] = relData.data.map(item => ({ id: item.id }));
         }
