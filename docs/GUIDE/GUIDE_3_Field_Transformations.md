@@ -624,7 +624,7 @@ await api.addResource('products', {
     }
   },
   relationships: {
-    reviews: { hasMany: 'reviews', foreignKey: 'product_id' }
+    reviews: { type: 'hasMany', target: 'reviews', foreignKey: 'product_id' }
   }
 });
 await api.resources.products.createKnexTable();
@@ -952,7 +952,7 @@ await api.addResource('authors', {
     bio: { type: 'string', nullable: true }
   },
   relationships: {
-    posts: { hasMany: 'posts', foreignKey: 'author_id' }
+    posts: { type: 'hasMany', target: 'posts', foreignKey: 'author_id' }
   },
   tableName: 'authors'
 });
@@ -1032,7 +1032,7 @@ await api.addResource('authors', {
     }
   },
   relationships: {
-    posts: { hasMany: 'posts', foreignKey: 'author_id' }
+    posts: { type: 'hasMany', target: 'posts', foreignKey: 'author_id' }
   },
   tableName: 'authors'
 });
@@ -1134,7 +1134,7 @@ await api.addResource('authors', {
     }
   },
   relationships: {
-    posts: { hasMany: 'posts', foreignKey: 'author_id' }
+    posts: { type: 'hasMany', target: 'posts', foreignKey: 'author_id' }
   },
   tableName: 'authors'
 });

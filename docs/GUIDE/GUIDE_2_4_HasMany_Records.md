@@ -14,7 +14,7 @@ await api.addResource('publishers', {
   },
   relationships: {
     // A publisher has many authors
-    authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
+    authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' },
   },
   searchSchema: { // Adding search schema for publishers
     name: { type: 'string', filterOperator: 'like' }

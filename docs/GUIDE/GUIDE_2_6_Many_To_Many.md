@@ -16,11 +16,10 @@ await api.addResource('books', {
   },
   relationships: {
     authors: { 
-      manyToMany: {
-        through: 'book_authors',  // The pivot table
-        foreignKey: 'book_id',    // Column in pivot table pointing to books
-        otherKey: 'author_id'     // Column in pivot table pointing to authors
-      }
+      type: 'manyToMany',
+      through: 'book_authors',  // The pivot table
+      foreignKey: 'book_id',    // Column in pivot table pointing to books
+      otherKey: 'author_id'     // Column in pivot table pointing to authors
     }
   },
   searchSchema: {
@@ -45,11 +44,10 @@ await api.addResource('authors', {
   },
   relationships: {
     books: { 
-      manyToMany: {
-        through: 'book_authors',  // Same pivot table
-        foreignKey: 'author_id',  // Column in pivot table pointing to authors
-        otherKey: 'book_id'      // Column in pivot table pointing to books
-      }
+      type: 'manyToMany',
+      through: 'book_authors',  // Same pivot table
+      foreignKey: 'author_id',  // Column in pivot table pointing to authors
+      otherKey: 'book_id'      // Column in pivot table pointing to books
     }
   },
   searchSchema: {
@@ -81,7 +79,7 @@ await api.addResource('book_authors', {
 await api.resources.book_authors.createKnexTable();
 ```
 
-The `manyToMany` relationship requires a configuration object with three mandatory properties:
+The `manyToMany` relationship type requires the following properties:
 - `through`: The pivot table name
 - `foreignKey`: The column in the pivot table pointing to the current resource
 - `otherKey`: The column in the pivot table pointing to the related resource

@@ -15,7 +15,8 @@ await api.addResource('posts', {
   },
   relationships: {
     comments: { 
-      hasMany: 'comments', 
+      type: 'hasMany',
+      target: 'comments', 
       foreignKey: 'post_id',
       include: {
         limit: 5,  // Default limit for included comments
@@ -23,7 +24,7 @@ await api.addResource('posts', {
       }
     },
     tags: {
-      hasMany: 'tags',
+      type: 'manyToMany',
       through: 'post_tags',
       foreignKey: 'post_id',
       otherKey: 'tag_id',
@@ -69,7 +70,7 @@ await api.addResource('tags', {
   },
   relationships: {
     posts: {
-      hasMany: 'posts',
+      type: 'manyToMany',
       through: 'post_tags',
       foreignKey: 'tag_id',
       otherKey: 'post_id'
@@ -881,7 +882,9 @@ When you include relationships in your query, they use the default `limit` and `
 // The relationship was defined with default limits:
 // relationships: {
 //   comments: { 
-//     hasMany: 'comments',
+//     type: 'hasMany',
+//     target: 'comments',
+//     foreignKey: 'post_id',
 //     include: {
 //       limit: 5,              // Always return max 5 comments
 //       orderBy: ['-created_at'] // Always order by newest first

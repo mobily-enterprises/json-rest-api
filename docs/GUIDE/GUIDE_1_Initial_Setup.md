@@ -56,8 +56,8 @@ await api.addResource('countries', {
     code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
   },
   relationships: {
-    publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-    books: { hasMany: 'books', foreignKey: 'country_id' }
+    publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+    books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
   },
 });
 await api.resources.countries.createKnexTable()

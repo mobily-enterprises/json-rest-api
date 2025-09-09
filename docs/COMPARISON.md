@@ -264,7 +264,7 @@ await api.addResource('comments', {
 // Parent resources define reverse relationship
 await api.addResource('posts', {
   relationships: {
-    comments: { hasMany: 'comments', via: 'commentable' }
+    comments: { type: 'hasMany', target: 'comments', via: 'commentable' }
   }
 });
 
@@ -290,13 +290,13 @@ Automatic optimization that competitors lack:
 // Define resources with nested relationships
 await api.addResource('countries', {
   relationships: {
-    publishers: { hasMany: 'publishers', foreignKey: 'country_id' }
+    publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' }
   }
 });
 
 await api.addResource('publishers', {
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' },
+    books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' },
     country: { belongsTo: 'countries' }
   }
 });
@@ -304,11 +304,10 @@ await api.addResource('publishers', {
 await api.addResource('books', {
   relationships: {
     authors: { 
-      manyToMany: {
-        through: 'book_authors',
-        foreignKey: 'book_id',
-        otherKey: 'author_id'
-      }
+      type: 'manyToMany',
+      through: 'book_authors',
+      foreignKey: 'book_id',
+      otherKey: 'author_id'
     },
     publisher: { belongsTo: 'publishers' }
   }

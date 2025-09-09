@@ -80,8 +80,8 @@ await api.addResource('countries', {
     code: { type: 'string', max: 2, unique: true }
   },
   relationships: {
-    publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-    books: { hasMany: 'books', foreignKey: 'country_id' }
+    publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+    books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
   }
 });
 
@@ -92,7 +92,7 @@ await api.addResource('publishers', {
     country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
   },
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' }
+    books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
   }
 });
 
@@ -103,11 +103,10 @@ await api.addResource('authors', {
   },
   relationships: {
     books: { 
-      manyToMany: {
-        through: 'book_authors',
-        foreignKey: 'author_id',
-        otherKey: 'book_id'
-      }
+      type: 'manyToMany',
+      through: 'book_authors',
+      foreignKey: 'author_id',
+      otherKey: 'book_id'
     }
   }
 });
@@ -121,11 +120,10 @@ await api.addResource('books', {
   },
   relationships: {
     authors: { 
-      manyToMany: {
-        through: 'book_authors',
-        foreignKey: 'book_id',
-        otherKey: 'author_id'
-      }
+      type: 'manyToMany',
+      through: 'book_authors',
+      foreignKey: 'book_id',
+      otherKey: 'author_id'
     }
   }
 });

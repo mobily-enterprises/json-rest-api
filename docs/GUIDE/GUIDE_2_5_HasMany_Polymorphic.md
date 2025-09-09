@@ -17,8 +17,8 @@ await api.addResource('publishers', {
     name: { type: 'string', required: true, max: 255, search: true, indexed: true},
   },
   relationships: {
-    authors: { hasMany: 'authors', foreignKey: 'publisher_id' },
-    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
+    authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' },
+    reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' } // Polymorphic relationship
   },
 });
 await api.resources.publishers.createKnexTable();
@@ -31,7 +31,7 @@ await api.addResource('authors', {
     publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
   },
   relationships: {
-    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
+    reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' } // Polymorphic relationship
   },
 });
 await api.resources.authors.createKnexTable();
@@ -78,7 +78,7 @@ So when the parent defines the relationship, they just have to mention `reviewab
 
 ```javascript
   relationships: {
-    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic relationship
+    reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' } // Polymorphic relationship
   },
 ```
 
@@ -545,8 +545,8 @@ await api.addResource('publishers', {
     name: { type: 'string', required: true, max: 255, search: true, indexed: true},
   },
   relationships: {
-    authors: { hasMany: 'authors', foreignKey: 'publisher_id' }, // Regular one-to-many
-    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic one-to-many
+    authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' }, // Regular one-to-many
+    reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' } // Polymorphic one-to-many
   },
   searchSchema: {
     // Search publishers by their review fields (reverse polymorphic search)
@@ -573,7 +573,7 @@ await api.addResource('authors', {
     publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
   },
   relationships: {
-    reviews: { hasMany: 'reviews', via: 'reviewable' } // Polymorphic one-to-many
+    reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' } // Polymorphic one-to-many
   },
   searchSchema: {
     // Regular search fields
@@ -676,7 +676,7 @@ reviewComment: {
 }
 
 // In relationships:
-reviews: { hasMany: 'reviews', via: 'reviewable' }  // Polymorphic relationship
+reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' }  // Polymorphic relationship
 ```
 
 This uses the `via` property to indicate a polymorphic hasMany relationship. The system automatically adds the polymorphic constraints:

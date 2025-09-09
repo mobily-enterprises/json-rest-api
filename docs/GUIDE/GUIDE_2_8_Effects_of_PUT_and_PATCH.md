@@ -14,7 +14,7 @@ await api.addResource('publishers', {
     country: { type: 'string', required: true, max: 100 }
   },
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'publisher_id' }
+    books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
   }
 });
 await api.resources.publishers.createKnexTable();
@@ -27,7 +27,7 @@ await api.addResource('authors', {
     birth_year: { type: 'number', required: true }
   },
   relationships: {
-    books: { hasMany: 'books', foreignKey: 'author_id' }
+    books: { type: 'hasMany', target: 'books', foreignKey: 'author_id' }
   }
 });
 await api.resources.authors.createKnexTable();
@@ -53,7 +53,7 @@ await api.addResource('books', {
   relationships: {
     // Many-to-many relationship with genres
     genres: { 
-      hasMany: 'genres',
+      type: 'manyToMany',
       through: 'book_genres',
       foreignKey: 'book_id',
       otherKey: 'genre_id'
