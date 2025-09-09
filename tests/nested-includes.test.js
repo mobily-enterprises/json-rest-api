@@ -58,7 +58,8 @@ describe('Nested Include Operations', () => {
       },
       relationships: {
         books: { 
-          hasMany: 'books', 
+          type: 'hasMany',
+          target: 'books', 
           foreignKey: 'publisher_id'
           // Relationships are always includable via ?include=
         }
@@ -75,11 +76,10 @@ describe('Nested Include Operations', () => {
       },
       relationships: {
         books: { 
-          manyToMany: {
-            through: 'book_authors', 
-            foreignKey: 'author_id', 
-            otherKey: 'book_id'
-          },
+          type: 'manyToMany',
+          through: 'book_authors', 
+          foreignKey: 'author_id', 
+          otherKey: 'book_id',
           // Relationships are always includable via ?include=
           include: {
             limit: 5,
@@ -99,15 +99,15 @@ describe('Nested Include Operations', () => {
       },
       relationships: {
         authors: { 
-          manyToMany: {
-            through: 'book_authors', 
-            foreignKey: 'book_id', 
-            otherKey: 'author_id'
-          }
+          type: 'manyToMany',
+          through: 'book_authors', 
+          foreignKey: 'book_id', 
+          otherKey: 'author_id'
           // Relationships are always includable via ?include=
         },
         reviews: { 
-          hasMany: 'reviews', 
+          type: 'hasMany',
+          target: 'reviews', 
           foreignKey: 'book_id'
           // Relationships are always includable via ?include=
         }

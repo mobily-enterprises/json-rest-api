@@ -62,7 +62,8 @@ describe('Query Limits and Include Limits', () => {
       },
       relationships: {
         books: { 
-          hasMany: 'books', 
+          type: 'hasMany',
+          target: 'books', 
           foreignKey: 'publisher_id',
           // Relationships are always includable via ?include=
           include: {
@@ -82,11 +83,10 @@ describe('Query Limits and Include Limits', () => {
       },
       relationships: {
         books: { 
-          manyToMany: {
-            through: 'book_authors', 
-            foreignKey: 'author_id', 
-            otherKey: 'book_id'
-          },
+          type: 'manyToMany',
+          through: 'book_authors', 
+          foreignKey: 'author_id', 
+          otherKey: 'book_id',
           // Relationships are always includable via ?include=
           include: {
             limit: 3,  // Explicit limit for testing
@@ -106,14 +106,13 @@ describe('Query Limits and Include Limits', () => {
       },
       relationships: {
         authors: { 
-          manyToMany: {
-            through: 'book_authors', 
-            foreignKey: 'book_id', 
-            otherKey: 'author_id'
-          }
+          type: 'manyToMany',
+          through: 'book_authors', 
+          foreignKey: 'book_id', 
+          otherKey: 'author_id'
           // Relationships are always includable via ?include=
         },
-        reviews: { hasMany: 'reviews', via: 'reviewable' }
+        reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' }
       }
     });
     await api.resources.books.createKnexTable();
@@ -416,7 +415,8 @@ describe('Query Limits and Include Limits', () => {
             },
             relationships: {
               subitems: {
-                hasMany: 'subitems',
+                type: 'hasMany',
+                target: 'subitems',
                 foreignKey: 'test_item_id',
                 include: {
                   limit: 25  // Exceeds queryMaxLimit of 20

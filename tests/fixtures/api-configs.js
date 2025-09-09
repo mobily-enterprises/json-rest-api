@@ -52,8 +52,8 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       code: { type: 'string', max: 2, unique: true }
     },
     relationships: {
-      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-      books: { hasMany: 'books', foreignKey: 'country_id' }
+      publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
     },
     tableName: `${tablePrefix}_countries`
   });
@@ -67,7 +67,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' }
+      books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
     },
     tableName: `${tablePrefix}_publishers`
   });
@@ -80,7 +80,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       name: { type: 'string', required: true, max: 200 }
     },
     relationships: {
-      books: { manyToMany: { through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' } }
+      books: { type: 'manyToMany', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
     },
     tableName: `${tablePrefix}_authors`
   });
@@ -95,7 +95,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
     },
     relationships: {
-      authors: { manyToMany: { through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' } }
+      authors: { type: 'manyToMany', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
     },
     tableName: `${tablePrefix}_books`
   });
@@ -174,9 +174,9 @@ export async function createExtendedApi(knex) {
       currency: { type: 'string', max: 3 }
     },
     relationships: {
-      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-      books: { hasMany: 'books', foreignKey: 'country_id' },
-      authors: { hasMany: 'authors', foreignKey: 'nationality_id' }
+      publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' },
+      authors: { type: 'hasMany', target: 'authors', foreignKey: 'nationality_id' }
     },
     tableName: 'ext_countries'
   });
@@ -193,9 +193,10 @@ export async function createExtendedApi(knex) {
       active: { type: 'boolean', default: true }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },
@@ -213,9 +214,10 @@ export async function createExtendedApi(knex) {
       nationality_id: { type: 'number', belongsTo: 'countries', as: 'nationality' }
     },
     relationships: {
-      books: { manyToMany: { through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' } },
+      books: { type: 'manyToMany', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },
@@ -237,9 +239,10 @@ export async function createExtendedApi(knex) {
       publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
     },
     relationships: {
-      authors: { manyToMany: { through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' } },
+      authors: { type: 'manyToMany', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },
@@ -326,8 +329,8 @@ export async function createLimitedDepthApi(knex) {
       code: { type: 'string', max: 2, unique: true }
     },
     relationships: {
-      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-      books: { hasMany: 'books', foreignKey: 'country_id' }
+      publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
     },
     tableName: 'limited_countries',
   });
@@ -340,8 +343,8 @@ export async function createLimitedDepthApi(knex) {
       country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' },
-      authors: { hasMany: 'authors', foreignKey: 'publisher_id' }
+      books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' },
+      authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' }
     },
     tableName: 'limited_publishers'
   });
@@ -354,7 +357,7 @@ export async function createLimitedDepthApi(knex) {
       publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher' }
     },
     relationships: {
-      books: { manyToMany: { through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' } }
+      books: { type: 'manyToMany', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
     },
     tableName: 'limited_authors'
   });
@@ -368,7 +371,7 @@ export async function createLimitedDepthApi(knex) {
       publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher', search: true }
     },
     relationships: {
-      authors: { manyToMany: { through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' } }
+      authors: { type: 'manyToMany', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
     },
     tableName: 'limited_books'
   });
@@ -424,8 +427,8 @@ export async function createPaginationApi(knex, options = {}) {
       code: { type: 'string', max: 2, unique: true }
     },
     relationships: {
-      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-      books: { hasMany: 'books', foreignKey: 'country_id' }
+      publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
     },
     tableName: 'pagination_countries'
   });
@@ -439,7 +442,7 @@ export async function createPaginationApi(knex, options = {}) {
       country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' }
+      books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
     },
     tableName: 'pagination_publishers'
   });
@@ -550,7 +553,7 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
       }
     },
     relationships: {
-      reviews: { hasMany: 'reviews', foreignKey: 'product_id' }
+      reviews: { type: 'hasMany', target: 'reviews', foreignKey: 'product_id' }
     },
     tableName: 'test_products'
   });
@@ -697,7 +700,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
       }
     },
     relationships: {
-      reviews: { hasMany: 'reviews', foreignKey: 'product_id' }
+      reviews: { type: 'hasMany', target: 'reviews', foreignKey: 'product_id' }
     },
     tableName: 'getter_products'
   });
@@ -1041,7 +1044,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
       tenant_id: { type: 'string', required: true }
     },
     relationships: {
-      tasks: { hasMany: 'tasks', foreignKey: 'project_id' }
+      tasks: { type: 'hasMany', target: 'tasks', foreignKey: 'project_id' }
     },
     tableName: 'multihome_projects'
   });
@@ -1215,8 +1218,8 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
       code: { type: 'string', max: 2, unique: true }
     },
     relationships: {
-      publishers: { hasMany: 'publishers', foreignKey: 'country_id' },
-      books: { hasMany: 'books', foreignKey: 'country_id' }
+      publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
     },
     tableName: `${tablePrefix}_countries`,
     idProperty: 'country_id'  // Custom ID property
@@ -1230,9 +1233,10 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
       country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
-      books: { hasMany: 'books', foreignKey: 'publisher_id' },
+      books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },
@@ -1249,9 +1253,10 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
       country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
     },
     relationships: {
-      books: { manyToMany: { through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' } },
+      books: { type: 'manyToMany', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },
@@ -1271,9 +1276,10 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
       publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher', search: true }
     },
     relationships: {
-      authors: { manyToMany: { through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' } },
+      authors: { type: 'manyToMany', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' },
       reviews: { 
-        hasMany: 'reviews', 
+        type: 'hasMany', 
+        target: 'reviews', 
         via: 'reviewable'
       }
     },

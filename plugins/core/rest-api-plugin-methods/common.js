@@ -604,7 +604,7 @@ export async function handleRecordReturnAfterWrite({
             queryParams: context.queryParams,
             transaction: context.transaction,
             simplified: context.simplified
-        }, {...context });
+        });
         
         context.responseRecord = fullRecord || undefined;
         

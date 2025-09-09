@@ -31,10 +31,15 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     );
   }
 
-  // Determine target type - relationships are stored as strings
-  // For manyToMany, the target type is the relationship name itself
-  const targetType = relDef.belongsTo || relDef.hasMany || 
-                    (relDef.manyToMany ? context.relationshipName : null) || relDef.hasOne;
+  // Determine target type based on relationship type
+  let targetType;
+  if (relDef.type === 'hasMany' || relDef.type === 'hasOne') {
+    targetType = relDef.target;
+  } else if (relDef.type === 'manyToMany') {
+    targetType = context.relationshipName; // For manyToMany, use the relationship name
+  } else if (relDef.belongsTo) {
+    targetType = relDef.belongsTo; // belongsTo still in schema
+  }
 
   if (!targetType || !scopes[targetType]) {
     throw new RestApiResourceError(
@@ -59,7 +64,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
 
   // Handle to-one relationships (belongsTo and hasOne)
   // For example: GET /api/books/1/country or GET /api/books/1/publisher
-  if (relDef.belongsTo || relDef.hasOne) {
+  if (relDef.belongsTo || relDef.type === 'hasOne') {
     // OPTIMIZATION: Detect if we actually need to make two API calls
     // 
     // The naive approach always makes 2 calls:

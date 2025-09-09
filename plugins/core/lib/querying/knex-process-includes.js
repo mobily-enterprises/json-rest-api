@@ -131,7 +131,7 @@ export const processIncludes = async (scope, records, deps) => {
         context: {
           scopes,
           log,
-          knex: db,
+          knex: knex,  // Always pass the main knex instance, not the transaction
           capabilities: api?.knex?.capabilities
         }
       }

@@ -114,8 +114,15 @@ export default async function putMethod({
     
     // Collect all defined relationships for this resource
     for (const [relName, relDef] of Object.entries(schemaRelationships || {})) {
-      if (relDef.manyToMany) {
-        allRelationships[relName] = { type: 'manyToMany', relDef: relDef.manyToMany };
+      if (relDef.type === 'manyToMany') {
+        allRelationships[relName] = { 
+          type: 'manyToMany', 
+          relDef: {
+            through: relDef.through,
+            foreignKey: relDef.foreignKey,
+            otherKey: relDef.otherKey
+          }
+        };
       }
     }
     

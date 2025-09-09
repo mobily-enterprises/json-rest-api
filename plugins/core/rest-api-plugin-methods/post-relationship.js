@@ -1,7 +1,6 @@
-import { RestApiResourceError } from "../../../lib/rest-api-errors.js";
+import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from "../../../lib/rest-api-errors.js";
 import { findRelationshipDefinition, handleWriteMethodError } from "./common.js";
 import { createPivotRecords } from "../lib/writing/many-to-many-manipulations.js";
-import { RestApiValidationError } from "../../../lib/rest-api-errors.js";
 
 /**
    * POST RELATIONSHIP
@@ -36,7 +35,7 @@ import { RestApiValidationError } from "../../../lib/rest-api-errors.js";
       );
   }
 
-  if (!relDef.hasMany && !relDef.manyToMany) {
+  if (relDef.type !== 'hasMany' && relDef.type !== 'manyToMany') {
       throw new RestApiValidationError(
       `Cannot POST to to-one relationship '${context.relationshipName}'. Use PATCH instead.`,
       { fields: ['data'] }
@@ -62,13 +61,15 @@ import { RestApiValidationError } from "../../../lib/rest-api-errors.js";
   }
 
   // Add relationships
-  if (relDef.manyToMany) {
-      const manyToManyDef = relDef.manyToMany;
-      
-      await createPivotRecords(api, context.id, manyToManyDef, params.relationshipData, context.transaction);
-  } else {
+  if (relDef.type === 'manyToMany') {
+      await createPivotRecords(api, context.id, {
+          through: relDef.through,
+          foreignKey: relDef.foreignKey,
+          otherKey: relDef.otherKey
+      }, params.relationshipData, context.transaction);
+  } else if (relDef.type === 'hasMany') {
       // Update foreign keys for hasMany
-      const targetType = relDef.hasMany;
+      const targetType = relDef.target;
       for (const identifier of params.relationshipData) {
       await api.resources[targetType].patch({
           id: identifier.id,

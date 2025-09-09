@@ -90,11 +90,10 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * 
  * // Schema relationships has:
  * // tags: {
- * //   manyToMany: {
- * //     through: 'article_tags',
- * //     foreignKey: 'article_id',
- * //     otherKey: 'tag_id'
- * //   }
+ * //   type: 'manyToMany',
+ * //   through: 'article_tags',
+ * //   foreignKey: 'article_id',
+ * //   otherKey: 'tag_id'
  * // }
  * 
  * const result = processRelationships(scope, { context: { inputRecord } });
@@ -227,14 +226,19 @@ export const processRelationships = (scope, deps) => {
       }
     }
     
-    // Check for many-to-many relationships defined in relationships object
-    if (relDef?.manyToMany && relData.data !== undefined) {
+    // Check relationship type and process accordingly
+    if (relDef?.type === 'manyToMany' && relData.data !== undefined) {
       manyToManyRelationships.push({
         relName,
-        relDef: relDef.manyToMany,  // Pass the manyToMany object, not the whole relationship
+        relDef: {
+          through: relDef.through,
+          foreignKey: relDef.foreignKey,
+          otherKey: relDef.otherKey
+        },
         relData: relData.data || []  // null means empty array for many-to-many
       });
     }
+    // Note: hasOne and hasMany don't need processing here as they don't update the current record
   }
   
   return { belongsToUpdates, manyToManyRelationships };

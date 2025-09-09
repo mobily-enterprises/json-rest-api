@@ -74,7 +74,8 @@
  *     scopeOptions: {
  *       relationships: {
  *         posts: {
- *           hasMany: 'posts'
+ *           type: 'hasMany',
+ *           target: 'posts'
  *           // Missing: foreignKey
  *         }
  *       }
@@ -154,8 +155,8 @@ export function validateRelationships({ context, scopes }) {
       }
     }
     
-    // Validate hasMany relationships require foreignKey
-    if (relDef.hasMany) {
+    // Validate based on relationship type
+    if (relDef.type === 'hasMany') {
       const validation = validateHasManyRelationship(relDef, relName, scopeName);
       if (!validation.valid) {
         throw new Error(
@@ -164,8 +165,16 @@ export function validateRelationships({ context, scopes }) {
       }
     }
     
-    // Validate manyToMany relationships require both foreignKey and otherKey
-    if (relDef.manyToMany) {
+    if (relDef.type === 'hasOne') {
+      const validation = validateHasOneRelationship(relDef, relName, scopeName);
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid hasOne relationship '${relName}' in scope '${scopeName}': ${validation.error}`
+        );
+      }
+    }
+    
+    if (relDef.type === 'manyToMany') {
       const validation = validateManyToManyRelationship(relDef, relName, scopeName);
       if (!validation.valid) {
         throw new Error(
@@ -290,7 +299,8 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * @example
  * // Input: Valid hasMany configuration
  * const relDef = {
- *   hasMany: 'posts',
+ *   type: 'hasMany',
+ *   target: 'posts',
  *   foreignKey: 'author_id'              // Required!
  * };
  * validateHasManyRelationship(relDef, 'posts', 'users');
@@ -299,7 +309,8 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * @example
  * // Input: Missing required foreignKey
  * const relDef = {
- *   hasMany: 'posts'
+ *   type: 'hasMany',
+ *   target: 'posts'
  *   // Missing: foreignKey
  * };
  * validateHasManyRelationship(relDef, 'posts', 'users');
@@ -311,7 +322,8 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * @example
  * // Input: Polymorphic hasMany with 'via' (doesn't need foreignKey)
  * const relDef = {
- *   hasMany: 'comments',
+ *   type: 'hasMany',
+ *   target: 'comments',
  *   via: 'commentable'                   // Uses polymorphic relationship
  * };
  * validateHasManyRelationship(relDef, 'comments', 'posts');
@@ -320,18 +332,18 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * @private
  */
 const validateHasManyRelationship = (relDef, relName, scopeName) => {
+  // Validate target is specified
+  if (!relDef.target) {
+    return { 
+      valid: false, 
+      error: `hasMany relationship requires 'target' to be specified.`
+    };
+  }
+  
   // Polymorphic hasMany relationships using 'via' don't need foreignKey
   // They use the polymorphic fields (typeField, idField) from the belongsToPolymorphic relationship
   if (relDef.via) {
     return { valid: true };
-  }
-  
-  // Reject hasMany with through
-  if (relDef.through) {
-    return { 
-      valid: false, 
-      error: `hasMany cannot be used with 'through'. Use 'manyToMany' for many-to-many relationships.`
-    };
   }
   
   if (!relDef.foreignKey) {
@@ -352,6 +364,52 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
 };
 
 /**
+ * Validates a hasOne relationship definition
+ * 
+ * @param {Object} relDef - Relationship definition with hasOne
+ * @param {string} relName - Relationship name
+ * @param {string} scopeName - Scope being registered
+ * @returns {Object} Validation result {valid: boolean, error?: string}
+ * 
+ * @example
+ * // Input: Valid hasOne configuration
+ * const relDef = {
+ *   type: 'hasOne',
+ *   target: 'profile',
+ *   foreignKey: 'user_id'              // Required!
+ * };
+ * validateHasOneRelationship(relDef, 'profile', 'users');
+ * // Output: { valid: true }
+ * 
+ * @private
+ */
+const validateHasOneRelationship = (relDef, relName, scopeName) => {
+  // Validate target is specified
+  if (!relDef.target) {
+    return { 
+      valid: false, 
+      error: `hasOne relationship requires 'target' to be specified.`
+    };
+  }
+  
+  if (!relDef.foreignKey) {
+    return { 
+      valid: false, 
+      error: `hasOne relationship requires foreignKey to be specified. Add foreignKey: '<field_name>' to the relationship definition.`
+    };
+  }
+  
+  if (typeof relDef.foreignKey !== 'string') {
+    return { 
+      valid: false, 
+      error: `hasOne relationship foreignKey must be a string, got ${typeof relDef.foreignKey}`
+    };
+  }
+  
+  return { valid: true };
+};
+
+/**
  * Validates a manyToMany relationship definition
  * 
  * @param {Object} relDef - Relationship definition with manyToMany
@@ -362,11 +420,10 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
  * @example
  * // Input: Valid manyToMany configuration
  * const relDef = {
- *   manyToMany: {
- *     through: 'article_tags',           // Pivot table
- *     foreignKey: 'article_id',          // This scope's FK
- *     otherKey: 'tag_id'                 // Other scope's FK
- *   }
+ *   type: 'manyToMany',
+ *   through: 'article_tags',           // Pivot table
+ *   foreignKey: 'article_id',          // This scope's FK
+ *   otherKey: 'tag_id'                 // Other scope's FK
  * };
  * validateManyToManyRelationship(relDef, 'tags', 'articles');
  * // Output: { valid: true }
@@ -374,11 +431,10 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
  * @example
  * // Input: Missing required fields
  * const relDef = {
- *   manyToMany: {
- *     through: 'article_tags',
- *     foreignKey: 'article_id'
- *     // Missing: otherKey
- *   }
+ *   type: 'manyToMany',
+ *   through: 'article_tags',
+ *   foreignKey: 'article_id'
+ *   // Missing: otherKey
  * };
  * validateManyToManyRelationship(relDef, 'tags', 'articles');
  * // Output: { 
@@ -389,7 +445,7 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
  * @private
  */
 const validateManyToManyRelationship = (relDef, relName, scopeName) => {
-  const { through, foreignKey, otherKey } = relDef.manyToMany;
+  const { through, foreignKey, otherKey } = relDef;
   
   if (!through) {
     return { 

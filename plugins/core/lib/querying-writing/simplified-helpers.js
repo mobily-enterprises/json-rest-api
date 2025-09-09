@@ -92,12 +92,11 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * // Input: Many-to-many relationship
  * const relationships = {
  *   tags: {
- *     manyToMany: {
- *       through: 'article_tags',
- *       foreignKey: 'article_id',
- *       otherKey: 'tag_id',
- *       otherType: 'tags'
- *     }
+ *     type: 'manyToMany',
+ *     through: 'article_tags',
+ *     foreignKey: 'article_id',
+ *     otherKey: 'tag_id',
+ *     target: 'tags'
  *   }
  * };
  * const input = {
@@ -273,13 +272,19 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
       const value = tempInput[relName];
       delete tempInput[relName]; // Remove from tempInput once processed
 
-      if ((relConfig.hasMany || relConfig.manyToMany) && Array.isArray(value)) {
+      if ((relConfig.type === 'hasMany' || relConfig.type === 'manyToMany') && Array.isArray(value)) {
         // Determine the target type based on relationship type:
         // - For manyToMany: the targetType is the relationship name itself
-        // - For hasMany: the targetType is the value specified in hasMany property
-        const targetType = relConfig.manyToMany ? relName : relConfig.hasMany;
+        // - For hasMany/hasOne: the targetType is specified in the target property
+        const targetType = relConfig.type === 'manyToMany' ? relName : relConfig.target;
         relationshipsData[relName] = {
           data: value.map(relId => ({ type: targetType, id: String(relId) }))
+        };
+      }
+      // Handle hasOne relationships
+      else if (relConfig.type === 'hasOne' && value !== undefined) {
+        relationshipsData[relName] = {
+          data: value ? { type: relConfig.target, id: String(value) } : null
         };
       }
       // Handle single belongsTo relationships if they were also defined in 'relationships'

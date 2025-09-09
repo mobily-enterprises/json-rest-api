@@ -287,11 +287,14 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
         }
       }
 
-      // Process hasMany and manyToMany relationships
+      // Process hasMany, hasOne and manyToMany relationships
       for (const [relName, relDef] of Object.entries(relationships)) {
-        if (relDef.hasMany || relDef.manyToMany) {
+        if (relDef.type === 'hasMany' || relDef.type === 'manyToMany') {
           // Add empty relationship data - will be populated if explicitly included
           record[RELATIONSHIP_METADATA_KEY][relName] = { data: [] };
+        } else if (relDef.type === 'hasOne') {
+          // hasOne expects a single object or null
+          record[RELATIONSHIP_METADATA_KEY][relName] = { data: null };
         } else if (relDef.belongsToPolymorphic) {
           // Process polymorphic relationships defined in relationships section
           const { typeField, idField } = relDef.belongsToPolymorphic;
@@ -559,8 +562,8 @@ export const loadHasMany = async (scope, deps) => {
       includeName, 
       recordCount: records.length,
       relDef,
-      isManyToMany: !!relDef.manyToMany,
-      hasMany: relDef.hasMany
+      isManyToMany: relDef.type === 'manyToMany',
+      hasMany: relDef.type === 'hasMany' ? relDef.target : undefined
     });
   
   // Collect all parent IDs
@@ -573,14 +576,12 @@ export const loadHasMany = async (scope, deps) => {
   
   
   // Check if this is a many-to-many relationship
-  if (relDef.manyToMany) {
+  if (relDef.type === 'manyToMany') {
     
     // Handle many-to-many relationship
-    const manyToManyConfig = relDef.manyToMany;
-    
-    const pivotTable = scopes[manyToManyConfig.through].vars.schemaInfo.tableName 
-    const foreignKey = manyToManyConfig.foreignKey;
-    const otherKey = manyToManyConfig.otherKey;
+    const pivotTable = scopes[relDef.through].vars.schemaInfo.tableName;
+    const foreignKey = relDef.foreignKey;
+    const otherKey = relDef.otherKey;
     
     if (!foreignKey || !otherKey) {
       throw new Error(`Missing foreignKey or otherKey in many-to-many relationship '${relName}' for scope '${scopeName}'`);
@@ -813,9 +814,9 @@ export const loadHasMany = async (scope, deps) => {
       }
     }
     
-  } else {
-    // Handle regular one-to-many relationship
-    const targetScope = relDef.hasMany;
+  } else if (relDef.type === 'hasMany') {
+    // Handle one-to-many relationship
+    const targetScope = relDef.target;
     const targetTable = scopes[targetScope].vars.schemaInfo.tableName;
     const foreignKey = relDef.foreignKey;
     
@@ -1004,6 +1005,131 @@ export const loadHasMany = async (scope, deps) => {
     enhancedError.originalError = error;
     enhancedError.context = { scopeName, includeName, hasThrough: !!relDef.through };
     throw enhancedError;
+  }
+};
+
+/**
+ * Loads hasOne relationships (one-to-one)
+ * 
+ * Similar to hasMany but expects a single related record.
+ * For example, a user that has one profile.
+ * 
+ * @param {Object} scope - The hooked-api scope object
+ * @param {Object} deps - Dependencies object
+ */
+export const loadHasOne = async (scope, deps) => {
+  const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope;
+  const { context: { scopes, log, knex, capabilities } } = deps;
+  
+  log = log?.child ? log.child({ method: 'loadHasOne' }) : console;
+  
+  if (!records || records.length === 0) {
+    log.trace('[INCLUDE] No records to load hasOne for');
+    return;
+  }
+  
+  // Get parent IDs
+  const idProperty = scopes[scopeName]?.vars?.schemaInfo?.idProperty || 'id';
+  const mainIds = [...new Set(records.map(r => r[idProperty]).filter(Boolean))];
+  
+  if (mainIds.length === 0) {
+    log.trace('[INCLUDE] No parent IDs found, skipping hasOne load');
+    return;
+  }
+  
+  const targetScope = relDef.target;
+  const targetTable = scopes[targetScope].vars.schemaInfo.tableName;
+  const foreignKey = relDef.foreignKey;
+  
+  if (!foreignKey) {
+    throw new Error(`Missing foreignKey in hasOne relationship '${includeName}' for scope '${scopeName}'`);
+  }
+  
+  log.debug(`[INCLUDE] Loading ${targetScope} records with foreign key ${foreignKey}:`, { 
+    whereIn: mainIds
+  });
+  
+  // Build query for hasOne - expects single result per parent
+  const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
+  const targetScopeObject = scopes[targetScope];
+  const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
+  
+  // Build field selection for sparse fieldsets
+  const fieldSelectionInfo = fields?.[targetScope] ? 
+    await buildFieldSelection(targetScopeObject, {
+      context: {
+        scopeName: targetScope,
+        queryParams: { fields: { [targetScope]: fields[targetScope] } },
+        schemaInfo: targetScopeObject.vars.schemaInfo
+      }
+    }) : 
+    null;
+  
+  // Query related records
+  let query = knex(targetTable).whereIn(foreignKey, mainIds);
+  
+  if (fieldSelectionInfo?.fieldsToSelect) {
+    query = query.select(fieldSelectionInfo.fieldsToSelect);
+  }
+  
+  const relatedRecords = await query;
+  
+  // Create a map of parent ID to related record (should be one-to-one)
+  const relatedByParentId = {};
+  for (const related of relatedRecords) {
+    const parentId = related[foreignKey];
+    if (relatedByParentId[parentId]) {
+      log.warn(`[INCLUDE] Multiple records found for hasOne relationship '${includeName}' with ${foreignKey}=${parentId}`);
+    }
+    relatedByParentId[parentId] = related;
+  }
+  
+  // Process each parent record
+  for (const record of records) {
+    const recordId = record[idProperty];
+    const relatedRecord = relatedByParentId[recordId];
+    
+    if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {};
+    
+    if (relatedRecord) {
+      // Transform to JSON:API format
+      const transformed = await toJsonApiRecord(
+        targetScopeObject,
+        { 
+          context: { 
+            record: relatedRecord,
+            scopeName: targetScope,
+            schemaInfo: targetScopeObject.vars.schemaInfo
+          } 
+        }
+      );
+      
+      // Set single object (not array) for hasOne
+      record[RELATIONSHIPS_KEY][includeName] = {
+        data: { type: targetScope, id: String(relatedRecord[targetIdProperty]) }
+      };
+      
+      // Add to included if not already there
+      const key = `${targetScope}:${relatedRecord[targetIdProperty]}`;
+      if (!included.has(key)) {
+        included.set(key, transformed);
+      }
+      
+      // Process nested includes if any
+      if (subIncludes && Object.keys(subIncludes).length > 0) {
+        const newPath = `${currentPath}.${includeName}`;
+        if (!processedPaths.has(newPath)) {
+          processedPaths.add(newPath);
+          await processIncludes(
+            { records: [relatedRecord], scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: newPath, fields },
+            { context: { scopes, log, knex, capabilities } }
+          );
+        }
+      }
+    } else {
+      // No related record found
+      record[RELATIONSHIPS_KEY][includeName] = { data: null };
+    }
   }
 };
 
@@ -1250,7 +1376,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
       recordCount: records.length 
     });
   
-  const targetScope = relDef.hasMany;
+  const targetScope = relDef.target;
   const viaRelName = relDef.via;
   
   // Get the polymorphic field info from target scope
@@ -1483,7 +1609,19 @@ export const processIncludes = async (scope, deps) => {
           const relDef = schemaRelationships[includeName];
           
           if (relDef) {
-            if (relDef.hasMany || relDef.manyToMany) {
+            if (relDef.type === 'hasOne') {
+              // Handle hasOne relationship
+              log.debug('[INCLUDE] About to call loadHasOne:', {
+                scopeName,
+                includeName,
+                target: relDef.target
+              });
+              await loadHasOne(
+                { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
+                { context: { scopes, log, knex, capabilities } }
+              );
+              handled = true;
+            } else if (relDef.type === 'hasMany' || relDef.type === 'manyToMany') {
               // Check if it's a reverse polymorphic (via)
               if (relDef.via) {
                 await loadReversePolymorphic(
@@ -1495,8 +1633,8 @@ export const processIncludes = async (scope, deps) => {
                   scopeName,
                   includeName,
                   relDefKeys: Object.keys(relDef || {}),
-                  hasManyToMany: !!relDef.manyToMany,
-                  hasMany: relDef.hasMany
+                  hasManyToMany: relDef.type === 'manyToMany',
+                  hasMany: relDef.type === 'hasMany' ? relDef.target : undefined
                 });
                 await loadHasMany(
                   { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
@@ -1709,7 +1847,7 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
   for (const [relName, relDef] of Object.entries(relationships)) {
     let idsMap = {};
     
-    if (relDef.hasMany && !relDef.through && !relDef.via) {
+    if (relDef.type === 'hasMany' && !relDef.via) {
       // Regular one-to-many
       // Example: publisher hasMany authors
       const foreignKey = relDef.foreignKey;
@@ -1717,8 +1855,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
     if (!foreignKey) {
       throw new Error(`Missing foreignKey in hasMany relationship '${relName}' for scope '${scopeName}'`);
     }
-      const targetScope = scopes[relDef.hasMany];
-      const targetTable = targetScope?.vars?.schemaInfo?.tableName || relDef.hasMany;
+      const targetScope = scopes[relDef.target];
+      const targetTable = targetScope?.vars?.schemaInfo?.tableName || relDef.target;
       const targetIdProperty = targetScope?.vars?.schemaInfo?.idProperty || 'id';
       
       const results = await knex(targetTable)
@@ -1731,10 +1869,10 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         idsMap[parentId].push(String(row.id));
       });
       
-    } else if (relDef.manyToMany) {
+    } else if (relDef.type === 'manyToMany') {
       // Many-to-many relationship
-      // Example: { manyToMany: { through: 'article_tags', foreignKey: 'article_id', otherKey: 'tag_id' } }
-      const { through, foreignKey, otherKey } = relDef.manyToMany;
+      // Example: { type: 'manyToMany', through: 'article_tags', foreignKey: 'article_id', otherKey: 'tag_id' }
+      const { through, foreignKey, otherKey } = relDef;
       const fk = foreignKey;
       const ok = otherKey;
       
@@ -1757,10 +1895,10 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         idsMap[parentId].push(childId);
       });
       
-    } else if (relDef.hasMany && relDef.via) {
+    } else if (relDef.type === 'hasMany' && relDef.via) {
       // Polymorphic reverse (via)
       // Example: publishers hasMany reviews via reviewable (where reviews.reviewable_type = 'publishers')
-      const targetScope = relDef.hasMany;
+      const targetScope = relDef.target;
       const targetRelationships = scopes[targetScope]?.vars?.schemaInfo?.schemaRelationships;
       const viaRel = targetRelationships?.[relDef.via];
       
@@ -1785,7 +1923,7 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
     }
     
     // Apply the collected IDs to all records
-    if (Object.keys(idsMap).length > 0 || relDef.hasMany || relDef.manyToMany) {
+    if (Object.keys(idsMap).length > 0 || relDef.type === 'hasMany' || relDef.type === 'manyToMany') {
       records.forEach(record => {
         if (!record[RELATIONSHIPS_KEY]) {
           record[RELATIONSHIPS_KEY] = {};
@@ -1793,8 +1931,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         
         const ids = idsMap[String(record.id)] || [];
         // For manyToMany, the target type is the relationship name itself
-        // For hasMany (without through), the target type is specified in the hasMany property
-        const targetType = relDef.hasMany || (relDef.manyToMany ? relName : null);
+        // For hasMany/hasOne, the target type is specified in the target property
+        const targetType = (relDef.type === 'manyToMany') ? relName : relDef.target;
         
         record[RELATIONSHIPS_KEY][relName] = {
           data: ids.map(id => ({ 
