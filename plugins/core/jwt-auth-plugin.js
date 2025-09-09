@@ -2,17 +2,21 @@
  * JWT Authentication Plugin for REST API
  * 
  * This plugin provides:
- * 1. JWT token validation and authentication
- * 2. Declarative authorization rules on resources
- * 3. Token revocation support
- * 4. Built-in and custom auth checkers
+ * 1. JWT token validation (authentication only)
+ * 2. Minimal built-in checkers: 'public', 'authenticated', 'owns'
+ * 3. Framework for custom authorization checkers
+ * 4. Token revocation support
  * 5. Helper methods for auth operations
  * 
+ * The plugin makes minimal assumptions:
+ * - Tokens contain 'sub' (userId) and 'email' fields
+ * - No built-in concepts of roles, permissions, or teams
+ * - Users register domain-specific checkers for their needs
+ * 
  * The plugin works by:
- * - Intercepting requests in the transport:request hook
- * - Validating JWT tokens and populating context.auth
- * - Checking permissions in the checkPermissions hook
- * - Providing helpers for programmatic auth checks
+ * - Validating JWT tokens and extracting userId and email
+ * - Providing a generic checker:parameter pattern
+ * - Enforcing declarative auth rules on resources
  */
 
 import { requirePackage } from 'hooked-api';
@@ -79,22 +83,30 @@ export const JwtAuthPlugin = {
       issuer: jwtOptions.issuer,
       
       // Token claim mapping
-      // These configure which JWT claims map to auth context properties
+      // Minimal assumptions - only userId and email are extracted
       // Example JWT payload:
       // {
       //   "sub": "user123",
-      //   "email": "user@example.com",
-      //   "roles": ["user", "editor"],
-      //   "permissions": ["posts:write", "comments:*"]
+      //   "email": "user@example.com"
+      //   // Any other fields are available in context.auth.token
       // }
       userIdField: jwtOptions.userIdField || 'sub',         // Standard JWT subject claim
       emailField: jwtOptions.emailField || 'email',
-      rolesField: jwtOptions.rolesField || 'roles',
-      permissionsField: jwtOptions.permissionsField || 'permissions',
       
       // Resource ownership
       // Configures which field in resources indicates the owner
       ownershipField: jwtOptions.ownershipField || 'user_id',
+      
+      // Auto-ownership configuration
+      // Automatically adds user_id field and manages ownership
+      autoOwnership: {
+        enabled: jwtOptions.autoOwnership?.enabled !== false, // Default true
+        field: jwtOptions.autoOwnership?.field || 'user_id',
+        userResource: jwtOptions.autoOwnership?.userResource || 'users',
+        excludeResources: jwtOptions.autoOwnership?.excludeResources || [],
+        filterByOwner: jwtOptions.autoOwnership?.filterByOwner !== false, // Default true
+        requireOwnership: jwtOptions.autoOwnership?.requireOwnership || false
+      },
       
       // Token revocation configuration
       // Supports both database and in-memory storage
@@ -182,29 +194,31 @@ export const JwtAuthPlugin = {
     /* -----------------------------------------------------------------------
      * BUILT-IN AUTH CHECKERS
      * 
-     * These are the authorization rules that can be used in resource definitions.
-     * Each checker is a function that returns true/false for permission.
+     * Minimal set of generic authorization checkers.
+     * The plugin makes no assumptions about roles, permissions, or other domain-specific concepts.
      * 
      * Usage in resource definition:
      *   auth: {
      *     query: ['public'],
      *     post: ['authenticated'],
-     *     patch: ['is_owner', 'admin'],
-     *     delete: ['admin']
+     *     patch: ['owns'],
+     *     delete: ['owns']
      *   }
+     * 
+     * Users should register their own domain-specific checkers for roles, permissions, etc.
      * ----------------------------------------------------------------------- */
     
     // 'public' - Anyone can access, no authentication required
-    state.authCheckers.set('public', (context) => true);
+    state.authCheckers.set('public', () => true);
     
     // 'authenticated' - User must be logged in (have a valid token)
     state.authCheckers.set('authenticated', (context) => {
       return !!context.auth?.userId;
     });
     
-    // 'is_owner' - User must own the resource
-    // This is the most complex checker as it handles multiple data formats
-    state.authCheckers.set('is_owner', (context, { existingRecord, scopeVars }) => {
+    // 'owns' - User must own the resource
+    // Checks the ownership field (default: user_id) against the authenticated user
+    state.authCheckers.set('owns', (context, { existingRecord, scopeVars }) => {
       if (!context.auth?.userId) return false;
       
       // For new records being created, ownership check passes
@@ -239,38 +253,14 @@ export const JwtAuthPlugin = {
       return record[ownerField] === context.auth.userId;
     });
     
-    // 'admin' - User must have the 'admin' role
-    state.authCheckers.set('admin', (context) => {
-      return context.auth?.roles?.includes('admin');
-    });
-    
-    // 'has_role:X' - User must have a specific role
-    // Usage: 'has_role:editor', 'has_role:moderator'
-    state.authCheckers.set('has_role', (context, { param }) => {
-      if (!param) throw new Error('has_role requires a role parameter');
-      return context.auth?.roles?.includes(param);
-    });
-    
-    // 'has_permission:X' - User must have a specific permission
-    // Usage: 'has_permission:posts:write', 'has_permission:users:delete'
-    state.authCheckers.set('has_permission', (context, { param }) => {
-      if (!param) throw new Error('has_permission requires a permission parameter');
-      const permissions = context.auth?.permissions || [];
-      
-      // Check for exact permission match
-      if (permissions.includes(param)) return true;
-      
-      // Check for wildcard permissions (e.g., 'posts:*' or '*')
-      const [resource] = param.split(':');
-      return permissions.includes(`${resource}:*`) || permissions.includes('*');
-    });
-    
     /*
-     * Summary: All built-in auth checkers are now registered in state.
-     * Resources can use these in their auth definitions:
-     * - 'public', 'authenticated', 'is_owner', 'admin'
-     * - 'has_role:X', 'has_permission:X'
-     * Custom checkers can be added via helpers.auth.registerChecker()
+     * Summary: Only 3 minimal built-in checkers:
+     * - 'public': Anyone can access
+     * - 'authenticated': Must have valid token
+     * - 'owns': Must own the resource
+     * 
+     * For domain-specific authorization (roles, permissions, teams, etc.),
+     * register custom checkers using helpers.auth.registerChecker()
      */
     
     /* -----------------------------------------------------------------------
@@ -285,7 +275,7 @@ export const JwtAuthPlugin = {
      * 
      * Example request flow:
      * - Client: POST /api/posts with Bearer token
-     * - Hook 2: Validates token, sets context.auth = {userId: '123', roles: ['user']}
+     * - Hook 2: Validates token, sets context.auth = {userId: '123', email: 'user@example.com'}
      * - REST API: Routes to posts resource, method = 'post'
      * - Hook 3: Checks posts.auth.post rules against context.auth
      * - If authorized: Operation proceeds
@@ -317,6 +307,141 @@ export const JwtAuthPlugin = {
       scope.vars.authRules = auth;
       
       log.debug(`Auth rules registered for ${scopeName}:`, scope.vars.authRules);
+    });
+    
+    // HOOK: Automatically add user_id field to schemas with ownership
+    addHook('schema:enrich', 'jwt-auto-add-ownership-field', {}, async ({ fields, scopeName, scopes }) => {
+      // Skip if auto-ownership is disabled
+      if (!config.autoOwnership.enabled) return;
+      
+      // Skip excluded resources
+      if (config.autoOwnership.excludeResources.includes(scopeName)) return;
+      
+      // Check if resource has ownership enabled via resource options
+      const scope = scopes[scopeName];
+      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      
+      if (!hasOwnership) return;
+      
+      const ownershipField = config.autoOwnership.field;
+      
+      // Check if field already exists
+      if (fields[ownershipField]) {
+        // Enhance existing field if it doesn't have belongsTo
+        if (!fields[ownershipField].belongsTo) {
+          log.warn(`Resource '${scopeName}' has '${ownershipField}' field but missing belongsTo relationship. Adding it.`);
+          fields[ownershipField].belongsTo = config.autoOwnership.userResource;
+          fields[ownershipField].as = 'owner';
+        }
+        return;
+      }
+      
+      // Add the user_id field with proper configuration
+      fields[ownershipField] = {
+        type: 'string', // UUID for Supabase/Auth0, string for others
+        required: false, // Will be set automatically
+        belongsTo: config.autoOwnership.userResource,
+        as: 'owner',
+        nullable: true,
+        indexed: true, // Important for query performance
+        description: 'Automatically managed ownership field'
+      };
+      
+      log.debug(`Added ${ownershipField} field to resource '${scopeName}' for ownership tracking`);
+    });
+    
+    // HOOK: Automatically set user_id on record creation
+    addHook('beforeSchemaValidate', 'jwt-auto-set-ownership', { sequence: -50 }, async ({ context, scopeName, scopes }) => {
+      // Skip if auto-ownership is disabled
+      if (!config.autoOwnership.enabled) return;
+      
+      // Skip excluded resources
+      if (config.autoOwnership.excludeResources.includes(scopeName)) return;
+      
+      // Skip if no auth context
+      if (!context.auth?.userId) {
+        if (config.autoOwnership.requireOwnership) {
+          throw new Error(`Cannot create ${scopeName} without authentication`);
+        }
+        return;
+      }
+      
+      // Check if resource has ownership enabled
+      const scope = scopes[scopeName];
+      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      
+      if (!hasOwnership) return;
+      
+      // Only set on POST (create)
+      if (context.method !== 'post') return;
+      
+      const ownershipField = config.autoOwnership.field;
+      
+      // Check if schema has the ownership field
+      const schemaInfo = scope?.vars?.schemaInfo;
+      if (!schemaInfo?.schemaStructure?.[ownershipField]) {
+        log.warn(`Resource '${scopeName}' has ownership enabled but no ${ownershipField} field in schema`);
+        return;
+      }
+      
+      // Set the ownership field in the input record
+      // Handle both JSON:API and simplified formats
+      if (context.inputRecord?.data?.attributes) {
+        // JSON:API format
+        context.inputRecord.data.attributes[ownershipField] = context.auth.userId;
+      } else if (context.inputRecord) {
+        // Simplified format
+        context.inputRecord[ownershipField] = context.auth.userId;
+      }
+      
+      log.trace(`Set ${ownershipField} to ${context.auth.userId} for new ${scopeName} record`);
+    });
+    
+    // HOOK: Automatically filter queries by owner (unless admin)
+    addHook('knexQueryFiltering', 'jwt-filter-by-owner', { sequence: -40 }, async ({ context, scopes }) => {
+      // Skip if auto-ownership is disabled
+      if (!config.autoOwnership.enabled || !config.autoOwnership.filterByOwner) return;
+      
+      const { query, tableName, scopeName } = context.knexQuery;
+      
+      // Skip excluded resources
+      if (config.autoOwnership.excludeResources.includes(scopeName)) return;
+      
+      // Skip if no auth context
+      if (!context.auth?.userId) {
+        if (config.autoOwnership.requireOwnership) {
+          throw new Error(`Cannot query ${scopeName} without authentication`);
+        }
+        return;
+      }
+      
+      // Skip filtering for admins
+      if (context.auth.roles?.includes('admin')) {
+        log.trace(`Admin user - skipping ownership filter for ${scopeName}`);
+        return;
+      }
+      
+      // Check if resource has ownership enabled
+      const scope = scopes[scopeName];
+      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      
+      if (!hasOwnership) return;
+      
+      const ownershipField = config.autoOwnership.field;
+      
+      // Check if schema has the ownership field
+      const schemaInfo = scope?.vars?.schemaInfo;
+      if (!schemaInfo?.schemaStructure?.[ownershipField]) {
+        log.trace(`Resource '${scopeName}' has no ${ownershipField} field - skipping ownership filter`);
+        return;
+      }
+      
+      // Add WHERE clause for ownership
+      query.where(function() {
+        this.where(`${tableName}.${ownershipField}`, context.auth.userId);
+      });
+      
+      log.trace(`Added ownership filter for ${scopeName}: ${ownershipField} = ${context.auth.userId}`);
     });
     
     // HOOK 2: Authenticate incoming requests
@@ -380,42 +505,13 @@ export const JwtAuthPlugin = {
           }
         }
         
-        // Step 3: Extract user information from token claims
-        
-        /**
-         * Helper to extract potentially nested values from JWT payload
-         * Some providers (like Supabase) nest roles/permissions under app_metadata
-         * 
-         * Examples:
-         * - 'roles' → payload.roles
-         * - 'app_metadata.roles' → payload.app_metadata.roles
-         * - 'user.permissions' → payload.user.permissions
-         * 
-         * @param {object} payload - JWT payload object
-         * @param {string} field - Dot-notation path to the field
-         * @returns {array} - Array of values, or empty array if not found
-         */
-        const getRoleValue = (payload, field) => {
-          const keys = field.split('.');
-          let value = payload;
-          
-          for (const key of keys) {
-            value = value?.[key];
-            if (value === undefined) break;
-          }
-          
-          return Array.isArray(value) ? value : [];
-        };
-        
-        // Step 4: Populate context.auth with user information
-        // This object will be available throughout the request lifecycle
+        // Step 3: Populate context.auth with minimal user information
+        // Only userId and email are extracted - no assumptions about roles or permissions
         context.auth = {
-          userId: payload[config.userIdField],
-          email: payload[config.emailField],
-          roles: getRoleValue(payload, config.rolesField),
-          permissions: getRoleValue(payload, config.permissionsField),
-          token: payload,        // Full token payload for advanced use cases
-          tokenId: payload.jti   // JWT ID for revocation
+          userId: payload[config.userIdField],   // User identifier (default: 'sub')
+          email: payload[config.emailField],     // User email (default: 'email')
+          token: payload,                        // Full token payload for custom use
+          tokenId: payload.jti                   // JWT ID for revocation
         };
         
         // Step 5: Allow other plugins to react to successful authentication
@@ -583,32 +679,8 @@ export const JwtAuthPlugin = {
       },
       
       /**
-       * HELPER: requireRoles
-       * Require user to have one of the specified roles
-       * Automatically calls requireAuth first
-       * 
-       * @example
-       * // Require admin OR moderator role
-       * helpers.auth.requireRoles(context, ['admin', 'moderator']);
-       */
-      requireRoles(context, requiredRoles) {
-        this.requireAuth(context);
-        
-        const userRoles = context.auth.roles || [];
-        const hasRole = requiredRoles.some(role => userRoles.includes(role));
-        
-        if (!hasRole) {
-          const error = new Error(`Required role(s): ${requiredRoles.join(', ')}`);
-          error.statusCode = 403;
-          throw error;
-        }
-        
-        return context.auth;
-      },
-      
-      /**
        * HELPER: requireOwnership
-       * Require user to own the resource (or be admin)
+       * Require user to own the resource
        * Supports multiple formats: direct user ID, resource object, or uses context
        * 
        * @example
@@ -646,7 +718,7 @@ export const JwtAuthPlugin = {
         }
         
         // Check ownership
-        if (context.auth.userId !== resourceUserId && !context.auth.roles?.includes('admin')) {
+        if (context.auth.userId !== resourceUserId) {
           const error = new Error('Access denied: you do not own this resource');
           error.statusCode = 403;
           throw error;
@@ -682,7 +754,7 @@ export const JwtAuthPlugin = {
        * // Check multiple rules programmatically
        * const canEdit = await helpers.auth.checkPermission(
        *   context, 
-       *   ['is_owner', 'admin', 'has_role:editor']
+       *   ['owns', 'role:admin']
        * );
        */
       async checkPermission(context, rules, options = {}) {

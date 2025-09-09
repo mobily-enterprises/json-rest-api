@@ -19,8 +19,7 @@ import { ExpressPlugin } from '../plugins/core/connectors/express-plugin.js';
 const TEST_SECRET = 'test-secret-key';
 const TEST_USER = {
   sub: '123',
-  email: 'test@example.com',
-  roles: ['user']
+  email: 'test@example.com'
 };
 
 async function createToken(payload, options = {}) {
@@ -76,6 +75,20 @@ describe('JWT Auth Plugin', () => {
     // Mount the routes on the Express app
     api.http.express.mount(app);
     
+    // Register custom checkers for testing domain-specific authorization
+    api.helpers.auth.registerChecker('role', async (context, { param }) => {
+      // In a real app, this would query a database
+      // For tests, we'll check a field we add to the token
+      const testRoles = context.auth?.token?.test_roles || [];
+      return testRoles.includes(param);
+    });
+    
+    api.helpers.auth.registerChecker('is_moderator', (context) => {
+      // Custom moderator check for tests
+      const testRoles = context.auth?.token?.test_roles || [];
+      return testRoles.includes('moderator');
+    });
+    
     // Add posts resource for declarative auth tests
     await api.addResource('posts', {
       schema: {
@@ -89,8 +102,8 @@ describe('JWT Auth Plugin', () => {
         query: ['public'],
         get: ['public'],
         post: ['authenticated'],
-        patch: ['is_owner', 'has_role:editor', 'admin'],
-        delete: ['is_owner', 'admin']
+        patch: ['owns', 'role:editor', 'role:admin'],
+        delete: ['owns', 'role:admin']
       }
     });
     await api.resources.posts.createKnexTable();
@@ -110,11 +123,6 @@ describe('JWT Auth Plugin', () => {
       }
     });
     await api.resources.moderated_posts.createKnexTable();
-    
-    // Register the custom moderator checker
-    api.helpers.auth.registerChecker('is_moderator', (context) => {
-      return context.auth?.roles?.includes('moderator');
-    });
   });
 
   after(async () => {
@@ -229,7 +237,6 @@ describe('JWT Auth Plugin', () => {
       
       assert.equal(decoded.sub, '123');
       assert.equal(decoded.email, 'test@example.com');
-      assert.deepEqual(decoded.roles, ['user']);
     });
     
     it('should reject expired tokens', async () => {
@@ -467,7 +474,8 @@ describe('JWT Auth Plugin', () => {
       const editorContext = {
         auth: {
           userId: 'editor-789',
-          roles: ['editor']
+          email: 'editor@example.com',
+          token: { test_roles: ['editor'] } // For our custom role checker
         }
       };
       
@@ -504,7 +512,8 @@ describe('JWT Auth Plugin', () => {
       const adminContext = {
         auth: {
           userId: adminId,
-          roles: ['admin']
+          email: 'admin@example.com',
+          token: { test_roles: ['admin'] } // For our custom role checker
         }
       };
       
@@ -549,7 +558,8 @@ describe('JWT Auth Plugin', () => {
       const otherUserContext = {
         auth: {
           userId: 'other-999',
-          roles: ['user']
+          email: 'other@example.com',
+          token: { test_roles: ['user'] } // Regular user, not editor or admin
         }
       };
       
@@ -561,7 +571,7 @@ describe('JWT Auth Plugin', () => {
             simplified: false
           }, otherUserContext);
         },
-        /Access denied.*Required one of: is_owner, has_role:editor, admin/
+        /Access denied.*Required one of: owns, role:editor, role:admin/
       );
     });
   });
@@ -586,29 +596,27 @@ describe('JWT Auth Plugin', () => {
       assert.equal(auth.userId, '123');
     });
     
-    it('should check roles with requireRoles', () => {
-      const helpers = api.helpers;
+    it('should work with custom role checkers', async () => {
+      // Test that custom checkers work as expected
       const context = {
         auth: {
           userId: '123',
-          roles: ['user', 'editor']
+          email: 'test@example.com',
+          token: { test_roles: ['editor'] }
         }
       };
       
-      // Has required role
-      assert.doesNotThrow(() => {
-        helpers.auth.requireRoles(context, ['editor']);
-      });
+      // Should pass role:editor check
+      const hasEditor = await api.helpers.auth.checkPermission(context, ['role:editor']);
+      assert.strictEqual(hasEditor, true);
       
-      // Missing required role
-      assert.throws(() => {
-        helpers.auth.requireRoles(context, ['admin']);
-      }, /Required role/);
+      // Should fail role:admin check
+      const hasAdmin = await api.helpers.auth.checkPermission(context, ['role:admin']);
+      assert.strictEqual(hasAdmin, false);
       
-      // At least one role matches
-      assert.doesNotThrow(() => {
-        helpers.auth.requireRoles(context, ['admin', 'editor']);
-      });
+      // Should pass with OR logic
+      const hasEither = await api.helpers.auth.checkPermission(context, ['role:admin', 'role:editor']);
+      assert.strictEqual(hasEither, true);
     });
     
     it('should check ownership with various inputs', () => {
@@ -616,7 +624,7 @@ describe('JWT Auth Plugin', () => {
       const context = {
         auth: {
           userId: '123',
-          roles: ['user']
+          email: 'test@example.com'
         }
       };
       
@@ -640,16 +648,16 @@ describe('JWT Auth Plugin', () => {
         helpers.auth.requireOwnership(context, otherRecord);
       }, /Access denied/);
       
-      // Admin can access any resource
-      const adminContext = {
+      // Different user cannot access
+      const otherContext = {
         auth: {
           userId: '999',
-          roles: ['admin']
+          email: 'other@example.com'
         }
       };
-      assert.doesNotThrow(() => {
-        helpers.auth.requireOwnership(adminContext, otherRecord);
-      });
+      assert.throws(() => {
+        helpers.auth.requireOwnership(otherContext, otherRecord);
+      }, /Access denied/);
     });
   });
   
@@ -685,24 +693,40 @@ describe('JWT Auth Plugin', () => {
       });
       updateDoc.data.id = postId;
       
+      const nonModContext = {
+        auth: {
+          userId: '456',
+          email: 'user@example.com',
+          token: { test_roles: ['user'] }
+        }
+      };
+      
       await assert.rejects(
         async () => {
           await api.resources.moderated_posts.patch({
             id: postId,
             inputRecord: updateDoc,
             simplified: false
-          }, { auth: { userId: '123', roles: ['user'] } });
+          }, nonModContext);
         },
         /Access denied.*Required one of: is_moderator/
       );
       
       // Update with moderator role should work
+      const modContext = {
+        auth: {
+          userId: '456',
+          email: 'mod@example.com',
+          token: { test_roles: ['moderator'] }
+        }
+      };
+      
       await assert.doesNotReject(async () => {
         await api.resources.moderated_posts.patch({
           id: postId,
           inputRecord: updateDoc,
           simplified: false
-        }, { auth: { userId: '456', roles: ['moderator'] } });
+        }, modContext);
       });
     });
   });
