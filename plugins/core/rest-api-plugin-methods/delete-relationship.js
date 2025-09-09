@@ -60,12 +60,8 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
     }
 
     // Remove relationships
-    if (relDef.manyToMany || (relDef.hasMany && relDef.through)) {
-      const manyToManyDef = relDef.manyToMany || {
-        through: relDef.through,
-        foreignKey: relDef.foreignKey,
-        otherKey: relDef.otherKey
-      };
+    if (relDef.manyToMany) {
+      const manyToManyDef = relDef.manyToMany;
 
       const knex = api.knex?.instance || helpers.db;
       const pivotResource = manyToManyDef.through;

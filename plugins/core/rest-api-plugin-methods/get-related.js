@@ -32,8 +32,9 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
   }
 
   // Determine target type - relationships are stored as strings
+  // For manyToMany, the target type is the relationship name itself
   const targetType = relDef.belongsTo || relDef.hasMany || 
-                    relDef.manyToMany || relDef.hasOne;
+                    (relDef.manyToMany ? context.relationshipName : null) || relDef.hasOne;
 
   if (!targetType || !scopes[targetType]) {
     throw new RestApiResourceError(
@@ -153,8 +154,8 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     }
   }
 
-  // Handle simple hasMany (one-to-many)
-  if (relDef.hasMany && !relDef.through) {
+  // Handle simple hasMany (one-to-many, NOT many-to-many)
+  if (relDef.hasMany) {
     // Check if this is a polymorphic relationship using 'via'
     if (relDef.via) {
       // Polymorphic hasMany relationship
@@ -227,9 +228,9 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     }
   }
 
-  // Handle many-to-many relationships (hasMany with through)
+  // Handle many-to-many relationships
   // For example: GET /api/authors/1/books (where authors and books are linked via book_authors)
-  if (relDef.manyToMany || (relDef.hasMany && relDef.through)) {
+  if (relDef.manyToMany) {
     // APPROACH: Query the pivot table directly
     //
     // Instead of:
@@ -240,9 +241,9 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     // and include the target resources. This is simpler and uses existing
     // API functionality without needing special array filter support.
     
-    const pivotResource = relDef.through;
-    const foreignKey = relDef.foreignKey;
-    const otherKey = relDef.otherKey;
+    const pivotResource = relDef.manyToMany.through;
+    const foreignKey = relDef.manyToMany.foreignKey;
+    const otherKey = relDef.manyToMany.otherKey;
     
     // These should already be validated by scope-validations.js
     if (!foreignKey || !otherKey) {

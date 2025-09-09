@@ -62,12 +62,8 @@ import { RestApiValidationError } from "../../../lib/rest-api-errors.js";
   }
 
   // Add relationships
-  if (relDef.manyToMany || (relDef.hasMany && relDef.through)) {
-      const manyToManyDef = relDef.manyToMany || {
-      through: relDef.through,
-      foreignKey: relDef.foreignKey,
-      otherKey: relDef.otherKey
-      };
+  if (relDef.manyToMany) {
+      const manyToManyDef = relDef.manyToMany;
       
       await createPivotRecords(api, context.id, manyToManyDef, params.relationshipData, context.transaction);
   } else {

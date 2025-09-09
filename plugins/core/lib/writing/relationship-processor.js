@@ -90,10 +90,11 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * 
  * // Schema relationships has:
  * // tags: {
- * //   hasMany: 'tags',
- * //   through: 'article_tags',
- * //   foreignKey: 'article_id',
- * //   otherKey: 'tag_id'
+ * //   manyToMany: {
+ * //     through: 'article_tags',
+ * //     foreignKey: 'article_id',
+ * //     otherKey: 'tag_id'
+ * //   }
  * // }
  * 
  * const result = processRelationships(scope, { context: { inputRecord } });
@@ -231,18 +232,6 @@ export const processRelationships = (scope, deps) => {
       manyToManyRelationships.push({
         relName,
         relDef: relDef.manyToMany,  // Pass the manyToMany object, not the whole relationship
-        relData: relData.data || []  // null means empty array for many-to-many
-      });
-    }
-    // Also check for hasMany with through (alternative many-to-many syntax)
-    else if (relDef?.hasMany && relDef?.through && relData.data !== undefined) {
-      manyToManyRelationships.push({
-        relName,
-        relDef: {
-          through: relDef.through,
-          foreignKey: relDef.foreignKey,
-          otherKey: relDef.otherKey
-        },
         relData: relData.data || []  // null means empty array for many-to-many
       });
     }
