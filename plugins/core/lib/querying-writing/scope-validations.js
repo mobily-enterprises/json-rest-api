@@ -326,6 +326,14 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
     return { valid: true };
   }
   
+  // Reject hasMany with through
+  if (relDef.through) {
+    return { 
+      valid: false, 
+      error: `hasMany cannot be used with 'through'. Use 'manyToMany' for many-to-many relationships.`
+    };
+  }
+  
   if (!relDef.foreignKey) {
     return { 
       valid: false, 
@@ -337,14 +345,6 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
     return { 
       valid: false, 
       error: `hasMany relationship foreignKey must be a string, got ${typeof relDef.foreignKey}`
-    };
-  }
-  
-  // If through is specified, also require otherKey for many-to-many
-  if (relDef.through && !relDef.otherKey) {
-    return { 
-      valid: false, 
-      error: `hasMany relationship with 'through' requires both foreignKey and otherKey to be specified`
     };
   }
   

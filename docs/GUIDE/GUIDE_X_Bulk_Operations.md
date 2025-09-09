@@ -102,7 +102,13 @@ await api.addResource('authors', {
     name: { type: 'string', required: true, max: 200 }
   },
   relationships: {
-    books: { hasMany: 'books', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }
+    books: { 
+      manyToMany: {
+        through: 'book_authors',
+        foreignKey: 'author_id',
+        otherKey: 'book_id'
+      }
+    }
   }
 });
 
@@ -114,7 +120,13 @@ await api.addResource('books', {
     publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher' }
   },
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors', foreignKey: 'book_id', otherKey: 'author_id' }
+    authors: { 
+      manyToMany: {
+        through: 'book_authors',
+        foreignKey: 'book_id',
+        otherKey: 'author_id'
+      }
+    }
   }
 });
 

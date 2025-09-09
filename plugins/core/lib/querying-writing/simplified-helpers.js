@@ -274,9 +274,10 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
       delete tempInput[relName]; // Remove from tempInput once processed
 
       if ((relConfig.hasMany || relConfig.manyToMany) && Array.isArray(value)) {
-        // For manyToMany, the targetType is the relationship name
-        // For hasMany (without through), the targetType is specified in the hasMany property
-        const targetType = relConfig.hasMany || relName;
+        // Determine the target type based on relationship type:
+        // - For manyToMany: the targetType is the relationship name itself
+        // - For hasMany: the targetType is the value specified in hasMany property
+        const targetType = relConfig.manyToMany ? relName : relConfig.hasMany;
         relationshipsData[relName] = {
           data: value.map(relId => ({ type: targetType, id: String(relId) }))
         };

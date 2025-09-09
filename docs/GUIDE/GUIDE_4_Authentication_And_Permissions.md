@@ -826,7 +826,13 @@ await api.addResource('books', {
   },
   
   relationships: {
-    authors: { hasMany: 'authors', through: 'book_authors' }
+    authors: { 
+      manyToMany: {
+        through: 'book_authors',
+        foreignKey: 'book_id',
+        otherKey: 'author_id'
+      }
+    }
   },
   
   auth: {

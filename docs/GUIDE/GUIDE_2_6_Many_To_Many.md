@@ -1,4 +1,4 @@
-# 2.6 Many to many (hasMany with through records)
+# 2.6 Many to Many Relationships
 
 Many-to-many relationships connect two resources through a pivot/junction table. For example, books can have multiple authors, and authors can write multiple books. This relationship is managed through a `book_authors` table that stores the connections.
 
@@ -16,10 +16,11 @@ await api.addResource('books', {
   },
   relationships: {
     authors: { 
-      hasMany: 'authors',
-      through: 'book_authors',  // The pivot table
-      foreignKey: 'book_id',    // Column in pivot table pointing to books
-      otherKey: 'author_id'     // Column in pivot table pointing to authors
+      manyToMany: {
+        through: 'book_authors',  // The pivot table
+        foreignKey: 'book_id',    // Column in pivot table pointing to books
+        otherKey: 'author_id'     // Column in pivot table pointing to authors
+      }
     }
   },
   searchSchema: {
@@ -44,10 +45,11 @@ await api.addResource('authors', {
   },
   relationships: {
     books: { 
-      hasMany: 'books',
-      through: 'book_authors',  // Same pivot table
-      foreignKey: 'author_id',  // Column in pivot table pointing to authors
-      otherKey: 'book_id'      // Column in pivot table pointing to books
+      manyToMany: {
+        through: 'book_authors',  // Same pivot table
+        foreignKey: 'author_id',  // Column in pivot table pointing to authors
+        otherKey: 'book_id'      // Column in pivot table pointing to books
+      }
     }
   },
   searchSchema: {
@@ -79,7 +81,10 @@ await api.addResource('book_authors', {
 await api.resources.book_authors.createKnexTable();
 ```
 
-The key difference from regular hasMany relationships is the `through` property, which specifies the pivot table. Both `foreignKey` and `otherKey` are mandatory for many-to-many relationships.
+The `manyToMany` relationship requires a configuration object with three mandatory properties:
+- `through`: The pivot table name
+- `foreignKey`: The column in the pivot table pointing to the current resource
+- `otherKey`: The column in the pivot table pointing to the related resource
 
 Now let's create some data and explore how to work with many-to-many relationships:
 

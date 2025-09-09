@@ -117,17 +117,6 @@ export default async function putMethod({
       if (relDef.manyToMany) {
         allRelationships[relName] = { type: 'manyToMany', relDef: relDef.manyToMany };
       }
-      // Also recognize hasMany with through as many-to-many
-      else if (relDef.hasMany && relDef.through) {
-        allRelationships[relName] = { 
-          type: 'manyToMany', 
-          relDef: {
-            through: relDef.through,
-            foreignKey: relDef.foreignKey,
-            otherKey: relDef.otherKey
-          }
-        };
-      }
     }
     
     // Also check schema fields for belongsTo relationships

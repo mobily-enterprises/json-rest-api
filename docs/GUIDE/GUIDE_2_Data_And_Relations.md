@@ -35,7 +35,7 @@ This guide has been split into the following sections for easier navigation:
 - Forward and reverse polymorphic search
 - Complex polymorphic filtering
 
-## [2.6 Many to many (hasMany with through records)](./GUIDE_2_6_Many_To_Many.md)
+## [2.6 Many to Many Relationships](./GUIDE_2_6_Many_To_Many.md)
 - Understanding many-to-many relationships
 - Working with pivot tables directly
 - Including many-to-many records

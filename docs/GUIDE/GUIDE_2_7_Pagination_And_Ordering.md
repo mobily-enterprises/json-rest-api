@@ -1230,4 +1230,4 @@ The pagination and ordering system is designed to be efficient and predictable:
 
 ---
 
-[Previous: 2.6 Many to many (hasMany with through records)](./GUIDE_2_6_Many_To_Many.md) | [Back to Guide](./README.md)
+[Previous: 2.6 Many to Many Relationships](./GUIDE_2_6_Many_To_Many.md) | [Back to Guide](./README.md)

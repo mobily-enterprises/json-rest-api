@@ -895,4 +895,4 @@ The polymorphic search seamlessly handles the fact that reviews can belong to di
 
 ---
 
-[Previous: 2.4 hasMany records](./GUIDE_2_4_HasMany_Records.md) | [Back to Guide](./README.md) | [Next: 2.6 Many to many (hasMany with through records)](./GUIDE_2_6_Many_To_Many.md)
+[Previous: 2.4 hasMany records](./GUIDE_2_4_HasMany_Records.md) | [Back to Guide](./README.md) | [Next: 2.6 Many to Many Relationships](./GUIDE_2_6_Many_To_Many.md)

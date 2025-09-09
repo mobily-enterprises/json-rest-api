@@ -573,15 +573,7 @@ export const loadHasMany = async (scope, deps) => {
   
   
   // Check if this is a many-to-many relationship
-  log.debug('[INCLUDE] Checking for manyToMany:', { 
-    hasManyToMany: !!relDef.manyToMany,
-    hasMany: relDef.hasMany,
-    relDefKeys: Object.keys(relDef || {}),
-    relDef: JSON.stringify(relDef)
-  });
-  
   if (relDef.manyToMany) {
-    log.debug('[INCLUDE] Processing as manyToMany relationship');
     
     // Handle many-to-many relationship
     const manyToManyConfig = relDef.manyToMany;
@@ -823,11 +815,6 @@ export const loadHasMany = async (scope, deps) => {
     
   } else {
     // Handle regular one-to-many relationship
-    log.debug('[INCLUDE] Processing as regular hasMany (NOT manyToMany):', {
-      hasMany: relDef.hasMany,
-      manyToMany: relDef.manyToMany,
-      relDefKeys: Object.keys(relDef || {})
-    });
     const targetScope = relDef.hasMany;
     const targetTable = scopes[targetScope].vars.schemaInfo.tableName;
     const foreignKey = relDef.foreignKey;
