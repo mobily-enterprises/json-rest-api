@@ -97,6 +97,9 @@ export const JwtAuthPlugin = {
       // Configures which field in resources indicates the owner
       ownershipField: jwtOptions.ownershipField || 'user_id',
       
+      // Users resource configuration
+      usersResource: jwtOptions.usersResource || 'users',
+      
       // Auto-ownership configuration
       // Automatically adds user_id field and manages ownership
       autoOwnership: {
@@ -310,10 +313,13 @@ export const JwtAuthPlugin = {
     });
     
     // HOOK: Automatically add user_id field to schemas with ownership
-    addHook('schema:enrich', 'jwt-auto-add-ownership-field', {}, async ({ fields, scopeName, scopes }) => {
+    addHook('schema:enrich', 'jwt-auto-add-ownership-field', {}, async ({ context, scopes }) => {
+      //
+      const { fields, scopeName } = context
       // Skip if auto-ownership is disabled
       if (!config.autoOwnership.enabled) return;
       
+
       // Skip excluded resources
       if (config.autoOwnership.excludeResources.includes(scopeName)) return;
       
@@ -878,6 +884,92 @@ export const JwtAuthPlugin = {
      * ----------------------------------------------------------------------- */
     
     /* -----------------------------------------------------------------------
+     * JWT AUTH HELPER METHODS FOR USER MANAGEMENT
+     * 
+     * These helpers provide user management functionality for auth providers.
+     * They work with an existing users resource that must be defined separately.
+     * ----------------------------------------------------------------------- */
+    
+    helpers.jwtAuth = {
+      /**
+       * HELPER: upsertUser
+       * Create or update a user record in the users resource
+       * Used by auth providers (Supabase, Google, etc.) to sync user data
+       * 
+       * @param {string} userId - User ID to create or update
+       * @param {object} userData - User attributes to set
+       * @returns {Promise<object>} The created or updated user record
+       * 
+       * @example
+       * const user = await helpers.jwtAuth.upsertUser('user-123', {
+       *   email: 'user@example.com',
+       *   name: 'John Doe',
+       *   supabase_id: '550e8400-e29b-41d4-a716-446655440000'
+       * });
+       */
+      async upsertUser(userId, userData) {
+        const resource = api.resources[config.usersResource];
+        if (!resource) {
+          throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
+        }
+        
+        // Check if user exists
+        const existing = await resource.query({
+          filters: { id: userId },
+          simplified: true,
+          context: { auth: { userId: 'system', system: true } }
+        });
+        
+        if (existing.data?.length > 0) {
+          // Update existing user
+          return resource.patch(userId, {
+            inputRecord: { 
+              data: { 
+                type: config.usersResource, 
+                id: userId, 
+                attributes: userData 
+              } 
+            },
+            context: { auth: { userId, system: true } }
+          });
+        } else {
+          // Create new user
+          return resource.post({
+            inputRecord: { 
+              data: { 
+                type: config.usersResource, 
+                attributes: { id: userId, ...userData } 
+              } 
+            },
+            context: { auth: null }  // Public endpoint
+          });
+        }
+      },
+      
+      /**
+       * HELPER: getUser
+       * Retrieve a user record from the users resource
+       * 
+       * @param {string} userId - User ID to retrieve
+       * @returns {Promise<object>} The user record
+       * 
+       * @example
+       * const user = await helpers.jwtAuth.getUser('user-123');
+       */
+      async getUser(userId) {
+        const resource = api.resources[config.usersResource];
+        if (!resource) {
+          throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
+        }
+        return resource.get(userId, {
+          simplified: true,
+          context: { auth: { userId } }
+        });
+      }
+    };
+    
+    
+    /* -----------------------------------------------------------------------
      * OPTIONAL ENDPOINTS
      * 
      * The plugin can automatically create REST endpoints for auth operations.
@@ -941,6 +1033,25 @@ export const JwtAuthPlugin = {
       }});
       
       log.info(`Added session endpoint: GET ${config.endpoints.session}`);
+    }
+    
+    // Add /auth/me endpoint using Express router (always enabled)
+    if (api.http?.express?.router) {
+      const router = api.http.express.router;
+      router.get('/auth/me', async (req, res) => {
+        if (!req.auth?.userId) {
+          return res.status(401).json({ error: 'Not authenticated' });
+        }
+        
+        try {
+          const user = await helpers.jwtAuth.getUser(req.auth.userId);
+          res.json(user.data);
+        } catch (error) {
+          res.status(404).json({ error: 'User not found' });
+        }
+      });
+      
+      log.info('Added /auth/me endpoint');
     }
     
     /*
