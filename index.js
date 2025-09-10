@@ -13,6 +13,10 @@ export { RestApiPlugin } from './plugins/core/rest-api-plugin.js';
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js';
 export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js';
 
+// Authentication plugins
+export { JwtAuthPlugin } from './plugins/core/jwt-auth-plugin.js';
+export { SupabaseAuthPlugin } from './plugins/core/supabase-auth-plugin.js';
+
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
 
