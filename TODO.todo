@@ -1,3 +1,11 @@
+  Potential Enhancements
+
+  1. Provider Priority: Consider adding a "primary_provider" field to handle users who authenticate through multiple providers.
+  2. Field Cleanup: Maybe add a helper to remove provider fields when a user unlinks that provider.
+  3. Migration Safety: The automatic column creation via RestApiKnexPlugin is convenient, but you might want provider plugins to check if their
+  fields already exist before extending.
+
+  
 ☐ Delete "Creating Custom Storage Plugins for JSON REST API", make an op plugin instead.
 ☐ Improve the look of the CSS, especially black and long code fragments, title fonts
 ☐ Check manually that the API is OK 
