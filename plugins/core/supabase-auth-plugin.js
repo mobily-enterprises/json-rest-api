@@ -77,8 +77,8 @@ export const SupabaseAuthPlugin = {
       });
       
       try {
-        // CRITICAL FIX: Require authentication
-        if (!req.auth?.userId) {
+        // Require authentication (check providerId for first-time users)
+        if (!req.auth?.providerId) {
           log.warn('Sync attempt without authentication', {
             ip: req.ip,
             userAgent: req.headers['user-agent']
