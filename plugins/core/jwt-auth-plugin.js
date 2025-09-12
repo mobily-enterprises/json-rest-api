@@ -78,11 +78,16 @@ export const JwtAuthPlugin = {
      * Configuration is divided into logical groups for clarity.
      * ----------------------------------------------------------------------- */
     
-    // Parse provider configurations
+    // Initialize providers registry
     const providers = {};
     
+    // Create a hook point for other plugins to register providers
+    // This hook will be called by JWT plugin to collect providers
+    const providerContext = { providers };
+    await runHooks('jwt:register-provider', providerContext);
+    
+    // Also accept providers passed directly (for backward compatibility)
     if (jwtOptions.providers) {
-      // Multi-provider configuration
       Object.entries(jwtOptions.providers).forEach(([name, providerConfig]) => {
         providers[name] = {
           secret: providerConfig.secret,
@@ -94,7 +99,7 @@ export const JwtAuthPlugin = {
           userIdField: providerConfig.userIdField || 'sub',
           emailField: providerConfig.emailField || 'email'
         };
-        log.info(`Registered auth provider: ${name}`, {
+        log.info(`Registered auth provider via config: ${name}`, {
           hasSecret: !!providerConfig.secret,
           hasPublicKey: !!providerConfig.publicKey,
           hasJwksUrl: !!providerConfig.jwksUrl,
@@ -103,23 +108,22 @@ export const JwtAuthPlugin = {
           emailField: providerConfig.emailField || 'email'
         });
       });
-    } else {
-      // Single provider configuration (for simplicity)
-      providers.default = {
-        secret: jwtOptions.secret,
-        publicKey: jwtOptions.publicKey,
-        jwksUrl: jwtOptions.jwksUrl,
-        algorithms: jwtOptions.algorithms || ['HS256', 'RS256'],
-        audience: jwtOptions.audience,
-        issuer: jwtOptions.issuer,
-        userIdField: jwtOptions.userIdField || 'sub',
-        emailField: jwtOptions.emailField || 'email'
-      };
+    }
+    
+    // Validate we have at least one provider configured
+    if (Object.keys(providers).length === 0) {
+      log.error('No auth providers configured');
+      throw new Error('JwtAuthPlugin requires at least one auth provider to be configured');
     }
     
     // Default provider to use when no header is specified
     const defaultProvider = jwtOptions.defaultProvider || Object.keys(providers)[0] || 'default';
-    log.info(`Default auth provider set to: ${defaultProvider}`);
+    
+    log.info('Auth providers collected', { 
+      providers: Object.keys(providers),
+      defaultProvider: defaultProvider,
+      totalProviders: Object.keys(providers).length
+    });
     
     const config = {
       // Store all provider configurations
@@ -143,6 +147,10 @@ export const JwtAuthPlugin = {
         filterByOwner: jwtOptions.autoOwnership?.filterByOwner !== false, // Default true
         requireOwnership: jwtOptions.autoOwnership?.requireOwnership || false
       },
+      
+      // Account linking configuration
+      // When enabled, automatically links accounts with the same email address
+      autoLinkByEmail: jwtOptions.autoLinkByEmail || false, // Default: disabled for backward compatibility
       
       // Token revocation configuration
       // Supports both database and in-memory storage
@@ -262,12 +270,17 @@ export const JwtAuthPlugin = {
     
     // 'authenticated' - User must be logged in (have a valid token)
     state.authCheckers.set('authenticated', (context) => {
+      // Allow system context
+      if (context.auth?.system === true) {
+        log.trace('Auth check "authenticated": true (system context)');
+        return true;
+      }
+      
       // Allow if has internal ID OR provider ID (for users not synced yet)
       const isAuth = !!(context.auth?.userId || context.auth?.providerId);
       log.trace(`Auth check 'authenticated': ${isAuth}`, { 
         userId: context.auth?.userId,
-        providerId: context.auth?.providerId,
-        needsSync: context.auth?.needsSync
+        providerId: context.auth?.providerId
       });
       return isAuth;
     });
@@ -281,11 +294,16 @@ export const JwtAuthPlugin = {
         hasExistingRecord: !!existingRecord 
       });
       
+      // Allow system context
+      if (context.auth?.system === true) {
+        log.trace('Auth check "owns": true (system context)');
+        return true;
+      }
+      
       // User must be synced to check ownership
       if (!context.auth?.userId) {
         log.trace('Auth check "owns" failed: user not synced', {
-          providerId: context.auth?.providerId,
-          needsSync: context.auth?.needsSync
+          providerId: context.auth?.providerId
         });
         return false;
       }
@@ -403,7 +421,7 @@ export const JwtAuthPlugin = {
     });
     
     // HOOK: Automatically add user_id field to schemas with ownership
-    addHook('schema:enrich', 'jwt-auto-add-ownership-field', {}, async ({ context, scopes }) => {
+    addHook('schema:enrich', 'jwt-auto-add-ownership-field', {}, async ({ context, scopes, scopeOptions }) => {
       //
       const { fields, scopeName } = context
       // Skip if auto-ownership is disabled
@@ -414,8 +432,7 @@ export const JwtAuthPlugin = {
       if (config.autoOwnership.excludeResources.includes(scopeName)) return;
       
       // Check if resource has ownership enabled via resource options
-      const scope = scopes[scopeName];
-      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      const hasOwnership = scopeOptions?.ownership === true;
       
       if (!hasOwnership) return;
       
@@ -472,7 +489,7 @@ export const JwtAuthPlugin = {
     });
     
     // HOOK: Automatically set user_id on record creation
-    addHook('beforeSchemaValidate', 'jwt-auto-set-ownership', { sequence: -50 }, async ({ context, scopeName, scopes }) => {
+    addHook('beforeSchemaValidate', 'jwt-auto-set-ownership', { sequence: -50 }, async ({ context, scopeName, scopes, scopeOptions }) => {
       // Skip if auto-ownership is disabled
       if (!config.autoOwnership.enabled) return;
       
@@ -498,8 +515,16 @@ export const JwtAuthPlugin = {
       }
       
       // Check if resource has ownership enabled
-      const scope = scopes[scopeName];
-      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      const hasOwnership = scopeOptions?.ownership === true;
+      
+      log.trace('Auto-ownership: checking configuration', {
+        scopeName,
+        method: context.method,
+        scopeOptions: scopeOptions,
+        ownership: scopeOptions?.ownership,
+        hasOwnership,
+        userId: context.auth?.userId
+      });
       
       if (!hasOwnership) return;
       
@@ -509,6 +534,7 @@ export const JwtAuthPlugin = {
       const ownershipField = config.autoOwnership.field;
       
       // Check if schema has the ownership field
+      const scope = scopes[scopeName];
       const schemaInfo = scope?.vars?.schemaInfo;
       if (!schemaInfo?.schemaStructure?.[ownershipField]) {
         log.warn(`Resource '${scopeName}' has ownership enabled but no ${ownershipField} field in schema`);
@@ -517,19 +543,43 @@ export const JwtAuthPlugin = {
       
       // Set the ownership field in the input record
       // Handle both JSON:API and simplified formats
-      if (context.inputRecord?.data?.attributes) {
-        // JSON:API format
-        context.inputRecord.data.attributes[ownershipField] = context.auth.userId;
+      log.trace('Auto-ownership: setting ownership field', {
+        scopeName,
+        ownershipField,
+        userId: context.auth?.userId,
+        hasInputRecord: !!context.inputRecord,
+        hasJsonApi: !!context.inputRecord?.data?.attributes,
+        inputRecord: context.inputRecord
+      });
+      
+      // Get the actual relationship name from the schema
+      const fieldSchema = schemaInfo.schemaStructure[ownershipField];
+      const relationshipName = fieldSchema?.as || ownershipField.replace(/_id$/, ''); // Fallback to removing _id if no 'as' field
+      
+      if (context.inputRecord?.data) {
+        // JSON:API format - set as relationship, not attribute
+        if (!context.inputRecord.data.relationships) {
+          context.inputRecord.data.relationships = {};
+        }
+        
+        context.inputRecord.data.relationships[relationshipName] = {
+          data: {
+            type: fieldSchema?.belongsTo || config.autoOwnership.userResource || 'users',
+            id: String(context.auth.userId)
+          }
+        };
+        log.trace('Auto-ownership: set in JSON:API format as relationship', { relationshipName, relationship: context.inputRecord.data.relationships[relationshipName] });
       } else if (context.inputRecord) {
-        // Simplified format
-        context.inputRecord[ownershipField] = context.auth.userId;
+        // Simplified format - use the actual relationship name
+        context.inputRecord[relationshipName] = context.auth.userId;
+        log.trace('Auto-ownership: set in simplified format', { relationshipName, value: context.inputRecord[relationshipName] });
       }
       
       log.trace(`Set ${ownershipField} to ${context.auth.userId} for new ${scopeName} record`);
     });
     
     // HOOK: Automatically filter queries by owner (unless admin)
-    addHook('knexQueryFiltering', 'jwt-filter-by-owner', { sequence: -40 }, async ({ context, scopes }) => {
+    addHook('knexQueryFiltering', 'jwt-filter-by-owner', { sequence: -40 }, async ({ context, scopes, scopeOptions }) => {
       // Skip if auto-ownership is disabled
       if (!config.autoOwnership.enabled || !config.autoOwnership.filterByOwner) return;
       
@@ -553,14 +603,14 @@ export const JwtAuthPlugin = {
       }
       
       // Check if resource has ownership enabled
-      const scope = scopes[scopeName];
-      const hasOwnership = scope?._scopeOptions?.ownership === true;
+      const hasOwnership = scopeOptions?.ownership === true;
       
       if (!hasOwnership) return;
       
       const ownershipField = config.autoOwnership.field;
       
       // Check if schema has the ownership field
+      const scope = scopes[scopeName];
       const schemaInfo = scope?.vars?.schemaInfo;
       if (!schemaInfo?.schemaStructure?.[ownershipField]) {
         log.trace(`Resource '${scopeName}' has no ${ownershipField} field - skipping ownership filter`);
@@ -685,46 +735,178 @@ export const JwtAuthPlugin = {
         
         // Step 4: Look up internal user ID from provider ID
         let internalUserId = null;
-        let needsSync = false;
         
         if (helpers.jwtAuth && helpers.jwtAuth.getUserByProviderId) {
           try {
-            const user = await helpers.jwtAuth.getUserByProviderId(providerId, providerName);
+            log.trace('Looking up user by provider ID', { providerId, providerName });
+            let user = await helpers.jwtAuth.getUserByProviderId(providerId, providerName);
+            log.trace('Provider ID lookup result', { userFound: !!user, userId: user?.id });
+            
             if (user) {
               internalUserId = user.id;
+              log.trace('User found by provider ID, using existing user', { internalUserId });
               log.debug('Found internal user ID from provider ID', {
                 providerId,
                 internalUserId,
                 provider: providerName
               });
             } else {
-              // User not synced yet
-              needsSync = true;
-              log.info('User not synced yet, needs sync', {
-                providerId,
-                email,
-                provider: providerName
+              log.trace('User not found by provider ID, checking email linking', { 
+                autoLinkByEmail: config.autoLinkByEmail, 
+                hasEmail: !!email,
+                email 
               });
+              // User not found by provider ID - check if we should link by email
+              if (config.autoLinkByEmail && email) {
+                log.trace('Auto-link by email enabled, looking up by email', { email });
+                log.debug('Checking for existing user by email', {
+                  email,
+                  provider: providerName
+                });
+                
+                user = await helpers.jwtAuth.getUserByEmail(email);
+                log.trace('Email lookup result', { userFoundByEmail: !!user, userId: user?.id });
+                
+                if (user) {
+                  // Found existing user with same email - link this provider
+                  log.trace('Found user by email, will link provider', { 
+                    userId: user.id,
+                    currentAuth0Id: user.auth0_id,
+                    newProviderId: providerId 
+                  });
+                  log.info('Found existing user with same email, linking provider', {
+                    userId: user.id,
+                    email: email,
+                    newProvider: providerName,
+                    newProviderId: providerId
+                  });
+                  
+                  // Update user to add this provider ID
+                  try {
+                    const providerField = `${providerName}_id`;
+                    const updateData = {
+                      [providerField]: providerId
+                    };
+                    log.trace('Preparing to patch user with provider ID', { 
+                      userId: user.id,
+                      providerField,
+                      updateData 
+                    });
+                    
+                    // If this provider provides additional metadata, update it
+                    if (payload.user_metadata) {
+                      updateData.name = payload.user_metadata.name || user.name;
+                      updateData.avatar_url = payload.user_metadata.avatar_url || user.avatar_url;
+                      log.trace('Added metadata to update', updateData);
+                    }
+                    
+                    const resource = api.resources[config.usersResource];
+                    log.trace('Calling resource.patch to link provider', {
+                      id: user.id,
+                      ...updateData
+                    });
+                    await resource.patch({
+                      id: user.id,
+                      ...updateData
+                    }, { auth: { userId: 'system', system: true } });
+                    log.trace('Provider linking patch completed successfully');
+                    
+                    internalUserId = user.id;
+                    log.info('Successfully linked provider to existing account', {
+                      userId: user.id,
+                      email: email,
+                      provider: providerName,
+                      providerId: providerId
+                    });
+                  } catch (linkError) {
+                    log.error('Failed to link provider to existing user', {
+                      error: linkError.message,
+                      userId: user.id,
+                      provider: providerName
+                    });
+                    // Still set the internal ID since we found the user
+                    internalUserId = user.id;
+                  }
+                } else {
+                }
+              } else {
+              }
+              
+              // No existing user found (or auto-link disabled) - create new user
+              if (!user) {
+                log.info('Creating new user account', {
+                  providerId,
+                  email,
+                  provider: providerName,
+                  autoLinkByEmail: config.autoLinkByEmail
+                });
+                
+                // Prepare user data for sync
+                const userData = {
+                  email: email || null,
+                  name: email ? email.split('@')[0] : 'User',
+                  // Provider-specific fields will be added by upsertUser
+                };
+                
+                // Extract additional user metadata from token if available
+                if (payload.user_metadata) {
+                  userData.name = payload.user_metadata.name || userData.name;
+                  userData.avatar_url = payload.user_metadata.avatar_url || '';
+                }
+                
+                // Auto-sync: Create user in database
+                try {
+                  const syncedUser = await helpers.jwtAuth.upsertUser(
+                    providerId,      // Provider-specific ID
+                    userData,        // User data
+                    providerName     // Provider name (e.g., 'supabase')
+                  );
+                  
+                  // Handle both simplified and JSON:API response formats
+                  const userId = syncedUser?.id || syncedUser?.data?.id;
+                  if (userId) {
+                    internalUserId = userId;
+                    log.info('User auto-synced successfully', {
+                      providerId,
+                      internalUserId,
+                      email,
+                      provider: providerName
+                    });
+                  } else {
+                    log.error('Auto-sync returned invalid user data', {
+                      providerId,
+                      provider: providerName,
+                      syncResult: syncedUser
+                    });
+                  }
+                } catch (syncError) {
+                  log.error('Failed to auto-sync user', {
+                    error: syncError.message,
+                    providerId,
+                    email,
+                    provider: providerName
+                  });
+                  // Continue without internal ID - user can still access public resources
+                }
+              }
             }
           } catch (error) {
-            log.warn('Failed to lookup user by provider ID', {
+            log.warn('Failed to lookup/sync user', {
               error: error.message,
               providerId,
               provider: providerName
             });
-            needsSync = true;
           }
         }
         
         // Step 5: Populate context.auth with both IDs
         context.auth = {
-          userId: internalUserId,                        // Internal database ID (integer)
+          userId: internalUserId,                        // Internal database ID (may be null if sync failed)
           providerId: providerId,                        // Provider-specific ID
           email: email,                                  // User email
           provider: providerName,                        // Track which provider authenticated this user
           token: payload,                                // Full token payload for custom use
-          tokenId: payload.jti,                          // JWT ID for revocation
-          needsSync: needsSync                           // Flag indicating if user needs to be synced
+          tokenId: payload.jti                           // JWT ID for revocation
         };
         
         log.info('JWT authentication successful', {
@@ -732,7 +914,6 @@ export const JwtAuthPlugin = {
           providerId: context.auth.providerId,
           email: context.auth.email,
           provider: providerName,
-          needsSync: needsSync,
           hasJti: !!payload.jti,
           exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : undefined
         });
@@ -750,20 +931,24 @@ export const JwtAuthPlugin = {
         // - JsonWebTokenError: Invalid signature, malformed token
         // - NotBeforeError: Token not active yet (nbf claim in future)
         // 
-        // By setting context.auth = null, we allow:
-        // - Public endpoints to still work
-        // - Protected endpoints to return proper 403 errors
-        // - Better error messages from checkPermissions hook
+        // If a token is provided but validation fails, this is an authentication error
+        // We should reject the request rather than treating it as unauthenticated
         log.warn('JWT token validation failed', {
           error: error.message,
           errorType: error.name,
           provider: providerName
         });
-        context.auth = null;
+        
+        // Return 401 Unauthorized for invalid tokens
+        context.rejection = {
+          status: 401,
+          title: 'Authentication Failed',
+          message: `Invalid token for provider: ${providerName}`
+        };
+        return false; // Stop processing
       }
       
-      // Always return true - authentication is separate from authorization
-      // Resources will check permissions based on context.auth
+      // Return true to continue processing
       return true;
     });
     
@@ -925,7 +1110,7 @@ export const JwtAuthPlugin = {
        * @example
        * // In a custom hook
        * helpers.auth.requireAuth(context);
-       * console.log('User ID:', context.auth.userId);
+       * log.info('User ID:', context.auth.userId);
        */
       requireAuth(context) {
         if (!context.auth?.userId) {
@@ -1161,6 +1346,7 @@ export const JwtAuthPlugin = {
        * );
        */
       async upsertUser(providerId, userData, provider = null) {
+        log.trace('Upsert user called', { providerId, userData, provider });
         const resource = api.resources[config.usersResource];
         if (!resource) {
           throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
@@ -1170,12 +1356,14 @@ export const JwtAuthPlugin = {
         let existing = null;
         if (provider) {
           const providerField = `${provider}_id`;
+          log.trace('Looking for existing user by provider field', { providerField, providerId });
           const byProviderId = await resource.query({
-            filters: { [providerField]: providerId },
-            simplified: true,
-            context: { auth: { userId: 'system', system: true } }
-          });
+            queryParams: {
+              filters: { [providerField]: providerId }
+            },
+          }, { auth: { userId: 'system', system: true } });
           existing = byProviderId.data?.[0];
+          log.trace('Provider field query result', { found: !!existing, existingId: existing?.id });
           
           if (existing && userData.email && existing.email !== userData.email) {
             log.info('User email changed at provider', {
@@ -1188,24 +1376,10 @@ export const JwtAuthPlugin = {
           }
         }
         
-        // If no user found by provider ID and email provided, try by email (for account linking)
-        if (!existing && userData.email) {
-          const byEmail = await resource.query({
-            filters: { email: userData.email },
-            simplified: true,
-            context: { auth: { userId: 'system', system: true } }
-          });
-          existing = byEmail.data?.[0];
-          
-          if (existing) {
-            log.info('Linking provider to existing account via email', {
-              provider,
-              providerId,
-              email: userData.email,
-              existingUserId: existing.id
-            });
-          }
-        }
+        // REMOVED: Email-based auto-linking was here
+        // This was dangerous as email changes could break account access
+        // Now requiring explicit linking via link-provider endpoint
+        
         
         if (existing) {
           // Update existing user
@@ -1214,16 +1388,10 @@ export const JwtAuthPlugin = {
             updateData[`${provider}_id`] = providerId;
           }
           
-          return resource.patch(existing.id, {
-            inputRecord: { 
-              data: { 
-                type: config.usersResource, 
-                id: existing.id, 
-                attributes: updateData 
-              } 
-            },
-            context: { auth: { userId: existing.id, system: true } }
-          });
+          return resource.patch({
+            id: existing.id,
+            ...updateData
+          }, { auth: { userId: existing.id, system: true } });
         } else {
           // Create new user
           const createData = { ...userData };
@@ -1232,15 +1400,7 @@ export const JwtAuthPlugin = {
           }
           
           try {
-            return await resource.post({
-              inputRecord: { 
-                data: { 
-                  type: config.usersResource, 
-                  attributes: createData 
-                } 
-              },
-              context: { auth: null }  // Public endpoint
-            });
+            return await resource.post(createData, { auth: { userId: 'system', system: true } });
           } catch (error) {
             // Handle race condition - if duplicate key error, try to find the user again
             if (error.code === 'ER_DUP_ENTRY' || error.code === '23505' || // MySQL/PostgreSQL
@@ -1255,26 +1415,20 @@ export const JwtAuthPlugin = {
               // Retry finding the user
               if (userData.email) {
                 const retryByEmail = await resource.query({
-                  filters: { email: userData.email },
-                  simplified: true,
-                  context: { auth: { userId: 'system', system: true } }
-                });
+                  queryParams: {
+                    filters: { email: userData.email }
+                  },
+                }, { auth: { userId: 'system', system: true } });
                 if (retryByEmail.data?.[0]) {
                   // Update with provider ID if needed
                   const updateData = { ...userData };
                   if (provider) {
                     updateData[`${provider}_id`] = providerId;
                   }
-                  return resource.patch(retryByEmail.data[0].id, {
-                    inputRecord: { 
-                      data: { 
-                        type: config.usersResource, 
-                        id: retryByEmail.data[0].id, 
-                        attributes: updateData 
-                      } 
-                    },
-                    context: { auth: { userId: retryByEmail.data[0].id, system: true } }
-                  });
+                  return resource.patch({
+                    id: retryByEmail.data[0].id,
+                    ...updateData
+                  }, { auth: { userId: retryByEmail.data[0].id, system: true } });
                 }
               }
             }
@@ -1299,9 +1453,8 @@ export const JwtAuthPlugin = {
           throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
         }
         return resource.get(userId, {
-          simplified: true,
-          context: { auth: { userId } }
-        });
+          simplified: true
+        }, { auth: { userId } });
       },
       
       /**
@@ -1326,10 +1479,40 @@ export const JwtAuthPlugin = {
         
         const providerField = `${provider}_id`;
         const result = await resource.query({
-          filters: { [providerField]: providerId },
-          simplified: true,
-          context: { auth: { userId: 'system', system: true } }
-        });
+          queryParams: {
+            filters: { [providerField]: providerId }
+          },
+        }, { auth: { userId: 'system', system: true } });
+        
+        return result.data?.[0] || null;
+      },
+      
+      /**
+       * HELPER: getUserByEmail
+       * Retrieve a user record by email address
+       * Used for auto-linking accounts with the same email
+       * 
+       * @param {string} email - The email address to search for
+       * @returns {Promise<Object|null>} User record or null if not found
+       * 
+       * @example
+       * const user = await helpers.jwtAuth.getUserByEmail('user@example.com');
+       */
+      async getUserByEmail(email) {
+        const resource = api.resources[config.usersResource];
+        if (!resource) {
+          throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
+        }
+        
+        if (!email) {
+          return null;
+        }
+        
+        const result = await resource.query({
+          queryParams: {
+            filters: { email: email }
+          },
+        }, { auth: { userId: 'system', system: true } });
         
         return result.data?.[0] || null;
       }
@@ -1432,9 +1615,109 @@ export const JwtAuthPlugin = {
       log.info('Added /auth/me endpoint');
     }
     
+    // Add /auth/link-provider endpoint for explicit account linking
+    if (api.http?.express?.router) {
+      const router = api.http.express.router;
+      router.post('/auth/link-provider', async (req, res) => {
+        // User must be authenticated with their primary account
+        if (!req.auth?.userId) {
+          return res.status(401).json({ 
+            error: 'Authentication required',
+            details: 'You must be logged in to link additional providers'
+          });
+        }
+        
+        const { provider, token } = req.body;
+        
+        if (!provider || !token) {
+          return res.status(400).json({
+            error: 'Invalid request',
+            details: 'Provider name and token are required'
+          });
+        }
+        
+        // Get provider configuration
+        const providerConfig = config.providers[provider];
+        if (!providerConfig) {
+          return res.status(400).json({
+            error: 'Unknown provider',
+            details: `Provider '${provider}' is not configured`
+          });
+        }
+        
+        try {
+          // Verify the token for the provider being linked
+          const payload = await verifyToken(token, {
+            secret: providerConfig.secret,
+            publicKey: providerConfig.publicKey,
+            algorithms: providerConfig.algorithms,
+            audience: providerConfig.audience,
+            issuer: providerConfig.issuer,
+            jwksUrl: providerConfig.jwksUrl
+          }, log);
+          
+          const providerId = payload[providerConfig.userIdField];
+          
+          // Check if this provider ID is already linked to another account
+          const existingUser = await helpers.jwtAuth.getUserByProviderId(providerId, provider);
+          if (existingUser && existingUser.id !== req.auth.userId) {
+            return res.status(409).json({
+              error: 'Provider already linked',
+              details: 'This provider account is already linked to another user'
+            });
+          }
+          
+          // Link the provider to the current user
+          const resource = api.resources[config.usersResource];
+          const providerField = `${provider}_id`;
+          
+          await resource.patch({
+            id: req.auth.userId,
+            inputRecord: {
+              data: {
+                type: config.usersResource,
+                id: req.auth.userId,
+                attributes: {
+                  [providerField]: providerId
+                }
+              }
+            }
+          }, { auth: { userId: req.auth.userId, system: true } });
+          
+          log.info('Provider linked successfully', {
+            userId: req.auth.userId,
+            provider,
+            providerId
+          });
+          
+          res.json({
+            success: true,
+            message: `${provider} account linked successfully`,
+            provider,
+            userId: req.auth.userId
+          });
+          
+        } catch (error) {
+          log.error('Failed to link provider', {
+            error: error.message,
+            provider,
+            userId: req.auth.userId
+          });
+          
+          res.status(400).json({
+            error: 'Failed to link provider',
+            details: error.message
+          });
+        }
+      });
+      
+      log.info('Added /auth/link-provider endpoint');
+    }
+    
     /*
      * Summary: Optional endpoints provide REST API access to auth operations.
      * Enable via config: endpoints: { logout: '/auth/logout', session: '/auth/session' }
+     * Always enabled: /auth/me, /auth/link-provider
      */
     
     log.info('JWT authentication plugin installed successfully', {
