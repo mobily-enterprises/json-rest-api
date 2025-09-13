@@ -730,12 +730,15 @@ export const JwtAuthPlugin = {
         }
         
         // Step 3: Get provider-specific user ID from token
+        console.log('🔵 JWT AUTH: Token payload:', JSON.stringify(payload, null, 2));
+        console.log('🔵 JWT AUTH: Provider config userIdField:', providerConfig.userIdField);
         const providerId = payload[providerConfig.userIdField];
         const email = payload[providerConfig.emailField];
-        
+        console.log('🔵 JWT AUTH: Extracted providerId:', providerId, 'email:', email);
+
         // Step 4: Look up internal user ID from provider ID
         let internalUserId = null;
-        
+
         if (helpers.jwtAuth && helpers.jwtAuth.getUserByProviderId) {
           try {
             log.trace('Looking up user by provider ID', { providerId, providerName });
@@ -1364,7 +1367,7 @@ export const JwtAuthPlugin = {
           }, { auth: { userId: 'system', system: true } });
           existing = byProviderId.data?.[0];
           log.trace('Provider field query result', { found: !!existing, existingId: existing?.id });
-          
+
           if (existing && userData.email && existing.email !== userData.email) {
             log.info('User email changed at provider', {
               provider,
@@ -1375,10 +1378,25 @@ export const JwtAuthPlugin = {
             // Will update email in the patch operation below
           }
         }
-        
-        // REMOVED: Email-based auto-linking was here
-        // This was dangerous as email changes could break account access
-        // Now requiring explicit linking via link-provider endpoint
+
+        // If not found by provider ID, check by email to avoid duplicate email errors
+        if (!existing && userData.email) {
+          log.trace('Provider ID not found, checking by email', { email: userData.email });
+          const byEmail = await resource.query({
+            queryParams: {
+              filters: { email: userData.email }
+            },
+          }, { auth: { userId: 'system', system: true } });
+          existing = byEmail.data?.[0];
+          if (existing) {
+            log.debug('Found existing user by email', {
+              userId: existing.id,
+              email: userData.email,
+              provider,
+              willAddProviderId: !!provider
+            });
+          }
+        }
         
         
         if (existing) {
@@ -1399,10 +1417,12 @@ export const JwtAuthPlugin = {
             createData[`${provider}_id`] = providerId;
           }
           
+          // Since we now check by email upfront, duplicate email errors should be rare
+          // Only occurring in true race conditions where two requests create users simultaneously
           try {
             return await resource.post(createData, { auth: { userId: 'system', system: true } });
           } catch (error) {
-            // Handle race condition - if duplicate key error, try to find the user again
+            // Handle true race condition - if duplicate key error, try to find the user again
             if (error.code === 'ER_DUP_ENTRY' || error.code === '23505' || // MySQL/PostgreSQL
                 error.message?.includes('UNIQUE constraint') || // SQLite
                 error.message?.includes('duplicate key')) {
@@ -1411,7 +1431,7 @@ export const JwtAuthPlugin = {
                 provider,
                 errorCode: error.code
               });
-              
+
               // Retry finding the user
               if (userData.email) {
                 const retryByEmail = await resource.query({
@@ -1452,9 +1472,10 @@ export const JwtAuthPlugin = {
         if (!resource) {
           throw new Error(`Users resource '${config.usersResource}' not found. Ensure it's defined in server/api/users.js`);
         }
-        return resource.get(userId, {
+        return resource.get({
+          id: userId,
           simplified: true
-        }, { auth: { userId } });
+        }, { auth: { userId: 'system', system: true } });
       },
       
       /**
@@ -1585,34 +1606,49 @@ export const JwtAuthPlugin = {
       log.info(`Added session endpoint: GET ${config.endpoints.session}`);
     }
     
-    // Add /auth/me endpoint using Express router (always enabled)
-    if (api.http?.express?.router) {
-      const router = api.http.express.router;
-      router.get('/auth/me', async (req, res) => {
-        // Check if user needs to be synced first
-        if (req.auth?.needsSync) {
-          return res.status(404).json({ 
-            error: 'User not synced',
-            message: 'Please sync your user data first',
-            needsSync: true,
-            providerId: req.auth.providerId,
-            provider: req.auth.provider
-          });
-        }
-        
-        if (!req.auth?.userId) {
-          return res.status(401).json({ error: 'Not authenticated' });
-        }
-        
-        try {
-          const user = await helpers.jwtAuth.getUser(req.auth.userId);
-          res.json(user.data);
-        } catch (error) {
-          res.status(404).json({ error: 'User not found' });
+    // Add /auth/me endpoint using api.addRoute (always enabled)
+    if (api.addRoute) {
+      await api.addRoute({
+        method: 'GET',
+        path: '/api/auth/me',
+        handler: async ({ context }) => {
+          // Check if user needs to be synced first
+          if (context.auth?.needsSync) {
+            return {
+              statusCode: 404,
+              body: {
+                error: 'User not synced',
+                message: 'Please sync your user data first',
+                needsSync: true,
+                providerId: context.auth.providerId,
+                provider: context.auth.provider
+              }
+            };
+          }
+
+          if (!context.auth?.userId) {
+            return {
+              statusCode: 401,
+              body: { error: 'Not authenticated' }
+            };
+          }
+
+          try {
+            const user = await helpers.jwtAuth.getUser(context.auth.userId);
+            return {
+              statusCode: 200,
+              body: user.data
+            };
+          } catch (error) {
+            return {
+              statusCode: 404,
+              body: { error: 'User not found' }
+            };
+          }
         }
       });
-      
-      log.info('Added /auth/me endpoint');
+
+      log.info('Added /api/auth/me endpoint');
     }
     
     // Add /auth/link-provider endpoint for explicit account linking
