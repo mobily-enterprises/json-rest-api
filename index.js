@@ -16,6 +16,7 @@ export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js';
 // Authentication plugins
 export { JwtAuthPlugin } from './plugins/core/jwt-auth-plugin.js';
 export { SupabaseAuthPlugin } from './plugins/core/supabase-auth-plugin.js';
+export { GoogleAuthPlugin } from './plugins/core/google-auth-plugin.js';
 
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
