@@ -163,6 +163,22 @@ export async function addKnexFields(knex, tableName, schema) {
   });
 }
 
+// Helper function to alter multiple fields in an existing table
+export async function alterKnexFields(knex, tableName, fields, options = {}) {
+  return knex.schema.alterTable(tableName, (table) => {
+    for (const [fieldName, definition] of Object.entries(fields)) {
+      // Create the column with alter flag
+      const column = mapTypeToKnex(table, fieldName, definition);
+
+      // Mark this as an alteration
+      column.alter();
+
+      // Apply constraints (these will be reapplied with the alter)
+      applyConstraints(column, definition);
+    }
+  });
+}
+
 /**
  * Generates a Knex migration string from a json-rest-schema definition
  * @param {string} tableName - The name of the table

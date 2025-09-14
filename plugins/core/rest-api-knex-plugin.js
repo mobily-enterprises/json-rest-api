@@ -1,6 +1,6 @@
 import { requirePackage } from 'hooked-api';
 import { createSchema }  from 'json-rest-schema';
-import { createKnexTable, addKnexFields } from './lib/dbTablesOperations.js';
+import { createKnexTable, addKnexFields, alterKnexFields } from './lib/dbTablesOperations.js';
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
 import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js';
@@ -127,7 +127,7 @@ export const RestApiKnexPlugin = {
     );
 
 
-  // Helper scope method to get all schema-related information
+    // Helper scope method to get all schema-related information
     addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
       // Create a filtered schema that excludes virtual fields
       const schemaStructure = vars.schemaInfo.schemaStructure || {};
@@ -146,6 +146,23 @@ export const RestApiKnexPlugin = {
       await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
     })
 
+
+      // Helper scope method to alter existing fields in a table
+  addScopeMethod('alterKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
+    // Validate required parameters
+    if (!params.fields || typeof params.fields !== 'object') {
+      throw new Error('fields parameter is required for alterKnexFields');
+    }
+
+    await alterKnexFields(
+      api.knex.instance,
+      vars.schemaInfo.tableName,
+      params.fields,
+      params.options // Pass through any additional options
+    );
+  });
+
+    
     // Helper scope method to add a field to an existing table
     addScopeMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
       
