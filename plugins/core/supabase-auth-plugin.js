@@ -82,7 +82,89 @@ export const SupabaseAuthPlugin = {
     // Note: User sync is now handled automatically by the JWT plugin
     // when a user makes their first authenticated request.
     // No manual sync endpoint is needed anymore.
-    
+
+    // Add link endpoint for Supabase accounts
+    if (api.addRoute) {
+      await api.addRoute({
+        method: 'POST',
+        path: '/api/auth/supabase/link',
+        handler: async ({ body, context }) => {
+          try {
+            // Check if user is authenticated
+            if (!context.auth?.userId) {
+              return {
+                statusCode: 401,
+                body: { error: 'Must be logged in to link accounts' }
+              };
+            }
+
+            // Fetch the current user
+            log.info(`[Supabase Link] Fetching user with ID: ${context.auth.userId}`);
+            const userResult = await api.scopes.users.methods.get({
+              id: context.auth.userId
+            }, context);
+
+            const currentUser = userResult.data;
+            log.info(`[Supabase Link] Current user:`, currentUser);
+
+            const { supabase_id, email } = body;
+
+            // Verify email matches
+            log.info(`[Supabase Link] Comparing emails: Supabase=${email}, Current=${currentUser.email}`);
+            if (email !== currentUser.email) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'EMAIL_MISMATCH',
+                  message: 'Email addresses must match'
+                }
+              };
+            }
+
+            // Check if Supabase ID already linked
+            const existingUser = await api.scopes.users.methods.query({
+              filter: { supabase_id: supabase_id }
+            }, context);
+
+            if (existingUser.length > 0 && existingUser[0].id !== currentUser.id) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'ALREADY_LINKED',
+                  message: 'This account is already linked to another user'
+                }
+              };
+            }
+
+            // Update user
+            log.info(`[Supabase Link] Updating user ${currentUser.id} with supabase_id: ${supabase_id}`);
+            await api.scopes.users.methods.patch({
+              inputRecord: {
+                id: currentUser.id,
+                supabase_id: supabase_id
+              }
+            }, context);
+
+            return {
+              statusCode: 200,
+              body: {
+                success: true,
+                linked: 'supabase'
+              }
+            };
+
+          } catch (error) {
+            return {
+              statusCode: 500,
+              body: { error: error.message }
+            };
+          }
+        }
+      });
+
+      log.info('Added Supabase link endpoint: /api/auth/supabase/link');
+    }
+
     log.info('SupabaseAuthPlugin installed successfully', {
       usersResource: config.usersResource,
       autoSync: 'Enabled via JWT plugin'

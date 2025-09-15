@@ -970,8 +970,13 @@ export const RestApiKnexPlugin = {
       const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
       
       // Strip non-database fields (computed and virtual) before database operation
+      console.log('[PATCH DEBUG] Before stripping:', {
+        mergedAttributes,
+        schemaFields: Object.keys(context.schemaInfo.schema?.fields || {})
+      });
       const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
-      
+
+      console.log('[PATCH DEBUG] After stripping:', { finalAttributes });
       log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
       
       // Remove the idProperty from attributes to prevent updating the primary key

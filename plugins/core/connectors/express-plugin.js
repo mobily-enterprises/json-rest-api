@@ -421,6 +421,19 @@ export const ExpressPlugin = {
           // So we use them as-is without adding basePath to avoid double-prefixing
 
           router[method.toLowerCase()](path, ...beforeMiddleware, expressHandler);
+
+          // Debug logging for route registration
+          console.log(`[EXPRESS DEBUG] Route registered: ${method} ${path}`);
+
+          // Check if the route was actually added
+          if (router.stack) {
+            const lastRoute = router.stack[router.stack.length - 1];
+            console.log(`[EXPRESS DEBUG] Last route in stack:`, {
+              regexp: lastRoute?.regexp?.toString(),
+              path: lastRoute?.route?.path,
+              methods: lastRoute?.route?.methods
+            });
+          }
         }
 
 

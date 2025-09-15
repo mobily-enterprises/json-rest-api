@@ -177,7 +177,95 @@ export const GoogleAuthPlugin = {
         }
       });
 
-      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh');
+      // Link Google account to existing user
+      await api.addRoute({
+        method: 'POST',
+        path: '/api/auth/google/link',
+        handler: async ({ body, context }) => {
+          try {
+            // Check if user is authenticated
+            if (!context.auth?.userId) {
+              return {
+                statusCode: 401,
+                body: { error: 'Must be logged in to link accounts' }
+              };
+            }
+
+            // Fetch the current user
+            log.info(`[Google Link] Fetching user with ID: ${context.auth.userId}`);
+            const userResult = await api.scopes.users.methods.get({
+              id: context.auth.userId
+            }, context);
+
+            const currentUser = userResult.data;
+            log.info(`[Google Link] Current user:`, currentUser);
+
+            const { credential } = body;
+
+            // Verify Google ID token
+            const { payload } = await jwtVerify(credential, JWKS, {
+              issuer: ['https://accounts.google.com', 'accounts.google.com'],
+              audience: config.clientId
+            });
+
+            // Check if email matches current user
+            log.info(`[Google Link] Comparing emails: Google=${payload.email}, Current=${currentUser.email}`);
+            if (payload.email !== currentUser.email) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'EMAIL_MISMATCH',
+                  message: 'The Google account email must match your current account email'
+                }
+              };
+            }
+
+            // Check if this Google ID is already linked to another account
+            const existingUser = await api.scopes.users.methods.query({
+              filter: { google_id: payload.sub }
+            }, context);
+
+            if (existingUser.length > 0 && existingUser[0].id !== currentUser.id) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'ALREADY_LINKED',
+                  message: 'This Google account is already linked to another user'
+                }
+              };
+            }
+
+            // Update current user with Google ID
+            log.info(`[Google Link] Updating user ${currentUser.id} with google_id: ${payload.sub}`);
+            await api.scopes.users.methods.patch({
+              inputRecord: {
+                id: currentUser.id,
+                google_id: payload.sub
+              }
+            }, context);
+
+            log.info(`Linked Google account ${payload.email} to user ${currentUser.id}`);
+
+            return {
+              statusCode: 200,
+              body: {
+                success: true,
+                linked: 'google',
+                message: 'Google account successfully linked'
+              }
+            };
+
+          } catch (error) {
+            log.error('Google account linking failed:', error);
+            return {
+              statusCode: 500,
+              body: { error: error.message || 'Failed to link Google account' }
+            };
+          }
+        }
+      });
+
+      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh, /api/auth/google/link');
     }
 
     // GOOGLE-SPECIFIC: Register as JWT provider for app-issued tokens

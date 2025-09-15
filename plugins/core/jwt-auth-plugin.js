@@ -289,17 +289,20 @@ export const JwtAuthPlugin = {
     // 'owns' - User must own the resource
     // Checks the ownership field (default: user_id) against the authenticated user
     state.authCheckers.set('owns', (context, { existingRecord, scopeVars }) => {
-      log.trace('Auth check "owns" starting', { 
+      log.trace('Auth check "owns" starting', {
         hasAuth: !!context.auth?.userId,
-        hasExistingRecord: !!existingRecord 
+        hasExistingRecord: !!existingRecord,
+        scopeVars: scopeVars,
+        contextKeys: Object.keys(context),
+        existingRecordKeys: existingRecord ? Object.keys(existingRecord) : null
       });
-      
+
       // Allow system context
       if (context.auth?.system === true) {
         log.trace('Auth check "owns": true (system context)');
         return true;
       }
-      
+
       // User must be synced to check ownership
       if (!context.auth?.userId) {
         log.trace('Auth check "owns" failed: user not synced', {
@@ -307,20 +310,40 @@ export const JwtAuthPlugin = {
         });
         return false;
       }
-      
+
       // For new records being created, ownership check passes
       const record = existingRecord || context.attributes;
-      if (!record) return true;
-      
+      if (!record) {
+        log.trace('Auth check "owns": no record to check ownership');
+        return true;
+      }
+
       // Determine which field indicates ownership (configurable per scope)
       const ownerField = scopeVars?.ownershipField || config.ownershipField;
+      log.trace('Auth check "owns" determining owner field', {
+        ownerField,
+        scopeVarsOwnershipField: scopeVars?.ownershipField,
+        configOwnershipField: config.ownershipField,
+        recordKeys: Object.keys(record),
+        recordType: record.type,
+        hasAttributes: !!record.attributes,
+        recordId: record.id,
+        recordAttributesId: record.attributes?.id
+      });
       
       // Handle JSON:API format (record has type and attributes)
       if (record.type && record.attributes) {
+
+        // Special case in case ownershipField is 'id': it won't be in attributes,
+        // but in the record itself, as per JSON:API.
+        // This is important for tables where the id IS the user ID, rather than
+        // the default user_id
+        const userIdFieldValue = ownerField === 'id' ? record.id : record.attributes[ownerField]
+
         // First check attributes for the ownership field
-        if (record.attributes[ownerField] !== undefined) {
+        if (userIdFieldValue !== undefined) {
           // Convert both to strings for consistent comparison (handles integer vs string)
-          const recordOwnerId = String(record.attributes[ownerField]);
+          const recordOwnerId = String(userIdFieldValue);
           const userIdStr = String(context.auth.userId);
           return recordOwnerId === userIdStr;
         }
@@ -1026,7 +1049,7 @@ export const JwtAuthPlugin = {
         // Allow if user is owner OR user is admin
         let passed = false;
         let failureReasons = [];
-        
+        debugger
         for (const rule of rules) {
           try {
             let checker;
@@ -1606,154 +1629,127 @@ export const JwtAuthPlugin = {
       log.info(`Added session endpoint: GET ${config.endpoints.session}`);
     }
     
-    // Add /auth/me endpoint using api.addRoute (always enabled)
-    if (api.addRoute) {
+    await api.addRoute({
+      method: 'GET',
+      path: '/api/auth/me',
+      handler: async ({ context }) => {
+        // Check if user needs to be synced first
+        if (context.auth?.needsSync) {
+          return {
+            statusCode: 404,
+            body: {
+              error: 'User not synced',
+              message: 'Please sync your user data first',
+              needsSync: true,
+              providerId: context.auth.providerId,
+              provider: context.auth.provider
+            }
+          };
+        }
+
+        if (!context.auth?.userId) {
+          return {
+            statusCode: 401,
+            body: { error: 'Not authenticated' }
+          };
+        }
+
+        try {
+          const user = await helpers.jwtAuth.getUser(context.auth.userId);
+          log.info('GET /api/auth/me - Full user object:', JSON.stringify(user, null, 2));
+
+          // In simplified mode, the user object is the data directly
+          const userData = user.data || user;
+          log.info('GET /api/auth/me - User data to return:', JSON.stringify(userData, null, 2));
+
+          return {
+            statusCode: 200,
+            body: { data: userData }  // Wrap in data property for consistency
+          };
+        } catch (error) {
+          log.error('GET /api/auth/me - Error fetching user:', error);
+          return {
+            statusCode: 404,
+            body: { error: 'User not found' }
+          };
+        }
+      }
+    });
+
+    log.info('Added /api/auth/me endpoint');
+
+    /* -----------------------------------------------------------------------
+     * OPTIONAL ENDPOINTS
+     *
+     * The plugin can automatically create REST endpoints for auth operations.
+     * These are opt-in via configuration.
+     * ----------------------------------------------------------------------- */
+
+    // Add logout endpoint if configured
+    if (config.endpoints.logout && api.addRoute) {
+      // Add as a public route that checks its own auth
       await api.addRoute({
-        method: 'GET',
-        path: '/api/auth/me',
+        method: 'POST',
+        path: config.endpoints.logout,
         handler: async ({ context }) => {
-          // Check if user needs to be synced first
-          if (context.auth?.needsSync) {
-            return {
-              statusCode: 404,
-              body: {
-                error: 'User not synced',
-                message: 'Please sync your user data first',
-                needsSync: true,
-                providerId: context.auth.providerId,
-                provider: context.auth.provider
-              }
-            };
-          }
-
-          if (!context.auth?.userId) {
-            return {
-              statusCode: 401,
-              body: { error: 'Not authenticated' }
-            };
-          }
-
           try {
-            const user = await helpers.jwtAuth.getUser(context.auth.userId);
-            return {
-              statusCode: 200,
-              body: user.data
-            };
+            if (!context.auth) {
+              return {
+                statusCode: 401,
+                body: { error: 'Authentication required' }
+              };
+            }
+
+            const result = await helpers.auth.logout(context);
+            return { statusCode: 200, body: result };
           } catch (error) {
             return {
-              statusCode: 404,
-              body: { error: 'User not found' }
+              statusCode: 400,
+              body: { error: error.message }
             };
           }
         }
       });
 
-      log.info('Added /api/auth/me endpoint');
+      log.info(`Added logout endpoint: POST ${config.endpoints.logout}`);
     }
-    
-    // Add /auth/link-provider endpoint for explicit account linking
-    if (api.http?.express?.router) {
-      const router = api.http.express.router;
-      router.post('/auth/link-provider', async (req, res) => {
-        // User must be authenticated with their primary account
-        if (!req.auth?.userId) {
-          return res.status(401).json({ 
-            error: 'Authentication required',
-            details: 'You must be logged in to link additional providers'
-          });
-        }
-        
-        const { provider, token } = req.body;
-        
-        if (!provider || !token) {
-          return res.status(400).json({
-            error: 'Invalid request',
-            details: 'Provider name and token are required'
-          });
-        }
-        
-        // Get provider configuration
-        const providerConfig = config.providers[provider];
-        if (!providerConfig) {
-          return res.status(400).json({
-            error: 'Unknown provider',
-            details: `Provider '${provider}' is not configured`
-          });
-        }
-        
-        try {
-          // Verify the token for the provider being linked
-          const payload = await verifyToken(token, {
-            secret: providerConfig.secret,
-            publicKey: providerConfig.publicKey,
-            algorithms: providerConfig.algorithms,
-            audience: providerConfig.audience,
-            issuer: providerConfig.issuer,
-            jwksUrl: providerConfig.jwksUrl
-          }, log);
-          
-          const providerId = payload[providerConfig.userIdField];
-          
-          // Check if this provider ID is already linked to another account
-          const existingUser = await helpers.jwtAuth.getUserByProviderId(providerId, provider);
-          if (existingUser && existingUser.id !== req.auth.userId) {
-            return res.status(409).json({
-              error: 'Provider already linked',
-              details: 'This provider account is already linked to another user'
-            });
+
+    // Add session endpoint if configured
+    // Returns current user info or {authenticated: false} for anonymous
+    if (config.endpoints.session && api.addRoute) {
+      await api.addRoute({
+        method: 'GET',
+        path: config.endpoints.session,
+        handler: async ({ context }) => {
+          if (!context.auth) {
+            return {
+              statusCode: 200,
+              body: { authenticated: false }
+            };
           }
-          
-          // Link the provider to the current user
-          const resource = api.resources[config.usersResource];
-          const providerField = `${provider}_id`;
-          
-          await resource.patch({
-            id: req.auth.userId,
-            inputRecord: {
-              data: {
-                type: config.usersResource,
-                id: req.auth.userId,
-                attributes: {
-                  [providerField]: providerId
-                }
-              }
+
+          return {
+            statusCode: 200,
+            body: {
+              authenticated: true,
+              user: {
+                id: context.auth.userId,
+                email: context.auth.email,
+                roles: context.auth.roles
+              },
+              expiresAt: new Date(context.auth.token.exp * 1000).toISOString()
             }
-          }, { auth: { userId: req.auth.userId, system: true } });
-          
-          log.info('Provider linked successfully', {
-            userId: req.auth.userId,
-            provider,
-            providerId
-          });
-          
-          res.json({
-            success: true,
-            message: `${provider} account linked successfully`,
-            provider,
-            userId: req.auth.userId
-          });
-          
-        } catch (error) {
-          log.error('Failed to link provider', {
-            error: error.message,
-            provider,
-            userId: req.auth.userId
-          });
-          
-          res.status(400).json({
-            error: 'Failed to link provider',
-            details: error.message
-          });
+          };
         }
       });
-      
-      log.info('Added /auth/link-provider endpoint');
+
+      log.info(`Added session endpoint: GET ${config.endpoints.session}`);
     }
     
     /*
      * Summary: Optional endpoints provide REST API access to auth operations.
      * Enable via config: endpoints: { logout: '/auth/logout', session: '/auth/session' }
-     * Always enabled: /auth/me, /auth/link-provider
+     * Always enabled: /auth/me
      */
     
     log.info('JWT authentication plugin installed successfully', {
