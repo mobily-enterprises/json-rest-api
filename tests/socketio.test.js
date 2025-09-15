@@ -14,7 +14,7 @@ import {
 import { createWebSocketApi } from './fixtures/api-configs.js';
 
 // Create JWT token using jose
-async function createToken(payload = {}, secret = 'test-secret') {
+async function createToken(payload = {}, secret = 'test-secret-key') {
   const encoder = new TextEncoder();
   const key = encoder.encode(secret);
   

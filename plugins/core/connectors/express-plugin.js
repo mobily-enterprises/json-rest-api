@@ -148,22 +148,28 @@ export const ExpressPlugin = {
       
       // Add transport data to context
       context.transport = transportData;
-      const shouldContinue = await runHooks('transport:request', context);
-      
-      if (!shouldContinue || context.handled) {
-        if (context.rejection) {
-          // Apply response headers from hooks
-          if (transportData.response.headers) {
-            res.set(transportData.response.headers);
-          }
-          return res.status(context.rejection.status || 500).json({
-            errors: [{
-              status: String(context.rejection.status || 500),
-              title: context.rejection.title || 'Request Rejected',
-              detail: context.rejection.message
-            }]
-          });
+
+      // Run transport hooks - don't check return value for consistency with other hooks
+      // Hooks communicate via context flags (rejection, handled) not return values
+      await runHooks('transport:request', context);
+
+      // Check if request was rejected (e.g., authentication failure)
+      if (context.rejection) {
+        // Apply response headers from hooks
+        if (transportData.response.headers) {
+          res.set(transportData.response.headers);
         }
+        return res.status(context.rejection.status || 500).json({
+          errors: [{
+            status: String(context.rejection.status || 500),
+            title: context.rejection.title || 'Request Rejected',
+            detail: context.rejection.message
+          }]
+        });
+      }
+
+      // Check if request was already handled by a hook
+      if (context.handled) {
         return;
       }
       

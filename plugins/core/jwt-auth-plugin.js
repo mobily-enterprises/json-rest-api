@@ -434,18 +434,26 @@ export const JwtAuthPlugin = {
     addHook('scope:added', 'jwt-process-auth-rules', {}, ({ context, scopes }) => {
       const { scopeName } = context;
       const scope = scopes[scopeName];
-      
+
+      log.info(`JWT: scope:added hook called for ${scopeName}`, {
+        hasContext: !!context,
+        contextKeys: Object.keys(context),
+        hasScopeOptions: !!context.scopeOptions,
+        hasAuth: !!context.scopeOptions?.auth,
+        actualAuth: context.auth || context.scopeOptions?.auth || scope?.vars?.auth
+      });
+
       // Extract auth rules from the resource definition
       const auth = context.scopeOptions?.auth;
-      
+
       if (!auth) {
         log.trace(`No auth rules defined for scope: ${scopeName}`);
         return;
       }
-      
+
       // Store auth rules in scope vars for later permission checking
       scope.vars.authRules = auth;
-      
+
       log.info(`Auth rules registered for ${scopeName}`, {
         query: auth.query,
         get: auth.get,
@@ -1091,11 +1099,13 @@ export const JwtAuthPlugin = {
         const minimalRecord = context.originalContext?.minimalRecord;
         const auth = context.originalContext?.auth;
 
-        log.trace('Checking permissions', {
+        log.info('DECLARATIVE AUTH: Checking permissions', {
           scopeName,
           operation,
           hasAuth: !!auth?.userId,
-          userId: auth?.userId
+          userId: auth?.userId,
+          providerId: auth?.providerId,
+          authRules: scopeVars?.authRules?.[operation]
         });
         
         const authRules = scopeVars?.authRules;
@@ -1147,11 +1157,18 @@ export const JwtAuthPlugin = {
             
             // Run the checker (pass originalContext to the checker)
             const result = await checker(context.originalContext || context, {
-              existingRecord: minimalRecord, 
-              scopeVars, 
-              param 
+              existingRecord: minimalRecord,
+              scopeVars,
+              param
             });
-            
+
+            log.debug(`Auth rule '${rule}' result for ${scopeName}.${operation}:`, {
+              result,
+              param,
+              hasChecker: !!checker,
+              userId: (context.originalContext || context).auth?.userId
+            });
+
             if (result) {
               log.debug(`Auth rule '${rule}' passed for ${scopeName}.${operation}`);
               passed = true;
@@ -1170,7 +1187,8 @@ export const JwtAuthPlugin = {
           log.warn(`Access denied for ${scopeName}.${operation}`, {
             requiredRules: rules,
             failedChecks: failureReasons,
-            userId: context.auth?.userId
+            userId: context.auth?.userId,
+            providerId: context.auth?.providerId
           });
           const error = new Error(
             `Access denied. Required one of: ${rules.join(', ')}. ` +
@@ -1184,6 +1202,10 @@ export const JwtAuthPlugin = {
           passedRule: rules.find(r => !failureReasons.includes(r)),
           userId: auth?.userId
         });
+
+        // Set flag to indicate auth was granted
+        context.authGranted = true;
+        return false; // Stop chain - no need to run ownership filter
       }
     );
 
@@ -1261,7 +1283,14 @@ export const JwtAuthPlugin = {
     
     // Add verifyToken helper for other plugins (like socketio)
     // This allows external plugins to verify JWT tokens using our config
-    helpers.verifyToken = (token) => verifyToken(token, config, log);
+    // Use the default provider's configuration for verification
+    helpers.verifyToken = (token) => {
+      const providerConfig = config.providers[config.defaultProvider];
+      if (!providerConfig) {
+        throw new Error(`Default provider '${config.defaultProvider}' not found`);
+      }
+      return verifyToken(token, providerConfig, log);
+    };
     
     // Add auth helpers using the standard pattern
     helpers.auth = {
@@ -1391,10 +1420,12 @@ export const JwtAuthPlugin = {
        * return { message: 'Logged out successfully' };
        */
       async logout(context) {
+        log.debug('Logout called with context.auth:', context.auth);
+
         if (!context.auth?.token) {
           throw new Error('No active session to logout');
         }
-        
+
         const token = context.auth.token;
         if (!token.jti) {
           throw new Error('Token must have jti claim for revocation');
@@ -1403,12 +1434,27 @@ export const JwtAuthPlugin = {
         // Add to revocation store
         if (config.revocation.enabled) {
           if (config.revocation.storage === 'database') {
-            await api.resources[config.revocation.tableName].post({
-              jti: token.jti,
-              user_id: context.auth.userId,
-              expires_at: new Date(token.exp * 1000),
-              revoked_at: new Date()
-            });
+            try {
+              const revokeData = {
+                jti: token.jti,
+                user_id: context.auth.userId || context.auth.providerId || 'unknown',
+                expires_at: new Date(token.exp * 1000),
+                revoked_at: new Date()
+              };
+              log.debug('Attempting to save revoked token', revokeData);
+              await api.resources[config.revocation.tableName].post(revokeData);
+            } catch (postError) {
+              log.error('Failed to save revoked token to database', {
+                error: postError.message,
+                jti: token.jti,
+                userId: context.auth.userId,
+                providerId: context.auth.providerId,
+                exp: token.exp,
+                tableName: config.revocation.tableName,
+                authContext: context.auth
+              });
+              throw postError;
+            }
           } else {
             // Memory storage
             state.memoryRevocationStore.set(token.jti, {

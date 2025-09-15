@@ -480,8 +480,13 @@ export async function createWebSocketApi(knex, pluginOptions = {}) {
   
   // Add JWT auth plugin (required by SocketIO plugin)
   await api.use(JwtAuthPlugin, {
-    secret: 'test-secret-key',
-    expiresIn: '1h'
+    providers: {
+      default: {
+        secret: 'test-secret-key',
+        algorithms: ['HS256']
+      }
+    },
+    defaultProvider: 'default'
   });
   
   // Add SocketIO plugin

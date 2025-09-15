@@ -62,7 +62,13 @@ describe('JWT Auth Plugin', () => {
     
     // Install JWT auth plugin with all features enabled
     await api.use(JwtAuthPlugin, {
-      secret: TEST_SECRET,
+      providers: {
+        default: {
+          secret: TEST_SECRET,
+          algorithms: ['HS256']
+        }
+      },
+      defaultProvider: 'default',
       revocation: {
         enabled: true,
         storage: 'database'
@@ -181,38 +187,37 @@ describe('JWT Auth Plugin', () => {
       assert.equal(response.body.data.length, 1);
     });
     
-    it('should not populate context.auth for expired tokens', async () => {
+    it('should return 401 for expired tokens', async () => {
       const token = await createToken({}, { expiresIn: -1 }); // Already expired
-      
-      // Try to access protected resource with expired token
+
+      // Try to access with expired token
       const response = await request(app)
         .get('/api/countries')
         .set('Authorization', `Bearer ${token}`)
         .set('Accept', 'application/vnd.api+json');
-      
-      // Should still return 200 but without auth context
-      // (unless the resource requires authentication)
-      assert.equal(response.status, 200);
+
+      // Should return 401 for expired token
+      assert.equal(response.status, 401);
     });
     
-    it('should not populate context.auth for invalid signatures', async () => {
+    it('should return 401 for invalid signatures', async () => {
       // Create token with wrong secret
       const encoder = new TextEncoder();
       const wrongSecret = encoder.encode('wrong-secret');
-      
+
       const token = await new SignJWT(TEST_USER)
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
         .setExpirationTime('1h')
         .sign(wrongSecret);
-      
+
       const response = await request(app)
         .get('/api/countries')
         .set('Authorization', `Bearer ${token}`)
         .set('Accept', 'application/vnd.api+json');
-      
-      // Should still return 200 but without auth context
-      assert.equal(response.status, 200);
+
+      // Should return 401 for invalid signature
+      assert.equal(response.status, 401);
     });
     
     it('should allow requests without tokens', async () => {
@@ -303,6 +308,11 @@ describe('JWT Auth Plugin', () => {
         .post('/auth/logout')
         .set('Authorization', `Bearer ${token}`)
         .set('Accept', 'application/json');
+
+      // Debug: Log the response if it's not 200
+      if (logoutResponse.status !== 200) {
+        console.log('Logout failed:', logoutResponse.status, logoutResponse.body);
+      }
 
       assert.equal(logoutResponse.status, 200);
       assert.equal(logoutResponse.body.success, true);

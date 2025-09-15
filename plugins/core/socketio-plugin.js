@@ -302,6 +302,7 @@ export const SocketIOPlugin = {
         socket.on('subscribe', async (data, callback) => {
           try {
             const { resource, filters = {}, include, fields, subscriptionId } = data;
+            const auth = socket.data.auth; // Get auth from socket data
 
             // Validate resource exists
             if (!scopes[resource]) {
@@ -341,7 +342,7 @@ export const SocketIOPlugin = {
               const searchSchemaInstance = scope.vars.schemaInfo?.searchSchemaInstance;
               const searchSchemaStructure = scope.vars.schemaInfo?.searchSchemaStructure;
 
-              if (!Object.keys(searchSchemaStructure)) {
+              if (!searchSchemaStructure || Object.keys(searchSchemaStructure).length === 0) {
                 const error = {
                   code: 'FILTERING_NOT_ENABLED',
                   message: `Filtering is not enabled for resource '${resource}'`
