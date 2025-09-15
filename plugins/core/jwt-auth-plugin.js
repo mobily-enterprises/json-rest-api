@@ -390,13 +390,24 @@ export const JwtAuthPlugin = {
     
     /* -----------------------------------------------------------------------
      * HOOK REGISTRATIONS
-     * 
+     *
      * Hooks integrate the JWT plugin with the REST API flow.
      * They execute in this order for a typical authenticated request:
-     * 
+     *
      * 1. scope:added (at startup) - Process auth rules from resource definitions
      * 2. transport:request (per request) - Validate JWT and populate context.auth
      * 3. checkPermissions (per operation) - Enforce auth rules before data access
+     *
+     * OWNERSHIP FILTERING - Three-state logic:
+     * Resources can control ownership filtering with the 'ownership' option:
+     * - ownership: true   -> ALWAYS filter by user_id (even if field doesn't exist)
+     * - ownership: false  -> NEVER filter by user_id (even if field exists)
+     * - ownership: undefined -> AUTO filter based on user_id field presence
+     *
+     * Examples:
+     * - projects: has user_id field, no ownership option = AUTO filters by owner
+     * - users: has user_id field, ownership: false = NEVER filters
+     * - special_table: no user_id field, ownership: true = ALWAYS filters
      * 
      * Example request flow:
      * - Client: POST /api/posts with Bearer token
@@ -453,10 +464,14 @@ export const JwtAuthPlugin = {
 
       // Skip excluded resources
       if (config.autoOwnership.excludeResources.includes(scopeName)) return;
-      
-      // Check if resource has ownership enabled via resource options
+
+      // Skip if ownership is explicitly disabled
+      if (scopeOptions?.ownership === false) return;
+
+      // For auto-adding fields, only proceed if ownership is explicitly true
+      // We don't auto-add fields just because the field exists (that would be circular logic)
       const hasOwnership = scopeOptions?.ownership === true;
-      
+
       if (!hasOwnership) return;
       
       const ownershipField = config.autoOwnership.field;
@@ -537,28 +552,36 @@ export const JwtAuthPlugin = {
         return;
       }
       
-      // Check if resource has ownership enabled
-      const hasOwnership = scopeOptions?.ownership === true;
-      
-      log.trace('Auto-ownership: checking configuration', {
-        scopeName,
-        method: context.method,
-        scopeOptions: scopeOptions,
-        ownership: scopeOptions?.ownership,
-        hasOwnership,
-        userId: context.auth?.userId
-      });
-      
-      if (!hasOwnership) return;
-      
-      // Only set on POST (create)
-      if (context.method !== 'post') return;
-      
+      // Skip if ownership is explicitly disabled
+      if (scopeOptions?.ownership === false) return;
+
       const ownershipField = config.autoOwnership.field;
-      
+
       // Check if schema has the ownership field
       const scope = scopes[scopeName];
       const schemaInfo = scope?.vars?.schemaInfo;
+      const hasOwnershipField = !!schemaInfo?.schemaStructure?.[ownershipField];
+
+      // Three-state logic for auto-setting ownership:
+      // - ownership: true -> ALWAYS set (even if no user_id field in schema)
+      // - ownership: false -> NEVER set (even if has user_id field)
+      // - ownership: undefined -> AUTO set if user_id field exists
+      const shouldSetOwnership = scopeOptions?.ownership === true ||
+                                 (scopeOptions?.ownership === undefined && hasOwnershipField);
+
+      log.trace('Auto-ownership: checking configuration', {
+        scopeName,
+        method: context.method,
+        ownershipOption: scopeOptions?.ownership,
+        hasOwnershipField,
+        shouldSetOwnership,
+        userId: context.auth?.userId
+      });
+
+      if (!shouldSetOwnership) return;
+      
+      // Only set on POST (create)
+      if (context.method !== 'post') return;
       if (!schemaInfo?.schemaStructure?.[ownershipField]) {
         log.warn(`Resource '${scopeName}' has ownership enabled but no ${ownershipField} field in schema`);
         return;
@@ -643,21 +666,37 @@ export const JwtAuthPlugin = {
         return;
       }
 
-      // Check if resource has ownership enabled
-      const hasOwnership = scopeOptions?.ownership === true;
-
-      log.trace(`Ownership check for ${scopeName}: hasOwnership=${hasOwnership}, scopeOptions:`, scopeOptions);
-
-      if (!hasOwnership) {
-        log.trace(`Ownership filter skipped for ${scopeName} - ownership not enabled`);
+      // Check if ownership is explicitly disabled (ownership: false)
+      if (scopeOptions?.ownership === false) {
+        log.trace(`Ownership filter explicitly disabled for ${scopeName}`);
         return;
       }
 
       const ownershipField = config.autoOwnership.field;
-      
+
       // Check if schema has the ownership field
       const scope = scopes[scopeName];
       const schemaInfo = scope?.vars?.schemaInfo;
+      const hasOwnershipField = !!schemaInfo?.schemaStructure?.[ownershipField];
+
+      // Three-state ownership logic:
+      // - ownership: true -> ALWAYS filter (even if no user_id field)
+      // - ownership: false -> NEVER filter (even if has user_id field)
+      // - ownership: undefined -> AUTO detect based on user_id field presence
+      const shouldFilterByOwner = scopeOptions?.ownership === true ||
+                                  (scopeOptions?.ownership === undefined && hasOwnershipField);
+
+      log.trace(`Ownership check for ${scopeName}:`, {
+        ownershipOption: scopeOptions?.ownership,
+        hasOwnershipField,
+        shouldFilterByOwner,
+        decision: shouldFilterByOwner ? 'WILL FILTER' : 'WILL NOT FILTER'
+      });
+
+      if (!shouldFilterByOwner) {
+        log.trace(`Ownership filter skipped for ${scopeName} - not applicable`);
+        return;
+      }
 
       log.trace(`Schema check for ${scopeName}:`, {
         hasScope: !!scope,
