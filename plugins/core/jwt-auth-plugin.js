@@ -753,11 +753,11 @@ export const JwtAuthPlugin = {
         }
         
         // Step 3: Get provider-specific user ID from token
-        console.log('🔵 JWT AUTH: Token payload:', JSON.stringify(payload, null, 2));
-        console.log('🔵 JWT AUTH: Provider config userIdField:', providerConfig.userIdField);
+        log.trace('JWT AUTH: Token payload:', { payload });
+        log.trace('JWT AUTH: Provider config userIdField:', { userIdField: providerConfig.userIdField });
         const providerId = payload[providerConfig.userIdField];
         const email = payload[providerConfig.emailField];
-        console.log('🔵 JWT AUTH: Extracted providerId:', providerId, 'email:', email);
+        log.trace('JWT AUTH: Extracted providerId and email', { providerId, email });
 
         // Step 4: Look up internal user ID from provider ID
         let internalUserId = null;
@@ -1569,66 +1569,7 @@ export const JwtAuthPlugin = {
      * The plugin can automatically create REST endpoints for auth operations.
      * These are opt-in via configuration.
      * ----------------------------------------------------------------------- */
-    
-    // Add logout endpoint if configured
-    if (config.endpoints.logout && api.addRoute) {
-      // Add as a public route that checks its own auth
-      await api.addRoute({
-        method: 'POST',
-        path: config.endpoints.logout,
-        handler: async ({ context }) => {
-        try {
-          if (!context.auth) {
-            return {
-              statusCode: 401,
-              body: { error: 'Authentication required' }
-            };
-          }
-          
-          const result = await helpers.auth.logout(context);
-          return { statusCode: 200, body: result };
-        } catch (error) {
-          return {
-            statusCode: 400,
-            body: { error: error.message }
-          };
-        }
-      }});
-      
-      log.info(`Added logout endpoint: POST ${config.endpoints.logout}`);
-    }
-    
-    // Add session endpoint if configured  
-    // Returns current user info or {authenticated: false} for anonymous
-    if (config.endpoints.session && api.addRoute) {
-      await api.addRoute({
-        method: 'GET',
-        path: config.endpoints.session,
-        handler: async ({ context }) => {
-        if (!context.auth) {
-          return {
-            statusCode: 200,
-            body: { authenticated: false }
-          };
-        }
-        
-        return {
-          statusCode: 200,
-          body: {
-            authenticated: true,
-            user: {
-              id: context.auth.userId,
-              email: context.auth.email,
-              roles: context.auth.roles
-            },
-            expiresAt: new Date(context.auth.token.exp * 1000).toISOString()
-          }
-        };
-      }});
-      
-      log.info(`Added session endpoint: GET ${config.endpoints.session}`);
-    }
-    
+
     await api.addRoute({
       method: 'GET',
       path: '/api/auth/me',
