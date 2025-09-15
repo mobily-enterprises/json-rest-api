@@ -125,8 +125,7 @@ export default async function queryMethod({
   // Centralised checkPermissions function
   await scope.checkPermissions({
     method: 'query',
-    auth: context.auth,
-    transaction: context.transaction
+    originalContext: context,
   });
 
   await runHooks('beforeData');

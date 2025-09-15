@@ -67,10 +67,7 @@ export default async function deleteMethod({
     // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'delete',
-      auth: context.auth,
-      id: context.id,
-      minimalRecord: context.minimalRecord,
-      transaction: context.transaction
+      originalContext: context,
     });
     
     // Before data operations

@@ -170,11 +170,7 @@ export default async function putMethod({
     // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'put',
-      auth: context.auth,
-      id: context.id,
-      minimalRecord: context.minimalRecord,
-      isUpdate: context.isUpdate,
-      transaction: context.transaction
+      originalContext: context,
     });
   
     await runHooks('beforeDataCall');

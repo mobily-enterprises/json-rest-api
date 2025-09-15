@@ -322,8 +322,7 @@ export const SocketIOPlugin = {
             try {
               await scope.checkPermissions({
                 method: 'query',
-                auth: socket.data.auth,
-                transaction: null
+                originalContext: { auth }
               });
               // No error thrown = permission granted, continue
             } catch (permissionError) {

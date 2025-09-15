@@ -1115,13 +1115,13 @@ export const JwtAuthPlugin = {
           rules,
           hasAuth: !!context.auth
         });
+
         
         // Check if any rule passes (OR logic)
         // Example: auth.patch = ['is_owner', 'admin'] means:
         // Allow if user is owner OR user is admin
         let passed = false;
         let failureReasons = [];
-        debugger
         for (const rule of rules) {
           try {
             let checker;
@@ -1184,7 +1184,67 @@ export const JwtAuthPlugin = {
         });
       }
     );
+
+
     
+    // HOOK: Check ownership for GET operations (single record fetch)
+    // The knexQueryFiltering hook only applies to query operations, not GET by ID
+    // This hook runs during checkPermissions to verify ownership of minimalRecord
+    addHook('checkPermissions', 'jwt-check-ownership-for-get', { sequence: -80 },
+      async ({ context, scope, scopeName, scopeOptions }) => {
+        
+        if (scopeName === 'projects') debugger
+
+        // Only check for GET operations (single record)
+        if (!['get', 'put', 'patch', 'delete'].includes(context.method)) return;
+
+        // Skip if auto-ownership is disabled
+        if (!config.autoOwnership.enabled || !config.autoOwnership.filterByOwner) return;
+
+        // Skip excluded resources
+        if (config.autoOwnership.excludeResources.includes(scopeName)) return;
+
+        // Skip if no auth context
+        if (!context.auth?.userId) return;
+
+        // Skip for admin users
+        if (context.auth.roles?.includes('admin')) return;
+
+        // Check if ownership is explicitly disabled
+        if (scopeOptions?.ownership === false) return;
+
+        const ownershipField = config.autoOwnership.field;
+
+        // Check if schema has the ownership field
+        const schemaInfo = scope?.vars?.schemaInfo;
+        const hasOwnershipField = !!schemaInfo?.schemaStructure?.[ownershipField];
+
+        // Three-state ownership logic (same as query filtering)
+        const shouldCheckOwnership = scopeOptions?.ownership === true ||
+                                    (scopeOptions?.ownership === undefined && hasOwnershipField);
+
+        if (!shouldCheckOwnership) return;
+
+        // Get the minimal record that was already fetched
+        const record = context.minimalRecord;
+        if (!record) return; // No record fetched (404 will be handled elsewhere)
+
+        // Check ownership
+        const recordOwnerId = record.attributes[ownershipField];
+        if (recordOwnerId && String(recordOwnerId) !== String(context.auth.userId)) {
+          log.info(`Ownership check failed for GET ${scopeName}/${context.id}`, {
+            recordOwnerId,
+            userId: context.auth.userId
+          });
+
+          // Return 404 instead of 403 to prevent information leakage
+          // (don't reveal that the record exists but is owned by someone else)
+          const { RestApiResourceError } = await import('../../lib/rest-api-errors.js');
+          throw new RestApiResourceError('Resource not found', { subtype: 'not_found' });
+        }
+      }
+    );
+
     /* -----------------------------------------------------------------------
      * HELPER METHODS
      * 

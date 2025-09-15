@@ -87,8 +87,7 @@ export default async function postMethod({
     // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'post',
-      auth: context.auth,
-      transaction: context.transaction
+      originalContext: context,
     });
 
     await runHooks('beforeDataCall');

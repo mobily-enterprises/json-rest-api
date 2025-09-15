@@ -5,13 +5,10 @@
  */
 export default async function checkPermissionsMethod({ context, params, runHooks, scopeName, scopes, helpers }) {
  
+  debugger
   Object.assign(context, {
     method: params.method,
-    isUpdate: params.isUpdate,
-    id: params.id,
-    auth: params.auth,
-    transaction: params.transaction,
-    minimalRecord: params.minimalRecord
+    originalContext: params.originalContext,
   })
   
   await runHooks('checkPermissions');

@@ -102,10 +102,7 @@ export default async function patchMethod({
     // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'patch',
-      auth: context.auth,
-      id: context.id,
-      minimalRecord: context.minimalRecord,
-      transaction: context.transaction
+      originalContext: context,
     });
 
     // Debug: Log what's being patched

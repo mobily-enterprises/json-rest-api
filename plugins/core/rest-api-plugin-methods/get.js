@@ -88,10 +88,7 @@ export default async function getMethod({
   // Centralised checkPermissions function
   await scope.checkPermissions({
     method: 'get',
-    auth: context.auth,
-    id: context.id,
-    minimalRecord: context.minimalRecord,
-    transaction: context.transaction
+    originalContext: context,
   });
   
   await runHooks('beforeData');
