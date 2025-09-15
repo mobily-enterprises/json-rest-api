@@ -461,10 +461,11 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
       // Check permissions using the related scope's checkPermissions
       await relatedScope.checkPermissions({
         method: 'get',
-        auth: context.auth,
-        id: item.id,
-        minimalRecord: record,
-        transaction: context.transaction
+        originalContext: {
+          ...context,
+          id: item.id,
+          minimalRecord: record
+        }
       });
     }
   }

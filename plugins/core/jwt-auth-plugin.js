@@ -20,13 +20,14 @@
  */
 
 import { requirePackage } from 'hooked-api';
-import { 
-  verifyToken, 
+import {
+  verifyToken,
   decodeToken,
-  createRevocationResource, 
+  createRevocationResource,
   checkRevocation,
-  cleanupExpiredTokens 
+  cleanupExpiredTokens
 } from './lib/jwt-auth-helpers.js';
+import { RestApiResourceError } from '../../lib/rest-api-errors.js';
 
 /* =========================================================================
  * PLUGIN EXPORTS
@@ -1083,17 +1084,18 @@ export const JwtAuthPlugin = {
     // 4. If ANY rule passes = allow, if ALL fail = throw 403 error
     // 
     // Sequence -100 ensures this runs BEFORE custom permission checks
-    addHook('checkPermissions', 'declarative-auth-check', { sequence: -100 }, 
+    addHook('checkPermissions', 'declarative-auth-check', { sequence: -100 },
       async ({ context, scope, scopeName }) => {
         const operation = context.method; // 'post', 'get', 'patch', etc.
         const scopeVars = scope?.vars;
-        const existingRecord = context.minimalRecord;
-        
+        const minimalRecord = context.originalContext?.minimalRecord;
+        const auth = context.originalContext?.auth;
+
         log.trace('Checking permissions', {
           scopeName,
           operation,
-          hasAuth: !!context.auth?.userId,
-          userId: context.auth?.userId
+          hasAuth: !!auth?.userId,
+          userId: auth?.userId
         });
         
         const authRules = scopeVars?.authRules;
@@ -1113,7 +1115,7 @@ export const JwtAuthPlugin = {
         
         log.debug(`Checking auth rules for ${scopeName}.${operation}`, {
           rules,
-          hasAuth: !!context.auth
+          hasAuth: !!auth
         });
 
         
@@ -1143,9 +1145,9 @@ export const JwtAuthPlugin = {
               throw new Error(`Unknown auth rule: ${rule}`);
             }
             
-            // Run the checker
-            const result = await checker(context, { 
-              existingRecord, 
+            // Run the checker (pass originalContext to the checker)
+            const result = await checker(context.originalContext || context, {
+              existingRecord: minimalRecord, 
               scopeVars, 
               param 
             });
@@ -1180,7 +1182,7 @@ export const JwtAuthPlugin = {
         
         log.debug(`Access granted for ${scopeName}.${operation}`, {
           passedRule: rules.find(r => !failureReasons.includes(r)),
-          userId: context.auth?.userId
+          userId: auth?.userId
         });
       }
     );
@@ -1192,8 +1194,13 @@ export const JwtAuthPlugin = {
     // This hook runs during checkPermissions to verify ownership of minimalRecord
     addHook('checkPermissions', 'jwt-check-ownership-for-get', { sequence: -80 },
       async ({ context, scope, scopeName, scopeOptions }) => {
-        
+
         if (scopeName === 'projects') debugger
+
+        // Extract the needed values from originalContext
+        const auth = context.originalContext?.auth;
+        const minimalRecord = context.originalContext?.minimalRecord;
+        const id = context.originalContext?.id;
 
         // Only check for GET operations (single record)
         if (!['get', 'put', 'patch', 'delete'].includes(context.method)) return;
@@ -1205,10 +1212,10 @@ export const JwtAuthPlugin = {
         if (config.autoOwnership.excludeResources.includes(scopeName)) return;
 
         // Skip if no auth context
-        if (!context.auth?.userId) return;
+        if (!auth?.userId) return;
 
         // Skip for admin users
-        if (context.auth.roles?.includes('admin')) return;
+        if (auth.roles?.includes('admin')) return;
 
         // Check if ownership is explicitly disabled
         if (scopeOptions?.ownership === false) return;
@@ -1226,20 +1233,18 @@ export const JwtAuthPlugin = {
         if (!shouldCheckOwnership) return;
 
         // Get the minimal record that was already fetched
-        const record = context.minimalRecord;
-        if (!record) return; // No record fetched (404 will be handled elsewhere)
+        if (!minimalRecord) return; // No record fetched (404 will be handled elsewhere)
 
         // Check ownership
-        const recordOwnerId = record.attributes[ownershipField];
-        if (recordOwnerId && String(recordOwnerId) !== String(context.auth.userId)) {
-          log.info(`Ownership check failed for GET ${scopeName}/${context.id}`, {
+        const recordOwnerId = minimalRecord.attributes[ownershipField];
+        if (recordOwnerId && String(recordOwnerId) !== String(auth.userId)) {
+          log.info(`Ownership check failed for GET ${scopeName}/${id}`, {
             recordOwnerId,
-            userId: context.auth.userId
+            userId: auth.userId
           });
 
           // Return 404 instead of 403 to prevent information leakage
           // (don't reveal that the record exists but is owned by someone else)
-          const { RestApiResourceError } = await import('../../lib/rest-api-errors.js');
           throw new RestApiResourceError('Resource not found', { subtype: 'not_found' });
         }
       }

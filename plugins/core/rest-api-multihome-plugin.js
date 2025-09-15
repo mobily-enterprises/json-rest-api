@@ -177,42 +177,47 @@ export const MultiHomePlugin = {
       // Add checkPermissions hook to enforce tenant isolation
       // This is the single source of truth for single-record access control
       addHook('checkPermissions', 'multihome-check-permissions', {}, async ({ context, scopeName }) => {
+        // Extract the needed values from originalContext
+        const auth = context.originalContext?.auth;
+        const minimalRecord = context.originalContext?.minimalRecord;
+        const id = context.originalContext?.id;
+
         // Skip excluded resources
         if (vars.multihome.excludeResources.includes(scopeName)) {
           return;
         }
-        
+
         // Skip if no multihome context
-        if (!context.auth?.multihome_id) {
+        if (!auth?.multihome_id) {
           if (vars.multihome.requireAuth) {
             throw new Error('No multihome context available');
           }
           return;
         }
-        
+
         // Get the scope to check if it has multihome field
         const scope = scopes[scopeName];
         const hasMultihomeField = scope?.vars?.schemaInfo?.schemaStructure?.[vars.multihome.field];
-        
+
         if (!hasMultihomeField) {
           return; // Resource doesn't support multihome
         }
-        
+
         // For operations on existing records, verify tenant ownership
-        if (context.minimalRecord) {
+        if (minimalRecord) {
           // minimalRecord is in JSON:API format, so tenant_id is in attributes
-          const recordTenant = context.minimalRecord.attributes?.[vars.multihome.field];
-          const userTenant = context.auth.multihome_id;
-          
+          const recordTenant = minimalRecord.attributes?.[vars.multihome.field];
+          const userTenant = auth.multihome_id;
+
           if (recordTenant !== userTenant) {
             log.error('Multihome permission violation', {
               scopeName,
-              recordId: context.id,
+              recordId: id,
               recordTenant: recordTenant,
               userTenant: userTenant,
               method: context.method
             });
-            
+
             // Return 404 for GET to prevent information leakage
             // Return 403 for other operations
             if (context.method === 'get') {
