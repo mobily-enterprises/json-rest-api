@@ -604,47 +604,80 @@ export const JwtAuthPlugin = {
     // HOOK: Automatically filter queries by owner (unless admin)
     addHook('knexQueryFiltering', 'jwt-filter-by-owner', { sequence: -40 }, async ({ context, scopes, scopeOptions }) => {
       // Skip if auto-ownership is disabled
-      if (!config.autoOwnership.enabled || !config.autoOwnership.filterByOwner) return;
-      
+      if (!config.autoOwnership.enabled || !config.autoOwnership.filterByOwner) {
+        log.trace(`Ownership filter skipped - autoOwnership disabled or filterByOwner false`);
+        return;
+      }
+
       const { query, tableName, scopeName } = context.knexQuery;
-      
+
+      log.trace(`Ownership filter check for ${scopeName}:`, {
+        scopeName,
+        tableName,
+        hasAuth: !!context.auth,
+        userId: context.auth?.userId,
+        autoOwnershipEnabled: config.autoOwnership.enabled,
+        filterByOwner: config.autoOwnership.filterByOwner,
+        excludedResources: config.autoOwnership.excludeResources,
+        scopeOptions
+      });
+
       // Skip excluded resources
-      if (config.autoOwnership.excludeResources.includes(scopeName)) return;
-      
+      if (config.autoOwnership.excludeResources.includes(scopeName)) {
+        log.trace(`Ownership filter skipped for ${scopeName} - in exclude list`);
+        return;
+      }
+
       // Skip if no auth context
       if (!context.auth?.userId) {
         if (config.autoOwnership.requireOwnership) {
           throw new Error(`Cannot query ${scopeName} without authentication`);
         }
+        log.trace(`Ownership filter skipped for ${scopeName} - no auth context`);
         return;
       }
-      
+
       // Skip filtering for admins
       if (context.auth.roles?.includes('admin')) {
         log.trace(`Admin user - skipping ownership filter for ${scopeName}`);
         return;
       }
-      
+
       // Check if resource has ownership enabled
       const hasOwnership = scopeOptions?.ownership === true;
-      
-      if (!hasOwnership) return;
-      
+
+      log.trace(`Ownership check for ${scopeName}: hasOwnership=${hasOwnership}, scopeOptions:`, scopeOptions);
+
+      if (!hasOwnership) {
+        log.trace(`Ownership filter skipped for ${scopeName} - ownership not enabled`);
+        return;
+      }
+
       const ownershipField = config.autoOwnership.field;
       
       // Check if schema has the ownership field
       const scope = scopes[scopeName];
       const schemaInfo = scope?.vars?.schemaInfo;
+
+      log.trace(`Schema check for ${scopeName}:`, {
+        hasScope: !!scope,
+        hasSchemaInfo: !!schemaInfo,
+        hasSchemaStructure: !!schemaInfo?.schemaStructure,
+        ownershipField,
+        hasOwnershipField: !!schemaInfo?.schemaStructure?.[ownershipField],
+        schemaFields: schemaInfo?.schemaStructure ? Object.keys(schemaInfo.schemaStructure) : []
+      });
+
       if (!schemaInfo?.schemaStructure?.[ownershipField]) {
         log.trace(`Resource '${scopeName}' has no ${ownershipField} field - skipping ownership filter`);
         return;
       }
-      
+
       // Add WHERE clause for ownership
       query.where(function() {
         this.where(`${tableName}.${ownershipField}`, context.auth.userId);
       });
-      
+
       log.trace(`Added ownership filter for ${scopeName}: ${ownershipField} = ${context.auth.userId}`);
     });
     

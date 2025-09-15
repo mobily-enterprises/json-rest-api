@@ -164,7 +164,7 @@ export function extractToken(req) {
       return bearerMatch[1];
     }
   }
-  
+
   // Check cookies for session token (Auth.js pattern)
   const cookies = parseCookies(req.headers.cookie || '');
   if (cookies['__Secure-authjs.session-token']) {
@@ -173,7 +173,7 @@ export function extractToken(req) {
   if (cookies['authjs.session-token']) {
     return cookies['authjs.session-token'];
   }
-  
+
   return null;
 }
 
