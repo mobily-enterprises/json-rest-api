@@ -5,8 +5,157 @@
  * Creates app-owned sessions with refresh tokens from Google ID tokens
  */
 
+import { randomBytes, randomUUID } from 'crypto';
 import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
 import { normalizeGoogleToken } from './lib/jwt-auth-normalizers/google.js';
+
+function toSeconds(duration, fallbackSeconds) {
+  if (typeof duration === 'number') {
+    return duration;
+  }
+
+  if (typeof duration !== 'string') {
+    return fallbackSeconds;
+  }
+
+  const match = duration.trim().match(/^(\d+)([smhdw])$/i);
+  if (!match) {
+    return fallbackSeconds;
+  }
+
+  const value = Number(match[1]);
+  const unit = match[2].toLowerCase();
+
+  const unitMap = {
+    s: 1,
+    m: 60,
+    h: 60 * 60,
+    d: 24 * 60 * 60,
+    w: 7 * 24 * 60 * 60
+  };
+
+  return value * (unitMap[unit] || 1);
+}
+
+function buildRefreshCookie(value, maxAgeSeconds, { secureCookie, sameSite = 'Lax' } = {}) {
+  const parts = [
+    `refresh_token=${value}`,
+    'Path=/',
+    `Max-Age=${maxAgeSeconds}`,
+    'HttpOnly'
+  ];
+
+  if (secureCookie) {
+    parts.push('Secure');
+  }
+
+  if (sameSite) {
+    parts.push(`SameSite=${sameSite}`);
+  }
+
+  return parts.join('; ');
+}
+
+function buildRefreshRemovalCookie({ secureCookie, sameSite = 'Lax' } = {}) {
+  const parts = [
+    'refresh_token=',
+    'Path=/',
+    'Max-Age=0',
+    'HttpOnly'
+  ];
+
+  if (secureCookie) {
+    parts.push('Secure');
+  }
+
+  if (sameSite) {
+    parts.push(`SameSite=${sameSite}`);
+  }
+
+  return parts.join('; ');
+}
+
+function buildCsrfCookie(value, maxAgeSeconds, { secureCookie, sameSite = 'Lax' } = {}) {
+  const parts = [
+    `refresh_csrf=${value}`,
+    'Path=/',
+    `Max-Age=${maxAgeSeconds}`
+  ];
+
+  if (secureCookie) {
+    parts.push('Secure');
+  }
+
+  if (sameSite) {
+    parts.push(`SameSite=${sameSite}`);
+  }
+
+  return parts.join('; ');
+}
+
+function buildCsrfRemovalCookie({ secureCookie, sameSite = 'Lax' } = {}) {
+  const parts = [
+    'refresh_csrf=',
+    'Path=/',
+    'Max-Age=0'
+  ];
+
+  if (secureCookie) {
+    parts.push('Secure');
+  }
+
+  if (sameSite) {
+    parts.push(`SameSite=${sameSite}`);
+  }
+
+  return parts.join('; ');
+}
+
+function parseCookies(context) {
+  const cookieHeader = context?.req?.headers?.cookie;
+  const result = {};
+
+  if (!cookieHeader) {
+    return result;
+  }
+
+  const cookies = cookieHeader.split(';');
+  for (const cookie of cookies) {
+    const [name, ...rest] = cookie.trim().split('=');
+    if (!name) continue;
+    result[name] = decodeURIComponent(rest.join('='));
+  }
+
+  return result;
+}
+
+function getCookieValue(context, name) {
+  const cookies = parseCookies(context);
+  return cookies[name] || null;
+}
+
+function generateCsrfToken() {
+  return randomBytes(32).toString('hex');
+}
+
+function validateCsrf(context) {
+  const headerValue = context?.req?.headers?.['x-csrf-token'];
+  const csrfHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const csrfCookie = getCookieValue(context, 'refresh_csrf');
+
+  if (!csrfHeader || !csrfCookie) {
+    return false;
+  }
+
+  return csrfHeader.trim() === csrfCookie.trim();
+}
+
+function generateTokenId() {
+  if (typeof randomUUID === 'function') {
+    return randomUUID();
+  }
+  return randomBytes(16).toString('hex');
+}
 
 export const GoogleAuthPlugin = {
   name: 'google-auth',
@@ -22,7 +171,11 @@ export const GoogleAuthPlugin = {
       sessionExpiry: pluginOptions.sessionExpiry || '30d',
       refreshExpiry: pluginOptions.refreshExpiry || '90d',
       usersResource: pluginOptions.usersResource || 'users',
-      jwksUrl: 'https://www.googleapis.com/oauth2/v3/certs'
+      jwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
+      cookieSameSite: pluginOptions.cookieSameSite || 'Lax',
+      cookieSecure: pluginOptions.cookieSecure !== undefined
+        ? pluginOptions.cookieSecure
+        : process.env.NODE_ENV === 'production'
     };
 
     if (!config.clientId) {
@@ -84,6 +237,7 @@ export const GoogleAuthPlugin = {
 
             // Create app-owned session token
             // Using standard JWT claims (RFC 7519) with minimal custom claims
+            const accessTokenJti = generateTokenId();
             const sessionToken = await new SignJWT({
               sub: payload.sub,     // Standard 'subject' claim (Google provider ID)
               provider: 'google',   // Custom claim: which auth provider
@@ -93,10 +247,12 @@ export const GoogleAuthPlugin = {
               .setIssuedAt()
               .setIssuer('app')
               .setAudience('app')
-              .setExpirationTime('30d')
+              .setJti(accessTokenJti)
+              .setExpirationTime(config.sessionExpiry)
               .sign(secret);
 
             // Create refresh token
+            const refreshTokenJti = generateTokenId();
             const refreshToken = await new SignJWT({
               sub: payload.sub,     // Standard 'subject' claim
               provider: 'google',   // Keep provider for consistency
@@ -106,22 +262,35 @@ export const GoogleAuthPlugin = {
               .setIssuedAt()
               .setIssuer('app')
               .setAudience('app')
-              .setExpirationTime('90d')
+              .setJti(refreshTokenJti)
+              .setExpirationTime(config.refreshExpiry)
               .sign(secret);
 
             // Normalize user data using the existing normalizer
             const normalizedUser = normalizeGoogleToken(payload);
 
             // Calculate expiry times
-            const expiresIn = 30 * 24 * 60 * 60; // 30 days in seconds
+            const expiresIn = toSeconds(config.sessionExpiry, 30 * 24 * 60 * 60);
             const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+            const refreshMaxAge = toSeconds(config.refreshExpiry, 90 * 24 * 60 * 60);
+            const refreshCookie = buildRefreshCookie(refreshToken, refreshMaxAge, {
+              secureCookie: config.cookieSecure,
+              sameSite: config.cookieSameSite
+            });
+            const csrfToken = generateCsrfToken();
+            const csrfCookie = buildCsrfCookie(csrfToken, refreshMaxAge, {
+              secureCookie: config.cookieSecure,
+              sameSite: config.cookieSameSite
+            });
 
             // Return unwrapped, standardized session format
             return {
               statusCode: 200,
+              headers: {
+                'Set-Cookie': [refreshCookie, csrfCookie]
+              },
               body: {
                 access_token: sessionToken,
-                refresh_token: refreshToken,
                 expires_in: expiresIn,
                 expires_at: expiresAt,
                 token_type: 'Bearer',
@@ -157,9 +326,23 @@ export const GoogleAuthPlugin = {
         path: '/api/auth/google/refresh',
         handler: async ({ body, context }) => {
           try {
-            const { refresh_token } = body;
+            if (!validateCsrf(context)) {
+              return {
+                statusCode: 403,
+                body: { error: 'INVALID_CSRF_TOKEN' }
+              };
+            }
 
-            const { payload } = await jwtVerify(refresh_token, secret, {
+            let refreshToken = body?.refresh_token;
+            if (!refreshToken) {
+              refreshToken = getCookieValue(context, 'refresh_token');
+            }
+
+            if (!refreshToken) {
+              throw new Error('Missing refresh token');
+            }
+
+            const { payload } = await jwtVerify(refreshToken, secret, {
               issuer: 'app',
               audience: 'app'
             });
@@ -168,7 +351,28 @@ export const GoogleAuthPlugin = {
               throw new Error('Invalid token type');
             }
 
+            if (payload.jti && helpers.jwtAuth?.revokeToken) {
+              try {
+                let revocationUserId = `google:${payload.sub}`;
+                if (helpers.jwtAuth.getUserByProviderId) {
+                  const existingUser = await helpers.jwtAuth.getUserByProviderId(payload.sub, 'google');
+                  if (existingUser?.id) {
+                    revocationUserId = existingUser.id;
+                  }
+                }
+
+                await helpers.jwtAuth.revokeToken(payload.jti, revocationUserId, payload.exp || Math.floor(Date.now() / 1000));
+              } catch (revokeError) {
+                log.error('Failed to revoke previous refresh token', {
+                  error: revokeError?.message || revokeError,
+                  jti: payload.jti,
+                  sub: payload.sub
+                });
+              }
+            }
+
             // Issue new access token
+            const newAccessTokenJti = generateTokenId();
             const sessionToken = await new SignJWT({
               sub: payload.sub,     // Standard 'subject' claim
               provider: 'google',
@@ -178,14 +382,43 @@ export const GoogleAuthPlugin = {
               .setIssuedAt()
               .setIssuer('app')
               .setAudience('app')
-              .setExpirationTime('30d')
+              .setJti(newAccessTokenJti)
+              .setExpirationTime(config.sessionExpiry)
               .sign(secret);
+
+            const newRefreshTokenJti = generateTokenId();
+            const newRefreshToken = await new SignJWT({
+              sub: payload.sub,
+              provider: 'google',
+              type: 'refresh'
+            })
+              .setProtectedHeader({ alg: 'HS256' })
+              .setIssuedAt()
+              .setIssuer('app')
+              .setAudience('app')
+              .setJti(newRefreshTokenJti)
+              .setExpirationTime(config.refreshExpiry)
+              .sign(secret);
+
+            const refreshMaxAge = toSeconds(config.refreshExpiry, 90 * 24 * 60 * 60);
+            const refreshCookie = buildRefreshCookie(newRefreshToken, refreshMaxAge, {
+              secureCookie: config.cookieSecure,
+              sameSite: config.cookieSameSite
+            });
+            const newCsrfToken = generateCsrfToken();
+            const csrfCookie = buildCsrfCookie(newCsrfToken, refreshMaxAge, {
+              secureCookie: config.cookieSecure,
+              sameSite: config.cookieSameSite
+            });
 
             return {
               statusCode: 200,
+              headers: {
+                'Set-Cookie': [refreshCookie, csrfCookie]
+              },
               body: {
                 access_token: sessionToken,
-                expires_in: 30 * 24 * 60 * 60
+                expires_in: toSeconds(config.sessionExpiry, 30 * 24 * 60 * 60)
               }
             };
 
@@ -199,95 +432,64 @@ export const GoogleAuthPlugin = {
         }
       });
 
-      // Link Google account to existing user
       await api.addRoute({
         method: 'POST',
-        path: '/api/auth/google/link',
-        handler: async ({ body, context }) => {
-          try {
-            // Check if user is authenticated
-            if (!context.auth?.userId) {
-              return {
-                statusCode: 401,
-                body: { error: 'Must be logged in to link accounts' }
-              };
-            }
-
-            // Fetch the current user
-            log.info(`[Google Link] Fetching user with ID: ${context.auth.userId}`);
-            const userResult = await api.scopes.users.methods.get({
-              id: context.auth.userId
-            }, context);
-
-            const currentUser = userResult.data;
-            log.info(`[Google Link] Current user:`, currentUser);
-
-            const { credential } = body;
-
-            // Verify Google ID token
-            const { payload } = await jwtVerify(credential, JWKS, {
-              issuer: ['https://accounts.google.com', 'accounts.google.com'],
-              audience: config.clientId
-            });
-
-            // Check if email matches current user
-            log.info(`[Google Link] Comparing emails: Google=${payload.email}, Current=${currentUser.email}`);
-            if (payload.email !== currentUser.email) {
-              return {
-                statusCode: 400,
-                body: {
-                  error: 'EMAIL_MISMATCH',
-                  message: 'The Google account email must match your current account email'
-                }
-              };
-            }
-
-            // Check if this Google ID is already linked to another account
-            const existingUser = await api.scopes.users.methods.query({
-              filter: { google_id: payload.sub }
-            }, context);
-
-            if (existingUser.length > 0 && existingUser[0].id !== currentUser.id) {
-              return {
-                statusCode: 400,
-                body: {
-                  error: 'ALREADY_LINKED',
-                  message: 'This Google account is already linked to another user'
-                }
-              };
-            }
-
-            // Update current user with Google ID
-            log.info(`[Google Link] Updating user ${currentUser.id} with google_id: ${payload.sub}`);
-            await api.scopes.users.methods.patch({
-              inputRecord: {
-                id: currentUser.id,
-                google_id: payload.sub
-              }
-            }, context);
-
-            log.info(`Linked Google account ${payload.email} to user ${currentUser.id}`);
-
+        path: '/api/auth/google/logout',
+        handler: async ({ context }) => {
+          if (!validateCsrf(context)) {
             return {
-              statusCode: 200,
-              body: {
-                success: true,
-                linked: 'google',
-                message: 'Google account successfully linked'
-              }
-            };
-
-          } catch (error) {
-            log.error('Google account linking failed:', error);
-            return {
-              statusCode: 500,
-              body: { error: error.message || 'Failed to link Google account' }
+              statusCode: 403,
+              body: { error: 'INVALID_CSRF_TOKEN' }
             };
           }
+
+          const existingRefreshToken = getCookieValue(context, 'refresh_token');
+          if (existingRefreshToken) {
+            try {
+              const { payload } = await jwtVerify(existingRefreshToken, secret, {
+                issuer: 'app',
+                audience: 'app'
+              });
+
+              if (payload.jti && helpers.jwtAuth?.revokeToken) {
+                let revocationUserId = `google:${payload.sub}`;
+                if (helpers.jwtAuth.getUserByProviderId) {
+                  const existingUser = await helpers.jwtAuth.getUserByProviderId(payload.sub, 'google');
+                  if (existingUser?.id) {
+                    revocationUserId = existingUser.id;
+                  }
+                }
+
+                await helpers.jwtAuth.revokeToken(payload.jti, revocationUserId, payload.exp || Math.floor(Date.now() / 1000));
+              }
+            } catch (verifyError) {
+              log.warn('Failed to verify refresh token during logout', {
+                error: verifyError?.message || verifyError
+              });
+            }
+          }
+
+          const removalCookie = buildRefreshRemovalCookie({
+            secureCookie: config.cookieSecure,
+            sameSite: config.cookieSameSite
+          });
+          const csrfRemovalCookie = buildCsrfRemovalCookie({
+            secureCookie: config.cookieSecure,
+            sameSite: config.cookieSameSite
+          });
+
+          return {
+            statusCode: 200,
+            headers: {
+              'Set-Cookie': [removalCookie, csrfRemovalCookie]
+            },
+            body: { success: true }
+          };
         }
       });
 
-      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh, /api/auth/google/link');
+      // Link Google account to existing user
+      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh, /api/auth/google/logout');
     }
 
     // GOOGLE-SPECIFIC: Register as JWT provider for app-issued tokens
