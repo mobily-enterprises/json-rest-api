@@ -1,23 +1,34 @@
 /**
  * JWT Authentication Plugin for REST API
- * 
+ *
  * This plugin provides:
  * 1. JWT token validation (authentication only)
  * 2. Minimal built-in checkers: 'public', 'authenticated', 'owns'
  * 3. Framework for custom authorization checkers
  * 4. Token revocation support
  * 5. Helper methods for auth operations
- * 
+ *
  * The plugin makes minimal assumptions:
  * - Tokens contain 'sub' (userId) and 'email' fields
  * - No built-in concepts of roles, permissions, or teams
  * - Users register domain-specific checkers for their needs
- * 
+ *
  * The plugin works by:
  * - Validating JWT tokens and extracting userId and email
  * - Providing a generic checker:parameter pattern
  * - Enforcing declarative auth rules on resources
  */
+
+// Import all provider normalizers (server-side can afford to load all)
+import { normalizeSupabaseToken } from './lib/jwt-auth-normalizers/supabase.js';
+import { normalizeGoogleToken } from './lib/jwt-auth-normalizers/google.js';
+
+// Map of provider names to their normalizer functions
+const tokenNormalizers = {
+  supabase: normalizeSupabaseToken,
+  google: normalizeGoogleToken
+  // Add new providers here as they're created
+};
 
 import { requirePackage } from 'hooked-api';
 import {
@@ -948,18 +959,20 @@ export const JwtAuthPlugin = {
                   autoLinkByEmail: config.autoLinkByEmail
                 });
                 
-                // Prepare user data for sync
-                const userData = {
-                  email: email || null,
-                  name: email ? email.split('@')[0] : 'User',
-                  // Provider-specific fields will be added by upsertUser
-                };
-                
-                // Extract additional user metadata from token if available
-                if (payload.user_metadata) {
-                  userData.name = payload.user_metadata.name || userData.name;
-                  userData.avatar_url = payload.user_metadata.avatar_url || '';
+                // Use provider-specific normalizer to extract user data
+                const normalizer = tokenNormalizers[providerName];
+
+                if (!normalizer) {
+                  log.error(`No normalizer found for provider '${providerName}'`);
+                  throw new Error(`No normalizer found for provider '${providerName}'. Please add a normalizer in jwt-auth-normalizers/${providerName}.js and import it in jwt-auth-plugin.js`);
                 }
+
+                const normalized = normalizer(payload);
+                const userData = {
+                  email: normalized.email,
+                  name: normalized.name,
+                  avatar_url: normalized.avatar_url
+                };
                 
                 // Auto-sync: Create user in database
                 try {
@@ -1538,6 +1551,21 @@ export const JwtAuthPlugin = {
     
     helpers.jwtAuth = {
       /**
+       * HELPER: getConfiguredProviders
+       * Get list of all configured auth providers
+       * Used by auth endpoints to build linked_providers objects
+       *
+       * @returns {string[]} Array of provider names
+       *
+       * @example
+       * const providers = helpers.jwtAuth.getConfiguredProviders();
+       * // Returns: ['google', 'supabase', 'auth0']
+       */
+      getConfiguredProviders() {
+        return Object.keys(config.providers);
+      },
+
+      /**
        * HELPER: upsertUser
        * Create or update a user record in the users resource
        * Used by auth providers (Supabase, Google, etc.) to sync user data
@@ -1606,19 +1634,34 @@ export const JwtAuthPlugin = {
         
         
         if (existing) {
-          // Update existing user
+          // Update existing user - but NEVER change primary email!
           const updateData = { ...userData };
+
+          // Remove email from update data - primary email is immutable
+          delete updateData.email;
+
+          // Store provider-specific email if provider is known
+          if (provider && userData.email) {
+            updateData[`${provider}_email`] = userData.email;
+          }
+
           if (provider) {
             updateData[`${provider}_id`] = providerId;
           }
-          
+
           return resource.patch({
             id: existing.id,
             ...updateData
           }, { auth: { userId: existing.id, system: true } });
         } else {
-          // Create new user
+          // Create new user - set both primary email and provider email
           const createData = { ...userData };
+
+          // On creation, also set the provider-specific email
+          if (provider && userData.email) {
+            createData[`${provider}_email`] = userData.email;
+          }
+
           if (provider) {
             createData[`${provider}_id`] = providerId;
           }
@@ -1646,8 +1689,13 @@ export const JwtAuthPlugin = {
                   },
                 }, { auth: { userId: 'system', system: true } });
                 if (retryByEmail.data?.[0]) {
-                  // Update with provider ID if needed
+                  // Update with provider ID if needed - but NOT primary email!
                   const updateData = { ...userData };
+                  delete updateData.email;  // Primary email is immutable
+
+                  if (provider && userData.email) {
+                    updateData[`${provider}_email`] = userData.email;
+                  }
                   if (provider) {
                     updateData[`${provider}_id`] = providerId;
                   }
@@ -1784,11 +1832,37 @@ export const JwtAuthPlugin = {
 
           // In simplified mode, the user object is the data directly
           const userData = user.data || user;
-          log.info('GET /api/auth/me - User data to return:', JSON.stringify(userData, null, 2));
+
+          // Build linked_providers dynamically from configured providers
+          const linked_providers = {};
+          Object.keys(config.providers).forEach(providerName => {
+            const providerIdField = `${providerName}_id`;
+            linked_providers[providerName] = userData[providerIdField] || null;
+          });
+
+          // Normalize to standard format for consistent API response
+          const response = {
+            provider: context.auth.provider,
+            provider_id: userData[`${context.auth.provider}_id`] || context.auth.providerId,
+            linked_providers,
+            user: {
+              id: String(userData.id),
+              email: userData.email,
+              email_verified: userData.email_verified !== false,
+              name: userData.name,
+              avatar_url: userData.avatar_url || userData.picture || userData.google_picture,
+              phone: userData.phone || null,
+              username: userData.username || null,
+              created_at: userData.created_at,
+              updated_at: userData.updated_at
+            }
+          };
+
+          log.info('GET /api/auth/me - Response to return:', JSON.stringify(response, null, 2));
 
           return {
             statusCode: 200,
-            body: { data: userData }  // Wrap in data property for consistency
+            body: response  // Return auth metadata with nested user
           };
         } catch (error) {
           log.error('GET /api/auth/me - Error fetching user:', error);

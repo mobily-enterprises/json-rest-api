@@ -6,6 +6,7 @@
  */
 
 import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
+import { normalizeGoogleToken } from './lib/jwt-auth-normalizers/google.js';
 
 export const GoogleAuthPlugin = {
   name: 'google-auth',
@@ -62,25 +63,31 @@ export const GoogleAuthPlugin = {
               {
                 email: payload.email,
                 name: payload.name,
-                google_picture: payload.picture,
-                google_verified_email: payload.email_verified
+                avatar_url: payload.picture  // Use standard field name
+                // Removed: google_picture, google_verified_email (not needed)
               },
               'google'
             );
 
-            console.log('🔴 GOOGLE AUTH: User object from upsertUser:', JSON.stringify(user, null, 2));
             const internalUserId = user?.id || user?.data?.id;
-            console.log('🔴 GOOGLE AUTH: Extracted internalUserId:', internalUserId, 'type:', typeof internalUserId);
-            console.log('🔴 GOOGLE AUTH: Google provider ID (sub):', payload.sub);
+            const userData = user?.data || user;
+
+            // Build linked_providers dynamically from configured providers
+            const linked_providers = {};
+            if (helpers.jwtAuth.getConfiguredProviders) {
+              const configuredProviders = helpers.jwtAuth.getConfiguredProviders();
+              configuredProviders.forEach(providerName => {
+                const providerIdField = `${providerName}_id`;
+                linked_providers[providerName] = userData[providerIdField] || null;
+              });
+            }
 
             // Create app-owned session token
-            // IMPORTANT: userId field should contain the Google provider ID, not the internal user ID
-            // The JWT plugin will look this up to find the internal user ID
+            // Using standard JWT claims (RFC 7519) with minimal custom claims
             const sessionToken = await new SignJWT({
-              userId: payload.sub,  // This MUST be the Google provider ID, not internal user ID!
-              email: payload.email,
-              provider: 'google',
-              type: 'access'
+              sub: payload.sub,     // Standard 'subject' claim (Google provider ID)
+              provider: 'google',   // Custom claim: which auth provider
+              type: 'access'        // Custom claim: token type
             })
               .setProtectedHeader({ alg: 'HS256' })
               .setIssuedAt()
@@ -91,7 +98,8 @@ export const GoogleAuthPlugin = {
 
             // Create refresh token
             const refreshToken = await new SignJWT({
-              userId: payload.sub,  // Also use Google provider ID here for consistency
+              sub: payload.sub,     // Standard 'subject' claim
+              provider: 'google',   // Keep provider for consistency
               type: 'refresh'
             })
               .setProtectedHeader({ alg: 'HS256' })
@@ -101,20 +109,34 @@ export const GoogleAuthPlugin = {
               .setExpirationTime('90d')
               .sign(secret);
 
+            // Normalize user data using the existing normalizer
+            const normalizedUser = normalizeGoogleToken(payload);
+
+            // Calculate expiry times
+            const expiresIn = 30 * 24 * 60 * 60; // 30 days in seconds
+            const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+
+            // Return unwrapped, standardized session format
             return {
               statusCode: 200,
               body: {
-                session: {
-                  access_token: sessionToken,
-                  refresh_token: refreshToken,
-                  expires_in: 30 * 24 * 60 * 60, // 30 days
-                  token_type: 'Bearer',
-                  user: {
-                    id: internalUserId,  // Return the internal user ID for the frontend
-                    email: payload.email,
-                    name: payload.name,
-                    picture: payload.picture
-                  }
+                access_token: sessionToken,
+                refresh_token: refreshToken,
+                expires_in: expiresIn,
+                expires_at: expiresAt,
+                token_type: 'Bearer',
+                provider: 'google',
+                provider_id: payload.sub,  // Provider ID at root level
+                user: {
+                  id: String(internalUserId),  // Ensure string for consistency
+                  email: normalizedUser.email,
+                  email_verified: normalizedUser.email_verified,
+                  name: normalizedUser.name,
+                  avatar_url: normalizedUser.avatar_url,  // Normalized field name
+                  phone: normalizedUser.phone || null,
+                  username: null,
+                  created_at: userData.created_at,
+                  updated_at: userData.updated_at
                 }
               }
             };
@@ -148,7 +170,7 @@ export const GoogleAuthPlugin = {
 
             // Issue new access token
             const sessionToken = await new SignJWT({
-              userId: payload.userId,
+              sub: payload.sub,     // Standard 'subject' claim
               provider: 'google',
               type: 'access'
             })
@@ -275,7 +297,7 @@ export const GoogleAuthPlugin = {
         algorithms: ['HS256'],         // App's algorithm
         issuer: 'app',
         audience: 'app',
-        userIdField: 'userId',
+        userIdField: 'sub',            // Standard JWT claim for subject
         emailField: 'email'
       };
 
@@ -290,9 +312,8 @@ export const GoogleAuthPlugin = {
 
       const googleFields = {
         google_id: { type: 'string', nullable: true, unique: true, indexed: true, search: true },
-        google_picture: { type: 'string', nullable: true },
-        google_name: { type: 'string', nullable: true },
-        google_verified_email: { type: 'boolean', default: false }
+        google_email: { type: 'string', nullable: true }  // Current email at Google
+        // Removed: google_picture (use avatar_url), google_name (use name), google_verified_email (not needed)
       };
 
       Object.assign(fields, googleFields);
