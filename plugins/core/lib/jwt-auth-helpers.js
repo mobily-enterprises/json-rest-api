@@ -152,8 +152,17 @@ export async function createRevocationResource(api, tableName, log) {
   
   // Create table if using Knex
   if (api.resources[tableName].createKnexTable) {
-    await api.resources[tableName].createKnexTable();
-    logger.info(`Created database table for revoked tokens: ${tableName}`);
+    try {
+      await api.resources[tableName].createKnexTable();
+      logger.info(`Created database table for revoked tokens: ${tableName}`);
+    } catch (error) {
+      const message = error?.message?.toLowerCase?.() || '';
+      if (message.includes('already exists')) {
+        logger.debug(`Revocation table '${tableName}' already exists; skipping create.`);
+      } else {
+        throw error;
+      }
+    }
   }
 }
 

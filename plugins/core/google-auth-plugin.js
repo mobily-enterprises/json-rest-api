@@ -326,7 +326,8 @@ export const GoogleAuthPlugin = {
         path: '/api/auth/google/refresh',
         handler: async ({ body, context }) => {
           try {
-            if (!validateCsrf(context)) {
+            const csrfCookie = getCookieValue(context, 'refresh_csrf');
+            if (csrfCookie && !validateCsrf(context)) {
               return {
                 statusCode: 403,
                 body: { error: 'INVALID_CSRF_TOKEN' }
@@ -406,7 +407,7 @@ export const GoogleAuthPlugin = {
               sameSite: config.cookieSameSite
             });
             const newCsrfToken = generateCsrfToken();
-            const csrfCookie = buildCsrfCookie(newCsrfToken, refreshMaxAge, {
+            const newCsrfCookie = buildCsrfCookie(newCsrfToken, refreshMaxAge, {
               secureCookie: config.cookieSecure,
               sameSite: config.cookieSameSite
             });
@@ -414,7 +415,7 @@ export const GoogleAuthPlugin = {
             return {
               statusCode: 200,
               headers: {
-                'Set-Cookie': [refreshCookie, csrfCookie]
+                'Set-Cookie': [refreshCookie, newCsrfCookie]
               },
               body: {
                 access_token: sessionToken,
@@ -488,8 +489,97 @@ export const GoogleAuthPlugin = {
         }
       });
 
-      // Link Google account to existing user
-      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh, /api/auth/google/logout');
+      await api.addRoute({
+        method: 'POST',
+        path: '/api/auth/google/link',
+        handler: async ({ body, context }) => {
+          try {
+            if (!context.auth?.userId) {
+              return {
+                statusCode: 401,
+                body: { error: 'AUTH_REQUIRED', message: 'Must be logged in to link accounts' }
+              };
+            }
+
+            const csrfCookie = getCookieValue(context, 'refresh_csrf');
+            if (csrfCookie && !validateCsrf(context)) {
+              return {
+                statusCode: 403,
+                body: { error: 'INVALID_CSRF_TOKEN' }
+              };
+            }
+
+            const { credential } = body || {};
+            if (!credential) {
+              return {
+                statusCode: 400,
+                body: { error: 'MISSING_CREDENTIAL', message: 'Google credential is required' }
+              };
+            }
+
+            const { payload } = await jwtVerify(credential, JWKS, {
+              issuer: ['https://accounts.google.com', 'accounts.google.com'],
+              audience: config.clientId
+            });
+
+            const currentUser = await helpers.jwtAuth.getUser(context.auth.userId);
+            if (!currentUser) {
+              return {
+                statusCode: 404,
+                body: { error: 'USER_NOT_FOUND' }
+              };
+            }
+
+            if (payload.email && currentUser.email && payload.email !== currentUser.email) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'EMAIL_MISMATCH',
+                  message: 'Google account email must match your existing account email'
+                }
+              };
+            }
+
+            const existingLinked = await helpers.jwtAuth.getUserByProviderId(payload.sub, 'google');
+            if (existingLinked && String(existingLinked.id) !== String(currentUser.id)) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'ALREADY_LINKED',
+                  message: 'This Google account is already linked to another user'
+                }
+              };
+            }
+
+            await api.resources[config.usersResource].patch({
+              id: currentUser.id,
+              google_id: payload.sub,
+              google_email: payload.email || currentUser.google_email || null
+            }, { auth: { userId: currentUser.id, system: true } });
+
+            log.info('Linked Google account to user', {
+              userId: currentUser.id,
+              googleId: payload.sub
+            });
+
+            return {
+              statusCode: 200,
+              body: {
+                success: true,
+                provider: 'google'
+              }
+            };
+          } catch (error) {
+            log.error('Google account linking failed:', error);
+            return {
+              statusCode: 500,
+              body: { error: 'LINK_FAILED', message: error.message || 'Failed to link Google account' }
+            };
+          }
+        }
+      });
+
+      log.info('Added Google auth endpoints: /api/auth/google/one-tap, /api/auth/google/refresh, /api/auth/google/logout, /api/auth/google/link');
     }
 
     // GOOGLE-SPECIFIC: Register as JWT provider for app-issued tokens

@@ -14,6 +14,22 @@
  * - App must define a users resource
  */
 
+import { jwtVerify } from 'jose';
+
+function getCookieValue(context, name) {
+  const cookieHeader = context?.req?.headers?.cookie;
+  if (!cookieHeader) return null;
+
+  const cookies = cookieHeader.split(';');
+  for (const cookie of cookies) {
+    const [cookieName, ...rest] = cookie.trim().split('=');
+    if (cookieName === name) {
+      return decodeURIComponent(rest.join('='));
+    }
+  }
+  return null;
+}
+
 export const SupabaseAuthPlugin = {
   name: 'supabase-auth',
   dependencies: ['rest-api'],
@@ -75,6 +91,102 @@ export const SupabaseAuthPlugin = {
       });
     });
     
+    if (api.addRoute) {
+      await api.addRoute({
+        method: 'POST',
+        path: '/api/auth/supabase/link',
+        handler: async ({ body, context }) => {
+          try {
+            if (!context.auth?.userId) {
+              return {
+                statusCode: 401,
+                body: { error: 'AUTH_REQUIRED', message: 'Must be logged in to link accounts' }
+              };
+            }
+
+            const { access_token: accessToken } = body || {};
+            if (!accessToken) {
+              return {
+                statusCode: 400,
+                body: { error: 'MISSING_TOKEN', message: 'Supabase access token is required' }
+              };
+            }
+
+            const currentUser = await helpers.jwtAuth.getUser(context.auth.userId);
+            if (!currentUser) {
+              return {
+                statusCode: 404,
+                body: { error: 'USER_NOT_FOUND' }
+              };
+            }
+
+            const csrfCookie = getCookieValue(context, 'refresh_csrf');
+            if (csrfCookie) {
+              const headerValue = context?.req?.headers?.['x-csrf-token'];
+              const csrfHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+              if (!csrfHeader || csrfHeader.trim() !== csrfCookie.trim()) {
+                return {
+                  statusCode: 403,
+                  body: { error: 'INVALID_CSRF_TOKEN' }
+                };
+              }
+            }
+
+            const { payload } = await jwtVerify(accessToken, new TextEncoder().encode(config.secret));
+
+            const supabaseId = payload.sub;
+            const supabaseEmail = payload.email;
+
+            if (supabaseEmail && currentUser.email && supabaseEmail !== currentUser.email) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'EMAIL_MISMATCH',
+                  message: 'Supabase account email must match your existing account email'
+                }
+              };
+            }
+
+            const existingLinked = await helpers.jwtAuth.getUserByProviderId(supabaseId, 'supabase');
+            if (existingLinked && String(existingLinked.id) !== String(currentUser.id)) {
+              return {
+                statusCode: 400,
+                body: {
+                  error: 'ALREADY_LINKED',
+                  message: 'This Supabase account is already linked to another user'
+                }
+              };
+            }
+
+            await api.resources[config.usersResource].patch({
+              id: currentUser.id,
+              supabase_id: supabaseId,
+              supabase_email: supabaseEmail || currentUser.supabase_email || null
+            }, { auth: { userId: currentUser.id, system: true } });
+
+            log.info('Linked Supabase account to user', {
+              userId: currentUser.id,
+              supabaseId
+            });
+
+            return {
+              statusCode: 200,
+              body: {
+                success: true,
+                provider: 'supabase'
+              }
+            };
+          } catch (error) {
+            log.error('Supabase account linking failed:', error);
+            return {
+              statusCode: 500,
+              body: { error: 'LINK_FAILED', message: error.message || 'Failed to link Supabase account' }
+            };
+          }
+        }
+      });
+    }
+
     log.info('SupabaseAuthPlugin installed successfully', {
       usersResource: config.usersResource,
       autoSync: 'Enabled via JWT plugin'
