@@ -18,9 +18,14 @@ export const storageMode = {
     if (!tableName || !resourceName) return;
     tableToResource.set(tableName, resourceName);
   },
-  registerLink(tableName, ownerResource, relationshipName, relationshipKey) {
+  registerLink(tableName, ownerResource, relationshipName, relationshipKey, inverseRelationshipKey) {
     if (!tableName || !ownerResource || !relationshipName) return;
-    linkMappings.set(tableName, { ownerResource, relationshipName, relationshipKey });
+    linkMappings.set(tableName, {
+      ownerResource,
+      relationshipName,
+      relationshipKey,
+      inverseRelationshipKey,
+    });
   },
   getResourceForTable(tableName) {
     return tableToResource.get(tableName);

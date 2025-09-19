@@ -303,7 +303,45 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       simplified: false,
       isTransport: params.isTransport
     });
-    const includedResources = pivotResult.included?.filter(r => r.type === targetType) || [];
+    let includedResources = pivotResult.included?.filter((r) => r.type === targetType) || [];
+
+    if (includedResources.length === 0) {
+      const pivotData = pivotResult.data || [];
+      const relatedIds = [...new Set(pivotData
+        .map((item) => {
+          const attrId = item?.attributes?.[otherKey];
+          if (attrId !== null && attrId !== undefined) {
+            return String(attrId);
+          }
+          const relationships = item?.relationships || {};
+          for (const rel of Object.values(relationships)) {
+            const data = rel?.data;
+            if (data?.type === targetType && data?.id != null) {
+              return String(data.id);
+            }
+          }
+          return null;
+        })
+        .filter((id) => id !== null)
+      )];
+
+      if (relatedIds.length > 0) {
+        includedResources = [];
+        for (const relatedId of relatedIds) {
+          const related = await api.resources[targetType].get({
+            id: relatedId,
+            queryParams: context.queryParams,
+            transaction: context.transaction,
+            simplified: false,
+            isTransport: params.isTransport,
+          });
+          if (related?.data) {
+            includedResources.push(related.data);
+          }
+        }
+      }
+    }
+
     return {
       links: {
         self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)

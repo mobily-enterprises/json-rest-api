@@ -84,6 +84,7 @@ export const ensureAnyApiSchema = async (knex) => {
     table.increments('id').primary();
     table.string('tenant_id').notNullable();
     table.string('relationship').notNullable();
+    table.string('inverse_relationship');
     table.string('left_resource').notNullable();
     table.string('left_id').notNullable();
     table.string('right_resource').notNullable();
@@ -93,9 +94,11 @@ export const ensureAnyApiSchema = async (knex) => {
     table.dateTime('updated_at').defaultTo(knex.fn.now()).notNullable();
 
     table.index(['tenant_id', 'relationship']);
+    table.index(['tenant_id', 'inverse_relationship']);
     table.index(['tenant_id', 'left_resource']);
     table.index(['tenant_id', 'right_resource']);
     table.index(['relationship']);
+    table.index(['inverse_relationship']);
   });
 
   await ensureTable(knex, 'any_resource_configs', (table) => {

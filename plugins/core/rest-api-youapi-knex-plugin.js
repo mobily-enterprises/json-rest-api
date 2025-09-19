@@ -1,5 +1,7 @@
 import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
 import { YouapiRegistry } from '../anyapi/youapi-registry.js';
+import { RestApiValidationError } from '../../lib/rest-api-errors.js';
+import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './lib/querying-writing/knex-constants.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
@@ -45,12 +47,499 @@ export const RestApiYouapiKnexPlugin = {
       return descriptor;
     };
 
+    const getRequestedFieldsForType = (context, resourceType) => {
+      if (!context?.queryParams?.fields) return null;
+      const fieldParam = context.queryParams.fields[resourceType];
+      if (!fieldParam) return null;
+      if (Array.isArray(fieldParam)) {
+        return fieldParam.map((field) => field.trim()).filter((field) => field);
+      }
+      return String(fieldParam)
+        .split(',')
+        .map((field) => field.trim())
+        .filter((field) => field);
+    };
+
+    const applySparseFieldsetToResource = (resource, context) => {
+      if (!resource?.attributes) return;
+      const requested = getRequestedFieldsForType(context, resource.type);
+      if (!requested || requested.length === 0) return;
+
+      const filtered = {};
+      for (const field of requested) {
+        if (Object.prototype.hasOwnProperty.call(resource.attributes, field)) {
+          filtered[field] = resource.attributes[field];
+        }
+      }
+      resource.attributes = filtered;
+    };
+
+    const findSchemaFieldByAlias = (descriptor, alias) => {
+      if (!descriptor?.schema) return null;
+      for (const [fieldName, definition] of Object.entries(descriptor.schema)) {
+        if (!definition) continue;
+        if (definition.as === alias) {
+          return { fieldName, definition };
+        }
+        if (definition.belongsTo && !definition.as) {
+          const inferredAlias = fieldName.endsWith('_id') ? fieldName.slice(0, -3) : fieldName;
+          if (inferredAlias === alias) {
+            return { fieldName, definition };
+          }
+        }
+      }
+      return null;
+    };
+
+    const resolveFieldInfo = (descriptor, field) => {
+      if (!descriptor) return null;
+      if (field === 'id') {
+        return { column: 'id', definition: { type: 'id' } };
+      }
+
+      const directField = descriptor.fields?.[field];
+      if (directField?.slot) {
+        return {
+          column: directField.slot,
+          definition: descriptor.schema?.[field] || null,
+        };
+      }
+
+      const belongsToInfo = descriptor.belongsTo?.[field];
+      if (belongsToInfo?.idColumn) {
+        const schemaField = findSchemaFieldByAlias(descriptor, field);
+        return {
+          column: belongsToInfo.idColumn,
+          definition: schemaField?.definition || null,
+          isRelationship: true,
+        };
+      }
+
+      const aliasField = findSchemaFieldByAlias(descriptor, field);
+      if (aliasField) {
+        const fieldEntry = descriptor.fields?.[aliasField.fieldName];
+        if (fieldEntry?.slot) {
+          return {
+            column: fieldEntry.slot,
+            definition: aliasField.definition,
+          };
+        }
+      }
+
+      return null;
+    };
+
+    const coerceValueForDefinition = (value, definition, { isRelationship } = {}) => {
+      if (value === null || value === undefined) return null;
+
+      if (isRelationship) {
+        return normalizeId(value);
+      }
+
+      const type = definition?.type || definition?.dataType;
+      if (!type) {
+        return value;
+      }
+
+      if (['number', 'integer', 'float', 'decimal'].includes(type)) {
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? value : numeric;
+      }
+
+      if (type === 'boolean') {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') {
+          if (value.toLowerCase() === 'true') return true;
+          if (value.toLowerCase() === 'false') return false;
+        }
+        return Boolean(value);
+      }
+
+      if (['string', 'text', 'uuid', 'email'].includes(type)) {
+        return String(value);
+      }
+
+      return value;
+    };
+
+    const normalizeFilterValues = (rawValue, definition, options) => {
+      if (Array.isArray(rawValue)) {
+        return rawValue.map((item) => coerceValueForDefinition(item, definition, options));
+      }
+      return [coerceValueForDefinition(rawValue, definition, options)];
+    };
+
+    const applyFiltersToQuery = ({ query, filters, descriptor }) => {
+      if (!filters || Object.keys(filters).length === 0) return;
+
+      for (const [field, rawValue] of Object.entries(filters)) {
+        const fieldInfo = resolveFieldInfo(descriptor, field);
+        if (!fieldInfo?.column) {
+          throw new RestApiValidationError('Invalid filter field', {
+            fields: [`filters.${field}`],
+            violations: [{
+              field: `filters.${field}`,
+              rule: 'unknown_field',
+              message: `Filter on '${field}' is not supported in AnyAPI mode`,
+            }],
+          });
+        }
+
+        const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
+          isRelationship: fieldInfo.isRelationship,
+        });
+
+        const nonNullValues = values.filter((value) => value !== null);
+        const hasNull = values.length !== nonNullValues.length;
+
+        if (nonNullValues.length === 0 && hasNull) {
+          query.whereNull(fieldInfo.column);
+          continue;
+        }
+
+        if (nonNullValues.length === 1 && !hasNull) {
+          query.where(fieldInfo.column, nonNullValues[0]);
+          continue;
+        }
+
+        if (nonNullValues.length > 1 && !hasNull) {
+          query.whereIn(fieldInfo.column, nonNullValues);
+          continue;
+        }
+
+        if (nonNullValues.length > 0 && hasNull) {
+          query.where(function filterGroup() {
+            this.whereIn(fieldInfo.column, nonNullValues).orWhereNull(fieldInfo.column);
+          });
+        }
+      }
+    };
+
+    const applySortingToQuery = ({ query, sort, descriptor, scope }) => {
+      let sortList = Array.isArray(sort) ? sort : (sort ? [sort] : []);
+
+      if (sortList.length === 0 && scope?.vars?.defaultSort) {
+        const defaultSort = scope.vars.defaultSort;
+        if (Array.isArray(defaultSort)) {
+          sortList = defaultSort;
+        } else if (typeof defaultSort === 'string') {
+          sortList = [defaultSort];
+        } else if (defaultSort && typeof defaultSort === 'object') {
+          const field = defaultSort.field || defaultSort.column || 'id';
+          const direction = (defaultSort.direction || '').toLowerCase() === 'desc' ? '-' : '';
+          sortList = [`${direction}${field}`];
+        }
+      }
+
+      const effectiveSort = sortList.length > 0 ? sortList : ['id'];
+
+      for (const entry of effectiveSort) {
+        const desc = typeof entry === 'string' && entry.startsWith('-');
+        const field = typeof entry === 'string' ? (desc ? entry.slice(1) : entry) : entry;
+        const fieldInfo = resolveFieldInfo(descriptor, field);
+        if (!fieldInfo?.column) continue;
+        query.orderBy(fieldInfo.column, desc ? 'desc' : 'asc');
+      }
+    };
+
+    const buildQueryString = (queryParams = {}) => {
+      const buildParts = (prefix, value) => {
+        const parts = [];
+        if (Array.isArray(value)) {
+          if (value.length === 0) return parts;
+          parts.push(`${prefix}=${value.map((item) => encodeURIComponent(item)).join(',')}`);
+          return parts;
+        }
+        if (value && typeof value === 'object') {
+          for (const [key, subValue] of Object.entries(value)) {
+            if (subValue === undefined || subValue === null) continue;
+            const newPrefix = `${prefix}[${key}]`;
+            parts.push(...buildParts(newPrefix, subValue));
+          }
+          return parts;
+        }
+        if (value === undefined || value === null) return parts;
+        parts.push(`${prefix}=${encodeURIComponent(value)}`);
+        return parts;
+      };
+
+      const parts = [];
+      for (const [key, value] of Object.entries(queryParams)) {
+        parts.push(...buildParts(key, value));
+      }
+      return parts.length > 0 ? `?${parts.join('&')}` : '';
+    };
+
+    const applyPaginationToQuery = ({ query, scope, queryParams }) => {
+      const pageParams = queryParams?.page || {};
+      const scopeVars = scope?.vars || {};
+      const defaultLimit = scopeVars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
+      const maxLimit = scopeVars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT;
+
+      const hasCursor = pageParams.after !== undefined || pageParams.before !== undefined;
+      if (hasCursor) {
+        throw new RestApiValidationError('Cursor pagination is not supported in AnyAPI mode yet.', {
+          fields: ['page.after', 'page.before'],
+          violations: [{
+            field: 'page',
+            rule: 'not_supported',
+            message: 'Cursor pagination is not available for AnyAPI storage.',
+          }],
+        });
+      }
+
+      const hasPageSize = pageParams.size !== undefined;
+      const hasPageNumber = pageParams.number !== undefined;
+
+      if (!hasPageSize && !hasPageNumber) {
+        query.limit(defaultLimit);
+        return {
+          used: false,
+          page: 1,
+          pageSize: defaultLimit,
+        };
+      }
+
+      const requestedSize = Number(pageParams.size ?? defaultLimit);
+      if (!Number.isFinite(requestedSize) || requestedSize <= 0) {
+        throw new RestApiValidationError('Page size must be greater than 0', {
+          fields: ['page.size'],
+          violations: [{
+            field: 'page.size',
+            rule: 'min_value',
+            message: 'Page size must be a positive number',
+          }],
+        });
+      }
+
+      const pageSize = Math.min(Math.trunc(requestedSize), maxLimit);
+      const pageNumber = Math.trunc(Number(pageParams.number ?? 1));
+      const safePageNumber = Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1;
+      const offset = (safePageNumber - 1) * pageSize;
+
+      query.limit(pageSize).offset(offset);
+
+      return {
+        used: true,
+        page: safePageNumber,
+        pageSize,
+      };
+    };
+
+    const canonicalizeLinkPair = ({
+      tenantId,
+      relationshipKey,
+      inverseRelationshipKey,
+      leftResource,
+      leftId,
+      rightResource,
+      rightId,
+    }) => {
+      const normalizedLeftId = normalizeId(leftId);
+      const normalizedRightId = normalizeId(rightId);
+
+      if (normalizedLeftId == null || normalizedRightId == null) {
+        return null;
+      }
+
+      if (inverseRelationshipKey && inverseRelationshipKey < relationshipKey) {
+        return {
+          tenant_id: tenantId,
+          relationship: inverseRelationshipKey,
+          inverse_relationship: relationshipKey,
+          left_resource: rightResource,
+          left_id: normalizedRightId,
+          right_resource: leftResource,
+          right_id: normalizedLeftId,
+        };
+      }
+
+      return {
+        tenant_id: tenantId,
+        relationship: relationshipKey,
+        inverse_relationship: inverseRelationshipKey || null,
+        left_resource: leftResource,
+        left_id: normalizedLeftId,
+        right_resource: rightResource,
+        right_id: normalizedRightId,
+      };
+    };
+
+    const buildLinkIdentity = (canonicalRow) => ({
+      tenant_id: canonicalRow.tenant_id,
+      relationship: canonicalRow.relationship,
+      left_resource: canonicalRow.left_resource,
+      left_id: canonicalRow.left_id,
+      right_resource: canonicalRow.right_resource,
+      right_id: canonicalRow.right_id,
+    });
+
+    const findInverseManyToMany = async ({ descriptor, relInfo }) => {
+      if (!relInfo?.target) return null;
+
+      let targetDescriptor;
+      try {
+        targetDescriptor = await getDescriptor(relInfo.target);
+      } catch (error) {
+        return null;
+      }
+
+      const entries = Object.entries(targetDescriptor.manyToMany || {});
+      for (const [candidateName, candidateInfo] of entries) {
+        const candidateTarget = candidateInfo.target || descriptor.resource;
+        if (candidateTarget !== descriptor.resource) continue;
+
+        if (relInfo.through && candidateInfo.through && relInfo.through !== candidateInfo.through) {
+          continue;
+        }
+
+        if (
+          relInfo.foreignKey && relInfo.otherKey &&
+          candidateInfo.foreignKey && candidateInfo.otherKey
+        ) {
+          const foreignMatches = relInfo.foreignKey === candidateInfo.otherKey;
+          const otherMatches = relInfo.otherKey === candidateInfo.foreignKey;
+          if (!foreignMatches || !otherMatches) continue;
+        }
+
+        const relationshipKey = candidateInfo.relationship
+          || `${targetDescriptor.tenant}:${targetDescriptor.resource}:${candidateName}`;
+
+        return {
+          descriptor: targetDescriptor,
+          relName: candidateName,
+          relInfo: candidateInfo,
+          relationshipKey,
+        };
+      }
+
+      return null;
+    };
+
     const getManyToManyInfo = async (scopeName, relName) => {
       const descriptor = await getDescriptor(scopeName);
       const relInfo = descriptor.manyToMany?.[relName];
       if (!relInfo) return null;
       const relationshipKey = relInfo.relationship || `${descriptor.tenant}:${descriptor.resource}:${relName}`;
-      return { descriptor, relInfo, relationshipKey };
+      const inverse = await findInverseManyToMany({ descriptor, relInfo });
+      const inverseRelationshipKey = inverse?.relationshipKey || null;
+      return { descriptor, relInfo, relationshipKey, inverseRelationshipKey };
+    };
+
+    const loadLinkRowsForResource = async ({ descriptor, relationshipKey, resourceId, db }) => {
+      const ownerId = normalizeId(resourceId);
+      if (ownerId == null) return new Map();
+
+      const rows = await db(LINKS_TABLE)
+        .where('tenant_id', descriptor.tenant)
+        .andWhere((builder) => {
+          builder
+            .where((q) => {
+              q.where('relationship', relationshipKey)
+                .andWhere('left_resource', descriptor.resource)
+                .andWhere('left_id', ownerId);
+            })
+            .orWhere((q) => {
+              q.where('inverse_relationship', relationshipKey)
+                .andWhere('right_resource', descriptor.resource)
+                .andWhere('right_id', ownerId);
+            });
+        })
+        .select('id', 'relationship', 'inverse_relationship', 'left_resource', 'left_id', 'right_resource', 'right_id');
+
+      const map = new Map();
+
+      for (const row of rows) {
+        let relatedResource;
+        let relatedId;
+        let otherKey = null;
+
+        if (row.relationship === relationshipKey && row.left_resource === descriptor.resource) {
+          relatedResource = row.right_resource;
+          relatedId = normalizeId(row.right_id);
+          otherKey = row.inverse_relationship || null;
+        } else if (row.inverse_relationship === relationshipKey && row.right_resource === descriptor.resource) {
+          relatedResource = row.left_resource;
+          relatedId = normalizeId(row.left_id);
+          otherKey = row.relationship || null;
+        } else {
+          continue;
+        }
+
+        if (relatedId == null) continue;
+
+        const canonical = canonicalizeLinkPair({
+          tenantId: descriptor.tenant,
+          relationshipKey,
+          inverseRelationshipKey: otherKey,
+          leftResource: descriptor.resource,
+          leftId: ownerId,
+          rightResource: relatedResource,
+          rightId: relatedId,
+        });
+
+        if (!canonical) continue;
+
+        map.set(relatedId, {
+          rowId: row.id,
+          relatedResource,
+          canonical,
+          otherKey,
+        });
+      }
+
+      return map;
+    };
+
+    const fetchLinksForParents = async ({ descriptor, relationshipKey, parentIds, db }) => {
+      const normalizedIds = parentIds
+        .map((id) => normalizeId(id))
+        .filter((id) => id !== null);
+
+      if (normalizedIds.length === 0) return [];
+
+      const rows = await db(LINKS_TABLE)
+        .where('tenant_id', descriptor.tenant)
+        .andWhere((builder) => {
+          builder
+            .where((q) => {
+              q.where('relationship', relationshipKey)
+                .andWhere('left_resource', descriptor.resource)
+                .whereIn('left_id', normalizedIds);
+            })
+            .orWhere((q) => {
+              q.where('inverse_relationship', relationshipKey)
+                .andWhere('right_resource', descriptor.resource)
+                .whereIn('right_id', normalizedIds);
+            });
+        })
+        .select('relationship', 'inverse_relationship', 'left_resource', 'left_id', 'right_resource', 'right_id');
+
+      const results = [];
+
+      for (const row of rows) {
+        let parentId;
+        let childId;
+        let childType;
+
+        if (row.relationship === relationshipKey && row.left_resource === descriptor.resource) {
+          parentId = normalizeId(row.left_id);
+          childId = normalizeId(row.right_id);
+          childType = row.right_resource;
+        } else if (row.inverse_relationship === relationshipKey && row.right_resource === descriptor.resource) {
+          parentId = normalizeId(row.right_id);
+          childId = normalizeId(row.left_id);
+          childType = row.left_resource;
+        } else {
+          continue;
+        }
+
+        if (parentId == null || childId == null) continue;
+
+        results.push({ parentId, childId, childType });
+      }
+
+      return results;
     };
 
     const ensureTargetsExist = async ({ relInfo, relData, transaction }) => {
@@ -71,40 +560,50 @@ export const RestApiYouapiKnexPlugin = {
       }
     };
 
-    const attachLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+    const attachLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
       const relArray = Array.isArray(relData) ? relData : [];
       if (relArray.length === 0) return;
 
-      const existingRows = await db(LINKS_TABLE)
-        .where({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-          left_id: leftId,
-        })
-        .select('right_id');
-
-      const existing = new Set(existingRows.map((row) => String(row.right_id)));
-      const rowsToInsert = [];
-
       for (const identifier of relArray) {
         const rightId = normalizeId(identifier.id);
-        if (rightId == null || existing.has(rightId)) continue;
-        rowsToInsert.push({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-          left_id: leftId,
-          right_resource: relInfo.target,
-          right_id: rightId,
+        if (rightId == null) continue;
+
+        const canonical = canonicalizeLinkPair({
+          tenantId: descriptor.tenant,
+          relationshipKey,
+          inverseRelationshipKey,
+          leftResource: descriptor.resource,
+          leftId,
+          rightResource: relInfo.target,
+          rightId,
+        });
+
+        if (!canonical) continue;
+
+        const identity = buildLinkIdentity(canonical);
+
+        const existing = await db(LINKS_TABLE)
+          .where(identity)
+          .first();
+
+        if (existing) {
+          if (!existing.inverse_relationship && canonical.inverse_relationship) {
+            await db(LINKS_TABLE)
+              .where({ id: existing.id })
+              .update({
+                inverse_relationship: canonical.inverse_relationship,
+                updated_at: db.fn.now(),
+              });
+          }
+          continue;
+        }
+
+        await db(LINKS_TABLE).insert({
+          ...canonical,
           payload: null,
           created_at: db.fn.now(),
           updated_at: db.fn.now(),
         });
-      }
-
-      if (rowsToInsert.length > 0) {
-        await db(LINKS_TABLE).insert(rowsToInsert);
       }
     };
 
@@ -121,6 +620,7 @@ export const RestApiYouapiKnexPlugin = {
           descriptor: info.descriptor,
           relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
+          inverseRelationshipKey: info.inverseRelationshipKey,
           leftId,
           relData,
           db,
@@ -139,6 +639,7 @@ export const RestApiYouapiKnexPlugin = {
             descriptor: info.descriptor,
             relInfo: info.relInfo,
             relationshipKey: info.relationshipKey,
+            inverseRelationshipKey: info.inverseRelationshipKey,
             leftId,
             relData,
             db,
@@ -148,6 +649,7 @@ export const RestApiYouapiKnexPlugin = {
             descriptor: info.descriptor,
             relInfo: info.relInfo,
             relationshipKey: info.relationshipKey,
+            inverseRelationshipKey: info.inverseRelationshipKey,
             leftId,
             relData,
             db,
@@ -165,6 +667,7 @@ export const RestApiYouapiKnexPlugin = {
           descriptor: info.descriptor,
           relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
+          inverseRelationshipKey: info.inverseRelationshipKey,
           leftId,
           relData,
           db,
@@ -181,6 +684,7 @@ export const RestApiYouapiKnexPlugin = {
           descriptor: info.descriptor,
           relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
+          inverseRelationshipKey: info.inverseRelationshipKey,
           leftId,
           db,
         });
@@ -189,96 +693,112 @@ export const RestApiYouapiKnexPlugin = {
         const info = await getManyToManyInfo(scopeName, relName);
         if (!info) return [];
         const db = context.db || context.transaction || api.knex.instance;
-        return fetchLinkedRecords({
+        return fetchLinksForParents({
           descriptor: info.descriptor,
-          relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
-          leftIds: parentIds,
+          parentIds,
           db,
         });
       },
     };
 
-    const syncLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+    const syncLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
       const relArray = Array.isArray(relData) ? relData : [];
-      const existingRows = await db(LINKS_TABLE)
-        .where({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-          left_id: leftId,
-        })
-        .select('right_id');
+      const existingMap = await loadLinkRowsForResource({
+        descriptor,
+        relationshipKey,
+        resourceId: leftId,
+        db,
+      });
 
-      const existing = new Set(existingRows.map((row) => String(row.right_id)));
-      const desired = new Set(relArray.map((identifier) => normalizeId(identifier.id)).filter((id) => id !== null));
+      const desired = new Set(
+        relArray
+          .map((identifier) => normalizeId(identifier.id))
+          .filter((id) => id !== null),
+      );
 
-      const toAdd = [...desired].filter((id) => !existing.has(id));
-      const toRemove = [...existing].filter((id) => !desired.has(id));
+      const existingIds = new Set(existingMap.keys());
+
+      const toAdd = [...desired].filter((id) => !existingIds.has(id));
+      const toRemove = [...existingIds].filter((id) => !desired.has(id));
 
       if (toAdd.length > 0) {
         const data = toAdd.map((id) => ({ id }));
-        await attachLinks({ descriptor, relInfo, relationshipKey, leftId, relData: data, db });
+        await attachLinks({
+          descriptor,
+          relInfo,
+          relationshipKey,
+          inverseRelationshipKey,
+          leftId,
+          relData: data,
+          db,
+        });
       }
 
       if (toRemove.length > 0) {
+        for (const id of toRemove) {
+          const entry = existingMap.get(id);
+          if (!entry?.canonical) continue;
+          await db(LINKS_TABLE)
+            .where(buildLinkIdentity(entry.canonical))
+            .delete();
+        }
+      }
+    };
+
+    const removeLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
+      const relArray = Array.isArray(relData) ? relData : [];
+      if (relArray.length === 0) return;
+
+      const existingMap = await loadLinkRowsForResource({
+        descriptor,
+        relationshipKey,
+        resourceId: leftId,
+        db,
+      });
+
+      for (const identifier of relArray) {
+        const relatedId = normalizeId(identifier.id);
+        if (relatedId == null) continue;
+
+        const entry = existingMap.get(relatedId);
+        if (entry?.canonical) {
+          await db(LINKS_TABLE)
+            .where(buildLinkIdentity(entry.canonical))
+            .delete();
+          continue;
+        }
+
+        const canonical = canonicalizeLinkPair({
+          tenantId: descriptor.tenant,
+          relationshipKey,
+          inverseRelationshipKey,
+          leftResource: descriptor.resource,
+          leftId,
+          rightResource: relInfo.target,
+          rightId: relatedId,
+        });
+
+        if (!canonical) continue;
+
         await db(LINKS_TABLE)
-          .where({
-            tenant_id: descriptor.tenant,
-            relationship: relationshipKey,
-            left_resource: descriptor.resource,
-            left_id: leftId,
-          })
-          .whereIn('right_id', toRemove)
+          .where(buildLinkIdentity(canonical))
           .delete();
       }
     };
 
-    const removeLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
-      const relArray = Array.isArray(relData) ? relData : [];
-      const idsToRemove = relArray
-        .map((identifier) => normalizeId(identifier.id))
-        .filter((id) => id !== null);
-
-      if (idsToRemove.length === 0) return;
-
-      await db(LINKS_TABLE)
-        .where({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-          left_id: leftId,
-        })
-        .whereIn('right_id', idsToRemove)
-        .delete();
-    };
-
     const listLinks = async ({ descriptor, relInfo, relationshipKey, leftId, db }) => {
-      const rows = await db(LINKS_TABLE)
-        .where({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-          left_id: leftId,
-        })
-        .select('right_id');
+      const existingMap = await loadLinkRowsForResource({
+        descriptor,
+        relationshipKey,
+        resourceId: leftId,
+        db,
+      });
 
-      return rows.map((row) => ({ type: relInfo.target, id: String(row.right_id) }));
-    };
-
-    const fetchLinkedRecords = async ({ descriptor, relInfo, relationshipKey, leftIds, db }) => {
-      if (leftIds.length === 0) return [];
-
-      const rows = await db(LINKS_TABLE)
-        .where({
-          tenant_id: descriptor.tenant,
-          relationship: relationshipKey,
-          left_resource: descriptor.resource,
-        })
-        .whereIn('left_id', leftIds)
-        .select('left_id', 'right_id');
-
-      return rows;
+      return [...existingMap.entries()].map(([relatedId, entry]) => ({
+        type: entry.relatedResource || relInfo.target,
+        id: relatedId,
+      }));
     };
 
     helpers.dataExists = async ({ scopeName, context }) => {
@@ -401,29 +921,45 @@ export const RestApiYouapiKnexPlugin = {
       };
     };
 
-    const buildIncludes = async ({ parentResources, descriptor, context }) => {
-      const includeParam = context.queryParams?.include;
-      if (!includeParam) return [];
+    const parseIncludeTree = (includeParam) => {
+      const tree = {};
+      if (!includeParam) return tree;
 
-      const includeList = Array.isArray(includeParam)
-        ? includeParam.flatMap((item) => item.split(',').map((part) => part.trim()).filter(Boolean))
-        : String(includeParam).split(',').map((part) => part.trim()).filter(Boolean);
-
-      if (includeList.length === 0) return [];
-
-      const includes = [];
-      const seen = new Set();
-
-      for (const path of includeList) {
-        if (!path || path.includes('.')) {
-          // Nested includes not yet supported
-          continue;
+      const pushPath = (raw) => {
+        if (!raw) return;
+        const segments = raw.split('.').map((segment) => segment.trim()).filter(Boolean);
+        if (segments.length === 0) return;
+        let node = tree;
+        for (const segment of segments) {
+          node[segment] = node[segment] || {};
+          node = node[segment];
         }
+      };
 
-        const belongsToInfo = descriptor.belongsTo?.[path];
+      if (Array.isArray(includeParam)) {
+        for (const entry of includeParam) {
+          String(entry).split(',').forEach((part) => pushPath(part.trim()));
+        }
+      } else {
+        String(includeParam).split(',').forEach((part) => pushPath(part.trim()));
+      }
+
+      return tree;
+    };
+
+    const collectIncludes = async ({ descriptor, resources, includeTree, context, includes, seen }) => {
+      const entries = Object.entries(includeTree || {});
+      if (entries.length === 0 || !resources || resources.length === 0) return;
+
+      const db = context.db || context.transaction || api.knex.instance;
+
+      for (const [relName, childTree] of entries) {
+        const childKeys = Object.keys(childTree || {});
+
+        const belongsToInfo = descriptor.belongsTo?.[relName];
         if (belongsToInfo) {
-          const ids = [...new Set(parentResources
-            .map((resource) => resource.relationships?.[path]?.data?.id)
+          const ids = [...new Set(resources
+            .map((resource) => resource.relationships?.[relName]?.data?.id)
             .filter((id) => id !== undefined && id !== null))];
 
           if (ids.length === 0) continue;
@@ -431,56 +967,70 @@ export const RestApiYouapiKnexPlugin = {
           const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, belongsToInfo.target);
           if (!targetDescriptor) continue;
 
-          const rows = await context.db(targetDescriptor.canonical.tableName)
+          const rows = await db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .whereIn('id', ids);
 
+          const newResources = [];
           for (const row of rows) {
-            const translated = translateRecordFromStorage(row, targetDescriptor);
             const includeKey = `${targetDescriptor.resource}:${row.id}`;
             if (seen.has(includeKey)) continue;
             seen.add(includeKey);
-
+            const translated = translateRecordFromStorage(row, targetDescriptor);
             const includeResource = {
               type: targetDescriptor.resource,
               id: String(row.id),
               attributes: translated.attributes,
             };
-
             if (translated.relationships && Object.keys(translated.relationships).length > 0) {
               includeResource.relationships = translated.relationships;
             }
-
+            applySparseFieldsetToResource(includeResource, context);
             includes.push(includeResource);
+            newResources.push(includeResource);
+          }
+
+          if (childKeys.length > 0 && newResources.length > 0) {
+            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await collectIncludes({
+              descriptor: targetDescriptor,
+              resources: newResources,
+              includeTree: childTree,
+              context,
+              includes,
+              seen,
+            });
           }
           continue;
         }
 
-        const manyInfo = descriptor.manyToMany?.[path];
-        if (manyInfo) {
-          const info = await getManyToManyInfo(descriptor.resource, path);
-          if (!info) continue;
-          const leftIds = parentResources.map((resource) => resource.id);
-          const linkRows = await fetchLinkedRecords({
-            descriptor: info.descriptor,
-            relInfo: info.relInfo,
-            relationshipKey: info.relationshipKey,
-            leftIds,
-            db: context.db || context.transaction || api.knex.instance,
-          });
+        const hasManyInfo = descriptor.relationships?.[relName];
+        if (hasManyInfo?.type === 'hasMany' && hasManyInfo.target && hasManyInfo.foreignKey) {
+          let targetDescriptor;
+          try {
+            targetDescriptor = await getDescriptor(hasManyInfo.target);
+          } catch (error) {
+            continue;
+          }
 
-          const rightIds = [...new Set(linkRows.map((row) => row.right_id))];
-          if (rightIds.length === 0) continue;
+          const foreignField = targetDescriptor.fields?.[hasManyInfo.foreignKey];
+          if (!foreignField?.slot) continue;
+          const column = foreignField.slot;
 
-          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, info.relInfo.target);
-          if (!targetDescriptor) continue;
+          const parentIds = resources
+            .map((resource) => normalizeId(resource.id))
+            .filter((id) => id !== null);
 
-          const rows = await context.db(targetDescriptor.canonical.tableName)
+          if (parentIds.length === 0) continue;
+
+          const rows = await db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn('id', rightIds);
+            .whereIn(column, parentIds);
 
+          const newResources = [];
           for (const row of rows) {
             const includeKey = `${targetDescriptor.resource}:${row.id}`;
             if (seen.has(includeKey)) continue;
@@ -494,12 +1044,150 @@ export const RestApiYouapiKnexPlugin = {
             if (translated.relationships && Object.keys(translated.relationships).length > 0) {
               includeResource.relationships = translated.relationships;
             }
+            applySparseFieldsetToResource(includeResource, context);
             includes.push(includeResource);
+            newResources.push(includeResource);
+          }
+
+          if (childKeys.length > 0 && newResources.length > 0) {
+            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await collectIncludes({
+              descriptor: targetDescriptor,
+              resources: newResources,
+              includeTree: childTree,
+              context,
+              includes,
+              seen,
+            });
+          }
+
+          continue;
+        }
+
+        const manyInfo = descriptor.manyToMany?.[relName];
+        if (manyInfo) {
+          const info = await getManyToManyInfo(descriptor.resource, relName);
+          if (!info) continue;
+          const linkRows = await fetchLinksForParents({
+            descriptor: info.descriptor,
+            relationshipKey: info.relationshipKey,
+            parentIds: resources.map((resource) => resource.id),
+            db,
+          });
+
+          const childIds = [...new Set(linkRows.map((row) => row.childId))];
+          if (childIds.length === 0) continue;
+
+          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, info.relInfo.target);
+          if (!targetDescriptor) continue;
+
+          const rows = await db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .whereIn('id', childIds);
+
+          const newResources = [];
+          for (const row of rows) {
+            const includeKey = `${targetDescriptor.resource}:${row.id}`;
+            if (seen.has(includeKey)) continue;
+            seen.add(includeKey);
+            const translated = translateRecordFromStorage(row, targetDescriptor);
+            const includeResource = {
+              type: targetDescriptor.resource,
+              id: String(row.id),
+              attributes: translated.attributes,
+            };
+            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+              includeResource.relationships = translated.relationships;
+            }
+            applySparseFieldsetToResource(includeResource, context);
+            includes.push(includeResource);
+            newResources.push(includeResource);
+          }
+
+          if (childKeys.length > 0 && newResources.length > 0) {
+            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
+            await collectIncludes({
+              descriptor: targetDescriptor,
+              resources: newResources,
+              includeTree: childTree,
+              context,
+              includes,
+              seen,
+            });
           }
         }
       }
+    };
+
+    const buildIncludes = async ({ parentResources, descriptor, context }) => {
+      const includeTree = parseIncludeTree(context.queryParams?.include);
+      if (Object.keys(includeTree).length === 0) return [];
+
+      const includes = [];
+      const seen = new Set();
+
+      await collectIncludes({
+        descriptor,
+        resources: parentResources,
+        includeTree,
+        context,
+        includes,
+        seen,
+      });
 
       return includes;
+    };
+
+    const attachHasManyRelationships = async ({ resources, descriptor, context }) => {
+      if (!resources || resources.length === 0) return;
+      const hasManyEntries = Object.entries(descriptor.relationships || {})
+        .filter(([, relDef]) => relDef?.type === 'hasMany' && relDef.target && relDef.foreignKey);
+
+      if (hasManyEntries.length === 0) return;
+
+      const db = context.db || context.transaction || api.knex.instance;
+      const parentIds = resources.map((resource) => resource.id);
+      const normalizedParentIds = parentIds
+        .map((id) => normalizeId(id))
+        .filter((id) => id !== null);
+
+      if (normalizedParentIds.length === 0) return;
+
+      for (const [relName, relDef] of hasManyEntries) {
+        let targetDescriptor;
+        try {
+          targetDescriptor = await getDescriptor(relDef.target);
+        } catch (error) {
+          continue;
+        }
+
+        const foreignField = targetDescriptor.fields?.[relDef.foreignKey];
+        if (!foreignField?.slot) continue;
+        const column = foreignField.slot;
+
+        const rows = await db(targetDescriptor.canonical.tableName)
+          .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+          .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+          .whereIn(column, normalizedParentIds);
+
+        const grouped = rows.reduce((acc, row) => {
+          const parentId = row[column];
+          if (parentId == null) return acc;
+          const key = String(parentId);
+          acc[key] = acc[key] || [];
+          acc[key].push({ type: targetDescriptor.resource, id: String(row.id) });
+          return acc;
+        }, {});
+
+        for (const resource of resources) {
+          resource.relationships = resource.relationships || {};
+          const related = grouped[String(resource.id)] || [];
+          resource.relationships[relName] = { data: related };
+        }
+      }
     };
 
     const attachManyToManyRelationships = async ({ resources, descriptor, context }) => {
@@ -513,18 +1201,17 @@ export const RestApiYouapiKnexPlugin = {
       for (const [relName, relInfo] of manyEntries) {
         const info = await getManyToManyInfo(descriptor.resource, relName);
         if (!info) continue;
-        const rows = await fetchLinkedRecords({
+        const rows = await fetchLinksForParents({
           descriptor: info.descriptor,
-          relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
-          leftIds: parentIds,
+          parentIds,
           db,
         });
 
         const grouped = rows.reduce((acc, row) => {
-          const key = String(row.left_id);
+          const key = String(row.parentId);
           acc[key] = acc[key] || [];
-          acc[key].push({ type: info.relInfo.target, id: String(row.right_id) });
+          acc[key].push({ type: row.childType, id: String(row.childId) });
           return acc;
         }, {});
 
@@ -560,6 +1247,14 @@ export const RestApiYouapiKnexPlugin = {
         data.relationships = record.relationships;
       }
 
+      applySparseFieldsetToResource(data, context);
+
+      await attachHasManyRelationships({
+        resources: [data],
+        descriptor,
+        context,
+      });
+
       await attachManyToManyRelationships({
         resources: [data],
         descriptor,
@@ -583,11 +1278,36 @@ export const RestApiYouapiKnexPlugin = {
     helpers.dataQuery = async ({ scopeName, context }) => {
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
-      const query = context.db(canonical.tableName)
+      const db = context.db || context.transaction || api.knex.instance;
+      const scope = api.resources?.[scopeName];
+      const queryParams = context.queryParams || {};
+
+      const baseQuery = db(canonical.tableName)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant);
 
-      const rows = await query.select();
+      applyFiltersToQuery({
+        query: baseQuery,
+        filters: queryParams.filters,
+        descriptor,
+      });
+
+      const countQuery = baseQuery.clone();
+
+      applySortingToQuery({
+        query: baseQuery,
+        sort: queryParams.sort,
+        descriptor,
+        scope,
+      });
+
+      const paginationInfo = applyPaginationToQuery({
+        query: baseQuery,
+        scope,
+        queryParams,
+      });
+
+      const rows = await baseQuery.select();
       const data = rows.map((row) => {
         const translated = translateRecordFromStorage(row, descriptor);
         const resource = {
@@ -598,7 +1318,14 @@ export const RestApiYouapiKnexPlugin = {
         if (translated.relationships && Object.keys(translated.relationships).length > 0) {
           resource.relationships = translated.relationships;
         }
+        applySparseFieldsetToResource(resource, context);
         return resource;
+      });
+
+      await attachHasManyRelationships({
+        resources: data,
+        descriptor,
+        context,
       });
 
       await attachManyToManyRelationships({
@@ -618,16 +1345,42 @@ export const RestApiYouapiKnexPlugin = {
         response.included = included;
       }
 
+      context.returnMeta = context.returnMeta || {};
+      context.returnMeta.queryString = buildQueryString(queryParams);
+
+      if (paginationInfo.used) {
+        const countResult = await countQuery.count({ count: '*' }).first();
+        const total = Number(countResult?.count ?? countResult?.total ?? 0);
+        context.returnMeta.paginationMeta = {
+          page: paginationInfo.page,
+          pageSize: paginationInfo.pageSize,
+          total,
+        };
+        response.meta = {
+          pagination: context.returnMeta.paginationMeta,
+        };
+      } else if (context.returnMeta.paginationMeta) {
+        delete context.returnMeta.paginationMeta;
+      }
+
       return response;
     };
 
     helpers.dataQueryCount = async ({ scopeName, context }) => {
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
-      const [{ count }] = await context.db(canonical.tableName)
+      const db = context.db || context.transaction || api.knex.instance;
+      const query = db(canonical.tableName)
         .where(canonical.resourceColumn, descriptor.resource)
-        .where(canonical.tenantColumn, descriptor.tenant)
-        .count({ count: '*' });
+        .where(canonical.tenantColumn, descriptor.tenant);
+
+      applyFiltersToQuery({
+        query,
+        filters: context.queryParams?.filters,
+        descriptor,
+      });
+
+      const [{ count }] = await query.count({ count: '*' });
       return Number(count);
     };
 

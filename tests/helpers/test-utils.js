@@ -72,10 +72,14 @@ export async function cleanTables(knex, tableNames) {
       if (linkInfo) {
         const relationshipKey = linkInfo.relationshipKey || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
         await knex('any_links')
-          .where({
-            tenant_id: storageMode.defaultTenant,
-            left_resource: linkInfo.ownerResource,
-            relationship: relationshipKey,
+          .where({ tenant_id: storageMode.defaultTenant })
+          .andWhere((builder) => {
+            builder.where('relationship', relationshipKey)
+              .orWhere('inverse_relationship', relationshipKey);
+            if (linkInfo.inverseRelationshipKey) {
+              builder.orWhere('relationship', linkInfo.inverseRelationshipKey)
+                .orWhere('inverse_relationship', linkInfo.inverseRelationshipKey);
+            }
           })
           .delete()
           .catch(() => {});
@@ -101,16 +105,17 @@ export async function countRecords(knex, tableName) {
     const resource = storageMode.getResourceForTable(tableName);
     const linkInfo = storageMode.getLinkInfo(tableName);
     if (linkInfo) {
-      const relationshipKey = linkInfo.relationshipKey || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
+      const relationshipKey = linkInfo.relationshipKey
+        || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
       const result = await knex('any_links')
-        .where({
-          tenant_id: storageMode.defaultTenant,
-          left_resource: linkInfo.ownerResource,
-          relationship: relationshipKey,
+        .where({ tenant_id: storageMode.defaultTenant })
+        .andWhere((builder) => {
+          builder.where('relationship', relationshipKey)
+            .orWhere('inverse_relationship', relationshipKey);
         })
         .count('* as count')
         .first();
-      return parseInt(result.count);
+      return parseInt(result?.count ?? 0, 10);
     }
     if (resource) {
       const result = await knex('any_records')

@@ -147,9 +147,17 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   await api.resources.book_authors.createKnexTable();
   mapTable(`${tablePrefix}_book_authors`, 'book_authors');
   if (storageMode.isAnyApi()) {
-    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
-    storageMode.registerLink(`${tablePrefix}_book_authors`, 'books', 'authors', relationshipKey);
+    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
+    const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
+    storageMode.registerLink(
+      `${tablePrefix}_book_authors`,
+      'books',
+      'authors',
+      relationshipKey,
+      inverseRelationshipKey,
+    );
   }
 
   return api;
@@ -308,9 +316,11 @@ export async function createExtendedApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('ext_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
-    storageMode.registerLink('ext_book_authors', 'books', 'authors', relationshipKey);
+    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
+    const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
+    storageMode.registerLink('ext_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
   }
 
   // Polymorphic reviews (can go on authors, books and publishers)
@@ -440,9 +450,11 @@ export async function createLimitedDepthApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('limited_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
-    storageMode.registerLink('limited_book_authors', 'books', 'authors', relationshipKey);
+    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
+    const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
+    storageMode.registerLink('limited_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
   }
 
   return api;
