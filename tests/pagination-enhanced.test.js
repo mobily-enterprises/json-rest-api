@@ -60,16 +60,19 @@ describe('Enhanced Pagination Features', () => {
     });
 
     it('should add self links to individual resources', async () => {
+      const list = await api.resources.books.query({ simplified: false });
+      const firstId = list.data[0]?.id;
+
       const result = await api.resources.books.get({
-        id: '1',
+        id: firstId,
         simplified: false
       });
 
       validateJsonApiStructure(result, false);
       assert(result.data.links, 'Resource should have links');
-      assert.equal(result.data.links.self, '/books/1');
+      assert.equal(result.data.links.self, `/books/${firstId}`);
       assert(result.links, 'Response should have top-level links');
-      assert.equal(result.links.self, '/books/1');
+      assert.equal(result.links.self, `/books/${firstId}`);
     });
 
     it('should add self links to collection resources', async () => {

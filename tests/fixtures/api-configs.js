@@ -486,8 +486,8 @@ export async function createPaginationApi(knex, options = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  
-  await api.use(RestApiKnexPlugin, { knex });
+
+  await useStoragePlugin(api, knex);
 
   // Countries table
   await api.addResource('countries', {
@@ -503,6 +503,7 @@ export async function createPaginationApi(knex, options = {}) {
     tableName: 'pagination_countries'
   });
   await api.resources.countries.createKnexTable();
+  mapTable('pagination_countries', 'countries');
 
   // Publishers table
   await api.addResource('publishers', {
@@ -517,6 +518,7 @@ export async function createPaginationApi(knex, options = {}) {
     tableName: 'pagination_publishers'
   });
   await api.resources.publishers.createKnexTable();
+  mapTable('pagination_publishers', 'publishers');
 
   // Books table
   await api.addResource('books', {
@@ -529,6 +531,7 @@ export async function createPaginationApi(knex, options = {}) {
     tableName: 'pagination_books'
   });
   await api.resources.books.createKnexTable();
+  mapTable('pagination_books', 'books');
 
   return api;
 }

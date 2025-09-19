@@ -145,26 +145,33 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
   
   const otherParams = Object.entries(queryParams)
     .filter(([key]) => key !== 'page')
-    .map(([key, value]) => {
+    .flatMap(([key, value]) => {
       if (Array.isArray(value)) {
-        return value.map(v => `${key}=${encodeURIComponent(v)}`).join('&');
-      } else if (typeof value === 'object' && value !== null) {
+        return value.length === 0
+          ? []
+          : value.map((v) => `${key}=${encodeURIComponent(v)}`);
+      }
+      if (typeof value === 'object' && value !== null) {
         const parts = [];
         const processObject = (obj, prefix) => {
           Object.entries(obj).forEach(([k, v]) => {
             const newKey = prefix ? `${prefix}[${k}]` : `${key}[${k}]`;
             if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
               processObject(v, newKey);
-            } else {
+            } else if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0)) {
               parts.push(`${newKey}=${encodeURIComponent(v)}`);
             }
           });
         };
         processObject(value, key);
-        return parts.join('&');
+        return parts;
       }
-      return `${key}=${encodeURIComponent(value)}`;
+      if (value === undefined || value === null) {
+        return [];
+      }
+      return [`${key}=${encodeURIComponent(value)}`];
     })
+    .filter(Boolean)
     .join('&');
   
   const baseUrl = `${urlPrefix}/${scopeName}`;
@@ -429,26 +436,33 @@ export const generateCursorPaginationLinks = (urlPrefix, scopeName, queryParams,
   
   const otherParams = Object.entries(queryParams)
     .filter(([key]) => key !== 'page')
-    .map(([key, value]) => {
+    .flatMap(([key, value]) => {
       if (Array.isArray(value)) {
-        return value.map(v => `${key}=${encodeURIComponent(v)}`).join('&');
-      } else if (typeof value === 'object' && value !== null) {
+        return value.length === 0
+          ? []
+          : value.map((v) => `${key}=${encodeURIComponent(v)}`);
+      }
+      if (typeof value === 'object' && value !== null) {
         const parts = [];
         const processObject = (obj, prefix) => {
           Object.entries(obj).forEach(([k, v]) => {
             const newKey = prefix ? `${prefix}[${k}]` : `${key}[${k}]`;
             if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
               processObject(v, newKey);
-            } else {
+            } else if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0)) {
               parts.push(`${newKey}=${encodeURIComponent(v)}`);
             }
           });
         };
         processObject(value, key);
-        return parts.join('&');
+        return parts;
       }
-      return `${key}=${encodeURIComponent(value)}`;
+      if (value === undefined || value === null) {
+        return [];
+      }
+      return [`${key}=${encodeURIComponent(value)}`];
     })
+    .filter(Boolean)
     .join('&');
   
   const queryPrefix = otherParams ? `?${otherParams}&` : '?';

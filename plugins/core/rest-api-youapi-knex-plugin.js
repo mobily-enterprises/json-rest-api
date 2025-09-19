@@ -1,7 +1,18 @@
 import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
 import { YouapiRegistry } from '../anyapi/youapi-registry.js';
 import { RestApiValidationError } from '../../lib/rest-api-errors.js';
-import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './lib/querying-writing/knex-constants.js';
+import {
+  DEFAULT_QUERY_LIMIT,
+  DEFAULT_MAX_QUERY_LIMIT,
+} from './lib/querying-writing/knex-constants.js';
+import {
+  calculatePaginationMeta,
+  generatePaginationLinks,
+  generateCursorPaginationLinks,
+  buildCursorMeta,
+  parseCursor,
+} from './lib/querying/knex-pagination-helpers.js';
+import { getUrlPrefix, buildResourceUrl } from './lib/querying/url-helpers.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
@@ -232,6 +243,7 @@ export const RestApiYouapiKnexPlugin = {
       }
 
       const effectiveSort = sortList.length > 0 ? sortList : ['id'];
+      const descriptors = [];
 
       for (const entry of effectiveSort) {
         const desc = typeof entry === 'string' && entry.startsWith('-');
@@ -239,7 +251,26 @@ export const RestApiYouapiKnexPlugin = {
         const fieldInfo = resolveFieldInfo(descriptor, field);
         if (!fieldInfo?.column) continue;
         query.orderBy(fieldInfo.column, desc ? 'desc' : 'asc');
+        descriptors.push({
+          field,
+          column: fieldInfo.column,
+          direction: desc ? 'desc' : 'asc',
+          definition: fieldInfo.definition || null,
+          isRelationship: fieldInfo.isRelationship || false,
+        });
       }
+
+      if (descriptors.length === 0) {
+        descriptors.push({
+          field: 'id',
+          column: 'id',
+          direction: 'asc',
+          definition: { type: 'id' },
+          isRelationship: false,
+        });
+      }
+
+      return descriptors;
     };
 
     const buildQueryString = (queryParams = {}) => {
@@ -270,59 +301,157 @@ export const RestApiYouapiKnexPlugin = {
       return parts.length > 0 ? `?${parts.join('&')}` : '';
     };
 
-    const applyPaginationToQuery = ({ query, scope, queryParams }) => {
+    const applyPaginationToQuery = ({
+      query,
+      scope,
+      queryParams,
+      sortDescriptors,
+    }) => {
       const pageParams = queryParams?.page || {};
       const scopeVars = scope?.vars || {};
       const defaultLimit = scopeVars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
       const maxLimit = scopeVars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT;
 
-      const hasCursor = pageParams.after !== undefined || pageParams.before !== undefined;
-      if (hasCursor) {
-        throw new RestApiValidationError('Cursor pagination is not supported in AnyAPI mode yet.', {
-          fields: ['page.after', 'page.before'],
-          violations: [{
-            field: 'page',
-            rule: 'not_supported',
-            message: 'Cursor pagination is not available for AnyAPI storage.',
-          }],
-        });
-      }
+      const descriptors = (sortDescriptors && sortDescriptors.length > 0)
+        ? sortDescriptors
+        : [{
+            field: 'id',
+            column: 'id',
+            direction: 'asc',
+            definition: { type: 'id' },
+            isRelationship: false,
+          }];
 
+      const hasCursorParam = pageParams.after !== undefined || pageParams.before !== undefined;
       const hasPageSize = pageParams.size !== undefined;
       const hasPageNumber = pageParams.number !== undefined;
 
-      if (!hasPageSize && !hasPageNumber) {
-        query.limit(defaultLimit);
+      const parseCursorOrThrow = (rawCursor, paramName) => {
+        try {
+          return parseCursor(rawCursor);
+        } catch (error) {
+          throw new RestApiValidationError(
+            `Invalid cursor format in ${paramName} parameter`,
+            {
+              fields: [`page.${paramName}`],
+              violations: [{
+                field: `page.${paramName}`,
+                rule: 'invalid_cursor',
+                message: error.message,
+              }],
+            },
+          );
+        }
+      };
+
+      const coerceCursorValues = (cursorMap) => {
+        const typed = {};
+        for (const descriptor of descriptors) {
+          if (descriptor.field === undefined) continue;
+          const raw = cursorMap[descriptor.field];
+          if (raw === undefined) continue;
+          typed[descriptor.field] = coerceValueForDefinition(
+            raw,
+            descriptor.definition,
+            { isRelationship: descriptor.isRelationship },
+          );
+        }
+        return typed;
+      };
+
+      const buildCursorPredicate = (cursorValues, operatorSelector) => {
+        query.where(function cursorWhere() {
+          descriptors.forEach((descriptor, index) => {
+            const value = cursorValues[descriptor.field];
+            if (value === undefined) return;
+
+            this.orWhere(function singleLevel() {
+              for (let i = 0; i < index; i += 1) {
+                const prev = descriptors[i];
+                const prevValue = cursorValues[prev.field];
+                if (prevValue === undefined) return;
+                this.where(prev.column, prevValue);
+              }
+
+              const operator = operatorSelector(descriptor.direction);
+              this.where(descriptor.column, operator, value);
+            });
+          });
+        });
+      };
+
+      const ensurePageSize = () => {
+        const requestedSize = Number(pageParams.size ?? defaultLimit);
+        if (!Number.isFinite(requestedSize) || requestedSize <= 0) {
+          throw new RestApiValidationError('Page size must be greater than 0', {
+            fields: ['page.size'],
+            violations: [{
+              field: 'page.size',
+              rule: 'min_value',
+              message: 'Page size must be a positive number',
+            }],
+          });
+        }
+        return Math.min(Math.trunc(requestedSize), maxLimit);
+      };
+
+      if (hasCursorParam || (hasPageSize && !hasPageNumber)) {
+        if (pageParams.after && pageParams.before) {
+          throw new RestApiValidationError(
+            'page[after] and page[before] cannot be used together',
+            {
+              fields: ['page.after', 'page.before'],
+              violations: [{
+                field: 'page.after',
+                rule: 'conflict',
+                message: 'Provide either page[after] or page[before], not both',
+              }],
+            },
+          );
+        }
+
+        const pageSize = ensurePageSize();
+        query.limit(pageSize + 1);
+
+        if (pageParams.after) {
+          const cursorMap = parseCursorOrThrow(pageParams.after, 'after');
+          const cursorValues = coerceCursorValues(cursorMap);
+          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'));
+        } else if (pageParams.before) {
+          const cursorMap = parseCursorOrThrow(pageParams.before, 'before');
+          const cursorValues = coerceCursorValues(cursorMap);
+          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'));
+        }
+
         return {
-          used: false,
-          page: 1,
-          pageSize: defaultLimit,
+          mode: 'cursor',
+          pageSize,
+          sortDescriptors: descriptors,
         };
       }
 
-      const requestedSize = Number(pageParams.size ?? defaultLimit);
-      if (!Number.isFinite(requestedSize) || requestedSize <= 0) {
-        throw new RestApiValidationError('Page size must be greater than 0', {
-          fields: ['page.size'],
-          violations: [{
-            field: 'page.size',
-            rule: 'min_value',
-            message: 'Page size must be a positive number',
-          }],
-        });
+      if (hasPageSize || hasPageNumber) {
+        const pageSize = ensurePageSize();
+        const pageNumber = Math.trunc(Number(pageParams.number ?? 1));
+        const safePageNumber = Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1;
+        const offset = (safePageNumber - 1) * pageSize;
+
+        query.limit(pageSize).offset(offset);
+
+        return {
+          mode: 'offset',
+          page: safePageNumber,
+          pageSize,
+          sortDescriptors: descriptors,
+        };
       }
 
-      const pageSize = Math.min(Math.trunc(requestedSize), maxLimit);
-      const pageNumber = Math.trunc(Number(pageParams.number ?? 1));
-      const safePageNumber = Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1;
-      const offset = (safePageNumber - 1) * pageSize;
-
-      query.limit(pageSize).offset(offset);
-
+      query.limit(defaultLimit);
       return {
-        used: true,
-        page: safePageNumber,
-        pageSize,
+        mode: 'default',
+        page: 1,
+        pageSize: defaultLimit,
+        sortDescriptors: descriptors,
       };
     };
 
@@ -904,6 +1033,7 @@ export const RestApiYouapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
+      const scope = api.resources?.[scopeName];
 
       const row = await context.db(canonical.tableName)
         .where('id', id)
@@ -913,12 +1043,18 @@ export const RestApiYouapiKnexPlugin = {
 
       if (!row) return null;
       const translated = translateRecordFromStorage(row, descriptor);
-      return {
+      const minimal = {
         type: descriptor.resource,
         id: String(row.id),
         attributes: translated.attributes,
         relationships: translated.relationships,
       };
+      if (scope) {
+        minimal.links = {
+          self: buildResourceUrl(context, scope, scopeName, minimal.id),
+        };
+      }
+      return minimal;
     };
 
     const parseIncludeTree = (includeParam) => {
@@ -952,6 +1088,12 @@ export const RestApiYouapiKnexPlugin = {
       if (entries.length === 0 || !resources || resources.length === 0) return;
 
       const db = context.db || context.transaction || api.knex.instance;
+      const addSelfLink = (resource, resourceType) => {
+        const targetScope = api.resources?.[resourceType];
+        if (!targetScope) return;
+        resource.links = resource.links || {};
+        resource.links.self = buildResourceUrl(context, targetScope, resourceType, resource.id);
+      };
 
       for (const [relName, childTree] of entries) {
         const childKeys = Object.keys(childTree || {});
@@ -987,6 +1129,7 @@ export const RestApiYouapiKnexPlugin = {
               includeResource.relationships = translated.relationships;
             }
             applySparseFieldsetToResource(includeResource, context);
+            addSelfLink(includeResource, targetDescriptor.resource);
             includes.push(includeResource);
             newResources.push(includeResource);
           }
@@ -1050,6 +1193,7 @@ export const RestApiYouapiKnexPlugin = {
                 includeResource.relationships = translated.relationships;
               }
               applySparseFieldsetToResource(includeResource, context);
+              addSelfLink(includeResource, targetDescriptor.resource);
               includes.push(includeResource);
               newResources.push(includeResource);
             }
@@ -1144,23 +1288,24 @@ export const RestApiYouapiKnexPlugin = {
           }
 
           const newResources = [];
-          for (const row of rows) {
-            const includeKey = `${targetDescriptor.resource}:${row.id}`;
-            if (seen.has(includeKey)) continue;
-            seen.add(includeKey);
-            const translated = translateRecordFromStorage(row, targetDescriptor);
-            const includeResource = {
-              type: targetDescriptor.resource,
-              id: String(row.id),
-              attributes: translated.attributes,
-            };
-            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-              includeResource.relationships = translated.relationships;
+            for (const row of rows) {
+              const includeKey = `${targetDescriptor.resource}:${row.id}`;
+              if (seen.has(includeKey)) continue;
+              seen.add(includeKey);
+              const translated = translateRecordFromStorage(row, targetDescriptor);
+              const includeResource = {
+                type: targetDescriptor.resource,
+                id: String(row.id),
+                attributes: translated.attributes,
+              };
+              if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+                includeResource.relationships = translated.relationships;
+              }
+              applySparseFieldsetToResource(includeResource, context);
+              addSelfLink(includeResource, targetDescriptor.resource);
+              includes.push(includeResource);
+              newResources.push(includeResource);
             }
-            applySparseFieldsetToResource(includeResource, context);
-            includes.push(includeResource);
-            newResources.push(includeResource);
-          }
 
           if (childKeys.length > 0 && newResources.length > 0) {
             await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
@@ -1200,21 +1345,22 @@ export const RestApiYouapiKnexPlugin = {
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .whereIn('id', childIds);
 
-          const newResources = [];
-          for (const row of rows) {
-            const includeKey = `${targetDescriptor.resource}:${row.id}`;
-            if (seen.has(includeKey)) continue;
-            seen.add(includeKey);
-            const translated = translateRecordFromStorage(row, targetDescriptor);
-            const includeResource = {
-              type: targetDescriptor.resource,
-              id: String(row.id),
-              attributes: translated.attributes,
-            };
-            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-              includeResource.relationships = translated.relationships;
-            }
-            applySparseFieldsetToResource(includeResource, context);
+         const newResources = [];
+         for (const row of rows) {
+           const includeKey = `${targetDescriptor.resource}:${row.id}`;
+           if (seen.has(includeKey)) continue;
+           seen.add(includeKey);
+           const translated = translateRecordFromStorage(row, targetDescriptor);
+           const includeResource = {
+             type: targetDescriptor.resource,
+             id: String(row.id),
+             attributes: translated.attributes,
+           };
+           if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+             includeResource.relationships = translated.relationships;
+           }
+           applySparseFieldsetToResource(includeResource, context);
+            addSelfLink(includeResource, targetDescriptor.resource);
             includes.push(includeResource);
             newResources.push(includeResource);
           }
@@ -1380,6 +1526,7 @@ export const RestApiYouapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
+      const scope = api.resources?.[scopeName];
 
       const row = await context.db(canonical.tableName)
         .where('id', id)
@@ -1425,6 +1572,28 @@ export const RestApiYouapiKnexPlugin = {
         response.included = included;
       }
 
+      if (scope) {
+        data.links = data.links || {};
+        data.links.self = buildResourceUrl(context, scope, scopeName, data.id);
+        response.links = {
+          self: data.links.self,
+        };
+      }
+
+      if (included.length > 0) {
+        for (const includeResource of included) {
+          const targetScope = api.resources?.[includeResource.type];
+          if (!targetScope) continue;
+          includeResource.links = includeResource.links || {};
+          includeResource.links.self = buildResourceUrl(
+            context,
+            targetScope,
+            includeResource.type,
+            includeResource.id,
+          );
+        }
+      }
+
       return response;
     };
 
@@ -1447,7 +1616,7 @@ export const RestApiYouapiKnexPlugin = {
 
       const countQuery = baseQuery.clone();
 
-      applySortingToQuery({
+      const sortDescriptors = applySortingToQuery({
         query: baseQuery,
         sort: queryParams.sort,
         descriptor,
@@ -1458,9 +1627,34 @@ export const RestApiYouapiKnexPlugin = {
         query: baseQuery,
         scope,
         queryParams,
+        sortDescriptors,
       });
 
-      const rows = await baseQuery.select();
+      let rows = await baseQuery.select();
+      let cursorRecords = null;
+      let hasMore = false;
+
+      if (paginationInfo.mode === 'cursor') {
+        const { pageSize, sortDescriptors: cursorDescriptors } = paginationInfo;
+        cursorRecords = rows.map((row) => {
+          const record = {};
+          for (const descriptorEntry of cursorDescriptors) {
+            if (descriptorEntry.field === 'id') {
+              record.id = row.id;
+            } else if (descriptorEntry.column) {
+              record[descriptorEntry.field] = row[descriptorEntry.column];
+            }
+          }
+          return record;
+        });
+
+        if (rows.length > pageSize) {
+          hasMore = true;
+          rows = rows.slice(0, pageSize);
+          cursorRecords = cursorRecords.slice(0, pageSize);
+        }
+      }
+
       const data = rows.map((row) => {
         const translated = translateRecordFromStorage(row, descriptor);
         const resource = {
@@ -1470,6 +1664,11 @@ export const RestApiYouapiKnexPlugin = {
         };
         if (translated.relationships && Object.keys(translated.relationships).length > 0) {
           resource.relationships = translated.relationships;
+        }
+        const resourceScope = scope;
+        if (resourceScope) {
+          resource.links = resource.links || {};
+          resource.links.self = buildResourceUrl(context, resourceScope, scopeName, resource.id);
         }
         applySparseFieldsetToResource(resource, context);
         return resource;
@@ -1500,20 +1699,63 @@ export const RestApiYouapiKnexPlugin = {
 
       context.returnMeta = context.returnMeta || {};
       context.returnMeta.queryString = buildQueryString(queryParams);
+      delete context.returnMeta.paginationMeta;
+      delete context.returnMeta.paginationLinks;
 
-      if (paginationInfo.used) {
-        const countResult = await countQuery.count({ count: '*' }).first();
-        const total = Number(countResult?.count ?? countResult?.total ?? 0);
-        context.returnMeta.paginationMeta = {
-          page: paginationInfo.page,
-          pageSize: paginationInfo.pageSize,
-          total,
-        };
+      if (paginationInfo.mode === 'offset') {
+        const { page, pageSize } = paginationInfo;
+        let paginationMeta;
+
+        if (scope?.vars?.enablePaginationCounts) {
+          const countResult = await countQuery.count({ count: '*' }).first();
+          const total = Number(countResult?.count ?? countResult?.total ?? 0);
+          paginationMeta = calculatePaginationMeta(total, page, pageSize);
+        } else {
+          paginationMeta = { page, pageSize };
+        }
+
+        context.returnMeta.paginationMeta = paginationMeta;
+        const urlPrefix = getUrlPrefix(context, scope);
+        context.returnMeta.paginationLinks = generatePaginationLinks(
+          urlPrefix,
+          scopeName,
+          queryParams,
+          paginationMeta,
+        );
+      } else if (paginationInfo.mode === 'cursor' && cursorRecords) {
+        const cursorFields = paginationInfo.sortDescriptors.map((descriptorEntry) => descriptorEntry.field);
+        const paginationMeta = buildCursorMeta(
+          cursorRecords,
+          paginationInfo.pageSize,
+          hasMore,
+          cursorFields,
+        );
+        context.returnMeta.paginationMeta = paginationMeta;
+        const urlPrefix = getUrlPrefix(context, scope);
+        context.returnMeta.paginationLinks = generateCursorPaginationLinks(
+          urlPrefix,
+          scopeName,
+          queryParams,
+          cursorRecords,
+          paginationInfo.pageSize,
+          hasMore,
+          cursorFields,
+        );
+      }
+
+      if (context.returnMeta.paginationMeta) {
         response.meta = {
           pagination: context.returnMeta.paginationMeta,
         };
-      } else if (context.returnMeta.paginationMeta) {
-        delete context.returnMeta.paginationMeta;
+      }
+
+      if (context.returnMeta.paginationLinks) {
+        response.links = context.returnMeta.paginationLinks;
+      } else if (scope) {
+        const urlPrefix = getUrlPrefix(context, scope);
+        response.links = {
+          self: `${urlPrefix}/${scopeName}${context.returnMeta.queryString || ''}`,
+        };
       }
 
       return response;
