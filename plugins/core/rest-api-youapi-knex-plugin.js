@@ -54,12 +54,13 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     const ensureTargetsExist = async ({ relInfo, relData, transaction }) => {
-      if (!relData || relData.length === 0) return;
+      const relArray = Array.isArray(relData) ? relData : [];
+      if (relArray.length === 0) return;
       const targetScope = api.resources[relInfo.target];
       if (!targetScope) {
         throw new Error(`Target resource '${relInfo.target}' not found`);
       }
-      for (const identifier of relData) {
+      for (const identifier of relArray) {
         if (!identifier?.id) {
           throw new Error('Relationship data requires resource identifier with id');
         }
@@ -71,7 +72,8 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     const attachLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
-      if (relData.length === 0) return;
+      const relArray = Array.isArray(relData) ? relData : [];
+      if (relArray.length === 0) return;
 
       const existingRows = await db(LINKS_TABLE)
         .where({
@@ -85,7 +87,7 @@ export const RestApiYouapiKnexPlugin = {
       const existing = new Set(existingRows.map((row) => String(row.right_id)));
       const rowsToInsert = [];
 
-      for (const identifier of relData) {
+      for (const identifier of relArray) {
         const rightId = normalizeId(identifier.id);
         if (rightId == null || existing.has(rightId)) continue;
         rowsToInsert.push({
@@ -198,6 +200,7 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     const syncLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+      const relArray = Array.isArray(relData) ? relData : [];
       const existingRows = await db(LINKS_TABLE)
         .where({
           tenant_id: descriptor.tenant,
@@ -208,7 +211,7 @@ export const RestApiYouapiKnexPlugin = {
         .select('right_id');
 
       const existing = new Set(existingRows.map((row) => String(row.right_id)));
-      const desired = new Set(relData.map((identifier) => normalizeId(identifier.id)).filter((id) => id !== null));
+      const desired = new Set(relArray.map((identifier) => normalizeId(identifier.id)).filter((id) => id !== null));
 
       const toAdd = [...desired].filter((id) => !existing.has(id));
       const toRemove = [...existing].filter((id) => !desired.has(id));
@@ -232,7 +235,8 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     const removeLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
-      const idsToRemove = relData
+      const relArray = Array.isArray(relData) ? relData : [];
+      const idsToRemove = relArray
         .map((identifier) => normalizeId(identifier.id))
         .filter((id) => id !== null);
 
@@ -321,11 +325,19 @@ export const RestApiYouapiKnexPlugin = {
       row[canonical.resourceColumn] = descriptor.resource;
       row[canonical.tenantColumn] = descriptor.tenant;
 
+      const updateRow = Object.fromEntries(
+        Object.entries(row).filter(([, value]) => value !== undefined)
+      );
+
+      if (Object.keys(updateRow).length === 0) {
+        return 0;
+      }
+
       const result = await context.db(canonical.tableName)
         .where('id', id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
-        .update(row);
+        .update(updateRow);
 
       return result;
     };
@@ -337,11 +349,19 @@ export const RestApiYouapiKnexPlugin = {
       const attributes = context.inputRecord?.data?.attributes || {};
       const row = translateAttributesForStorage(attributes, descriptor);
 
+      const updateRow = Object.fromEntries(
+        Object.entries(row).filter(([, value]) => value !== undefined)
+      );
+
+      if (Object.keys(updateRow).length === 0) {
+        return 0;
+      }
+
       const result = await context.db(canonical.tableName)
         .where('id', id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
-        .update(row);
+        .update(updateRow);
 
       return result;
     };
