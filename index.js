@@ -16,6 +16,7 @@ export { AccessPlugin } from './plugins/core/rest-api-access.js';
 
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
+export { RestApiYouapiKnexPlugin } from './plugins/core/rest-api-youapi-knex-plugin.js';
 
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js';

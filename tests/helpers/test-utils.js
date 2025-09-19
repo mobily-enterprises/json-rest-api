@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { storageMode } from './storage-mode.js';
 
 /**
  * Validates that a response follows JSON:API structure
@@ -48,8 +49,35 @@ export function resourceIdentifier(type, id) {
  * Cleans all records from the given tables
  */
 export async function cleanTables(knex, tableNames) {
-  for (const table of tableNames) {
-    await knex(table).delete();
+  if (storageMode.isAnyApi()) {
+    const resources = tableNames
+      .map((table) => storageMode.getResourceForTable(table))
+      .filter(Boolean);
+
+    if (resources.length > 0) {
+      await knex('any_records')
+        .where(storageMode.defaultTenant ? { tenant_id: storageMode.defaultTenant } : {})
+        .whereIn('resource', resources)
+        .delete();
+
+      await knex('any_links')
+        .where(storageMode.defaultTenant ? { tenant_id: storageMode.defaultTenant } : {})
+        .whereIn('relationship', resources)
+        .delete()
+        .catch(() => {});
+    }
+
+    for (const table of tableNames) {
+      try {
+        await knex(table).delete();
+      } catch (error) {
+        // Ignore missing tables in anyapi mode
+      }
+    }
+  } else {
+    for (const table of tableNames) {
+      await knex(table).delete();
+    }
   }
 }
 
@@ -57,6 +85,26 @@ export async function cleanTables(knex, tableNames) {
  * Counts records in a table
  */
 export async function countRecords(knex, tableName) {
+  if (storageMode.isAnyApi()) {
+    const resource = storageMode.getResourceForTable(tableName);
+    if (resource) {
+      const result = await knex('any_records')
+        .where({
+          tenant_id: storageMode.defaultTenant,
+          resource,
+        })
+        .count('* as count')
+        .first();
+      return parseInt(result.count);
+    }
+    try {
+      const result = await knex(tableName).count('* as count').first();
+      return parseInt(result?.count || 0);
+    } catch (error) {
+      return 0;
+    }
+  }
+
   const result = await knex(tableName).count('* as count').first();
   return parseInt(result.count);
 }

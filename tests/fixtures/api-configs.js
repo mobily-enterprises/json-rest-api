@@ -1,8 +1,25 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin } from '../../index.js';
+import { RestApiPlugin, RestApiKnexPlugin, RestApiYouapiKnexPlugin } from '../../index.js';
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
 import express from 'express';
 import { createServer } from 'http';
+import { ensureAnyApiSchema } from '../../plugins/anyapi/schema-utils.js';
+import { storageMode } from '../helpers/storage-mode.js';
+
+async function useStoragePlugin(api, knex) {
+  if (storageMode.isAnyApi()) {
+    await ensureAnyApiSchema(knex);
+    await api.use(RestApiYouapiKnexPlugin, { knex });
+  } else {
+    await api.use(RestApiKnexPlugin, { knex });
+  }
+}
+
+function mapTable(tableName, resourceName) {
+  if (storageMode.isAnyApi()) {
+    storageMode.registerTable(tableName, resourceName);
+  }
+}
 
 /**
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
@@ -10,6 +27,9 @@ import { createServer } from 'http';
 export async function createBasicApi(knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || `basic-test-api`;
   const tablePrefix = pluginOptions.tablePrefix || 'basic';
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry();
+  }
   const api = new Api({
     name: apiName,
     log: { level: process.env.LOG_LEVEL || 'info' }
@@ -33,8 +53,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
   
   // Add Express plugin if requested
   if (pluginOptions.includeExpress) {
@@ -58,6 +77,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_countries`
   });
   await api.resources.countries.createKnexTable();
+  mapTable(`${tablePrefix}_countries`, 'countries');
 
   // Publishers table
   await api.addResource('publishers', {
@@ -72,6 +92,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_publishers`
   });
   await api.resources.publishers.createKnexTable();
+  mapTable(`${tablePrefix}_publishers`, 'publishers');
 
   // Authors table
   await api.addResource('authors', {
@@ -85,6 +106,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_authors`
   });
   await api.resources.authors.createKnexTable();
+  mapTable(`${tablePrefix}_authors`, 'authors');
 
   // Books table
   await api.addResource('books', {
@@ -100,6 +122,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_books`
   });
   await api.resources.books.createKnexTable();
+  mapTable(`${tablePrefix}_books`, 'books');
 
   // Book-Authors pivot table
   await api.addResource('book_authors', {
@@ -111,6 +134,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_book_authors`
   });
   await api.resources.book_authors.createKnexTable();
+  mapTable(`${tablePrefix}_book_authors`, 'book_authors');
 
   return api;
 }
@@ -160,8 +184,7 @@ export async function createExtendedApi(knex) {
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'price', 'language', 'population', 'name', 'code']
   });
-  
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
 
   // Countries with extended fields
   await api.addResource('countries', {
@@ -181,6 +204,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_countries'
   });
   await api.resources.countries.createKnexTable();
+  mapTable('ext_countries', 'countries');
 
   // Publishers with extended fields
   await api.addResource('publishers', {
@@ -203,6 +227,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_publishers'
   });
   await api.resources.publishers.createKnexTable();
+  mapTable('ext_publishers', 'publishers');
 
   // Authors with extended fields
   await api.addResource('authors', {
@@ -224,6 +249,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_authors'
   });
   await api.resources.authors.createKnexTable();
+  mapTable('ext_authors', 'authors');
 
   // Books with extended fields
   await api.addResource('books', {
@@ -249,6 +275,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_books'
   });
   await api.resources.books.createKnexTable();
+  mapTable('ext_books', 'books');
 
   // Book-Authors pivot with extended fields
   await api.addResource('book_authors', {
@@ -262,6 +289,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_book_authors'
   });
   await api.resources.book_authors.createKnexTable();
+  mapTable('ext_book_authors', 'book_authors');
 
   // Polymorphic reviews (can go on authors, books and publishers)
   await api.addResource('reviews', {
@@ -288,6 +316,7 @@ export async function createExtendedApi(knex) {
     tableName: 'ext_reviews'
   });
   await api.resources.reviews.createKnexTable();
+  mapTable('ext_reviews', 'reviews');
 
 
   return api;
@@ -318,8 +347,7 @@ export async function createLimitedDepthApi(knex) {
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
     includeDepthLimit: 2  // Key difference: limit is 2 instead of default 3
   });
-  
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
 
   // Use different table names with 'limited_' prefix to avoid conflicts
   await api.addResource('countries', {
@@ -335,6 +363,7 @@ export async function createLimitedDepthApi(knex) {
     tableName: 'limited_countries',
   });
   await api.resources.countries.createKnexTable();
+  mapTable('limited_countries', 'countries');
 
   await api.addResource('publishers', {
     schema: {
@@ -349,6 +378,7 @@ export async function createLimitedDepthApi(knex) {
     tableName: 'limited_publishers'
   });
   await api.resources.publishers.createKnexTable();
+  mapTable('limited_publishers', 'publishers');
 
   await api.addResource('authors', {
     schema: {
