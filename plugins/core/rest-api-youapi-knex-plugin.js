@@ -1006,8 +1006,90 @@ export const RestApiYouapiKnexPlugin = {
           continue;
         }
 
+        const polymorphicInfo = descriptor.polymorphicBelongsTo?.[relName];
+        if (polymorphicInfo) {
+          const typeToIds = new Map();
+          for (const resource of resources) {
+            const relData = resource.relationships?.[relName]?.data;
+            if (!relData?.type || relData?.id == null) continue;
+            const targetType = String(relData.type);
+            const targetId = normalizeId(relData.id);
+            if (targetId == null) continue;
+            if (!typeToIds.has(targetType)) {
+              typeToIds.set(targetType, new Set());
+            }
+            typeToIds.get(targetType).add(targetId);
+          }
+
+          const newResources = [];
+          for (const [targetType, idSet] of typeToIds.entries()) {
+            if (idSet.size === 0) continue;
+            let targetDescriptor;
+            try {
+              targetDescriptor = await getDescriptor(targetType);
+            } catch (error) {
+              continue;
+            }
+
+            const rows = await db(targetDescriptor.canonical.tableName)
+              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+              .whereIn('id', [...idSet]);
+
+            for (const row of rows) {
+              const includeKey = `${targetDescriptor.resource}:${row.id}`;
+              if (seen.has(includeKey)) continue;
+              seen.add(includeKey);
+              const translated = translateRecordFromStorage(row, targetDescriptor);
+              const includeResource = {
+                type: targetDescriptor.resource,
+                id: String(row.id),
+                attributes: translated.attributes,
+              };
+              if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+                includeResource.relationships = translated.relationships;
+              }
+              applySparseFieldsetToResource(includeResource, context);
+              includes.push(includeResource);
+              newResources.push(includeResource);
+            }
+          }
+
+          if (childKeys.length > 0 && newResources.length > 0) {
+            const resourcesByType = new Map();
+            for (const includeResource of newResources) {
+              if (!resourcesByType.has(includeResource.type)) {
+                resourcesByType.set(includeResource.type, []);
+              }
+              resourcesByType.get(includeResource.type).push(includeResource);
+            }
+
+            for (const [targetType, groupedResources] of resourcesByType.entries()) {
+              let targetDescriptor;
+              try {
+                targetDescriptor = await getDescriptor(targetType);
+              } catch (error) {
+                continue;
+              }
+
+              await attachHasManyRelationships({ resources: groupedResources, descriptor: targetDescriptor, context });
+              await attachManyToManyRelationships({ resources: groupedResources, descriptor: targetDescriptor, context });
+              await collectIncludes({
+                descriptor: targetDescriptor,
+                resources: groupedResources,
+                includeTree: childTree,
+                context,
+                includes,
+                seen,
+              });
+            }
+          }
+
+          continue;
+        }
+
         const hasManyInfo = descriptor.relationships?.[relName];
-        if (hasManyInfo?.type === 'hasMany' && hasManyInfo.target && hasManyInfo.foreignKey) {
+        if (hasManyInfo?.type === 'hasMany' && hasManyInfo.target && (hasManyInfo.foreignKey || hasManyInfo.via)) {
           let targetDescriptor;
           try {
             targetDescriptor = await getDescriptor(hasManyInfo.target);
@@ -1015,20 +1097,51 @@ export const RestApiYouapiKnexPlugin = {
             continue;
           }
 
-          const foreignField = targetDescriptor.fields?.[hasManyInfo.foreignKey];
-          if (!foreignField?.slot) continue;
-          const column = foreignField.slot;
-
           const parentIds = resources
             .map((resource) => normalizeId(resource.id))
             .filter((id) => id !== null);
 
           if (parentIds.length === 0) continue;
 
-          const rows = await db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn(column, parentIds);
+          const queryIds = Array.from(new Set([
+            ...parentIds,
+            ...parentIds
+              .map((id) => {
+                const numeric = Number(id);
+                return Number.isFinite(numeric) ? numeric : null;
+              })
+              .filter((value) => value !== null),
+          ]));
+
+          let rows = [];
+          let groupingColumn = null;
+
+          if (hasManyInfo.foreignKey) {
+            const foreignField = targetDescriptor.fields?.[hasManyInfo.foreignKey];
+            if (!foreignField?.slot) {
+              continue;
+            }
+            groupingColumn = foreignField.slot;
+            rows = await db(targetDescriptor.canonical.tableName)
+              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+              .whereIn(groupingColumn, parentIds);
+          } else if (hasManyInfo.via) {
+            const polyInfo = targetDescriptor.polymorphicBelongsTo?.[hasManyInfo.via];
+            if (!polyInfo?.idColumn || !polyInfo?.typeColumn) {
+              continue;
+            }
+            groupingColumn = polyInfo.idColumn;
+            rows = await db(targetDescriptor.canonical.tableName)
+              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+              .where(polyInfo.typeColumn, descriptor.resource)
+              .whereIn(groupingColumn, queryIds);
+          }
+
+          if (!groupingColumn || rows.length === 0) {
+            continue;
+          }
 
           const newResources = [];
           for (const row of rows) {
@@ -1144,7 +1257,7 @@ export const RestApiYouapiKnexPlugin = {
     const attachHasManyRelationships = async ({ resources, descriptor, context }) => {
       if (!resources || resources.length === 0) return;
       const hasManyEntries = Object.entries(descriptor.relationships || {})
-        .filter(([, relDef]) => relDef?.type === 'hasMany' && relDef.target && relDef.foreignKey);
+        .filter(([, relDef]) => relDef?.type === 'hasMany' && relDef.target && (relDef.foreignKey || relDef.via));
 
       if (hasManyEntries.length === 0) return;
 
@@ -1164,28 +1277,68 @@ export const RestApiYouapiKnexPlugin = {
           continue;
         }
 
-        const foreignField = targetDescriptor.fields?.[relDef.foreignKey];
-        if (!foreignField?.slot) continue;
-        const column = foreignField.slot;
+        if (relDef.foreignKey) {
+          const foreignField = targetDescriptor.fields?.[relDef.foreignKey];
+          if (!foreignField?.slot) continue;
+          const column = foreignField.slot;
 
-        const rows = await db(targetDescriptor.canonical.tableName)
-          .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-          .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-          .whereIn(column, normalizedParentIds);
+          const rows = await db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .whereIn(column, normalizedParentIds);
 
-        const grouped = rows.reduce((acc, row) => {
-          const parentId = row[column];
-          if (parentId == null) return acc;
-          const key = String(parentId);
-          acc[key] = acc[key] || [];
-          acc[key].push({ type: targetDescriptor.resource, id: String(row.id) });
-          return acc;
-        }, {});
+          const grouped = rows.reduce((acc, row) => {
+            const parentId = row[column];
+            if (parentId == null) return acc;
+            const key = String(parentId);
+            acc[key] = acc[key] || [];
+            acc[key].push({ type: targetDescriptor.resource, id: String(row.id) });
+            return acc;
+          }, {});
 
-        for (const resource of resources) {
-          resource.relationships = resource.relationships || {};
-          const related = grouped[String(resource.id)] || [];
-          resource.relationships[relName] = { data: related };
+          for (const resource of resources) {
+            resource.relationships = resource.relationships || {};
+            const related = grouped[String(resource.id)] || [];
+            resource.relationships[relName] = { data: related };
+          }
+
+          continue;
+        }
+
+        if (relDef.via) {
+          const polyInfo = targetDescriptor.polymorphicBelongsTo?.[relDef.via];
+          if (!polyInfo?.idColumn || !polyInfo?.typeColumn) continue;
+
+          const queryIds = Array.from(new Set([
+            ...normalizedParentIds,
+            ...normalizedParentIds
+              .map((id) => {
+                const numeric = Number(id);
+                return Number.isFinite(numeric) ? numeric : null;
+              })
+              .filter((value) => value !== null),
+          ]));
+
+          const rows = await db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .where(polyInfo.typeColumn, descriptor.resource)
+            .whereIn(polyInfo.idColumn, queryIds);
+
+          const grouped = rows.reduce((acc, row) => {
+            const parentId = row[polyInfo.idColumn];
+            if (parentId == null) return acc;
+            const key = String(parentId);
+            acc[key] = acc[key] || [];
+            acc[key].push({ type: targetDescriptor.resource, id: String(row.id) });
+            return acc;
+          }, {});
+
+          for (const resource of resources) {
+            resource.relationships = resource.relationships || {};
+            const related = grouped[String(resource.id)] || [];
+            resource.relationships[relName] = { data: related };
+          }
         }
       }
     };
@@ -1461,6 +1614,23 @@ const translateRecordFromStorage = (row, descriptor) => {
     const relationshipData = idValue == null
       ? null
       : { type: info.target, id: String(idValue) };
+
+    relationships[alias] = { data: relationshipData };
+  }
+
+  for (const [alias, info] of Object.entries(descriptor.polymorphicBelongsTo || {})) {
+    const typeValue = info.typeColumn ? row[info.typeColumn] : null;
+    const idValue = info.idColumn ? row[info.idColumn] : null;
+
+    let relationshipData = null;
+    if (typeValue != null && idValue != null) {
+      relationshipData = {
+        type: String(typeValue),
+        id: String(idValue),
+      };
+    } else if (typeValue == null && idValue == null) {
+      relationshipData = null;
+    }
 
     relationships[alias] = { data: relationshipData };
   }

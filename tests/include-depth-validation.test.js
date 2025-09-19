@@ -266,6 +266,7 @@ describe('Include Depth Validation', () => {
       const result = await api.resources.books.query({
         queryParams: { include: [] }
       });
+      console.log('DEBUG empty include arrays', result);
       assert(result.data.length > 0, 'Should return books');
       assert(!result.included, 'Should not have included resources');
     });

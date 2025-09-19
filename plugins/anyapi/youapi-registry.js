@@ -61,6 +61,43 @@ export class YouapiRegistry {
         throw new Error(`Resource '${resource}' not found in metadata`);
       }
 
+      if (definition?.belongsToPolymorphic) {
+        const alias = definition.as || fieldName;
+        const { typeField, idField, types = [] } = definition.belongsToPolymorphic;
+
+        await trx('any_relationship_configs').insert({
+          resource_config_id: resourceRow.id,
+          relationship_name: alias,
+          relationship_type: 'belongsToPolymorphic',
+          target_resource: null,
+          slot_index: null,
+          id_column: idField,
+          type_column: typeField,
+          relationship_key: null,
+          through: null,
+          foreign_key: null,
+          other_key: null,
+          alias,
+          meta_json: JSON.stringify({ types }),
+        });
+
+        if (managed) {
+          await trx.commit();
+        }
+
+        descriptor.polymorphicBelongsTo = descriptor.polymorphicBelongsTo || {};
+        descriptor.polymorphicBelongsTo[alias] = {
+          alias,
+          typeField,
+          idField,
+          types,
+          typeColumn: descriptor.fields?.[typeField]?.slot || null,
+          idColumn: descriptor.fields?.[idField]?.slot || null,
+        };
+        this.cache.set(this.#key(tenant, resource), descriptor);
+        return clone(descriptor);
+      }
+
       const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState);
       const meta = definition.meta ? JSON.stringify(definition.meta) : null;
 
@@ -215,7 +252,32 @@ export class YouapiRegistry {
 
       for (const [fieldName, fieldDef] of Object.entries(schema)) {
         if (fieldName === 'id') continue;
-      const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, slotState);
+
+        if (fieldDef?.belongsToPolymorphic) {
+          const alias = fieldDef.as || fieldName;
+          const { typeField, idField, types = [] } = fieldDef.belongsToPolymorphic;
+
+          relationshipInserts.push({
+            resource_config_id: resourceRow.id,
+            relationship_name: alias,
+            relationship_type: 'belongsToPolymorphic',
+            target_resource: null,
+            slot_index: null,
+            id_column: idField,
+            type_column: typeField,
+            relationship_key: null,
+            through: null,
+            foreign_key: null,
+            other_key: null,
+            alias,
+            meta_json: JSON.stringify({ types }),
+            created_at: this.knex.fn.now(),
+            updated_at: this.knex.fn.now(),
+          });
+          continue;
+        }
+
+        const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, slotState);
         if (!allocation) continue;
 
         const meta = fieldDef.meta ? JSON.stringify(fieldDef.meta) : null;
@@ -338,6 +400,7 @@ export class YouapiRegistry {
     const reverseAttributes = {};
     const belongsTo = {};
     const manyToMany = {};
+    const polymorphicBelongsTo = {};
 
     for (const row of fieldRows) {
       fields[row.field_name] = {
@@ -378,6 +441,39 @@ export class YouapiRegistry {
       }
     }
 
+    const schemaObj = schema || {};
+    for (const [fieldName, fieldDef] of Object.entries(schemaObj)) {
+      if (!fieldDef?.belongsToPolymorphic) continue;
+      const alias = fieldDef.as || fieldName;
+      const { typeField, idField, types = [] } = fieldDef.belongsToPolymorphic;
+      const typeEntry = fields[typeField] || null;
+      const idEntry = fields[idField] || null;
+      polymorphicBelongsTo[alias] = {
+        alias,
+        typeField,
+        idField,
+        typeColumn: typeEntry?.slot || null,
+        idColumn: idEntry?.slot || null,
+        types,
+      };
+    }
+
+    for (const [relName, relDef] of Object.entries(relationships || {})) {
+      if (!relDef?.belongsToPolymorphic) continue;
+      const alias = relDef.as || relName;
+      const { typeField, idField, types = [] } = relDef.belongsToPolymorphic;
+      const typeEntry = fields[typeField] || null;
+      const idEntry = fields[idField] || null;
+      polymorphicBelongsTo[alias] = {
+        alias,
+        typeField,
+        idField,
+        typeColumn: typeEntry?.slot || null,
+        idColumn: idEntry?.slot || null,
+        types,
+      };
+    }
+
     return {
       tenant,
       resource,
@@ -387,6 +483,7 @@ export class YouapiRegistry {
       fields,
       belongsTo,
       manyToMany,
+      polymorphicBelongsTo,
       reverseAttributes,
       slotState,
     };
