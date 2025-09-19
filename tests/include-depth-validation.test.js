@@ -266,12 +266,45 @@ describe('Include Depth Validation', () => {
       const result = await api.resources.books.query({
         queryParams: { include: [] }
       });
-      console.log('DEBUG empty include arrays', result);
       assert(result.data.length > 0, 'Should return books');
       assert(!result.included, 'Should not have included resources');
     });
 
     it('should handle single-level paths correctly', async () => {
+      const country = await api.resources.countries.post({
+        inputRecord: {
+          data: {
+            type: 'countries',
+            attributes: { name: 'Single Level Country', code: `S${Date.now().toString().slice(-2)}` }
+          }
+        }
+      });
+
+      const publisher = await api.resources.publishers.post({
+        inputRecord: {
+          data: {
+            type: 'publishers',
+            attributes: { name: 'Single Level Publisher' },
+            relationships: {
+              country: { data: { type: 'countries', id: country.data.id } }
+            }
+          }
+        }
+      });
+
+      await api.resources.books.post({
+        inputRecord: {
+          data: {
+            type: 'books',
+            attributes: { title: 'Single Level Book' },
+            relationships: {
+              country: { data: { type: 'countries', id: country.data.id } },
+              publisher: { data: { type: 'publishers', id: publisher.data.id } }
+            }
+          }
+        }
+      });
+
       const result = await api.resources.books.query({
         queryParams: { include: ['publisher'] }
       });
