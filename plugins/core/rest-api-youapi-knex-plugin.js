@@ -13,11 +13,18 @@ import {
   parseCursor,
 } from './lib/querying/knex-pagination-helpers.js';
 import { getUrlPrefix, buildResourceUrl } from './lib/querying/url-helpers.js';
+import {
+  normalizeId,
+  resolveFieldInfo,
+  coerceValueForDefinition,
+} from '../anyapi/utils/descriptor-helpers.js';
+import {
+  YouapiQueryAdapter,
+  preloadRelatedDescriptors,
+} from '../anyapi/query/youapi-query-adapter.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
-
-const normalizeId = (value) => (value === null || value === undefined ? null : String(value));
 
 export const RestApiYouapiKnexPlugin = {
   name: 'rest-api-youapi-knex',
@@ -83,147 +90,6 @@ export const RestApiYouapiKnexPlugin = {
         }
       }
       resource.attributes = filtered;
-    };
-
-    const findSchemaFieldByAlias = (descriptor, alias) => {
-      if (!descriptor?.schema) return null;
-      for (const [fieldName, definition] of Object.entries(descriptor.schema)) {
-        if (!definition) continue;
-        if (definition.as === alias) {
-          return { fieldName, definition };
-        }
-        if (definition.belongsTo && !definition.as) {
-          const inferredAlias = fieldName.endsWith('_id') ? fieldName.slice(0, -3) : fieldName;
-          if (inferredAlias === alias) {
-            return { fieldName, definition };
-          }
-        }
-      }
-      return null;
-    };
-
-    const resolveFieldInfo = (descriptor, field) => {
-      if (!descriptor) return null;
-      if (field === 'id') {
-        return { column: 'id', definition: { type: 'id' } };
-      }
-
-      const directField = descriptor.fields?.[field];
-      if (directField?.slot) {
-        return {
-          column: directField.slot,
-          definition: descriptor.schema?.[field] || null,
-        };
-      }
-
-      const belongsToInfo = descriptor.belongsTo?.[field];
-      if (belongsToInfo?.idColumn) {
-        const schemaField = findSchemaFieldByAlias(descriptor, field);
-        return {
-          column: belongsToInfo.idColumn,
-          definition: schemaField?.definition || null,
-          isRelationship: true,
-        };
-      }
-
-      const aliasField = findSchemaFieldByAlias(descriptor, field);
-      if (aliasField) {
-        const fieldEntry = descriptor.fields?.[aliasField.fieldName];
-        if (fieldEntry?.slot) {
-          return {
-            column: fieldEntry.slot,
-            definition: aliasField.definition,
-          };
-        }
-      }
-
-      return null;
-    };
-
-    const coerceValueForDefinition = (value, definition, { isRelationship } = {}) => {
-      if (value === null || value === undefined) return null;
-
-      if (isRelationship) {
-        return normalizeId(value);
-      }
-
-      const type = definition?.type || definition?.dataType;
-      if (!type) {
-        return value;
-      }
-
-      if (['number', 'integer', 'float', 'decimal'].includes(type)) {
-        const numeric = Number(value);
-        return Number.isNaN(numeric) ? value : numeric;
-      }
-
-      if (type === 'boolean') {
-        if (typeof value === 'boolean') return value;
-        if (typeof value === 'string') {
-          if (value.toLowerCase() === 'true') return true;
-          if (value.toLowerCase() === 'false') return false;
-        }
-        return Boolean(value);
-      }
-
-      if (['string', 'text', 'uuid', 'email'].includes(type)) {
-        return String(value);
-      }
-
-      return value;
-    };
-
-    const normalizeFilterValues = (rawValue, definition, options) => {
-      if (Array.isArray(rawValue)) {
-        return rawValue.map((item) => coerceValueForDefinition(item, definition, options));
-      }
-      return [coerceValueForDefinition(rawValue, definition, options)];
-    };
-
-    const applyFiltersToQuery = ({ query, filters, descriptor }) => {
-      if (!filters || Object.keys(filters).length === 0) return;
-
-      for (const [field, rawValue] of Object.entries(filters)) {
-        const fieldInfo = resolveFieldInfo(descriptor, field);
-        if (!fieldInfo?.column) {
-          throw new RestApiValidationError('Invalid filter field', {
-            fields: [`filters.${field}`],
-            violations: [{
-              field: `filters.${field}`,
-              rule: 'unknown_field',
-              message: `Filter on '${field}' is not supported in AnyAPI mode`,
-            }],
-          });
-        }
-
-        const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
-          isRelationship: fieldInfo.isRelationship,
-        });
-
-        const nonNullValues = values.filter((value) => value !== null);
-        const hasNull = values.length !== nonNullValues.length;
-
-        if (nonNullValues.length === 0 && hasNull) {
-          query.whereNull(fieldInfo.column);
-          continue;
-        }
-
-        if (nonNullValues.length === 1 && !hasNull) {
-          query.where(fieldInfo.column, nonNullValues[0]);
-          continue;
-        }
-
-        if (nonNullValues.length > 1 && !hasNull) {
-          query.whereIn(fieldInfo.column, nonNullValues);
-          continue;
-        }
-
-        if (nonNullValues.length > 0 && hasNull) {
-          query.where(function filterGroup() {
-            this.whereIn(fieldInfo.column, nonNullValues).orWhereNull(fieldInfo.column);
-          });
-        }
-      }
     };
 
     const applySortingToQuery = ({ query, sort, descriptor, scope }) => {
@@ -1597,40 +1463,74 @@ export const RestApiYouapiKnexPlugin = {
       return response;
     };
 
-    helpers.dataQuery = async ({ scopeName, context }) => {
+    const buildTableNameMaps = () => {
+      const resourceToTableName = new Map();
+      const tableNameToResource = new Map();
+      for (const [resourceName, resourceScope] of Object.entries(api.resources || {})) {
+        const tableName = resourceScope?.vars?.schemaInfo?.tableName;
+        if (!tableName) continue;
+        resourceToTableName.set(resourceName, tableName);
+        tableNameToResource.set(tableName, resourceName);
+      }
+      return { resourceToTableName, tableNameToResource };
+    };
+
+    helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
       const descriptor = await getDescriptor(scopeName);
-      const { canonical } = descriptor;
       const db = context.db || context.transaction || api.knex.instance;
       const scope = api.resources?.[scopeName];
       const queryParams = context.queryParams || {};
 
-      const baseQuery = db(canonical.tableName)
-        .where(canonical.resourceColumn, descriptor.resource)
-        .where(canonical.tenantColumn, descriptor.tenant);
-
-      applyFiltersToQuery({
-        query: baseQuery,
-        filters: queryParams.filters,
+      const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
+      const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor });
+      const adapter = new YouapiQueryAdapter({
         descriptor,
+        db,
+        registry,
+        descriptorsMap,
+        resourceToTableName,
+        tableNameToResource,
+        log,
       });
+      const queryBuilder = adapter.query;
 
-      const countQuery = baseQuery.clone();
+      const schemaInfo = scope?.vars?.schemaInfo;
+      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias;
+
+      context.knexQuery = {
+        query: queryBuilder,
+        filters: queryParams.filters,
+        schemaInfo,
+        scopeName,
+        tableName: tableNameForHooks,
+        db,
+        isAnyApi: true,
+        adapter,
+      };
+
+      if (runHooks) {
+        await runHooks('knexQueryFiltering');
+      }
+
+      delete context.knexQuery;
+
+      const countQuery = queryBuilder.clone();
 
       const sortDescriptors = applySortingToQuery({
-        query: baseQuery,
+        query: queryBuilder,
         sort: queryParams.sort,
         descriptor,
         scope,
       });
 
       const paginationInfo = applyPaginationToQuery({
-        query: baseQuery,
+        query: queryBuilder,
         scope,
         queryParams,
         sortDescriptors,
       });
 
-      let rows = await baseQuery.select();
+      let rows = await queryBuilder.select();
       let cursorRecords = null;
       let hasMore = false;
 
@@ -1763,19 +1663,20 @@ export const RestApiYouapiKnexPlugin = {
 
     helpers.dataQueryCount = async ({ scopeName, context }) => {
       const descriptor = await getDescriptor(scopeName);
-      const { canonical } = descriptor;
       const db = context.db || context.transaction || api.knex.instance;
-      const query = db(canonical.tableName)
-        .where(canonical.resourceColumn, descriptor.resource)
-        .where(canonical.tenantColumn, descriptor.tenant);
-
-      applyFiltersToQuery({
-        query,
-        filters: context.queryParams?.filters,
+      const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
+      const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor });
+      const adapter = new YouapiQueryAdapter({
         descriptor,
+        db,
+        registry,
+        descriptorsMap,
+        resourceToTableName,
+        tableNameToResource,
+        log,
       });
 
-      const [{ count }] = await query.count({ count: '*' });
+      const [{ count }] = await adapter.query.count({ count: '*' });
       return Number(count);
     };
 
