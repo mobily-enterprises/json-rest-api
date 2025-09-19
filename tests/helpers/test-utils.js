@@ -68,6 +68,18 @@ export async function cleanTables(knex, tableNames) {
     }
 
     for (const table of tableNames) {
+      const linkInfo = storageMode.getLinkInfo(table);
+      if (linkInfo) {
+        const relationshipKey = linkInfo.relationshipKey || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
+        await knex('any_links')
+          .where({
+            tenant_id: storageMode.defaultTenant,
+            left_resource: linkInfo.ownerResource,
+            relationship: relationshipKey,
+          })
+          .delete()
+          .catch(() => {});
+      }
       try {
         await knex(table).delete();
       } catch (error) {
@@ -87,6 +99,19 @@ export async function cleanTables(knex, tableNames) {
 export async function countRecords(knex, tableName) {
   if (storageMode.isAnyApi()) {
     const resource = storageMode.getResourceForTable(tableName);
+    const linkInfo = storageMode.getLinkInfo(tableName);
+    if (linkInfo) {
+      const relationshipKey = linkInfo.relationshipKey || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
+      const result = await knex('any_links')
+        .where({
+          tenant_id: storageMode.defaultTenant,
+          left_resource: linkInfo.ownerResource,
+          relationship: relationshipKey,
+        })
+        .count('* as count')
+        .first();
+      return parseInt(result.count);
+    }
     if (resource) {
       const result = await knex('any_records')
         .where({

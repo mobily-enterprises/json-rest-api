@@ -60,20 +60,30 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
     }
 
     // Remove relationships
-    if (relDef.type === 'manyToMany') {
-      const knex = api.knex?.instance || helpers.db;
-      const pivotResource = relDef.through;
-      const pivotScope = api.resources[pivotResource];
-      const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || pivotResource;
-      const localKey = relDef.foreignKey;
-      const foreignKey = relDef.otherKey;
+    if (relDef?.through) {
+      if (api.youapi?.links?.removeMany) {
+        await api.youapi.links.removeMany({
+          context,
+          scopeName,
+          relName: context.relationshipName,
+          relDef,
+          relData: params.relationshipData,
+        });
+      } else {
+        const knex = api.knex?.instance || helpers.db;
+        const pivotResource = relDef.through;
+        const pivotScope = api.resources[pivotResource];
+        const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || pivotResource;
+        const localKey = relDef.foreignKey;
+        const foreignKey = relDef.otherKey;
 
-      for (const identifier of params.relationshipData) {
-        await knex(pivotTable)
-          .where(localKey, context.id)
-          .where(foreignKey, identifier.id)
-          .delete()
-          .transacting(context.transaction);
+        for (const identifier of params.relationshipData) {
+          await knex(pivotTable)
+            .where(localKey, context.id)
+            .where(foreignKey, identifier.id)
+            .delete()
+            .transacting(context.transaction);
+        }
       }
     } else {
       // Null out foreign keys for hasMany

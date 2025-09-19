@@ -149,18 +149,20 @@ export default async function patchMethod({
     // Process many-to-many relationships after main record update
     // For PATCH, we only update the relationships that were explicitly provided
     for (const { relName, relDef, relData } of manyToManyRelationships) {
-      
-      // Validate pivot resource exists
+      if (relDef?.through && api.youapi?.links?.syncMany) {
+        await api.youapi.links.syncMany({
+          context,
+          scopeName,
+          relName,
+          relDef,
+          relData,
+          isUpdate: true,
+        });
+        continue;
+      }
+
       validatePivotResource(scopes, relDef, relName);
-      
-      // Update many-to-many relationships using intelligent synchronization that preserves pivot data.
-      // This compares current relationships with desired state: removes records no longer needed,
-      // adds new relationships, and crucially preserves existing pivot records with their metadata
-      // (like created_at timestamps or extra pivot fields). This is superior to delete-all-recreate
-      // because it maintains audit trails and custom pivot data.
-      // Example: If article has tags [1,2,3] and you update to [2,3,4], it keeps the pivot records
-      // for tags 2&3 (preserving their created_at), deletes tag 1, and adds new record for tag 4.
-      // Example: If article has tags [1,2,3] and update sends [2,3,4], tag 1 is removed, tags 2,3 kept, tag 4 added
+
       await updateManyToManyRelationship(null, {
         api,
         context: {

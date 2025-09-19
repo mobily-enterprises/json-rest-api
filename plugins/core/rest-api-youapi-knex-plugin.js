@@ -2,6 +2,9 @@ import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
 import { YouapiRegistry } from '../anyapi/youapi-registry.js';
 
 const DEFAULT_TENANT = 'default';
+const LINKS_TABLE = 'any_links';
+
+const normalizeId = (value) => (value === null || value === undefined ? null : String(value));
 
 export const RestApiYouapiKnexPlugin = {
   name: 'rest-api-youapi-knex',
@@ -40,6 +43,238 @@ export const RestApiYouapiKnexPlugin = {
         throw new Error(`Descriptor not found for resource '${scopeName}'`);
       }
       return descriptor;
+    };
+
+    const getManyToManyInfo = async (scopeName, relName) => {
+      const descriptor = await getDescriptor(scopeName);
+      const relInfo = descriptor.manyToMany?.[relName];
+      if (!relInfo) return null;
+      const relationshipKey = relInfo.relationship || `${descriptor.tenant}:${descriptor.resource}:${relName}`;
+      return { descriptor, relInfo, relationshipKey };
+    };
+
+    const ensureTargetsExist = async ({ relInfo, relData, transaction }) => {
+      if (!relData || relData.length === 0) return;
+      const targetScope = api.resources[relInfo.target];
+      if (!targetScope) {
+        throw new Error(`Target resource '${relInfo.target}' not found`);
+      }
+      for (const identifier of relData) {
+        if (!identifier?.id) {
+          throw new Error('Relationship data requires resource identifier with id');
+        }
+        if (identifier.type && identifier.type !== relInfo.target) {
+          throw new Error(`Relationship expects type '${relInfo.target}' but received '${identifier.type}'`);
+        }
+        await targetScope.get({ id: identifier.id, transaction, simplified: false });
+      }
+    };
+
+    const attachLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+      if (relData.length === 0) return;
+
+      const existingRows = await db(LINKS_TABLE)
+        .where({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+          left_id: leftId,
+        })
+        .select('right_id');
+
+      const existing = new Set(existingRows.map((row) => String(row.right_id)));
+      const rowsToInsert = [];
+
+      for (const identifier of relData) {
+        const rightId = normalizeId(identifier.id);
+        if (rightId == null || existing.has(rightId)) continue;
+        rowsToInsert.push({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+          left_id: leftId,
+          right_resource: relInfo.target,
+          right_id: rightId,
+          payload: null,
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        });
+      }
+
+      if (rowsToInsert.length > 0) {
+        await db(LINKS_TABLE).insert(rowsToInsert);
+      }
+    };
+
+    api.youapi.links = {
+      attachMany: async ({ context, scopeName, relName, relDef, relData }) => {
+        const info = await getManyToManyInfo(scopeName, relName);
+        if (!info) {
+          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`);
+        }
+        const db = context.transaction || context.db || api.knex.instance;
+        const leftId = normalizeId(context.id);
+        await ensureTargetsExist({ relInfo: info.relInfo, relData, transaction: context.transaction });
+        await attachLinks({
+          descriptor: info.descriptor,
+          relInfo: info.relInfo,
+          relationshipKey: info.relationshipKey,
+          leftId,
+          relData,
+          db,
+        });
+      },
+      syncMany: async ({ context, scopeName, relName, relDef, relData, isUpdate }) => {
+        const info = await getManyToManyInfo(scopeName, relName);
+        if (!info) {
+          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`);
+        }
+        const db = context.transaction || context.db || api.knex.instance;
+        const leftId = normalizeId(context.id);
+        await ensureTargetsExist({ relInfo: info.relInfo, relData, transaction: context.transaction });
+        if (isUpdate) {
+          await syncLinks({
+            descriptor: info.descriptor,
+            relInfo: info.relInfo,
+            relationshipKey: info.relationshipKey,
+            leftId,
+            relData,
+            db,
+          });
+        } else {
+          await attachLinks({
+            descriptor: info.descriptor,
+            relInfo: info.relInfo,
+            relationshipKey: info.relationshipKey,
+            leftId,
+            relData,
+            db,
+          });
+        }
+      },
+      removeMany: async ({ context, scopeName, relName, relData }) => {
+        const info = await getManyToManyInfo(scopeName, relName);
+        if (!info) {
+          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`);
+        }
+        const db = context.transaction || context.db || api.knex.instance;
+        const leftId = normalizeId(context.id);
+        await removeLinks({
+          descriptor: info.descriptor,
+          relInfo: info.relInfo,
+          relationshipKey: info.relationshipKey,
+          leftId,
+          relData,
+          db,
+        });
+      },
+      listMany: async ({ context, scopeName, relName }) => {
+        const info = await getManyToManyInfo(scopeName, relName);
+        if (!info) {
+          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`);
+        }
+        const db = context.transaction || context.db || api.knex.instance;
+        const leftId = normalizeId(context.id);
+        return listLinks({
+          descriptor: info.descriptor,
+          relInfo: info.relInfo,
+          relationshipKey: info.relationshipKey,
+          leftId,
+          db,
+        });
+      },
+      fetchManyToManyRows: async ({ scopeName, relName, parentIds, context }) => {
+        const info = await getManyToManyInfo(scopeName, relName);
+        if (!info) return [];
+        const db = context.db || context.transaction || api.knex.instance;
+        return fetchLinkedRecords({
+          descriptor: info.descriptor,
+          relInfo: info.relInfo,
+          relationshipKey: info.relationshipKey,
+          leftIds: parentIds,
+          db,
+        });
+      },
+    };
+
+    const syncLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+      const existingRows = await db(LINKS_TABLE)
+        .where({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+          left_id: leftId,
+        })
+        .select('right_id');
+
+      const existing = new Set(existingRows.map((row) => String(row.right_id)));
+      const desired = new Set(relData.map((identifier) => normalizeId(identifier.id)).filter((id) => id !== null));
+
+      const toAdd = [...desired].filter((id) => !existing.has(id));
+      const toRemove = [...existing].filter((id) => !desired.has(id));
+
+      if (toAdd.length > 0) {
+        const data = toAdd.map((id) => ({ id }));
+        await attachLinks({ descriptor, relInfo, relationshipKey, leftId, relData: data, db });
+      }
+
+      if (toRemove.length > 0) {
+        await db(LINKS_TABLE)
+          .where({
+            tenant_id: descriptor.tenant,
+            relationship: relationshipKey,
+            left_resource: descriptor.resource,
+            left_id: leftId,
+          })
+          .whereIn('right_id', toRemove)
+          .delete();
+      }
+    };
+
+    const removeLinks = async ({ descriptor, relInfo, relationshipKey, leftId, relData, db }) => {
+      const idsToRemove = relData
+        .map((identifier) => normalizeId(identifier.id))
+        .filter((id) => id !== null);
+
+      if (idsToRemove.length === 0) return;
+
+      await db(LINKS_TABLE)
+        .where({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+          left_id: leftId,
+        })
+        .whereIn('right_id', idsToRemove)
+        .delete();
+    };
+
+    const listLinks = async ({ descriptor, relInfo, relationshipKey, leftId, db }) => {
+      const rows = await db(LINKS_TABLE)
+        .where({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+          left_id: leftId,
+        })
+        .select('right_id');
+
+      return rows.map((row) => ({ type: relInfo.target, id: String(row.right_id) }));
+    };
+
+    const fetchLinkedRecords = async ({ descriptor, relInfo, relationshipKey, leftIds, db }) => {
+      if (leftIds.length === 0) return [];
+
+      const rows = await db(LINKS_TABLE)
+        .where({
+          tenant_id: descriptor.tenant,
+          relationship: relationshipKey,
+          left_resource: descriptor.resource,
+        })
+        .whereIn('left_id', leftIds)
+        .select('left_id', 'right_id');
+
+      return rows;
     };
 
     helpers.dataExists = async ({ scopeName, context }) => {
@@ -165,46 +400,120 @@ export const RestApiYouapiKnexPlugin = {
           continue;
         }
 
-        const relInfo = descriptor.belongsTo?.[path];
-        if (!relInfo) {
+        const belongsToInfo = descriptor.belongsTo?.[path];
+        if (belongsToInfo) {
+          const ids = [...new Set(parentResources
+            .map((resource) => resource.relationships?.[path]?.data?.id)
+            .filter((id) => id !== undefined && id !== null))];
+
+          if (ids.length === 0) continue;
+
+          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, belongsToInfo.target);
+          if (!targetDescriptor) continue;
+
+          const rows = await context.db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .whereIn('id', ids);
+
+          for (const row of rows) {
+            const translated = translateRecordFromStorage(row, targetDescriptor);
+            const includeKey = `${targetDescriptor.resource}:${row.id}`;
+            if (seen.has(includeKey)) continue;
+            seen.add(includeKey);
+
+            const includeResource = {
+              type: targetDescriptor.resource,
+              id: String(row.id),
+              attributes: translated.attributes,
+            };
+
+            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+              includeResource.relationships = translated.relationships;
+            }
+
+            includes.push(includeResource);
+          }
           continue;
         }
 
-        const ids = [...new Set(parentResources
-          .map((resource) => resource.relationships?.[path]?.data?.id)
-          .filter((id) => id !== undefined && id !== null))];
+        const manyInfo = descriptor.manyToMany?.[path];
+        if (manyInfo) {
+          const info = await getManyToManyInfo(descriptor.resource, path);
+          if (!info) continue;
+          const leftIds = parentResources.map((resource) => resource.id);
+          const linkRows = await fetchLinkedRecords({
+            descriptor: info.descriptor,
+            relInfo: info.relInfo,
+            relationshipKey: info.relationshipKey,
+            leftIds,
+            db: context.db || context.transaction || api.knex.instance,
+          });
 
-        if (ids.length === 0) continue;
+          const rightIds = [...new Set(linkRows.map((row) => row.right_id))];
+          if (rightIds.length === 0) continue;
 
-        const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, relInfo.target);
-        if (!targetDescriptor) continue;
+          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, info.relInfo.target);
+          if (!targetDescriptor) continue;
 
-        const rows = await context.db(targetDescriptor.canonical.tableName)
-          .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-          .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-          .whereIn('id', ids);
+          const rows = await context.db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .whereIn('id', rightIds);
 
-        for (const row of rows) {
-          const translated = translateRecordFromStorage(row, targetDescriptor);
-          const includeKey = `${targetDescriptor.resource}:${row.id}`;
-          if (seen.has(includeKey)) continue;
-          seen.add(includeKey);
-
-          const includeResource = {
-            type: targetDescriptor.resource,
-            id: String(row.id),
-            attributes: translated.attributes,
-          };
-
-          if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-            includeResource.relationships = translated.relationships;
+          for (const row of rows) {
+            const includeKey = `${targetDescriptor.resource}:${row.id}`;
+            if (seen.has(includeKey)) continue;
+            seen.add(includeKey);
+            const translated = translateRecordFromStorage(row, targetDescriptor);
+            const includeResource = {
+              type: targetDescriptor.resource,
+              id: String(row.id),
+              attributes: translated.attributes,
+            };
+            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+              includeResource.relationships = translated.relationships;
+            }
+            includes.push(includeResource);
           }
-
-          includes.push(includeResource);
         }
       }
 
       return includes;
+    };
+
+    const attachManyToManyRelationships = async ({ resources, descriptor, context }) => {
+      if (!resources || resources.length === 0) return;
+      const manyEntries = Object.entries(descriptor.manyToMany || {});
+      if (manyEntries.length === 0) return;
+
+      const db = context.db || context.transaction || api.knex.instance;
+      const parentIds = resources.map((resource) => resource.id);
+
+      for (const [relName, relInfo] of manyEntries) {
+        const info = await getManyToManyInfo(descriptor.resource, relName);
+        if (!info) continue;
+        const rows = await fetchLinkedRecords({
+          descriptor: info.descriptor,
+          relInfo: info.relInfo,
+          relationshipKey: info.relationshipKey,
+          leftIds: parentIds,
+          db,
+        });
+
+        const grouped = rows.reduce((acc, row) => {
+          const key = String(row.left_id);
+          acc[key] = acc[key] || [];
+          acc[key].push({ type: info.relInfo.target, id: String(row.right_id) });
+          return acc;
+        }, {});
+
+        for (const resource of resources) {
+          const related = grouped[resource.id] || [];
+          resource.relationships = resource.relationships || {};
+          resource.relationships[relName] = { data: related };
+        }
+      }
     };
 
     helpers.dataGet = async ({ scopeName, context }) => {
@@ -230,6 +539,12 @@ export const RestApiYouapiKnexPlugin = {
       if (record.relationships && Object.keys(record.relationships).length > 0) {
         data.relationships = record.relationships;
       }
+
+      await attachManyToManyRelationships({
+        resources: [data],
+        descriptor,
+        context,
+      });
 
       const included = await buildIncludes({
         parentResources: [data],
@@ -264,6 +579,12 @@ export const RestApiYouapiKnexPlugin = {
           resource.relationships = translated.relationships;
         }
         return resource;
+      });
+
+      await attachManyToManyRelationships({
+        resources: data,
+        descriptor,
+        context,
       });
 
       const included = await buildIncludes({

@@ -262,7 +262,7 @@ export class YouapiRegistry {
             resource_config_id: resourceRow.id,
             relationship_name: relName,
             relationship_type: 'manyToMany',
-            target_resource: relDef.target,
+            target_resource: relDef.target || relName,
             relationship_key: relDef.relationship || `${tenant}:${resource}:${relName}`,
             through: relDef.through,
             foreign_key: relDef.foreignKey,
@@ -369,7 +369,7 @@ export class YouapiRegistry {
         manyToMany[row.relationship_name] = {
           alias: row.alias || row.relationship_name,
           relationship: row.relationship_key,
-          target: row.target_resource,
+          target: row.target_resource || row.relationship_name,
           through: row.through,
           foreignKey: row.foreign_key,
           otherKey: row.other_key,

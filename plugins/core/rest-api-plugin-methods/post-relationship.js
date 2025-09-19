@@ -61,12 +61,22 @@ import { createPivotRecords } from "../lib/writing/many-to-many-manipulations.js
   }
 
   // Add relationships
-  if (relDef.type === 'manyToMany') {
-      await createPivotRecords(api, context.id, {
-          through: relDef.through,
-          foreignKey: relDef.foreignKey,
-          otherKey: relDef.otherKey
-      }, params.relationshipData, context.transaction);
+  if (relDef?.through) {
+      if (api.youapi?.links?.attachMany) {
+        await api.youapi.links.attachMany({
+          context,
+          scopeName,
+          relName: context.relationshipName,
+          relDef,
+          relData: params.relationshipData,
+        });
+      } else {
+        await createPivotRecords(api, context.id, {
+            through: relDef.through,
+            foreignKey: relDef.foreignKey,
+            otherKey: relDef.otherKey
+        }, params.relationshipData, context.transaction);
+      }
   } else if (relDef.type === 'hasMany') {
       // Update foreign keys for hasMany
       const targetType = relDef.target;

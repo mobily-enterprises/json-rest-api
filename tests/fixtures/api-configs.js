@@ -6,6 +6,15 @@ import { createServer } from 'http';
 import { ensureAnyApiSchema } from '../../plugins/anyapi/schema-utils.js';
 import { storageMode } from '../helpers/storage-mode.js';
 
+async function resetAnyApiTables(knex) {
+  if (!storageMode.isAnyApi()) return;
+  await knex('any_links').delete().catch(() => {});
+  await knex('any_records').delete().catch(() => {});
+  await knex('any_relationship_configs').delete().catch(() => {});
+  await knex('any_field_configs').delete().catch(() => {});
+  await knex('any_resource_configs').delete().catch(() => {});
+}
+
 async function useStoragePlugin(api, knex) {
   if (storageMode.isAnyApi()) {
     await ensureAnyApiSchema(knex);
@@ -54,6 +63,8 @@ export async function createBasicApi(knex, pluginOptions = {}) {
 
   await api.use(RestApiPlugin, restApiOptions);
   await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
+  await resetAnyApiTables(knex);
   
   // Add Express plugin if requested
   if (pluginOptions.includeExpress) {
@@ -135,6 +146,11 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   });
   await api.resources.book_authors.createKnexTable();
   mapTable(`${tablePrefix}_book_authors`, 'book_authors');
+  if (storageMode.isAnyApi()) {
+    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
+    storageMode.registerLink(`${tablePrefix}_book_authors`, 'books', 'authors', relationshipKey);
+  }
 
   return api;
 }
@@ -185,6 +201,7 @@ export async function createExtendedApi(knex) {
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'price', 'language', 'population', 'name', 'code']
   });
   await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Countries with extended fields
   await api.addResource('countries', {
@@ -290,6 +307,11 @@ export async function createExtendedApi(knex) {
   });
   await api.resources.book_authors.createKnexTable();
   mapTable('ext_book_authors', 'book_authors');
+  if (storageMode.isAnyApi()) {
+    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
+    storageMode.registerLink('ext_book_authors', 'books', 'authors', relationshipKey);
+  }
 
   // Polymorphic reviews (can go on authors, books and publishers)
   await api.addResource('reviews', {
@@ -416,6 +438,12 @@ export async function createLimitedDepthApi(knex) {
     tableName: 'limited_book_authors'
   });
   await api.resources.book_authors.createKnexTable();
+  mapTable('limited_book_authors', 'book_authors');
+  if (storageMode.isAnyApi()) {
+    const descriptor = await api.youapi.registry.getDescriptor('default', 'books');
+    const relationshipKey = descriptor?.manyToMany?.authors?.relationship;
+    storageMode.registerLink('limited_book_authors', 'books', 'authors', relationshipKey);
+  }
 
   return api;
 }

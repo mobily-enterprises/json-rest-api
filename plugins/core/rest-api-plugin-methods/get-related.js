@@ -235,28 +235,43 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
 
   // Handle many-to-many relationships
   // For example: GET /api/authors/1/books (where authors and books are linked via book_authors)
-  if (relDef.type === 'manyToMany') {
-    // APPROACH: Query the pivot table directly
-    //
-    // Instead of:
-    // 1. Getting parent with relationship included to find related IDs
-    // 2. Trying to filter by id:[array] which doesn't work
-    //
-    // We query the pivot table (e.g., book_authors) filtered by the parent ID
-    // and include the target resources. This is simpler and uses existing
-    // API functionality without needing special array filter support.
-    
+  if (relDef?.through) {
+    if (api.youapi?.links?.listMany) {
+      const identifiers = await api.youapi.links.listMany({
+        context,
+        scopeName,
+        relName: context.relationshipName,
+      });
+
+      const results = [];
+      for (const identifier of identifiers) {
+        const related = await api.resources[targetType].get({
+          id: identifier.id,
+          queryParams: context.queryParams,
+          transaction: context.transaction,
+          simplified: false,
+          isTransport: params.isTransport,
+        });
+        if (related?.data) {
+          results.push(related.data);
+        }
+      }
+
+      return {
+        links: {
+          self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
+        },
+        data: results,
+      };
+    }
+
+    // Legacy fallback
     const pivotResource = relDef.through;
     const foreignKey = relDef.foreignKey;
     const otherKey = relDef.otherKey;
-    
-    // These should already be validated by scope-validations.js
     if (!foreignKey || !otherKey) {
       throw new Error(`Missing foreignKey or otherKey in many-to-many relationship`);
     }
-    
-    // We need to find the relationship name on the pivot table that points to the target
-    // The pivot table should have a belongsTo relationship to the target resource
     const pivotScope = scopes[pivotResource];
     if (!pivotScope) {
       throw new RestApiResourceError(
@@ -264,26 +279,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         { subtype: 'pivot_table_not_found' }
       );
     }
-    
-    // Find the relationship name on the pivot table that points to the target
-    let targetRelationshipName = null;
     const pivotSchema = pivotScope.vars.schemaInfo.schemaStructure;
-    for (const [fieldName, fieldDef] of Object.entries(pivotSchema)) {
-      if (fieldDef.belongsTo === targetType && fieldDef.as) {
-        targetRelationshipName = fieldDef.as;
-        break;
-      }
-    }
-    
-    if (!targetRelationshipName) {
-      throw new RestApiResourceError(
-        `Cannot find relationship to '${targetType}' in pivot table '${pivotResource}'`,
-        { subtype: 'pivot_relationship_not_found' }
-      );
-    }
-    
-    // Build filters for the pivot table
-    // Need to find the relationship name that corresponds to the foreignKey
     let parentRelationshipName = null;
     for (const [fieldName, fieldDef] of Object.entries(pivotSchema)) {
       if (fieldName === foreignKey && fieldDef.belongsTo === scopeName && fieldDef.as) {
@@ -291,19 +287,14 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         break;
       }
     }
-    
-    // Use relationship name if found, otherwise fall back to foreign key
     const filterKey = parentRelationshipName || foreignKey;
     const pivotFilters = {
       [filterKey]: context.id
     };
-    
-    // Query the pivot table with the target included
     const pivotResult = await api.resources[pivotResource].query({
       queryParams: {
         filters: pivotFilters,
-        include: [targetRelationshipName],
-        // Pass through other query params that should apply to the included resources
+        include: [context.relationshipName],
         fields: context.queryParams.fields,
         sort: context.queryParams.sort,
         page: context.queryParams.page
@@ -312,11 +303,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       simplified: false,
       isTransport: params.isTransport
     });
-    
-    // Extract the included target resources
     const includedResources = pivotResult.included?.filter(r => r.type === targetType) || [];
-    
-    // Build the response
     return {
       links: {
         self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)

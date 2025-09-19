@@ -197,13 +197,21 @@ export default async function putMethod({
 
     // Process many-to-many relationships after main record update/creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
-      // Validate pivot resource exists
+      if (relDef?.through && api.youapi?.links?.syncMany) {
+        await api.youapi.links.syncMany({
+          context,
+          scopeName,
+          relName,
+          relDef,
+          relData,
+          isUpdate: context.isUpdate,
+        });
+        continue;
+      }
+
       await validatePivotResource(scopes, relDef, relName);
-      
-      // Use smart sync for updates (like industry standard ORMs)
+
       if (context.isUpdate) {
-        // Update many-to-many relationships using intelligent synchronization
-        // This preserves existing pivot data while efficiently updating relationships
         await updateManyToManyRelationship(null, {
           api,
           context: {
@@ -213,11 +221,8 @@ export default async function putMethod({
             transaction: context.transaction
           }
         });
-      } else {
-        // For new records, just create the pivot records
-        if (relData.length > 0) {
-          await createPivotRecords(api, context.id, relDef, relData, context.transaction);
-        }
+      } else if (relData.length > 0) {
+        await createPivotRecords(api, context.id, relDef, relData, context.transaction);
       }
     }
    

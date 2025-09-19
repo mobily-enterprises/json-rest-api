@@ -115,16 +115,19 @@ export default async function postMethod({
     
     // Process many-to-many relationships after main record creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
+      if (api.youapi?.links?.attachMany && relDef?.through) {
+        await api.youapi.links.attachMany({
+          context,
+          scopeName,
+          relName,
+          relDef,
+          relData,
+        });
+        continue;
+      }
+
       // Validate pivot resource exists
       validatePivotResource(scopes, relDef, relName);
-      
-      // Create pivot records in the through table to establish many-to-many relationships.
-      // This creates records in the intermediary table (like 'article_tags') that link the main
-      // resource to each related resource. Before creating each pivot record, it validates that
-      // the related resource actually exists (preventing orphaned relationships). If validateExists
-      // is false, it skips validation for performance in bulk operations.
-      // Example: article.tags: [{id: '1'}, {id: '2'}] creates two article_tags records:
-      // {article_id: 100, tag_id: 1} and {article_id: 100, tag_id: 2}
       await createPivotRecords(api, context.id, relDef, relData, context.transaction);
     }
     
