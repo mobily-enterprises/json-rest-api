@@ -1527,6 +1527,12 @@ export const RestApiYouapiKnexPlugin = {
           || scope.vars?.idProperty
           || 'id',
         descriptor,
+        canonicalFieldMap: descriptor.canonicalFieldMap || {},
+      };
+
+      scope.scopeOptions = {
+        ...(scope.scopeOptions || {}),
+        canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
       };
     };
 
@@ -1753,12 +1759,19 @@ export const RestApiYouapiKnexPlugin = {
       const scope = api.scopes?.[scopeName] || scopes?.[scopeName];
       const schema = scope?.scopeOptions?.schema || {};
       const relationships = scope?.scopeOptions?.relationships || {};
-      await registry.registerResource({
+      const descriptor = await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
         schema,
         relationships,
+        canonicalFieldMap: scope?.scopeOptions?.canonicalFieldsMap || null,
       });
+      if (scope) {
+        scope.scopeOptions = {
+          ...(scope.scopeOptions || {}),
+          canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
+        };
+      }
       await rehydrateSchemaInfo(scopeName);
     });
 
@@ -1782,12 +1795,21 @@ export const RestApiYouapiKnexPlugin = {
           searchSchema: existingOptions.searchSchema || scopeOptions?.searchSchema,
         };
       }
-      await registry.registerResource({
+      const descriptor = await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
         schema: schemaInput,
         relationships: relationshipInput,
+        canonicalFieldMap: scopeOptions?.canonicalFieldsMap
+          || scope?.scopeOptions?.canonicalFieldsMap
+          || null,
       });
+      if (scope) {
+        scope.scopeOptions = {
+          ...(scope.scopeOptions || {}),
+          canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
+        };
+      }
       await rehydrateSchemaInfo(scopeName);
     });
 
@@ -1805,16 +1827,30 @@ export const RestApiYouapiKnexPlugin = {
           searchSchema: existingOptions.searchSchema,
         };
       }
+      const canonicalEntries = params.canonicalFieldsMap ? { ...params.canonicalFieldsMap } : null;
+      let latestDescriptor = null;
       for (const [fieldName, definition] of Object.entries(params.fields)) {
         if (scope) {
           scope.scopeOptions.schema[fieldName] = definition;
         }
-        await registry.allocateField({
+        const canonicalEntry = canonicalEntries ? canonicalEntries[fieldName] : null;
+        if (canonicalEntries) {
+          delete canonicalEntries[fieldName];
+        }
+        latestDescriptor = await registry.allocateField({
           tenant: DEFAULT_TENANT,
           resource: scopeName,
           fieldName,
           definition,
+          canonicalField: canonicalEntry,
         });
+      }
+      if (canonicalEntries && Object.keys(canonicalEntries).length > 0) {
+        const unknown = Object.keys(canonicalEntries).join(', ');
+        throw new Error(`canonicalFieldsMap contains unknown fields for addKnexFields: ${unknown}`);
+      }
+      if (scope && latestDescriptor?.canonicalFieldMap) {
+        scope.scopeOptions.canonicalFieldsMap = latestDescriptor.canonicalFieldMap;
       }
       if (scope && params.searchSchema) {
         scope.scopeOptions.searchSchema = {

@@ -17,6 +17,45 @@ const BELONGS_TO_ALIAS = (fieldName, fieldDef) => {
   return fieldName;
 };
 
+const SLOT_PATTERNS = {
+  string: /^string_(\d+)$/,
+  number: /^number_(\d+)$/,
+  boolean: /^boolean_(\d+)$/,
+  date: /^date_(\d+)$/,
+  json: /^json_(\d+)$/,
+};
+
+const BELONGS_TO_ID_PATTERN = /^rel_(\d+)_id$/;
+const BELONGS_TO_TYPE_PATTERN = /^rel_(\d+)_type$/;
+
+const parseSimpleSlotColumn = (column) => {
+  for (const [type, pattern] of Object.entries(SLOT_PATTERNS)) {
+    const match = pattern.exec(column);
+    if (match) {
+      return { slotType: type, slotIndex: Number(match[1]) };
+    }
+  }
+  throw new Error(`Invalid canonical slot column '${column}'`);
+};
+
+const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
+  if (!idSlot || typeof idSlot !== 'string') {
+    throw new Error('BelongsTo canonical mapping requires idSlot');
+  }
+  const idMatch = BELONGS_TO_ID_PATTERN.exec(idSlot);
+  if (!idMatch) {
+    throw new Error(`Invalid belongsTo id slot '${idSlot}'`);
+  }
+  const index = Number(idMatch[1]);
+  const expectedTypeSlot = `rel_${index}_type`;
+  const actualTypeSlot = typeSlot || expectedTypeSlot;
+  const typeMatch = BELONGS_TO_TYPE_PATTERN.exec(actualTypeSlot);
+  if (!typeMatch || Number(typeMatch[1]) !== index) {
+    throw new Error(`BelongsTo type slot '${actualTypeSlot}' must correspond to id slot '${idSlot}'`);
+  }
+  return { slotType: 'belongsTo', slotIndex: index, idColumn: idSlot, typeColumn: actualTypeSlot };
+};
+
 export class YouapiRegistry {
   constructor({ knex, log } = {}) {
     if (!knex) {
@@ -39,7 +78,7 @@ export class YouapiRegistry {
     return clone(descriptor);
   }
 
-  async allocateField({ tenant, resource, fieldName, definition }, options = {}) {
+  async allocateField({ tenant, resource, fieldName, definition, canonicalField }, options = {}) {
     if (!tenant || !resource || !fieldName || !definition) {
       throw new Error('allocateField requires tenant, resource, fieldName, and definition');
     }
@@ -51,6 +90,24 @@ export class YouapiRegistry {
 
     const trx = options.transaction || await this.knex.transaction();
     const managed = !options.transaction;
+
+    descriptor.belongsTo = descriptor.belongsTo || {};
+    descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {};
+
+    const usedSlots = new Set();
+    Object.values(descriptor.fields || {}).forEach((info) => {
+      if (info?.slot) {
+        usedSlots.add(info.slot);
+      }
+    });
+    Object.values(descriptor.belongsTo || {}).forEach((info) => {
+      if (info?.typeColumn) {
+        usedSlots.add(info.typeColumn);
+      }
+      if (info?.idColumn) {
+        usedSlots.add(info.idColumn);
+      }
+    });
 
     try {
       const resourceRow = await trx('any_resource_configs')
@@ -98,7 +155,38 @@ export class YouapiRegistry {
         return clone(descriptor);
       }
 
-      const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState);
+      let override = null;
+      if (canonicalField) {
+        if (definition.belongsTo) {
+          const normalized = typeof canonicalField === 'string'
+            ? { idSlot: canonicalField }
+            : canonicalField;
+          if (!normalized || !normalized.idSlot) {
+            throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`);
+          }
+          const parsed = parseBelongsToSlots(normalized);
+          if (usedSlots.has(parsed.idColumn) || usedSlots.has(parsed.typeColumn)) {
+            throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`);
+          }
+          usedSlots.add(parsed.idColumn);
+          usedSlots.add(parsed.typeColumn);
+          override = normalized;
+        } else {
+          const slotColumn = typeof canonicalField === 'string'
+            ? canonicalField
+            : canonicalField?.slot || canonicalField?.slotColumn;
+          if (!slotColumn) {
+            throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`);
+          }
+          if (usedSlots.has(slotColumn)) {
+            throw new Error(`Canonical slot '${slotColumn}' already in use`);
+          }
+          usedSlots.add(slotColumn);
+          override = { slotColumn };
+        }
+      }
+
+      const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState, override);
       const meta = definition.meta ? JSON.stringify(definition.meta) : null;
 
       await trx('any_field_configs').insert({
@@ -149,6 +237,19 @@ export class YouapiRegistry {
 
       if (fieldSlot.belongsToInfo) {
         descriptor.belongsTo[fieldSlot.belongsToInfo.alias] = fieldSlot.belongsToInfo;
+        descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {};
+        descriptor.canonicalFieldMap[fieldName] = {
+          idSlot: fieldSlot.slotColumn,
+          typeSlot: fieldSlot.belongsToInfo.typeColumn,
+        };
+      } else {
+        descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {};
+        descriptor.canonicalFieldMap[fieldName] = fieldSlot.slotColumn;
+      }
+
+      usedSlots.add(fieldSlot.slotColumn);
+      if (fieldSlot.relationshipRow?.typeColumn) {
+        usedSlots.add(fieldSlot.relationshipRow.typeColumn);
       }
 
       descriptor.slotState = fieldSlot.updatedState;
@@ -203,7 +304,7 @@ export class YouapiRegistry {
   }
 
   async #register(definition, externalTrx) {
-    const { tenant, resource, schema, relationships = {} } = definition;
+    const { tenant, resource, schema, relationships = {}, canonicalFieldMap = null } = definition;
     const trx = externalTrx || await this.knex.transaction();
     const managed = !externalTrx;
 
@@ -247,13 +348,26 @@ export class YouapiRegistry {
       await trx('any_relationship_configs').where({ resource_config_id: resourceRow.id }).delete();
 
       const slotState = this.#initializeSlotState();
+      const usedSlotColumns = new Set();
+      let canonicalOverrides = null;
+      if (canonicalFieldMap) {
+        canonicalOverrides = new Map(Object.entries(canonicalFieldMap));
+      }
       const fieldInserts = [];
       const relationshipInserts = [];
 
       for (const [fieldName, fieldDef] of Object.entries(schema)) {
-        if (fieldName === 'id') continue;
+        if (fieldName === 'id') {
+          if (canonicalOverrides) {
+            canonicalOverrides.delete(fieldName);
+          }
+          continue;
+        }
 
         if (fieldDef?.belongsToPolymorphic) {
+          if (canonicalOverrides?.has(fieldName)) {
+            throw new Error(`canonicalFieldsMap should not include polymorphic field '${fieldName}'`);
+          }
           const alias = fieldDef.as || fieldName;
           const { typeField, idField, types = [] } = fieldDef.belongsToPolymorphic;
 
@@ -277,7 +391,59 @@ export class YouapiRegistry {
           continue;
         }
 
-        const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, slotState);
+        if (fieldDef?.computed) {
+          if (canonicalOverrides?.has(fieldName)) {
+            throw new Error(`canonicalFieldsMap should not include computed field '${fieldName}'`);
+          }
+          continue;
+        }
+
+        if (fieldDef?.virtual === true) {
+          if (canonicalOverrides?.has(fieldName)) {
+            throw new Error(`canonicalFieldsMap should not include virtual field '${fieldName}'`);
+          }
+          continue;
+        }
+
+        let override = null;
+        if (canonicalOverrides) {
+          if (!canonicalOverrides.has(fieldName)) {
+            throw new Error(`canonicalFieldsMap missing entry for field '${fieldName}'`);
+          }
+          const rawOverride = canonicalOverrides.get(fieldName);
+          canonicalOverrides.delete(fieldName);
+
+          if (fieldDef.belongsTo) {
+            const normalized = typeof rawOverride === 'string'
+              ? { idSlot: rawOverride }
+              : rawOverride;
+            if (!normalized || !normalized.idSlot) {
+              throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`);
+            }
+            const parsed = parseBelongsToSlots(normalized);
+            if (usedSlotColumns.has(parsed.idColumn) || usedSlotColumns.has(parsed.typeColumn)) {
+              throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`);
+            }
+            usedSlotColumns.add(parsed.idColumn);
+            usedSlotColumns.add(parsed.typeColumn);
+            override = normalized;
+          } else {
+            const slotColumn = typeof rawOverride === 'string'
+              ? rawOverride
+              : rawOverride?.slot || rawOverride?.slotColumn;
+            if (!slotColumn) {
+              throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`);
+            }
+            const parsed = parseSimpleSlotColumn(slotColumn);
+            if (usedSlotColumns.has(slotColumn)) {
+              throw new Error(`Canonical slot '${slotColumn}' already in use`);
+            }
+            usedSlotColumns.add(slotColumn);
+            override = { slotColumn, slotType: parsed.slotType, slotIndex: parsed.slotIndex };
+          }
+        }
+
+        const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, slotState, override);
         if (!allocation) continue;
 
         const meta = fieldDef.meta ? JSON.stringify(fieldDef.meta) : null;
@@ -316,6 +482,16 @@ export class YouapiRegistry {
           };
           relationshipInserts.push(relationshipRow);
         }
+
+        usedSlotColumns.add(allocation.slotColumn);
+        if (allocation.relationshipRow?.typeColumn) {
+          usedSlotColumns.add(allocation.relationshipRow.typeColumn);
+        }
+      }
+
+      if (canonicalOverrides && canonicalOverrides.size > 0) {
+        const unknownFields = [...canonicalOverrides.keys()].join(', ');
+        throw new Error(`canonicalFieldsMap contains unknown fields: ${unknownFields}`);
       }
 
       for (const [relName, relDef] of Object.entries(relationships || {})) {
@@ -384,7 +560,7 @@ export class YouapiRegistry {
       }
     }
 
-    return this.#buildDescriptor({
+    const descriptor = this.#buildDescriptor({
       tenant,
       resource,
       schema: JSON.parse(resourceRow.schema_json),
@@ -393,6 +569,24 @@ export class YouapiRegistry {
       fieldRows,
       relationshipRows,
     });
+
+    const canonicalFieldMap = {};
+    for (const [fieldName, fieldInfo] of Object.entries(descriptor.fields || {})) {
+      if (fieldInfo.slotType === 'belongsTo') {
+        const alias = fieldInfo.alias || BELONGS_TO_ALIAS(fieldName, descriptor.schema?.[fieldName] || {});
+        const belongsToInfo = descriptor.belongsTo?.[alias];
+        canonicalFieldMap[fieldName] = {
+          idSlot: fieldInfo.slot,
+          typeSlot: belongsToInfo?.typeColumn || `rel_${fieldInfo.slotIndex}_type`,
+        };
+      } else {
+        canonicalFieldMap[fieldName] = fieldInfo.slot;
+      }
+    }
+
+    descriptor.canonicalFieldMap = canonicalFieldMap;
+
+    return descriptor;
   }
 
   #buildDescriptor({ tenant, resource, schema, relationships, slotState, fieldRows, relationshipRows }) {
@@ -500,9 +694,9 @@ export class YouapiRegistry {
     };
   }
 
-  #assignFieldSlot(fieldDef, slotState) {
+  #assignFieldSlot(fieldDef, slotState, canonicalOverride = null) {
     if (fieldDef.belongsTo) {
-      return this.#assignBelongsTo(fieldDef, slotState);
+      return this.#assignBelongsTo(fieldDef, slotState, canonicalOverride);
     }
 
     const { type } = fieldDef;
@@ -516,6 +710,28 @@ export class YouapiRegistry {
     const pool = TYPE_TO_POOL.get(type);
     if (!pool) {
       throw new Error(`No slot pool defined for type '${type}'`);
+    }
+
+    if (canonicalOverride) {
+      const slotColumn = typeof canonicalOverride === 'string'
+        ? canonicalOverride
+        : canonicalOverride.slot || canonicalOverride.slotColumn;
+      if (!slotColumn) {
+        throw new Error(`Canonical mapping for field '${fieldDef.fieldName}' must provide a slot column`);
+      }
+      const { slotType, slotIndex } = parseSimpleSlotColumn(slotColumn);
+      if (slotType !== pool) {
+        throw new Error(
+          `Canonical slot '${slotColumn}' does not match expected type '${pool}' for field '${fieldDef.fieldName}'`,
+        );
+      }
+      slotState[pool] = Math.max(slotState[pool], slotIndex);
+      return {
+        slotType: pool,
+        slotIndex,
+        slotColumn,
+        updatedState: slotState,
+      };
     }
 
     const nextIndex = slotState[pool] + 1;
@@ -534,15 +750,48 @@ export class YouapiRegistry {
     };
   }
 
-  #assignBelongsTo(fieldDef, slotState) {
+  #assignBelongsTo(fieldDef, slotState, canonicalOverride = null) {
+    const alias = BELONGS_TO_ALIAS(fieldDef.fieldName || '', fieldDef);
+    const relationshipKey = fieldDef.relationshipKey || null;
+
+    if (canonicalOverride) {
+      const normalized = typeof canonicalOverride === 'string'
+        ? { idSlot: canonicalOverride }
+        : canonicalOverride;
+      const { slotIndex, idColumn, typeColumn } = parseBelongsToSlots(normalized || {});
+      slotState.belongsTo = Math.max(slotState.belongsTo, slotIndex);
+      return {
+        slotType: 'belongsTo',
+        slotIndex,
+        slotColumn: idColumn,
+        relationshipRow: {
+          name: alias,
+          type: 'belongsTo',
+          target: fieldDef.belongsTo,
+          slotIndex,
+          idColumn,
+          typeColumn,
+          relationshipKey,
+          alias,
+        },
+        belongsToInfo: {
+          alias,
+          target: fieldDef.belongsTo,
+          slotIndex,
+          idColumn,
+          typeColumn,
+          nullable: fieldDef.nullable === true,
+        },
+        updatedState: slotState,
+      };
+    }
+
     const nextIndex = slotState.belongsTo + 1;
     if (nextIndex > SLOT_LIMITS.belongsTo) {
       throw new Error('No available belongsTo slots remaining');
     }
 
     slotState.belongsTo = nextIndex;
-    const alias = BELONGS_TO_ALIAS(fieldDef.fieldName || '', fieldDef);
-    const relationshipKey = fieldDef.relationshipKey || null;
 
     return {
       slotType: 'belongsTo',
