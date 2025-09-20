@@ -1,6 +1,7 @@
 import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
 import { YouapiRegistry } from '../anyapi/youapi-registry.js';
 import { RestApiValidationError } from '../../lib/rest-api-errors.js';
+import { createSchema } from 'json-rest-schema';
 import {
   DEFAULT_QUERY_LIMIT,
   DEFAULT_MAX_QUERY_LIMIT,
@@ -22,6 +23,10 @@ import {
   YouapiQueryAdapter,
   preloadRelatedDescriptors,
 } from '../anyapi/query/youapi-query-adapter.js';
+import {
+  ensureSearchFieldsAreIndexed,
+  generateSearchSchemaFromSchema,
+} from './lib/querying-writing/schema-helpers.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
@@ -1463,6 +1468,68 @@ export const RestApiYouapiKnexPlugin = {
       return response;
     };
 
+    const rehydrateSchemaInfo = async (scopeName) => {
+      const scope = api.resources?.[scopeName] || scopes?.[scopeName];
+      if (!scope) return;
+
+      const descriptor = await registry.getDescriptor(DEFAULT_TENANT, scopeName);
+      if (!descriptor) return;
+
+      const existingInfo = scope.vars?.schemaInfo || {};
+
+      const mergedSchema = { ...(existingInfo.schemaInstance?.structure || {}) };
+      const computed = { ...(existingInfo.computed || {}) };
+
+      for (const [fieldName, definition] of Object.entries(descriptor.schema || {})) {
+        if (definition?.computed) {
+          if (!computed[fieldName]) {
+            computed[fieldName] = { ...definition };
+          }
+          continue;
+        }
+        mergedSchema[fieldName] = {
+          ...(mergedSchema[fieldName] || {}),
+          ...definition,
+        };
+      }
+
+      if (!mergedSchema.id) {
+        mergedSchema.id = { type: 'id' };
+      }
+
+      const schemaInstance = createSchema(mergedSchema);
+
+      const rawSearchFields = generateSearchSchemaFromSchema(
+        mergedSchema,
+        scope.scopeOptions?.searchSchema,
+      );
+      if (rawSearchFields) {
+        ensureSearchFieldsAreIndexed(rawSearchFields);
+      }
+      const searchSchemaInstance = createSchema(rawSearchFields || {});
+
+      scope.vars.schemaInfo = {
+        ...existingInfo,
+        schemaInstance,
+        schemaStructure: schemaInstance.structure,
+        searchSchemaInstance,
+        searchSchemaStructure: searchSchemaInstance.structure,
+        schemaRelationships: descriptor.relationships
+          || scope.scopeOptions?.relationships
+          || existingInfo.schemaRelationships
+          || {},
+        computed,
+        tableName: existingInfo.tableName
+          || scope.scopeOptions?.tableName
+          || scopeName,
+        idProperty: existingInfo.idProperty
+          || scope.scopeOptions?.idProperty
+          || scope.vars?.idProperty
+          || 'id',
+        descriptor,
+      };
+    };
+
     const buildTableNameMaps = () => {
       const resourceToTableName = new Map();
       const tableNameToResource = new Map();
@@ -1482,6 +1549,7 @@ export const RestApiYouapiKnexPlugin = {
       const queryParams = context.queryParams || {};
 
       const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
+      context.resourceToTableName = resourceToTableName;
       const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor });
       const adapter = new YouapiQueryAdapter({
         descriptor,
@@ -1680,7 +1748,7 @@ export const RestApiYouapiKnexPlugin = {
       return Number(count);
     };
 
-    addHook('scope:added', 'youapi-register-resource', {}, async ({ context }) => {
+    addHook('scope:added', 'youapi-register-resource', { sequence: 50 }, async ({ context }) => {
       const { scopeName } = context;
       const scope = api.scopes?.[scopeName] || scopes?.[scopeName];
       const schema = scope?.scopeOptions?.schema || {};
@@ -1691,20 +1759,56 @@ export const RestApiYouapiKnexPlugin = {
         schema,
         relationships,
       });
+      await rehydrateSchemaInfo(scopeName);
     });
 
     addScopeMethod('createKnexTable', async ({ scopeName, scopeOptions }) => {
+      const scope = api.resources?.[scopeName] || scopes?.[scopeName];
+      const schemaInput = scopeOptions?.schema || scope?.scopeOptions?.schema || {};
+      const relationshipInput = scopeOptions?.relationships || scope?.scopeOptions?.relationships || {};
+
+      if (scope) {
+        const existingOptions = scope.scopeOptions || {};
+        scope.scopeOptions = {
+          ...existingOptions,
+          schema: {
+            ...(existingOptions.schema || {}),
+            ...schemaInput,
+          },
+          relationships: {
+            ...(existingOptions.relationships || {}),
+            ...relationshipInput,
+          },
+          searchSchema: existingOptions.searchSchema || scopeOptions?.searchSchema,
+        };
+      }
       await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
-        schema: scopeOptions.schema || {},
-        relationships: scopeOptions.relationships || {},
+        schema: schemaInput,
+        relationships: relationshipInput,
       });
+      await rehydrateSchemaInfo(scopeName);
     });
 
     addScopeMethod('addKnexFields', async ({ scopeName, params }) => {
       if (!params?.fields) return;
+      const scope = api.resources?.[scopeName] || scopes?.[scopeName];
+      if (scope) {
+        const existingOptions = scope.scopeOptions || {};
+        scope.scopeOptions = {
+          ...existingOptions,
+          schema: {
+            ...(existingOptions.schema || {}),
+          },
+          relationships: existingOptions.relationships || {},
+          searchSchema: existingOptions.searchSchema,
+        };
+      }
       for (const [fieldName, definition] of Object.entries(params.fields)) {
+        if (scope) {
+          scope.scopeOptions.schema[fieldName] = definition;
+        }
         await registry.allocateField({
           tenant: DEFAULT_TENANT,
           resource: scopeName,
@@ -1712,6 +1816,13 @@ export const RestApiYouapiKnexPlugin = {
           definition,
         });
       }
+      if (scope && params.searchSchema) {
+        scope.scopeOptions.searchSchema = {
+          ...(scope.scopeOptions.searchSchema || {}),
+          ...params.searchSchema,
+        };
+      }
+      await rehydrateSchemaInfo(scopeName);
     });
 
     addScopeMethod('alterKnexFields', async () => {
