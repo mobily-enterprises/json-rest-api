@@ -20,7 +20,8 @@ async function useStoragePlugin(api, knex) {
     await ensureAnyApiSchema(knex);
     await api.use(RestApiYouapiKnexPlugin, { knex });
   } else {
-    await api.use(RestApiKnexPlugin, { knex });
+    await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
   }
 }
 
@@ -602,7 +603,8 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
     simplifiedTransport: true
   });
   
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Products resource with computed fields
   await api.addResource('products', {
@@ -636,6 +638,7 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
     tableName: 'test_products'
   });
   await api.resources.products.createKnexTable();
+  mapTable('searchmerge_products', 'products');
 
   // Reviews resource with computed fields
   await api.addResource('reviews', {
@@ -689,7 +692,8 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     simplifiedTransport: true
   });
   
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Users resource with basic getters
   await api.addResource('users', {
@@ -742,6 +746,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     tableName: 'getter_users'
   });
   await api.resources.users.createKnexTable();
+  mapTable('searchmerge_users', 'users');
 
   // Products resource with getters and computed fields
   await api.addResource('products', {
@@ -883,7 +888,8 @@ export async function createFieldSettersApi(knex, pluginOptions = {}) {
     }
   });
   
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Users resource with basic setters
   await api.addResource('users', {
@@ -1093,7 +1099,8 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     sortableFields: ['id', 'title', 'name', 'tenant_id']
   });
   
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
   
   // Add Express plugin if requested for transport testing
   if (pluginOptions.includeExpress) {
@@ -1127,6 +1134,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     tableName: 'multihome_projects'
   });
   await api.resources.projects.createKnexTable();
+  mapTable('multihome_projects', 'projects');
 
   await api.addResource('tasks', {
     schema: {
@@ -1139,6 +1147,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     tableName: 'multihome_tasks'
   });
   await api.resources.tasks.createKnexTable();
+  mapTable('multihome_tasks', 'tasks');
 
   await api.addResource('users', {
     schema: {
@@ -1151,6 +1160,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     tableName: 'multihome_users'
   });
   await api.resources.users.createKnexTable();
+  mapTable('multihome_users', 'users');
 
   // Global resource (excluded from multihome)
   await api.addResource('system_settings', {
@@ -1162,6 +1172,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     tableName: 'multihome_system_settings'
   });
   await api.resources.system_settings.createKnexTable();
+  mapTable('multihome_system_settings', 'system_settings');
 
   return api;
 }
@@ -1194,7 +1205,8 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Categories (for grouping tasks)
   await api.addResource('categories', {
@@ -1286,7 +1298,8 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Countries table with custom idProperty
   await api.addResource('countries', {
@@ -1431,7 +1444,8 @@ export async function createCursorPaginationApi(knex) {
   };
   
   await api.use(RestApiPlugin, restApiOptions);
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Create products table with fields suitable for multi-field sorting
   await api.addResource('products', {
@@ -1493,7 +1507,8 @@ export async function createVirtualFieldsApi(knex, pluginOptions = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Add a test resource with virtual fields
   await api.addResource('users', {
@@ -1539,7 +1554,8 @@ export async function createSearchSchemaMergeApi(knex, pluginOptions = {}) {
     ...pluginOptions['rest-api']
   });
   
-  await api.use(RestApiKnexPlugin, { knex });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
 
   // Test resource with both search:true and searchSchema
   await api.addResource('products', {
@@ -1601,6 +1617,7 @@ export async function createSearchSchemaMergeApi(knex, pluginOptions = {}) {
     tableName: 'searchmerge_orders'
   });
   await api.resources.orders.createKnexTable();
+  mapTable('searchmerge_orders', 'orders');
 
   return api;
 }

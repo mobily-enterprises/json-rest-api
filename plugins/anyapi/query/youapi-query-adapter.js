@@ -11,6 +11,36 @@ const JOIN_METHODS = new Set([
   'crossJoin',
 ]);
 
+const JOIN_ON_METHODS = new Set([
+  'on',
+  'andOn',
+  'orOn',
+  'onVal',
+  'andOnVal',
+  'orOnVal',
+]);
+
+const JOIN_ON_IN_METHODS = new Set([
+  'onIn',
+  'orOnIn',
+  'onNotIn',
+  'orOnNotIn',
+]);
+
+const JOIN_ON_NULL_METHODS = new Set([
+  'onNull',
+  'orOnNull',
+  'onNotNull',
+  'orOnNotNull',
+]);
+
+const JOIN_ON_BETWEEN_METHODS = new Set([
+  'onBetween',
+  'orOnBetween',
+  'onNotBetween',
+  'orOnNotBetween',
+]);
+
 const WHERE_METHODS = new Set([
   'where',
   'andWhere',
@@ -52,6 +82,24 @@ const CALLBACK_FIRST_METHODS = new Set([
 const isFunction = (value) => typeof value === 'function';
 const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
+const SQL_OPERATORS = new Set([
+  '=',
+  '!=',
+  '<>',
+  '<',
+  '<=',
+  '>',
+  '>=',
+  'like',
+  'not like',
+  'ilike',
+  'not ilike',
+  'is',
+  'is not',
+  'is null',
+  'is not null',
+]);
+
 const parseTableExpression = (expression) => {
   if (expression && typeof expression === 'object' && !Array.isArray(expression)) {
     const [alias, tableName] = Object.entries(expression)[0] || [];
@@ -87,6 +135,16 @@ const translateObjectKeys = (adapter, obj) => {
   const result = {};
   for (const [key, value] of Object.entries(obj)) {
     result[adapter.translateColumn(key)] = value;
+  }
+  return result;
+};
+
+const translateJoinObject = (adapter, obj) => {
+  const result = {};
+  for (const [lhs, rhs] of Object.entries(obj)) {
+    const translatedKey = typeof lhs === 'string' ? adapter.translateColumn(lhs) : lhs;
+    const translatedValue = typeof rhs === 'string' ? adapter.translateColumn(rhs) : rhs;
+    result[translatedKey] = translatedValue;
   }
   return result;
 };
@@ -376,6 +434,65 @@ export class YouapiQueryAdapter {
     return args;
   }
 
+  #translateOnArgs(args) {
+    if (args.length === 0) return args;
+    const [first, ...rest] = args;
+
+    if (isFunction(first)) {
+      return [maybeWrapCallback(this, first), ...rest];
+    }
+
+    if (isObject(first) && !isRaw(first)) {
+      return [translateJoinObject(this, first), ...rest];
+    }
+
+    const translatedFirst = typeof first === 'string' ? this.translateColumn(first) : first;
+
+    if (rest.length === 0) {
+      return [translatedFirst];
+    }
+
+    const translatedRest = rest.map((value, index) => {
+      if (isFunction(value)) {
+        return maybeWrapCallback(this, value);
+      }
+      if (typeof value !== 'string') {
+        return value;
+      }
+      const lower = value.toLowerCase();
+      if (SQL_OPERATORS.has(lower)) {
+        return value;
+      }
+      return this.translateColumn(value);
+    });
+
+    return [translatedFirst, ...translatedRest];
+  }
+
+  #translateOnInArgs(args) {
+    if (args.length === 0) return args;
+    const [column, values, ...rest] = args;
+    const translatedColumn = typeof column === 'string' ? this.translateColumn(column) : column;
+
+    if (isFunction(values)) {
+      return [translatedColumn, maybeWrapCallback(this, values), ...rest];
+    }
+
+    return [translatedColumn, values, ...rest];
+  }
+
+  #translateOnBetweenArgs(args) {
+    if (args.length === 0) return args;
+    const [column, range, ...rest] = args;
+    return [typeof column === 'string' ? this.translateColumn(column) : column, range, ...rest];
+  }
+
+  #translateOnNullArgs(args) {
+    if (args.length === 0) return args;
+    const [column, ...rest] = args;
+    return [typeof column === 'string' ? this.translateColumn(column) : column, ...rest];
+  }
+
   #addResourceConstraints(joinClause, alias, descriptor) {
     joinClause.on(`${alias}.${descriptor.canonical.tenantColumn}`, this.db.raw('?', [descriptor.tenant]));
     joinClause.andOn(`${alias}.${descriptor.canonical.resourceColumn}`, this.db.raw('?', [descriptor.resource]));
@@ -400,6 +517,14 @@ export class YouapiQueryAdapter {
             translatedArgs = adapter.#translateBetweenArgs(args);
           } else if (NULL_METHODS.has(prop)) {
             translatedArgs = adapter.#translateNullArgs(args);
+          } else if (JOIN_ON_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnArgs(args);
+          } else if (JOIN_ON_IN_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnInArgs(args);
+          } else if (JOIN_ON_BETWEEN_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnBetweenArgs(args);
+          } else if (JOIN_ON_NULL_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnNullArgs(args);
           }
 
           const result = original.apply(target, translatedArgs);
@@ -489,6 +614,14 @@ export class YouapiQueryAdapter {
             translatedArgs = adapter.#translateBetweenArgs(args);
           } else if (NULL_METHODS.has(prop)) {
             translatedArgs = adapter.#translateNullArgs(args);
+          } else if (JOIN_ON_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnArgs(args);
+          } else if (JOIN_ON_IN_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnInArgs(args);
+          } else if (JOIN_ON_BETWEEN_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnBetweenArgs(args);
+          } else if (JOIN_ON_NULL_METHODS.has(prop)) {
+            translatedArgs = adapter.#translateOnNullArgs(args);
           } else if (ORDER_METHODS.has(prop)) {
             translatedArgs = adapter.#translateOrderArgs(prop, args);
           } else if (GROUP_METHODS.has(prop)) {

@@ -1,8 +1,12 @@
 export const MultiHomePlugin = {
     name: 'multihome',
-    dependencies: ['rest-api', 'rest-api-knex'],
+    dependencies: ['rest-api'],
 
     install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
+
+      if (!api.knex?.instance) {
+        throw new Error('Multihome plugin requires a storage plugin with knex support (rest-api-knex or rest-api-youapi-knex)');
+      }
 
       // Get configuration - hooked-api namespaces options by plugin name
       const multihomeOptions = pluginOptions || {};
@@ -80,7 +84,8 @@ export const MultiHomePlugin = {
       });
 
       // Main filtering hook - adds WHERE clause to all queries
-      addHook('knexQueryFiltering', 'multihome-filter', { beforePlugin: 'rest-api-knex' }, async ({ context, vars }) => {
+      log.debug('Registering multihome filter hook');
+      addHook('knexQueryFiltering', 'multihome-filter', {}, async ({ context, vars }) => {
         // Get query info from context
         const { query, tableName, scopeName } = context.knexQuery;
 
@@ -90,15 +95,21 @@ export const MultiHomePlugin = {
           return;
         }
 
-        // Skip if no multihome context
-        if (!context.auth?.multihome_id) {
-          if (vars.multihome.requireAuth) {
-            throw new Error('No multihome context available - cannot execute query');
-          }
-          return;
+      // Skip if no multihome context
+      if (!context.auth?.multihome_id) {
+        if (vars.multihome.requireAuth) {
+          throw new Error('No multihome context available - cannot execute query');
         }
+        return;
+      }
 
-        // Check if this resource has multihome field
+      log.debug('Applying multihome tenant filter', {
+        scopeName,
+        tableName,
+        tenant: context.auth.multihome_id,
+      });
+
+      // Check if this resource has multihome field
         const scope = scopes[scopeName];
         const hasMultihomeField = scope?.vars?.schemaInfo?.schemaStructure?.[vars.multihome.field];
 
@@ -111,10 +122,18 @@ export const MultiHomePlugin = {
           }
         }
 
-        // Add WHERE condition wrapped in function for proper grouping
+      const adapter = context.knexQuery?.adapter;
+      const columnRef = adapter
+        ? adapter.translateColumn(`${tableName}.${vars.multihome.field}`)
+        : `${tableName}.${vars.multihome.field}`;
+
+      if (adapter) {
+        query.whereRaw(`${columnRef} = ?`, [context.auth.multihome_id]);
+      } else {
         query.where(function() {
-          this.where(`${tableName}.${vars.multihome.field}`, context.auth.multihome_id);
+          this.where(columnRef, context.auth.multihome_id);
         });
+      }
 
         log.trace('Added multihome filter', {
           scopeName,

@@ -29,6 +29,11 @@ import {
   ensureSearchFieldsAreIndexed,
   generateSearchSchemaFromSchema,
 } from './lib/querying-writing/schema-helpers.js';
+import {
+  polymorphicFiltersHook,
+  crossTableFiltersHook,
+  basicFiltersHook,
+} from './lib/querying/knex-query-helpers.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
@@ -55,6 +60,8 @@ export const RestApiYouapiKnexPlugin = {
       instance: knex,
       helpers: {},
     };
+
+    const scopeOptionsRegistry = new Map();
 
     helpers.newTransaction = async () => knex.transaction();
 
@@ -99,10 +106,62 @@ export const RestApiYouapiKnexPlugin = {
       resource.attributes = filtered;
     };
 
-    const applyFiltersToQuery = ({ query, filters, descriptor }) => {
+    const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
       if (!filters || Object.keys(filters).length === 0) return;
 
       for (const [field, rawValue] of Object.entries(filters)) {
+        const searchDef = searchSchema ? searchSchema[field] : null;
+        if (searchDef) {
+          const isAdvanced = Boolean(
+            searchDef.actualField?.includes('.')
+            || (Array.isArray(searchDef.oneOf) && searchDef.oneOf.some((entry) => entry.includes('.')))
+            || searchDef.polymorphicField
+            || typeof searchDef.applyFilter === 'function'
+          );
+          if (!isAdvanced && adapter) {
+            const columnRef = adapter.translateColumn(searchDef.actualField || field);
+            const operator = (searchDef.filterOperator || '=').toLowerCase();
+            const normalizedValues = normalizeFilterValues(rawValue, searchDef, {
+              isRelationship: Boolean(searchDef.isRelationship),
+            });
+            const primaryValue = normalizedValues[0];
+            switch (operator) {
+              case 'like':
+                query.whereRaw(`${columnRef} like ?`, [`%${primaryValue}%`]);
+                break;
+              case 'in':
+                if (normalizedValues.includes(null) && normalizedValues.length === 1) {
+                  query.whereNull(columnRef);
+                } else if (normalizedValues.length > 1) {
+                  query.whereIn(columnRef, normalizedValues);
+                } else if (primaryValue === null) {
+                  query.whereNull(columnRef);
+                } else {
+                  query.whereRaw(`${columnRef} = ?`, [primaryValue]);
+                }
+                break;
+              case 'between':
+                if (normalizedValues.length === 2) {
+                  query.whereBetween(columnRef, normalizedValues);
+                } else if (primaryValue === null) {
+                  query.whereNull(columnRef);
+                } else {
+                  query.whereRaw(`${columnRef} = ?`, [primaryValue]);
+                }
+                break;
+              default:
+                if (primaryValue === null) {
+                  query.whereNull(columnRef);
+                } else {
+                  query.whereRaw(`${columnRef} ${operator || '='} ?`, [primaryValue]);
+                }
+                break;
+            }
+            continue;
+          }
+          // Leave advanced search fields to downstream hooks
+          continue;
+        }
         const fieldInfo = ensureFilterableField(descriptor, field);
 
         const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
@@ -313,19 +372,20 @@ export const RestApiYouapiKnexPlugin = {
           return;
         }
 
-        query.where(function cursorWhere() {
-          translatedConditions.forEach((chain) => {
-            this.orWhere(function chainGroup() {
-              chain.forEach(({ column, operator, value }) => {
-                if (adapter) {
-                  this.whereRaw(`${column} ${operator} ?`, [value]);
-                } else {
-                  this.where(column, operator, value);
-                }
-              });
-            });
+        const predicateParts = [];
+        const predicateBindings = [];
+        translatedConditions.forEach((chain) => {
+          const chainParts = chain.map(({ column, operator, value }) => {
+            predicateBindings.push(value);
+            return `${column} ${operator} ?`;
           });
+          predicateParts.push(`(${chainParts.join(' AND ')})`);
         });
+
+        if (predicateParts.length > 0) {
+          const combined = predicateParts.join(' OR ');
+          query.whereRaw(`(${combined})`, predicateBindings);
+        }
       };
 
       const ensurePageSize = () => {
@@ -1546,8 +1606,19 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     const rehydrateSchemaInfo = async (scopeName) => {
-      const scope = api.resources?.[scopeName] || scopes?.[scopeName];
-      if (!scope) return;
+      const scope = api.resources?.[scopeName] || scopes?.[scopeName] || {};
+      const storedOptions = scopeOptionsRegistry.get(scopeName) || {};
+
+      if (!scope.scopeOptions) {
+        scope.scopeOptions = {
+          schema: storedOptions.schema || {},
+          relationships: storedOptions.relationships || {},
+          searchSchema: storedOptions.searchSchema || null,
+          tableName: storedOptions.tableName || scopeName,
+          idProperty: storedOptions.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
+          canonicalFieldsMap: storedOptions.canonicalFieldsMap || {},
+        };
+      }
 
       const descriptor = await registry.getDescriptor(DEFAULT_TENANT, scopeName);
       if (!descriptor) return;
@@ -1578,12 +1649,24 @@ export const RestApiYouapiKnexPlugin = {
 
       const rawSearchFields = generateSearchSchemaFromSchema(
         mergedSchema,
-        scope.scopeOptions?.searchSchema,
+        scope.scopeOptions?.searchSchema || storedOptions.searchSchema || null,
       );
       if (rawSearchFields) {
         ensureSearchFieldsAreIndexed(rawSearchFields);
       }
       const searchSchemaInstance = createSchema(rawSearchFields || {});
+
+      const tableName = storedOptions.tableName
+        || existingInfo.tableName
+        || scope.scopeOptions?.tableName
+        || scopeName;
+
+      const idProperty = storedOptions.idProperty
+        || existingInfo.idProperty
+        || scope.scopeOptions?.idProperty
+        || scope.vars?.idProperty
+        || vars.idProperty
+        || 'id';
 
       scope.vars.schemaInfo = {
         ...existingInfo,
@@ -1593,16 +1676,12 @@ export const RestApiYouapiKnexPlugin = {
         searchSchemaStructure: searchSchemaInstance.structure,
         schemaRelationships: descriptor.relationships
           || scope.scopeOptions?.relationships
+          || storedOptions.relationships
           || existingInfo.schemaRelationships
           || {},
         computed,
-        tableName: existingInfo.tableName
-          || scope.scopeOptions?.tableName
-          || scopeName,
-        idProperty: existingInfo.idProperty
-          || scope.scopeOptions?.idProperty
-          || scope.vars?.idProperty
-          || 'id',
+        tableName,
+        idProperty,
         descriptor,
         canonicalFieldMap: descriptor.canonicalFieldMap || {},
       };
@@ -1611,6 +1690,15 @@ export const RestApiYouapiKnexPlugin = {
         ...(scope.scopeOptions || {}),
         canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
       };
+
+      scopeOptionsRegistry.set(scopeName, {
+        schema: storedOptions.schema || scope.scopeOptions?.schema || {},
+        relationships: storedOptions.relationships || scope.scopeOptions?.relationships || {},
+        searchSchema: scope.scopeOptions?.searchSchema || storedOptions.searchSchema || null,
+        tableName,
+        idProperty,
+        canonicalFieldsMap: descriptor.canonicalFieldMap || {},
+      });
     };
 
     const buildTableNameMaps = () => {
@@ -1624,6 +1712,33 @@ export const RestApiYouapiKnexPlugin = {
       }
       return { resourceToTableName, tableNameToResource };
     };
+
+    const scopesProxy = new Proxy({}, {
+      get(_target, prop) {
+        if (typeof prop !== 'string') {
+          return undefined;
+        }
+        const resource = api.resources?.[prop];
+        if (resource?.vars?.schemaInfo) {
+          return resource;
+        }
+        return scopes?.[prop];
+      },
+    });
+
+    const queryHookDependencies = { log, scopes: scopesProxy, knex };
+
+    addHook('knexQueryFiltering', 'polymorphicFiltersHook', {}, async (hookParams) =>
+      polymorphicFiltersHook(hookParams, queryHookDependencies)
+    );
+
+    addHook('knexQueryFiltering', 'crossTableFiltersHook', {}, async (hookParams) =>
+      crossTableFiltersHook(hookParams, queryHookDependencies)
+    );
+
+    addHook('knexQueryFiltering', 'basicFiltersHook', {}, async (hookParams) =>
+      basicFiltersHook(hookParams, queryHookDependencies)
+    );
 
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
       const descriptor = await getDescriptor(scopeName);
@@ -1645,14 +1760,16 @@ export const RestApiYouapiKnexPlugin = {
       });
       const queryBuilder = adapter.query;
 
+      const schemaInfo = scope?.vars?.schemaInfo;
+      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias;
+
       applyFiltersToQuery({
         query: queryBuilder,
         filters: queryParams.filters,
         descriptor,
+        searchSchema: schemaInfo?.searchSchemaStructure,
+        adapter,
       });
-
-      const schemaInfo = scope?.vars?.schemaInfo;
-      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias;
 
       context.knexQuery = {
         query: queryBuilder,
@@ -1851,23 +1968,50 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     addHook('scope:added', 'youapi-register-resource', { sequence: 50 }, async ({ context }) => {
-      const { scopeName } = context;
+      const { scopeName, scopeOptions = {} } = context;
       const scope = api.scopes?.[scopeName] || scopes?.[scopeName];
-      const schema = scope?.scopeOptions?.schema || {};
-      const relationships = scope?.scopeOptions?.relationships || {};
+      const stored = scopeOptionsRegistry.get(scopeName) || {};
+
+      const schema = scopeOptions.schema || scope?.scopeOptions?.schema || stored.schema || {};
+      const relationships = scopeOptions.relationships || scope?.scopeOptions?.relationships || stored.relationships || {};
+      const searchSchemaDef = scopeOptions.searchSchema || scope?.scopeOptions?.searchSchema || stored.searchSchema || null;
+      const tableName = scopeOptions.tableName || scope?.scopeOptions?.tableName || stored.tableName || scopeName;
+      const idProperty = scopeOptions.idProperty || scope?.scopeOptions?.idProperty || stored.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id';
+      const canonicalFieldsMap = scope?.scopeOptions?.canonicalFieldsMap || stored.canonicalFieldsMap || null;
+
+      scopeOptionsRegistry.set(scopeName, {
+        schema,
+        relationships,
+        searchSchema: searchSchemaDef,
+        tableName,
+        idProperty,
+        canonicalFieldsMap,
+      });
+
       const descriptor = await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
         schema,
         relationships,
-        canonicalFieldMap: scope?.scopeOptions?.canonicalFieldsMap || null,
+        canonicalFieldMap: canonicalFieldsMap,
       });
+
+      const updatedStored = scopeOptionsRegistry.get(scopeName) || {};
+      updatedStored.canonicalFieldsMap = descriptor.canonicalFieldMap || updatedStored.canonicalFieldsMap || null;
+      scopeOptionsRegistry.set(scopeName, updatedStored);
+
       if (scope) {
         scope.scopeOptions = {
           ...(scope.scopeOptions || {}),
+          schema,
+          relationships,
+          searchSchema: searchSchemaDef || undefined,
+          tableName,
+          idProperty,
           canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
         };
       }
+
       await rehydrateSchemaInfo(scopeName);
     });
 
@@ -1891,6 +2035,15 @@ export const RestApiYouapiKnexPlugin = {
           searchSchema: existingOptions.searchSchema || scopeOptions?.searchSchema,
         };
       }
+      const storedBefore = scopeOptionsRegistry.get(scopeName) || {};
+      scopeOptionsRegistry.set(scopeName, {
+        schema: scope?.scopeOptions?.schema || schemaInput || storedBefore.schema || {},
+        relationships: scope?.scopeOptions?.relationships || relationshipInput || storedBefore.relationships || {},
+        searchSchema: scope?.scopeOptions?.searchSchema || scopeOptions?.searchSchema || storedBefore.searchSchema || null,
+        tableName: scope?.scopeOptions?.tableName || scopeOptions?.tableName || storedBefore.tableName || scopeName,
+        idProperty: scope?.scopeOptions?.idProperty || scopeOptions?.idProperty || storedBefore.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
+        canonicalFieldsMap: storedBefore.canonicalFieldsMap || null,
+      });
       const descriptor = await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
@@ -1906,6 +2059,9 @@ export const RestApiYouapiKnexPlugin = {
           canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
         };
       }
+      const storedAfter = scopeOptionsRegistry.get(scopeName) || {};
+      storedAfter.canonicalFieldsMap = descriptor.canonicalFieldMap || storedAfter.canonicalFieldsMap || null;
+      scopeOptionsRegistry.set(scopeName, storedAfter);
       await rehydrateSchemaInfo(scopeName);
     });
 
@@ -1923,6 +2079,7 @@ export const RestApiYouapiKnexPlugin = {
           searchSchema: existingOptions.searchSchema,
         };
       }
+      const storedBefore = scopeOptionsRegistry.get(scopeName) || {};
       const canonicalEntries = params.canonicalFieldsMap ? { ...params.canonicalFieldsMap } : null;
       let latestDescriptor = null;
       for (const [fieldName, definition] of Object.entries(params.fields)) {
@@ -1954,6 +2111,15 @@ export const RestApiYouapiKnexPlugin = {
           ...params.searchSchema,
         };
       }
+      const updatedStored = {
+        schema: scope?.scopeOptions?.schema || storedBefore.schema || {},
+        relationships: scope?.scopeOptions?.relationships || storedBefore.relationships || {},
+        searchSchema: scope?.scopeOptions?.searchSchema || storedBefore.searchSchema || null,
+        tableName: scope?.scopeOptions?.tableName || storedBefore.tableName || scopeName,
+        idProperty: scope?.scopeOptions?.idProperty || storedBefore.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
+        canonicalFieldsMap: scope?.scopeOptions?.canonicalFieldsMap || storedBefore.canonicalFieldsMap || null,
+      };
+      scopeOptionsRegistry.set(scopeName, updatedStored);
       await rehydrateSchemaInfo(scopeName);
     });
 
