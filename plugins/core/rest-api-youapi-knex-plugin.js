@@ -18,6 +18,8 @@ import {
   normalizeId,
   resolveFieldInfo,
   coerceValueForDefinition,
+  normalizeFilterValues,
+  ensureFilterableField,
 } from '../anyapi/utils/descriptor-helpers.js';
 import {
   YouapiQueryAdapter,
@@ -95,6 +97,42 @@ export const RestApiYouapiKnexPlugin = {
         }
       }
       resource.attributes = filtered;
+    };
+
+    const applyFiltersToQuery = ({ query, filters, descriptor }) => {
+      if (!filters || Object.keys(filters).length === 0) return;
+
+      for (const [field, rawValue] of Object.entries(filters)) {
+        const fieldInfo = ensureFilterableField(descriptor, field);
+
+        const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
+          isRelationship: fieldInfo.isRelationship,
+        });
+
+        const nonNullValues = values.filter((value) => value !== null);
+        const hasNull = values.length !== nonNullValues.length;
+
+        if (nonNullValues.length === 0 && hasNull) {
+          query.whereNull(fieldInfo.column);
+          continue;
+        }
+
+        if (nonNullValues.length === 1 && !hasNull) {
+          query.where(fieldInfo.column, nonNullValues[0]);
+          continue;
+        }
+
+        if (nonNullValues.length > 1 && !hasNull) {
+          query.whereIn(fieldInfo.column, nonNullValues);
+          continue;
+        }
+
+        if (nonNullValues.length > 0 && hasNull) {
+          query.where(function filterGroup() {
+            this.whereIn(fieldInfo.column, nonNullValues).orWhereNull(fieldInfo.column);
+          });
+        }
+      }
     };
 
     const applySortingToQuery = ({ query, sort, descriptor, scope }) => {
@@ -177,6 +215,7 @@ export const RestApiYouapiKnexPlugin = {
       scope,
       queryParams,
       sortDescriptors,
+      adapter,
     }) => {
       const pageParams = queryParams?.page || {};
       const scopeVars = scope?.vars || {};
@@ -231,21 +270,59 @@ export const RestApiYouapiKnexPlugin = {
       };
 
       const buildCursorPredicate = (cursorValues, operatorSelector) => {
+        if (!descriptors || descriptors.length === 0) {
+          return;
+        }
+
+        if (descriptors.length === 1) {
+          const descriptor = descriptors[0];
+          const value = cursorValues[descriptor.field];
+          if (value === undefined) return;
+          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column;
+          const operator = operatorSelector(descriptor.direction);
+          if (adapter) {
+            query.whereRaw(`${columnRef} ${operator} ?`, [value]);
+          } else {
+            query.where(columnRef, operator, value);
+          }
+          return;
+        }
+
+        const translatedConditions = [];
+
+        descriptors.forEach((descriptor, index) => {
+          const value = cursorValues[descriptor.field];
+          if (value === undefined) return;
+
+          const chain = [];
+          for (let i = 0; i < index; i += 1) {
+            const prev = descriptors[i];
+            const prevValue = cursorValues[prev.field];
+            if (prevValue === undefined) return;
+            const prevColumn = adapter ? adapter.translateColumn(prev.column) : prev.column;
+            chain.push({ column: prevColumn, operator: '=', value: prevValue });
+          }
+
+          const operator = operatorSelector(descriptor.direction);
+          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column;
+          chain.push({ column: columnRef, operator, value });
+          translatedConditions.push(chain);
+        });
+
+        if (translatedConditions.length === 0) {
+          return;
+        }
+
         query.where(function cursorWhere() {
-          descriptors.forEach((descriptor, index) => {
-            const value = cursorValues[descriptor.field];
-            if (value === undefined) return;
-
-            this.orWhere(function singleLevel() {
-              for (let i = 0; i < index; i += 1) {
-                const prev = descriptors[i];
-                const prevValue = cursorValues[prev.field];
-                if (prevValue === undefined) return;
-                this.where(prev.column, prevValue);
-              }
-
-              const operator = operatorSelector(descriptor.direction);
-              this.where(descriptor.column, operator, value);
+          translatedConditions.forEach((chain) => {
+            this.orWhere(function chainGroup() {
+              chain.forEach(({ column, operator, value }) => {
+                if (adapter) {
+                  this.whereRaw(`${column} ${operator} ?`, [value]);
+                } else {
+                  this.where(column, operator, value);
+                }
+              });
             });
           });
         });
@@ -284,15 +361,15 @@ export const RestApiYouapiKnexPlugin = {
         const pageSize = ensurePageSize();
         query.limit(pageSize + 1);
 
-        if (pageParams.after) {
-          const cursorMap = parseCursorOrThrow(pageParams.after, 'after');
-          const cursorValues = coerceCursorValues(cursorMap);
-          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'));
-        } else if (pageParams.before) {
-          const cursorMap = parseCursorOrThrow(pageParams.before, 'before');
-          const cursorValues = coerceCursorValues(cursorMap);
-          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'));
-        }
+      if (pageParams.after) {
+        const cursorMap = parseCursorOrThrow(pageParams.after, 'after');
+        const cursorValues = coerceCursorValues(cursorMap);
+        buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'));
+      } else if (pageParams.before) {
+        const cursorMap = parseCursorOrThrow(pageParams.before, 'before');
+        const cursorValues = coerceCursorValues(cursorMap);
+        buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'));
+      }
 
         return {
           mode: 'cursor',
@@ -1568,6 +1645,12 @@ export const RestApiYouapiKnexPlugin = {
       });
       const queryBuilder = adapter.query;
 
+      applyFiltersToQuery({
+        query: queryBuilder,
+        filters: queryParams.filters,
+        descriptor,
+      });
+
       const schemaInfo = scope?.vars?.schemaInfo;
       const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias;
 
@@ -1597,12 +1680,19 @@ export const RestApiYouapiKnexPlugin = {
         scope,
       });
 
+      if (queryParams?.page?.after) {
+              }
+
       const paginationInfo = applyPaginationToQuery({
         query: queryBuilder,
         scope,
         queryParams,
         sortDescriptors,
+        adapter,
       });
+
+      if (queryParams?.page?.after) {
+              }
 
       let rows = await queryBuilder.select();
       let cursorRecords = null;
@@ -1748,6 +1838,12 @@ export const RestApiYouapiKnexPlugin = {
         resourceToTableName,
         tableNameToResource,
         log,
+      });
+
+      applyFiltersToQuery({
+        query: adapter.query,
+        filters: context.queryParams?.filters,
+        descriptor,
       });
 
       const [{ count }] = await adapter.query.count({ count: '*' });
