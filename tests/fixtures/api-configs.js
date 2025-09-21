@@ -4,7 +4,7 @@ import { AccessPlugin } from '../../plugins/core/rest-api-access.js';
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
 import express from 'express';
 import { createServer } from 'http';
-import { ensureAnyApiSchema } from '../../plugins/anyapi/schema-utils.js';
+import { ensureAnyApiSchema } from '../../plugins/core/lib/anyapi/schema-utils.js';
 import { storageMode } from '../helpers/storage-mode.js';
 
 async function resetAnyApiTables(knex) {

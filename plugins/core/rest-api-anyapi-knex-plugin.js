@@ -1,5 +1,5 @@
-import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
-import { AnyapiRegistry } from '../anyapi/anyapi-registry.js';
+import { ensureAnyApiSchema } from './lib/anyapi/schema-utils.js';
+import { AnyapiRegistry } from './lib/anyapi/anyapi-registry.js';
 import { RestApiValidationError } from '../../lib/rest-api-errors.js';
 import { createSchema } from 'json-rest-schema';
 import {
@@ -20,11 +20,11 @@ import {
   coerceValueForDefinition,
   normalizeFilterValues,
   ensureFilterableField,
-} from '../anyapi/utils/descriptor-helpers.js';
+} from './lib/anyapi/utils/descriptor-helpers.js';
 import {
   AnyapiQueryAdapter,
   preloadRelatedDescriptors,
-} from '../anyapi/query/anyapi-query-adapter.js';
+} from './lib/anyapi/query/anyapi-query-adapter.js';
 import {
   ensureSearchFieldsAreIndexed,
   generateSearchSchemaFromSchema,

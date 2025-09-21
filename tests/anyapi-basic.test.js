@@ -4,7 +4,7 @@ import knexLib from 'knex';
 import { Api } from 'hooked-api';
 
 import { RestApiPlugin, RestApiAnyapiKnexPlugin } from '../index.js';
-import { ensureAnyApiSchema } from '../plugins/anyapi/schema-utils.js';
+import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js';
 
 const knex = knexLib({
   client: 'better-sqlite3',

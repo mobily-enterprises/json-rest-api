@@ -1,4 +1,4 @@
-import { RestApiValidationError } from '../../../lib/rest-api-errors.js';
+import { RestApiValidationError } from '../../../../../lib/rest-api-errors.js';
 
 export const normalizeId = (value) => (value === null || value === undefined ? null : String(value));
 
