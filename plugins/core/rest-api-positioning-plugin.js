@@ -40,6 +40,25 @@ export const PositioningPlugin = {
       rebalanceThreshold: positioningOptions.rebalanceThreshold || 50 // Max position string length
     };
 
+    const resolveStorageAdapter = (scopeName) => {
+      if (!scopeName) return null;
+      const scope = scopes[scopeName] || api.resources?.[scopeName];
+      const scopeVars = scope?.vars;
+      if (!scopeVars) return null;
+
+      if (scopeVars.storageAdapter) {
+        return scopeVars.storageAdapter;
+      }
+
+      if (scopeVars.schemaInfo && api.knex?.instance) {
+        const adapter = createStorageAdapter({ knex: api.knex.instance, schemaInfo: scopeVars.schemaInfo });
+        scopeVars.storageAdapter = adapter;
+        return adapter;
+      }
+
+      return null;
+    };
+
     // Validate configuration
     if (!['fractional', 'integer'].includes(vars.positioning.strategy)) {
       throw new Error(`Invalid positioning strategy: ${vars.positioning.strategy}. Must be 'fractional' or 'integer'`);
@@ -181,7 +200,7 @@ export const PositioningPlugin = {
       }
 
       try {
-        const adapter = createStorageAdapter({ knex: api.knex.instance, schemaInfo });
+        const adapter = resolveStorageAdapter(scopeName);
         if (adapter.isCanonical()) {
           log.debug(`Skipping positioning index for canonical storage on ${scopeName}`);
           return;
@@ -387,8 +406,13 @@ export const PositioningPlugin = {
 
       // Build filter conditions for the position group
       const schemaInfo = context.schemaInfo;
-      const adapter = createStorageAdapter({ knex: api.knex.instance, schemaInfo });
+      const adapter = context.storageAdapter || resolveStorageAdapter(scopeName);
 
+      if (!adapter) {
+        log.warn('*** Positioning skipped - no storage adapter available', { scopeName });
+        return;
+      }
+      
       const filterConditions = buildPositionFilterConditions(adapter, schemaInfo, {
         attributes: combinedAttributes,
         rawRecord: recordData,

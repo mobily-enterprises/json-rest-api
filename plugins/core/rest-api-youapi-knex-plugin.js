@@ -34,6 +34,7 @@ import {
   crossTableFiltersHook,
   basicFiltersHook,
 } from './lib/querying/knex-query-helpers.js';
+import { createStorageAdapter } from './lib/storage/storage-adapter.js';
 
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
@@ -60,6 +61,30 @@ export const RestApiYouapiKnexPlugin = {
       instance: knex,
       helpers: {},
     };
+
+    const storageAdapterCache = new Map();
+
+    const getScopeStorageAdapter = (scopeName) => {
+      if (!scopeName) return null;
+      const resource = api.resources?.[scopeName] || scopes?.[scopeName];
+      const schemaInfo = resource?.vars?.schemaInfo;
+      if (!schemaInfo) return null;
+
+      const cached = storageAdapterCache.get(scopeName);
+      if (cached && cached.schemaInfo === schemaInfo) {
+        return cached.adapter;
+      }
+
+      const adapter = createStorageAdapter({ knex, schemaInfo });
+      storageAdapterCache.set(scopeName, { adapter, schemaInfo });
+      if (resource?.vars) {
+        resource.vars.storageAdapter = adapter;
+      }
+      return adapter;
+    };
+
+    api.knex.helpers.getStorageAdapter = getScopeStorageAdapter;
+    helpers.getStorageAdapter = getScopeStorageAdapter;
 
     const scopeOptionsRegistry = new Map();
 
@@ -939,6 +964,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataExists = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -954,6 +983,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataPost = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const attributes = context.inputRecord?.data?.attributes || {};
@@ -973,6 +1006,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataPut = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -1000,6 +1037,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataPatch = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -1024,6 +1065,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataDelete = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -1038,6 +1083,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataGetMinimal = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -1531,6 +1580,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataGet = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const { canonical } = descriptor;
       const id = context.id;
@@ -1686,6 +1739,8 @@ export const RestApiYouapiKnexPlugin = {
         canonicalFieldMap: descriptor.canonicalFieldMap || {},
       };
 
+      getScopeStorageAdapter(scopeName);
+
       scope.scopeOptions = {
         ...(scope.scopeOptions || {}),
         canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
@@ -1741,6 +1796,10 @@ export const RestApiYouapiKnexPlugin = {
     );
 
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const db = context.db || context.transaction || api.knex.instance;
       const scope = api.resources?.[scopeName];
@@ -1780,6 +1839,7 @@ export const RestApiYouapiKnexPlugin = {
         db,
         isAnyApi: true,
         adapter,
+        storageAdapter,
       };
 
       if (runHooks) {
@@ -1943,6 +2003,10 @@ export const RestApiYouapiKnexPlugin = {
     };
 
     helpers.dataQueryCount = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const descriptor = await getDescriptor(scopeName);
       const db = context.db || context.transaction || api.knex.instance;
       const { resourceToTableName, tableNameToResource } = buildTableNameMaps();

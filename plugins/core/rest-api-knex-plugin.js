@@ -25,6 +25,7 @@ import {
   parseCursor
 } from './lib/querying/knex-pagination-helpers.js';
 import { getUrlPrefix } from './lib/querying/url-helpers.js';
+import { createStorageAdapter } from './lib/storage/storage-adapter.js';
 
 /**
  * Strips non-database fields (computed and virtual) from attributes before database operations
@@ -74,6 +75,30 @@ export const RestApiKnexPlugin = {
       instance: knex,
       helpers: {}
     };
+
+    const storageAdapters = new Map();
+
+    const getScopeStorageAdapter = (scopeName) => {
+      if (!scopeName) return null;
+      const resource = api.resources?.[scopeName] || scopes?.[scopeName];
+      const schemaInfo = resource?.vars?.schemaInfo;
+      if (!schemaInfo) return null;
+
+      const cached = storageAdapters.get(scopeName);
+      if (cached && cached.schemaInfo === schemaInfo) {
+        return cached.adapter;
+      }
+
+      const adapter = createStorageAdapter({ knex, schemaInfo });
+      storageAdapters.set(scopeName, { adapter, schemaInfo });
+      if (resource?.vars) {
+        resource.vars.storageAdapter = adapter;
+      }
+      return adapter;
+    };
+
+    api.knex.helpers.getStorageAdapter = getScopeStorageAdapter;
+    helpers.getStorageAdapter = getScopeStorageAdapter;
 
     // Check database capabilities
     const hasWindowFunctions = await supportsWindowFunctions(knex);
@@ -195,16 +220,19 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<boolean>} True if the resource exists, false otherwise
      */
     helpers.dataExists = async ({ scopeName, context }) => {
-      const id = context.id;
-      const scope = api.resources[scopeName];
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
 
-      const tableName = context.schemaInfo.tableName
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
+      const id = context.id;
+
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
       
       log.debug(`[Knex] EXISTS ${tableName}/${id}`);
       
-      // Select with alias if idProperty is not 'id'
       const selectClause = idProperty !== 'id' ? `${idProperty} as id` : 'id';
       
       const record = await db(tableName)
@@ -235,6 +263,10 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When the resource is not found
      */
     helpers.dataGet = async ({ scopeName, context, runHooks }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
       if (!scope) {
         log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) });
@@ -248,10 +280,10 @@ export const RestApiKnexPlugin = {
           varKeys: scope.vars ? Object.keys(scope.vars) : []
         });
       }
-      const id = context.id;      
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
+      const id = context.id;
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
       
       log.debug(`[Knex] GET ${tableName}/${id}`);
       
@@ -318,11 +350,15 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
     helpers.dataGetMinimal = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
       const id = context.id;
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty;
-      const db = context.db;
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
       
       log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
       
@@ -374,13 +410,17 @@ export const RestApiKnexPlugin = {
      * @param {Function} params.runHooks - Function to run hooks (e.g., 'knexQueryFiltering')
      * @returns {Promise<Object>} JSON:API formatted response with data array, optional included resources, and pagination meta/links
      */
-    helpers.dataQuery = async ({ scopeName, context, runHooks }) => {    
+    helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
-      const tableName = context.schemaInfo.tableName;
-      const schemaInfo =  context.schemaInfo;
-      const queryParams = context.queryParams
-      const db = context.db;
-      const sortableFields = context.sortableFields
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const schemaInfo = context.schemaInfo;
+      const queryParams = context.queryParams;
+      const db = context.db || api.knex.instance;
+      const sortableFields = context.sortableFields;
 
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName });
       log.debug(`[Knex] QUERY ${tableName}`, queryParams);
@@ -424,7 +464,15 @@ export const RestApiKnexPlugin = {
       // Store the query data in context where hooks can access it
       // This is the proper way to share data between methods and hooks
       if (context) {
-        context.knexQuery = { query, filters: queryParams.filters, schemaInfo, scopeName, tableName, db };
+        context.knexQuery = {
+          query,
+          filters: queryParams.filters,
+          schemaInfo,
+          scopeName,
+          tableName,
+          db,
+          adapter: storageAdapter,
+        };
         
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
       }
@@ -458,8 +506,11 @@ export const RestApiKnexPlugin = {
             // This is a relationship field, use the actual database column
             dbField = searchField.actualField;
           }
-          
-          query.orderBy(dbField, desc ? 'desc' : 'asc');
+          const translatedField = storageAdapter?.translateColumn
+            ? storageAdapter.translateColumn(dbField)
+            : dbField;
+
+          query.orderBy(translatedField, desc ? 'desc' : 'asc');
         });
       }
       
@@ -821,11 +872,15 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<string|number>} The ID of the newly created resource
      */
     helpers.dataPost = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
-      const inputRecord = context.inputRecord      
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
+      const inputRecord = context.inputRecord;
       
       log.debug(`[Knex] POST ${tableName}`, inputRecord);
       
@@ -864,13 +919,17 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When updating and the resource is not found
      */
     helpers.dataPut = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
       const id = context.id;
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
-      const inputRecord = context.inputRecord      
-      const isCreate = context.isCreate
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
+      const inputRecord = context.inputRecord;
+      const isCreate = context.isCreate;
     
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${context.isCreate})`);
       
@@ -945,13 +1004,17 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<void>} Resolves when the update is complete
      * @throws {RestApiResourceError} When the resource is not found
      */
-    helpers.dataPatch = async ({ scopeName, context  }) => {
+    helpers.dataPatch = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
       const id = context.id;
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
-      const inputRecord = context.inputRecord      
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
+      const inputRecord = context.inputRecord;
       
       log.debug(`[Knex] PATCH ${tableName}/${id}`);
       
@@ -1014,12 +1077,16 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When the resource is not found
      */
     helpers.dataDelete = async ({ scopeName, context }) => {
+      const storageAdapter = getScopeStorageAdapter(scopeName);
+      if (storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
       const scope = api.resources[scopeName];
       const id = context.id;
 
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty
-      const db = context.db;
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
+      const db = context.db || api.knex.instance;
       
       log.debug(`[Knex] DELETE ${tableName}/${id}`);
       
