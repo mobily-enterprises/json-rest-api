@@ -1,9 +1,10 @@
-import { 
-  calculatePosition, 
-  getInitialPosition, 
+import {
+  calculatePosition,
+  getInitialPosition,
   isValidPosition,
-  assignInitialPositions 
+  assignInitialPositions,
 } from './lib/fractional-positioning.js';
+import { createStorageAdapter } from './lib/storage/storage-adapter.js';
 
 export const PositioningPlugin = {
   name: 'positioning',
@@ -39,66 +40,6 @@ export const PositioningPlugin = {
       rebalanceThreshold: positioningOptions.rebalanceThreshold || 50 // Max position string length
     };
 
-    const hasCanonicalStorage = (schemaInfo) => Boolean(schemaInfo?.descriptor?.canonical?.tableName);
-
-    const getStorageTableName = (schemaInfo) => schemaInfo?.descriptor?.canonical?.tableName || schemaInfo?.tableName;
-
-    const translateColumn = (schemaInfo, column) => {
-      if (!schemaInfo || !column) return column;
-      const descriptor = schemaInfo.descriptor;
-      if (!descriptor) return column;
-
-      const canonicalMap = descriptor.canonicalFieldMap || {};
-      const mapEntry = canonicalMap[column];
-      if (typeof mapEntry === 'string') {
-        return mapEntry;
-      }
-      if (mapEntry && typeof mapEntry === 'object') {
-        if (mapEntry.slot) return mapEntry.slot;
-        if (mapEntry.slotColumn) return mapEntry.slotColumn;
-        if (mapEntry.idSlot) return mapEntry.idSlot;
-        if (mapEntry.typeSlot && column.endsWith('_type')) return mapEntry.typeSlot;
-      }
-
-      if (!mapEntry && column.endsWith('_id')) {
-        const alias = column.slice(0, -3);
-        const aliasEntry = canonicalMap[alias];
-        if (typeof aliasEntry === 'string') {
-          return aliasEntry;
-        }
-        if (aliasEntry?.idSlot) {
-          return aliasEntry.idSlot;
-        }
-      }
-
-      if (!mapEntry && column.endsWith('_type')) {
-        const alias = column.slice(0, -5);
-        const aliasEntry = canonicalMap[alias];
-        if (aliasEntry?.typeSlot) {
-          return aliasEntry.typeSlot;
-        }
-      }
-
-      const fieldInfo = descriptor.fields?.[column];
-      if (fieldInfo?.slot) return fieldInfo.slot;
-
-      const belongsToInfo = descriptor.belongsTo?.[column];
-      if (belongsToInfo?.idColumn) return belongsToInfo.idColumn;
-
-      return column;
-    };
-
-    const applyResourceScope = (query, schemaInfo) => {
-      const descriptor = schemaInfo?.descriptor;
-      const canonical = descriptor?.canonical;
-      if (!descriptor || !canonical?.tableName) {
-        return query;
-      }
-      return query
-        .where(canonical.tenantColumn, descriptor.tenant)
-        .where(canonical.resourceColumn, descriptor.resource);
-    };
-
     // Validate configuration
     if (!['fractional', 'integer'].includes(vars.positioning.strategy)) {
       throw new Error(`Invalid positioning strategy: ${vars.positioning.strategy}. Must be 'fractional' or 'integer'`);
@@ -114,7 +55,7 @@ export const PositioningPlugin = {
     }
 
     // Helper to build filter conditions for position groups
-    function buildPositionFilterConditions(schemaInfo, {
+    function buildPositionFilterConditions(adapter, schemaInfo, {
       attributes = {},
       rawRecord = {},
       simplifiedRecord = {},
@@ -167,19 +108,12 @@ export const PositioningPlugin = {
           attempt(tryAssign(rawRecord?.relationships, filterField)?.data?.id);
         }
 
-        if (value !== undefined) {
-          const descriptorField = schemaInfo.descriptor?.fields?.[dbField];
-          const isBelongsToSlot = descriptorField?.slotType === 'belongsTo'
-            || Boolean(schemaField?.belongsTo || schemaField?.belongsToPolymorphic)
-            || Boolean(searchField?.isRelationship);
-
-          if (value === null) {
-            conditions[dbField] = null;
-          } else if (isBelongsToSlot) {
-            conditions[dbField] = String(value);
-          } else {
-            conditions[dbField] = value;
-          }
+       if (value !== undefined) {
+         const column = adapter.translateColumn(dbField);
+          const normalizedValue = value === null
+            ? null
+            : adapter.translateFilterValue(filterField, value);
+          conditions[column] = normalizedValue;
         }
       });
 
@@ -246,14 +180,15 @@ export const PositioningPlugin = {
         return; // Skip if no database connection
       }
 
-      if (hasCanonicalStorage(schemaInfo)) {
-        log.debug(`Skipping positioning index for canonical storage on ${scopeName}`);
-        return;
-      }
-
       try {
+        const adapter = createStorageAdapter({ knex: api.knex.instance, schemaInfo });
+        if (adapter.isCanonical()) {
+          log.debug(`Skipping positioning index for canonical storage on ${scopeName}`);
+          return;
+        }
+
         const knex = api.knex.instance;
-        const tableName = schemaInfo.tableName;
+        const tableName = adapter.getTableName();
         
         // Check if table exists first
         const tableExists = await knex.schema.hasTable(tableName);
@@ -263,7 +198,7 @@ export const PositioningPlugin = {
         }
         
         // Build index columns: map filter fields to actual database columns
-        const indexColumns = [];
+        const indexColumns = new Set();
         
         // Map each filter field to its database column
         vars.positioning.filters.forEach(filterField => {
@@ -271,27 +206,29 @@ export const PositioningPlugin = {
           if (searchField) {
             // Use actualField if it exists (for relationships)
             const dbField = searchField.actualField || filterField;
-            indexColumns.push(dbField);
+            indexColumns.add(adapter.translateColumn(dbField));
           } else if (schemaInfo.schemaStructure[filterField]) {
             // Direct database field
-            indexColumns.push(filterField);
+            indexColumns.add(adapter.translateColumn(filterField));
           }
         });
         
         // Add the position field
-        indexColumns.push(vars.positioning.field);
+        indexColumns.add(adapter.translateColumn(vars.positioning.field));
+
+        const indexColumnList = [...indexColumns].filter(Boolean);
         
         const indexName = `idx_${tableName}_positioning`;
         
         // Check if index already exists
-        const hasIndex = await knex.schema.hasIndex(tableName, indexColumns, indexName);
+        const hasIndex = await knex.schema.hasIndex(tableName, indexColumnList, indexName);
         
         if (!hasIndex) {
           await knex.schema.table(tableName, table => {
-            table.index(indexColumns, indexName);
+            table.index(indexColumnList, indexName);
           });
           
-          log.info(`Created positioning index on ${tableName}`, { columns: indexColumns });
+          log.info(`Created positioning index on ${tableName}`, { columns: indexColumnList });
         }
       } catch (error) {
         log.warn(`Could not create positioning index for ${scopeName}:`, error.message);
@@ -450,7 +387,9 @@ export const PositioningPlugin = {
 
       // Build filter conditions for the position group
       const schemaInfo = context.schemaInfo;
-      const filterConditions = buildPositionFilterConditions(schemaInfo, {
+      const adapter = createStorageAdapter({ knex: api.knex.instance, schemaInfo });
+
+      const filterConditions = buildPositionFilterConditions(adapter, schemaInfo, {
         attributes: combinedAttributes,
         rawRecord: recordData,
         simplifiedRecord,
@@ -458,12 +397,14 @@ export const PositioningPlugin = {
         minimalRelationships,
       });
 
+      log.debug('*** Position filter conditions', { scopeName, filterConditions });
+
       // Query existing items in the same position group
       const knex = api.knex.instance;
-      const tableName = getStorageTableName(schemaInfo);
+      const tableName = adapter.getTableName();
       const idProperty = schemaInfo.idProperty;
-      const idColumn = translateColumn(schemaInfo, idProperty);
-      const positionColumn = translateColumn(schemaInfo, vars.positioning.field);
+      const idColumn = adapter.getIdColumn();
+      const positionColumn = adapter.translateColumn(vars.positioning.field);
       
       log.debug('*** Building position query', {
         tableName,
@@ -475,22 +416,20 @@ export const PositioningPlugin = {
       });
       
       // Check if we have a transaction to use
-      const db = context.transaction || knex;
-      
       // Build base query with filter conditions
-      const baseQuery = applyResourceScope(db(tableName), schemaInfo);
-      Object.entries(filterConditions).forEach(([field, value]) => {
-        const column = translateColumn(schemaInfo, field);
+      const baseQuery = adapter.buildBaseQuery({ transaction: context.transaction });
+      Object.entries(filterConditions).forEach(([column, value]) => {
         if (value === null) {
           baseQuery.whereNull(column);
         } else {
           baseQuery.where(column, value);
         }
       });
-      
+
       // For updates, exclude the current record
       if ((context.method === 'patch' || context.method === 'put') && context.id) {
-        baseQuery.whereNot(idColumn, context.id);
+        const translatedId = adapter.translateFilterValue(idProperty, context.id);
+        baseQuery.whereNot(idColumn, translatedId);
       }
       
       // Calculate effective beforeId first
@@ -511,7 +450,7 @@ export const PositioningPlugin = {
         [idProperty]: idColumn,
         [vars.positioning.field]: positionColumn,
       };
-      const selectWithAliases = (builder) => builder.select(selectColumns);
+      const selectWithAliases = (builder) => adapter.selectColumns(builder, selectColumns);
 
       try {
         log.debug('*** Positioning query start', {
@@ -543,9 +482,10 @@ export const PositioningPlugin = {
           }
         } else if (effectiveBeforeId) {
           // Positioning before a specific item - get that item and the one before it
+          const normalizedTargetId = adapter.translateFilterValue(idProperty, effectiveBeforeId);
           const targetItem = await selectWithAliases(baseQuery
             .clone())
-            .where(idColumn, effectiveBeforeId)
+            .where(idColumn, normalizedTargetId)
             .first();
           
           if (targetItem) {
