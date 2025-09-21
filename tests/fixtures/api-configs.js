@@ -634,8 +634,8 @@ export async function createPaginationApi(knex, options = {}) {
  */
 export async function createWebSocketApi(knex, pluginOptions = {}) {
   const { SocketIOPlugin } = await import('../../plugins/core/socketio-plugin.js');
-  const { JwtAuthPlugin } = await import('../../plugins/core/jwt-auth-plugin.js');
-  
+  const { jwtVerify } = await import('jose');
+
   const api = await createBasicApi(knex, {
     ...pluginOptions,
     includeExpress: true,
@@ -643,20 +643,47 @@ export async function createWebSocketApi(knex, pluginOptions = {}) {
       port: 0 // Let OS assign a port
     }
   });
-  
-  // Add JWT auth plugin (required by SocketIO plugin)
-  await api.use(JwtAuthPlugin, {
-    providers: {
-      default: {
-        secret: 'test-secret-key',
-        algorithms: ['HS256']
+
+  const socketioOptions = { ...(pluginOptions['socketio'] || {}) };
+  const authOptions = { ...(socketioOptions.auth || {}) };
+  const sharedSecret = authOptions.sharedSecret || socketioOptions.sharedSecret || 'test-secret-key';
+
+  if (!authOptions.authenticate) {
+    authOptions.authenticate = async ({ socket }) => {
+      const token = socket.handshake.auth?.token;
+      if (!token) {
+        throw new Error('Authentication required');
       }
-    },
-    defaultProvider: 'default'
-  });
-  
-  // Add SocketIO plugin
-  await api.use(SocketIOPlugin, pluginOptions['socketio'] || {});
+
+      const encoder = new TextEncoder();
+      const key = encoder.encode(sharedSecret);
+      const { payload } = await jwtVerify(token, key);
+
+      const roles = Array.isArray(payload.roles)
+        ? payload.roles
+        : payload.role ? [payload.role] : [];
+
+      const authContext = {
+        userId: payload.userId || payload.sub,
+        roles,
+        token: payload
+      };
+
+      if (!authContext.userId) {
+        throw new Error('Token is missing required user identifier');
+      }
+
+      return authContext;
+    };
+  }
+
+  if (authOptions.requireAuth === undefined) {
+    authOptions.requireAuth = true;
+  }
+
+  socketioOptions.auth = authOptions;
+
+  await api.use(SocketIOPlugin, socketioOptions);
   
   // Create and start Express server
   const app = express();
