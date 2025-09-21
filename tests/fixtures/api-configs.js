@@ -20,8 +20,7 @@ async function useStoragePlugin(api, knex) {
     await ensureAnyApiSchema(knex);
     await api.use(RestApiYouapiKnexPlugin, { knex });
   } else {
-    await useStoragePlugin(api, knex);
-  await resetAnyApiTables(knex);
+    await api.use(RestApiKnexPlugin, { knex });
   }
 }
 
@@ -64,7 +63,6 @@ export async function createBasicApi(knex, pluginOptions = {}) {
 
   await api.use(RestApiPlugin, restApiOptions);
   await useStoragePlugin(api, knex);
-  await resetAnyApiTables(knex);
   await resetAnyApiTables(knex);
   
   // Add Express plugin if requested

@@ -7,10 +7,23 @@ import {
 
 export const PositioningPlugin = {
   name: 'positioning',
-  dependencies: ['rest-api', 'rest-api-knex'],
+  dependencies: ['rest-api', 'rest-api-knex|rest-api-youapi-knex'],
 
   install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
-    
+
+    const installedPlugins = Array.from(api._installedPlugins || []);
+    const legacyStorageInstalled = installedPlugins.includes('rest-api-knex');
+    const canonicalStorageInstalled = installedPlugins.includes('rest-api-youapi-knex');
+    if (!legacyStorageInstalled && !canonicalStorageInstalled) {
+      throw new Error(
+        "Positioning plugin requires either 'rest-api-knex' or 'rest-api-youapi-knex' to be installed before it."
+      );
+    }
+
+    if (!api.knex?.instance) {
+      throw new Error('Positioning plugin requires a storage plugin with knex support (rest-api-knex or rest-api-youapi-knex)');
+    }
+
     // Get configuration - hooked-api namespaces options by plugin name
     const positioningOptions = pluginOptions || {};
 
@@ -24,6 +37,66 @@ export const PositioningPlugin = {
       defaultPosition: positioningOptions.defaultPosition || 'last',
       autoIndex: positioningOptions.autoIndex !== undefined ? positioningOptions.autoIndex : true,
       rebalanceThreshold: positioningOptions.rebalanceThreshold || 50 // Max position string length
+    };
+
+    const hasCanonicalStorage = (schemaInfo) => Boolean(schemaInfo?.descriptor?.canonical?.tableName);
+
+    const getStorageTableName = (schemaInfo) => schemaInfo?.descriptor?.canonical?.tableName || schemaInfo?.tableName;
+
+    const translateColumn = (schemaInfo, column) => {
+      if (!schemaInfo || !column) return column;
+      const descriptor = schemaInfo.descriptor;
+      if (!descriptor) return column;
+
+      const canonicalMap = descriptor.canonicalFieldMap || {};
+      const mapEntry = canonicalMap[column];
+      if (typeof mapEntry === 'string') {
+        return mapEntry;
+      }
+      if (mapEntry && typeof mapEntry === 'object') {
+        if (mapEntry.slot) return mapEntry.slot;
+        if (mapEntry.slotColumn) return mapEntry.slotColumn;
+        if (mapEntry.idSlot) return mapEntry.idSlot;
+        if (mapEntry.typeSlot && column.endsWith('_type')) return mapEntry.typeSlot;
+      }
+
+      if (!mapEntry && column.endsWith('_id')) {
+        const alias = column.slice(0, -3);
+        const aliasEntry = canonicalMap[alias];
+        if (typeof aliasEntry === 'string') {
+          return aliasEntry;
+        }
+        if (aliasEntry?.idSlot) {
+          return aliasEntry.idSlot;
+        }
+      }
+
+      if (!mapEntry && column.endsWith('_type')) {
+        const alias = column.slice(0, -5);
+        const aliasEntry = canonicalMap[alias];
+        if (aliasEntry?.typeSlot) {
+          return aliasEntry.typeSlot;
+        }
+      }
+
+      const fieldInfo = descriptor.fields?.[column];
+      if (fieldInfo?.slot) return fieldInfo.slot;
+
+      const belongsToInfo = descriptor.belongsTo?.[column];
+      if (belongsToInfo?.idColumn) return belongsToInfo.idColumn;
+
+      return column;
+    };
+
+    const applyResourceScope = (query, schemaInfo) => {
+      const descriptor = schemaInfo?.descriptor;
+      const canonical = descriptor?.canonical;
+      if (!descriptor || !canonical?.tableName) {
+        return query;
+      }
+      return query
+        .where(canonical.tenantColumn, descriptor.tenant)
+        .where(canonical.resourceColumn, descriptor.resource);
     };
 
     // Validate configuration
@@ -41,49 +114,70 @@ export const PositioningPlugin = {
     }
 
     // Helper to build filter conditions for position groups
-    function buildPositionFilterConditions(record, schemaInfo) {
+    function buildPositionFilterConditions(schemaInfo, {
+      attributes = {},
+      rawRecord = {},
+      simplifiedRecord = {},
+      inputRelationships = {},
+      minimalRelationships = {},
+    }) {
       const conditions = {};
-      
-      log.debug('*** buildPositionFilterConditions', { 
+
+      log.debug('*** buildPositionFilterConditions', {
         filters: vars.positioning.filters,
-        record: record,
-        recordKeys: Object.keys(record),
-        searchSchema: schemaInfo.searchSchemaStructure
+        attributeKeys: Object.keys(attributes || {}),
+        rawKeys: Object.keys(rawRecord || {}),
+        simplifiedKeys: Object.keys(simplifiedRecord || {}),
       });
-      
-      vars.positioning.filters.forEach(filterField => {
-        // The filter field should be in the searchSchema if it's searchable
-        const searchField = schemaInfo.searchSchemaStructure?.[filterField];
-        
-        if (!searchField) {
-          // If not in searchSchema, it might be a direct database field
-          // Check if it exists in the main schema
-          if (schemaInfo.schemaStructure[filterField]) {
-            // It's a direct database field, use it as-is
-            if (record[filterField] !== undefined) {
-              conditions[filterField] = record[filterField];
-            }
-          } else {
-            log.warn(`Filter field '${filterField}' not found in searchSchema or main schema for positioning`);
+
+      const tryAssign = (holder, field) => (holder && field in holder ? holder[field] : undefined);
+
+      vars.positioning.filters.forEach((filterField) => {
+        const searchField = schemaInfo.searchSchemaStructure?.[filterField] || null;
+        const schemaField = schemaInfo.schemaStructure?.[filterField] || null;
+        const isRelationship = Boolean(
+          searchField?.isRelationship
+          || schemaField?.belongsTo
+          || schemaField?.belongsToPolymorphic
+        );
+
+        if (!searchField && !schemaField) {
+          log.warn(`Filter field '${filterField}' not found in search schema or resource schema for positioning`);
+        }
+
+        const dbField = searchField?.actualField || filterField;
+        let value;
+
+        const attempt = (candidate) => {
+          if (value === undefined && candidate !== undefined) {
+            value = candidate;
           }
-        } else {
-          // It's in the searchSchema - use the actualField if it exists
-          const dbField = searchField.actualField || filterField;
-          
-          // For relationship fields, the record will have the relationship name as the key
-          // For regular fields, the record will have the field name as the key
-          let value;
-          if (searchField.isRelationship) {
-            // This is a relationship - the filter field is the relationship name
-            // The record should have the foreign key value under the dbField name
-            value = record[dbField];
+        };
+
+        attempt(tryAssign(rawRecord, filterField));
+        attempt(tryAssign(simplifiedRecord, filterField));
+        attempt(tryAssign(rawRecord, dbField));
+        attempt(tryAssign(attributes, filterField));
+        attempt(tryAssign(attributes, dbField));
+
+        if (isRelationship) {
+          attempt(inputRelationships?.[filterField]?.data?.id);
+          attempt(minimalRelationships?.[filterField]?.data?.id);
+          // Some contexts may expose relationship data under attributes
+          attempt(tryAssign(rawRecord?.relationships, filterField)?.data?.id);
+        }
+
+        if (value !== undefined) {
+          const descriptorField = schemaInfo.descriptor?.fields?.[dbField];
+          const isBelongsToSlot = descriptorField?.slotType === 'belongsTo'
+            || Boolean(schemaField?.belongsTo || schemaField?.belongsToPolymorphic)
+            || Boolean(searchField?.isRelationship);
+
+          if (value === null) {
+            conditions[dbField] = null;
+          } else if (isBelongsToSlot) {
+            conditions[dbField] = String(value);
           } else {
-            // Regular field - check both the filter field and db field names
-            value = record[filterField] !== undefined ? record[filterField] : record[dbField];
-          }
-          
-          if (value !== undefined) {
-            // Always use the database field name in the query conditions
             conditions[dbField] = value;
           }
         }
@@ -150,6 +244,11 @@ export const PositioningPlugin = {
       
       if (!schemaInfo || !api.knex?.instance) {
         return; // Skip if no database connection
+      }
+
+      if (hasCanonicalStorage(schemaInfo)) {
+        log.debug(`Skipping positioning index for canonical storage on ${scopeName}`);
+        return;
       }
 
       try {
@@ -229,26 +328,37 @@ export const PositioningPlugin = {
       }
 
       // Extract beforeId from JSON:API format attributes
-      const attributes = context.inputRecord?.data?.attributes || {};
+      const attributes = context.inputRecord?.data?.attributes
+        || (context.simplified && context.inputRecord && typeof context.inputRecord === 'object'
+          ? context.inputRecord
+          : {});
       const beforeId = attributes[vars.positioning.beforeIdField];
 
       // Store beforeId in context for later use
       if (beforeId !== undefined) {
         context.positioningBeforeId = beforeId;
-        
+
         // Remove beforeId from attributes so it doesn't get stored
         delete attributes[vars.positioning.beforeIdField];
+
+        if (context.simplified && context.inputRecord && typeof context.inputRecord === 'object') {
+          delete context.inputRecord[vars.positioning.beforeIdField];
+        }
       }
-      
+
       // Remove any manually provided position field - position is managed by this plugin
       if (attributes[vars.positioning.field] !== undefined) {
         delete attributes[vars.positioning.field];
-        
+
         log.debug('Positioning beforeId extracted', { 
           scopeName, 
           beforeId,
           method
         });
+
+        if (context.simplified && context.inputRecord && typeof context.inputRecord === 'object') {
+          delete context.inputRecord[vars.positioning.field];
+        }
       }
 
       // For new records without explicit position, mark for positioning
@@ -304,8 +414,15 @@ export const PositioningPlugin = {
         return;
       }
 
-      // Always work with JSON:API format - get attributes
-      const recordData = context.inputRecord?.data?.attributes || {};
+      const recordData = (() => {
+        if (context.inputRecord?.data?.attributes) {
+          return { ...context.inputRecord.data.attributes };
+        }
+        if (context.simplified && context.inputRecord && typeof context.inputRecord === 'object') {
+          return { ...context.inputRecord };
+        }
+        return {};
+      })();
         
       log.debug('*** Record data for positioning', { 
         recordData,
@@ -313,41 +430,67 @@ export const PositioningPlugin = {
         inputRecord: context.inputRecord
       });
 
+      const jsonApiRecord = context.inputRecord?.data || {};
+      const inputRelationships = jsonApiRecord.relationships || {};
+      const simplifiedRecord = context.simplified && context.inputRecord && typeof context.inputRecord === 'object'
+        ? context.inputRecord
+        : {};
 
-      // For PATCH/PUT, we need to get the current record's filter values
-      let filterData = recordData;
-      if ((context.method === 'patch' || context.method === 'put') && context.minimalRecord) {
-        // Use the minimalRecord that was already fetched by REST API plugin
-        // Merge current record's filter fields with the update data
-        filterData = { ...context.minimalRecord, ...recordData };
-      }
-      
+      const minimalAttributes = context.minimalRecord?.attributes
+        || context.minimalRecord?.data?.attributes
+        || {};
+      const minimalRelationships = context.minimalRecord?.relationships
+        || context.minimalRecord?.data?.relationships
+        || {};
+
+      const combinedAttributes = {
+        ...minimalAttributes,
+        ...recordData,
+      };
+
       // Build filter conditions for the position group
-      const filterConditions = buildPositionFilterConditions(filterData, context.schemaInfo);
-      
+      const schemaInfo = context.schemaInfo;
+      const filterConditions = buildPositionFilterConditions(schemaInfo, {
+        attributes: combinedAttributes,
+        rawRecord: recordData,
+        simplifiedRecord,
+        inputRelationships,
+        minimalRelationships,
+      });
+
       // Query existing items in the same position group
       const knex = api.knex.instance;
-      const tableName = context.schemaInfo.tableName;
-      const idProperty = context.schemaInfo.idProperty;
+      const tableName = getStorageTableName(schemaInfo);
+      const idProperty = schemaInfo.idProperty;
+      const idColumn = translateColumn(schemaInfo, idProperty);
+      const positionColumn = translateColumn(schemaInfo, vars.positioning.field);
       
-      log.debug('*** Building position query', { tableName, idProperty, filterConditions });
+      log.debug('*** Building position query', {
+        tableName,
+        idProperty,
+        idColumn,
+        positionField: vars.positioning.field,
+        positionColumn,
+        filterConditions
+      });
       
       // Check if we have a transaction to use
       const db = context.transaction || knex;
       
       // Build base query with filter conditions
-      const baseQuery = db(tableName);
+      const baseQuery = applyResourceScope(db(tableName), schemaInfo);
       Object.entries(filterConditions).forEach(([field, value]) => {
+        const column = translateColumn(schemaInfo, field);
         if (value === null) {
-          baseQuery.whereNull(field);
+          baseQuery.whereNull(column);
         } else {
-          baseQuery.where(field, value);
+          baseQuery.where(column, value);
         }
       });
       
       // For updates, exclude the current record
       if ((context.method === 'patch' || context.method === 'put') && context.id) {
-        baseQuery.whereNot(idProperty, context.id);
+        baseQuery.whereNot(idColumn, context.id);
       }
       
       // Calculate effective beforeId first
@@ -364,13 +507,22 @@ export const PositioningPlugin = {
       
       let items = [];
       
+      const selectColumns = {
+        [idProperty]: idColumn,
+        [vars.positioning.field]: positionColumn,
+      };
+      const selectWithAliases = (builder) => builder.select(selectColumns);
+
       try {
+        log.debug('*** Positioning query start', {
+          effectiveBeforeId,
+          selectColumns,
+        });
         if (effectiveBeforeId === null) {
           // Positioning at end - only get the last item
-          const lastItem = await baseQuery
-            .clone()
-            .select(idProperty, vars.positioning.field)
-            .orderBy(vars.positioning.field, 'desc')
+          const lastItem = await selectWithAliases(baseQuery
+            .clone())
+            .orderBy(positionColumn, 'desc')
             .first();
           
           if (lastItem) {
@@ -378,10 +530,9 @@ export const PositioningPlugin = {
           }
         } else if (effectiveBeforeId === 'FIRST') {
           // Positioning at beginning - get the first item
-          const firstItem = await baseQuery
-            .clone()
-            .select(idProperty, vars.positioning.field)
-            .orderBy(vars.positioning.field, 'asc')
+          const firstItem = await selectWithAliases(baseQuery
+            .clone())
+            .orderBy(positionColumn, 'asc')
             .first();
           
           if (firstItem) {
@@ -392,19 +543,17 @@ export const PositioningPlugin = {
           }
         } else if (effectiveBeforeId) {
           // Positioning before a specific item - get that item and the one before it
-          const targetItem = await baseQuery
-            .clone()
-            .select(idProperty, vars.positioning.field)
-            .where(idProperty, effectiveBeforeId)
+          const targetItem = await selectWithAliases(baseQuery
+            .clone())
+            .where(idColumn, effectiveBeforeId)
             .first();
           
           if (targetItem) {
             // Get the item immediately before the target
-            const prevItem = await baseQuery
-              .clone()
-              .select(idProperty, vars.positioning.field)
-              .where(vars.positioning.field, '<', targetItem[vars.positioning.field])
-              .orderBy(vars.positioning.field, 'desc')
+            const prevItem = await selectWithAliases(baseQuery
+              .clone())
+              .where(positionColumn, '<', targetItem[vars.positioning.field])
+              .orderBy(positionColumn, 'desc')
               .first();
             
             items = prevItem ? [prevItem, targetItem] : [targetItem];
@@ -414,7 +563,7 @@ export const PositioningPlugin = {
           items = [];
         }
         
-        log.debug('*** Query completed', { itemCount: items.length });
+        log.debug('*** Query completed', { itemCount: items.length, items });
       } catch (error) {
         log.error('*** Query failed', { error: error.message, stack: error.stack });
         throw error;
@@ -425,9 +574,15 @@ export const PositioningPlugin = {
         ? getInitialPosition()
         : calculatePosition(items, effectiveBeforeId, idProperty, vars.positioning.field);
       
-      // Set the position in JSON:API format
-      context.inputRecord.data.attributes = context.inputRecord.data.attributes || {};
-      context.inputRecord.data.attributes[vars.positioning.field] = newPosition;
+      // Set the position on the incoming payload so downstream steps persist it
+      if (context.inputRecord?.data) {
+        context.inputRecord.data.attributes = context.inputRecord.data.attributes || {};
+        context.inputRecord.data.attributes[vars.positioning.field] = newPosition;
+      }
+
+      if (context.simplified && context.inputRecord && typeof context.inputRecord === 'object') {
+        context.inputRecord[vars.positioning.field] = newPosition;
+      }
       
       log.debug('Position calculated', {
         scopeName,
