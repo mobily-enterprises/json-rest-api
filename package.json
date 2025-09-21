@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:anyapi": "JSON_REST_API_STORAGE=anyapi node --test tests/*.test.js",
     "docs": "node scripts/run-docs.js",
     "sloc": "sloc --exclude \"(_site|node_modules|\\.git|vendor|docs)\" .",
     "slod": "cd docs;echo 'DOC LINES:'; cat `find . -iname \\*md | grep -v _site | grep -v vendor` | wc"

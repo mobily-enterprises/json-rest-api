@@ -16,10 +16,15 @@ async function resetAnyApiTables(knex) {
   await knex('any_resource_configs').delete().catch(() => {});
 }
 
-async function useStoragePlugin(api, knex) {
+async function useStoragePlugin(api, knex, { tenantId } = {}) {
   if (storageMode.isAnyApi()) {
     await ensureAnyApiSchema(knex);
-    await api.use(RestApiYouapiKnexPlugin, { knex });
+    const sanitizedName = api?.name ? api.name.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() : 'tenant';
+    const effectiveTenantId = tenantId || api?.youapi?.tenantId || `${sanitizedName}_tenant`;
+    api.youapi = api.youapi || {};
+    api.youapi.tenantId = effectiveTenantId;
+    await api.use(RestApiYouapiKnexPlugin, { knex, tenantId: effectiveTenantId });
+    storageMode.setCurrentTenant(effectiveTenantId);
   } else {
     await api.use(RestApiKnexPlugin, { knex });
   }
@@ -28,6 +33,20 @@ async function useStoragePlugin(api, knex) {
 function mapTable(tableName, resourceName) {
   if (storageMode.isAnyApi()) {
     storageMode.registerTable(tableName, resourceName);
+  }
+}
+
+async function withTenantContext(tenantId, fn) {
+  if (!storageMode.isAnyApi()) {
+    return await fn();
+  }
+
+  const previousTenant = storageMode.currentTenant;
+  storageMode.setCurrentTenant(tenantId || storageMode.defaultTenant);
+  try {
+    return await fn();
+  } finally {
+    storageMode.setCurrentTenant(previousTenant);
   }
 }
 
@@ -44,6 +63,14 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     name: apiName,
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
+
+  const previousTenant = storageMode.currentTenant;
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant;
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId);
+  }
 
   const restApiOptions = {
     simplifiedApi: false,
@@ -63,9 +90,9 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
-  await useStoragePlugin(api, knex);
+  await useStoragePlugin(api, knex, { tenantId });
   await resetAnyApiTables(knex);
-  
+
   // Add Express plugin if requested
   if (pluginOptions.includeExpress) {
     await api.use(ExpressPlugin, {
@@ -74,6 +101,7 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     });
   }
 
+  try {
   // Countries table
   await api.addResource('countries', {
     schema: {
@@ -147,8 +175,9 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   await api.resources.book_authors.createKnexTable();
   mapTable(`${tablePrefix}_book_authors`, 'book_authors');
   if (storageMode.isAnyApi()) {
-    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const descriptorTenant = api.youapi?.tenantId || tenantId;
+    const booksDescriptor = await api.youapi.registry.getDescriptor(descriptorTenant, 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor(descriptorTenant, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink(
@@ -160,7 +189,12 @@ export async function createBasicApi(knex, pluginOptions = {}) {
     );
   }
 
-  return api;
+    return api;
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant);
+    }
+  }
 }
 
 export async function createAccessControlApi(knex, pluginOptions = {}) {
@@ -174,6 +208,14 @@ export async function createAccessControlApi(knex, pluginOptions = {}) {
     name: apiName,
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
+
+  const previousTenant = storageMode.currentTenant;
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant;
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId);
+  }
 
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
@@ -190,70 +232,76 @@ export async function createAccessControlApi(knex, pluginOptions = {}) {
     },
     sortableFields: ['id', 'name', 'user_id']
   });
-  await useStoragePlugin(api, knex);
+  await useStoragePlugin(api, knex, { tenantId });
   await resetAnyApiTables(knex);
 
-  await api.use(AccessPlugin, pluginOptions.access || {});
+  try {
+    await api.use(AccessPlugin, pluginOptions.access || {});
 
-  await api.addResource('users', {
-    schema: {
-      id: { type: 'id' },
-      email: { type: 'string', required: true },
-      display_name: { type: 'string', nullable: true }
-    },
-    tableName: `${tablePrefix}_users`
-  });
-  await api.resources.users.createKnexTable();
-  mapTable(`${tablePrefix}_users`, 'users');
+    await api.addResource('users', {
+      schema: {
+        id: { type: 'id' },
+        email: { type: 'string', required: true },
+        display_name: { type: 'string', nullable: true }
+      },
+      tableName: `${tablePrefix}_users`
+    });
+    await api.resources.users.createKnexTable();
+    mapTable(`${tablePrefix}_users`, 'users');
 
-  await api.addResource('projects', {
-    schema: {
-      id: { type: 'id' },
-      name: { type: 'string', required: true },
-      status: { type: 'string', nullable: true },
-      user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
-    },
-    relationships: {
-      user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
-    },
-    auth: {
-      query: ['authenticated'],
-      get: ['owns'],
-      post: ['authenticated'],
-      patch: ['owns'],
-      delete: ['owns']
-    },
-    ownership: true,
-    tableName: `${tablePrefix}_projects`
-  });
-  await api.resources.projects.createKnexTable();
-  mapTable(`${tablePrefix}_projects`, 'projects');
+    await api.addResource('projects', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true },
+        status: { type: 'string', nullable: true },
+        user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
+      },
+      relationships: {
+        user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
+      },
+      auth: {
+        query: ['authenticated'],
+        get: ['owns'],
+        post: ['authenticated'],
+        patch: ['owns'],
+        delete: ['owns']
+      },
+      ownership: true,
+      tableName: `${tablePrefix}_projects`
+    });
+    await api.resources.projects.createKnexTable();
+    mapTable(`${tablePrefix}_projects`, 'projects');
 
-  await api.addResource('notes', {
-    schema: {
-      id: { type: 'id' },
-      project_id: { type: 'number', belongsTo: 'projects', as: 'project', nullable: true },
-      body: { type: 'string', required: true },
-      user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
-    },
-    relationships: {
-      project: { type: 'belongsTo', target: 'projects', foreignKey: 'project_id' },
-      user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
-    },
-    auth: {
-      query: ['authenticated'],
-      get: ['owns'],
-      post: ['authenticated'],
-      patch: ['owns'],
-      delete: ['owns']
-    },
-    ownership: true,
-    tableName: `${tablePrefix}_notes`
-  });
-  await api.resources.notes.createKnexTable();
-  mapTable(`${tablePrefix}_notes`, 'notes');
+    await api.addResource('notes', {
+      schema: {
+        id: { type: 'id' },
+        project_id: { type: 'number', belongsTo: 'projects', as: 'project', nullable: true },
+        body: { type: 'string', required: true },
+        user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
+      },
+      relationships: {
+        project: { type: 'belongsTo', target: 'projects', foreignKey: 'project_id' },
+        user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
+      },
+      auth: {
+        query: ['authenticated'],
+        get: ['owns'],
+        post: ['authenticated'],
+        patch: ['owns'],
+        delete: ['owns']
+      },
+      ownership: true,
+      tableName: `${tablePrefix}_notes`
+    });
+    await api.resources.notes.createKnexTable();
+    mapTable(`${tablePrefix}_notes`, 'notes');
 
-  return api;
+    return api;
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant);
+    }
+  }
 }
 
 /**
@@ -262,8 +310,11 @@ export async function createAccessControlApi(knex, pluginOptions = {}) {
 export async function createBulkOperationsApi(knex, pluginOptions = {}) {
   const { BulkOperationsPlugin } = await import('../../plugins/core/bulk-operations-plugin.js');
   
-  const api = await createBasicApi(knex, pluginOptions);
-  
+  const api = await createBasicApi(knex, {
+    ...pluginOptions,
+    tenantId: pluginOptions.tenantId || 'bulk_ops_tenant'
+  });
+
   // Add bulk operations plugin
   await api.use(BulkOperationsPlugin, {
     'bulk-operations': {
@@ -286,6 +337,8 @@ export async function createExtendedApi(knex) {
     name: 'extended-test-api',
   });
 
+  const tenantId = storageMode.isAnyApi() ? 'extended_tenant' : storageMode.defaultTenant;
+
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
     simplifiedTransport: false,
@@ -301,11 +354,12 @@ export async function createExtendedApi(knex) {
     },
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'price', 'language', 'population', 'name', 'code']
   });
-  await useStoragePlugin(api, knex);
-  await resetAnyApiTables(knex);
+  await withTenantContext(tenantId, async () => {
+    await useStoragePlugin(api, knex, { tenantId });
+    await resetAnyApiTables(knex);
 
-  // Countries with extended fields
-  await api.addResource('countries', {
+    // Countries with extended fields
+    await api.addResource('countries', {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 100 },
@@ -409,8 +463,8 @@ export async function createExtendedApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('ext_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const booksDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink('ext_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
@@ -442,7 +496,7 @@ export async function createExtendedApi(knex) {
   });
   await api.resources.reviews.createKnexTable();
   mapTable('ext_reviews', 'reviews');
-
+  });
 
   return api;
 }
@@ -455,6 +509,8 @@ export async function createLimitedDepthApi(knex) {
   const api = new Api({
     name: 'limited-depth-api',
   });
+
+  const tenantId = storageMode.isAnyApi() ? 'limited_depth_tenant' : storageMode.defaultTenant;
 
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
@@ -472,10 +528,11 @@ export async function createLimitedDepthApi(knex) {
     sortableFields: ['id', 'title', 'country_id', 'publisher_id', 'name', 'code'],
     includeDepthLimit: 2  // Key difference: limit is 2 instead of default 3
   });
-  await useStoragePlugin(api, knex);
+  await withTenantContext(tenantId, async () => {
+    await useStoragePlugin(api, knex, { tenantId });
 
-  // Use different table names with 'limited_' prefix to avoid conflicts
-  await api.addResource('countries', {
+    // Use different table names with 'limited_' prefix to avoid conflicts
+    await api.addResource('countries', {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 100 },
@@ -543,12 +600,13 @@ export async function createLimitedDepthApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('limited_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const booksDescriptor = await api.youapi.registry.getDescriptor('default', 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor('default', 'authors');
+    const booksDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink('limited_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
   }
+  });
 
   return api;
 }
@@ -560,6 +618,8 @@ export async function createPaginationApi(knex, options = {}) {
   const api = new Api({
     name: 'pagination-test-api',
   });
+
+  const tenantId = storageMode.isAnyApi() ? 'pagination_tenant' : storageMode.defaultTenant;
 
   const restApiOptions = {
     simplifiedApi: false,
@@ -579,11 +639,11 @@ export async function createPaginationApi(knex, options = {}) {
   };
 
   await api.use(RestApiPlugin, restApiOptions);
+  await withTenantContext(tenantId, async () => {
+    await useStoragePlugin(api, knex, { tenantId });
 
-  await useStoragePlugin(api, knex);
-
-  // Countries table
-  await api.addResource('countries', {
+    // Countries table
+    await api.addResource('countries', {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 100 },
@@ -625,6 +685,7 @@ export async function createPaginationApi(knex, options = {}) {
   });
   await api.resources.books.createKnexTable();
   mapTable('pagination_books', 'books');
+  });
 
   return api;
 }
@@ -638,6 +699,7 @@ export async function createWebSocketApi(knex, pluginOptions = {}) {
 
   const api = await createBasicApi(knex, {
     ...pluginOptions,
+    tenantId: pluginOptions.tenantId || 'socketio_tenant',
     includeExpress: true,
     express: {
       port: 0 // Let OS assign a port
@@ -717,84 +779,88 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
+  const tenantId = storageMode.isAnyApi() ? 'computed_fields_tenant' : storageMode.defaultTenant;
+
   await api.use(RestApiPlugin, {
     simplifiedApi: true,
     simplifiedTransport: true
   });
-  
-  await useStoragePlugin(api, knex);
-  await resetAnyApiTables(knex);
 
-  // Products resource with computed fields
-  await api.addResource('products', {
-    schema: {
-      id: { type: 'id' },
-      name: { type: 'string', required: true, max: 255 },
-      price: { type: 'number', required: true, min: 0 },
-      cost: { type: 'number', required: true, min: 0, normallyHidden: true },
-      internal_notes: { type: 'string', normallyHidden: true },
-      profit_margin: {
-        type: 'number',
-        computed: true,
-        dependencies: ['price', 'cost'],
-        compute: ({ attributes }) => {
-          if (!attributes.price || attributes.price === 0) return 0;
-          return Number(((attributes.price - attributes.cost) / attributes.price * 100).toFixed(2));
+  await withTenantContext(tenantId, async () => {
+    await useStoragePlugin(api, knex, { tenantId });
+    await resetAnyApiTables(knex);
+
+    // Products resource with computed fields
+    await api.addResource('products', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true, max: 255 },
+        price: { type: 'number', required: true, min: 0 },
+        cost: { type: 'number', required: true, min: 0, normallyHidden: true },
+        internal_notes: { type: 'string', normallyHidden: true },
+        profit_margin: {
+          type: 'number',
+          computed: true,
+          dependencies: ['price', 'cost'],
+          compute: ({ attributes }) => {
+            if (!attributes.price || attributes.price === 0) return 0;
+            return Number(((attributes.price - attributes.cost) / attributes.price * 100).toFixed(2));
+          }
+        },
+        profit_amount: {
+          type: 'number',
+          computed: true,
+          dependencies: ['price', 'cost'],
+          compute: ({ attributes }) => {
+            return Number((attributes.price - attributes.cost).toFixed(2));
+          }
         }
       },
-      profit_amount: {
-        type: 'number',
-        computed: true,
-        dependencies: ['price', 'cost'],
-        compute: ({ attributes }) => {
-          return Number((attributes.price - attributes.cost).toFixed(2));
-        }
-      }
-    },
-    relationships: {
-      reviews: { type: 'hasMany', target: 'reviews', foreignKey: 'product_id' }
-    },
-    tableName: 'test_products'
-  });
-  await api.resources.products.createKnexTable();
-  mapTable('searchmerge_products', 'products');
-  mapTable('test_products', 'products');
+      relationships: {
+        reviews: { type: 'hasMany', target: 'reviews', foreignKey: 'product_id' }
+      },
+      tableName: 'test_products'
+    });
+    await api.resources.products.createKnexTable();
+    mapTable('searchmerge_products', 'products');
+    mapTable('test_products', 'products');
 
-  // Reviews resource with computed fields
-  await api.addResource('reviews', {
-    schema: {
-      id: { type: 'id' },
-      product_id: { type: 'number', required: true, belongsTo: 'products', as: 'product' },
-      reviewer_name: { type: 'string', required: true },
-      rating: { type: 'number', required: true, min: 1, max: 5 },
-      comment: { type: 'string', max: 1000 },
-      helpful_votes: { type: 'number', default: 0 },
-      total_votes: { type: 'number', default: 0 },
-      spam_score: { type: 'number', default: 0, normallyHidden: true },
-      helpfulness_score: {
-        type: 'number',
-        computed: true,
-        dependencies: ['helpful_votes', 'total_votes'],
-        compute: ({ attributes }) => {
-          if (attributes.total_votes === 0) return null;
-          return Number(((attributes.helpful_votes / attributes.total_votes) * 100).toFixed(0));
+    // Reviews resource with computed fields
+    await api.addResource('reviews', {
+      schema: {
+        id: { type: 'id' },
+        product_id: { type: 'number', required: true, belongsTo: 'products', as: 'product' },
+        reviewer_name: { type: 'string', required: true },
+        rating: { type: 'number', required: true, min: 1, max: 5 },
+        comment: { type: 'string', max: 1000 },
+        helpful_votes: { type: 'number', default: 0 },
+        total_votes: { type: 'number', default: 0 },
+        spam_score: { type: 'number', default: 0, normallyHidden: true },
+        helpfulness_score: {
+          type: 'number',
+          computed: true,
+          dependencies: ['helpful_votes', 'total_votes'],
+          compute: ({ attributes }) => {
+            if (attributes.total_votes === 0) return null;
+            return Number(((attributes.helpful_votes / attributes.total_votes) * 100).toFixed(0));
+          }
+        },
+        is_helpful: {
+          type: 'boolean',
+          computed: true,
+          dependencies: ['helpful_votes', 'total_votes', 'spam_score'],
+          compute: ({ attributes }) => {
+            if (attributes.total_votes < 10) return null;
+            const helpfulnessScore = (attributes.helpful_votes / attributes.total_votes) * 100;
+            return helpfulnessScore > 70 && attributes.spam_score < 0.5;
+          }
         }
       },
-      is_helpful: {
-        type: 'boolean',
-        computed: true,
-        dependencies: ['helpful_votes', 'total_votes', 'spam_score'],
-        compute: ({ attributes }) => {
-          if (attributes.total_votes < 10) return null;
-          const helpfulnessScore = (attributes.helpful_votes / attributes.total_votes) * 100;
-          return helpfulnessScore > 70 && attributes.spam_score < 0.5;
-        }
-      }
-    },
-    tableName: 'test_reviews'
+      tableName: 'test_reviews'
+    });
+    await api.resources.reviews.createKnexTable();
+    mapTable('test_reviews', 'reviews');
   });
-  await api.resources.reviews.createKnexTable();
-  mapTable('test_reviews', 'reviews');
 
   return api;
 }
@@ -808,12 +874,18 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
+  const tenantId = storageMode.isAnyApi() ? 'field_getters_tenant' : storageMode.defaultTenant;
+  const previousTenant = storageMode.currentTenant;
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId);
+  }
+
   await api.use(RestApiPlugin, {
     simplifiedApi: true,
     simplifiedTransport: true
   });
   
-  await useStoragePlugin(api, knex);
+  await useStoragePlugin(api, knex, { tenantId });
   await resetAnyApiTables(knex);
 
   // Users resource with basic getters
@@ -992,6 +1064,10 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
   await api.resources.encrypted_data.createKnexTable();
   mapTable('getter_encrypted', 'encrypted_data');
 
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(previousTenant);
+  }
+
   return api;
 }
 
@@ -1004,6 +1080,12 @@ export async function createFieldSettersApi(knex, pluginOptions = {}) {
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
 
+  const tenantId = storageMode.isAnyApi() ? 'field_setters_tenant' : storageMode.defaultTenant;
+  const previousTenant = storageMode.currentTenant;
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId);
+  }
+
   await api.use(RestApiPlugin, {
     simplifiedApi: true,
     simplifiedTransport: true,
@@ -1014,7 +1096,7 @@ export async function createFieldSettersApi(knex, pluginOptions = {}) {
     }
   });
   
-  await useStoragePlugin(api, knex);
+  await useStoragePlugin(api, knex, { tenantId });
   await resetAnyApiTables(knex);
 
   // Users resource with basic setters
@@ -1199,6 +1281,10 @@ export async function createFieldSettersApi(knex, pluginOptions = {}) {
   });
   await api.resources.validated_data.createKnexTable();
 
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(previousTenant);
+  }
+
   return api;
 }
 
@@ -1208,6 +1294,12 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
   const api = new Api({
     name: 'multihome-test-api',
   });
+
+  const tenantId = storageMode.isAnyApi() ? 'multihome_tenant' : storageMode.defaultTenant;
+  const previousTenant = storageMode.currentTenant;
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId);
+  }
 
   await api.use(RestApiPlugin, {
     simplifiedApi: false,
@@ -1225,7 +1317,7 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
     sortableFields: ['id', 'title', 'name', 'tenant_id']
   });
   
-  await useStoragePlugin(api, knex);
+  await useStoragePlugin(api, knex, { tenantId });
   await resetAnyApiTables(knex);
   
   // Add Express plugin if requested for transport testing
@@ -1299,6 +1391,10 @@ export async function createMultiHomeApi(knex, pluginOptions = {}) {
   });
   await api.resources.system_settings.createKnexTable();
   mapTable('multihome_system_settings', 'system_settings');
+
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(previousTenant);
+  }
 
   return api;
 }

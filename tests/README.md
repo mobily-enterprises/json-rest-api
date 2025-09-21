@@ -163,6 +163,12 @@ const result = await api.resources.books.query({
 # Run all tests
 npm test
 
+# Run all tests against the AnyAPI storage backend
+npm run test:anyapi
+
+# Windows PowerShell (AnyAPI run)
+$Env:JSON_REST_API_STORAGE = 'anyapi'; npm test
+
 # Run specific test file
 npm test -- tests/relationships.test.js
 

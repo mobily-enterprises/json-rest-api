@@ -50,29 +50,32 @@ export function resourceIdentifier(type, id) {
  */
 export async function cleanTables(knex, tableNames) {
   if (storageMode.isAnyApi()) {
-    const resources = tableNames
-      .map((table) => storageMode.getResourceForTable(table))
-      .filter(Boolean);
+    const resourceGroups = new Map();
 
-    if (resources.length > 0) {
+    for (const table of tableNames) {
+      const resource = storageMode.getResourceForTable(table);
+      if (!resource) continue;
+      const tenantId = storageMode.getTenantForTable(table);
+      const key = `${tenantId}::${resource}`;
+      if (!resourceGroups.has(key)) {
+        resourceGroups.set(key, { resource, tenantId });
+      }
+    }
+
+    for (const { resource, tenantId } of resourceGroups.values()) {
       await knex('any_records')
-        .where(storageMode.defaultTenant ? { tenant_id: storageMode.defaultTenant } : {})
-        .whereIn('resource', resources)
+        .where({ tenant_id: tenantId, resource })
         .delete();
-
-      await knex('any_links')
-        .where(storageMode.defaultTenant ? { tenant_id: storageMode.defaultTenant } : {})
-        .whereIn('relationship', resources)
-        .delete()
-        .catch(() => {});
     }
 
     for (const table of tableNames) {
       const linkInfo = storageMode.getLinkInfo(table);
       if (linkInfo) {
-        const relationshipKey = linkInfo.relationshipKey || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
+        const tenantId = linkInfo.tenantId || storageMode.defaultTenant;
+        const relationshipKey = linkInfo.relationshipKey
+          || `${tenantId}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
         await knex('any_links')
-          .where({ tenant_id: storageMode.defaultTenant })
+          .where({ tenant_id: tenantId })
           .andWhere((builder) => {
             builder.where('relationship', relationshipKey)
               .orWhere('inverse_relationship', relationshipKey);
@@ -104,11 +107,12 @@ export async function countRecords(knex, tableName) {
   if (storageMode.isAnyApi()) {
     const resource = storageMode.getResourceForTable(tableName);
     const linkInfo = storageMode.getLinkInfo(tableName);
+    const tenantId = storageMode.getTenantForTable(tableName);
     if (linkInfo) {
       const relationshipKey = linkInfo.relationshipKey
-        || `${storageMode.defaultTenant}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
+        || `${tenantId}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`;
       const result = await knex('any_links')
-        .where({ tenant_id: storageMode.defaultTenant })
+        .where({ tenant_id: tenantId })
         .andWhere((builder) => {
           builder.where('relationship', relationshipKey)
             .orWhere('inverse_relationship', relationshipKey);
@@ -120,7 +124,7 @@ export async function countRecords(knex, tableName) {
     if (resource) {
       const result = await knex('any_records')
         .where({
-          tenant_id: storageMode.defaultTenant,
+          tenant_id: tenantId,
           resource,
         })
         .count('* as count')

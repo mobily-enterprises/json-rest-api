@@ -47,6 +47,7 @@ export const RestApiYouapiKnexPlugin = {
   async install({ helpers, vars, pluginOptions, api, log, addHook, addScopeMethod, scopes }) {
     const options = pluginOptions || {};
     const knex = options.knex;
+    const tenantId = options.tenantId || DEFAULT_TENANT;
 
     if (!knex) {
       throw new Error('YouapiKnexPlugin requires a knex instance');
@@ -58,6 +59,7 @@ export const RestApiYouapiKnexPlugin = {
 
     api.youapi = api.youapi || {};
     api.youapi.registry = registry;
+    api.youapi.tenantId = tenantId;
     api.knex = {
       instance: knex,
       helpers: {},
@@ -98,7 +100,7 @@ export const RestApiYouapiKnexPlugin = {
     });
 
     const getDescriptor = async (scopeName) => {
-      const descriptor = await registry.getDescriptor(DEFAULT_TENANT, scopeName);
+      const descriptor = await registry.getDescriptor(tenantId, scopeName);
       if (!descriptor) {
         throw new Error(`Descriptor not found for resource '${scopeName}'`);
       }
@@ -1137,7 +1139,7 @@ export const RestApiYouapiKnexPlugin = {
 
           if (ids.length === 0) continue;
 
-          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, belongsToInfo.target);
+          const targetDescriptor = await registry.getDescriptor(tenantId, belongsToInfo.target);
           if (!targetDescriptor) continue;
 
           const rows = await db(targetDescriptor.canonical.tableName)
@@ -1365,7 +1367,7 @@ export const RestApiYouapiKnexPlugin = {
           const childIds = [...new Set(linkRows.map((row) => row.childId))];
           if (childIds.length === 0) continue;
 
-          const targetDescriptor = await registry.getDescriptor(DEFAULT_TENANT, info.relInfo.target);
+          const targetDescriptor = await registry.getDescriptor(tenantId, info.relInfo.target);
           if (!targetDescriptor) continue;
 
           const rows = await db(targetDescriptor.canonical.tableName)
@@ -1649,7 +1651,7 @@ export const RestApiYouapiKnexPlugin = {
         };
       }
 
-      const descriptor = await registry.getDescriptor(DEFAULT_TENANT, scopeName);
+      const descriptor = await registry.getDescriptor(tenantId, scopeName);
       if (!descriptor) return;
 
       const existingInfo = scope.vars?.schemaInfo || {};
@@ -2069,7 +2071,7 @@ export const RestApiYouapiKnexPlugin = {
       });
 
       const descriptor = await registry.registerResource({
-        tenant: DEFAULT_TENANT,
+        tenant: tenantId,
         resource: scopeName,
         schema,
         relationships,
@@ -2137,7 +2139,7 @@ export const RestApiYouapiKnexPlugin = {
         canonicalFieldsMap: storedBefore.canonicalFieldsMap || null,
       });
       const descriptor = await registry.registerResource({
-        tenant: DEFAULT_TENANT,
+        tenant: tenantId,
         resource: scopeName,
         schema: effectiveSchema,
         relationships: relationshipInput,
@@ -2183,7 +2185,7 @@ export const RestApiYouapiKnexPlugin = {
           delete canonicalEntries[fieldName];
         }
         latestDescriptor = await registry.allocateField({
-          tenant: DEFAULT_TENANT,
+          tenant: tenantId,
           resource: scopeName,
           fieldName,
           definition,
