@@ -29,6 +29,7 @@ import {
   ensureSearchFieldsAreIndexed,
   generateSearchSchemaFromSchema,
 } from './lib/querying-writing/schema-helpers.js';
+import { buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js';
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
@@ -102,33 +103,6 @@ export const RestApiYouapiKnexPlugin = {
         throw new Error(`Descriptor not found for resource '${scopeName}'`);
       }
       return descriptor;
-    };
-
-    const getRequestedFieldsForType = (context, resourceType) => {
-      if (!context?.queryParams?.fields) return null;
-      const fieldParam = context.queryParams.fields[resourceType];
-      if (!fieldParam) return null;
-      if (Array.isArray(fieldParam)) {
-        return fieldParam.map((field) => field.trim()).filter((field) => field);
-      }
-      return String(fieldParam)
-        .split(',')
-        .map((field) => field.trim())
-        .filter((field) => field);
-    };
-
-    const applySparseFieldsetToResource = (resource, context) => {
-      if (!resource?.attributes) return;
-      const requested = getRequestedFieldsForType(context, resource.type);
-      if (!requested || requested.length === 0) return;
-
-      const filtered = {};
-      for (const field of requested) {
-        if (Object.prototype.hasOwnProperty.call(resource.attributes, field)) {
-          filtered[field] = resource.attributes[field];
-        }
-      }
-      resource.attributes = filtered;
     };
 
     const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
@@ -1185,7 +1159,6 @@ export const RestApiYouapiKnexPlugin = {
             if (translated.relationships && Object.keys(translated.relationships).length > 0) {
               includeResource.relationships = translated.relationships;
             }
-            applySparseFieldsetToResource(includeResource, context);
             addSelfLink(includeResource, targetDescriptor.resource);
             includes.push(includeResource);
             newResources.push(includeResource);
@@ -1249,7 +1222,6 @@ export const RestApiYouapiKnexPlugin = {
               if (translated.relationships && Object.keys(translated.relationships).length > 0) {
                 includeResource.relationships = translated.relationships;
               }
-              applySparseFieldsetToResource(includeResource, context);
               addSelfLink(includeResource, targetDescriptor.resource);
               includes.push(includeResource);
               newResources.push(includeResource);
@@ -1358,7 +1330,6 @@ export const RestApiYouapiKnexPlugin = {
               if (translated.relationships && Object.keys(translated.relationships).length > 0) {
                 includeResource.relationships = translated.relationships;
               }
-              applySparseFieldsetToResource(includeResource, context);
               addSelfLink(includeResource, targetDescriptor.resource);
               includes.push(includeResource);
               newResources.push(includeResource);
@@ -1416,11 +1387,10 @@ export const RestApiYouapiKnexPlugin = {
            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
              includeResource.relationships = translated.relationships;
            }
-           applySparseFieldsetToResource(includeResource, context);
-            addSelfLink(includeResource, targetDescriptor.resource);
-            includes.push(includeResource);
-            newResources.push(includeResource);
-          }
+          addSelfLink(includeResource, targetDescriptor.resource);
+          includes.push(includeResource);
+          newResources.push(includeResource);
+        }
 
           if (childKeys.length > 0 && newResources.length > 0) {
             await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context });
@@ -1589,6 +1559,14 @@ export const RestApiYouapiKnexPlugin = {
       const id = context.id;
       const scope = api.resources?.[scopeName];
 
+      let fieldSelectionInfo = null;
+      if (scope) {
+        fieldSelectionInfo = await buildFieldSelection(scope, { context });
+        context.computedDependencies = fieldSelectionInfo.computedDependencies;
+      } else {
+        context.computedDependencies = [];
+      }
+
       const row = await context.db(canonical.tableName)
         .where('id', id)
         .where(canonical.resourceColumn, descriptor.resource)
@@ -1607,8 +1585,6 @@ export const RestApiYouapiKnexPlugin = {
       if (record.relationships && Object.keys(record.relationships).length > 0) {
         data.relationships = record.relationships;
       }
-
-      applySparseFieldsetToResource(data, context);
 
       await attachHasManyRelationships({
         resources: [data],
@@ -1768,6 +1744,26 @@ export const RestApiYouapiKnexPlugin = {
       return { resourceToTableName, tableNameToResource };
     };
 
+    const translateSelectFieldsForAdapter = (fields, adapter) => {
+      if (!adapter || !fields) return fields;
+
+      return fields.map((field) => {
+        if (typeof field !== 'string') return field;
+
+        if (field === '*') return '*';
+
+        const aliasMatch = field.match(/\s+as\s+/i);
+        if (aliasMatch) {
+          const [source, alias] = field.split(/\s+as\s+/i);
+          const translatedSource = adapter.translateColumn(source.trim()) || source.trim();
+          return `${translatedSource} as ${alias.trim()}`;
+        }
+
+        const translated = adapter.translateColumn(field);
+        return translated || field;
+      });
+    };
+
     const scopesProxy = new Proxy({}, {
       get(_target, prop) {
         if (typeof prop !== 'string') {
@@ -1781,7 +1777,7 @@ export const RestApiYouapiKnexPlugin = {
       },
     });
 
-    const queryHookDependencies = { log, scopes: scopesProxy, knex };
+    const queryHookDependencies = { log, scopes: scopesProxy, knex, getStorageAdapter: getScopeStorageAdapter };
 
     addHook('knexQueryFiltering', 'polymorphicFiltersHook', {}, async (hookParams) =>
       polymorphicFiltersHook(hookParams, queryHookDependencies)
@@ -1804,6 +1800,14 @@ export const RestApiYouapiKnexPlugin = {
       const db = context.db || context.transaction || api.knex.instance;
       const scope = api.resources?.[scopeName];
       const queryParams = context.queryParams || {};
+
+      let fieldSelectionInfo = null;
+      if (scope) {
+        fieldSelectionInfo = await buildFieldSelection(scope, { context });
+        context.computedDependencies = fieldSelectionInfo.computedDependencies;
+      } else {
+        context.computedDependencies = [];
+      }
 
       const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
       context.resourceToTableName = resourceToTableName;
@@ -1871,7 +1875,12 @@ export const RestApiYouapiKnexPlugin = {
       if (queryParams?.page?.after) {
               }
 
-      let rows = await queryBuilder.select();
+      if (fieldSelectionInfo && fieldSelectionInfo.fieldsToSelect && fieldSelectionInfo.fieldsToSelect.length > 0) {
+        const translatedSelect = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, adapter);
+        queryBuilder.select(translatedSelect);
+      }
+
+      let rows = await queryBuilder;
       let cursorRecords = null;
       let hasMore = false;
 
@@ -1911,7 +1920,9 @@ export const RestApiYouapiKnexPlugin = {
           resource.links = resource.links || {};
           resource.links.self = buildResourceUrl(context, resourceScope, scopeName, resource.id);
         }
-        applySparseFieldsetToResource(resource, context);
+        if (fieldSelectionInfo?.computedDependencies?.length) {
+          resource.__$jsonrestapi_computed_deps$__ = fieldSelectionInfo.computedDependencies;
+        }
         return resource;
       });
 
@@ -2036,12 +2047,17 @@ export const RestApiYouapiKnexPlugin = {
       const scope = api.scopes?.[scopeName] || scopes?.[scopeName];
       const stored = scopeOptionsRegistry.get(scopeName) || {};
 
-      const schema = scopeOptions.schema || scope?.scopeOptions?.schema || stored.schema || {};
+      const baseSchema = scopeOptions.schema || scope?.scopeOptions?.schema || stored.schema || {};
       const relationships = scopeOptions.relationships || scope?.scopeOptions?.relationships || stored.relationships || {};
       const searchSchemaDef = scopeOptions.searchSchema || scope?.scopeOptions?.searchSchema || stored.searchSchema || null;
       const tableName = scopeOptions.tableName || scope?.scopeOptions?.tableName || stored.tableName || scopeName;
       const idProperty = scopeOptions.idProperty || scope?.scopeOptions?.idProperty || stored.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id';
       const canonicalFieldsMap = scope?.scopeOptions?.canonicalFieldsMap || stored.canonicalFieldsMap || null;
+
+      const schema = { ...baseSchema };
+      if (idProperty && idProperty !== 'id' && !schema[idProperty]) {
+        schema[idProperty] = { type: 'number' };
+      }
 
       scopeOptionsRegistry.set(scopeName, {
         schema,
@@ -2083,6 +2099,18 @@ export const RestApiYouapiKnexPlugin = {
       const scope = api.resources?.[scopeName] || scopes?.[scopeName];
       const schemaInput = scopeOptions?.schema || scope?.scopeOptions?.schema || {};
       const relationshipInput = scopeOptions?.relationships || scope?.scopeOptions?.relationships || {};
+      const storedBefore = scopeOptionsRegistry.get(scopeName) || {};
+      const idProperty = scopeOptions?.idProperty
+        || scope?.scopeOptions?.idProperty
+        || storedBefore.idProperty
+        || scope?.vars?.schemaInfo?.idProperty
+        || vars.idProperty
+        || 'id';
+
+      const effectiveSchema = { ...schemaInput };
+      if (idProperty && idProperty !== 'id' && !effectiveSchema[idProperty]) {
+        effectiveSchema[idProperty] = { type: 'number' };
+      }
 
       if (scope) {
         const existingOptions = scope.scopeOptions || {};
@@ -2091,6 +2119,7 @@ export const RestApiYouapiKnexPlugin = {
           schema: {
             ...(existingOptions.schema || {}),
             ...schemaInput,
+            ...(idProperty && idProperty !== 'id' && !schemaInput[idProperty] ? { [idProperty]: { type: 'number' } } : {}),
           },
           relationships: {
             ...(existingOptions.relationships || {}),
@@ -2099,9 +2128,8 @@ export const RestApiYouapiKnexPlugin = {
           searchSchema: existingOptions.searchSchema || scopeOptions?.searchSchema,
         };
       }
-      const storedBefore = scopeOptionsRegistry.get(scopeName) || {};
       scopeOptionsRegistry.set(scopeName, {
-        schema: scope?.scopeOptions?.schema || schemaInput || storedBefore.schema || {},
+        schema: scope?.scopeOptions?.schema || effectiveSchema || storedBefore.schema || {},
         relationships: scope?.scopeOptions?.relationships || relationshipInput || storedBefore.relationships || {},
         searchSchema: scope?.scopeOptions?.searchSchema || scopeOptions?.searchSchema || storedBefore.searchSchema || null,
         tableName: scope?.scopeOptions?.tableName || scopeOptions?.tableName || storedBefore.tableName || scopeName,
@@ -2111,7 +2139,7 @@ export const RestApiYouapiKnexPlugin = {
       const descriptor = await registry.registerResource({
         tenant: DEFAULT_TENANT,
         resource: scopeName,
-        schema: schemaInput,
+        schema: effectiveSchema,
         relationships: relationshipInput,
         canonicalFieldMap: scopeOptions?.canonicalFieldsMap
           || scope?.scopeOptions?.canonicalFieldsMap

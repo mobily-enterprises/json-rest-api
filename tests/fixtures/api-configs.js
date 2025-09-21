@@ -637,6 +637,7 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
   });
   await api.resources.products.createKnexTable();
   mapTable('searchmerge_products', 'products');
+  mapTable('test_products', 'products');
 
   // Reviews resource with computed fields
   await api.addResource('reviews', {
@@ -672,6 +673,7 @@ export async function createComputedFieldsApi(knex, pluginOptions = {}) {
     tableName: 'test_reviews'
   });
   await api.resources.reviews.createKnexTable();
+  mapTable('test_reviews', 'reviews');
 
   return api;
 }
@@ -745,6 +747,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
   });
   await api.resources.users.createKnexTable();
   mapTable('searchmerge_users', 'users');
+  mapTable('getter_users', 'users');
 
   // Products resource with getters and computed fields
   await api.addResource('products', {
@@ -786,6 +789,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     tableName: 'getter_products'
   });
   await api.resources.products.createKnexTable();
+  mapTable('getter_products', 'products');
 
   // Reviews resource with getters
   await api.addResource('reviews', {
@@ -801,6 +805,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     tableName: 'getter_reviews'
   });
   await api.resources.reviews.createKnexTable();
+  mapTable('getter_reviews', 'reviews');
 
   // Resource with getter dependencies
   await api.addResource('formatted_data', {
@@ -834,6 +839,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     tableName: 'getter_formatted'
   });
   await api.resources.formatted_data.createKnexTable();
+  mapTable('getter_formatted', 'formatted_data');
 
   // Async getters example
   await api.addResource('encrypted_data', {
@@ -863,6 +869,7 @@ export async function createFieldGettersApi(knex, pluginOptions = {}) {
     tableName: 'getter_encrypted'
   });
   await api.resources.encrypted_data.createKnexTable();
+  mapTable('getter_encrypted', 'encrypted_data');
 
   return api;
 }
@@ -1215,6 +1222,7 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_categories`
   });
   await api.resources.categories.createKnexTable();
+  mapTable(`${tablePrefix}_categories`, 'categories');
 
   // Tasks (main positioning test resource)
   await api.addResource('tasks', {
@@ -1233,6 +1241,7 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_tasks`
   });
   await api.resources.tasks.createKnexTable();
+  mapTable(`${tablePrefix}_tasks`, 'tasks');
 
   // Projects (for multi-filter testing)
   await api.addResource('projects', {
@@ -1243,6 +1252,7 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_projects`
   });
   await api.resources.projects.createKnexTable();
+  mapTable(`${tablePrefix}_projects`, 'projects');
 
   // Items (flexible resource for various positioning tests)
   await api.addResource('items', {
@@ -1262,6 +1272,7 @@ export async function createPositioningApi(knex, pluginOptions = {}) {
     tableName: `${tablePrefix}_items`
   });
   await api.resources.items.createKnexTable();
+  mapTable(`${tablePrefix}_items`, 'items');
 
   return api;
 }
@@ -1277,6 +1288,10 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     name: apiName,
     log: { level: process.env.LOG_LEVEL || 'info' }
   });
+
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry();
+  }
 
   const restApiOptions = {
     simplifiedApi: false,
@@ -1314,6 +1329,7 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'country_id'  // Custom ID property
   });
   await api.resources.countries.createKnexTable();
+  mapTable(`${tablePrefix}_countries`, 'countries');
 
   // Publishers table with custom idProperty
   await api.addResource('publishers', {
@@ -1333,6 +1349,7 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'publisher_id'
   });
   await api.resources.publishers.createKnexTable();
+  mapTable(`${tablePrefix}_publishers`, 'publishers');
 
   // Authors table with custom idProperty
   await api.addResource('authors', {
@@ -1353,6 +1370,7 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'author_id'
   });
   await api.resources.authors.createKnexTable();
+  mapTable(`${tablePrefix}_authors`, 'authors');
 
   // Books table with custom idProperty
   await api.addResource('books', {
@@ -1376,6 +1394,7 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'book_id'
   });
   await api.resources.books.createKnexTable();
+  mapTable(`${tablePrefix}_books`, 'books');
 
   // Book-Authors pivot table with custom idProperty
   await api.addResource('book_authors', {
@@ -1389,6 +1408,7 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'book_author_id'
   });
   await api.resources.book_authors.createKnexTable();
+  mapTable(`${tablePrefix}_book_authors`, 'book_authors');
 
   // Polymorphic reviews with custom idProperty
   await api.addResource('reviews', {
@@ -1415,6 +1435,22 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
     idProperty: 'review_id'
   });
   await api.resources.reviews.createKnexTable();
+  mapTable(`${tablePrefix}_reviews`, 'reviews');
+
+  if (storageMode.isAnyApi()) {
+    const tenant = storageMode.defaultTenant || 'default';
+    const booksDescriptor = await api.youapi.registry.getDescriptor(tenant, 'books');
+    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenant, 'authors');
+    const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
+    const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
+    storageMode.registerLink(
+      `${tablePrefix}_book_authors`,
+      'books',
+      'authors',
+      relationshipKey,
+      inverseRelationshipKey,
+    );
+  }
 
   return api;
 }

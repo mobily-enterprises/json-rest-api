@@ -1,5 +1,57 @@
 import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-search.js';
 
+const createAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
+  const context = hookParams.context || {};
+  const storageCache = new Map();
+
+  const fetchStorageAdapter = (scopeName) => {
+    if (!scopeName) return null;
+    if (storageCache.has(scopeName)) return storageCache.get(scopeName);
+
+    let adapter = null;
+    if (scopeName === context?.knexQuery?.scopeName) {
+      adapter = context.storageAdapter
+        || context.knexQuery?.storageAdapter
+        || (typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null);
+      if (adapter && !context.storageAdapter) {
+        context.storageAdapter = adapter;
+      }
+    } else {
+      adapter = typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null;
+    }
+
+    storageCache.set(scopeName, adapter);
+    return adapter;
+  };
+
+  const defaultAliasForScope = (scopeName) => {
+    if (scopeName === context?.knexQuery?.scopeName) {
+      return context.knexQuery?.tableName || scopeName;
+    }
+    return scopeName;
+  };
+
+  const translateColumn = (scopeName, field, alias = defaultAliasForScope(scopeName)) => {
+    const adapter = fetchStorageAdapter(scopeName);
+    const translated = adapter?.translateColumn?.(field) ?? field;
+    if (!alias) return translated;
+    return `${alias}.${translated}`;
+  };
+
+  const translateFilterValue = (scopeName, field, value) => {
+    const adapter = fetchStorageAdapter(scopeName);
+    if (!adapter?.translateFilterValue) return value;
+    return adapter.translateFilterValue(field, value);
+  };
+
+  return {
+    fetchStorageAdapter,
+    defaultAliasForScope,
+    translateColumn,
+    translateFilterValue,
+  };
+};
+
 /**
  * Processes filters that target polymorphic relationships where a single relationship can point to different types of resources
  * 
@@ -75,6 +127,7 @@ import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-searc
  */
 export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies;
+  const adapterUtils = createAdapterUtilities(hookParams, dependencies);
   
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
@@ -83,7 +136,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   const db = hookParams.context?.knexQuery?.db || knex;
 
   const schemaInfo = scopes[scopeName].vars.schemaInfo;
-  const tableName = schemaInfo.tableName;
+  const tableAlias = adapterUtils.defaultAliasForScope(scopeName);
 
 
   if (!filters) {
@@ -135,12 +188,13 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
     
     // Build JOINs for each target type
     for (const [targetType, targetFieldPath] of Object.entries(fieldDef.targetFields)) {
-      const baseAlias = `${tableName}_${polymorphicField}_${targetType}`;
+      const baseAlias = `${tableAlias}_${polymorphicField}_${targetType}`;
       
       // Skip if we already added this JOIN
       if (!polymorphicJoins.has(baseAlias)) {
-        const targetSchema = scopes[targetType].vars.schemaInfo.schemaInstance;;
+        const targetSchema = scopes[targetType].vars.schemaInfo.schemaInstance;
         const targetTable = targetSchema?.tableName || targetType;
+        const targetIdField = scopes[targetType].vars.schemaInfo.idProperty || 'id';
         
         log.trace('[POLYMORPHIC-SEARCH] Adding conditional JOIN:', { 
           targetType, 
@@ -149,8 +203,12 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
         
         // Conditional JOIN - only matches when type is correct
         query.leftJoin(`${targetTable} as ${baseAlias}`, function() {
-          this.on(`${tableName}.${typeField}`, db.raw('?', [targetType]))
-              .andOn(`${tableName}.${idField}`, `${baseAlias}.id`);
+          const typeColumn = adapterUtils.translateColumn(scopeName, typeField, tableAlias);
+          const idColumn = adapterUtils.translateColumn(scopeName, idField, tableAlias);
+          const targetIdColumn = adapterUtils.translateColumn(targetType, targetIdField, baseAlias);
+
+          this.on(typeColumn, db.raw('?', [adapterUtils.translateFilterValue(scopeName, typeField, targetType)]))
+              .andOn(idColumn, targetIdColumn);
         });
         
         polymorphicJoins.set(baseAlias, {
@@ -158,7 +216,14 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
           targetTable,
           targetFieldPath
         });
-        
+        polymorphicJoins.get(baseAlias).baseAlias = baseAlias;
+        polymorphicJoins.get(baseAlias).targetIdField = targetIdField;
+
+        if (!polymorphicJoins.get(baseAlias).aliasScopeMap) {
+          polymorphicJoins.get(baseAlias).aliasScopeMap = new Map();
+        }
+        polymorphicJoins.get(baseAlias).aliasScopeMap.set(baseAlias, targetType);
+
         // Handle cross-table paths
         if (targetFieldPath.includes('.')) {
           log.trace('[POLYMORPHIC-SEARCH] Building cross-table JOINs for path:', targetFieldPath);
@@ -212,13 +277,16 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
               table: nextTable 
             });
             
-            query.leftJoin(`${nextTable} as ${nextAlias}`, 
-              `${currentAlias}.${foreignKeyField}`, 
-              `${nextAlias}.id`
-            );
-            
+            const nextIdField = scopes[nextScope].vars.schemaInfo.idProperty || 'id';
+            const sourceColumn = adapterUtils.translateColumn(currentScope, foreignKeyField, currentAlias);
+            const targetColumn = adapterUtils.translateColumn(nextScope, nextIdField, nextAlias);
+
+            query.leftJoin(`${nextTable} as ${nextAlias}`, sourceColumn, targetColumn);
+
             currentAlias = nextAlias;
             currentScope = nextScope;
+
+            polymorphicJoins.get(baseAlias).aliasScopeMap.set(currentAlias, currentScope);
           }
         }
       }
@@ -240,8 +308,36 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   hookParams.context.knexQuery.hasJoins = true;
 
   // Step 3: Apply WHERE conditions
-  query.where(function() {
-    for (const [filterKey, filterValue] of Object.entries(filters)) {
+  query.where(function applyPolymorphicWhere() {
+    const applyComparison = (builder, scope, alias, field, operator, rawValue) => {
+      const columnRef = adapterUtils.translateColumn(scope, field, alias);
+      const normalizedValue = adapterUtils.translateFilterValue(scope, field, rawValue);
+      const op = operator || '=';
+
+      const lowerOp = typeof op === 'string' ? op.toLowerCase() : op;
+      if (normalizedValue === null && (lowerOp === '=' || lowerOp === '==')) {
+        builder.whereNull(columnRef);
+        return;
+      }
+
+      if (lowerOp === 'like') {
+        if (normalizedValue === null || normalizedValue === undefined) {
+          builder.whereNull(columnRef);
+        } else {
+          builder.where(columnRef, 'like', `%${normalizedValue}%`);
+        }
+        return;
+      }
+
+      if (Array.isArray(normalizedValue) && lowerOp === 'in') {
+        builder.whereIn(columnRef, normalizedValue);
+        return;
+      }
+
+      builder.where(columnRef, op, normalizedValue);
+    };
+
+    for (const [filterKey] of Object.entries(filters)) {
       if (!polymorphicSearches.has(filterKey)) continue;
 
       const searchInfo = polymorphicSearches.get(filterKey);
@@ -250,18 +346,17 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
 
       const { typeField } = polyRel.belongsToPolymorphic;
 
-      // Build OR conditions for each possible type
-      this.where(function() {
+      this.where(function applyTypeOrBranch() {
         for (const [targetType, targetFieldPath] of Object.entries(searchInfo.fieldDef.targetFields)) {
-          this.orWhere(function() {
-            // First check the type matches
-            this.where(`${tableName}.${typeField}`, targetType);
+          this.orWhere(function applyTargetBranch() {
+            const typeColumnAlias = tableAlias;
+            applyComparison(this, scopeName, typeColumnAlias, typeField, '=', targetType);
 
-            // Then apply the field filter
-            const baseAlias = `${tableName}_${searchInfo.polymorphicField}_${targetType}`;
+            const baseAlias = `${tableAlias}_${searchInfo.polymorphicField}_${targetType}`;
+            const joinMeta = polymorphicJoins.get(baseAlias);
+            const aliasScopeMap = joinMeta?.aliasScopeMap || new Map([[baseAlias, targetType]]);
 
             if (targetFieldPath.includes('.')) {
-              // Complex path
               const pathParts = targetFieldPath.split('.');
               const fieldName = pathParts[pathParts.length - 1];
 
@@ -270,20 +365,13 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
                 finalAlias = `${finalAlias}_${pathParts[i]}`;
               }
 
+              const finalScope = aliasScopeMap.get(finalAlias) || targetType;
               const operator = searchInfo.fieldDef.filterOperator || '=';
-              if (operator === 'like') {
-                this.where(`${finalAlias}.${fieldName}`, 'like', `%${searchInfo.filterValue}%`);
-              } else {
-                this.where(`${finalAlias}.${fieldName}`, operator, searchInfo.filterValue);
-              }
+              applyComparison(this, finalScope, finalAlias, fieldName, operator, searchInfo.filterValue);
             } else {
-              // Direct field
               const operator = searchInfo.fieldDef.filterOperator || '=';
-              if (operator === 'like') {
-                this.where(`${baseAlias}.${targetFieldPath}`, 'like', `%${searchInfo.filterValue}%`);
-              } else {
-                this.where(`${baseAlias}.${targetFieldPath}`, operator, searchInfo.filterValue);
-              }
+              const finalScope = aliasScopeMap.get(baseAlias) || targetType;
+              applyComparison(this, finalScope, baseAlias, targetFieldPath, operator, searchInfo.filterValue);
             }
           });
         }
@@ -386,6 +474,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  */
 export const crossTableFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies;
+  const adapterUtils = createAdapterUtilities(hookParams, dependencies);
   
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
@@ -395,6 +484,9 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   
   const schemaInfo = scopes[scopeName].vars.schemaInfo;
   const tableName = schemaInfo.tableName;
+  const tableAlias = adapterUtils.defaultAliasForScope(scopeName);
+  const aliasScopeMap = new Map();
+  aliasScopeMap.set(tableAlias, scopeName);
 
   if (!filters) {
     return;
@@ -448,76 +540,113 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
     return;
   }
 
+  joinMap.forEach((joinInfo) => {
+    if (joinInfo.joinAlias) {
+      aliasScopeMap.set(joinInfo.joinAlias, joinInfo.targetScopeName || joinInfo.targetTableName);
+    }
+    if (joinInfo.isMultiLevel && Array.isArray(joinInfo.joinChain)) {
+      joinInfo.joinChain.forEach((join) => {
+        if (join.joinAlias) {
+          aliasScopeMap.set(join.joinAlias, join.targetScopeName || join.targetTableName);
+        }
+      });
+    }
+  });
+
+  const translateQualifiedColumn = (qualified) => {
+    const trimmed = qualified.trim();
+    if (!trimmed.includes('.')) {
+      return adapterUtils.translateColumn(scopeName, trimmed, tableAlias);
+    }
+
+    const [alias, ...fieldParts] = trimmed.split('.');
+    const field = fieldParts.join('.');
+    const scopeForAlias = aliasScopeMap.get(alias) || scopeName;
+    return adapterUtils.translateColumn(scopeForAlias, field, alias);
+  };
+
+  const resolveFieldColumn = (field) => {
+    if (field.includes('.')) {
+      const qualified = fieldPathMap.get(field) || field;
+      return translateQualifiedColumn(qualified);
+    }
+    return adapterUtils.translateColumn(scopeName, field, tableAlias);
+  };
+
+  const normalizeFieldValue = (field, value) => {
+    if (field.includes('.')) {
+      const qualified = fieldPathMap.get(field) || field;
+      const [alias, ...rest] = qualified.split('.');
+      const fieldName = rest.join('.');
+      const valueScope = aliasScopeMap.get(alias) || scopeName;
+      if (Array.isArray(value)) {
+        return value.map((entry) => adapterUtils.translateFilterValue(valueScope, fieldName, entry));
+      }
+      return adapterUtils.translateFilterValue(valueScope, fieldName, value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => adapterUtils.translateFilterValue(scopeName, field, entry));
+    }
+    return adapterUtils.translateFilterValue(scopeName, field, value);
+  };
+
   // Step 3: Apply JOINs
   const appliedJoins = new Set();
 
-  joinMap.forEach((joinInfo) => {
-    if (joinInfo.isMultiLevel && joinInfo.joinChain) {
-      joinInfo.joinChain.forEach((join) => {
-        const joinKey = `${join.joinAlias}:${join.joinCondition}`;
-        if (!appliedJoins.has(joinKey)) {
-          // Check if this is a polymorphic join with AND condition
-          if (join.isPolymorphic && join.joinCondition.includes(' AND ')) {
-            query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
-              // Parse polymorphic condition: type_field = 'value' AND id_field = parent.id
-              const parts = join.joinCondition.split(' AND ');
-              const [typeCondition, idCondition] = parts;
-              
-              // Extract the type field and value from first part
-              const typeMatch = typeCondition.match(/(.+?)\s*=\s*'(.+?)'/);
-              if (typeMatch) {
-                const typeField = typeMatch[1].trim();
-                const typeValue = typeMatch[2];
-                this.on(typeField, db.raw('?', [typeValue]));
-              }
-              
-              // Extract the id fields from second part
-              const idMatch = idCondition.match(/(.+?)\s*=\s*(.+)/);
-              if (idMatch) {
-                this.andOn(idMatch[1].trim(), idMatch[2].trim());
-              }
-            });
-          } else {
-            const [leftSide, rightSide] = join.joinCondition.split(' = ');
-            query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
-              this.on(leftSide, rightSide);
-            });
-          }
-          appliedJoins.add(joinKey);
-        }
-      });
-    } else {
-      const joinKey = `${joinInfo.joinAlias}:${joinInfo.joinCondition}`;
-      if (!appliedJoins.has(joinKey)) {
-        // Check if this is a polymorphic join with AND condition
-        if (joinInfo.isPolymorphic && joinInfo.joinCondition.includes(' AND ')) {
-          query.leftJoin(`${joinInfo.targetTableName} as ${joinInfo.joinAlias}`, function() {
-            // Parse polymorphic condition: type_field = 'value' AND id_field = parent.id
-            const parts = joinInfo.joinCondition.split(' AND ');
-            const [typeCondition, idCondition] = parts;
-            
-            // Extract the type field and value from first part
-            const typeMatch = typeCondition.match(/(.+?)\s*=\s*'(.+?)'/);
-            if (typeMatch) {
-              const typeField = typeMatch[1].trim();
-              const typeValue = typeMatch[2];
-              this.on(typeField, db.raw('?', [typeValue]));
-            }
-            
-            // Extract the id fields from second part
-            const idMatch = idCondition.match(/(.+?)\s*=\s*(.+)/);
-            if (idMatch) {
-              this.andOn(idMatch[1].trim(), idMatch[2].trim());
-            }
-          });
-        } else {
-          const [leftSide, rightSide] = joinInfo.joinCondition.split(' = ');
-          query.leftJoin(`${joinInfo.targetTableName} as ${joinInfo.joinAlias}`, function() {
-            this.on(leftSide, rightSide);
-          });
-        }
-        appliedJoins.add(joinKey);
+  const applyPolymorphicJoin = (join) => {
+    query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
+      const parts = join.joinCondition.split(' AND ');
+      const [typeCondition, idCondition] = parts;
+
+      const typeMatch = typeCondition.match(/(.+?)\s*=\s*'(.+?)'/);
+      if (typeMatch) {
+        const typeColumnToken = typeMatch[1].trim();
+        const typeAlias = typeColumnToken.split('.')[0];
+        const typeField = typeColumnToken.split('.').slice(1).join('.');
+        const typeScope = aliasScopeMap.get(typeAlias) || scopeName;
+        const translatedColumn = translateQualifiedColumn(typeColumnToken);
+        const translatedValue = adapterUtils.translateFilterValue(typeScope, typeField, typeMatch[2]);
+        this.on(translatedColumn, db.raw('?', [translatedValue]));
       }
+
+      const idMatch = idCondition.match(/(.+?)\s*=\s*(.+)/);
+      if (idMatch) {
+        const leftToken = idMatch[1].trim();
+        const rightToken = idMatch[2].trim();
+        const leftColumn = translateQualifiedColumn(leftToken);
+        const rightColumn = translateQualifiedColumn(rightToken);
+        this.andOn(leftColumn, rightColumn);
+      }
+    });
+  };
+
+  const applyStandardJoin = (join) => {
+    const [leftSide, rightSide] = join.joinCondition.split(' = ');
+    const translatedLeft = translateQualifiedColumn(leftSide.trim());
+    const translatedRight = translateQualifiedColumn(rightSide.trim());
+    query.leftJoin(`${join.targetTableName} as ${join.joinAlias}`, function() {
+      this.on(translatedLeft, translatedRight);
+    });
+  };
+
+  const processJoin = (join) => {
+    const joinKey = `${join.joinAlias}:${join.joinCondition}`;
+    if (appliedJoins.has(joinKey)) return;
+
+    if (join.isPolymorphic && join.joinCondition.includes(' AND ')) {
+      applyPolymorphicJoin(join);
+    } else {
+      applyStandardJoin(join);
+    }
+
+    appliedJoins.add(joinKey);
+  };
+
+  joinMap.forEach((joinInfo) => {
+    if (joinInfo.isMultiLevel && Array.isArray(joinInfo.joinChain)) {
+      joinInfo.joinChain.forEach(processJoin);
+    } else {
+      processJoin(joinInfo);
     }
   });
 
@@ -558,59 +687,56 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
       switch (true) {
         case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
           const operator = fieldDef.filterOperator || '=';
-          
-          // Handle split search terms
+
           let searchTerms = [filterValue];
           if (fieldDef.splitBy && typeof filterValue === 'string') {
             searchTerms = filterValue.split(fieldDef.splitBy).filter(term => term.trim());
+          } else if (Array.isArray(filterValue)) {
+            searchTerms = filterValue;
           }
-          
+
+          const applyTermComparison = (builder, method, field, raw) => {
+            const columnRef = resolveFieldColumn(field);
+            let normalized = normalizeFieldValue(field, raw);
+
+            if (operator === 'like') {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized;
+              if (value === null || value === undefined) {
+                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef);
+              } else {
+                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `%${String(value)}%`);
+              }
+              return;
+            }
+
+            if (operator === 'in') {
+              const values = Array.isArray(normalized) ? normalized : [normalized];
+              builder[method === 'or' ? 'orWhereIn' : 'whereIn'](columnRef, values);
+              return;
+            }
+
+            const value = Array.isArray(normalized) ? normalized[0] : normalized;
+            if (value === null && (operator === '=' || operator === '==')) {
+              builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef);
+            } else {
+              builder[method === 'or' ? 'orWhere' : 'where'](columnRef, operator, value);
+            }
+          };
+
           this.where(function() {
             if (fieldDef.matchAll && searchTerms.length > 1) {
-              // AND logic - all terms must match
               searchTerms.forEach(term => {
                 this.andWhere(function() {
                   fieldDef.oneOf.forEach((field, index) => {
-                    const dbField = fieldPathMap.get(field) ||
-                                   (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
-                    
-                    if (operator === 'like') {
-                      const condition = `%${term}%`;
-                      if (index === 0) {
-                        this.where(dbField, 'like', condition);
-                      } else {
-                        this.orWhere(dbField, 'like', condition);
-                      }
-                    } else {
-                      if (index === 0) {
-                        this.where(dbField, operator, term);
-                      } else {
-                        this.orWhere(dbField, operator, term);
-                      }
-                    }
+                    const method = index === 0 ? 'and' : 'or';
+                    applyTermComparison(this, method, field, term);
                   });
                 });
               });
             } else {
-              // OR logic for single term or matchAll=false
               fieldDef.oneOf.forEach((field, index) => {
-                const dbField = fieldPathMap.get(field) ||
-                               (!field.includes('.') && joinMap.size > 0 ? `${tableName}.${field}` : field);
-                
-                if (operator === 'like') {
-                  const condition = `%${filterValue}%`;
-                  if (index === 0) {
-                    this.where(dbField, 'like', condition);
-                  } else {
-                    this.orWhere(dbField, 'like', condition);
-                  }
-                } else {
-                  if (index === 0) {
-                    this.where(dbField, operator, filterValue);
-                  } else {
-                    this.orWhere(dbField, operator, filterValue);
-                  }
-                }
+                const method = index === 0 ? 'and' : 'or';
+                applyTermComparison(this, method, field, filterValue);
               });
             }
           });
@@ -622,34 +748,44 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
           break;
 
         default:
-          let dbField = fieldDef.actualField || filterKey;
-          if (dbField.includes('.')) {
-            dbField = fieldPathMap.get(dbField) || dbField;
-          }
-
+          const targetField = fieldDef.actualField || filterKey;
+          const columnRef = resolveFieldColumn(targetField);
           const operator = fieldDef.filterOperator || '=';
+          const normalized = normalizeFieldValue(targetField, filterValue);
 
           switch (operator) {
-            case 'like':
-              this.where(dbField, 'like', `%${filterValue}%`);
-              break;
-            case 'in':
-              if (Array.isArray(filterValue)) {
-                this.whereIn(dbField, filterValue);
+            case 'like': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized;
+              if (value === null || value === undefined) {
+                this.whereNull(columnRef);
               } else {
-                this.where(dbField, operator, filterValue);
+                this.where(columnRef, 'like', `%${String(value)}%`);
               }
               break;
-            case 'between':
-              if (Array.isArray(filterValue) && filterValue.length === 2) {
-                this.whereBetween(dbField, filterValue);
+            }
+            case 'in': {
+              const values = Array.isArray(normalized) ? normalized : [normalized];
+              this.whereIn(columnRef, values);
+              break;
+            }
+            case 'between': {
+              const values = Array.isArray(normalized) ? normalized : [normalized];
+              if (values.length === 2) {
+                this.whereBetween(columnRef, values);
               } else {
-                this.where(dbField, operator, filterValue);
+                this.where(columnRef, operator, values[0]);
               }
               break;
-            default:
-              this.where(dbField, operator, filterValue);
+            }
+            default: {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized;
+              if (value === null && (operator === '=' || operator === '==')) {
+                this.whereNull(columnRef);
+              } else {
+                this.where(columnRef, operator, value);
+              }
               break;
+            }
           }
           break;
       }
@@ -800,6 +936,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  */
 export const basicFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies;
+  const adapterUtils = createAdapterUtilities(hookParams, dependencies);
   
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName;
@@ -809,6 +946,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   
   const schemaInfo = scopes[scopeName].vars.schemaInfo;
   const tableName = schemaInfo.tableName;
+  const tableAlias = adapterUtils.defaultAliasForScope(scopeName);
 
   log.trace('[DEBUG basicFiltersHook] Called with:', {
     scopeName,
@@ -825,8 +963,12 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
 
   // Check if we have any JOINs applied (to know if we need to qualify fields)
   // Instead of relying on hasJoins flag, always qualify fields for safety
-  const qualifyField = (field) => {
-    return `${tableName}.${field}`;
+  const qualifyField = (field) => adapterUtils.translateColumn(scopeName, field, tableAlias);
+  const normalizeValue = (field, value) => {
+    if (Array.isArray(value)) {
+      return value.map((entry) => adapterUtils.translateFilterValue(scopeName, field, entry));
+    }
+    return adapterUtils.translateFilterValue(scopeName, field, value);
   };
 
   // Main WHERE group
@@ -861,48 +1003,55 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           
           this.where(function() {
             if (fieldDef.matchAll && searchTerms.length > 1) {
-              // AND logic - all terms must match
               searchTerms.forEach(term => {
+                const normalizedTerm = normalizeValue(fieldDef.oneOf[0], term);
                 this.andWhere(function() {
                   fieldDef.oneOf.forEach((field, index) => {
-                    // Always qualify field names
-                    const dbField = qualifyField(field);
-                    
+                    const columnRef = qualifyField(field);
+                    const perFieldValue = Array.isArray(normalizedTerm)
+                      ? normalizeValue(field, term)
+                      : normalizeValue(field, term);
+                    const normalized = Array.isArray(perFieldValue) ? perFieldValue[0] : perFieldValue;
+
                     if (operator === 'like') {
-                      const condition = `%${term}%`;
-                      if (index === 0) {
-                        this.where(dbField, 'like', condition);
+                      if (normalized === null || normalized === undefined) {
+                        this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef);
                       } else {
-                        this.orWhere(dbField, 'like', condition);
+                        this[index === 0 ? 'where' : 'orWhere'](columnRef, 'like', `%${String(normalized)}%`);
                       }
+                    } else if (operator === 'in') {
+                      const values = Array.isArray(perFieldValue) ? perFieldValue : [perFieldValue];
+                      this[index === 0 ? 'whereIn' : 'orWhereIn'](columnRef, values);
                     } else {
-                      if (index === 0) {
-                        this.where(dbField, operator, term);
+                      if (normalized === null && (operator === '=' || operator === '==')) {
+                        this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef);
                       } else {
-                        this.orWhere(dbField, operator, term);
+                        this[index === 0 ? 'where' : 'orWhere'](columnRef, operator, normalized);
                       }
                     }
                   });
                 });
               });
             } else {
-              // OR logic for single term or matchAll=false
               fieldDef.oneOf.forEach((field, index) => {
-                // Always qualify field names
-                const dbField = qualifyField(field);
-                
+                const columnRef = qualifyField(field);
+                const normalizedValue = normalizeValue(field, filterValue);
+                const primary = Array.isArray(normalizedValue) ? normalizedValue[0] : normalizedValue;
+
                 if (operator === 'like') {
-                  const condition = `%${filterValue}%`;
-                  if (index === 0) {
-                    this.where(dbField, 'like', condition);
+                  if (primary === null || primary === undefined) {
+                    this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef);
                   } else {
-                    this.orWhere(dbField, 'like', condition);
+                    this[index === 0 ? 'where' : 'orWhere'](columnRef, 'like', `%${String(primary)}%`);
                   }
+                } else if (operator === 'in') {
+                  const values = Array.isArray(normalizedValue) ? normalizedValue : [normalizedValue];
+                  this[index === 0 ? 'whereIn' : 'orWhereIn'](columnRef, values);
                 } else {
-                  if (index === 0) {
-                    this.where(dbField, operator, filterValue);
+                  if (primary === null && (operator === '=' || operator === '==')) {
+                    this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef);
                   } else {
-                    this.orWhere(dbField, operator, filterValue);
+                    this[index === 0 ? 'where' : 'orWhere'](columnRef, operator, primary);
                   }
                 }
               });
@@ -923,44 +1072,46 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           const dbField = qualifyField(actualField);
 
           const operator = fieldDef.filterOperator || '=';
+          const normalized = normalizeValue(actualField, filterValue);
           log.trace(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`);
 
           switch (operator) {
-            case 'like':
-              this.where(dbField, 'like', `%${filterValue}%`);
-              break;
-            case 'in':
-              if (Array.isArray(filterValue)) {
-                this.whereIn(dbField, filterValue);
-              } else {
-                // Handle null values for 'in' operator
-                if (filterValue === null) {
-                  this.whereNull(dbField);
-                } else {
-                  this.where(dbField, operator, filterValue);
-                }
-              }
-              break;
-            case 'between':
-              if (Array.isArray(filterValue) && filterValue.length === 2) {
-                this.whereBetween(dbField, filterValue);
-              } else {
-                // Handle null values for 'between' operator
-                if (filterValue === null) {
-                  this.whereNull(dbField);
-                } else {
-                  this.where(dbField, operator, filterValue);
-                }
-              }
-              break;
-            default:
-              // Handle null values specially
-              if (filterValue === null) {
+            case 'like': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized;
+              if (value === null || value === undefined) {
                 this.whereNull(dbField);
               } else {
-                this.where(dbField, operator, filterValue);
+                this.where(dbField, 'like', `%${String(value)}%`);
               }
               break;
+            }
+            case 'in': {
+              const values = Array.isArray(normalized) ? normalized : [normalized];
+              this.whereIn(dbField, values);
+              break;
+            }
+            case 'between': {
+              const values = Array.isArray(normalized) ? normalized : [normalized];
+              if (values.length === 2) {
+                this.whereBetween(dbField, values);
+              } else {
+                if (values[0] === null || values[0] === undefined) {
+                  this.whereNull(dbField);
+                } else {
+                  this.where(dbField, operator, values[0]);
+                }
+              }
+              break;
+            }
+            default: {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized;
+              if (value === null || value === undefined) {
+                this.whereNull(dbField);
+              } else {
+                this.where(dbField, operator, value);
+              }
+              break;
+            }
           }
           break;
       }

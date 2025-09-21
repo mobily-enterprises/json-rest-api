@@ -19,6 +19,31 @@ export const MultiHomePlugin = {
         allowMissing: multihomeOptions.allowMissing || false
       };
 
+      const resolveStorageAdapter = (scopeName, hookContext = {}) => {
+        if (!scopeName) return null;
+        if (hookContext.storageAdapter) return hookContext.storageAdapter;
+        if (hookContext.knexQuery?.storageAdapter) return hookContext.knexQuery.storageAdapter;
+        if (helpers.getStorageAdapter) {
+          return helpers.getStorageAdapter(scopeName);
+        }
+        return null;
+      };
+
+      const translateColumnReference = ({ field, tableName, scopeName, hookContext }) => {
+        const storageAdapter = resolveStorageAdapter(scopeName, hookContext);
+        const translated = storageAdapter?.translateColumn?.(field) ?? field;
+        if (tableName) {
+          return `${tableName}.${translated}`;
+        }
+        return translated;
+      };
+
+      const translateFilterValue = ({ field, value, scopeName, hookContext }) => {
+        const storageAdapter = resolveStorageAdapter(scopeName, hookContext);
+        if (!storageAdapter?.translateFilterValue) return value;
+        return storageAdapter.translateFilterValue(field, value);
+      };
+
       // Default extractor function
       function defaultSubdomainExtractor(request) {
         // Extract from subdomain (e.g., 'mobily' from 'mobily.app.com')
@@ -122,17 +147,30 @@ export const MultiHomePlugin = {
           }
         }
 
-      const adapter = context.knexQuery?.adapter;
-      const columnRef = adapter
-        ? adapter.translateColumn(`${tableName}.${vars.multihome.field}`)
-        : `${tableName}.${vars.multihome.field}`;
+      const storageAdapter = resolveStorageAdapter(scopeName, context);
+      if (storageAdapter && !context.storageAdapter) {
+        context.storageAdapter = storageAdapter;
+      }
 
-      if (adapter) {
-        query.whereRaw(`${columnRef} = ?`, [context.auth.multihome_id]);
+      const columnRef = translateColumnReference({
+        field: vars.multihome.field,
+        tableName,
+        scopeName,
+        hookContext: context,
+      });
+
+      const tenantValue = translateFilterValue({
+        field: vars.multihome.field,
+        value: context.auth.multihome_id,
+        scopeName,
+        hookContext: context,
+      });
+
+      
+      if (tenantValue === null) {
+        query.whereNull(columnRef);
       } else {
-        query.where(function() {
-          this.where(columnRef, context.auth.multihome_id);
-        });
+        query.where(columnRef, tenantValue);
       }
 
         log.trace('Added multihome filter', {

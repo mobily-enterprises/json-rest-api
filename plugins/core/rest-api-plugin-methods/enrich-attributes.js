@@ -167,6 +167,18 @@ export default async function enrichAttributesMethod({ context, params, runHooks
         }
       }
 
+      if (requestedFields && requestedFields.length > 0) {
+        const requestedList = typeof requestedFields === 'string'
+          ? requestedFields.split(',').map((field) => field.trim()).filter((field) => field)
+          : requestedFields;
+        const allowed = new Set(requestedList);
+        Object.keys(finalAttributes).forEach((key) => {
+          if (!allowed.has(key)) {
+            delete finalAttributes[key];
+          }
+        });
+      }
+
       // Create context for enrichAttributes hooks
       Object.assign(context, {
         parentContext,

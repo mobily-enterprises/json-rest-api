@@ -24,6 +24,33 @@ export const AccessPlugin = {
 
     const ownershipField = () => config.ownership.field
 
+    const resolveStorageAdapter = (scopeName, hookContext = {}) => {
+      if (!scopeName) return null
+
+      if (hookContext.storageAdapter) return hookContext.storageAdapter
+      if (hookContext.knexQuery?.storageAdapter) return hookContext.knexQuery.storageAdapter
+
+      if (helpers.getStorageAdapter) {
+        return helpers.getStorageAdapter(scopeName)
+      }
+      return null
+    }
+
+    const translateColumnReference = ({ field, tableName, scopeName, hookContext }) => {
+      const storageAdapter = resolveStorageAdapter(scopeName, hookContext)
+      const translated = storageAdapter?.translateColumn?.(field) ?? field
+      if (tableName) {
+        return `${tableName}.${translated}`
+      }
+      return translated
+    }
+
+    const translateFilterValue = ({ field, value, scopeName, hookContext }) => {
+      const storageAdapter = resolveStorageAdapter(scopeName, hookContext)
+      if (!storageAdapter?.translateFilterValue) return value
+      return storageAdapter.translateFilterValue(field, value)
+    }
+
     function registerBuiltinCheckers() {
       state.authCheckers.set('public', () => true)
 
@@ -193,9 +220,19 @@ export const AccessPlugin = {
       const shouldFilter = scopeOptions?.ownership === true || (scopeOptions?.ownership === undefined && hasField)
       if (!shouldFilter || !hasField) return
 
-      query.where(function () {
-        this.where(`${tableName}.${field}`, context.auth.userId)
-      })
+      const storageAdapter = resolveStorageAdapter(scopeName, context)
+      if (storageAdapter && !context.storageAdapter) {
+        context.storageAdapter = storageAdapter
+      }
+
+      const columnRef = translateColumnReference({ field, tableName, scopeName, hookContext: context })
+      const ownerValue = translateFilterValue({ field, value: context.auth.userId, scopeName, hookContext: context })
+
+      if (ownerValue === null) {
+        query.whereNull(columnRef)
+      } else {
+        query.where(columnRef, ownerValue)
+      }
     })
 
     addHook('checkPermissions', 'rest-auth-enforce', { sequence: -100 }, async ({ context, scope, scopeName }) => {

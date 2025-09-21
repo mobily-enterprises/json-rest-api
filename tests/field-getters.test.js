@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import knexLib from 'knex';
 import { createFieldGettersApi } from './fixtures/api-configs.js';
 import { cleanTables } from './helpers/test-utils.js';
+import { storageMode } from './helpers/storage-mode.js';
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -177,11 +178,25 @@ describe('Field Getters', () => {
       // Helper to simulate encryption
       const encrypt = (value) => Buffer.from(value).toString('base64');
 
-      // Store encrypted data directly in DB
-      const id = await knex('getter_encrypted').insert({
+      const payload = {
         secret: encrypt('my-secret-value'),
         data: encrypt('sensitive-info')
-      }).returning('id').then(r => r[0].id);
+      };
+
+      let id;
+      if (storageMode.isAnyApi()) {
+        // AnyAPI mode stores records in canonical slots, so use the API to ensure persistence
+        const created = await api.resources.encrypted_data.post(payload);
+        id = created.id;
+      } else {
+        // Legacy mode can insert directly into the backing table for the same effect
+        const inserted = await knex('getter_encrypted')
+          .insert(payload)
+          .returning('id')
+          .then((rows) => rows);
+        const first = Array.isArray(inserted) ? inserted[0] : inserted;
+        id = typeof first === 'object' && first !== null ? first.id : first;
+      }
 
       // Fetch should decrypt via async getters
       const record = await api.resources.encrypted_data.get({ id });
@@ -297,6 +312,9 @@ describe('Field Getters', () => {
         tableName: 'getter_errors'
       });
       await api.resources.error_test.createKnexTable();
+      if (storageMode.isAnyApi()) {
+        storageMode.registerTable('getter_errors', 'error_test');
+      }
 
       const record = await api.resources.error_test.post({
         good_field: 'hello',

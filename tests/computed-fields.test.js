@@ -2,6 +2,7 @@ import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import knexLib from 'knex';
 import { cleanTables } from './helpers/test-utils.js';
+import { storageMode } from './helpers/storage-mode.js';
 import { createComputedFieldsApi } from './fixtures/api-configs.js';
 
 // Create Knex instance for tests
@@ -345,6 +346,9 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         tableName: 'test_faulty_products'
       });
       await api.resources.faulty_products.createKnexTable();
+      if (storageMode.isAnyApi()) {
+        storageMode.registerTable('test_faulty_products', 'faulty_products');
+      }
 
       const faulty = await api.resources.faulty_products.post({ value: 42 });
       const fetched = await api.resources.faulty_products.get({ id: faulty.id });
@@ -410,6 +414,9 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         tableName: 'test_async_products'
       });
       await api.resources.async_products.createKnexTable();
+      if (storageMode.isAnyApi()) {
+        storageMode.registerTable('test_async_products', 'async_products');
+      }
 
       const product = await api.resources.async_products.post({
         name: 'Async Product',
@@ -440,6 +447,9 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         tableName: 'test_failing_async_products'
       });
       await api.resources.failing_async_products.createKnexTable();
+      if (storageMode.isAnyApi()) {
+        storageMode.registerTable('test_failing_async_products', 'failing_async_products');
+      }
 
       const product = await api.resources.failing_async_products.post({ value: 42 });
       const fetched = await api.resources.failing_async_products.get({ id: product.id });

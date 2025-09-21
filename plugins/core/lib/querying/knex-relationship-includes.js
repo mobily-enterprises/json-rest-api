@@ -81,6 +81,28 @@ import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClau
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js';
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js';
 
+const translateSelectFieldsForAdapter = (fields, adapter) => {
+  if (!adapter || !fields) return fields;
+
+  const translateField = (field) => {
+    if (typeof field !== 'string') return field;
+
+    if (field === '*') return '*';
+
+    const aliasMatch = field.match(/\s+as\s+/i);
+    if (aliasMatch) {
+      const [source, alias] = field.split(/\s+as\s+/i);
+      const translatedSource = adapter.translateColumn(source.trim()) || source.trim();
+      return `${translatedSource} as ${alias.trim()}`;
+    }
+
+    const translated = adapter.translateColumn(field);
+    return translated || field;
+  };
+
+  return fields.map(translateField);
+};
+
 /**
  * Groups records by their polymorphic type for efficient batch loading
  * 
@@ -402,12 +424,14 @@ export const loadBelongsTo = async (scope, deps) => {
     
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope];
+    const storageAdapter = targetScopeObject.vars.storageAdapter;
     const fieldSelectionInfo = fields?.[targetScope] ? 
       await buildFieldSelection(targetScopeObject, {
         context: {
           scopeName: targetScope,
           queryParams: { fields: { [targetScope]: fields[targetScope] } },
-          schemaInfo: targetScopeObject.vars.schemaInfo
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
         }
       }) : 
       null;
@@ -415,7 +439,8 @@ export const loadBelongsTo = async (scope, deps) => {
     // Load the target records
     let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds);
     if (fieldSelectionInfo) {
-      query = query.select(fieldSelectionInfo.fieldsToSelect);
+      const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+      query = query.select(selectFields);
     } else if (targetIdProperty !== 'id') {
       // If no field selection but custom idProperty, we need to alias it
       query = query.select('*', `${targetIdProperty} as id`);
@@ -633,13 +658,15 @@ export const loadHasMany = async (scope, deps) => {
     // Step 3: Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
     const targetScopeObject = scopes[targetScope];
+    const storageAdapter = targetScopeObject.vars.storageAdapter;
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
       await buildFieldSelection(targetScopeObject, {
         context: {
           scopeName: targetScope,
           queryParams: { fields: { [targetScope]: fields[targetScope] } },
-          schemaInfo: targetScopeObject.vars.schemaInfo
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
         }
       }) : 
       null;
@@ -705,7 +732,8 @@ export const loadHasMany = async (scope, deps) => {
       let query = knex(targetTable).whereIn(targetIdProperty, targetIds);
       
       if (fieldSelectionInfo) {
-        query = query.select(fieldSelectionInfo.fieldsToSelect);
+        const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+        query = query.select(selectFields);
       } else if (targetIdProperty !== 'id') {
         // If no field selection but custom idProperty, we need to alias it
         query = query.select('*', `${targetIdProperty} as id`);
@@ -832,13 +860,15 @@ export const loadHasMany = async (scope, deps) => {
     // Build field selection for sparse fieldsets
     const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
     const targetScopeObject = scopes[targetScope];
+    const storageAdapter = targetScopeObject.vars.storageAdapter;
     const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
     const fieldSelectionInfo = fields?.[targetScope] ? 
       await buildFieldSelection(targetScopeObject, {
         context: {
           scopeName: targetScope,
           queryParams: { fields: { [targetScope]: fields[targetScope] } },
-          schemaInfo: targetScopeObject.vars.schemaInfo
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
         }
       }) : 
       null;
@@ -850,12 +880,16 @@ export const loadHasMany = async (scope, deps) => {
     if (relDef.include?.strategy === 'window') {
       try {
         // Try to build window function query
+        const selectFields = fieldSelectionInfo
+          ? translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
+          : null;
+
         query = buildWindowedIncludeQuery(
           knex,
           targetTable,
           foreignKey,
           mainIds,
-          fieldSelectionInfo ? fieldSelectionInfo.fieldsToSelect : null,
+          selectFields,
           relDef.include || {},
           capabilities,
           targetScopeObject.vars  // Pass target scope vars
@@ -881,7 +915,8 @@ export const loadHasMany = async (scope, deps) => {
       query = knex(targetTable).whereIn(foreignKey, mainIds);
       
       if (fieldSelectionInfo) {
-        query = query.select(fieldSelectionInfo.fieldsToSelect);
+        const selectFieldsStd = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+        query = query.select(selectFieldsStd);
       }
       
       // Apply standard config with defaults
@@ -1052,6 +1087,7 @@ export const loadHasOne = async (scope, deps) => {
   // Build query for hasOne - expects single result per parent
   const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
   const targetScopeObject = scopes[targetScope];
+  const storageAdapter = targetScopeObject.vars.storageAdapter;
   const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   
   // Build field selection for sparse fieldsets
@@ -1060,7 +1096,8 @@ export const loadHasOne = async (scope, deps) => {
       context: {
         scopeName: targetScope,
         queryParams: { fields: { [targetScope]: fields[targetScope] } },
-        schemaInfo: targetScopeObject.vars.schemaInfo
+        schemaInfo: targetScopeObject.vars.schemaInfo,
+        storageAdapter,
       }
     }) : 
     null;
@@ -1069,7 +1106,8 @@ export const loadHasOne = async (scope, deps) => {
   let query = knex(targetTable).whereIn(foreignKey, mainIds);
   
   if (fieldSelectionInfo?.fieldsToSelect) {
-    query = query.select(fieldSelectionInfo.fieldsToSelect);
+    const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+    query = query.select(selectFields);
   }
   
   const relatedRecords = await query;
@@ -1194,12 +1232,14 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetType];
     // const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
+    const storageAdapter = targetScopeObject.vars.storageAdapter;
     const fieldSelectionInfo = fields?.[targetType] ? 
       await buildFieldSelection(targetScopeObject, {
         context: {
           scopeName: targetType,
           queryParams: { fields: { [targetType]: fields[targetType] } },
-          schemaInfo: targetScopeObject.vars.schemaInfo
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
         }
       }) : 
       null;
@@ -1213,7 +1253,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     const targetIdProperty = scopes[targetType]?.vars?.schemaInfo?.idProperty || 'id';
     let query = knex(targetTable).whereIn(targetIdProperty, targetIds);
     if (fieldSelectionInfo) {
-      query = query.select(fieldSelectionInfo.fieldsToSelect);
+      const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+      query = query.select(selectFields);
     } else if (targetIdProperty !== 'id') {
       // If no field selection but custom idProperty, we need to alias it
       query = query.select('*', `${targetIdProperty} as id`);
@@ -1408,12 +1449,17 @@ export const loadReversePolymorphic = async (scope, deps) => {
   // Build field selection for sparse fieldsets
   const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance;
   const targetScopeObject = scopes[targetScope];
+  const storageAdapter = targetScopeObject.vars.storageAdapter;
   const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
   const fieldSelectionInfo = fields?.[targetScope] ? 
-    await buildFieldSelection(
-      { scopeName: targetScope, queryParams: { fields: { [targetScope]: fields[targetScope] } }, schemaInfo: targetScopeObject.vars.schemaInfo },
-      { context: { scopes, log, knex } }
-    ) : 
+    await buildFieldSelection(targetScopeObject, {
+      context: {
+        scopeName: targetScope,
+        queryParams: { fields: { [targetScope]: fields[targetScope] } },
+        schemaInfo: targetScopeObject.vars.schemaInfo,
+        storageAdapter,
+      }
+    }) : 
     null;
   
   // Query for records pointing back to our scope
@@ -1422,7 +1468,8 @@ export const loadReversePolymorphic = async (scope, deps) => {
     .whereIn(idField, parentIds);
     
   if (fieldSelectionInfo) {
-    query = query.select(fieldSelectionInfo.fieldsToSelect);
+    const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter);
+    query = query.select(selectFields);
   } else if (targetIdProperty !== 'id') {
     // If no field selection but custom idProperty, we need to alias it
     query = query.select('*', `${targetIdProperty} as id`);

@@ -100,6 +100,24 @@ export const RestApiKnexPlugin = {
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter;
     helpers.getStorageAdapter = getScopeStorageAdapter;
 
+    const createSelectTranslator = (adapter) => {
+      if (!adapter) return null;
+      return (field, alias) => {
+        if (field === '*') {
+          return alias ? `${alias}.*` : '*';
+        }
+        const translated = adapter.translateColumn(field);
+        const result = translated || field;
+        if (!alias) {
+          return result;
+        }
+        if (result.includes('.')) {
+          return result;
+        }
+        return `${alias}.${result}`;
+      };
+    };
+
     // Check database capabilities
     const hasWindowFunctions = await supportsWindowFunctions(knex);
     const dbInfo = await getDatabaseInfo(knex);
@@ -126,7 +144,7 @@ export const RestApiKnexPlugin = {
     
     // Register the three separate filter hooks
     // Dependencies object for the hooks
-    const polymorphicFiltersHookParams  = { log, scopes, knex };
+    const polymorphicFiltersHookParams  = { log, scopes, knex, getStorageAdapter: getScopeStorageAdapter };
     
     // Register in specific order: polymorphic → cross-table → basic
     // This ensures proper field qualification when JOINs are present
@@ -305,7 +323,14 @@ export const RestApiKnexPlugin = {
       let query = db(tableName).where(idProperty, id);
       
       // Apply field selection
-      query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, false);
+      const selectTranslator = createSelectTranslator(storageAdapter);
+      query = buildQuerySelection(
+        query,
+        tableName,
+        fieldSelectionInfo.fieldsToSelect,
+        false,
+        selectTranslator ? { translateColumn: selectTranslator } : undefined,
+      );
       
       const record = await query.first();
       
@@ -441,7 +466,14 @@ export const RestApiKnexPlugin = {
       // Start building query with table prefix (for JOIN support)
       let query = db(tableName);
 
-      query = buildQuerySelection(query, tableName, fieldSelectionInfo.fieldsToSelect, true);
+      const selectTranslator = createSelectTranslator(storageAdapter);
+      query = buildQuerySelection(
+        query,
+        tableName,
+        fieldSelectionInfo.fieldsToSelect,
+        true,
+        selectTranslator ? { translateColumn: selectTranslator } : undefined,
+      );
       
       /* ═══════════════════════════════════════════════════════════════════
        * FILTERING HOOKS
@@ -1040,13 +1072,8 @@ export const RestApiKnexPlugin = {
       const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
       
       // Strip non-database fields (computed and virtual) before database operation
-      console.log('[PATCH DEBUG] Before stripping:', {
-        mergedAttributes,
-        schemaFields: Object.keys(context.schemaInfo.schema?.fields || {})
-      });
       const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
 
-      console.log('[PATCH DEBUG] After stripping:', { finalAttributes });
       log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
       
       // Remove the idProperty from attributes to prevent updating the primary key

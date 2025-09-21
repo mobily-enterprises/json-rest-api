@@ -105,16 +105,6 @@ export default async function patchMethod({
       originalContext: context,
     });
 
-    // Debug: Log what's being patched
-    console.log('[PATCH DEBUG] Attempting to patch:', {
-      scopeName,
-      id: context.id,
-      attributes: context.inputRecord.data.attributes,
-      belongsToUpdates,
-      userId: context.auth?.userId,
-      authProvider: context.auth?.provider
-    });
-
     // Merge belongsTo updates into attributes before patching the record
     if (Object.keys(belongsToUpdates).length > 0) {
       context.inputRecord.data.attributes = {

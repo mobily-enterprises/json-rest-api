@@ -302,7 +302,8 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
           isOneToMany: true,
           isPolymorphic: false,
           relationshipField: foreignKey,
-          relationshipType: 'manyToMany_pivot'
+          relationshipType: 'manyToMany_pivot',
+          targetScopeName: through
         });
         
         const targetAlias = `${through}_to_${targetScope}_${targetScope}`;
@@ -315,7 +316,8 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
           isOneToMany: false,
           isPolymorphic: false,
           relationshipField: otherKey,
-          relationshipType: 'manyToMany_target'
+          relationshipType: 'manyToMany_target',
+          targetScopeName: targetScope
         });
       } else {
         const joinAlias = `${currentScope}_to_${targetScope}_${targetScope}`;
@@ -340,7 +342,8 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
           isOneToMany: relationshipType === 'hasMany' || relationshipType === 'hasManyPolymorphic',
           isPolymorphic: relationshipType === 'hasManyPolymorphic',
           relationshipField,
-          relationshipType
+          relationshipType,
+          targetScopeName: targetScope
         });
       }
       
@@ -364,7 +367,8 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
         targetField: targetFieldName,
         isOneToMany: joinChain.some(j => j.isOneToMany),
         isMultiLevel: true,
-        joinChain
+        joinChain,
+        targetScopeName: finalScope
       };
     } else {
       return {
@@ -374,7 +378,8 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
         targetField: targetFieldName,
         joinCondition: lastJoin.joinCondition,
         isOneToMany: lastJoin.isOneToMany,
-        isPolymorphic: lastJoin.isPolymorphic
+        isPolymorphic: lastJoin.isPolymorphic,
+        targetScopeName: lastJoin.targetScopeName || finalScope
       };
     }
   };

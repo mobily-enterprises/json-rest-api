@@ -13,6 +13,7 @@ import {
   assertResourceAttributes,
   assertResourceRelationship
 } from './helpers/test-utils.js';
+import { storageMode } from './helpers/storage-mode.js';
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -59,10 +60,12 @@ describe('Custom idProperty Relationship Operations', () => {
       assert(countryResult.data.id, 'Should have id field');
       assert(!countryResult.data.attributes.country_id, 'Should not expose country_id in attributes');
 
-      // Verify database has correct column
-      const dbCountry = await knex('custom_id_countries').first();
-      assert(dbCountry.country_id, 'Database should have country_id column');
-      assert.equal(String(dbCountry.country_id), countryResult.data.id);
+      // Verify database has correct column when using legacy storage
+      if (!storageMode.isAnyApi()) {
+        const dbCountry = await knex('custom_id_countries').first();
+        assert(dbCountry.country_id, 'Database should have country_id column');
+        assert.equal(String(dbCountry.country_id), countryResult.data.id);
+      }
 
       // Test GET
       const getResult = await api.resources.countries.get({
@@ -139,9 +142,11 @@ describe('Custom idProperty Relationship Operations', () => {
       assertResourceRelationship(publisherResult.data, 'country',
         resourceIdentifier('countries', countryResult.data.id));
 
-      // Verify database foreign key uses country_id
-      const dbPublisher = await knex('custom_id_publishers').first();
-      assert.equal(String(dbPublisher.country_id), countryResult.data.id);
+      // Verify database foreign key uses country_id in legacy mode
+      if (!storageMode.isAnyApi()) {
+        const dbPublisher = await knex('custom_id_publishers').first();
+        assert.equal(String(dbPublisher.country_id), countryResult.data.id);
+      }
 
       // Verify through GET with include
       const getResult = await api.resources.publishers.get({
@@ -266,15 +271,19 @@ describe('Custom idProperty Relationship Operations', () => {
       bookId = bookResult.data.id;
 
       // Verify pivot table has correct foreign keys
-      const pivotRecords = await knex('custom_id_book_authors').select('*');
-      assert.equal(pivotRecords.length, 2);
-      
-      // Check that book_id and author_id columns contain the right values
-      const bookIds = pivotRecords.map(r => r.book_id);
-      const authorIds = pivotRecords.map(r => r.author_id).sort();
-      
-      assert(bookIds.every(id => String(id) === bookId));
-      assert.deepEqual(authorIds.map(String).sort(), [author1Id, author2Id].sort());
+      if (!storageMode.isAnyApi()) {
+        const pivotRecords = await knex('custom_id_book_authors').select('*');
+        assert.equal(pivotRecords.length, 2);
+
+        const bookIds = pivotRecords.map((r) => r.book_id);
+        const authorIds = pivotRecords.map((r) => r.author_id).sort();
+
+        assert(bookIds.every((id) => String(id) === bookId));
+        assert.deepEqual(authorIds.map(String).sort(), [author1Id, author2Id].sort());
+      } else {
+        const pivotCount = await countRecords(knex, 'custom_id_book_authors');
+        assert.equal(pivotCount, 2);
+      }
 
       // Verify through GET with include
       const getResult = await api.resources.books.get({
@@ -388,11 +397,12 @@ describe('Custom idProperty Relationship Operations', () => {
       assert.equal(review.data.attributes.reviewable_type, 'books');
       assert.equal(String(review.data.attributes.reviewable_id), bookId);
 
-      // Verify database
-      const dbReview = await knex('custom_id_reviews').first();
-      assert.equal(dbReview.reviewable_type, 'books');
-      assert.equal(String(dbReview.reviewable_id), bookId);
-      assert(dbReview.review_id, 'Should have custom review_id column');
+      if (!storageMode.isAnyApi()) {
+        const dbReview = await knex('custom_id_reviews').first();
+        assert.equal(dbReview.reviewable_type, 'books');
+        assert.equal(String(dbReview.reviewable_id), bookId);
+        assert(dbReview.review_id, 'Should have custom review_id column');
+      }
     });
 
     it('should create polymorphic review for author with custom IDs', async () => {
@@ -441,8 +451,6 @@ describe('Custom idProperty Relationship Operations', () => {
           filters: { reviewable_type: 'books' }
         }
       });
-
-      debugger
       assert.equal(bookReviews.data.length, 1, `Expected 1 book review, got ${bookReviews.data.length}`);
       assert.equal(bookReviews.data[0].attributes.reviewable_type, 'books');
     });
@@ -808,8 +816,8 @@ describe('Custom idProperty Relationship Operations', () => {
       assert.equal(bookWithAuthors.included.length, 3);
       
       // Verify pivot table
-      const pivotCount = await knex('custom_id_book_authors').count('* as count').first();
-      assert.equal(pivotCount.count, 3);
+      const pivotCount = await countRecords(knex, 'custom_id_book_authors');
+      assert.equal(pivotCount, 3);
     });
 
     it('should handle DELETE operations with custom IDs', async () => {
@@ -845,8 +853,8 @@ describe('Custom idProperty Relationship Operations', () => {
       // The REST API correctly does NOT cascade delete pivot records
       // This is intentional - automatic cascade deletion would be dangerous
       // Pivot records remain and should be cleaned up by application logic if needed
-      const pivotCount = await knex('custom_id_book_authors').count('* as count').first();
-      assert.equal(pivotCount.count, 1, 'Pivot record should still exist');
+      const pivotCount = await countRecords(knex, 'custom_id_book_authors');
+      assert.equal(pivotCount, 1, 'Pivot record should still exist');
 
       // Verify author still exists
       const authorStillExists = await api.resources.authors.get({ id: author.data.id });

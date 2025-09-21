@@ -55,20 +55,55 @@
  * 4. Smaller result sets improve query performance
  * 5. JSON:API response includes only requested attributes
  */
-export const buildQuerySelection = (query, tableName, fieldsToSelect, useTablePrefix = false) => {
+export const buildQuerySelection = (
+  query,
+  tableName,
+  fieldsToSelect,
+  useTablePrefix = false,
+  options = {},
+) => {
+  const translateColumn = options.translateColumn;
+
+  const applyTranslation = (field, aliasForField) => {
+    if (translateColumn) {
+      const translated = translateColumn(field, aliasForField);
+      if (translated) {
+        return translated;
+      }
+    }
+
+    if (aliasForField) {
+      return `${aliasForField}.${field}`;
+    }
+    return field;
+  };
+
+  const targetAlias = useTablePrefix ? tableName : null;
+
   if (fieldsToSelect === '*') {
+    const translated = translateColumn ? translateColumn('*', targetAlias) : null;
+    if (translated) {
+      return query.select(translated);
+    }
     return useTablePrefix ? query.select(`${tableName}.*`) : query;
-  } else {
-    const fields = useTablePrefix 
-      ? fieldsToSelect.map(field => {
-          // Handle aliased fields (e.g., "user_id as id")
-          if (field.includes(' as ')) {
-            const [realField, alias] = field.split(' as ');
-            return `${tableName}.${realField.trim()} as ${alias.trim()}`;
-          }
-          return `${tableName}.${field}`;
-        })
-      : fieldsToSelect;
-    return query.select(fields);
   }
+
+  const fieldsArray = Array.isArray(fieldsToSelect)
+    ? fieldsToSelect
+    : Array.from(fieldsToSelect || []);
+
+  const translatedFields = fieldsArray.map((field) => {
+    if (typeof field !== 'string') return field;
+
+    const aliasMatch = field.match(/\s+as\s+/i);
+    if (aliasMatch) {
+      const [source, alias] = field.split(/\s+as\s+/i);
+      const translatedSource = applyTranslation(source.trim(), targetAlias);
+      return `${translatedSource} as ${alias.trim()}`;
+    }
+
+    return applyTranslation(field.trim(), targetAlias);
+  });
+
+  return query.select(translatedFields);
 };

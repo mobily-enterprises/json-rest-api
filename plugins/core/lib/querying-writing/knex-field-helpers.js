@@ -199,6 +199,10 @@ export const buildFieldSelection = async (scope, deps) => {
       
       const fieldDef = schemaStructure[field];
       if (!fieldDef) throw new Error(`Unknown sparse field '${field}' requested for '${scopeName}'`);
+
+      if (fieldDef.belongsToPolymorphic) {
+        return;
+      }
       
       // NEVER include hidden fields, even if explicitly requested
       // Example: password_hash with hidden:true is never returned
@@ -254,6 +258,9 @@ export const buildFieldSelection = async (scope, deps) => {
       // Example: password_hash with hidden:true
       if (fieldDef.hidden === true) return;
       
+      // Skip polymorphic placeholder fields - handled via type/id columns
+      if (fieldDef.belongsToPolymorphic) return;
+
       // Skip normallyHidden fields - these are hidden by default
       // Example: cost with normallyHidden:true (only returned when explicitly requested)
       if (fieldDef.normallyHidden === true) return;
@@ -385,4 +392,3 @@ export const getRequestedComputedFields = (scopeName, requestedFields, computedF
   // Return only requested computed fields that exist
   return requested.filter(field => allComputedFields.includes(field));
 };
-
