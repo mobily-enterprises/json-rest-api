@@ -1,5 +1,6 @@
 import { Api } from 'hooked-api';
 import { RestApiPlugin, RestApiKnexPlugin, RestApiYouapiKnexPlugin } from '../../index.js';
+import { AccessPlugin } from '../../plugins/core/rest-api-access.js';
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
 import express from 'express';
 import { createServer } from 'http';
@@ -158,6 +159,99 @@ export async function createBasicApi(knex, pluginOptions = {}) {
       inverseRelationshipKey,
     );
   }
+
+  return api;
+}
+
+export async function createAccessControlApi(knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'access-test-api';
+  const tablePrefix = pluginOptions.tablePrefix || 'access';
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry();
+  }
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  });
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
+    },
+    sortableFields: ['id', 'name', 'user_id']
+  });
+  await useStoragePlugin(api, knex);
+  await resetAnyApiTables(knex);
+
+  await api.use(AccessPlugin, pluginOptions.access || {});
+
+  await api.addResource('users', {
+    schema: {
+      id: { type: 'id' },
+      email: { type: 'string', required: true },
+      display_name: { type: 'string', nullable: true }
+    },
+    tableName: `${tablePrefix}_users`
+  });
+  await api.resources.users.createKnexTable();
+  mapTable(`${tablePrefix}_users`, 'users');
+
+  await api.addResource('projects', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true },
+      status: { type: 'string', nullable: true },
+      user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
+    },
+    relationships: {
+      user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
+    },
+    auth: {
+      query: ['authenticated'],
+      get: ['owns'],
+      post: ['authenticated'],
+      patch: ['owns'],
+      delete: ['owns']
+    },
+    ownership: true,
+    tableName: `${tablePrefix}_projects`
+  });
+  await api.resources.projects.createKnexTable();
+  mapTable(`${tablePrefix}_projects`, 'projects');
+
+  await api.addResource('notes', {
+    schema: {
+      id: { type: 'id' },
+      project_id: { type: 'number', belongsTo: 'projects', as: 'project', nullable: true },
+      body: { type: 'string', required: true },
+      user_id: { type: 'number', belongsTo: 'users', as: 'user', nullable: true }
+    },
+    relationships: {
+      project: { type: 'belongsTo', target: 'projects', foreignKey: 'project_id' },
+      user: { type: 'belongsTo', target: 'users', foreignKey: 'user_id' }
+    },
+    auth: {
+      query: ['authenticated'],
+      get: ['owns'],
+      post: ['authenticated'],
+      patch: ['owns'],
+      delete: ['owns']
+    },
+    ownership: true,
+    tableName: `${tablePrefix}_notes`
+  });
+  await api.resources.notes.createKnexTable();
+  mapTable(`${tablePrefix}_notes`, 'notes');
 
   return api;
 }
