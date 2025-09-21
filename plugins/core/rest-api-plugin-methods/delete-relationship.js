@@ -61,8 +61,8 @@ export default async function deleteRelationshipMethod({ params, context, vars, 
 
     // Remove relationships
     if (relDef?.through) {
-      if (api.youapi?.links?.removeMany) {
-        await api.youapi.links.removeMany({
+      if (api.anyapi?.links?.removeMany) {
+        await api.anyapi.links.removeMany({
           context,
           scopeName,
           relName: context.relationshipName,

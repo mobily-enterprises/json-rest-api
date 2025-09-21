@@ -1,5 +1,5 @@
 import { ensureAnyApiSchema } from '../anyapi/schema-utils.js';
-import { YouapiRegistry } from '../anyapi/youapi-registry.js';
+import { AnyapiRegistry } from '../anyapi/anyapi-registry.js';
 import { RestApiValidationError } from '../../lib/rest-api-errors.js';
 import { createSchema } from 'json-rest-schema';
 import {
@@ -22,9 +22,9 @@ import {
   ensureFilterableField,
 } from '../anyapi/utils/descriptor-helpers.js';
 import {
-  YouapiQueryAdapter,
+  AnyapiQueryAdapter,
   preloadRelatedDescriptors,
-} from '../anyapi/query/youapi-query-adapter.js';
+} from '../anyapi/query/anyapi-query-adapter.js';
 import {
   ensureSearchFieldsAreIndexed,
   generateSearchSchemaFromSchema,
@@ -40,8 +40,8 @@ import { createStorageAdapter } from './lib/storage/storage-adapter.js';
 const DEFAULT_TENANT = 'default';
 const LINKS_TABLE = 'any_links';
 
-export const RestApiYouapiKnexPlugin = {
-  name: 'rest-api-youapi-knex',
+export const RestApiAnyapiKnexPlugin = {
+  name: 'rest-api-anyapi-knex',
   dependencies: ['rest-api'],
 
   async install({ helpers, vars, pluginOptions, api, log, addHook, addScopeMethod, scopes }) {
@@ -50,16 +50,16 @@ export const RestApiYouapiKnexPlugin = {
     const tenantId = options.tenantId || DEFAULT_TENANT;
 
     if (!knex) {
-      throw new Error('YouapiKnexPlugin requires a knex instance');
+      throw new Error('AnyapiKnexPlugin requires a knex instance');
     }
 
     await ensureAnyApiSchema(knex);
 
-    const registry = new YouapiRegistry({ knex, log });
+    const registry = new AnyapiRegistry({ knex, log });
 
-    api.youapi = api.youapi || {};
-    api.youapi.registry = registry;
-    api.youapi.tenantId = tenantId;
+    api.anyapi = api.anyapi || {};
+    api.anyapi.registry = registry;
+    api.anyapi.tenantId = tenantId;
     api.knex = {
       instance: knex,
       helpers: {},
@@ -93,7 +93,7 @@ export const RestApiYouapiKnexPlugin = {
 
     helpers.newTransaction = async () => knex.transaction();
 
-    addHook('release', 'youapi-knex-release', {}, async ({ api }) => {
+    addHook('release', 'anyapi-knex-release', {}, async ({ api }) => {
       if (api.knex?.instance) {
         await api.knex.instance.destroy();
       }
@@ -745,7 +745,7 @@ export const RestApiYouapiKnexPlugin = {
       }
     };
 
-    api.youapi.links = {
+    api.anyapi.links = {
       attachMany: async ({ context, scopeName, relName, relDef, relData }) => {
         const info = await getManyToManyInfo(scopeName, relName);
         if (!info) {
@@ -1814,7 +1814,7 @@ export const RestApiYouapiKnexPlugin = {
       const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
       context.resourceToTableName = resourceToTableName;
       const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor });
-      const adapter = new YouapiQueryAdapter({
+      const adapter = new AnyapiQueryAdapter({
         descriptor,
         db,
         registry,
@@ -2024,7 +2024,7 @@ export const RestApiYouapiKnexPlugin = {
       const db = context.db || context.transaction || api.knex.instance;
       const { resourceToTableName, tableNameToResource } = buildTableNameMaps();
       const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor });
-      const adapter = new YouapiQueryAdapter({
+      const adapter = new AnyapiQueryAdapter({
         descriptor,
         db,
         registry,
@@ -2044,7 +2044,7 @@ export const RestApiYouapiKnexPlugin = {
       return Number(count);
     };
 
-    addHook('scope:added', 'youapi-register-resource', { sequence: 50 }, async ({ context }) => {
+    addHook('scope:added', 'anyapi-register-resource', { sequence: 50 }, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context;
       const scope = api.scopes?.[scopeName] || scopes?.[scopeName];
       const stored = scopeOptionsRegistry.get(scopeName) || {};
@@ -2218,7 +2218,7 @@ export const RestApiYouapiKnexPlugin = {
     });
 
     addScopeMethod('alterKnexFields', async () => {
-      throw new Error('alterKnexFields is not supported by YouAPI Knex plugin yet');
+      throw new Error('alterKnexFields is not supported by AnyAPI Knex plugin yet');
     });
   },
 };

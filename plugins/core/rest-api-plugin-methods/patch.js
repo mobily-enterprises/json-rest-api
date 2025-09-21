@@ -139,8 +139,8 @@ export default async function patchMethod({
     // Process many-to-many relationships after main record update
     // For PATCH, we only update the relationships that were explicitly provided
     for (const { relName, relDef, relData } of manyToManyRelationships) {
-      if (relDef?.through && api.youapi?.links?.syncMany) {
-        await api.youapi.links.syncMany({
+      if (relDef?.through && api.anyapi?.links?.syncMany) {
+        await api.anyapi.links.syncMany({
           context,
           scopeName,
           relName,

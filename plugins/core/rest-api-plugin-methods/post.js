@@ -115,8 +115,8 @@ export default async function postMethod({
     
     // Process many-to-many relationships after main record creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
-      if (api.youapi?.links?.attachMany && relDef?.through) {
-        await api.youapi.links.attachMany({
+      if (api.anyapi?.links?.attachMany && relDef?.through) {
+        await api.anyapi.links.attachMany({
           context,
           scopeName,
           relName,

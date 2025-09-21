@@ -201,7 +201,7 @@ export async function preloadRelatedDescriptors({ registry, descriptor }) {
   return visited;
 }
 
-export class YouapiQueryAdapter {
+export class AnyapiQueryAdapter {
   constructor({
     descriptor,
     db,

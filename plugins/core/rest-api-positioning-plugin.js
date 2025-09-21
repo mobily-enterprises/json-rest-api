@@ -8,21 +8,21 @@ import { createStorageAdapter } from './lib/storage/storage-adapter.js';
 
 export const PositioningPlugin = {
   name: 'positioning',
-  dependencies: ['rest-api', 'rest-api-knex|rest-api-youapi-knex'],
+  dependencies: ['rest-api', 'rest-api-knex|rest-api-anyapi-knex'],
 
   install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
 
     const installedPlugins = Array.from(api._installedPlugins || []);
     const legacyStorageInstalled = installedPlugins.includes('rest-api-knex');
-    const canonicalStorageInstalled = installedPlugins.includes('rest-api-youapi-knex');
+    const canonicalStorageInstalled = installedPlugins.includes('rest-api-anyapi-knex');
     if (!legacyStorageInstalled && !canonicalStorageInstalled) {
       throw new Error(
-        "Positioning plugin requires either 'rest-api-knex' or 'rest-api-youapi-knex' to be installed before it."
+        "Positioning plugin requires either 'rest-api-knex' or 'rest-api-anyapi-knex' to be installed before it."
       );
     }
 
     if (!api.knex?.instance) {
-      throw new Error('Positioning plugin requires a storage plugin with knex support (rest-api-knex or rest-api-youapi-knex)');
+      throw new Error('Positioning plugin requires a storage plugin with knex support (rest-api-knex or rest-api-anyapi-knex)');
     }
 
     // Get configuration - hooked-api namespaces options by plugin name

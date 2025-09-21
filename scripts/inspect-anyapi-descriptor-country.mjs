@@ -4,7 +4,7 @@ import { createCustomIdPropertyApi } from '../tests/fixtures/api-configs.js';
 async function run() {
   const knex = knexLib({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const api = await createCustomIdPropertyApi(knex);
-  const descriptor = await api.youapi.registry.getDescriptor('default', 'countries');
+  const descriptor = await api.anyapi.registry.getDescriptor('default', 'countries');
   console.log(JSON.stringify({
     idProperty: descriptor.idProperty,
     fields: descriptor.fields,

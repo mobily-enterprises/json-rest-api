@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import knexLib from 'knex';
 import { Api } from 'hooked-api';
 
-import { RestApiPlugin, RestApiYouapiKnexPlugin } from '../index.js';
+import { RestApiPlugin, RestApiAnyapiKnexPlugin } from '../index.js';
 import { ensureAnyApiSchema } from '../plugins/anyapi/schema-utils.js';
 
 const knex = knexLib({
@@ -14,14 +14,14 @@ const knex = knexLib({
 
 let api;
 
-describe('YouAPI Knex Plugin - Basic Attributes', () => {
+describe('AnyAPI Knex Plugin - Basic Attributes', () => {
   before(async () => {
     try {
       await ensureAnyApiSchema(knex);
 
-      api = new Api({ name: 'youapi-test', log: { level: 'warn' } });
+      api = new Api({ name: 'anyapi-test', log: { level: 'warn' } });
       await api.use(RestApiPlugin, { simplifiedApi: false, simplifiedTransport: false });
-      await api.use(RestApiYouapiKnexPlugin, { knex });
+      await api.use(RestApiAnyapiKnexPlugin, { knex });
 
       await api.addResource('countries', {
         schema: {

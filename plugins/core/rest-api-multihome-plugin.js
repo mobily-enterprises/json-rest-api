@@ -5,7 +5,7 @@ export const MultiHomePlugin = {
     install({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
 
       if (!api.knex?.instance) {
-        throw new Error('Multihome plugin requires a storage plugin with knex support (rest-api-knex or rest-api-youapi-knex)');
+        throw new Error('Multihome plugin requires a storage plugin with knex support (rest-api-knex or rest-api-anyapi-knex)');
       }
 
       // Get configuration - hooked-api namespaces options by plugin name

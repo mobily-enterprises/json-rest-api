@@ -236,8 +236,8 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
   // Handle many-to-many relationships
   // For example: GET /api/authors/1/books (where authors and books are linked via book_authors)
   if (relDef?.through) {
-    if (api.youapi?.links?.listMany) {
-      const identifiers = await api.youapi.links.listMany({
+    if (api.anyapi?.links?.listMany) {
+      const identifiers = await api.anyapi.links.listMany({
         context,
         scopeName,
         relName: context.relationshipName,

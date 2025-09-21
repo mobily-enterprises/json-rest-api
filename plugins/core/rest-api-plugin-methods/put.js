@@ -197,8 +197,8 @@ export default async function putMethod({
 
     // Process many-to-many relationships after main record update/creation
     for (const { relName, relDef, relData } of manyToManyRelationships) {
-      if (relDef?.through && api.youapi?.links?.syncMany) {
-        await api.youapi.links.syncMany({
+      if (relDef?.through && api.anyapi?.links?.syncMany) {
+        await api.anyapi.links.syncMany({
           context,
           scopeName,
           relName,

@@ -56,10 +56,10 @@ const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
   return { slotType: 'belongsTo', slotIndex: index, idColumn: idSlot, typeColumn: actualTypeSlot };
 };
 
-export class YouapiRegistry {
+export class AnyapiRegistry {
   constructor({ knex, log } = {}) {
     if (!knex) {
-      throw new Error('YouapiRegistry requires a knex instance');
+      throw new Error('AnyapiRegistry requires a knex instance');
     }
     this.knex = knex;
     this.log = log || console;
@@ -293,13 +293,13 @@ export class YouapiRegistry {
   #validateDefinition(definition) {
     const { tenant, resource, schema } = definition || {};
     if (!tenant || typeof tenant !== 'string') {
-      throw new Error('YouapiRegistry.registerResource requires a tenant string');
+      throw new Error('AnyapiRegistry.registerResource requires a tenant string');
     }
     if (!resource || typeof resource !== 'string') {
-      throw new Error('YouapiRegistry.registerResource requires a resource string');
+      throw new Error('AnyapiRegistry.registerResource requires a resource string');
     }
     if (!schema || typeof schema !== 'object') {
-      throw new Error('YouapiRegistry.registerResource requires a schema object');
+      throw new Error('AnyapiRegistry.registerResource requires a schema object');
     }
   }
 

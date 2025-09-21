@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin, RestApiYouapiKnexPlugin } from '../../index.js';
+import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../../index.js';
 import { AccessPlugin } from '../../plugins/core/rest-api-access.js';
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js';
 import express from 'express';
@@ -20,10 +20,10 @@ async function useStoragePlugin(api, knex, { tenantId } = {}) {
   if (storageMode.isAnyApi()) {
     await ensureAnyApiSchema(knex);
     const sanitizedName = api?.name ? api.name.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() : 'tenant';
-    const effectiveTenantId = tenantId || api?.youapi?.tenantId || `${sanitizedName}_tenant`;
-    api.youapi = api.youapi || {};
-    api.youapi.tenantId = effectiveTenantId;
-    await api.use(RestApiYouapiKnexPlugin, { knex, tenantId: effectiveTenantId });
+    const effectiveTenantId = tenantId || api?.anyapi?.tenantId || `${sanitizedName}_tenant`;
+    api.anyapi = api.anyapi || {};
+    api.anyapi.tenantId = effectiveTenantId;
+    await api.use(RestApiAnyapiKnexPlugin, { knex, tenantId: effectiveTenantId });
     storageMode.setCurrentTenant(effectiveTenantId);
   } else {
     await api.use(RestApiKnexPlugin, { knex });
@@ -175,9 +175,9 @@ export async function createBasicApi(knex, pluginOptions = {}) {
   await api.resources.book_authors.createKnexTable();
   mapTable(`${tablePrefix}_book_authors`, 'book_authors');
   if (storageMode.isAnyApi()) {
-    const descriptorTenant = api.youapi?.tenantId || tenantId;
-    const booksDescriptor = await api.youapi.registry.getDescriptor(descriptorTenant, 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor(descriptorTenant, 'authors');
+    const descriptorTenant = api.anyapi?.tenantId || tenantId;
+    const booksDescriptor = await api.anyapi.registry.getDescriptor(descriptorTenant, 'books');
+    const authorsDescriptor = await api.anyapi.registry.getDescriptor(descriptorTenant, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink(
@@ -463,8 +463,8 @@ export async function createExtendedApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('ext_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const booksDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'authors');
+    const booksDescriptor = await api.anyapi.registry.getDescriptor(tenantId, 'books');
+    const authorsDescriptor = await api.anyapi.registry.getDescriptor(tenantId, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink('ext_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
@@ -600,8 +600,8 @@ export async function createLimitedDepthApi(knex) {
   await api.resources.book_authors.createKnexTable();
   mapTable('limited_book_authors', 'book_authors');
   if (storageMode.isAnyApi()) {
-    const booksDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenantId, 'authors');
+    const booksDescriptor = await api.anyapi.registry.getDescriptor(tenantId, 'books');
+    const authorsDescriptor = await api.anyapi.registry.getDescriptor(tenantId, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink('limited_book_authors', 'books', 'authors', relationshipKey, inverseRelationshipKey);
@@ -1656,8 +1656,8 @@ export async function createCustomIdPropertyApi(knex, pluginOptions = {}) {
 
   if (storageMode.isAnyApi()) {
     const tenant = storageMode.defaultTenant || 'default';
-    const booksDescriptor = await api.youapi.registry.getDescriptor(tenant, 'books');
-    const authorsDescriptor = await api.youapi.registry.getDescriptor(tenant, 'authors');
+    const booksDescriptor = await api.anyapi.registry.getDescriptor(tenant, 'books');
+    const authorsDescriptor = await api.anyapi.registry.getDescriptor(tenant, 'authors');
     const relationshipKey = booksDescriptor?.manyToMany?.authors?.relationship;
     const inverseRelationshipKey = authorsDescriptor?.manyToMany?.books?.relationship;
     storageMode.registerLink(

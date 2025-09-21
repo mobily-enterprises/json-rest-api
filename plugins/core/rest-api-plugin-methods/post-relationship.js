@@ -62,8 +62,8 @@ import { createPivotRecords } from "../lib/writing/many-to-many-manipulations.js
 
   // Add relationships
   if (relDef?.through) {
-      if (api.youapi?.links?.attachMany) {
-        await api.youapi.links.attachMany({
+      if (api.anyapi?.links?.attachMany) {
+        await api.anyapi.links.attachMany({
           context,
           scopeName,
           relName: context.relationshipName,
