@@ -24,6 +24,60 @@ export const AccessPlugin = {
 
     const ownershipField = () => config.ownership.field
 
+    const evaluateOwnership = ({ record, field, schemaInfo, userId }) => {
+      if (!record) return 'unknown'
+
+      debugger
+      const idProperty = schemaInfo?.idProperty || 'id'
+      const schemaStructure = schemaInfo?.schemaStructure || {}
+      const schemaRelationships = schemaInfo?.schemaRelationships || {}
+
+      const matchesUser = (value) => value !== undefined && value !== null && String(value) === userId
+
+      if (field === idProperty) {
+        if (record.id === undefined || record.id === null) {
+          return 'unknown'
+        }
+        return matchesUser(record.id) ? 'match' : 'mismatch'
+      }
+
+      const fieldSchema = schemaStructure[field]
+
+      if (record.type && record.attributes && fieldSchema && !fieldSchema.belongsTo) {
+        const attributeValue = record.attributes[field]
+        if (attributeValue !== undefined && attributeValue !== null) {
+          return matchesUser(attributeValue) ? 'match' : 'mismatch'
+        }
+      }
+
+      let relationshipName
+      if (fieldSchema?.belongsTo) {
+        relationshipName = fieldSchema.as || field
+      } else if (schemaRelationships[field]) {
+        relationshipName = field
+      }
+
+      if (!relationshipName) {
+        return 'unknown'
+      }
+
+      const relationship = record.relationships?.[relationshipName]
+      const relData = relationship?.data
+      if (!relData) {
+        return 'unknown'
+      }
+
+      if (Array.isArray(relData)) {
+        return relData.some((item) => matchesUser(item?.id)) ? 'match' : 'mismatch'
+      }
+
+      if (relData?.id === undefined || relData?.id === null) {
+        return 'unknown'
+      }
+
+      return matchesUser(relData.id) ? 'match' : 'mismatch'
+    }
+
     const resolveStorageAdapter = (scopeName, hookContext = {}) => {
       if (!scopeName) return null
 
@@ -62,31 +116,24 @@ export const AccessPlugin = {
       state.authCheckers.set('owns', (context, { existingRecord, scopeVars }) => {
         if (context.auth?.system === true) return true
         if (!context.auth?.userId) return false
+        if (context.method === 'post') return true
 
-        const record = existingRecord || context.attributes
+        // Minimal record is always prepared upstream (dataGetMinimal for reads, request payload snapshot for POST).
+        const record = existingRecord
         if (!record) return true
 
+        const userId = String(context.auth.userId)
         const field = scopeVars?.ownershipField || ownershipField()
+        const schemaInfo = scopeVars?.schemaInfo || {}
 
-        if (record.type && record.attributes) {
-          const value = field === 'id' ? record.id : record.attributes[field]
-          if (value !== undefined && value !== null) {
-            return String(value) === String(context.auth.userId)
-          }
+        const ownershipStatus = evaluateOwnership({
+          record,
+          field,
+          schemaInfo,
+          userId
+        })
 
-          if (record.relationships) {
-            const relationshipName = field.replace(/_id$/, '')
-            const relationship = record.relationships[relationshipName]
-            if (relationship?.data?.id) {
-              return String(relationship.data.id) === String(context.auth.userId)
-            }
-          }
-          return false
-        }
-
-        const value = record[field]
-        if (value === undefined || value === null) return false
-        return String(value) === String(context.auth.userId)
+        return ownershipStatus === 'match'
       })
     }
 
@@ -99,6 +146,7 @@ export const AccessPlugin = {
       const auth = context.scopeOptions?.auth
       if (!auth) return
 
+      debugger
       scope.vars.authRules = auth
       scope.vars.ownershipField = context.scopeOptions?.ownershipField
 
@@ -118,7 +166,7 @@ export const AccessPlugin = {
       if (scopeOptions?.ownership === false) return
 
       const field = ownershipField()
-      const relationshipName = (fields[field]?.as) || field.replace(/_id$/, '') || 'owner'
+      const relationshipName = fields[field]?.as || fields[field]?.belongsTo || field
 
       if (fields[field]) {
         if (!fields[field].belongsTo) {
@@ -133,7 +181,7 @@ export const AccessPlugin = {
       fields[field] = {
         type: 'integer',
         belongsTo: config.ownership.userResource,
-        as: relationshipName,
+        ...(relationshipName ? { as: relationshipName } : {}),
         nullable: true,
         indexed: true,
         description: 'Automatically managed ownership field'
@@ -169,7 +217,7 @@ export const AccessPlugin = {
       const relationships = context.inputRecord.data.relationships = context.inputRecord.data.relationships || {}
       const attributes = context.inputRecord.data.attributes = context.inputRecord.data.attributes || {}
 
-      const relationshipName = fieldSchema.as || field.replace(/_id$/, '')
+      const relationshipName = fieldSchema.as || fieldSchema.belongsTo || field
 
       if (fieldSchema.belongsTo) {
         relationships[relationshipName] = {
@@ -237,6 +285,7 @@ export const AccessPlugin = {
 
     addHook('checkPermissions', 'rest-auth-enforce', { sequence: -100 }, async ({ context, scope, scopeName }) => {
       const operation = context.method
+      debugger
       const scopeVars = scope?.vars
       const authRules = scopeVars?.authRules
       const minimalRecord = context.originalContext?.minimalRecord
@@ -251,6 +300,7 @@ export const AccessPlugin = {
       const failures = []
 
       for (const rule of rules) {
+        // if (rule === 'owns') debugger
         try {
           const [checkerName, ...paramParts] = rule.split(':')
           const checker = state.authCheckers.get(checkerName)
@@ -299,7 +349,7 @@ export const AccessPlugin = {
       if (scopeOptions?.ownership === false) return
 
       const field = ownershipField()
-      const schemaInfo = scope?.vars?.schemaInfo
+      const schemaInfo = scope?.vars?.schemaInfo || {}
       const hasField = !!schemaInfo?.schemaStructure?.[field]
       const shouldCheck = scopeOptions?.ownership === true || (scopeOptions?.ownership === undefined && hasField)
       if (!shouldCheck) return
@@ -307,8 +357,25 @@ export const AccessPlugin = {
       const record = context.originalContext?.minimalRecord
       if (!record) return
 
-      const ownerId = record.attributes?.[field]
-      if (ownerId && String(ownerId) !== String(auth.userId)) {
+      const idProperty = schemaInfo.idProperty || 'id'
+      const userId = String(auth.userId)
+
+      // Ownership by primary key (e.g., users modifying themselves)
+      if (field === idProperty) {
+        if (record.id !== undefined && record.id !== null && String(record.id) !== userId) {
+          throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
+        }
+        return
+      }
+
+      const ownershipStatus = evaluateOwnership({
+        record,
+        field,
+        schemaInfo,
+        userId
+      })
+
+      if (ownershipStatus === 'mismatch') {
         throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
       }
     })

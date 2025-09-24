@@ -1,19 +1,34 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The public entry point `index.js` re-exports the core plugins that live in `plugins/` (REST API, access, CORS, file handling, connectors). Shared utilities and error classes sit under `lib/`. Scenario-driven examples are in `examples/`, while longer-form references and comparison guides stay in `docs/`. Automated tests target `tests/*.test.js`, backed by shared fixtures in `tests/fixtures/` and helpers in `tests/helpers/`. Scripts used during development are in `scripts/`, and `quickTest.js` provides a minimal end-to-end demo.
+- `index.js` re-exports the public plugins from `plugins/` (REST API core, access, CORS, file, connectors) so new features slot in there.
+- Shared helpers and error types live in `lib/`; reuse or extend these modules before adding new utilities elsewhere.
+- Scenario walkthroughs are under `examples/`, long-form references stay in `docs/`, and development scripts reside in `scripts/`.
+- Tests sit in `tests/` with fixtures at `tests/fixtures/`, helpers in `tests/helpers/`, and `quickTest.js` provides a throwaway API for manual poking.
 
 ## Build, Test, and Development Commands
-Run `npm test` to execute the Node test runner (`node --test tests/*.test.js`) against the in-memory SQLite fixtures. Use `npm run docs` to rebuild the static documentation via `scripts/run-docs.js`. `npm run sloc` gives a quick surface area snapshot before PRs, and `node quickTest.js` spins up a throwaway API for manual exploration.
+- `npm test` runs `node --test tests/*.test.js` against the in-memory SQLite fixtures; run it before every push.
+- `node quickTest.js` spins up an in-memory API instance for experimenting with endpoints during development.
+- `npm run docs` rebuilds the static docs via `scripts/run-docs.js` whenever reference prose changes.
+- `npm run sloc` prints a line-count summary to gauge change size before opening a PR.
 
 ## Coding Style & Naming Conventions
-Follow the repository’s ESM-first layout (`"type": "module"`) and two-space indentation. Prefer descriptive resource and file names, mirroring existing patterns such as `rest-api-knex-plugin.js`. Keep exports explicit from modules; avoid default exports. Tests and fixtures use lower-kebab case (`bulk-operations.test.js`, `api-configs.js`), so mirror that convention when adding new files.
+- Stay with ESM (`"type": "module"`) and export named symbols only; avoid `default` exports for predictable tree-shaking.
+- Use two-space indentation and keep existing spacing in JSON fixtures and migration files.
+- Name runtime files in lower-kebab case (e.g., `rest-api-knex-plugin.js`) and mirror that pattern for tests like `bulk-operations.test.js`.
+- Keep comments brief and reserved for decisions that are not obvious from the code.
 
 ## Testing Guidelines
-Tests must instantiate APIs once per suite (see `tests/TEST_TEMPLATE.test.js`) and reset state with `cleanTables()` in `beforeEach`. Create resources exclusively through API helpers declared in `tests/fixtures/api-configs.js`; never call `api.addResource` inside test files. Always run in strict JSON:API mode (`simplified: false`) unless a test explicitly covers simplified behaviour, and validate responses with the helper assertions. Limit direct database access to the provided counting and cleanup utilities.
+- Instantiate the API once per suite following `tests/TEST_TEMPLATE.test.js`, and call `cleanTables()` in `beforeEach` to reset state.
+- Seed data through helpers in `tests/fixtures/api-configs.js`; never invoke `api.addResource` directly in test code.
+- Run suites in strict JSON:API mode (`simplified: false`) unless the scenario explicitly covers the simplified flag.
+- Prefer the shared assertion helpers for response checks to keep expectations consistent.
 
 ## Commit & Pull Request Guidelines
-Follow the existing concise, capitalised commit subjects (e.g., `Auth moved out`, `Security improvements`). Group logical changes per commit and mention affected plugins or connectors directly. Pull requests should include: a short summary, linked issue (if any), a list of impacted resources/plugins, test evidence (`npm test` output or reasoning for omissions), and notes for downstream integrators when API contracts shift. Attach screenshots or example payloads for HTTP-visible changes.
+- Use concise, capitalised commit subjects that highlight the affected area (e.g., `Access rules tightened`) and group related changes per commit.
+- Pull requests should include a short summary, linked issue reference, impacted plugins or resources, and `npm test` output or the reason it was skipped.
+- Document externally visible updates with sample payloads or screenshots, and note configuration changes in `docs/` for downstream teams.
 
 ## Security & Configuration Tips
-Do not commit secrets or environment-specific connection strings; prefer local `.env` files ignored by Git. Keep optional peer dependencies (`express`, `redis`, `socket.io`, etc.) updated when exercising those connectors. When adding new storage adapters or auth flows, document the necessary configuration toggles in `docs/` and ensure cross-origin rules in `plugins/core/rest-api-cors-plugin.js` stay restrictive by default.
+- Keep secrets in local `.env` files; never commit environment-specific strings.
+- When adding connectors or auth flows, review `plugins/core/rest-api-cors-plugin.js`, update optional peers (`express`, `redis`, `socket.io`) if required, and document new toggles in `docs/`.

@@ -392,12 +392,8 @@ export const PositioningPlugin = {
         ? context.inputRecord
         : {};
 
-      const minimalAttributes = context.minimalRecord?.attributes
-        || context.minimalRecord?.data?.attributes
-        || {};
-      const minimalRelationships = context.minimalRecord?.relationships
-        || context.minimalRecord?.data?.relationships
-        || {};
+      const minimalAttributes = context.minimalRecord?.attributes || {};
+      const minimalRelationships = context.minimalRecord?.relationships || {};
 
       const combinedAttributes = {
         ...minimalAttributes,

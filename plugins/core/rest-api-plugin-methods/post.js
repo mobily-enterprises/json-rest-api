@@ -84,6 +84,16 @@ export default async function postMethod({
       runHooks
     });
 
+    if (context.inputRecord?.data) {
+      const inputData = context.inputRecord.data;
+      context.minimalRecord = {
+        type: scopeName,
+        ...(inputData.id !== undefined && inputData.id !== null ? { id: String(inputData.id) } : {}),
+        attributes: structuredClone(inputData.attributes || {}),
+        relationships: structuredClone(inputData.relationships || {})
+      };
+    }
+
     // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'post',

@@ -610,6 +610,7 @@ Used for creating new resources.
 - Can set defaults or compute values
 
 **Note**: After validation, attributes are stored in `context.inputRecord.data.attributes`, not directly in `context.attributes`.
+**Note**: `context.minimalRecord` is always a JSON:API resource object; for POST requests it is a snapshot of the incoming payload (`{ type, id?, attributes, relationships }`).
 
 **Example**:
 ```javascript
@@ -780,7 +781,7 @@ hooks: {
     if (context.method === 'put' && context.inputRecord) {
       // Prevent changing the author (check if belongsTo relationship changed)
       const newAuthorId = context.belongsToUpdates?.author_id;
-      const currentAuthorId = context.minimalRecord?.data?.relationships?.author?.data?.id;
+      const currentAuthorId = context.minimalRecord?.relationships?.author?.data?.id;
       if (newAuthorId && newAuthorId !== currentAuthorId) {
         throw new Error('Cannot change post author');
       }
@@ -898,7 +899,7 @@ Used for partially updating a resource.
 - `belongsToUpdates` - Modify foreign key values (if any)
 - Can add computed values or prevent updates
 
-**Note**: For PATCH, `context.inputRecord.data.attributes` contains only the fields being updated. Use `context.minimalRecord.data.attributes` to access the complete current record.
+**Note**: For PATCH, `context.inputRecord.data.attributes` contains only the fields being updated. Use `context.minimalRecord.attributes` to access the complete current record.
 
 **Example**:
 ```javascript
@@ -907,7 +908,7 @@ hooks: {
     if (context.method === 'patch' && context.inputRecord) {
       // If status is being changed to published, set publish date
       if (context.inputRecord.data.attributes.status === 'published' && 
-          context.minimalRecord?.data?.attributes?.status !== 'published') {
+        context.minimalRecord?.attributes?.status !== 'published') {
         context.inputRecord.data.attributes.published_at = new Date().toISOString();
       }
       
@@ -1486,4 +1487,3 @@ hooks: {
 ---
 
 [Back to Guide](./README.md)
-

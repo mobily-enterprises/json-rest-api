@@ -5,7 +5,6 @@
  */
 export default async function checkPermissionsMethod({ context, params, runHooks, scopeName, scopes, helpers }) {
  
-  debugger
   Object.assign(context, {
     method: params.method,
     originalContext: params.originalContext,
