@@ -179,7 +179,7 @@ export const AccessPlugin = {
       }
 
       fields[field] = {
-        type: 'integer',
+        type: 'number',
         belongsTo: config.ownership.userResource,
         ...(relationshipName ? { as: relationshipName } : {}),
         nullable: true,
