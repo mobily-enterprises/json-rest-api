@@ -1,12 +1,12 @@
-import { getSchemaStructure } from '../querying-writing/knex-constants.js';
+import { getSchemaStructure } from '../querying-writing/knex-constants.js'
 
 /**
  * Processes belongsTo relationships from JSON:API input to foreign key updates
- * 
+ *
  * @param {Object} scope - The scope object containing schema info
  * @param {Object} deps - Dependencies object containing context with inputRecord
  * @returns {Object} Object mapping foreign key fields to their values
- * 
+ *
  * @example
  * // Input: JSON:API document with relationships
  * const inputRecord = {
@@ -23,18 +23,18 @@ import { getSchemaStructure } from '../querying-writing/knex-constants.js';
  *     }
  *   }
  * };
- * 
+ *
  * // Schema has: author_id field with belongsTo: 'users', as: 'author'
  * // Schema has: category_id field with belongsTo: 'categories', as: 'category'
- * 
+ *
  * const updates = processBelongsToRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Foreign key values extracted
  * // {
  * //   author_id: '123',
  * //   category_id: '456'
  * // }
- * 
+ *
  * @example
  * // Input: Removing a relationship (setting to null)
  * const inputRecord = {
@@ -48,26 +48,26 @@ import { getSchemaStructure } from '../querying-writing/knex-constants.js';
  *     }
  *   }
  * };
- * 
+ *
  * const updates = processBelongsToRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Foreign key set to null
  * // {
  * //   author_id: null
  * // }
- * 
+ *
  * @description
  * Used by:
  * - rest-api-knex-plugin's dataPut and dataPatch methods
  * - Called before saving to extract foreign keys from JSON:API relationships
  * - Works in conjunction with relationship-processor for complete handling
- * 
+ *
  * Purpose:
  * - Converts JSON:API relationship format to database foreign keys
  * - Maps from relationship names (e.g., 'author') to field names (e.g., 'author_id')
  * - Handles both setting relationships (with id) and removing them (null)
  * - Only processes belongsTo relationships, not hasMany
- * 
+ *
  * Data flow:
  * 1. Receives JSON:API document with relationships section
  * 2. Looks up schema to find foreign key fields
@@ -76,35 +76,35 @@ import { getSchemaStructure } from '../querying-writing/knex-constants.js';
  * 5. Returns object ready to merge with attributes for database update
  */
 export const processBelongsToRelationships = (scope, deps) => {
-  const foreignKeyUpdates = {};
-  
+  const foreignKeyUpdates = {}
+
   // Extract values from deps
-  const { context } = deps;
-  const inputRecord = context.inputRecord;
-  
+  const { context } = deps
+  const inputRecord = context.inputRecord
+
   if (!inputRecord.data.relationships) {
-    return foreignKeyUpdates;
+    return foreignKeyUpdates
   }
-  
+
   // Extract schema from scope
-  const { 
-    vars: { 
+  const {
+    vars: {
       schemaInfo: { schema }
     }
-  } = scope;
-  
+  } = scope
+
   // Schema might be a Schema object or plain object
-  const schemaStructure = getSchemaStructure(schema);
-  
+  const schemaStructure = getSchemaStructure(schema)
+
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (fieldDef.belongsTo && fieldDef.as) {
-      const relName = fieldDef.as;
+      const relName = fieldDef.as
       if (inputRecord.data.relationships[relName] !== undefined) {
-        const relData = inputRecord.data.relationships[relName];
-        foreignKeyUpdates[fieldName] = relData.data?.id || null;
+        const relData = inputRecord.data.relationships[relName]
+        foreignKeyUpdates[fieldName] = relData.data?.id || null
       }
     }
   }
-  
-  return foreignKeyUpdates;
-};
+
+  return foreignKeyUpdates
+}

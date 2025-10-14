@@ -1,16 +1,16 @@
-import { describe, it, before, beforeEach, after } from 'node:test';
-import assert from 'node:assert/strict';
-import knexLib from 'knex';
-import { Api } from 'hooked-api';
-import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js';
-import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js';
+import { describe, it, before, beforeEach, after } from 'node:test'
+import assert from 'node:assert/strict'
+import knexLib from 'knex'
+import { Api } from 'hooked-api'
+import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js'
+import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js'
 import {
   cleanTables,
   countRecords,
   createJsonApiDocument,
   createRelationship,
   validateJsonApiStructure
-} from './helpers/test-utils.js';
+} from './helpers/test-utils.js'
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -19,16 +19,16 @@ const knex = knexLib({
     filename: ':memory:'
   },
   useNullAsDefault: true
-});
+})
 
 describe('Query Limits and Include Limits', () => {
-  let api;
+  let api
 
   before(async () => {
     // Create API with specific limits for testing
     api = new Api({
       name: 'test-api-limits'
-    });
+    })
 
     await api.use(RestApiPlugin, {
       queryDefaultLimit: 10,
@@ -37,11 +37,11 @@ describe('Query Limits and Include Limits', () => {
       returnFullRecord: {
         post: true
       }
-    });
+    })
 
     await api.use(RestApiKnexPlugin, {
-      knex: knex
-    });
+      knex
+    })
 
     // Countries
     await api.addResource('countries', {
@@ -50,8 +50,8 @@ describe('Query Limits and Include Limits', () => {
         name: { type: 'string', required: true },
         code: { type: 'string', required: true }
       }
-    });
-    await api.resources.countries.createKnexTable();
+    })
+    await api.resources.countries.createKnexTable()
 
     // Publishers
     await api.addResource('publishers', {
@@ -61,9 +61,9 @@ describe('Query Limits and Include Limits', () => {
         country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
-        books: { 
+        books: {
           type: 'hasMany',
-          target: 'books', 
+          target: 'books',
           foreignKey: 'publisher_id',
           // Relationships are always includable via ?include=
           include: {
@@ -71,8 +71,8 @@ describe('Query Limits and Include Limits', () => {
           }
         }
       }
-    });
-    await api.resources.publishers.createKnexTable();
+    })
+    await api.resources.publishers.createKnexTable()
 
     // Authors
     await api.addResource('authors', {
@@ -82,10 +82,10 @@ describe('Query Limits and Include Limits', () => {
         country_id: { type: 'number', belongsTo: 'countries', as: 'country' }
       },
       relationships: {
-        books: { 
+        books: {
           type: 'manyToMany',
-          through: 'book_authors', 
-          foreignKey: 'author_id', 
+          through: 'book_authors',
+          foreignKey: 'author_id',
           otherKey: 'book_id',
           // Relationships are always includable via ?include=
           include: {
@@ -94,8 +94,8 @@ describe('Query Limits and Include Limits', () => {
           }
         }
       }
-    });
-    await api.resources.authors.createKnexTable();
+    })
+    await api.resources.authors.createKnexTable()
 
     // Books
     await api.addResource('books', {
@@ -105,17 +105,17 @@ describe('Query Limits and Include Limits', () => {
         publisher_id: { type: 'number', belongsTo: 'publishers', as: 'publisher' }
       },
       relationships: {
-        authors: { 
+        authors: {
           type: 'manyToMany',
-          through: 'book_authors', 
-          foreignKey: 'book_id', 
+          through: 'book_authors',
+          foreignKey: 'book_id',
           otherKey: 'author_id'
           // Relationships are always includable via ?include=
         },
         reviews: { type: 'hasMany', target: 'reviews', via: 'reviewable' }
       }
-    });
-    await api.resources.books.createKnexTable();
+    })
+    await api.resources.books.createKnexTable()
 
     // Book Authors (pivot table)
     await api.addResource('book_authors', {
@@ -124,8 +124,8 @@ describe('Query Limits and Include Limits', () => {
         book_id: { type: 'number', belongsTo: 'books', as: 'book' },
         author_id: { type: 'number', belongsTo: 'authors', as: 'author' }
       }
-    });
-    await api.resources.book_authors.createKnexTable();
+    })
+    await api.resources.book_authors.createKnexTable()
 
     // Reviews (polymorphic)
     await api.addResource('reviews', {
@@ -146,19 +146,19 @@ describe('Query Limits and Include Limits', () => {
           }
         }
       }
-    });
-    await api.resources.reviews.createKnexTable();
-  });
+    })
+    await api.resources.reviews.createKnexTable()
+  })
 
   after(async () => {
-    await knex.destroy();
-  });
+    await knex.destroy()
+  })
 
   beforeEach(async () => {
     await cleanTables(knex, [
       'countries', 'publishers', 'authors', 'books', 'book_authors', 'reviews'
-    ]);
-  });
+    ])
+  })
 
   describe('Query Default Limits', () => {
     it('should apply queryDefaultLimit when no page size specified', async () => {
@@ -169,18 +169,18 @@ describe('Query Limits and Include Limits', () => {
             name: `Country ${i}`,
             code: `C${i}`
           })
-        });
+        })
       }
 
       // Query without page size
       const result = await api.resources.countries.query({
         queryParams: {},
         simplified: false
-      });
+      })
 
       // Should use queryDefaultLimit of 10
-      assert.equal(result.data.length, 10, 'Should apply default limit of 10');
-    });
+      assert.equal(result.data.length, 10, 'Should apply default limit of 10')
+    })
 
     it('should respect queryMaxLimit when page size exceeds it', async () => {
       // Create 100 countries
@@ -190,7 +190,7 @@ describe('Query Limits and Include Limits', () => {
             name: `Country ${i}`,
             code: `C${i}`
           })
-        });
+        })
       }
 
       // Query with page size exceeding max (use offset-based pagination)
@@ -199,12 +199,12 @@ describe('Query Limits and Include Limits', () => {
           page: { size: 100, number: 1 }  // Exceeds queryMaxLimit of 50
         },
         simplified: false
-      });
+      })
 
       // Should be capped at queryMaxLimit of 50
-      assert.equal(result.data.length, 50, 'Should cap at queryMaxLimit of 50');
-    });
-  });
+      assert.equal(result.data.length, 50, 'Should cap at queryMaxLimit of 50')
+    })
+  })
 
   describe('Include Limits - HasMany Relationships', () => {
     beforeEach(async () => {
@@ -214,27 +214,27 @@ describe('Query Limits and Include Limits', () => {
           name: 'USA',
           code: 'US'
         })
-      });
+      })
 
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher'
         }, {
-            country: createRelationship({ type: 'countries', id: String(country.id) })
-          })
-      });
+          country: createRelationship({ type: 'countries', id: String(country.id) })
+        })
+      })
 
       // Create 25 books for the publisher
       for (let i = 1; i <= 25; i++) {
         await api.resources.books.post({
           inputRecord: createJsonApiDocument('books', {
-              title: `Book ${i}`
-            }, {
-                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
-              })
-        });
+            title: `Book ${i}`
+          }, {
+            publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+          })
+        })
       }
-    });
+    })
 
     it('should apply default limit to hasMany includes when not specified', async () => {
       // Query publishers with books (no explicit limit in include config)
@@ -243,17 +243,17 @@ describe('Query Limits and Include Limits', () => {
           include: ['books']
         },
         simplified: false
-      });
+      })
 
-      assert(result.data, 'Result should have data array');
-      assert(result.data.length > 0, 'Should have at least one publisher');
-      
-      const publisher = result.data[0];
-      const publisherBooks = (result.included || []).filter(r => r.type === 'books');
+      assert(result.data, 'Result should have data array')
+      assert(result.data.length > 0, 'Should have at least one publisher')
+
+      const publisher = result.data[0]
+      const publisherBooks = (result.included || []).filter(r => r.type === 'books')
 
       // Should apply queryDefaultLimit of 10
-      assert.equal(publisherBooks.length, 10, 'Should include only 10 books by default');
-    });
+      assert.equal(publisherBooks.length, 10, 'Should include only 10 books by default')
+    })
 
     it('should respect explicit limit in relationship config', async () => {
       // Create a country first
@@ -262,8 +262,8 @@ describe('Query Limits and Include Limits', () => {
           name: 'Test Country',
           code: 'TC'
         })
-      });
-      
+      })
+
       // Create a publisher
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
@@ -271,33 +271,33 @@ describe('Query Limits and Include Limits', () => {
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      });
+      })
 
       // Create authors with many books
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Test Author'
         }, {
-            country: createRelationship({ type: 'countries', id: String(country.id) })
-          })
-      });
+          country: createRelationship({ type: 'countries', id: String(country.id) })
+        })
+      })
 
       // Create 10 books and associate with author
       for (let i = 1; i <= 10; i++) {
         const book = await api.resources.books.post({
           inputRecord: createJsonApiDocument('books', {
-              title: `Book ${i}`
-            }, {
-                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
-              })
-        });
+            title: `Book ${i}`
+          }, {
+            publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+          })
+        })
 
         await api.resources.book_authors.post({
           inputRecord: createJsonApiDocument('book_authors', {}, {
-              book: createRelationship({ type: 'books', id: String(book.id) }),
-              author: createRelationship({ type: 'authors', id: String(author.id) })
-            })
-        });
+            book: createRelationship({ type: 'books', id: String(book.id) }),
+            author: createRelationship({ type: 'authors', id: String(author.id) })
+          })
+        })
       }
 
       // Query authors with books (has explicit limit of 3)
@@ -306,12 +306,12 @@ describe('Query Limits and Include Limits', () => {
           include: ['books']
         },
         simplified: false
-      });
+      })
 
-      const authorBooks = result.included.filter(r => r.type === 'books');
-      assert.equal(authorBooks.length, 3, 'Should respect explicit limit of 3');
-    });
-  });
+      const authorBooks = result.included.filter(r => r.type === 'books')
+      assert.equal(authorBooks.length, 3, 'Should respect explicit limit of 3')
+    })
+  })
 
   describe('Include Limits - Polymorphic Relationships', () => {
     beforeEach(async () => {
@@ -321,16 +321,16 @@ describe('Query Limits and Include Limits', () => {
           name: 'Test Country',
           code: 'TC'
         })
-      });
+      })
 
       // Create a publisher with country
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher'
         }, {
-            country: createRelationship({ type: 'countries', id: String(country.id) })
-          })
-      });
+          country: createRelationship({ type: 'countries', id: String(country.id) })
+        })
+      })
 
       // Create books with reviews
       for (let bookNum = 1; bookNum <= 3; bookNum++) {
@@ -346,7 +346,7 @@ describe('Query Limits and Include Limits', () => {
               }
             }
           }
-        });
+        })
 
         // Create 15 reviews for each book
         for (let i = 1; i <= 15; i++) {
@@ -367,10 +367,10 @@ describe('Query Limits and Include Limits', () => {
               }
             },
             simplified: false
-          });
+          })
         }
       }
-    });
+    })
 
     it('should apply default limit to polymorphic hasMany includes', async () => {
       // Query books with reviews
@@ -379,21 +379,21 @@ describe('Query Limits and Include Limits', () => {
           include: ['reviews']
         },
         simplified: false
-      });
+      })
 
       // Without window strategy, the default strategy will limit total reviews
-      const totalReviews = result.included.filter(r => r.type === 'reviews');
-      
+      const totalReviews = result.included.filter(r => r.type === 'reviews')
+
       // Should apply queryDefaultLimit of 10 to total reviews
-      assert.equal(totalReviews.length, 10, 'Should limit total reviews to default of 10');
-    });
-  });
+      assert.equal(totalReviews.length, 10, 'Should limit total reviews to default of 10')
+    })
+  })
 
   describe('Include Limit Validation', () => {
     it('should throw error when include limit exceeds queryMaxLimit at resource definition', async () => {
       // Create a new API instance with stricter limits
-      const strictApi = new Api({ name: 'strict-api' });
-      
+      const strictApi = new Api({ name: 'strict-api' })
+
       await strictApi.use(RestApiPlugin, {
         queryDefaultLimit: 5,
         queryMaxLimit: 20,
@@ -401,9 +401,9 @@ describe('Query Limits and Include Limits', () => {
         returnFullRecord: {
           post: true
         }
-      });
-      
-      await strictApi.use(RestApiKnexPlugin, { knex });
+      })
+
+      await strictApi.use(RestApiKnexPlugin, { knex })
 
       // Try to create a resource with include limit exceeding max
       await assert.rejects(
@@ -423,15 +423,15 @@ describe('Query Limits and Include Limits', () => {
                 }
               }
             }
-          });
+          })
         },
         (err) => {
-          return err.message && err.message.includes('limit') && err.message.includes('exceeds queryMaxLimit');
+          return err.message && err.message.includes('limit') && err.message.includes('exceeds queryMaxLimit')
         },
         'Should throw error for excessive include limit'
-      );
-    });
-  });
+      )
+    })
+  })
 
   describe('Window Strategy with Defaults', () => {
     beforeEach(async () => {
@@ -441,7 +441,7 @@ describe('Query Limits and Include Limits', () => {
           name: 'USA',
           code: 'US'
         })
-      });
+      })
 
       // Create multiple publishers with different numbers of books
       for (let pubNum = 1; pubNum <= 3; pubNum++) {
@@ -450,13 +450,13 @@ describe('Query Limits and Include Limits', () => {
             data: createJsonApiDocument('publishers', {
               name: `Publisher ${pubNum}`
             }, {
-                country: createRelationship({ type: 'countries', id: String(country.id) })
-              }).data
+              country: createRelationship({ type: 'countries', id: String(country.id) })
+            }).data
           }
         })
 
         // Create different number of books for each publisher
-        const bookCount = pubNum * 8; // 8, 16, 24 books
+        const bookCount = pubNum * 8 // 8, 16, 24 books
         for (let i = 1; i <= bookCount; i++) {
           await api.resources.books.post({
             inputRecord: {
@@ -470,10 +470,10 @@ describe('Query Limits and Include Limits', () => {
                 }
               }
             }
-          });
+          })
         }
       }
-    });
+    })
 
     it('should apply per-parent limits with window strategy', async () => {
       // Query all publishers with books (window strategy configured)
@@ -482,27 +482,27 @@ describe('Query Limits and Include Limits', () => {
           include: ['books']
         },
         simplified: false
-      });
+      })
 
       // Each publisher should have its own limit applied
       for (const publisher of result.data) {
-        const publisherBooks = result.included.filter(r => 
-          r.type === 'books' && 
+        const publisherBooks = result.included.filter(r =>
+          r.type === 'books' &&
           r.relationships.publisher.data.id === publisher.id
-        );
-        
+        )
+
         // Each publisher gets up to queryDefaultLimit (10) books
-        assert(publisherBooks.length <= 10, 
-          `Publisher ${publisher.id} should have at most 10 books with window strategy`);
+        assert(publisherBooks.length <= 10,
+          `Publisher ${publisher.id} should have at most 10 books with window strategy`)
       }
 
       // Total books can exceed queryDefaultLimit since each parent gets its own limit
-      const totalBooks = result.included.filter(r => r.type === 'books').length;
-      assert(totalBooks > 10, 'Total books should exceed 10 with window strategy');
+      const totalBooks = result.included.filter(r => r.type === 'books').length
+      assert(totalBooks > 10, 'Total books should exceed 10 with window strategy')
       // Publisher 1 has 8 books, Publishers 2 and 3 are limited to 10 each
-      assert.equal(totalBooks, 28, 'Should have 28 total books (8 + 10 + 10)');
-    });
-  });
+      assert.equal(totalBooks, 28, 'Should have 28 total books (8 + 10 + 10)')
+    })
+  })
 
   describe('Many-to-Many with Window Strategy', () => {
     it('should apply window limits to many-to-many relationships', async () => {
@@ -512,38 +512,38 @@ describe('Query Limits and Include Limits', () => {
           name: 'USA',
           code: 'US'
         })
-      });
+      })
 
       const publisher = await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher'
         }, {
-            country: createRelationship({ type: 'countries', id: String(country.id) })
-          })
-      });
+          country: createRelationship({ type: 'countries', id: String(country.id) })
+        })
+      })
 
       // Create 2 authors
-      const authors = [];
+      const authors = []
       for (let i = 1; i <= 2; i++) {
         const author = await api.resources.authors.post({
           inputRecord: createJsonApiDocument('authors', {
             name: `Author ${i}`
           }, {
-              country: createRelationship({ type: 'countries', id: String(country.id) })
-            })
-        });
-        authors.push(author);
+            country: createRelationship({ type: 'countries', id: String(country.id) })
+          })
+        })
+        authors.push(author)
       }
 
       // Create 10 books and associate ALL with BOTH authors
       for (let i = 1; i <= 10; i++) {
         const book = await api.resources.books.post({
           inputRecord: createJsonApiDocument('books', {
-              title: `Book ${i}`
-            }, {
-                publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
-              })
-        });
+            title: `Book ${i}`
+          }, {
+            publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
+          })
+        })
 
         // Associate with both authors
         for (const author of authors) {
@@ -552,7 +552,7 @@ describe('Query Limits and Include Limits', () => {
               book: createRelationship({ type: 'books', id: String(book.id) }),
               author: createRelationship({ type: 'authors', id: String(author.id) })
             })
-          });
+          })
         }
       }
 
@@ -562,24 +562,23 @@ describe('Query Limits and Include Limits', () => {
           include: ['books']
         },
         simplified: false
-      });
+      })
 
-      
       // Each author should get exactly 3 books (configured limit)
       for (const author of result.data) {
         // Check the author's relationships to see which books they have
-        const authorBookIds = author.relationships?.books?.data?.map(b => b.id) || [];
-        
+        const authorBookIds = author.relationships?.books?.data?.map(b => b.id) || []
+
         // Verify the books exist in the included array
-        const authorBooks = result.included.filter(r => 
+        const authorBooks = result.included.filter(r =>
           r.type === 'books' && authorBookIds.includes(r.id)
-        );
-        
-        assert.equal(authorBookIds.length, 3, 
-          `Author ${author.id} should have exactly 3 book relationships (configured limit)`);
-        assert.equal(authorBooks.length, 3, 
-          `Author ${author.id} should have exactly 3 books in included array`);
+        )
+
+        assert.equal(authorBookIds.length, 3,
+          `Author ${author.id} should have exactly 3 book relationships (configured limit)`)
+        assert.equal(authorBooks.length, 3,
+          `Author ${author.id} should have exactly 3 books in included array`)
       }
-    });
-  });
-});
+    })
+  })
+})

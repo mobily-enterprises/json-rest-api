@@ -1,31 +1,31 @@
-import { requirePackage } from 'hooked-api';
-import { createSchema }  from 'json-rest-schema';
-import { createKnexTable, addKnexFields, alterKnexFields } from './lib/dbTablesOperations.js';
-import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js';
-import { getForeignKeyFields } from './lib/querying-writing/field-utils.js';
-import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js';
-import { toJsonApiRecord, buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js';
-import { processBelongsToRelationships } from './lib/writing/knex-json-api-transformers-writing.js';
-import { toJsonApiRecordWithBelongsTo } from './lib/querying-writing/knex-json-api-transformers.js';
-import { processIncludes } from './lib/querying/knex-process-includes.js';
-import { loadRelationshipIdentifiers } from './lib/querying/knex-relationship-includes.js';
+import { requirePackage } from 'hooked-api'
+import { createSchema } from 'json-rest-schema'
+import { createKnexTable, addKnexFields, alterKnexFields } from './lib/dbTablesOperations.js'
+import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
+import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
+import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js'
+import { toJsonApiRecord, buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js'
+import { processBelongsToRelationships } from './lib/writing/knex-json-api-transformers-writing.js'
+import { toJsonApiRecordWithBelongsTo } from './lib/querying-writing/knex-json-api-transformers.js'
+import { processIncludes } from './lib/querying/knex-process-includes.js'
+import { loadRelationshipIdentifiers } from './lib/querying/knex-relationship-includes.js'
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
   basicFiltersHook
-} from './lib/querying/knex-query-helpers.js';
-import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js';
-import { supportsWindowFunctions, getDatabaseInfo } from './lib/querying-writing/database-capabilities.js';
-import { ERROR_SUBTYPES, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './lib/querying-writing/knex-constants.js';
-import { 
-  calculatePaginationMeta, 
+} from './lib/querying/knex-query-helpers.js'
+import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { supportsWindowFunctions, getDatabaseInfo } from './lib/querying-writing/database-capabilities.js'
+import { ERROR_SUBTYPES, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './lib/querying-writing/knex-constants.js'
+import {
+  calculatePaginationMeta,
   generatePaginationLinks,
   generateCursorPaginationLinks,
   buildCursorMeta,
   parseCursor
-} from './lib/querying/knex-pagination-helpers.js';
-import { getUrlPrefix } from './lib/querying/url-helpers.js';
-import { createStorageAdapter } from './lib/storage/storage-adapter.js';
+} from './lib/querying/knex-pagination-helpers.js'
+import { getUrlPrefix } from './lib/querying/url-helpers.js'
+import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 
 /**
  * Strips non-database fields (computed and virtual) from attributes before database operations
@@ -34,184 +34,179 @@ import { createStorageAdapter } from './lib/storage/storage-adapter.js';
  * @returns {Object} Attributes with computed and virtual fields removed
  */
 const stripNonDatabaseFields = (attributes, schemaInfo) => {
-  if (!attributes || !schemaInfo) return attributes || {};
-  
-  const { computed = {}, schemaStructure = {} } = schemaInfo;
+  if (!attributes || !schemaInfo) return attributes || {}
+
+  const { computed = {}, schemaStructure = {} } = schemaInfo
   return Object.entries(attributes)
     .filter(([key]) => {
       // Remove computed fields
-      if (key in computed) return false;
+      if (key in computed) return false
       // Remove fields marked as virtual in the schema
-      const fieldDef = schemaStructure[key];
+      const fieldDef = schemaStructure[key]
       if (fieldDef && fieldDef.virtual === true) {
-        return false;
+        return false
       }
-      return true;
+      return true
     })
-    .reduce((acc, [key, val]) => ({ ...acc, [key]: val }), {});
-};
-
+    .reduce((acc, [key, val]) => ({ ...acc, [key]: val }), {})
+}
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
+  async install ({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     // Try to import knex dynamically
-    let knexLib;
+    let knexLib
     try {
-      knexLib = await import('knex');
+      knexLib = await import('knex')
     } catch (e) {
-      requirePackage('knex', 'rest-api-knex', 
-        'Knex.js is required for database operations. This is a peer dependency that allows you to control the version.');
+      requirePackage('knex', 'rest-api-knex',
+        'Knex.js is required for database operations. This is a peer dependency that allows you to control the version.')
     }
-    
+
     // Get Knex instance from plugin options
-    const knexOptions = pluginOptions || {};
-    const knex = knexOptions.knex;
-    
+    const knexOptions = pluginOptions || {}
+    const knex = knexOptions.knex
+
     // Expose Knex instance and helpers in a structured way
     api.knex = {
       instance: knex,
       helpers: {}
-    };
+    }
 
-    const storageAdapters = new Map();
+    const storageAdapters = new Map()
 
     const getScopeStorageAdapter = (scopeName) => {
-      if (!scopeName) return null;
-      const resource = api.resources?.[scopeName] || scopes?.[scopeName];
-      const schemaInfo = resource?.vars?.schemaInfo;
-      if (!schemaInfo) return null;
+      if (!scopeName) return null
+      const resource = api.resources?.[scopeName] || scopes?.[scopeName]
+      const schemaInfo = resource?.vars?.schemaInfo
+      if (!schemaInfo) return null
 
-      const cached = storageAdapters.get(scopeName);
+      const cached = storageAdapters.get(scopeName)
       if (cached && cached.schemaInfo === schemaInfo) {
-        return cached.adapter;
+        return cached.adapter
       }
 
-      const adapter = createStorageAdapter({ knex, schemaInfo });
-      storageAdapters.set(scopeName, { adapter, schemaInfo });
+      const adapter = createStorageAdapter({ knex, schemaInfo })
+      storageAdapters.set(scopeName, { adapter, schemaInfo })
       if (resource?.vars) {
-        resource.vars.storageAdapter = adapter;
+        resource.vars.storageAdapter = adapter
       }
-      return adapter;
-    };
+      return adapter
+    }
 
-    api.knex.helpers.getStorageAdapter = getScopeStorageAdapter;
-    helpers.getStorageAdapter = getScopeStorageAdapter;
+    api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
+    helpers.getStorageAdapter = getScopeStorageAdapter
 
     const createSelectTranslator = (adapter) => {
-      if (!adapter) return null;
+      if (!adapter) return null
       return (field, alias) => {
         if (field === '*') {
-          return alias ? `${alias}.*` : '*';
+          return alias ? `${alias}.*` : '*'
         }
-        const translated = adapter.translateColumn(field);
-        const result = translated || field;
+        const translated = adapter.translateColumn(field)
+        const result = translated || field
         if (!alias) {
-          return result;
+          return result
         }
         if (result.includes('.')) {
-          return result;
+          return result
         }
-        return `${alias}.${result}`;
-      };
-    };
+        return `${alias}.${result}`
+      }
+    }
 
     // Check database capabilities
-    const hasWindowFunctions = await supportsWindowFunctions(knex);
-    const dbInfo = await getDatabaseInfo(knex);
-    
+    const hasWindowFunctions = await supportsWindowFunctions(knex)
+    const dbInfo = await getDatabaseInfo(knex)
+
     // Store capabilities in API instance for access throughout
     api.knex.capabilities = {
       windowFunctions: hasWindowFunctions,
       dbInfo
-    };
-    
-    log.info(`Database capabilities detected:`, {
+    }
+
+    log.info('Database capabilities detected:', {
       database: dbInfo.client,
       version: dbInfo.version,
       windowFunctions: hasWindowFunctions
-    });
+    })
 
     // Cross-table search functions are now imported directly and used with full signatures
-    
+
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                  MAIN QUERY FILTERING HOOK                              ║
      * ║  This is the heart of the filtering system. It processes searchSchema   ║
      * ║  filters and builds SQL WHERE conditions with proper JOINs              ║
      * ╚═════════════════════════════════════════════════════════════════════╝ */
-    
+
     // Register the three separate filter hooks
     // Dependencies object for the hooks
-    const polymorphicFiltersHookParams  = { log, scopes, knex, getStorageAdapter: getScopeStorageAdapter };
-    
+    const polymorphicFiltersHookParams = { log, scopes, knex, getStorageAdapter: getScopeStorageAdapter }
+
     // Register in specific order: polymorphic → cross-table → basic
     // This ensures proper field qualification when JOINs are present
-    
+
     // 1. Polymorphic filters (adds JOINs for polymorphic relationships)
-    addHook('knexQueryFiltering', 'polymorphicFiltersHook', {}, 
+    addHook('knexQueryFiltering', 'polymorphicFiltersHook', {},
       async (hookParams) => polymorphicFiltersHook(hookParams, polymorphicFiltersHookParams)
-    );
-    
+    )
+
     // 2. Cross-table filters (adds JOINs for cross-table fields)
-    addHook('knexQueryFiltering', 'crossTableFiltersHook', {}, 
+    addHook('knexQueryFiltering', 'crossTableFiltersHook', {},
       async (hookParams) => crossTableFiltersHook(hookParams, polymorphicFiltersHookParams)
-    );
-    
+    )
+
     // 3. Basic filters (processes simple main table filters)
-    addHook('knexQueryFiltering', 'basicFiltersHook', {}, 
+    addHook('knexQueryFiltering', 'basicFiltersHook', {},
       async (hookParams) => basicFiltersHook(hookParams, polymorphicFiltersHookParams)
-    );
+    )
 
-        // 3. Basic filters (processes simple main table filters)
-    addHook('release', 'releaseHook', {}, 
-       async ({ api }) => api.knex.instance.destroy() 
-    );
-
+    // 3. Basic filters (processes simple main table filters)
+    addHook('release', 'releaseHook', {},
+      async ({ api }) => api.knex.instance.destroy()
+    )
 
     // Helper scope method to get all schema-related information
     addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
       // Create a filtered schema that excludes virtual fields
-      const schemaStructure = vars.schemaInfo.schemaStructure || {};
-      const filteredSchema = {};
-      
+      const schemaStructure = vars.schemaInfo.schemaStructure || {}
+      const filteredSchema = {}
+
       // Copy only non-virtual fields to the filtered schema
       Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
         if (!fieldDef.virtual) {
-          filteredSchema[fieldName] = fieldDef;
+          filteredSchema[fieldName] = fieldDef
         }
-      });
-      
+      })
+
       // Create schema object from filtered fields
-      const tableSchemaInstance = createSchema(filteredSchema);
-      
+      const tableSchemaInstance = createSchema(filteredSchema)
+
       await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
     })
 
-
-      // Helper scope method to alter existing fields in a table
-  addScopeMethod('alterKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
+    // Helper scope method to alter existing fields in a table
+    addScopeMethod('alterKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
     // Validate required parameters
-    if (!params.fields || typeof params.fields !== 'object') {
-      throw new Error('fields parameter is required for alterKnexFields');
-    }
+      if (!params.fields || typeof params.fields !== 'object') {
+        throw new Error('fields parameter is required for alterKnexFields')
+      }
 
-    await alterKnexFields(
-      api.knex.instance,
-      vars.schemaInfo.tableName,
-      params.fields,
-      params.options // Pass through any additional options
-    );
-  });
+      await alterKnexFields(
+        api.knex.instance,
+        vars.schemaInfo.tableName,
+        params.fields,
+        params.options // Pass through any additional options
+      )
+    })
 
-    
     // Helper scope method to add a field to an existing table
     addScopeMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
-      
       // Create schema object from filtered fields
-      const partialTableSchema = createSchema(params.fields);
-      
+      const partialTableSchema = createSchema(params.fields)
+
       await addKnexFields(api.knex.instance, vars.schemaInfo.tableName, partialTableSchema)
     })
 
@@ -226,7 +221,7 @@ export const RestApiKnexPlugin = {
 
     /**
      * Checks if a resource exists in the database
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -238,32 +233,32 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<boolean>} True if the resource exists, false otherwise
      */
     helpers.dataExists = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
 
-      const id = context.id;
+      const id = context.id
 
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      
-      log.debug(`[Knex] EXISTS ${tableName}/${id}`);
-      
-      const selectClause = idProperty !== 'id' ? `${idProperty} as id` : 'id';
-      
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+
+      log.debug(`[Knex] EXISTS ${tableName}/${id}`)
+
+      const selectClause = idProperty !== 'id' ? `${idProperty} as id` : 'id'
+
       const record = await db(tableName)
         .where(idProperty, id)
         .select(selectClause)
-        .first();
-      
-      return !!record;
-    };
+        .first()
+
+      return !!record
+    }
 
     /**
      * Retrieves a single resource by ID with support for sparse fieldsets and includes
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -281,89 +276,89 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When the resource is not found
      */
     helpers.dataGet = async ({ scopeName, context, runHooks }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
+      const scope = api.resources[scopeName]
       if (!scope) {
-        log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) });
-        throw new Error(`Scope '${scopeName}' not found in api.resources`);
+        log.error('[DATA-GET] scope is undefined!', { scopeName, availableScopes: Object.keys(api.resources || {}) })
+        throw new Error(`Scope '${scopeName}' not found in api.resources`)
       }
       if (!scope.scopeName && !scope.name) {
-        log.debug('[DATA-GET] Scope structure:', { 
+        log.debug('[DATA-GET] Scope structure:', {
           scopeKeys: Object.keys(scope),
           scopeName,
           hasVars: !!scope.vars,
           varKeys: scope.vars ? Object.keys(scope.vars) : []
-        });
+        })
       }
-      const id = context.id;
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      
-      log.debug(`[Knex] GET ${tableName}/${id}`);
-      
+      const id = context.id
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+
+      log.debug(`[Knex] GET ${tableName}/${id}`)
+
       // Build field selection for sparse fieldsets
       // This determines which fields to SELECT from database
       // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
         scope,
         { context }
-      );
-      
+      )
+
       // Store dependency info in context for enrichAttributes
       // Example: If user requests 'profit_margin' (computed), this might contain ['cost']
       // The REST API plugin will use this to remove 'cost' from response if not requested
-      context.computedDependencies = fieldSelectionInfo.computedDependencies;
-      
+      context.computedDependencies = fieldSelectionInfo.computedDependencies
+
       // Build query - no filtering hooks for single records
       // Permission checks will handle access control
-      let query = db(tableName).where(idProperty, id);
-      
+      let query = db(tableName).where(idProperty, id)
+
       // Apply field selection
-      const selectTranslator = createSelectTranslator(storageAdapter);
+      const selectTranslator = createSelectTranslator(storageAdapter)
       query = buildQuerySelection(
         query,
         tableName,
         fieldSelectionInfo.fieldsToSelect,
         false,
-        selectTranslator ? { translateColumn: selectTranslator } : undefined,
-      );
-      
-      const record = await query.first();
-      
+        selectTranslator ? { translateColumn: selectTranslator } : undefined
+      )
+
+      const record = await query.first()
+
       if (!record) {
         throw new RestApiResourceError(
-          `Resource not found`,
-          { 
+          'Resource not found',
+          {
             subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }
-        );
+        )
       }
-      
+
       // Load relationship identifiers for all hasMany relationships
-      const records = [record]; // Wrap in array for processing
-      await loadRelationshipIdentifiers(records, scopeName, scopes, db);
-      
+      const records = [record] // Wrap in array for processing
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db)
+
       // Process includes
       const included = await processIncludes(scope, records, {
         log,
         scopes,
         knex,
         context
-      });
-      
+      })
+
       // Build and return response
-      return buildJsonApiResponse(scope, records, included, true, scopeName, context);
-    };
+      return buildJsonApiResponse(scope, records, included, true, scopeName, context)
+    }
 
     /**
      * Retrieves a single resource by ID with minimal processing (no includes or sparse fieldsets)
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -375,41 +370,41 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
     helpers.dataGetMinimal = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const id = context.id;
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      
-      log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`);
-      
+      const scope = api.resources[scopeName]
+      const id = context.id
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+
+      log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`)
+
       // Build query - no filtering hooks for single records
       // Permission checks will handle access control
-      let query = db(tableName).where(idProperty, id);
-      
+      let query = db(tableName).where(idProperty, id)
+
       // Add alias if idProperty is not 'id'
       if (idProperty !== 'id') {
-        query = query.select('*', `${idProperty} as id`);
+        query = query.select('*', `${idProperty} as id`)
       }
-      
+
       // Execute query
-      const record = await query.first();
-      
+      const record = await query.first()
+
       if (!record) {
-        return null;
+        return null
       }
-      
+
       // Transform to JSON:API format with belongsTo relationships
-      return toJsonApiRecordWithBelongsTo(scope, record, scopeName);
-    };
+      return toJsonApiRecordWithBelongsTo(scope, record, scopeName)
+    }
 
     /**
      * Queries resources with support for filtering, sorting, pagination, sparse fieldsets, and includes
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -436,61 +431,61 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object>} JSON:API formatted response with data array, optional included resources, and pagination meta/links
      */
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const schemaInfo = context.schemaInfo;
-      const queryParams = context.queryParams;
-      const db = context.db || api.knex.instance;
-      const sortableFields = context.sortableFields;
+      const scope = api.resources[scopeName]
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const schemaInfo = context.schemaInfo
+      const queryParams = context.queryParams
+      const db = context.db || api.knex.instance
+      const sortableFields = context.sortableFields
 
-      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName });
-      log.debug(`[Knex] QUERY ${tableName}`, queryParams);
-      
+      log.trace('[DATA-QUERY] Starting dataQuery', { scopeName })
+      log.debug(`[Knex] QUERY ${tableName}`, queryParams)
+
       // Build field selection for sparse fieldsets
       // This determines which fields to SELECT from database
       // and tracks dependencies needed for computed fields
       const fieldSelectionInfo = await buildFieldSelection(
         scope,
         { context }
-      );
-      
+      )
+
       // Store dependency info in context for enrichAttributes
       // Example: If user requests 'profit_margin' (computed), this might contain ['cost']
       // The REST API plugin will use this to remove 'cost' from response if not requested
-      context.computedDependencies = fieldSelectionInfo.computedDependencies;
-      
-      // Start building query with table prefix (for JOIN support)
-      let query = db(tableName);
+      context.computedDependencies = fieldSelectionInfo.computedDependencies
 
-      const selectTranslator = createSelectTranslator(storageAdapter);
+      // Start building query with table prefix (for JOIN support)
+      let query = db(tableName)
+
+      const selectTranslator = createSelectTranslator(storageAdapter)
       query = buildQuerySelection(
         query,
         tableName,
         fieldSelectionInfo.fieldsToSelect,
         true,
-        selectTranslator ? { translateColumn: selectTranslator } : undefined,
-      );
-      
+        selectTranslator ? { translateColumn: selectTranslator } : undefined
+      )
+
       /* ═══════════════════════════════════════════════════════════════════
        * FILTERING HOOKS
        * This is where the magic happens. The knexQueryFiltering hook is called
        * to apply all filter conditions. The searchSchemaFilter hook (registered
        * above) will process the searchSchema and apply filters with JOINs.
-       * 
+       *
        * IMPORTANT: Each hook should wrap its conditions in query.where(function() {...})
        * to ensure proper grouping and prevent accidental filter bypass.
        * ═══════════════════════════════════════════════════════════════════ */
-      
-      log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filters, scopeName, tableName });
-      
-      log.trace('[DATA-QUERY] About to call runHooks', { hookName: 'knexQueryFiltering' });
-      
-      log.trace('[DATA-QUERY] Storing query data in context before calling runHooks');
-      
+
+      log.trace('[DATA-QUERY] Calling knexQueryFiltering hook', { hasQuery: !!query, hasFilters: !!queryParams.filters, scopeName, tableName })
+
+      log.trace('[DATA-QUERY] About to call runHooks', { hookName: 'knexQueryFiltering' })
+
+      log.trace('[DATA-QUERY] Storing query data in context before calling runHooks')
+
       // YOU ARE HERE: pass 'sesrchSchemaInstance' in the context below
 
       // Store the query data in context where hooks can access it
@@ -504,63 +499,63 @@ export const RestApiKnexPlugin = {
           tableName,
           db,
           adapter: storageAdapter,
-        };
-        
-        log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters });
+        }
+
+        log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters })
       }
-      
-      await runHooks('knexQueryFiltering');
-      
+
+      await runHooks('knexQueryFiltering')
+
       // Clean up after hook execution
       if (context && context.knexQuery) {
-        delete context.knexQuery;
+        delete context.knexQuery
       }
-      
-      log.trace('[DATA-QUERY] Finished knexQueryFiltering hook');
-      
+
+      log.trace('[DATA-QUERY] Finished knexQueryFiltering hook')
+
       // Apply sorting directly (no hooks)
       if (queryParams.sort && queryParams.sort.length > 0) {
         queryParams.sort.forEach(sortField => {
-          const desc = sortField.startsWith('-');
-          const field = desc ? sortField.substring(1) : sortField;
-          
+          const desc = sortField.startsWith('-')
+          const field = desc ? sortField.substring(1) : sortField
+
           // Check if field is sortable
           if (sortableFields && sortableFields.length > 0 && !sortableFields.includes(field)) {
-            log.warn(`Ignoring non-sortable field: ${field}`);
-            return; // Skip non-sortable fields
+            log.warn(`Ignoring non-sortable field: ${field}`)
+            return // Skip non-sortable fields
           }
-          
+
           // Map relationship names to actual database columns for sorting
           // Check if this is a relationship field that needs to be mapped
-          let dbField = field;
-          const searchField = schemaInfo.searchSchemaStructure?.[field];
+          let dbField = field
+          const searchField = schemaInfo.searchSchemaStructure?.[field]
           if (searchField?.actualField) {
             // This is a relationship field, use the actual database column
-            dbField = searchField.actualField;
+            dbField = searchField.actualField
           }
           const translatedField = storageAdapter?.translateColumn
             ? storageAdapter.translateColumn(dbField)
-            : dbField;
+            : dbField
 
-          query.orderBy(translatedField, desc ? 'desc' : 'asc');
-        });
+          query.orderBy(translatedField, desc ? 'desc' : 'asc')
+        })
       }
-      
+
       // Apply pagination
       // Check if page object has any actual pagination parameters
-      const hasPageParams = queryParams.page && 
-        (queryParams.page.size !== undefined || 
-         queryParams.page.number !== undefined || 
-         queryParams.page.after !== undefined || 
-         queryParams.page.before !== undefined);
-      
+      const hasPageParams = queryParams.page &&
+        (queryParams.page.size !== undefined ||
+         queryParams.page.number !== undefined ||
+         queryParams.page.after !== undefined ||
+         queryParams.page.before !== undefined)
+
       if (hasPageParams) {
-        const requestedSize = queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
+        const requestedSize = queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
         const pageSize = Math.min(
           requestedSize,
           scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-        );
-        
+        )
+
         // Validate page size
         if (requestedSize <= 0) {
           throw new RestApiValidationError(
@@ -573,28 +568,28 @@ export const RestApiKnexPlugin = {
                 message: 'Page size must be a positive number'
               }]
             }
-          );
+          )
         }
-        
+
         // Offset-based pagination
         if (queryParams.page.number !== undefined) {
-          const pageNumber = queryParams.page.number || 1;
+          const pageNumber = queryParams.page.number || 1
           query
             .limit(pageSize)
-            .offset((pageNumber - 1) * pageSize);
+            .offset((pageNumber - 1) * pageSize)
         }
         // Cursor-based pagination
         else if (queryParams.page.after || queryParams.page.before) {
           // Fetch one extra record to determine if there are more
-          query.limit(pageSize + 1);
-          
+          query.limit(pageSize + 1)
+
           // Get the configured ID property
-          const idProperty = context.schemaInfo.idProperty || 'id';
-          
+          const idProperty = context.schemaInfo.idProperty || 'id'
+
           if (queryParams.page.after) {
-            let cursorData;
+            let cursorData
             try {
-              cursorData = parseCursor(queryParams.page.after);
+              cursorData = parseCursor(queryParams.page.after)
             } catch (error) {
               throw new RestApiValidationError(
                 'Invalid cursor format in page[after] parameter',
@@ -606,64 +601,63 @@ export const RestApiKnexPlugin = {
                     message: 'The cursor value is not valid'
                   }]
                 }
-              );
+              )
             }
-            
+
             // Build sort fields array with directions
-            const sortFields = [];
+            const sortFields = []
             if (queryParams.sort && queryParams.sort.length > 0) {
               queryParams.sort.forEach(sortField => {
-                const desc = sortField.startsWith('-');
-                const field = desc ? sortField.substring(1) : sortField;
-                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' });
-              });
+                const desc = sortField.startsWith('-')
+                const field = desc ? sortField.substring(1) : sortField
+                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' })
+              })
             } else if (scope.vars.defaultSort) {
               sortFields.push({
                 field: scope.vars.defaultSort.field || idProperty,
                 direction: scope.vars.defaultSort.direction || 'ASC'
-              });
+              })
             } else {
-              sortFields.push({ field: idProperty, direction: 'ASC' });
+              sortFields.push({ field: idProperty, direction: 'ASC' })
             }
-            
+
             // Build compound WHERE clause for multi-field cursor
-            query.where(function() {
+            query.where(function () {
               sortFields.forEach((sortInfo, index) => {
-                const { field, direction } = sortInfo;
-                const qualifiedField = `${tableName}.${field}`;
-                const cursorValue = cursorData[field];
-                
+                const { field, direction } = sortInfo
+                const qualifiedField = `${tableName}.${field}`
+                const cursorValue = cursorData[field]
+
                 if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${field}`);
-                  return;
+                  log.warn(`Cursor missing value for sort field: ${field}`)
+                  return
                 }
-                
+
                 // Build condition for this level and all previous levels
-                this.orWhere(function() {
+                this.orWhere(function () {
                   // All previous fields must be equal
                   for (let i = 0; i < index; i++) {
-                    const prevField = sortFields[i].field;
-                    const prevQualifiedField = `${tableName}.${prevField}`;
-                    const prevValue = cursorData[prevField];
+                    const prevField = sortFields[i].field
+                    const prevQualifiedField = `${tableName}.${prevField}`
+                    const prevValue = cursorData[prevField]
                     if (prevValue !== undefined) {
-                      this.where(prevQualifiedField, '=', prevValue);
+                      this.where(prevQualifiedField, '=', prevValue)
                     }
                   }
-                  
+
                   // Current field must be greater/less than cursor value
                   if (direction === 'DESC') {
-                    this.where(qualifiedField, '<', cursorValue);
+                    this.where(qualifiedField, '<', cursorValue)
                   } else {
-                    this.where(qualifiedField, '>', cursorValue);
+                    this.where(qualifiedField, '>', cursorValue)
                   }
-                });
-              });
-            });
-            
+                })
+              })
+            })
           } else if (queryParams.page.before) {
-            let cursorData;
+            let cursorData
             try {
-              cursorData = parseCursor(queryParams.page.before);
+              cursorData = parseCursor(queryParams.page.before)
             } catch (error) {
               throw new RestApiValidationError(
                 'Invalid cursor format in page[before] parameter',
@@ -675,82 +669,82 @@ export const RestApiKnexPlugin = {
                     message: 'The cursor value is not valid'
                   }]
                 }
-              );
+              )
             }
-            
+
             // Build sort fields array with directions
-            const sortFields = [];
+            const sortFields = []
             if (queryParams.sort && queryParams.sort.length > 0) {
               queryParams.sort.forEach(sortField => {
-                const desc = sortField.startsWith('-');
-                const field = desc ? sortField.substring(1) : sortField;
-                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' });
-              });
+                const desc = sortField.startsWith('-')
+                const field = desc ? sortField.substring(1) : sortField
+                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' })
+              })
             } else if (scope.vars.defaultSort) {
               sortFields.push({
                 field: scope.vars.defaultSort.field || idProperty,
                 direction: scope.vars.defaultSort.direction || 'ASC'
-              });
+              })
             } else {
-              sortFields.push({ field: idProperty, direction: 'ASC' });
+              sortFields.push({ field: idProperty, direction: 'ASC' })
             }
-            
+
             // Build compound WHERE clause for multi-field cursor (reversed for before)
-            query.where(function() {
+            query.where(function () {
               sortFields.forEach((sortInfo, index) => {
-                const { field, direction } = sortInfo;
-                const qualifiedField = `${tableName}.${field}`;
-                const cursorValue = cursorData[field];
-                
+                const { field, direction } = sortInfo
+                const qualifiedField = `${tableName}.${field}`
+                const cursorValue = cursorData[field]
+
                 if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${field}`);
-                  return;
+                  log.warn(`Cursor missing value for sort field: ${field}`)
+                  return
                 }
-                
+
                 // Build condition for this level and all previous levels
-                this.orWhere(function() {
+                this.orWhere(function () {
                   // All previous fields must be equal
                   for (let i = 0; i < index; i++) {
-                    const prevField = sortFields[i].field;
-                    const prevQualifiedField = `${tableName}.${prevField}`;
-                    const prevValue = cursorData[prevField];
+                    const prevField = sortFields[i].field
+                    const prevQualifiedField = `${tableName}.${prevField}`
+                    const prevValue = cursorData[prevField]
                     if (prevValue !== undefined) {
-                      this.where(prevQualifiedField, '=', prevValue);
+                      this.where(prevQualifiedField, '=', prevValue)
                     }
                   }
-                  
+
                   // Current field must be less/greater than cursor value (reversed)
                   if (direction === 'DESC') {
-                    this.where(qualifiedField, '>', cursorValue);
+                    this.where(qualifiedField, '>', cursorValue)
                   } else {
-                    this.where(qualifiedField, '<', cursorValue);
+                    this.where(qualifiedField, '<', cursorValue)
                   }
-                });
-              });
-            });
+                })
+              })
+            })
           }
         }
         // Default pagination if only size is specified - treat as cursor-based for "load more"
         else {
           // Fetch one extra to detect hasMore
-          query.limit(pageSize + 1);
+          query.limit(pageSize + 1)
         }
       } else {
         // No pagination params provided - apply default limit
-        const defaultLimit = scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
-        query.limit(defaultLimit);
+        const defaultLimit = scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
+        query.limit(defaultLimit)
       }
-      
+
       // Execute query
-      const records = await query;
-      
+      const records = await query
+
       // Store query string for response building
-      const queryParts = [];
+      const queryParts = []
       Object.entries(queryParams).forEach(([key, value]) => {
         if (Array.isArray(value)) {
           // Handle arrays (like sort, include)
           if (value.length > 0) {
-            queryParts.push(`${key}=${value.map(v => encodeURIComponent(v)).join(',')}`);
+            queryParts.push(`${key}=${value.map(v => encodeURIComponent(v)).join(',')}`)
           }
         } else if (typeof value === 'object' && value !== null) {
           // Handle nested objects (like filters, fields, page)
@@ -760,33 +754,33 @@ export const RestApiKnexPlugin = {
                 // Handle deeply nested objects (like filters[country][code])
                 Object.entries(subValue).forEach(([subSubKey, subSubValue]) => {
                   if (subSubValue !== undefined && subSubValue !== null) {
-                    queryParts.push(`${key}[${subKey}][${subSubKey}]=${encodeURIComponent(subSubValue)}`);
+                    queryParts.push(`${key}[${subKey}][${subSubKey}]=${encodeURIComponent(subSubValue)}`)
                   }
-                });
+                })
               } else {
-                queryParts.push(`${key}[${subKey}]=${encodeURIComponent(subValue)}`);
+                queryParts.push(`${key}[${subKey}]=${encodeURIComponent(subValue)}`)
               }
             }
-          });
+          })
         } else if (value !== undefined && value !== null) {
-          queryParts.push(`${key}=${encodeURIComponent(value)}`);
+          queryParts.push(`${key}=${encodeURIComponent(value)}`)
         }
-      });
-      
+      })
+
       // Initialize returnMeta namespace for thread-safe metadata
-      context.returnMeta = context.returnMeta || {};
-      context.returnMeta.queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
+      context.returnMeta = context.returnMeta || {}
+      context.returnMeta.queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : ''
 
       // Execute count query for pagination if offset-based pagination is used
       if (queryParams.page?.number !== undefined || (queryParams.page?.size !== undefined && !queryParams.page?.after && !queryParams.page?.before)) {
-        const page = parseInt(queryParams.page?.number) || 1;
-        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
-        
+        const page = parseInt(queryParams.page?.number) || 1
+        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
+
         // Only execute count query if enabled
         if (scope.vars.enablePaginationCounts) {
           // Build count query with same filters as main query
-          const countQuery = db(tableName);
-          
+          const countQuery = db(tableName)
+
           // Apply filters through hooks (same as main query)
           if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
             // Store query data in context for hooks
@@ -798,67 +792,67 @@ export const RestApiKnexPlugin = {
                 tableName,
                 schemaInfo,
                 db
-              };
+              }
             }
-            
+
             // Run the same filtering hooks
-            await runHooks('knexQueryFiltering');
-            
+            await runHooks('knexQueryFiltering')
+
             // Clean up
             if (context && context.knexQuery) {
-              delete context.knexQuery;
+              delete context.knexQuery
             }
           }
-          
+
           // Get total count
-          const countResult = await countQuery.count('* as total').first();
-          const total = parseInt(countResult.total);
-          
+          const countResult = await countQuery.count('* as total').first()
+          const total = parseInt(countResult.total)
+
           // Calculate pagination metadata with total
-          context.returnMeta.paginationMeta = calculatePaginationMeta(total, page, pageSize);
+          context.returnMeta.paginationMeta = calculatePaginationMeta(total, page, pageSize)
         } else {
           // Without count, we can still provide basic pagination info
           context.returnMeta.paginationMeta = {
             page,
             pageSize
             // No total, pageCount, or hasMore when counts are disabled
-          };
+          }
         }
-        
-        // Generate links 
-        const urlPrefix = getUrlPrefix(context, scope);
+
+        // Generate links
+        const urlPrefix = getUrlPrefix(context, scope)
         context.returnMeta.paginationLinks = generatePaginationLinks(
           urlPrefix,
           scopeName,
           queryParams,
           context.returnMeta.paginationMeta
-        );
+        )
       }
-      
+
       // Handle cursor-based pagination meta
       // Generate cursor metadata when using cursor parameters OR when only size is specified (no page number)
-      if (queryParams.page?.after || queryParams.page?.before || 
+      if (queryParams.page?.after || queryParams.page?.before ||
           (queryParams.page?.size && queryParams.page?.number === undefined)) {
-        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT;
-        
+        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
+
         // Check if there are more records
         // We fetched pageSize + 1 records to detect if there are more
-        const hasMore = records.length > pageSize;
-        
+        const hasMore = records.length > pageSize
+
         // Remove the extra record if present
         if (hasMore) {
-          records.pop();
+          records.pop()
         }
-        
+
         // Determine sort fields for cursor
-        const idProperty = context.schemaInfo.idProperty || 'id';
-        let sortFields = [idProperty];
+        const idProperty = context.schemaInfo.idProperty || 'id'
+        let sortFields = [idProperty]
         if (queryParams.sort && queryParams.sort.length > 0) {
-          sortFields = queryParams.sort.map(s => s.startsWith('-') ? s.substring(1) : s);
+          sortFields = queryParams.sort.map(s => s.startsWith('-') ? s.substring(1) : s)
         }
-        
-        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields);
-        const urlPrefix = getUrlPrefix(context, scope);
+
+        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields)
+        const urlPrefix = getUrlPrefix(context, scope)
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
           scopeName,
@@ -867,12 +861,12 @@ export const RestApiKnexPlugin = {
           pageSize,
           hasMore,
           sortFields
-        );
+        )
       }
-      
+
       // Load relationship identifiers for all hasMany relationships
-      await loadRelationshipIdentifiers(records, scopeName, scopes, db);
-      
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db)
+
       // Process includes
       const included = await processIncludes(scope, records, {
         log,
@@ -880,16 +874,15 @@ export const RestApiKnexPlugin = {
         knex,
         context,
         api
-      });
-      
+      })
 
       // Build and return response
-      return buildJsonApiResponse(scope, records, included, false, scopeName, context);
-    };
-    
+      return buildJsonApiResponse(scope, records, included, false, scopeName, context)
+    }
+
     /**
      * Creates a new resource in the database
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -904,35 +897,35 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<string|number>} The ID of the newly created resource
      */
     helpers.dataPost = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      const inputRecord = context.inputRecord;
-      
-      log.debug(`[Knex] POST ${tableName}`, inputRecord);
-      
+      const scope = api.resources[scopeName]
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+      const inputRecord = context.inputRecord
+
+      log.debug(`[Knex] POST ${tableName}`, inputRecord)
+
       // Extract attributes from JSON:API format
-      const attributes = inputRecord.data.attributes;
-      
+      const attributes = inputRecord.data.attributes
+
       // Strip non-database fields (computed and virtual) before insert
-      const dbAttributes = stripNonDatabaseFields(attributes, context.schemaInfo);
-      
+      const dbAttributes = stripNonDatabaseFields(attributes, context.schemaInfo)
+
       // Insert and get the new ID
-      const result = await db(tableName).insert(dbAttributes).returning(idProperty);
-      
+      const result = await db(tableName).insert(dbAttributes).returning(idProperty)
+
       // Extract the ID value (SQLite returns array of objects)
-      const id = result[0]?.[idProperty] || result[0];
+      const id = result[0]?.[idProperty] || result[0]
       return id
-    };
-    
+    }
+
     /**
      * Replaces an entire resource (PUT operation) or creates it with a specific ID
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -951,31 +944,31 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When updating and the resource is not found
      */
     helpers.dataPut = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const id = context.id;
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      const inputRecord = context.inputRecord;
-      const isCreate = context.isCreate;
-    
-      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${context.isCreate})`);
-      
+      const scope = api.resources[scopeName]
+      const id = context.id
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+      const inputRecord = context.inputRecord
+      const isCreate = context.isCreate
+
+      log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${context.isCreate})`)
+
       // Extract attributes and process relationships using helper
-      const attributes = inputRecord.data.attributes || {};
-      const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
-      const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
-      
+      const attributes = inputRecord.data.attributes || {}
+      const foreignKeyUpdates = processBelongsToRelationships(scope, { context })
+      const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
+
       // Strip non-database fields (computed and virtual) before database operation
-      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
-        
+      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo)
+
       // Map 'id' to actual idProperty if needed (for PUT with specific ID)
       if (idProperty !== 'id' && inputRecord.data.id) {
-        finalAttributes[idProperty] = inputRecord.data.id;
+        finalAttributes[idProperty] = inputRecord.data.id
       }
 
       if (isCreate) {
@@ -983,43 +976,41 @@ export const RestApiKnexPlugin = {
         const recordData = {
           ...finalAttributes,
           [idProperty]: id
-        };
-        
-        await db(tableName).insert(recordData);
+        }
+
+        await db(tableName).insert(recordData)
       } else {
         // Update mode - check if record exists first
         const exists = await db(tableName)
           .where(idProperty, id)
-          .first();
-        
+          .first()
+
         if (!exists) {
           throw new RestApiResourceError(
-            `Resource not found`,
-            { 
+            'Resource not found',
+            {
               subtype: ERROR_SUBTYPES.NOT_FOUND,
               resourceType: scopeName,
               resourceId: id
             }
-          );
+          )
         }
-        
+
         // Remove the idProperty from attributes to prevent updating the primary key
-        delete finalAttributes[idProperty];
-        
+        delete finalAttributes[idProperty]
+
         // Update the record (replace all fields)
         if (Object.keys(finalAttributes).length > 0) {
           await db(tableName)
             .where(idProperty, id)
-            .update(finalAttributes);
+            .update(finalAttributes)
         }
       }
-      
-      return 
-    };
-    
+    }
+
     /**
      * Partially updates a resource (PATCH operation)
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -1037,61 +1028,59 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When the resource is not found
      */
     helpers.dataPatch = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const id = context.id;
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      const inputRecord = context.inputRecord;
-      
-      log.debug(`[Knex] PATCH ${tableName}/${id}`);
-      
+      const scope = api.resources[scopeName]
+      const id = context.id
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+      const inputRecord = context.inputRecord
+
+      log.debug(`[Knex] PATCH ${tableName}/${id}`)
+
       // Check if record exists
       const exists = await db(tableName)
         .where(idProperty, id)
-        .first();
-      
+        .first()
+
       if (!exists) {
         throw new RestApiResourceError(
-          `Resource not found`,
-          { 
+          'Resource not found',
+          {
             subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }
-        );
+        )
       }
-      
-      // Extract attributes and process relationships using helper
-      const attributes = inputRecord.data.attributes || {};
-      const foreignKeyUpdates = processBelongsToRelationships(scope, { context });
-      const mergedAttributes = { ...attributes, ...foreignKeyUpdates };
-      
-      // Strip non-database fields (computed and virtual) before database operation
-      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo);
 
-      log.debug(`[Knex] PATCH finalAttributes:`, finalAttributes);
-      
+      // Extract attributes and process relationships using helper
+      const attributes = inputRecord.data.attributes || {}
+      const foreignKeyUpdates = processBelongsToRelationships(scope, { context })
+      const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
+
+      // Strip non-database fields (computed and virtual) before database operation
+      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo)
+
+      log.debug('[Knex] PATCH finalAttributes:', finalAttributes)
+
       // Remove the idProperty from attributes to prevent updating the primary key
-      delete finalAttributes[idProperty];
-      
+      delete finalAttributes[idProperty]
+
       // Update only if there are changes
       if (Object.keys(finalAttributes).length > 0) {
         await db(tableName)
           .where(idProperty, id)
-          .update(finalAttributes);
+          .update(finalAttributes)
       }
-      
-      return
-    };
-    
+    }
+
     /**
      * Deletes a resource from the database
-     * 
+     *
      * @param {Object} params - The parameters object
      * @param {string} params.scopeName - The name of the resource scope (e.g., 'books', 'authors')
      * @param {Object} params.context - The context object containing request-specific data
@@ -1104,43 +1093,43 @@ export const RestApiKnexPlugin = {
      * @throws {RestApiResourceError} When the resource is not found
      */
     helpers.dataDelete = async ({ scopeName, context }) => {
-      const storageAdapter = getScopeStorageAdapter(scopeName);
+      const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
-        context.storageAdapter = storageAdapter;
+        context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName];
-      const id = context.id;
+      const scope = api.resources[scopeName]
+      const id = context.id
 
-      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName;
-      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty;
-      const db = context.db || api.knex.instance;
-      
-      log.debug(`[Knex] DELETE ${tableName}/${id}`);
-      
+      const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
+      const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
+      const db = context.db || api.knex.instance
+
+      log.debug(`[Knex] DELETE ${tableName}/${id}`)
+
       // Check if record exists
       const exists = await db(tableName)
         .where(idProperty, id)
-        .first();
-      
+        .first()
+
       if (!exists) {
         throw new RestApiResourceError(
-          `Resource not found`,
-          { 
+          'Resource not found',
+          {
             subtype: ERROR_SUBTYPES.NOT_FOUND,
             resourceType: scopeName,
             resourceId: id
           }
-        );
+        )
       }
-      
+
       // Delete the record
       await db(tableName)
         .where(idProperty, id)
-        .delete();
-      
-      return { success: true };
-    };
-    
-    log.info('RestApiKnexPlugin installed - basic CRUD operations ready');
+        .delete()
+
+      return { success: true }
+    }
+
+    log.info('RestApiKnexPlugin installed - basic CRUD operations ready')
   }
 }

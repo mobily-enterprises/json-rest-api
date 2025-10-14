@@ -1,29 +1,29 @@
-import { getForeignKeyFields as getForeignKeyFieldsFromUtils } from '../querying-writing/field-utils.js';
-import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, getSchemaStructure } from '../querying-writing/knex-constants.js';
-import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-helpers.js';
+import { getForeignKeyFields as getForeignKeyFieldsFromUtils } from '../querying-writing/field-utils.js'
+import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, getSchemaStructure } from '../querying-writing/knex-constants.js'
+import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-helpers.js'
 
 /**
  * Transforms a flat database record into JSON:API resource format
- * 
+ *
  * @private
  * @param {Object} scope - Scope containing schema and configuration
  * @param {Object} record - Database record to transform
  * @param {Object} deps - Dependencies including context with scopeName and polymorphicFields
  * @returns {Object|null} JSON:API resource object or null if no record
- * 
+ *
  * @example
  * // Input: Database record with foreign keys and internal fields
- * const record = { 
- *   id: 1, 
- *   title: 'Hello World', 
+ * const record = {
+ *   id: 1,
+ *   title: 'Hello World',
  *   content: 'Article content',
  *   author_id: 2,           // Foreign key
  *   category_id: 5,         // Foreign key
  *   __$jsonrestapi_rn$__: 1 // Internal field
  * };
- * 
+ *
  * const jsonApiResource = toJsonApi(scope, record, deps);
- * 
+ *
  * // Output: Clean JSON:API resource
  * // {
  * //   type: 'articles',
@@ -34,7 +34,7 @@ import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-help
  * //     // Note: author_id, category_id, and internal fields are removed
  * //   }
  * // }
- * 
+ *
  * @example
  * // Input: Polymorphic record
  * const record = {
@@ -44,9 +44,9 @@ import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-help
  *   commentable_id: 1               // Polymorphic id field
  * };
  * // deps.context.polymorphicFields = Set(['commentable_type', 'commentable_id'])
- * 
+ *
  * const jsonApiResource = toJsonApi(scope, record, deps);
- * 
+ *
  * // Output: Polymorphic fields filtered out
  * // {
  * //   type: 'comments',
@@ -55,79 +55,79 @@ import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-help
  * //     text: 'Great article!'
  * //   }
  * // }
- * 
+ *
  * @description
  * Used by:
  * - toJsonApiRecord calls this as the core transformation logic
  * - buildJsonApiResponse uses this indirectly through toJsonApiRecord
- * 
+ *
  * Purpose:
  * - Separates database structure from API structure
  * - Filters out foreign keys that become relationships in JSON:API
  * - Removes internal fields used for query optimization
  * - Ensures clean attribute objects without implementation details
- * 
+ *
  * Data flow:
  * - Called after database query returns flat records
  * - Transforms each record individually
  * - Output feeds into relationship building and response assembly
  */
 const toJsonApi = (scope, record, deps) => {
-  if (!record) return null;
-  
+  if (!record) return null
+
   const schemaInstance = scope.vars.schemaInfo.schemaInstance
-  
-  const { context } = deps;
-  const scopeName = context.scopeName;
-  const idProperty = context.schemaInfo?.idProperty || 'id';
-  const polymorphicFields = context.polymorphicFields || new Set();
-  
-  const { id, ...allAttributes } = record;
-  
-  const foreignKeys = schemaInstance ? getForeignKeyFieldsFromUtils(schemaInstance) : new Set();
-  
+
+  const { context } = deps
+  const scopeName = context.scopeName
+  const idProperty = context.schemaInfo?.idProperty || 'id'
+  const polymorphicFields = context.polymorphicFields || new Set()
+
+  const { id, ...allAttributes } = record
+
+  const foreignKeys = schemaInstance ? getForeignKeyFieldsFromUtils(schemaInstance) : new Set()
+
   const internalFields = new Set([
     RELATIONSHIPS_KEY,
     RELATIONSHIP_METADATA_KEY,
     ROW_NUMBER_KEY,
     COMPUTED_DEPENDENCIES_KEY
-  ]);
-  
-  const attributes = {};
+  ])
+
+  const attributes = {}
   Object.entries(allAttributes).forEach(([key, value]) => {
     if (!foreignKeys.has(key) && !polymorphicFields.has(key) && !internalFields.has(key) && key !== idProperty) {
-      attributes[key] = value;
+      attributes[key] = value
     }
-  });
-  
+  })
+
   return {
     type: scopeName,
     id: String(id),
     attributes
-  };
-};
+  }
+}
 
 /**
  * Converts a database record to JSON:API format with proper field filtering
- * 
+ *
  * @param {Object} scope - Scope containing schema and relationship definitions
  * @param {Object} record - Raw database record
  * @param {string} scopeName - Resource type name
  * @returns {Object} JSON:API formatted resource
- * 
+ *
  * @example
  * // Input: Database record with various field types
- * const record = { 
- *   id: 1, 
- *   title: 'My Article', 
+ * const record = {
+ *   id: 1,
+ *   title: 'My Article',
  *   author_id: 2,      // belongsTo relationship
  *   category_id: 3,    // belongsTo relationship
  *   views: 150,
  *   published: true
  * };
- * 
+ *
  * const jsonApi = toJsonApiRecord(scope, record, 'articles');
- * 
+ *
  * // Output: Foreign keys filtered out
  * // {
  * //   type: 'articles',
@@ -138,7 +138,7 @@ const toJsonApi = (scope, record, deps) => {
  * //     published: true
  * //   }
  * // }
- * 
+ *
  * @example
  * // Input: Record with polymorphic relationship
  * const record = {
@@ -149,9 +149,9 @@ const toJsonApi = (scope, record, deps) => {
  *   commentable_id: 3              // Polymorphic
  * };
  * // Schema has polymorphic relationship defined
- * 
+ *
  * const jsonApi = toJsonApiRecord(scope, record, 'comments');
- * 
+ *
  * // Output: Both foreign keys and polymorphic fields filtered
  * // {
  * //   type: 'comments',
@@ -160,20 +160,20 @@ const toJsonApi = (scope, record, deps) => {
  * //     body: 'Nice post!'
  * //   }
  * // }
- * 
+ *
  * @description
  * Used by:
  * - rest-api-knex-plugin's dataGet method for single resource responses
  * - rest-api-knex-plugin's dataQuery method for collection responses
  * - processIncludes when transforming included resources
  * - buildJsonApiResponse as the primary transformation function
- * 
+ *
  * Purpose:
  * - Provides consistent JSON:API transformation across all query operations
  * - Automatically identifies and filters foreign keys based on schema
  * - Handles polymorphic relationship fields (type/id pairs)
  * - Ensures IDs are always strings as required by JSON:API spec
- * 
+ *
  * Data flow:
  * 1. Database query returns flat records with all fields
  * 2. toJsonApiRecord identifies foreign keys from schema
@@ -182,39 +182,39 @@ const toJsonApi = (scope, record, deps) => {
  * 5. buildJsonApiResponse adds relationships and links to complete the response
  */
 export const toJsonApiRecord = (scope, record, scopeName) => {
-  const { 
-    vars: { 
+  const {
+    vars: {
       schemaInfo: { schemaRelationships: relationships, idProperty }
     }
-  } = scope;
-    
-  const polymorphicFields = new Set();
+  } = scope
+
+  const polymorphicFields = new Set()
   try {
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
-        const typeFieldName = relDef.belongsToPolymorphic.typeField || `${relName}_type`;
-        const idFieldName = relDef.belongsToPolymorphic.idField || `${relName}_id`;
-        polymorphicFields.add(typeFieldName);
-        polymorphicFields.add(idFieldName);
+        const typeFieldName = relDef.belongsToPolymorphic.typeField || `${relName}_type`
+        const idFieldName = relDef.belongsToPolymorphic.idField || `${relName}_id`
+        polymorphicFields.add(typeFieldName)
+        polymorphicFields.add(idFieldName)
       }
-    });
+    })
   } catch (e) {
   }
-  
+
   const deps = {
     context: {
       scopeName,
       schemaInfo: { idProperty },
       polymorphicFields
     }
-  };
-  
-  return toJsonApi(scope, record, deps);
-};
+  }
+
+  return toJsonApi(scope, record, deps)
+}
 
 /**
  * Builds complete JSON:API response with data, relationships, links, and optional includes
- * 
+ *
  * @async
  * @param {Object} scope - Scope containing schema and configuration
  * @param {Array<Object>} records - Primary records to include in response
@@ -223,7 +223,7 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  * @param {string} scopeName - Resource type name
  * @param {Object} context - Request context with pagination metadata
  * @returns {Promise<Object>} Complete JSON:API response document
- * 
+ *
  * @example
  * // Input: Single article with author include
  * const records = [{
@@ -233,15 +233,15 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  *   author_id: 2,
  *   category_id: 3
  * }];
- * 
+ *
  * const included = [{
  *   type: 'authors',
  *   id: '2',
  *   attributes: { name: 'John Doe', email: 'john@example.com' }
  * }];
- * 
+ *
  * const response = await buildJsonApiResponse(scope, records, included, true, 'articles', context);
- * 
+ *
  * // Output: Complete JSON:API document
  * // {
  * //   data: {
@@ -281,7 +281,7 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  * //     self: '/articles/1'
  * //   }
  * // }
- * 
+ *
  * @example
  * // Input: Collection with pagination
  * const records = [
@@ -289,7 +289,7 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  *   { id: 2, title: 'Article 2', author_id: 10 },
  *   { id: 3, title: 'Article 3', author_id: 11 }
  * ];
- * 
+ *
  * context.returnMeta = {
  *   paginationMeta: { page: 2, pageSize: 3, pageCount: 10, total: 30 },
  *   paginationLinks: {
@@ -300,9 +300,9 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  *     last: '/articles?page[number]=10&page[size]=3'
  *   }
  * };
- * 
+ *
  * const response = await buildJsonApiResponse(scope, records, [], false, 'articles', context);
- * 
+ *
  * // Output: Collection with pagination metadata
  * // {
  * //   data: [
@@ -321,20 +321,20 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  * //     last: '/articles?page[number]=10&page[size]=3'
  * //   }
  * // }
- * 
+ *
  * @description
  * Used by:
  * - rest-api-knex-plugin's dataGet method for single resource responses
  * - rest-api-knex-plugin's dataQuery method for collection responses
  * - Called at the end of the query pipeline to assemble the final response
- * 
+ *
  * Purpose:
  * - Assembles all parts of a JSON:API response in the correct structure
  * - Adds relationship objects with proper links for each foreign key
  * - Handles both regular belongsTo and polymorphic relationships
  * - Adds self links to all resources as required by JSON:API
  * - Includes pagination metadata and links when applicable
- * 
+ *
  * Data flow:
  * 1. Query operations fetch primary records and optional includes
  * 2. Records are transformed to JSON:API format via toJsonApiRecord
@@ -345,27 +345,27 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
  * 7. Returns complete JSON:API document ready for HTTP response
  */
 export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName, context) => {
-  const { 
-    vars: { 
-      schemaInfo: { schemaInstance: schemaInstance, schemaRelationships: relationships, idProperty }
+  const {
+    vars: {
+      schemaInfo: { schemaInstance, schemaRelationships: relationships, idProperty }
     }
-  } = scope;
-  
-  const idField = idProperty || 'id';
-  
-  const schemaStructure = getSchemaStructure(schemaInstance);
-  
+  } = scope
+
+  const idField = idProperty || 'id'
+
+  const schemaStructure = getSchemaStructure(schemaInstance)
+
   const processedRecords = records.map(record => {
-    const { [RELATIONSHIPS_KEY]: _relationships, ...cleanRecord } = record;
-    const jsonApiRecord = toJsonApiRecord(scope, cleanRecord, scopeName);
-    
+    const { [RELATIONSHIPS_KEY]: _relationships, ...cleanRecord } = record
+    const jsonApiRecord = toJsonApiRecord(scope, cleanRecord, scopeName)
+
     if (_relationships) {
-      jsonApiRecord.relationships = _relationships;
+      jsonApiRecord.relationships = _relationships
     }
-    
+
     for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
       if (fieldDef.belongsTo && fieldDef.as && fieldName in cleanRecord) {
-        jsonApiRecord.relationships = jsonApiRecord.relationships || {};
+        jsonApiRecord.relationships = jsonApiRecord.relationships || {}
         if (!jsonApiRecord.relationships[fieldDef.as]) {
           if (cleanRecord[fieldName] !== null && cleanRecord[fieldName] !== undefined) {
             const relationshipObject = {
@@ -373,113 +373,113 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
                 type: fieldDef.belongsTo,
                 id: String(cleanRecord[fieldName])
               }
-            };
-            
+            }
+
             relationshipObject.links = {
               self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
               related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
-            };
-            
-            jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
+            }
+
+            jsonApiRecord.relationships[fieldDef.as] = relationshipObject
           } else {
             const relationshipObject = {
               data: null
-            };
-            
+            }
+
             relationshipObject.links = {
               self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
               related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
-            };
-            
-            jsonApiRecord.relationships[fieldDef.as] = relationshipObject;
+            }
+
+            jsonApiRecord.relationships[fieldDef.as] = relationshipObject
           }
         }
       }
     }
-    
+
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
-        const typeValue = cleanRecord[relDef.belongsToPolymorphic.typeField];
-        const idValue = cleanRecord[relDef.belongsToPolymorphic.idField];
-        
+        const typeValue = cleanRecord[relDef.belongsToPolymorphic.typeField]
+        const idValue = cleanRecord[relDef.belongsToPolymorphic.idField]
+
         if (typeValue && idValue) {
-          jsonApiRecord.relationships = jsonApiRecord.relationships || {};
+          jsonApiRecord.relationships = jsonApiRecord.relationships || {}
           const relationshipObject = {
             data: {
               type: typeValue,
               id: String(idValue)
             }
-          };
-          
+          }
+
           relationshipObject.links = {
             self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
             related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
-          };
-          
-          jsonApiRecord.relationships[relName] = relationshipObject;
+          }
+
+          jsonApiRecord.relationships[relName] = relationshipObject
         } else if (typeValue === null || idValue === null) {
-          jsonApiRecord.relationships = jsonApiRecord.relationships || {};
+          jsonApiRecord.relationships = jsonApiRecord.relationships || {}
           const relationshipObject = {
             data: null
-          };
-          
+          }
+
           relationshipObject.links = {
             self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
             related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
-          };
-          
-          jsonApiRecord.relationships[relName] = relationshipObject;
+          }
+
+          jsonApiRecord.relationships[relName] = relationshipObject
         }
       }
-    });
-    
-    return jsonApiRecord;
-  });
-  
-  const urlPrefix = context.urlPrefix || scope.vars.transport?.mountPath || '';
-  const normalizedData = isSingle ? processedRecords[0] : processedRecords;
-  
+    })
+
+    return jsonApiRecord
+  })
+
+  const urlPrefix = context.urlPrefix || scope.vars.transport?.mountPath || ''
+  const normalizedData = isSingle ? processedRecords[0] : processedRecords
+
   if (normalizedData) {
     if (Array.isArray(normalizedData)) {
       normalizedData.forEach(item => {
-        if (!item.links) item.links = {};
-        item.links.self = buildResourceUrl(context, scope, scopeName, item.id);
-      });
+        if (!item.links) item.links = {}
+        item.links.self = buildResourceUrl(context, scope, scopeName, item.id)
+      })
     } else {
-      if (!normalizedData.links) normalizedData.links = {};
-      normalizedData.links.self = buildResourceUrl(context, scope, scopeName, normalizedData.id);
+      if (!normalizedData.links) normalizedData.links = {}
+      normalizedData.links.self = buildResourceUrl(context, scope, scopeName, normalizedData.id)
     }
   }
 
   const response = {
     data: normalizedData
-  };
+  }
 
   if (included.length > 0) {
     included.forEach(item => {
-      if (!item.links) item.links = {};
-      item.links.self = buildResourceUrl(context, scope, item.type, item.id);
-    });
-    
-    response.included = included;
+      if (!item.links) item.links = {}
+      item.links.self = buildResourceUrl(context, scope, item.type, item.id)
+    })
+
+    response.included = included
   }
 
   if (context?.returnMeta?.paginationMeta) {
     response.meta = {
       pagination: context.returnMeta.paginationMeta
-    };
-  }
-  
-  if (context?.returnMeta?.paginationLinks) {
-    response.links = context.returnMeta.paginationLinks;
-  } else {
-    const urlPrefix = getUrlPrefix(context, scope);
-    response.links = {
-      self: isSingle 
-        ? buildResourceUrl(context, scope, scopeName, normalizedData.id)
-        : `${urlPrefix}/${scopeName}${context?.returnMeta?.queryString || ''}`
-    };
+    }
   }
 
-  return response;
-};
+  if (context?.returnMeta?.paginationLinks) {
+    response.links = context.returnMeta.paginationLinks
+  } else {
+    const urlPrefix = getUrlPrefix(context, scope)
+    response.links = {
+      self: isSingle
+        ? buildResourceUrl(context, scope, scopeName, normalizedData.id)
+        : `${urlPrefix}/${scopeName}${context?.returnMeta?.queryString || ''}`
+    }
+  }
+
+  return response
+}

@@ -1,85 +1,85 @@
-import { RestApiValidationError, RestApiResourceError } from '../../lib/rest-api-errors.js';
+import { RestApiValidationError, RestApiResourceError } from '../../lib/rest-api-errors.js'
 
 export const BulkOperationsPlugin = {
   name: 'bulk-operations',
   dependencies: ['rest-api'],
 
-  async install({ api, log, addHook, addScopeMethod, helpers, pluginOptions }) {
-    const bulkOptions = pluginOptions || {};
+  async install ({ api, log, addHook, addScopeMethod, helpers, pluginOptions }) {
+    const bulkOptions = pluginOptions || {}
     const {
       maxBulkOperations = 100,
       defaultAtomic = true,
       batchSize = 100,
       enableOptimizations = true
-    } = bulkOptions;
+    } = bulkOptions
 
-    log.info('Installing Bulk Operations plugin', { maxBulkOperations, defaultAtomic });
+    log.info('Installing Bulk Operations plugin', { maxBulkOperations, defaultAtomic })
 
     // Add bulk methods to each scope
     addScopeMethod('bulkPost', async ({ scope, scopeName, params, context, runHooks }) => {
-      const { inputRecords, atomic = defaultAtomic } = params;
-      
+      const { inputRecords, atomic = defaultAtomic } = params
+
       // Validate bulk size
       if (!Array.isArray(inputRecords) || inputRecords.length === 0) {
         throw new RestApiValidationError('Bulk operations require an array of records', {
           fields: ['data'],
           violations: [{ field: 'data', rule: 'required_array', message: 'Must be a non-empty array' }]
-        });
+        })
       }
 
       if (inputRecords.length > maxBulkOperations) {
         throw new RestApiValidationError(`Bulk operations limited to ${maxBulkOperations} records`, {
           fields: ['data'],
-          violations: [{ 
-            field: 'data', 
-            rule: 'max_items', 
-            message: `Cannot process more than ${maxBulkOperations} records at once` 
+          violations: [{
+            field: 'data',
+            rule: 'max_items',
+            message: `Cannot process more than ${maxBulkOperations} records at once`
           }]
-        });
+        })
       }
 
-      const results = [];
-      const errors = [];
-      let transaction = null;
+      const results = []
+      const errors = []
+      let transaction = null
 
       try {
         // Start transaction if atomic mode
         if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction();
+          transaction = await helpers.newTransaction()
         }
 
         // Process records in batches
         for (let i = 0; i < inputRecords.length; i += batchSize) {
-          const batch = inputRecords.slice(i, i + batchSize);
-          
+          const batch = inputRecords.slice(i, i + batchSize)
+
           for (let j = 0; j < batch.length; j++) {
-            const recordIndex = i + j;
-            const inputRecord = batch[j];
-            
+            const recordIndex = i + j
+            const inputRecord = batch[j]
+
             try {
               // Create individual context for each record
-              const recordContext = { 
+              const recordContext = {
                 ...context,
                 bulkOperation: true,
                 bulkIndex: recordIndex
-              };
+              }
 
               // Use the existing post method with transaction
               const result = await scope.post({
                 inputRecord: inputRecord.data ? inputRecord : { data: inputRecord },
                 transaction
-              }, recordContext);
+              }, recordContext)
 
               results.push({
                 index: recordIndex,
                 status: 'success',
                 data: result.data
-              });
+              })
             } catch (error) {
               if (atomic) {
                 // In atomic mode, rollback and throw
-                if (transaction) await transaction.rollback();
-                throw error;
+                if (transaction) await transaction.rollback()
+                throw error
               } else {
                 // In non-atomic mode, collect errors
                 errors.push({
@@ -90,7 +90,7 @@ export const BulkOperationsPlugin = {
                     message: error.message,
                     details: error.details
                   }
-                });
+                })
               }
             }
           }
@@ -98,7 +98,7 @@ export const BulkOperationsPlugin = {
 
         // Commit transaction if atomic
         if (transaction) {
-          await transaction.commit();
+          await transaction.commit()
         }
 
         // Build response
@@ -111,51 +111,50 @@ export const BulkOperationsPlugin = {
             failed: errors.length,
             atomic
           }
-        };
-
+        }
       } catch (error) {
         // Ensure rollback on error
         if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback();
+          await transaction.rollback()
         }
-        throw error;
+        throw error
       }
-    });
+    })
 
     addScopeMethod('bulkPatch', async ({ scope, scopeName, params, context, runHooks }) => {
-      const { operations, atomic = defaultAtomic } = params;
-      
+      const { operations, atomic = defaultAtomic } = params
+
       // Validate operations
       if (!Array.isArray(operations) || operations.length === 0) {
         throw new RestApiValidationError('Bulk patch requires an array of operations', {
           fields: ['operations'],
           violations: [{ field: 'operations', rule: 'required_array', message: 'Must be a non-empty array' }]
-        });
+        })
       }
 
       if (operations.length > maxBulkOperations) {
         throw new RestApiValidationError(`Bulk operations limited to ${maxBulkOperations} operations`, {
           fields: ['operations'],
-          violations: [{ 
-            field: 'operations', 
-            rule: 'max_items', 
-            message: `Cannot process more than ${maxBulkOperations} operations at once` 
+          violations: [{
+            field: 'operations',
+            rule: 'max_items',
+            message: `Cannot process more than ${maxBulkOperations} operations at once`
           }]
-        });
+        })
       }
 
-      const results = [];
-      const errors = [];
-      let transaction = null;
+      const results = []
+      const errors = []
+      let transaction = null
 
       try {
         if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction();
+          transaction = await helpers.newTransaction()
         }
 
         for (let i = 0; i < operations.length; i++) {
-          const operation = operations[i];
-          
+          const operation = operations[i]
+
           // Validate operation structure
           if (!operation.id || !operation.data) {
             errors.push({
@@ -166,42 +165,42 @@ export const BulkOperationsPlugin = {
                 message: 'Operation must include id and data',
                 details: { operation }
               }
-            });
+            })
             if (atomic) {
-              if (transaction) await transaction.rollback();
+              if (transaction) await transaction.rollback()
               throw new RestApiValidationError('Invalid operation structure', {
                 fields: [`operations[${i}]`],
-                violations: [{ 
-                  field: `operations[${i}]`, 
-                  rule: 'required_fields', 
-                  message: 'Operation must include id and data' 
+                violations: [{
+                  field: `operations[${i}]`,
+                  rule: 'required_fields',
+                  message: 'Operation must include id and data'
                 }]
-              });
+              })
             }
-            continue;
+            continue
           }
 
           try {
-            const recordContext = { 
+            const recordContext = {
               ...context,
               bulkOperation: true,
               bulkIndex: i
-            };
+            }
 
             const result = await scope.patch({
               id: operation.id,
               inputRecord: { data: operation.data },
               transaction
-            }, recordContext);
+            }, recordContext)
 
             // If patch doesn't return full record, fetch it
-            let resultData = result.data;
+            let resultData = result.data
             if (!resultData && result.id) {
               const fetchedRecord = await scope.get({
                 id: result.id,
                 transaction
-              }, recordContext);
-              resultData = fetchedRecord.data;
+              }, recordContext)
+              resultData = fetchedRecord.data
             }
 
             results.push({
@@ -209,11 +208,11 @@ export const BulkOperationsPlugin = {
               id: operation.id,
               status: 'success',
               data: resultData
-            });
+            })
           } catch (error) {
             if (atomic) {
-              if (transaction) await transaction.rollback();
-              throw error;
+              if (transaction) await transaction.rollback()
+              throw error
             } else {
               errors.push({
                 index: i,
@@ -224,13 +223,13 @@ export const BulkOperationsPlugin = {
                   message: error.message,
                   details: error.details
                 }
-              });
+              })
             }
           }
         }
 
         if (transaction) {
-          await transaction.commit();
+          await transaction.commit()
         }
 
         return {
@@ -242,72 +241,71 @@ export const BulkOperationsPlugin = {
             failed: errors.length,
             atomic
           }
-        };
-
+        }
       } catch (error) {
         if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback();
+          await transaction.rollback()
         }
-        throw error;
+        throw error
       }
-    });
+    })
 
     addScopeMethod('bulkDelete', async ({ scope, scopeName, params, context, runHooks }) => {
-      const { ids, atomic = defaultAtomic } = params;
-      
+      const { ids, atomic = defaultAtomic } = params
+
       // Validate IDs
       if (!Array.isArray(ids) || ids.length === 0) {
         throw new RestApiValidationError('Bulk delete requires an array of IDs', {
           fields: ['ids'],
           violations: [{ field: 'ids', rule: 'required_array', message: 'Must be a non-empty array' }]
-        });
+        })
       }
 
       if (ids.length > maxBulkOperations) {
         throw new RestApiValidationError(`Bulk operations limited to ${maxBulkOperations} IDs`, {
           fields: ['ids'],
-          violations: [{ 
-            field: 'ids', 
-            rule: 'max_items', 
-            message: `Cannot process more than ${maxBulkOperations} IDs at once` 
+          violations: [{
+            field: 'ids',
+            rule: 'max_items',
+            message: `Cannot process more than ${maxBulkOperations} IDs at once`
           }]
-        });
+        })
       }
 
-      const results = [];
-      const errors = [];
-      let transaction = null;
+      const results = []
+      const errors = []
+      let transaction = null
 
       try {
         if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction();
+          transaction = await helpers.newTransaction()
         }
 
         // Process deletes
         for (let i = 0; i < ids.length; i++) {
-          const id = ids[i];
-          
+          const id = ids[i]
+
           try {
-            const recordContext = { 
+            const recordContext = {
               ...context,
               bulkOperation: true,
               bulkIndex: i
-            };
+            }
 
             await scope.delete({
               id,
               transaction
-            }, recordContext);
+            }, recordContext)
 
             results.push({
               index: i,
               id,
               status: 'success'
-            });
+            })
           } catch (error) {
             if (atomic) {
-              if (transaction) await transaction.rollback();
-              throw error;
+              if (transaction) await transaction.rollback()
+              throw error
             } else {
               errors.push({
                 index: i,
@@ -318,13 +316,13 @@ export const BulkOperationsPlugin = {
                   message: error.message,
                   details: error.details
                 }
-              });
+              })
             }
           }
         }
 
         if (transaction) {
-          await transaction.commit();
+          await transaction.commit()
         }
 
         return {
@@ -336,85 +334,84 @@ export const BulkOperationsPlugin = {
             atomic
           },
           errors: errors.length > 0 ? errors : undefined
-        };
-
+        }
       } catch (error) {
         if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback();
+          await transaction.rollback()
         }
-        throw error;
+        throw error
       }
-    });
+    })
 
     // Hook into scope creation to add bulk routes
     addHook('afterAddScope', 'bulkOperationsRoutes', {}, async ({ scopeName }) => {
       // Note: context is not available here during route registration
       // The urlPrefix will be calculated per-request in the handler
-      const urlPrefix = api.vars.transport?.mountPath || '';
-      const scopePath = `${urlPrefix}/${scopeName}`;
+      const urlPrefix = api.vars.transport?.mountPath || ''
+      const scopePath = `${urlPrefix}/${scopeName}`
 
       // Create route handlers
       const createBulkRouteHandler = (method) => {
         return async ({ context, body, query }) => {
           try {
             // Parse query params for atomic mode override
-            const atomic = query?.atomic !== undefined 
-              ? query.atomic === 'true' 
-              : defaultAtomic;
+            const atomic = query?.atomic !== undefined
+              ? query.atomic === 'true'
+              : defaultAtomic
 
-            let params;
+            let params
             if (method === 'bulkPost') {
               // For bulk create, expect array in data field (JSON:API style)
               params = {
                 inputRecords: body?.data || body,
                 atomic
-              };
+              }
             } else if (method === 'bulkPatch') {
               // For bulk update, expect operations array
               params = {
                 operations: body?.operations || body,
                 atomic
-              };
+              }
             } else if (method === 'bulkDelete') {
               // For bulk delete, expect IDs array
               params = {
                 ids: body?.data || body?.ids || body,
                 atomic
-              };
+              }
             }
 
             // Call the scope method
-            const result = await api.scopes[scopeName][method](params);
-            
-            return result;
+            const result = await api.scopes[scopeName][method](params)
+
+            return result
           } catch (error) {
             // Let transport plugin handle error mapping
-            throw error;
+            throw error
           }
-        };
-      };
+        }
+      }
 
       // Register bulk routes
       await api.addRoute({
         method: 'POST',
         path: `${scopePath}/bulk`,
         handler: createBulkRouteHandler('bulkPost')
-      });
+      })
 
       await api.addRoute({
         method: 'PATCH',
         path: `${scopePath}/bulk`,
         handler: createBulkRouteHandler('bulkPatch')
-      });
+      })
 
       await api.addRoute({
         method: 'DELETE',
         path: `${scopePath}/bulk`,
         handler: createBulkRouteHandler('bulkDelete')
-      });
+      })
 
-      log.debug(`Added bulk operation routes for scope: ${scopeName}`);
-    });
+      log.debug(`Added bulk operation routes for scope: ${scopeName}`)
+    })
 
     // Add optimized bulk insert for Knex if available
     if (enableOptimizations) {
@@ -422,40 +419,40 @@ export const BulkOperationsPlugin = {
         // Check if we can use optimized path
         if (params.atomic && api.knex?.instance && context.bulkOperation === undefined) {
           // This is the main bulk operation, not individual records
-          const { inputRecords } = params;
-          
+          const { inputRecords } = params
+
           // Transform records for direct insertion
-          const recordsToInsert = [];
+          const recordsToInsert = []
           for (const inputRecord of inputRecords) {
             // Run validation
-            const validated = await scope.validateInput({ 
-              inputRecord, 
-              operation: 'create' 
-            });
-            
+            const validated = await scope.validateInput({
+              inputRecord,
+              operation: 'create'
+            })
+
             // Transform to database format
-            const dbRecord = await scope.transformForDatabase({ 
+            const dbRecord = await scope.transformForDatabase({
               record: validated,
               operation: 'create'
-            });
-            
-            recordsToInsert.push(dbRecord);
+            })
+
+            recordsToInsert.push(dbRecord)
           }
 
           // Perform bulk insert
-          const knex = api.knex.instance;
-          const tableName = scope.vars.schemaInfo.tableName;
-          
+          const knex = api.knex.instance
+          const tableName = scope.vars.schemaInfo.tableName
+
           try {
             const inserted = await knex(tableName)
               .insert(recordsToInsert)
-              .returning('*');
-            
+              .returning('*')
+
             // Transform back to API format
-            const results = [];
+            const results = []
             for (const record of inserted) {
-              const apiRecord = await scope.transformFromDatabase({ record });
-              results.push(apiRecord);
+              const apiRecord = await scope.transformFromDatabase({ record })
+              results.push(apiRecord)
             }
 
             // Return optimized result
@@ -469,15 +466,15 @@ export const BulkOperationsPlugin = {
                 optimized: true
               },
               skipDefault: true // Tell the default handler to skip
-            };
+            }
           } catch (error) {
             // Fall back to default handling
-            log.warn('Optimized bulk insert failed, falling back to default', { error: error.message });
+            log.warn('Optimized bulk insert failed, falling back to default', { error: error.message })
           }
         }
-      });
+      })
     }
 
-    log.info('Bulk Operations plugin installed successfully');
+    log.info('Bulk Operations plugin installed successfully')
   }
-};
+}

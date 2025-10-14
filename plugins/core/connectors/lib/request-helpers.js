@@ -8,30 +8,30 @@
  * @param {Object} req - The request object (Node.js http.IncomingMessage or Express Request)
  * @returns {string} The client IP address
  */
-export function getClientIP(req) {
+export function getClientIP (req) {
   // Check X-Forwarded-For header (comma-separated list, first is original client)
-  const xForwardedFor = req.headers['x-forwarded-for'];
+  const xForwardedFor = req.headers['x-forwarded-for']
   if (xForwardedFor) {
-    return xForwardedFor.split(',')[0].trim();
+    return xForwardedFor.split(',')[0].trim()
   }
-  
+
   // Check X-Real-IP header (single IP)
-  const xRealIP = req.headers['x-real-ip'];
+  const xRealIP = req.headers['x-real-ip']
   if (xRealIP) {
-    return xRealIP;
+    return xRealIP
   }
-  
+
   // Check Cloudflare's CF-Connecting-IP
-  const cfConnectingIP = req.headers['cf-connecting-ip'];
+  const cfConnectingIP = req.headers['cf-connecting-ip']
   if (cfConnectingIP) {
-    return cfConnectingIP;
+    return cfConnectingIP
   }
-  
+
   // Fall back to direct connection
-  return req.connection?.remoteAddress || 
-         req.socket?.remoteAddress || 
+  return req.connection?.remoteAddress ||
+         req.socket?.remoteAddress ||
          req.ip || // Express specific
-         'unknown';
+         'unknown'
 }
 
 /**
@@ -39,30 +39,30 @@ export function getClientIP(req) {
  * @param {Object} req - The request object
  * @returns {boolean} True if the request is secure
  */
-export function isSecure(req) {
+export function isSecure (req) {
   // Express-specific property
   if (req.secure !== undefined) {
-    return req.secure;
+    return req.secure
   }
-  
+
   // Check X-Forwarded-Proto header (used by proxies)
-  const xForwardedProto = req.headers['x-forwarded-proto'];
+  const xForwardedProto = req.headers['x-forwarded-proto']
   if (xForwardedProto) {
-    return xForwardedProto === 'https';
+    return xForwardedProto === 'https'
   }
-  
+
   // Check if connection is encrypted (Node.js)
   if (req.connection?.encrypted) {
-    return true;
+    return true
   }
-  
+
   // Check protocol directly
   if (req.protocol === 'https') {
-    return true;
+    return true
   }
-  
+
   // Default to false
-  return false;
+  return false
 }
 
 /**
@@ -70,53 +70,53 @@ export function isSecure(req) {
  * @param {Object} req - The request object
  * @returns {string} The hostname
  */
-export function getHostname(req) {
+export function getHostname (req) {
   // Express-specific property
   if (req.hostname) {
-    return req.hostname;
+    return req.hostname
   }
-  
+
   // Check Host header
-  const hostHeader = req.headers.host;
+  const hostHeader = req.headers.host
   if (hostHeader) {
     // Remove port if present
-    const colonIndex = hostHeader.indexOf(':');
-    return colonIndex === -1 ? hostHeader : hostHeader.substring(0, colonIndex);
+    const colonIndex = hostHeader.indexOf(':')
+    return colonIndex === -1 ? hostHeader : hostHeader.substring(0, colonIndex)
   }
-  
+
   // Fall back
-  return 'localhost';
+  return 'localhost'
 }
 
 /**
  * Get the port from the request
- * @param {Object} req - The request object  
+ * @param {Object} req - The request object
  * @returns {number|null} The port number or null
  */
-export function getPort(req) {
+export function getPort (req) {
   // Check Host header for port
-  const hostHeader = req.headers.host;
+  const hostHeader = req.headers.host
   if (hostHeader) {
-    const colonIndex = hostHeader.indexOf(':');
+    const colonIndex = hostHeader.indexOf(':')
     if (colonIndex !== -1) {
-      const port = parseInt(hostHeader.substring(colonIndex + 1), 10);
+      const port = parseInt(hostHeader.substring(colonIndex + 1), 10)
       if (!isNaN(port)) {
-        return port;
+        return port
       }
     }
   }
-  
+
   // Check connection local port
   if (req.connection?.localPort) {
-    return req.connection.localPort;
+    return req.connection.localPort
   }
-  
+
   if (req.socket?.localPort) {
-    return req.socket.localPort;
+    return req.socket.localPort
   }
-  
+
   // Default ports based on protocol
-  return isSecure(req) ? 443 : 80;
+  return isSecure(req) ? 443 : 80
 }
 
 /**
@@ -124,30 +124,30 @@ export function getPort(req) {
  * @param {string} cookieString - The cookie header value
  * @returns {Object} Parsed cookies as key-value pairs
  */
-export function parseCookies(cookieString) {
-  const cookies = {};
-  
+export function parseCookies (cookieString) {
+  const cookies = {}
+
   if (!cookieString || typeof cookieString !== 'string') {
-    return cookies;
+    return cookies
   }
-  
+
   // Split by semicolons and parse each cookie
   cookieString.split(';').forEach(cookie => {
-    const trimmedCookie = cookie.trim();
+    const trimmedCookie = cookie.trim()
     if (trimmedCookie) {
-      const eqIndex = trimmedCookie.indexOf('=');
+      const eqIndex = trimmedCookie.indexOf('=')
       if (eqIndex !== -1) {
-        const name = trimmedCookie.substring(0, eqIndex).trim();
-        const value = trimmedCookie.substring(eqIndex + 1).trim();
+        const name = trimmedCookie.substring(0, eqIndex).trim()
+        const value = trimmedCookie.substring(eqIndex + 1).trim()
         if (name) {
           // Remove quotes if present
-          cookies[name] = value.replace(/^"(.*)"$/, '$1');
+          cookies[name] = value.replace(/^"(.*)"$/, '$1')
         }
       }
     }
-  });
-  
-  return cookies;
+  })
+
+  return cookies
 }
 
 /**
@@ -155,26 +155,26 @@ export function parseCookies(cookieString) {
  * @param {Object} req - The request object
  * @returns {string|null} The extracted token or null
  */
-export function extractToken(req) {
+export function extractToken (req) {
   // Check Authorization header for Bearer token
-  const authHeader = req.headers.authorization || req.headers.Authorization;
+  const authHeader = req.headers.authorization || req.headers.Authorization
   if (authHeader && typeof authHeader === 'string') {
-    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i)
     if (bearerMatch) {
-      return bearerMatch[1];
+      return bearerMatch[1]
     }
   }
 
   // Check cookies for session token (Auth.js pattern)
-  const cookies = parseCookies(req.headers.cookie || '');
+  const cookies = parseCookies(req.headers.cookie || '')
   if (cookies['__Secure-authjs.session-token']) {
-    return cookies['__Secure-authjs.session-token'];
+    return cookies['__Secure-authjs.session-token']
   }
   if (cookies['authjs.session-token']) {
-    return cookies['authjs.session-token'];
+    return cookies['authjs.session-token']
   }
 
-  return null;
+  return null
 }
 
 /**
@@ -184,7 +184,7 @@ export function extractToken(req) {
  * @param {string} source - The source plugin ('http' or 'express')
  * @returns {Object} The context object
  */
-export function createContext(req, res, source) {
+export function createContext (req, res, source) {
   const context = {
     source,
     auth: {
@@ -206,17 +206,17 @@ export function createContext(req, res, source) {
     raw: { req, res },
     handled: false,
     rejection: null
-  };
-  
+  }
+
   // Add reject function
   context.reject = (status, message, details = {}) => {
-    context.handled = true;
+    context.handled = true
     context.rejection = {
       status,
       message,
       ...details
-    };
-  };
-  
-  return context;
+    }
+  }
+
+  return context
 }

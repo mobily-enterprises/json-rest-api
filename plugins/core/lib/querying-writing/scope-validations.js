@@ -1,6 +1,6 @@
 /**
  * Scope configuration validators for relationship definitions
- * 
+ *
  * @description
  * These validators run at scope registration time to ensure:
  * - Polymorphic relationships are properly configured
@@ -9,15 +9,14 @@
  * - Referenced scopes actually exist in the system
  */
 
-
 /**
  * Validates all relationships in a scope configuration
- * 
+ *
  * @param {Object} params - Validation parameters
  * @param {Object} params.context - Event context with scopeName and scopeOptions
  * @param {Object} params.scopes - All registered scopes for validation
  * @throws {Error} If any relationship is misconfigured
- * 
+ *
  * @example
  * // Input: Valid polymorphic relationship
  * validateRelationships({
@@ -42,7 +41,7 @@
  *   scopes: { posts: {}, videos: {} }         // Referenced types exist
  * });
  * // Output: No error (valid configuration)
- * 
+ *
  * @example
  * // Input: Missing required field
  * validateRelaationships({
@@ -63,9 +62,9 @@
  *   scopes: { documents: {} }
  * });
  * // Throws: Error
- * // "Invalid polymorphic relationship 'attachable' in scope 'attachments': 
+ * // "Invalid polymorphic relationship 'attachable' in scope 'attachments':
  * //  belongsToPolymorphic.idField must be specified"
- * 
+ *
  * @example
  * // Input: HasMany without foreignKey
  * validateRelationships({
@@ -86,7 +85,7 @@
  * // Throws: Error
  * // "Invalid hasMany relationship 'posts' in scope 'users':
  * //  hasMany relationship requires foreignKey to be specified"
- * 
+ *
  * @example
  * // Input: Complex activity feed with multiple polymorphic relationships
  * validateRelationships({
@@ -120,19 +119,19 @@
  *   scopes: { posts: {}, comments: {}, users: {}, api_clients: {} }
  * });
  * // Output: No error (both polymorphic relationships valid)
- * 
+ *
  * @description
  * Used by:
  * - rest-api-plugin on 'scope:added' event
  * - Runs automatically when scopes are registered
- * 
+ *
  * Purpose:
  * - Catches configuration errors at startup, not runtime
  * - Validates polymorphic relationship structure
  * - Ensures referenced scope types exist
  * - Validates hasMany/manyToMany foreign keys
  * - Provides clear error messages for debugging
- * 
+ *
  * Data flow:
  * 1. Extracts relationships from scope options
  * 2. For each relationship, checks its type
@@ -141,59 +140,58 @@
  * 5. Validates manyToMany: through, foreignKey, otherKey
  * 6. Throws descriptive error on first validation failure
  */
-export function validateRelationships({ context, scopes }) {
-  const { scopeName, scopeOptions } = context;
-  const relationships = scopeOptions.relationships || {};
-  
+export function validateRelationships ({ context, scopes }) {
+  const { scopeName, scopeOptions } = context
+  const relationships = scopeOptions.relationships || {}
+
   for (const [relName, relDef] of Object.entries(relationships)) {
     if (relDef.belongsToPolymorphic) {
-      const validation = validatePolymorphicRelationship(relDef, scopeName, scopes);
+      const validation = validatePolymorphicRelationship(relDef, scopeName, scopes)
       if (!validation.valid) {
         throw new Error(
           `Invalid polymorphic relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        );
+        )
       }
     }
-    
+
     // Validate based on relationship type
     if (relDef.type === 'hasMany') {
-      const validation = validateHasManyRelationship(relDef, relName, scopeName);
+      const validation = validateHasManyRelationship(relDef, relName, scopeName)
       if (!validation.valid) {
         throw new Error(
           `Invalid hasMany relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        );
+        )
       }
     }
-    
+
     if (relDef.type === 'hasOne') {
-      const validation = validateHasOneRelationship(relDef, relName, scopeName);
+      const validation = validateHasOneRelationship(relDef, relName, scopeName)
       if (!validation.valid) {
         throw new Error(
           `Invalid hasOne relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        );
+        )
       }
     }
-    
+
     if (relDef.type === 'manyToMany') {
-      const validation = validateManyToManyRelationship(relDef, relName, scopeName);
+      const validation = validateManyToManyRelationship(relDef, relName, scopeName)
       if (!validation.valid) {
         throw new Error(
           `Invalid manyToMany relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        );
+        )
       }
     }
   }
 }
 
-
 /**
  * Validates a polymorphic relationship definition
- * 
+ *
  * @param {Object} relDef - Relationship definition with belongsToPolymorphic
  * @param {string} scopeName - Scope being registered (for error messages)
  * @param {Object} scopes - All registered scopes for validation
  * @returns {Object} Validation result {valid: boolean, error?: string}
- * 
+ *
  * @example
  * // Input: Valid polymorphic configuration
  * const relDef = {
@@ -205,7 +203,7 @@ export function validateRelationships({ context, scopes }) {
  * };
  * validatePolymorphicRelationship(relDef, 'comments', scopes);
  * // Output: { valid: true }
- * 
+ *
  * @example
  * // Input: Missing required types array
  * const relDef = {
@@ -216,11 +214,11 @@ export function validateRelationships({ context, scopes }) {
  *   }
  * };
  * validatePolymorphicRelationship(relDef, 'comments', scopes);
- * // Output: { 
- * //   valid: false, 
- * //   error: 'belongsToPolymorphic.types must be a non-empty array' 
+ * // Output: {
+ * //   valid: false,
+ * //   error: 'belongsToPolymorphic.types must be a non-empty array'
  * // }
- * 
+ *
  * @example
  * // Input: References non-existent scope
  * const relDef = {
@@ -231,11 +229,11 @@ export function validateRelationships({ context, scopes }) {
  *   }
  * };
  * validatePolymorphicRelationship(relDef, 'attachments', scopes);
- * // Output: { 
- * //   valid: false, 
- * //   error: "Polymorphic type 'unicorns' is not a registered scope" 
+ * // Output: {
+ * //   valid: false,
+ * //   error: "Polymorphic type 'unicorns' is not a registered scope"
  * // }
- * 
+ *
  * @private
  */
 const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
@@ -245,57 +243,57 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
   // 3. Ensure types is non-empty array
   // 4. Verify all types are registered scopes
   // 5. Check that typeField and idField exist in the schema
-  
-  const { belongsToPolymorphic } = relDef;
-  
+
+  const { belongsToPolymorphic } = relDef
+
   if (!belongsToPolymorphic) {
-    return { valid: false, error: 'Missing belongsToPolymorphic definition' };
+    return { valid: false, error: 'Missing belongsToPolymorphic definition' }
   }
-  
-  const { types, typeField, idField } = belongsToPolymorphic;
-  
+
+  const { types, typeField, idField } = belongsToPolymorphic
+
   if (!types || !Array.isArray(types) || types.length === 0) {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.types must be a non-empty array' 
-    };
+    return {
+      valid: false,
+      error: 'belongsToPolymorphic.types must be a non-empty array'
+    }
   }
-  
+
   if (!typeField || typeof typeField !== 'string') {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.typeField must be specified' 
-    };
+    return {
+      valid: false,
+      error: 'belongsToPolymorphic.typeField must be specified'
+    }
   }
-  
+
   if (!idField || typeof idField !== 'string') {
-    return { 
-      valid: false, 
-      error: 'belongsToPolymorphic.idField must be specified' 
-    };
+    return {
+      valid: false,
+      error: 'belongsToPolymorphic.idField must be specified'
+    }
   }
-  
+
   // Check that all types are valid scopes
   for (const type of types) {
     if (!scopes[type]) {
-      return { 
-        valid: false, 
-        error: `Polymorphic type '${type}' is not a registered scope` 
-      };
+      return {
+        valid: false,
+        error: `Polymorphic type '${type}' is not a registered scope`
+      }
     }
   }
-  
-  return { valid: true };
-};
+
+  return { valid: true }
+}
 
 /**
  * Validates a hasMany relationship definition
- * 
+ *
  * @param {Object} relDef - Relationship definition with hasMany
  * @param {string} relName - Relationship name
  * @param {string} scopeName - Scope being registered
  * @returns {Object} Validation result {valid: boolean, error?: string}
- * 
+ *
  * @example
  * // Input: Valid hasMany configuration
  * const relDef = {
@@ -305,7 +303,7 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * };
  * validateHasManyRelationship(relDef, 'posts', 'users');
  * // Output: { valid: true }
- * 
+ *
  * @example
  * // Input: Missing required foreignKey
  * const relDef = {
@@ -314,11 +312,11 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  *   // Missing: foreignKey
  * };
  * validateHasManyRelationship(relDef, 'posts', 'users');
- * // Output: { 
- * //   valid: false, 
- * //   error: 'hasMany relationship requires foreignKey to be specified...' 
+ * // Output: {
+ * //   valid: false,
+ * //   error: 'hasMany relationship requires foreignKey to be specified...'
  * // }
- * 
+ *
  * @example
  * // Input: Polymorphic hasMany with 'via' (doesn't need foreignKey)
  * const relDef = {
@@ -328,49 +326,49 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
  * };
  * validateHasManyRelationship(relDef, 'comments', 'posts');
  * // Output: { valid: true }
- * 
+ *
  * @private
  */
 const validateHasManyRelationship = (relDef, relName, scopeName) => {
   // Validate target is specified
   if (!relDef.target) {
-    return { 
-      valid: false, 
-      error: `hasMany relationship requires 'target' to be specified.`
-    };
+    return {
+      valid: false,
+      error: 'hasMany relationship requires \'target\' to be specified.'
+    }
   }
-  
+
   // Polymorphic hasMany relationships using 'via' don't need foreignKey
   // They use the polymorphic fields (typeField, idField) from the belongsToPolymorphic relationship
   if (relDef.via) {
-    return { valid: true };
+    return { valid: true }
   }
-  
+
   if (!relDef.foreignKey) {
-    return { 
-      valid: false, 
-      error: `hasMany relationship requires foreignKey to be specified. Add foreignKey: '<field_name>' to the relationship definition.`
-    };
+    return {
+      valid: false,
+      error: 'hasMany relationship requires foreignKey to be specified. Add foreignKey: \'<field_name>\' to the relationship definition.'
+    }
   }
-  
+
   if (typeof relDef.foreignKey !== 'string') {
-    return { 
-      valid: false, 
+    return {
+      valid: false,
       error: `hasMany relationship foreignKey must be a string, got ${typeof relDef.foreignKey}`
-    };
+    }
   }
-  
-  return { valid: true };
-};
+
+  return { valid: true }
+}
 
 /**
  * Validates a hasOne relationship definition
- * 
+ *
  * @param {Object} relDef - Relationship definition with hasOne
  * @param {string} relName - Relationship name
  * @param {string} scopeName - Scope being registered
  * @returns {Object} Validation result {valid: boolean, error?: string}
- * 
+ *
  * @example
  * // Input: Valid hasOne configuration
  * const relDef = {
@@ -380,43 +378,43 @@ const validateHasManyRelationship = (relDef, relName, scopeName) => {
  * };
  * validateHasOneRelationship(relDef, 'profile', 'users');
  * // Output: { valid: true }
- * 
+ *
  * @private
  */
 const validateHasOneRelationship = (relDef, relName, scopeName) => {
   // Validate target is specified
   if (!relDef.target) {
-    return { 
-      valid: false, 
-      error: `hasOne relationship requires 'target' to be specified.`
-    };
+    return {
+      valid: false,
+      error: 'hasOne relationship requires \'target\' to be specified.'
+    }
   }
-  
+
   if (!relDef.foreignKey) {
-    return { 
-      valid: false, 
-      error: `hasOne relationship requires foreignKey to be specified. Add foreignKey: '<field_name>' to the relationship definition.`
-    };
+    return {
+      valid: false,
+      error: 'hasOne relationship requires foreignKey to be specified. Add foreignKey: \'<field_name>\' to the relationship definition.'
+    }
   }
-  
+
   if (typeof relDef.foreignKey !== 'string') {
-    return { 
-      valid: false, 
+    return {
+      valid: false,
       error: `hasOne relationship foreignKey must be a string, got ${typeof relDef.foreignKey}`
-    };
+    }
   }
-  
-  return { valid: true };
-};
+
+  return { valid: true }
+}
 
 /**
  * Validates a manyToMany relationship definition
- * 
+ *
  * @param {Object} relDef - Relationship definition with manyToMany
  * @param {string} relName - Relationship name
  * @param {string} scopeName - Scope being registered
  * @returns {Object} Validation result {valid: boolean, error?: string}
- * 
+ *
  * @example
  * // Input: Valid manyToMany configuration
  * const relDef = {
@@ -427,7 +425,7 @@ const validateHasOneRelationship = (relDef, relName, scopeName) => {
  * };
  * validateManyToManyRelationship(relDef, 'tags', 'articles');
  * // Output: { valid: true }
- * 
+ *
  * @example
  * // Input: Missing required fields
  * const relDef = {
@@ -437,51 +435,50 @@ const validateHasOneRelationship = (relDef, relName, scopeName) => {
  *   // Missing: otherKey
  * };
  * validateManyToManyRelationship(relDef, 'tags', 'articles');
- * // Output: { 
- * //   valid: false, 
- * //   error: 'manyToMany relationship requires otherKey to be specified...' 
+ * // Output: {
+ * //   valid: false,
+ * //   error: 'manyToMany relationship requires otherKey to be specified...'
  * // }
- * 
+ *
  * @private
  */
 const validateManyToManyRelationship = (relDef, relName, scopeName) => {
-  const { through, foreignKey, otherKey } = relDef;
-  
-  if (!through) {
-    return { 
-      valid: false, 
-      error: `manyToMany relationship requires 'through' table to be specified`
-    };
-  }
-  
-  if (!foreignKey) {
-    return { 
-      valid: false, 
-      error: `manyToMany relationship requires foreignKey to be specified. Add foreignKey: '<field_name>' to the manyToMany configuration.`
-    };
-  }
-  
-  if (!otherKey) {
-    return { 
-      valid: false, 
-      error: `manyToMany relationship requires otherKey to be specified. Add otherKey: '<field_name>' to the manyToMany configuration.`
-    };
-  }
-  
-  if (typeof foreignKey !== 'string') {
-    return { 
-      valid: false, 
-      error: `manyToMany relationship foreignKey must be a string, got ${typeof foreignKey}`
-    };
-  }
-  
-  if (typeof otherKey !== 'string') {
-    return { 
-      valid: false, 
-      error: `manyToMany relationship otherKey must be a string, got ${typeof otherKey}`
-    };
-  }
-  
-  return { valid: true };
-};
+  const { through, foreignKey, otherKey } = relDef
 
+  if (!through) {
+    return {
+      valid: false,
+      error: 'manyToMany relationship requires \'through\' table to be specified'
+    }
+  }
+
+  if (!foreignKey) {
+    return {
+      valid: false,
+      error: 'manyToMany relationship requires foreignKey to be specified. Add foreignKey: \'<field_name>\' to the manyToMany configuration.'
+    }
+  }
+
+  if (!otherKey) {
+    return {
+      valid: false,
+      error: 'manyToMany relationship requires otherKey to be specified. Add otherKey: \'<field_name>\' to the manyToMany configuration.'
+    }
+  }
+
+  if (typeof foreignKey !== 'string') {
+    return {
+      valid: false,
+      error: `manyToMany relationship foreignKey must be a string, got ${typeof foreignKey}`
+    }
+  }
+
+  if (typeof otherKey !== 'string') {
+    return {
+      valid: false,
+      error: `manyToMany relationship otherKey must be a string, got ${typeof otherKey}`
+    }
+  }
+
+  return { valid: true }
+}

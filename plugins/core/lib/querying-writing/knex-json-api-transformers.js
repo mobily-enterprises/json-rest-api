@@ -1,14 +1,14 @@
-import { toJsonApiRecord } from '../querying/knex-json-api-transformers-querying.js';
-import { getSchemaStructure } from './knex-constants.js';
+import { toJsonApiRecord } from '../querying/knex-json-api-transformers-querying.js'
+import { getSchemaStructure } from './knex-constants.js'
 
 /**
  * Converts database record to JSON:API format with belongsTo relationships
- * 
+ *
  * @param {Object} scope - Resource scope with schema and relationship info
  * @param {Object} record - Raw database record
  * @param {string} scopeName - Resource type name
  * @returns {Object} JSON:API resource with belongsTo relationships
- * 
+ *
  * @example
  * // Input: Database record with foreign keys
  * const dbRecord = {
@@ -19,7 +19,7 @@ import { getSchemaStructure } from './knex-constants.js';
  *   category_id: null
  * };
  * const result = toJsonApiRecordWithBelongsTo(scope, dbRecord, 'articles');
- * 
+ *
  * // Output: JSON:API with relationship objects
  * // {
  * //   type: 'articles',
@@ -40,7 +40,7 @@ import { getSchemaStructure } from './knex-constants.js';
  * //     }
  * //   }
  * // }
- * 
+ *
  * @example
  * // Input: Polymorphic relationships
  * const dbRecord = {
@@ -57,7 +57,7 @@ import { getSchemaStructure } from './knex-constants.js';
  * //     idField: 'commentable_id'
  * //   }
  * // }
- * 
+ *
  * // Output: Polymorphic relationship in JSON:API
  * // {
  * //   type: 'comments',
@@ -69,19 +69,19 @@ import { getSchemaStructure } from './knex-constants.js';
  * //     }
  * //   }
  * // }
- * 
+ *
  * @description
  * Used by:
  * - dataGetMinimal for lightweight single record fetches
  * - dataDelete to return deleted record structure
  * - Internal operations needing quick JSON:API conversion
- * 
+ *
  * Purpose:
  * - Provides JSON:API structure without loading related data
  * - Transforms foreign keys into relationship objects
  * - Handles both regular and polymorphic belongsTo
  * - Maintains explicit nulls for empty relationships
- * 
+ *
  * Data flow:
  * 1. Calls toJsonApiRecord for basic transformation
  * 2. Scans schema for belongsTo field definitions
@@ -90,73 +90,73 @@ import { getSchemaStructure } from './knex-constants.js';
  * 5. Returns complete JSON:API resource object
  */
 export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
-  if (!record) return null;
-  
+  if (!record) return null
+
   // Get the basic JSON:API structure (without relationships)
-  const jsonApiRecord = toJsonApiRecord(scope, record, scopeName);
-  
+  const jsonApiRecord = toJsonApiRecord(scope, record, scopeName)
+
   // Extract schema info from scope
-  const { 
-    vars: { 
-      schemaInfo: { schemaInstance: schemaInstance, schemaRelationships: relationships, idProperty }
+  const {
+    vars: {
+      schemaInfo: { schemaInstance, schemaRelationships: relationships, idProperty }
     }
-  } = scope;
-  
-  const idField = idProperty || 'id';
-  
+  } = scope
+
+  const idField = idProperty || 'id'
+
   // Get schema structure
-  const schemaStructure = getSchemaStructure(schemaInstance);
-  
+  const schemaStructure = getSchemaStructure(schemaInstance)
+
   // Initialize relationships object
-  jsonApiRecord.relationships = {};
-  
+  jsonApiRecord.relationships = {}
+
   // Process regular belongsTo relationships from schema
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (fieldDef.belongsTo && fieldDef.as) {
-      const foreignKeyValue = record[fieldName];
-      
+      const foreignKeyValue = record[fieldName]
+
       if (foreignKeyValue !== null && foreignKeyValue !== undefined) {
         jsonApiRecord.relationships[fieldDef.as] = {
           data: {
             type: fieldDef.belongsTo,
             id: String(foreignKeyValue)
           }
-        };
+        }
       } else {
         // Explicitly null relationship
         jsonApiRecord.relationships[fieldDef.as] = {
           data: null
-        };
+        }
       }
     }
   }
-  
+
   // Process polymorphic belongsTo relationships
   Object.entries(relationships || {}).forEach(([relName, relDef]) => {
     if (relDef.belongsToPolymorphic) {
-      const typeValue = record[relDef.typeField];
-      const idValue = record[relDef.idField];
-      
+      const typeValue = record[relDef.typeField]
+      const idValue = record[relDef.idField]
+
       if (typeValue && idValue) {
         jsonApiRecord.relationships[relName] = {
           data: {
             type: typeValue,
             id: String(idValue)
           }
-        };
+        }
       } else {
         // Explicitly null relationship
         jsonApiRecord.relationships[relName] = {
           data: null
-        };
+        }
       }
     }
-  });
-  
+  })
+
   // Remove relationships object if empty
   if (Object.keys(jsonApiRecord.relationships).length === 0) {
-    delete jsonApiRecord.relationships;
+    delete jsonApiRecord.relationships
   }
-  
-  return jsonApiRecord;
-};
+
+  return jsonApiRecord
+}

@@ -4,7 +4,7 @@ export const AccessPlugin = {
   name: 'rest-api-access',
   dependencies: ['rest-api'],
 
-  async install({ addHook, helpers, log, pluginOptions = {}, scopes }) {
+  async install ({ addHook, helpers, log, pluginOptions = {}, scopes }) {
     const ownershipOptions = pluginOptions.ownership || pluginOptions.autoOwnership || {}
 
     const config = {
@@ -105,7 +105,7 @@ export const AccessPlugin = {
       return storageAdapter.translateFilterValue(field, value)
     }
 
-    function registerBuiltinCheckers() {
+    function registerBuiltinCheckers () {
       state.authCheckers.set('public', () => true)
 
       state.authCheckers.set('authenticated', (context) => {
@@ -188,7 +188,7 @@ export const AccessPlugin = {
       }
     })
 
-    function setOwnerOnInput({ context, scopeName, scopes, scopeOptions }) {
+    function setOwnerOnInput ({ context, scopeName, scopes, scopeOptions }) {
       if (!config.ownership.enabled) return
       if (config.ownership.excludeResources.includes(scopeName)) return
       if (!context.auth?.userId) {
@@ -384,7 +384,7 @@ export const AccessPlugin = {
       helpers.auth = {}
     }
 
-    helpers.auth.requireAuth = function requireAuth(context) {
+    helpers.auth.requireAuth = function requireAuth (context) {
       if (!context.auth?.userId) {
         const error = new Error('Authentication required')
         error.statusCode = 401
@@ -393,7 +393,7 @@ export const AccessPlugin = {
       return context.auth
     }
 
-    helpers.auth.requireOwnership = function requireOwnership(context, resourceOrUserId) {
+    helpers.auth.requireOwnership = function requireOwnership (context, resourceOrUserId) {
       const auth = helpers.auth.requireAuth(context)
       const field = ownershipField()
 
@@ -424,11 +424,11 @@ export const AccessPlugin = {
       return auth
     }
 
-    helpers.auth.registerChecker = function registerChecker(name, checkerFn) {
+    helpers.auth.registerChecker = function registerChecker (name, checkerFn) {
       state.authCheckers.set(name, checkerFn)
     }
 
-    helpers.auth.checkPermission = async function checkPermission(context, rules, options = {}) {
+    helpers.auth.checkPermission = async function checkPermission (context, rules, options = {}) {
       if (!rules || rules.length === 0) return true
 
       const { existingRecord, scopeVars } = options
@@ -447,7 +447,7 @@ export const AccessPlugin = {
       return false
     }
 
-    helpers.auth.cleanup = function cleanup() {
+    helpers.auth.cleanup = function cleanup () {
       state.authCheckers.clear()
     }
   }

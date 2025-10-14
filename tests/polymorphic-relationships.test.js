@@ -1,13 +1,13 @@
-import { describe, it, before, after, beforeEach } from 'node:test';
-import assert from 'node:assert/strict';
-import knexLib from 'knex';
-import { createExtendedApi } from './fixtures/api-configs.js';
+import { describe, it, before, after, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
+import knexLib from 'knex'
+import { createExtendedApi } from './fixtures/api-configs.js'
 import {
   validateJsonApiStructure,
   cleanTables,
   createJsonApiDocument,
   createRelationship
-} from './helpers/test-utils.js';
+} from './helpers/test-utils.js'
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -16,30 +16,30 @@ const knex = knexLib({
     filename: ':memory:'
   },
   useNullAsDefault: true
-});
+})
 
 // API instance
-let api;
+let api
 
 describe('Polymorphic Relationship Operations', () => {
   before(async () => {
     // Initialize API
-    api = await createExtendedApi(knex);
-  });
+    api = await createExtendedApi(knex)
+  })
 
   after(async () => {
     // Close database connection
-    await knex.destroy();
-  });
+    await knex.destroy()
+  })
 
   describe('Creating Reviews with Polymorphic Relationships', () => {
     beforeEach(async () => {
       // Clean all tables before each test
       await cleanTables(knex, [
-        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books', 
+        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books',
         'ext_book_authors', 'ext_reviews'
-      ]);
-    });
+      ])
+    })
 
     it('should create a review for a book', async () => {
       // Create a country first
@@ -48,7 +48,7 @@ describe('Polymorphic Relationship Operations', () => {
           name: 'USA',
           code: 'US'
         })
-      });
+      })
 
       // Create a book
       const book = await api.resources.books.post({
@@ -57,7 +57,7 @@ describe('Polymorphic Relationship Operations', () => {
         }, {
           country: createRelationship({ type: 'countries', id: country.data.id })
         })
-      });
+      })
 
       // Create a review for the book
       const review = await api.resources.reviews.post({
@@ -69,14 +69,14 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'books',
           reviewable_id: book.data.id
         })
-      });
+      })
 
-      validateJsonApiStructure(review);
-      assert.equal(review.data.type, 'reviews');
-      assert.equal(review.data.attributes.rating, 5);
+      validateJsonApiStructure(review)
+      assert.equal(review.data.type, 'reviews')
+      assert.equal(review.data.attributes.rating, 5)
       // Since polymorphic fields are filtered out from POST responses,
       // we need to GET the record to verify the relationship was saved correctly
-    });
+    })
 
     it('should create a review for an author', async () => {
       // Create an author
@@ -84,7 +84,7 @@ describe('Polymorphic Relationship Operations', () => {
         inputRecord: createJsonApiDocument('authors', {
           name: 'Jane Doe'
         })
-      });
+      })
 
       // Create a review for the author
       const review = await api.resources.reviews.post({
@@ -96,13 +96,13 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'authors',
           reviewable_id: author.data.id
         })
-      });
+      })
 
-      validateJsonApiStructure(review);
+      validateJsonApiStructure(review)
       // Polymorphic fields are no longer in attributes, they're in relationships
-      assert.equal(review.data.relationships.reviewable.data.type, 'authors');
-      assert.equal(review.data.relationships.reviewable.data.id, String(author.data.id));
-    });
+      assert.equal(review.data.relationships.reviewable.data.type, 'authors')
+      assert.equal(review.data.relationships.reviewable.data.id, String(author.data.id))
+    })
 
     it('should create a review for a publisher', async () => {
       // Create a country
@@ -111,7 +111,7 @@ describe('Polymorphic Relationship Operations', () => {
           name: 'UK',
           code: 'GB'
         })
-      });
+      })
 
       // Create a publisher
       const publisher = await api.resources.publishers.post({
@@ -120,7 +120,7 @@ describe('Polymorphic Relationship Operations', () => {
         }, {
           country: createRelationship({ type: 'countries', id: country.data.id })
         })
-      });
+      })
 
       // Create a review for the publisher
       const review = await api.resources.reviews.post({
@@ -132,28 +132,28 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'publishers',
           reviewable_id: publisher.data.id
         })
-      });
+      })
 
-      validateJsonApiStructure(review);
+      validateJsonApiStructure(review)
       // Polymorphic fields are no longer in attributes, they're in relationships
-      assert.equal(review.data.relationships.reviewable.data.type, 'publishers');
-      assert.equal(review.data.relationships.reviewable.data.id, String(publisher.data.id));
-    });
+      assert.equal(review.data.relationships.reviewable.data.type, 'publishers')
+      assert.equal(review.data.relationships.reviewable.data.id, String(publisher.data.id))
+    })
 
     it('should fail to create review with invalid reviewable_type', async () => {
       // Skip this test for now - polymorphic validation happens at relationship level
       // not at the attribute level, so we need to create a proper relationship
       // This would require more complex validation implementation
-    });
-  });
+    })
+  })
 
   describe('Querying Reviews with Polymorphic Relationships', () => {
     beforeEach(async () => {
       await cleanTables(knex, [
-        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books', 
+        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books',
         'ext_book_authors', 'ext_reviews'
-      ]);
-    });
+      ])
+    })
 
     it('should query reviews and include polymorphic reviewable resource', async () => {
       // Create test data
@@ -162,7 +162,7 @@ describe('Polymorphic Relationship Operations', () => {
           name: 'France',
           code: 'FR'
         })
-      });
+      })
 
       const book = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
@@ -170,7 +170,7 @@ describe('Polymorphic Relationship Operations', () => {
         }, {
           country: createRelationship({ type: 'countries', id: country.data.id })
         })
-      });
+      })
 
       await api.resources.reviews.post({
         inputRecord: createJsonApiDocument('reviews', {
@@ -181,26 +181,26 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'books',
           reviewable_id: book.data.id
         })
-      });
+      })
 
       // Query reviews with include
       const result = await api.resources.reviews.query({
         queryParams: {
           include: ['reviewable']
         }
-      });
+      })
 
-      validateJsonApiStructure(result, true); // It's a collection
-      assert.equal(result.data.length, 1);
-      assert.equal(result.data[0].type, 'reviews');
-      
+      validateJsonApiStructure(result, true) // It's a collection
+      assert.equal(result.data.length, 1)
+      assert.equal(result.data[0].type, 'reviews')
+
       // Check included resources
-      assert(result.included);
-      assert.equal(result.included.length, 1);
-      assert.equal(result.included[0].type, 'books');
-      assert.equal(result.included[0].id, book.data.id);
-      assert.equal(result.included[0].attributes.title, 'Test Book for Review');
-    });
+      assert(result.included)
+      assert.equal(result.included.length, 1)
+      assert.equal(result.included[0].type, 'books')
+      assert.equal(result.included[0].id, book.data.id)
+      assert.equal(result.included[0].attributes.title, 'Test Book for Review')
+    })
 
     it('should handle mixed polymorphic types in a single query', async () => {
       // Create test data
@@ -209,7 +209,7 @@ describe('Polymorphic Relationship Operations', () => {
           name: 'Germany',
           code: 'DE'
         })
-      });
+      })
 
       const book = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
@@ -217,13 +217,13 @@ describe('Polymorphic Relationship Operations', () => {
         }, {
           country: createRelationship({ type: 'countries', id: country.data.id })
         })
-      });
+      })
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'German Author'
         })
-      });
+      })
 
       // Create reviews for different types
       await api.resources.reviews.post({
@@ -235,7 +235,7 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'books',
           reviewable_id: book.data.id
         })
-      });
+      })
 
       await api.resources.reviews.post({
         inputRecord: createJsonApiDocument('reviews', {
@@ -246,41 +246,41 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'authors',
           reviewable_id: author.data.id
         })
-      });
+      })
 
       // Query all reviews with includes
       const result = await api.resources.reviews.query({
         queryParams: {
           include: ['reviewable']
         }
-      });
+      })
 
-      validateJsonApiStructure(result, true); // It's a collection
-      assert.equal(result.data.length, 2);
-      
+      validateJsonApiStructure(result, true) // It's a collection
+      assert.equal(result.data.length, 2)
+
       // Check included resources
-      assert(result.included);
-      assert.equal(result.included.length, 2);
-      
+      assert(result.included)
+      assert.equal(result.included.length, 2)
+
       // Find each type in included
-      const includedBook = result.included.find(r => r.type === 'books');
-      const includedAuthor = result.included.find(r => r.type === 'authors');
-      
-      assert(includedBook);
-      assert.equal(includedBook.attributes.title, 'German Book');
-      
-      assert(includedAuthor);
-      assert.equal(includedAuthor.attributes.name, 'German Author');
-    });
-  });
+      const includedBook = result.included.find(r => r.type === 'books')
+      const includedAuthor = result.included.find(r => r.type === 'authors')
+
+      assert(includedBook)
+      assert.equal(includedBook.attributes.title, 'German Book')
+
+      assert(includedAuthor)
+      assert.equal(includedAuthor.attributes.name, 'German Author')
+    })
+  })
 
   describe('Reverse Polymorphic Queries', () => {
     beforeEach(async () => {
       await cleanTables(knex, [
-        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books', 
+        'ext_countries', 'ext_publishers', 'ext_authors', 'ext_books',
         'ext_book_authors', 'ext_reviews'
-      ]);
-    });
+      ])
+    })
 
     it('should query books and include their reviews', async () => {
       // Create test data
@@ -289,7 +289,7 @@ describe('Polymorphic Relationship Operations', () => {
           name: 'Spain',
           code: 'ES'
         })
-      });
+      })
 
       const book = await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
@@ -297,7 +297,7 @@ describe('Polymorphic Relationship Operations', () => {
         }, {
           country: createRelationship({ type: 'countries', id: country.data.id })
         })
-      });
+      })
 
       // Create multiple reviews for the book
       await api.resources.reviews.post({
@@ -309,7 +309,7 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'books',
           reviewable_id: book.data.id
         })
-      });
+      })
 
       await api.resources.reviews.post({
         inputRecord: createJsonApiDocument('reviews', {
@@ -320,7 +320,7 @@ describe('Polymorphic Relationship Operations', () => {
           reviewable_type: 'books',
           reviewable_id: book.data.id
         })
-      });
+      })
 
       // Query book with reviews
       const result = await api.resources.books.get({
@@ -328,20 +328,20 @@ describe('Polymorphic Relationship Operations', () => {
         queryParams: {
           include: ['reviews']
         }
-      });
+      })
 
-      validateJsonApiStructure(result);
-      assert.equal(result.data.type, 'books');
-      
+      validateJsonApiStructure(result)
+      assert.equal(result.data.type, 'books')
+
       // Check included reviews
-      console.log('Result included:', JSON.stringify(result.included, null, 2));
-      assert(result.included);
-      assert.equal(result.included.length, 2);
-      assert(result.included.every(r => r.type === 'reviews'));
-      assert(result.included.every(r => 
-        r.relationships.reviewable.data.type === 'books' && 
+      console.log('Result included:', JSON.stringify(result.included, null, 2))
+      assert(result.included)
+      assert.equal(result.included.length, 2)
+      assert(result.included.every(r => r.type === 'reviews'))
+      assert(result.included.every(r =>
+        r.relationships.reviewable.data.type === 'books' &&
         String(r.relationships.reviewable.data.id) === String(book.data.id)
-      ));
-    });
-  });
-});
+      ))
+    })
+  })
+})

@@ -1,12 +1,12 @@
-import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
+import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
 /**
  * Processes JSON:API relationship data and converts to database operations
- * 
+ *
  * @param {Object} scope - The scope object containing schema info
  * @param {Object} deps - Dependencies object
  * @returns {Object} Object with belongsToUpdates and manyToManyRelationships arrays
- * 
+ *
  * @example
  * // Input: Simple belongsTo relationship
  * const inputRecord = {
@@ -23,13 +23,13 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  *     }
  *   }
  * };
- * 
+ *
  * // Schema has:
  * // author_id: { belongsTo: 'users', as: 'author' }
  * // category_id: { belongsTo: 'categories', as: 'category' }
- * 
+ *
  * const result = processRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Foreign keys extracted
  * // {
  * //   belongsToUpdates: {
@@ -38,7 +38,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //   },
  * //   manyToManyRelationships: []
  * // }
- * 
+ *
  * @example
  * // Input: Polymorphic relationship
  * const inputRecord = {
@@ -51,7 +51,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  *     }
  *   }
  * };
- * 
+ *
  * // Schema relationships has:
  * // commentable: {
  * //   belongsToPolymorphic: {
@@ -60,9 +60,9 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //     idField: 'commentable_id'
  * //   }
  * // }
- * 
+ *
  * const result = processRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Both type and id fields set
  * // {
  * //   belongsToUpdates: {
@@ -71,12 +71,12 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //   },
  * //   manyToManyRelationships: []
  * // }
- * 
+ *
  * @example
  * // Input: Many-to-many relationship
  * const inputRecord = {
  *   data: {
- *     type: 'articles', 
+ *     type: 'articles',
  *     relationships: {
  *       tags: {
  *         data: [
@@ -87,7 +87,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  *     }
  *   }
  * };
- * 
+ *
  * // Schema relationships has:
  * // tags: {
  * //   type: 'manyToMany',
@@ -95,9 +95,9 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //   foreignKey: 'article_id',
  * //   otherKey: 'tag_id'
  * // }
- * 
+ *
  * const result = processRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Many-to-many data collected
  * // {
  * //   belongsToUpdates: {},
@@ -114,7 +114,7 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //     ]
  * //   }]
  * // }
- * 
+ *
  * @example
  * // Input: Clearing relationships
  * const inputRecord = {
@@ -125,9 +125,9 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  *     }
  *   }
  * };
- * 
+ *
  * const result = processRelationships(scope, { context: { inputRecord } });
- * 
+ *
  * // Output: Null for belongsTo, empty array for many-to-many
  * // {
  * //   belongsToUpdates: { author_id: null },
@@ -137,18 +137,18 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  * //     relData: []  // Will delete all pivot records
  * //   }]
  * // }
- * 
+ *
  * @description
  * Used by:
  * - rest-api-knex-plugin's dataPut and dataPatch methods
  * - Called before database writes to prepare relationship updates
- * 
+ *
  * Purpose:
  * - Converts JSON:API relationship format to database operations
  * - Handles all relationship types: belongsTo, polymorphic, many-to-many
  * - Validates polymorphic types against allowed values
  * - Separates concerns: foreign keys vs pivot table operations
- * 
+ *
  * Data flow:
  * 1. Receives JSON:API document with relationships section
  * 2. Analyzes schema to determine relationship types
@@ -159,58 +159,58 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js';
  */
 export const processRelationships = (scope, deps) => {
   // Extract values from scope
-  const { 
-    vars: { 
+  const {
+    vars: {
       schemaInfo: { schemaStructure: schemaFields, schemaRelationships: relationships }
     }
-  } = scope;
-  
+  } = scope
+
   // Extract values from deps
-  const { context } = deps;
-  const { inputRecord } = context;
-  const belongsToUpdates = {};
-  const manyToManyRelationships = [];
-  
+  const { context } = deps
+  const { inputRecord } = context
+  const belongsToUpdates = {}
+  const manyToManyRelationships = []
+
   if (!inputRecord.data.relationships) {
-    return { belongsToUpdates, manyToManyRelationships };
+    return { belongsToUpdates, manyToManyRelationships }
   }
-  
+
   for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
-    const relDef = relationships?.[relName];
-    
+    const relDef = relationships?.[relName]
+
     // Find the schema field that defines this relationship
-    const schemaField = Object.entries(schemaFields).find(([fieldName, fieldDef]) => 
+    const schemaField = Object.entries(schemaFields).find(([fieldName, fieldDef]) =>
       fieldDef.as === relName
-    );
-    
+    )
+
     if (schemaField) {
-      const [fieldName, fieldDef] = schemaField;
-      
+      const [fieldName, fieldDef] = schemaField
+
       // Handle regular belongsTo (1:1)
       if (fieldDef.belongsTo) {
         if (relData.data === null) {
-          belongsToUpdates[fieldName] = null;
+          belongsToUpdates[fieldName] = null
         } else if (relData.data?.id) {
-          belongsToUpdates[fieldName] = relData.data.id;
+          belongsToUpdates[fieldName] = relData.data.id
         }
       }
     }
-    
+
     // Check for polymorphic belongsTo defined in relationships object (not as schema field)
     if (!schemaField && relDef?.belongsToPolymorphic && relData.data !== undefined) {
       if (relData.data === null) {
-        const { typeField, idField } = relDef.belongsToPolymorphic;
-        belongsToUpdates[typeField] = null;
-        belongsToUpdates[idField] = null;
+        const { typeField, idField } = relDef.belongsToPolymorphic
+        belongsToUpdates[typeField] = null
+        belongsToUpdates[idField] = null
       } else if (relData.data) {
-        const { type, id } = relData.data;
-        const { types, typeField, idField } = relDef.belongsToPolymorphic;
-        
+        const { type, id } = relData.data
+        const { types, typeField, idField } = relDef.belongsToPolymorphic
+
         // Validate type is allowed
         if (!types.includes(type)) {
           throw new RestApiValidationError(
             `Invalid type '${type}' for polymorphic relationship '${relName}'. Allowed types: ${types.join(', ')}`,
-            { 
+            {
               fields: [`data.relationships.${relName}.data.type`],
               violations: [{
                 field: `data.relationships.${relName}.data.type`,
@@ -218,14 +218,14 @@ export const processRelationships = (scope, deps) => {
                 message: `Type must be one of: ${types.join(', ')}`
               }]
             }
-          );
+          )
         }
-        
-        belongsToUpdates[typeField] = type;
-        belongsToUpdates[idField] = id;
+
+        belongsToUpdates[typeField] = type
+        belongsToUpdates[idField] = id
       }
     }
-    
+
     // Check relationship type and process accordingly
     if (relDef?.type === 'manyToMany' && relData.data !== undefined) {
       manyToManyRelationships.push({
@@ -236,10 +236,10 @@ export const processRelationships = (scope, deps) => {
           otherKey: relDef.otherKey
         },
         relData: relData.data || []  // null means empty array for many-to-many
-      });
+      })
     }
     // Note: hasOne and hasMany don't need processing here as they don't update the current record
   }
-  
-  return { belongsToUpdates, manyToManyRelationships };
-};
+
+  return { belongsToUpdates, manyToManyRelationships }
+}
