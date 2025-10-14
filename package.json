@@ -1,6 +1,6 @@
 {
   "name": "json-rest-api",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -22,7 +22,7 @@
   "homepage": "https://mobily-enterprises.github.io/json-rest-api",
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
-    "hooked-api": "^1.0.14",
+    "hooked-api": "^1.0.22",
     "json-rest-schema": "^1.0.8",
     "semver": "^7.7.2"
   },
