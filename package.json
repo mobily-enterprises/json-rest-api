@@ -1,6 +1,6 @@
 {
   "name": "json-rest-api",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -8,7 +8,9 @@
     "test:anyapi": "JSON_REST_API_STORAGE=anyapi node --test tests/*.test.js",
     "docs": "node scripts/run-docs.js",
     "sloc": "sloc --exclude \"(_site|node_modules|\\.git|vendor|docs)\" .",
-    "slod": "cd docs;echo 'DOC LINES:'; cat `find . -iname \\*md | grep -v _site | grep -v vendor` | wc"
+    "slod": "cd docs;echo 'DOC LINES:'; cat `find . -iname \\*md | grep -v _site | grep -v vendor` | wc",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "repository": {
     "type": "git",
@@ -22,8 +24,8 @@
   "homepage": "https://mobily-enterprises.github.io/json-rest-api",
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
-    "hooked-api": "^1.0.22",
-    "json-rest-schema": "^1.0.10",
+    "hooked-api": "^1.0.23",
+    "json-rest-schema": "^1.0.11",
     "semver": "^7.7.2"
   },
   "peerDependencies": {
@@ -84,6 +86,8 @@
     "redis": "^5.6.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
-    "supertest": "^7.1.3"
+    "supertest": "^7.1.3",
+    "eslint": "^9.37.0",
+    "neostandard": "^0.12.2"
   }
 }
