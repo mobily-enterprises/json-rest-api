@@ -184,7 +184,8 @@ export async function compileSchemas (scope, deps) {
   const schemaContext = {
     fields: enrichedFields,    // Mutable
     originalFields: rawFields,  // Read-only
-    scopeName
+    scopeName,
+    scopeOptions: scope.scopeOptions || {}
   }
   await runHooks('schema:enrich', schemaContext)
 

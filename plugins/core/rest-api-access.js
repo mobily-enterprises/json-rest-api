@@ -27,7 +27,6 @@ export const AccessPlugin = {
     const evaluateOwnership = ({ record, field, schemaInfo, userId }) => {
       if (!record) return 'unknown'
 
-      debugger
       const idProperty = schemaInfo?.idProperty || 'id'
       const schemaStructure = schemaInfo?.schemaStructure || {}
       const schemaRelationships = schemaInfo?.schemaRelationships || {}
@@ -146,7 +145,6 @@ export const AccessPlugin = {
       const auth = context.scopeOptions?.auth
       if (!auth) return
 
-      debugger
       scope.vars.authRules = auth
       scope.vars.ownershipField = context.scopeOptions?.ownershipField
 
@@ -159,11 +157,11 @@ export const AccessPlugin = {
       })
     })
 
-    addHook('schema:enrich', 'rest-auth-auto-ownership-field', {}, ({ context, scopeOptions }) => {
+    addHook('schema:enrich', 'rest-auth-auto-ownership-field', {}, ({ context }) => {
       if (!config.ownership.enabled) return
-      const { fields, scopeName } = context
+      const { fields, scopeName, scopeOptions = {} } = context
       if (config.ownership.excludeResources.includes(scopeName)) return
-      if (scopeOptions?.ownership === false) return
+      if (scopeOptions.ownership === false) return
 
       const field = ownershipField()
       const relationshipName = fields[field]?.as || fields[field]?.belongsTo || field
@@ -285,7 +283,6 @@ export const AccessPlugin = {
 
     addHook('checkPermissions', 'rest-auth-enforce', { sequence: -100 }, async ({ context, scope, scopeName }) => {
       const operation = context.method
-      debugger
       const scopeVars = scope?.vars
       const authRules = scopeVars?.authRules
       const minimalRecord = context.originalContext?.minimalRecord
@@ -300,7 +297,6 @@ export const AccessPlugin = {
       const failures = []
 
       for (const rule of rules) {
-        // if (rule === 'owns') debugger
         try {
           const [checkerName, ...paramParts] = rule.split(':')
           const checker = state.authCheckers.get(checkerName)
