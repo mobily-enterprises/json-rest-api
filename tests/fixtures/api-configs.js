@@ -1872,3 +1872,77 @@ export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
 
   return api
 }
+
+
+/**
+ * Creates an API with resources that OPT OUT of ownership
+ * - public_items_ownerfield: uses ownerField: false
+ * - public_items_ownership: uses ownership: false
+ * Both tables intentionally DO NOT have a user_id column.
+ */
+export async function createOwnershipOptOutApi (knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'ownership-optout-api'
+  const tablePrefix = pluginOptions.tablePrefix || 'ownopt'
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry()
+  }
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  const previousTenant = storageMode.currentTenant
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: { post: true, put: false, patch: false },
+    returnRecordTransport: { post: 'full', put: 'no', patch: 'minimal' },
+    sortableFields: ['id', 'name']
+  })
+  await useStoragePlugin(api, knex, { tenantId })
+  await resetAnyApiTables(knex)
+
+  try {
+    // Access plugin (defaults: ownership enabled, filterByOwner true)
+    await api.use(AccessPlugin, pluginOptions.access || {})
+
+    // Resource A: disable via ownerField:false
+    await api.addResource('public_items_ownerfield', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true }
+      },
+      // Important: no user_id column in schema; ownerField disables ownership logic
+      ownerField: false,
+      tableName: `${tablePrefix}_public_items_of`
+    })
+    await api.resources.public_items_ownerfield.createKnexTable()
+    mapTable(`${tablePrefix}_public_items_of`, 'public_items_ownerfield')
+
+    // Resource B: disable via ownership:false
+    await api.addResource('public_items_ownership', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true }
+      },
+      ownership: false,
+      tableName: `${tablePrefix}_public_items_own`
+    })
+    await api.resources.public_items_ownership.createKnexTable()
+    mapTable(`${tablePrefix}_public_items_own`, 'public_items_ownership')
+
+    return api
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant)
+    }
+  }
+}

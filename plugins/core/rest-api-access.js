@@ -24,6 +24,13 @@ export const AccessPlugin = {
 
     const ownershipField = () => config.ownership.field
 
+    // Minimal helper: treat ownerField false/null as ownership disabled (alias)
+    const isOwnershipDisabled = (scopeOptions = {}) => (
+      scopeOptions?.ownership === false ||
+      scopeOptions?.ownerField === false ||
+      scopeOptions?.ownerField === null
+    )
+
     const evaluateOwnership = ({ record, field, schemaInfo, userId }) => {
       if (!record) return 'unknown'
 
@@ -161,7 +168,7 @@ export const AccessPlugin = {
       if (!config.ownership.enabled) return
       const { fields, scopeName, scopeOptions = {} } = context
       if (config.ownership.excludeResources.includes(scopeName)) return
-      if (scopeOptions.ownership === false) return
+      if (isOwnershipDisabled(scopeOptions)) return
 
       const field = ownershipField()
       const relationshipName = fields[field]?.as || fields[field]?.belongsTo || field
@@ -196,7 +203,7 @@ export const AccessPlugin = {
         return
       }
 
-      if (scopeOptions?.ownership === false) return
+      if (isOwnershipDisabled(scopeOptions)) return
 
       const field = ownershipField()
       const scope = scopes[scopeName]
@@ -257,7 +264,7 @@ export const AccessPlugin = {
       }
 
       if (context.auth.roles?.includes?.('admin')) return
-      if (scopeOptions?.ownership === false) return
+      if (isOwnershipDisabled(scopeOptions)) return
 
       const field = ownershipField()
       const scope = scopes[scopeName]
@@ -342,7 +349,7 @@ export const AccessPlugin = {
       const auth = context.originalContext?.auth || context.auth
       if (!auth?.userId) return
       if (auth.roles?.includes?.('admin')) return
-      if (scopeOptions?.ownership === false) return
+      if (isOwnershipDisabled(scopeOptions)) return
 
       const field = ownershipField()
       const schemaInfo = scope?.vars?.schemaInfo || {}
