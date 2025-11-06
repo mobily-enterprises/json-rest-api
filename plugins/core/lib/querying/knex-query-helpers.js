@@ -1,5 +1,15 @@
 import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-search.js'
 
+// Resolve operator with sensible defaults for fields declared in searchSchema.
+// - If filterOperator is provided, use it as-is
+// - If field type is string and no operator provided, default to 'like' (contains)
+// - Otherwise default to '='
+function resolveSearchOperator (fieldDef) {
+  if (fieldDef && fieldDef.filterOperator) return String(fieldDef.filterOperator)
+  if (fieldDef && fieldDef.type === 'string') return 'like'
+  return '='
+}
+
 const createAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
   const context = hookParams.context || {}
   const storageCache = new Map()
@@ -319,11 +329,29 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
         return
       }
 
-      if (lowerOp === 'like') {
+      if (lowerOp === 'like' || lowerOp === 'contains') {
         if (normalizedValue === null || normalizedValue === undefined) {
           builder.whereNull(columnRef)
         } else {
           builder.where(columnRef, 'like', `%${normalizedValue}%`)
+        }
+        return
+      }
+
+      if (lowerOp === 'startswith') {
+        if (normalizedValue === null || normalizedValue === undefined) {
+          builder.whereNull(columnRef)
+        } else {
+          builder.where(columnRef, 'like', `${normalizedValue}%`)
+        }
+        return
+      }
+
+      if (lowerOp === 'endswith') {
+        if (normalizedValue === null || normalizedValue === undefined) {
+          builder.whereNull(columnRef)
+        } else {
+          builder.where(columnRef, 'like', `%${normalizedValue}`)
         }
         return
       }
@@ -365,10 +393,10 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
               }
 
               const finalScope = aliasScopeMap.get(finalAlias) || targetType
-              const operator = searchInfo.fieldDef.filterOperator || '='
+              const operator = resolveSearchOperator(searchInfo.fieldDef)
               applyComparison(this, finalScope, finalAlias, fieldName, operator, searchInfo.filterValue)
             } else {
-              const operator = searchInfo.fieldDef.filterOperator || '='
+              const operator = resolveSearchOperator(searchInfo.fieldDef)
               const finalScope = aliasScopeMap.get(baseAlias) || targetType
               applyComparison(this, finalScope, baseAlias, targetFieldPath, operator, searchInfo.filterValue)
             }
@@ -672,7 +700,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   // Step 5: Apply WHERE conditions for cross-table filters
   query.where(function () {
     for (const [filterKey, filterValue] of Object.entries(filters)) {
-      const fieldDef = searchSchemaStructure[filterKey]
+      const fieldDef = schemaInfo.searchSchemaStructure[filterKey]
       if (!fieldDef) continue
 
       // Skip non-cross-table and polymorphic filters
@@ -685,7 +713,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
       // Process cross-table filters
       switch (true) {
         case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
-          const operator = fieldDef.filterOperator || '='
+          const operator = resolveSearchOperator(fieldDef)
 
           let searchTerms = [filterValue]
           if (fieldDef.splitBy && typeof filterValue === 'string') {
@@ -698,12 +726,30 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
             const columnRef = resolveFieldColumn(field)
             const normalized = normalizeFieldValue(field, raw)
 
-            if (operator === 'like') {
+            if (operator === 'like' || operator === 'contains') {
               const value = Array.isArray(normalized) ? normalized[0] : normalized
               if (value === null || value === undefined) {
                 builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
               } else {
                 builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `%${String(value)}%`)
+              }
+              return
+            }
+            if (operator === 'startsWith' || operator === 'startswith') {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
+              } else {
+                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `${String(value)}%`)
+              }
+              return
+            }
+            if (operator === 'endsWith' || operator === 'endswith') {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
+              } else {
+                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `%${String(value)}`)
               }
               return
             }
@@ -749,16 +795,37 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
         default:
           const targetField = fieldDef.actualField || filterKey
           const columnRef = resolveFieldColumn(targetField)
-          const operator = fieldDef.filterOperator || '='
+          const operator = resolveSearchOperator(fieldDef)
           const normalized = normalizeFieldValue(targetField, filterValue)
 
           switch (operator) {
-            case 'like': {
+            case 'like':
+            case 'contains': {
               const value = Array.isArray(normalized) ? normalized[0] : normalized
               if (value === null || value === undefined) {
                 this.whereNull(columnRef)
               } else {
                 this.where(columnRef, 'like', `%${String(value)}%`)
+              }
+              break
+            }
+            case 'startsWith':
+            case 'startswith': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                this.whereNull(columnRef)
+              } else {
+                this.where(columnRef, 'like', `${String(value)}%`)
+              }
+              break
+            }
+            case 'endsWith':
+            case 'endswith': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                this.whereNull(columnRef)
+              } else {
+                this.where(columnRef, 'like', `%${String(value)}`)
               }
               break
             }
@@ -1070,17 +1137,38 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           // Always qualify field names
           const dbField = qualifyField(actualField)
 
-          const operator = fieldDef.filterOperator || '='
+          const operator = resolveSearchOperator(fieldDef)
           const normalized = normalizeValue(actualField, filterValue)
           log.trace(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`)
 
           switch (operator) {
-            case 'like': {
+            case 'like':
+            case 'contains': {
               const value = Array.isArray(normalized) ? normalized[0] : normalized
               if (value === null || value === undefined) {
                 this.whereNull(dbField)
               } else {
                 this.where(dbField, 'like', `%${String(value)}%`)
+              }
+              break
+            }
+            case 'startsWith':
+            case 'startswith': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                this.whereNull(dbField)
+              } else {
+                this.where(dbField, 'like', `${String(value)}%`)
+              }
+              break
+            }
+            case 'endsWith':
+            case 'endswith': {
+              const value = Array.isArray(normalized) ? normalized[0] : normalized
+              if (value === null || value === undefined) {
+                this.whereNull(dbField)
+              } else {
+                this.where(dbField, 'like', `%${String(value)}`)
               }
               break
             }
