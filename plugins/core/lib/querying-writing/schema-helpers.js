@@ -117,7 +117,7 @@ export function ensureSearchFieldsAreIndexed (searchSchema) {
  *
  * // Output: Generated search schema
  * // {
- * //   title: { type: 'string', filterOperator: '=' },      // Default operator
+ * //   title: { type: 'string' },                           // No operator set; resolver applies defaults
  * //   status: { type: 'string', filterOperator: '=' }      // Specified operator
  * // }
  *
@@ -163,7 +163,7 @@ export function ensureSearchFieldsAreIndexed (searchSchema) {
  * // {
  * //   email: { type: 'string', filterOperator: '=' },    // Explicit
  * //   age: { type: 'number', filterOperator: '>=' },     // Explicit
- * //   name: { type: 'string', filterOperator: '=' }      // From schema
+ * //   name: { type: 'string' }                           // From schema (no operator set)
  * // }
  *
  * @example
@@ -253,12 +253,11 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
           return
         }
 
-        // Simple boolean - copy entire field definition (except search) and add filterOperator
+        // Simple boolean - copy entire field definition (except search)
         const { search, ...fieldDefWithoutSearch } = fieldDef
         const searchEntry = {
           ...fieldDefWithoutSearch,
-          // Preserve existing filterOperator or default to '='
-          filterOperator: fieldDefWithoutSearch.filterOperator || '='
+          // Do not set filterOperator here; centralized resolver will apply sensible defaults
         }
 
         // For belongsTo relationships, add metadata to map back to the actual field

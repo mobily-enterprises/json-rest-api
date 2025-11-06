@@ -4,10 +4,74 @@ import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-searc
 // - If filterOperator is provided, use it as-is
 // - If field type is string and no operator provided, default to 'like' (contains)
 // - Otherwise default to '='
-function resolveSearchOperator (fieldDef) {
+export function resolveSearchOperator (fieldDef) {
   if (fieldDef && fieldDef.filterOperator) return String(fieldDef.filterOperator)
   if (fieldDef && fieldDef.type === 'string') return 'like'
   return '='
+}
+
+// Apply a comparison for a single field/operator/value onto a query builder.
+// Handles contains/startsWith/endsWith, IN, BETWEEN, =/== null semantics,
+// and uses ILIKE for case-insensitive matching on Postgres.
+export function applyWhereForOperator ({ builder, columnRef, operator, value, knex, or = false }) {
+  const method = or ? 'orWhere' : 'where'
+  const methodNull = or ? 'orWhereNull' : 'whereNull'
+  const methodIn = or ? 'orWhereIn' : 'whereIn'
+  const likeOp = 'like'
+
+  const op = typeof operator === 'string' ? operator.toLowerCase() : operator
+
+  // Normalize scalar from possibly array input
+  const firstVal = Array.isArray(value) ? value[0] : value
+
+  // Null handling for equality and string ops
+  if (firstVal === null || firstVal === undefined) {
+    if (op === 'like' || op === 'contains' || op === 'startswith' || op === 'endswith') {
+      builder[methodNull](columnRef)
+      return
+    }
+    if (op === '=' || op === '==') {
+      builder[methodNull](columnRef)
+      return
+    }
+  }
+
+  // Text search operators
+  if (op === 'like' || op === 'contains') {
+    builder[method](columnRef, likeOp, `%${String(firstVal)}%`)
+    return
+  }
+  if (op === 'startswith') {
+    builder[method](columnRef, likeOp, `${String(firstVal)}%`)
+    return
+  }
+  if (op === 'endswith') {
+    builder[method](columnRef, likeOp, `%${String(firstVal)}`)
+    return
+  }
+
+  // Array-based operators
+  if (op === 'in') {
+    const values = Array.isArray(value) ? value : [value]
+    builder[methodIn](columnRef, values)
+    return
+  }
+  if (op === 'between') {
+    const values = Array.isArray(value) ? value : [value]
+    if (values.length === 2) {
+      builder.whereBetween(columnRef, values)
+    } else if (values.length === 1) {
+      if (values[0] === null || values[0] === undefined) {
+        builder[methodNull](columnRef)
+      } else {
+        builder[method](columnRef, '=', values[0])
+      }
+    }
+    return
+  }
+
+  // Default
+  builder[method](columnRef, operator || '=', firstVal)
 }
 
 const createAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
@@ -321,47 +385,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
     const applyComparison = (builder, scope, alias, field, operator, rawValue) => {
       const columnRef = adapterUtils.translateColumn(scope, field, alias)
       const normalizedValue = adapterUtils.translateFilterValue(scope, field, rawValue)
-      const op = operator || '='
-
-      const lowerOp = typeof op === 'string' ? op.toLowerCase() : op
-      if (normalizedValue === null && (lowerOp === '=' || lowerOp === '==')) {
-        builder.whereNull(columnRef)
-        return
-      }
-
-      if (lowerOp === 'like' || lowerOp === 'contains') {
-        if (normalizedValue === null || normalizedValue === undefined) {
-          builder.whereNull(columnRef)
-        } else {
-          builder.where(columnRef, 'like', `%${normalizedValue}%`)
-        }
-        return
-      }
-
-      if (lowerOp === 'startswith') {
-        if (normalizedValue === null || normalizedValue === undefined) {
-          builder.whereNull(columnRef)
-        } else {
-          builder.where(columnRef, 'like', `${normalizedValue}%`)
-        }
-        return
-      }
-
-      if (lowerOp === 'endswith') {
-        if (normalizedValue === null || normalizedValue === undefined) {
-          builder.whereNull(columnRef)
-        } else {
-          builder.where(columnRef, 'like', `%${normalizedValue}`)
-        }
-        return
-      }
-
-      if (Array.isArray(normalizedValue) && lowerOp === 'in') {
-        builder.whereIn(columnRef, normalizedValue)
-        return
-      }
-
-      builder.where(columnRef, op, normalizedValue)
+      applyWhereForOperator({ builder, columnRef, operator, value: normalizedValue, knex })
     }
 
     for (const [filterKey] of Object.entries(filters)) {
@@ -725,47 +749,14 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
           const applyTermComparison = (builder, method, field, raw) => {
             const columnRef = resolveFieldColumn(field)
             const normalized = normalizeFieldValue(field, raw)
-
-            if (operator === 'like' || operator === 'contains') {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
-              } else {
-                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `%${String(value)}%`)
-              }
-              return
-            }
-            if (operator === 'startsWith' || operator === 'startswith') {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
-              } else {
-                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `${String(value)}%`)
-              }
-              return
-            }
-            if (operator === 'endsWith' || operator === 'endswith') {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
-              } else {
-                builder[method === 'or' ? 'orWhere' : 'where'](columnRef, 'like', `%${String(value)}`)
-              }
-              return
-            }
-
-            if (operator === 'in') {
-              const values = Array.isArray(normalized) ? normalized : [normalized]
-              builder[method === 'or' ? 'orWhereIn' : 'whereIn'](columnRef, values)
-              return
-            }
-
-            const value = Array.isArray(normalized) ? normalized[0] : normalized
-            if (value === null && (operator === '=' || operator === '==')) {
-              builder[method === 'or' ? 'orWhereNull' : 'whereNull'](columnRef)
-            } else {
-              builder[method === 'or' ? 'orWhere' : 'where'](columnRef, operator, value)
-            }
+            applyWhereForOperator({
+              builder,
+              columnRef,
+              operator,
+              value: normalized,
+              knex,
+              or: method === 'or',
+            })
           }
 
           this.where(function () {
@@ -797,64 +788,9 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
           const columnRef = resolveFieldColumn(targetField)
           const operator = resolveSearchOperator(fieldDef)
           const normalized = normalizeFieldValue(targetField, filterValue)
-
-          switch (operator) {
-            case 'like':
-            case 'contains': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(columnRef)
-              } else {
-                this.where(columnRef, 'like', `%${String(value)}%`)
-              }
-              break
-            }
-            case 'startsWith':
-            case 'startswith': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(columnRef)
-              } else {
-                this.where(columnRef, 'like', `${String(value)}%`)
-              }
-              break
-            }
-            case 'endsWith':
-            case 'endswith': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(columnRef)
-              } else {
-                this.where(columnRef, 'like', `%${String(value)}`)
-              }
-              break
-            }
-            case 'in': {
-              const values = Array.isArray(normalized) ? normalized : [normalized]
-              this.whereIn(columnRef, values)
-              break
-            }
-            case 'between': {
-              const values = Array.isArray(normalized) ? normalized : [normalized]
-              if (values.length === 2) {
-                this.whereBetween(columnRef, values)
-              } else {
-                this.where(columnRef, operator, values[0])
-              }
-              break
-            }
-            default: {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null && (operator === '=' || operator === '==')) {
-                this.whereNull(columnRef)
-              } else {
-                this.where(columnRef, operator, value)
-              }
-              break
-            }
-          }
+          applyWhereForOperator({ builder: this, columnRef, operator, value: normalized, knex })
           break
-      }
+        }
     }
   })
 }
@@ -1059,7 +995,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
       switch (true) {
         case fieldDef.oneOf && Array.isArray(fieldDef.oneOf): {
           // Multi-field OR search
-          const operator = fieldDef.filterOperator || '='
+          const operator = resolveSearchOperator(fieldDef)
 
           // Handle split search terms
           let searchTerms = [filterValue]
@@ -1077,24 +1013,14 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
                     const perFieldValue = Array.isArray(normalizedTerm)
                       ? normalizeValue(field, term)
                       : normalizeValue(field, term)
-                    const normalized = Array.isArray(perFieldValue) ? perFieldValue[0] : perFieldValue
-
-                    if (operator === 'like') {
-                      if (normalized === null || normalized === undefined) {
-                        this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef)
-                      } else {
-                        this[index === 0 ? 'where' : 'orWhere'](columnRef, 'like', `%${String(normalized)}%`)
-                      }
-                    } else if (operator === 'in') {
-                      const values = Array.isArray(perFieldValue) ? perFieldValue : [perFieldValue]
-                      this[index === 0 ? 'whereIn' : 'orWhereIn'](columnRef, values)
-                    } else {
-                      if (normalized === null && (operator === '=' || operator === '==')) {
-                        this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef)
-                      } else {
-                        this[index === 0 ? 'where' : 'orWhere'](columnRef, operator, normalized)
-                      }
-                    }
+                    applyWhereForOperator({
+                      builder: this,
+                      columnRef,
+                      operator,
+                      value: perFieldValue,
+                      knex,
+                      or: index !== 0,
+                    })
                   })
                 })
               })
@@ -1102,24 +1028,14 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
               fieldDef.oneOf.forEach((field, index) => {
                 const columnRef = qualifyField(field)
                 const normalizedValue = normalizeValue(field, filterValue)
-                const primary = Array.isArray(normalizedValue) ? normalizedValue[0] : normalizedValue
-
-                if (operator === 'like') {
-                  if (primary === null || primary === undefined) {
-                    this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef)
-                  } else {
-                    this[index === 0 ? 'where' : 'orWhere'](columnRef, 'like', `%${String(primary)}%`)
-                  }
-                } else if (operator === 'in') {
-                  const values = Array.isArray(normalizedValue) ? normalizedValue : [normalizedValue]
-                  this[index === 0 ? 'whereIn' : 'orWhereIn'](columnRef, values)
-                } else {
-                  if (primary === null && (operator === '=' || operator === '==')) {
-                    this[index === 0 ? 'whereNull' : 'orWhereNull'](columnRef)
-                  } else {
-                    this[index === 0 ? 'where' : 'orWhere'](columnRef, operator, primary)
-                  }
-                }
+                applyWhereForOperator({
+                  builder: this,
+                  columnRef,
+                  operator,
+                  value: normalizedValue,
+                  knex,
+                  or: index !== 0,
+                })
               })
             }
           })
@@ -1140,68 +1056,9 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           const operator = resolveSearchOperator(fieldDef)
           const normalized = normalizeValue(actualField, filterValue)
           log.trace(`[DEBUG basicFiltersHook] Applying filter: ${dbField} ${operator} ${filterValue}`)
-
-          switch (operator) {
-            case 'like':
-            case 'contains': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(dbField)
-              } else {
-                this.where(dbField, 'like', `%${String(value)}%`)
-              }
-              break
-            }
-            case 'startsWith':
-            case 'startswith': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(dbField)
-              } else {
-                this.where(dbField, 'like', `${String(value)}%`)
-              }
-              break
-            }
-            case 'endsWith':
-            case 'endswith': {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(dbField)
-              } else {
-                this.where(dbField, 'like', `%${String(value)}`)
-              }
-              break
-            }
-            case 'in': {
-              const values = Array.isArray(normalized) ? normalized : [normalized]
-              this.whereIn(dbField, values)
-              break
-            }
-            case 'between': {
-              const values = Array.isArray(normalized) ? normalized : [normalized]
-              if (values.length === 2) {
-                this.whereBetween(dbField, values)
-              } else {
-                if (values[0] === null || values[0] === undefined) {
-                  this.whereNull(dbField)
-                } else {
-                  this.where(dbField, operator, values[0])
-                }
-              }
-              break
-            }
-            default: {
-              const value = Array.isArray(normalized) ? normalized[0] : normalized
-              if (value === null || value === undefined) {
-                this.whereNull(dbField)
-              } else {
-                this.where(dbField, operator, value)
-              }
-              break
-            }
-          }
+          applyWhereForOperator({ builder: this, columnRef: dbField, operator, value: normalized, knex })
           break
-      }
+        }
     }
   })
 }

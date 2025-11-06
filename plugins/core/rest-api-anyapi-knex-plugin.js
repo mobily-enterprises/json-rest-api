@@ -108,63 +108,17 @@ export const RestApiAnyapiKnexPlugin = {
     }
 
     const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
+      // Filtering is handled by the query hooks to keep behavior consistent
+      // (operators, null handling, multi-field, joins, polymorphic, etc.).
+      // Avoid applying filters here to prevent duplicate conditions.
+      if (searchSchema) {
+        return
+      }
       if (!filters || Object.keys(filters).length === 0) return
 
+      // Fallback: apply minimal safe filtering when no search schema is defined
       for (const [field, rawValue] of Object.entries(filters)) {
-        const searchDef = searchSchema ? searchSchema[field] : null
-        if (searchDef) {
-          const isAdvanced = Boolean(
-            searchDef.actualField?.includes('.') ||
-            (Array.isArray(searchDef.oneOf) && searchDef.oneOf.some((entry) => entry.includes('.'))) ||
-            searchDef.polymorphicField ||
-            typeof searchDef.applyFilter === 'function'
-          )
-          if (!isAdvanced && adapter) {
-            const columnRef = adapter.translateColumn(searchDef.actualField || field)
-            const operator = (searchDef.filterOperator || '=').toLowerCase()
-            const normalizedValues = normalizeFilterValues(rawValue, searchDef, {
-              isRelationship: Boolean(searchDef.isRelationship),
-            })
-            const primaryValue = normalizedValues[0]
-            switch (operator) {
-              case 'like':
-                query.whereRaw(`${columnRef} like ?`, [`%${primaryValue}%`])
-                break
-              case 'in':
-                if (normalizedValues.includes(null) && normalizedValues.length === 1) {
-                  query.whereNull(columnRef)
-                } else if (normalizedValues.length > 1) {
-                  query.whereIn(columnRef, normalizedValues)
-                } else if (primaryValue === null) {
-                  query.whereNull(columnRef)
-                } else {
-                  query.whereRaw(`${columnRef} = ?`, [primaryValue])
-                }
-                break
-              case 'between':
-                if (normalizedValues.length === 2) {
-                  query.whereBetween(columnRef, normalizedValues)
-                } else if (primaryValue === null) {
-                  query.whereNull(columnRef)
-                } else {
-                  query.whereRaw(`${columnRef} = ?`, [primaryValue])
-                }
-                break
-              default:
-                if (primaryValue === null) {
-                  query.whereNull(columnRef)
-                } else {
-                  query.whereRaw(`${columnRef} ${operator || '='} ?`, [primaryValue])
-                }
-                break
-            }
-            continue
-          }
-          // Leave advanced search fields to downstream hooks
-          continue
-        }
         const fieldInfo = ensureFilterableField(descriptor, field)
-
         const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
           isRelationship: fieldInfo.isRelationship,
         })
@@ -176,17 +130,14 @@ export const RestApiAnyapiKnexPlugin = {
           query.whereNull(fieldInfo.column)
           continue
         }
-
         if (nonNullValues.length === 1 && !hasNull) {
           query.where(fieldInfo.column, nonNullValues[0])
           continue
         }
-
         if (nonNullValues.length > 1 && !hasNull) {
           query.whereIn(fieldInfo.column, nonNullValues)
           continue
         }
-
         if (nonNullValues.length > 0 && hasNull) {
           query.where(function filterGroup () {
             this.whereIn(fieldInfo.column, nonNullValues).orWhereNull(fieldInfo.column)
@@ -2034,11 +1985,30 @@ export const RestApiAnyapiKnexPlugin = {
         log,
       })
 
-      applyFiltersToQuery({
-        query: adapter.query,
-        filters: context.queryParams?.filters,
-        descriptor,
-      })
+      // Apply the same filter hooks as dataQuery for consistent counts
+      const scope = api.resources?.[scopeName]
+      const schemaInfo = scope?.vars?.schemaInfo
+      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias
+
+      const hookParams = {
+        context: {
+          knexQuery: {
+            query: adapter.query,
+            filters: context.queryParams?.filters,
+            schemaInfo,
+            scopeName,
+            tableName: tableNameForHooks,
+            db,
+            isAnyApi: true,
+            adapter,
+            storageAdapter,
+          },
+        },
+      }
+
+      await polymorphicFiltersHook(hookParams, queryHookDependencies)
+      await crossTableFiltersHook(hookParams, queryHookDependencies)
+      await basicFiltersHook(hookParams, queryHookDependencies)
 
       const [{ count }] = await adapter.query.count({ count: '*' })
       return Number(count)
