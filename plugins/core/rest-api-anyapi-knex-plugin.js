@@ -114,6 +114,8 @@ export const RestApiAnyapiKnexPlugin = {
       if (searchSchema) {
         return
       }
+
+      // TODO: Probably delete the rest of the function. searchSchema is always there...!!!
       if (!filters || Object.keys(filters).length === 0) return
 
       // Fallback: apply minimal safe filtering when no search schema is defined
