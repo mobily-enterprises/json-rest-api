@@ -333,8 +333,8 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
   })
 
-  describe('Bulk Operations', () => {
-    it('should handle bulk creation with positioning', async () => {
+  describe('Concurrent Writes', () => {
+    it('should handle concurrent creation with positioning', async () => {
       const category = await api.resources.categories.post({ name: 'Test Category' })
 
       // Create initial task
@@ -375,7 +375,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       }
     })
 
-    it('should handle bulk positioning before same target', async () => {
+    it('should handle concurrent positioning before same target', async () => {
       const category = await api.resources.categories.post({ name: 'Test Category' })
 
       // Create initial tasks

@@ -10,8 +10,6 @@
 
 // Core plugins
 export { RestApiPlugin } from './plugins/core/rest-api-plugin.js'
-export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js'
-export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js'
 export { AccessPlugin } from './plugins/core/rest-api-access.js'
 export { LabelPlugin } from './plugins/core/rest-api-label-plugin.js'
 
@@ -24,10 +22,6 @@ export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js'
 // Future: export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js';
 // Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
 
-// Storage plugins for file handling
-export { LocalStorage } from './plugins/storage/local-storage.js'
-export { S3Storage } from './plugins/storage/s3-storage.js'
-
 // Error classes for consumers who need them
 export {
   RestApiValidationError,
@@ -37,6 +31,3 @@ export {
 
 // Re-export everything for backward compatibility
 export * from './lib/rest-api-errors.js'
-
-// URL helper function for generating API URL prefix
-export { getUrlPrefix } from './plugins/core/lib/querying/url-helpers.js'

@@ -815,12 +815,6 @@ When you install the REST API plugins, the following helpers are added to `api.h
   // Returns: 'http://localhost:3000/api/countries/1'
   ```
 
-- **`api.helpers.getUrlPrefix(scope, context)`** - Gets the URL prefix for generating links
-  ```javascript
-  const prefix = api.helpers.getUrlPrefix(scope, context);
-  // Returns: 'http://localhost:3000/api'
-  ```
-
 ### From RestApiKnexPlugin
 
 - **`api.helpers.newTransaction()`** - Creates a new database transaction for atomic operations
@@ -928,13 +922,6 @@ Each resource (added via `api.addResource()`) gets these methods automatically:
   await api.resources.countries.createKnexTable();
   ```
 
-
-## API Namespaces (internal, for plugin developers)
-
-### `api.rest` Namespace (from RestApiPlugin)
-
-- **`api.rest.registerFileDetector(detector)`** - Registers file upload detectors (requires FileHandlingPlugin)
-- **`api.rest.fileDetectors`** - Registry of file detectors for handling uploads
 
 ## Summary
 

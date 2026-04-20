@@ -1,6 +1,6 @@
 # JSON REST API
 
-A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprises/hooked-api) that provides JSON:API-compliant endpoints with minimal configuration. This library makes it easy to create fully-featured REST APIs with support for relationships, filtering, sorting, pagination, and file uploads.
+A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprises/hooked-api) that provides JSON:API-compliant endpoints with minimal configuration. This library makes it easy to create fully-featured REST APIs with support for relationships, filtering, sorting, and pagination.
 
 [Official Website](https://mobily-enterprises.github.io/json-rest-api/)
 
@@ -9,7 +9,6 @@ A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprise
 * **JSON:API Compliant** - Full support for the JSON:API specification
 * **Relationship Support** - `belongsTo`, `hasMany`, and many-to-many relationships, including polymorphic
 * **Advanced Querying** - Filtering, sorting, pagination, and field selection (sparse fieldsets)
-* **File Uploads** - Built-in support for file handling with multiple storage adapters (local, S3)
 * **Framework Agnostic** - Works with raw Node.js HTTP, Express, and other Node.js frameworks via flexible connectors
 * **Validation** - Schema-based validation with detailed error messages and custom rules
 * **Simplified Mode** - A developer-friendly option to work with plain JavaScript objects instead of verbose JSON:API structure

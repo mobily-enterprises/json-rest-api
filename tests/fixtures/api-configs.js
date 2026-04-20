@@ -2,8 +2,6 @@ import { Api } from 'hooked-api'
 import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../../index.js'
 import { AccessPlugin } from '../../plugins/core/rest-api-access.js'
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js'
-import express from 'express'
-import { createServer } from 'http'
 import { ensureAnyApiSchema } from '../../plugins/core/lib/anyapi/schema-utils.js'
 import { storageMode } from '../helpers/storage-mode.js'
 
@@ -302,31 +300,6 @@ export async function createAccessControlApi (knex, pluginOptions = {}) {
       storageMode.setCurrentTenant(previousTenant)
     }
   }
-}
-
-/**
- * Creates a basic API with bulk operations enabled
- */
-export async function createBulkOperationsApi (knex, pluginOptions = {}) {
-  const { BulkOperationsPlugin } = await import('../../plugins/core/bulk-operations-plugin.js')
-
-  const api = await createBasicApi(knex, {
-    ...pluginOptions,
-    tenantId: pluginOptions.tenantId || 'bulk_ops_tenant'
-  })
-
-  // Add bulk operations plugin
-  await api.use(BulkOperationsPlugin, {
-    'bulk-operations': {
-      maxBulkOperations: 100,
-      defaultAtomic: true,
-      batchSize: 10,
-      enableOptimizations: true,
-      ...pluginOptions['bulk-operations']
-    }
-  })
-
-  return api
 }
 
 /**
@@ -688,86 +661,6 @@ export async function createPaginationApi (knex, options = {}) {
   })
 
   return api
-}
-
-/**
- * Creates an API with WebSocket/Socket.IO support for testing
- */
-export async function createWebSocketApi (knex, pluginOptions = {}) {
-  const { SocketIOPlugin } = await import('../../plugins/core/socketio-plugin.js')
-  const { jwtVerify } = await import('jose')
-
-  const api = await createBasicApi(knex, {
-    ...pluginOptions,
-    tenantId: pluginOptions.tenantId || 'socketio_tenant',
-    includeExpress: true,
-    express: {
-      port: 0 // Let OS assign a port
-    }
-  })
-
-  const socketioOptions = { ...(pluginOptions['socketio'] || {}) }
-  const authOptions = { ...(socketioOptions.auth || {}) }
-  const sharedSecret = authOptions.sharedSecret || socketioOptions.sharedSecret || 'test-secret-key'
-
-  if (!authOptions.authenticate) {
-    authOptions.authenticate = async ({ socket }) => {
-      const token = socket.handshake.auth?.token
-      if (!token) {
-        throw new Error('Authentication required')
-      }
-
-      const encoder = new TextEncoder()
-      const key = encoder.encode(sharedSecret)
-      const { payload } = await jwtVerify(token, key)
-
-      const roles = Array.isArray(payload.roles)
-        ? payload.roles
-        : payload.role ? [payload.role] : []
-
-      const authContext = {
-        userId: payload.userId || payload.sub,
-        roles,
-        token: payload
-      }
-
-      if (!authContext.userId) {
-        throw new Error('Token is missing required user identifier')
-      }
-
-      return authContext
-    }
-  }
-
-  if (authOptions.requireAuth === undefined) {
-    authOptions.requireAuth = true
-  }
-
-  socketioOptions.auth = authOptions
-
-  await api.use(SocketIOPlugin, socketioOptions)
-
-  // Create and start Express server
-  const app = express()
-  api.http.express.app = app
-
-  // Mount the API routes
-  app.use('/api', api.http.express.router)
-
-  // Create HTTP server
-  const server = createServer(app)
-
-  // Start Socket.IO server
-  await api.startSocketServer(server)
-
-  // Start listening
-  await new Promise((resolve) => {
-    server.listen(0, () => {
-      resolve()
-    })
-  })
-
-  return { api, server }
 }
 
 /**
@@ -1280,117 +1173,6 @@ export async function createFieldSettersApi (knex, pluginOptions = {}) {
     tableName: 'setter_validated'
   })
   await api.resources.validated_data.createKnexTable()
-
-  if (storageMode.isAnyApi()) {
-    storageMode.setCurrentTenant(previousTenant)
-  }
-
-  return api
-}
-
-export async function createMultiHomeApi (knex, pluginOptions = {}) {
-  const { MultiHomePlugin } = await import('../../plugins/core/rest-api-multihome-plugin.js')
-
-  const api = new Api({
-    name: 'multihome-test-api',
-  })
-
-  const tenantId = storageMode.isAnyApi() ? 'multihome_tenant' : storageMode.defaultTenant
-  const previousTenant = storageMode.currentTenant
-  if (storageMode.isAnyApi()) {
-    storageMode.setCurrentTenant(tenantId)
-  }
-
-  await api.use(RestApiPlugin, {
-    simplifiedApi: false,
-    simplifiedTransport: false,
-    returnRecordApi: {
-      post: true,
-      put: false,
-      patch: false
-    },
-    returnRecordTransport: {
-      post: 'full',
-      put: 'no',
-      patch: 'minimal'
-    },
-    sortableFields: ['id', 'title', 'name', 'tenant_id']
-  })
-
-  await useStoragePlugin(api, knex, { tenantId })
-  await resetAnyApiTables(knex)
-
-  // Add Express plugin if requested for transport testing
-  if (pluginOptions.includeExpress) {
-    await api.use(ExpressPlugin, pluginOptions.express || {})
-  }
-
-  // Add MultiHome plugin with configuration
-  await api.use(MultiHomePlugin, {
-    field: pluginOptions.field || 'tenant_id',
-    excludeResources: pluginOptions.excludeResources || ['system_settings'],
-    requireAuth: pluginOptions.requireAuth !== undefined ? pluginOptions.requireAuth : true,
-    allowMissing: pluginOptions.allowMissing || false,
-    extractor: pluginOptions.extractor || ((request) => {
-      // Default to header extraction for tests
-      return request.headers?.['x-tenant-id'] || null
-    })
-  })
-
-  // Tenant-specific resources
-  await api.addResource('projects', {
-    schema: {
-      id: { type: 'id' },
-      name: { type: 'string', required: true, max: 200 },
-      description: { type: 'string', max: 1000 },
-      status: { type: 'string', defaultTo: 'active' },
-      tenant_id: { type: 'string', required: true }
-    },
-    relationships: {
-      tasks: { type: 'hasMany', target: 'tasks', foreignKey: 'project_id' }
-    },
-    tableName: 'multihome_projects'
-  })
-  await api.resources.projects.createKnexTable()
-  mapTable('multihome_projects', 'projects')
-
-  await api.addResource('tasks', {
-    schema: {
-      id: { type: 'id' },
-      title: { type: 'string', required: true, max: 200 },
-      completed: { type: 'boolean', defaultTo: false },
-      project_id: { type: 'number', belongsTo: 'projects', as: 'project' },
-      tenant_id: { type: 'string', required: true }
-    },
-    tableName: 'multihome_tasks'
-  })
-  await api.resources.tasks.createKnexTable()
-  mapTable('multihome_tasks', 'tasks')
-
-  await api.addResource('users', {
-    schema: {
-      id: { type: 'id' },
-      email: { type: 'string', required: true, unique: true },
-      name: { type: 'string', required: true },
-      role: { type: 'string', defaultTo: 'member', search: true },
-      tenant_id: { type: 'string', required: true }
-    },
-    tableName: 'multihome_users'
-  })
-  await api.resources.users.createKnexTable()
-  mapTable('multihome_users', 'users')
-
-  // Global resource (excluded from multihome)
-  await api.addResource('system_settings', {
-    schema: {
-      id: { type: 'id' },
-      key: { type: 'string', required: true, unique: true },
-      value: { type: 'string', required: true }
-    },
-    tableName: 'multihome_system_settings'
-  })
-  await api.resources.system_settings.createKnexTable()
-  mapTable('multihome_system_settings', 'system_settings')
 
   if (storageMode.isAnyApi()) {
     storageMode.setCurrentTenant(previousTenant)

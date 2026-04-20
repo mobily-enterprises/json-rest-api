@@ -107,12 +107,11 @@ export class BookEntity {
 
 // json-rest-api (framework agnostic)
 import { Api } from 'hooked-api';
-import { RestApiPlugin, ExpressPlugin, SocketIOPlugin } from 'json-rest-api';
+import { RestApiPlugin, ExpressPlugin } from 'json-rest-api';
 
 const api = new Api({ name: 'books-api' });
 await api.use(RestApiPlugin);
 await api.use(ExpressPlugin);    // HTTP transport
-await api.use(SocketIOPlugin);   // WebSocket transport
 
 await api.addResource('books', {
   schema: {
@@ -124,7 +123,7 @@ await api.addResource('books', {
     author: { belongsTo: 'authors' }
   }
 });
-// Works with Express, Fastify, or any framework - plus WebSockets!
+// Works with Express or other Node.js transports
 ```
 
 ### vs @jsonapi/server
@@ -132,7 +131,7 @@ await api.addResource('books', {
 **@jsonapi/server** is a lightweight JSON:API framework that provides basic compliance.
 
 **Key Differences:**
-- **Features**: json-rest-api offers many more features (file uploads, WebSockets, bulk operations)
+- **Features**: json-rest-api includes Knex integration, simplified mode, and a richer plugin surface
 - **Database**: No built-in database support vs comprehensive Knex integration
 - **Maintenance**: Semi-active (2022) vs actively maintained
 - **TypeScript**: No TypeScript support vs full TypeScript
@@ -145,7 +144,7 @@ await api.addResource('books', {
 - **Maintenance**: Abandoned (2022) vs actively maintained
 - **Focus**: Generic hypermedia vs dedicated JSON:API implementation
 - **Plugin ecosystem**: Limited vs extensive hooked-api ecosystem
-- **Modern features**: Lacks WebSocket support, file uploads, etc.
+- **Modern features**: Lacks the same level of Knex-backed querying and JSON:API tooling
 
 ## Unique json-rest-api Features
 
@@ -194,11 +193,7 @@ import {
   RestApiPlugin, 
   RestApiKnexPlugin, 
   ExpressPlugin,
-  CorsPlugin,
-  JwtAuthPlugin,
-  FileHandlingPlugin,
-  BulkOperationsPlugin,
-  SocketIOPlugin
+  AccessPlugin
 } from 'json-rest-api';
 
 const api = new Api({ name: 'full-featured-api' });
@@ -211,25 +206,8 @@ await api.use(RestApiKnexPlugin, { knex: connection });
 await api.use(ExpressPlugin, { mountPath: '/api' });
 
 // Cross-cutting concerns
-await api.use(CorsPlugin, { 
-  origin: ['https://app.example.com'],
-  credentials: true 
-});
-await api.use(JwtAuthPlugin, { 
-  secret: process.env.JWT_SECRET,
-  expiresIn: '24h' 
-});
-
-// Advanced features
-await api.use(FileHandlingPlugin, { 
-  storage: 's3',
-  bucket: 'my-uploads' 
-});
-await api.use(BulkOperationsPlugin, { 
-  maxBulkOperations: 100 
-});
-await api.use(SocketIOPlugin, { 
-  cors: { origin: "https://app.example.com" } 
+await api.use(AccessPlugin, {
+  defaultAuth: ['authenticated']
 });
 
 // Each plugin extends the API with new capabilities
@@ -341,7 +319,7 @@ const books = await api.resources.books.query({
 - ✅ Full JSON:API compliance with minimal setup
 - ✅ Flexibility to add/remove features via plugins
 - ✅ Support for multiple databases (PostgreSQL, MySQL, SQLite, etc.)
-- ✅ Advanced features like file uploads, WebSockets, bulk operations
+- ✅ Knex-backed resources with strong relationship handling
 - ✅ Both JSON:API and simplified object formats
 - ✅ Production-ready solution with active maintenance
 

@@ -1,21 +1,19 @@
 /**
  * URL Helper Functions
  *
- * Centralized functions for URL generation to avoid code duplication
- * and support flexible URL prefix override capabilities.
+ * Centralized functions for URL generation to avoid code duplication.
  */
 
 /**
- * Get the complete URL prefix, handling all calculation and override logic
+ * Get the complete URL prefix.
  *
  * Priority order:
- * 1. context.urlPrefixOverride - Explicit override (from hooks or middleware)
- * 2. context.urlPrefix - Pre-calculated URL prefix
- * 3. Calculate from request if provided
- * 4. scope.vars.transport?.mountPath - Fallback to mount path
- * 5. '' - Empty string as final fallback
+ * 1. context.urlPrefix - Pre-calculated URL prefix
+ * 2. Calculate from request if provided
+ * 3. scope.vars.transport?.mountPath - Fallback to mount path
+ * 4. '' - Empty string as final fallback
  *
- * @param {Object} context - Request context (may have urlPrefixOverride or urlPrefix)
+ * @param {Object} context - Request context (may have urlPrefix)
  * @param {Object} scope - Scope/resource object with transport vars
  * @param {Object} req - Optional Express request object for auto-calculation
  * @returns {string} The final URL prefix to use
@@ -29,17 +27,12 @@
  * const urlPrefix = getUrlPrefix({}, api, req);
  */
 export function getUrlPrefix (context, scope, req = null) {
-  // Priority 1: Explicit override
-  if (context?.urlPrefixOverride) {
-    return context.urlPrefixOverride
-  }
-
-  // Priority 2: Pre-calculated urlPrefix
+  // Priority 1: Pre-calculated urlPrefix
   if (context?.urlPrefix) {
     return context.urlPrefix
   }
 
-  // Priority 3: Calculate from request if provided
+  // Priority 2: Calculate from request if provided
   if (req) {
     const protocol = req.get?.('x-forwarded-proto') || req.protocol || 'http'
     const host = req.get?.('x-forwarded-host') || req.get?.('host')
@@ -50,7 +43,7 @@ export function getUrlPrefix (context, scope, req = null) {
     }
   }
 
-  // Priority 4: Fallback to mount path
+  // Priority 3: Fallback to mount path
   return scope?.vars?.transport?.mountPath || ''
 }
 

@@ -11,7 +11,6 @@
  * - Error mapping to HTTP status codes
  * - Content type validation
  * - Middleware injection points
- * - File upload support with busboy or formidable
  */
 
 import { requirePackage } from 'hooked-api'
@@ -63,46 +62,6 @@ export const ExpressPlugin = {
       mountPath // Transport-specific mount path
     }
 
-    // Register file detector if enabled
-    if (expressOptions.enableFileUploads !== false && api.rest?.registerFileDetector) {
-      const parserLib = expressOptions.fileParser || 'busboy'
-      const parserOptions = expressOptions.fileParserOptions || {}
-
-      let detector
-
-      if (parserLib === 'busboy') {
-        try {
-          const { createBusboyDetector } = await import('../lib/busboy-detector.js')
-          detector = createBusboyDetector(parserOptions)
-        } catch (e) {
-          log.warn('Busboy not installed. Install with: npm install busboy')
-        }
-      } else if (parserLib === 'formidable') {
-        try {
-          const { createFormidableDetector } = await import('../lib/formidable-detector.js')
-          detector = createFormidableDetector(parserOptions)
-        } catch (e) {
-          log.warn('Formidable not installed. Install with: npm install formidable')
-        }
-      }
-
-      if (detector) {
-        api.rest.registerFileDetector({
-          name: `express-${detector.name}`,
-          detect: (params, context) => {
-            if (!context || !context.raw || !context.raw.req) return false
-            const detectParams = { ...params, _expressReq: context.raw.req }
-            return detector.detect(detectParams)
-          },
-          parse: (params, context) => {
-            const parseParams = { ...params, _expressReq: context.raw.req, _expressRes: context.raw.res }
-            return detector.parse(parseParams)
-          }
-        })
-        log.info(`Express plugin registered file detector: ${detector.name}`)
-      }
-    }
-
     // Create Express routers
     const router = expressOptions.router || express.Router()
     const notFoundRouter = express.Router()
@@ -116,11 +75,6 @@ export const ExpressPlugin = {
     // Add transport hook middleware
     router.use(async (req, res, next) => {
       const context = createContext(req, res, 'express')
-
-      // Check for Express middleware override first
-      if (req.urlPrefixOverride) {
-        context.urlPrefixOverride = req.urlPrefixOverride
-      }
 
       // Calculate and cache URL prefix (getUrlPrefix handles all logic)
       const { getUrlPrefix } = await import('../lib/querying/url-helpers.js')
@@ -183,7 +137,7 @@ export const ExpressPlugin = {
           const contentType = req.get('Content-Type')
 
           if (contentType && !contentType.includes('application/vnd.api+json') &&
-              !contentType.includes('application/json') && !contentType.includes('multipart/form-data')) {
+              !contentType.includes('application/json')) {
             return res.status(415).json({
               errors: [{
                 status: '415',
@@ -382,13 +336,6 @@ export const ExpressPlugin = {
         // 2. router.use(path, handler)
         //    - Responds to ALL HTTP methods
         //    - Needed for wildcard paths that must handle any method
-        //
-        // The CORS plugin needs wildcard routes because it must handle OPTIONS
-        // requests for ANY path under the API prefix, even paths that don't exist
-        // as defined routes. For example:
-        // - Defined route: GET /api/users
-        // - Browser might send: OPTIONS /api/users/invalid/path
-        // - CORS must still respond with proper headers
         //
         if (path === vars.transport.matchAll) {
           // This is a wildcard route (path = '*')

@@ -432,7 +432,7 @@ try {
 
 ## Best Practices
 
-### 1. Use Relationship Endpoints for Bulk Operations
+### 1. Use Relationship Endpoints for Batch Changes
 
 Instead of updating each book individually to add an author:
 ```javascript
