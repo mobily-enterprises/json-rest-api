@@ -94,6 +94,47 @@ describe('SearchSchema Merge Behavior', () => {
     assert.ok(!searchSchema.structure.age, 'age should not be searchable')
   })
 
+  it('should use exact matching for search:true strings unless filterOperator is explicit', async () => {
+    const context = {}
+
+    await api.resources.users.post({
+      inputRecord: createJsonApiDocument('users', {
+        username: 'ann',
+        email: 'ann@example.com',
+        bio: 'Writes API guides'
+      })
+    }, context)
+
+    await api.resources.users.post({
+      inputRecord: createJsonApiDocument('users', {
+        username: 'anna',
+        email: 'anna@example.com',
+        bio: 'Writing API tutorials'
+      })
+    }, context)
+
+    const usernameResults = await api.resources.users.query({
+      queryParams: {
+        filters: {
+          username: 'ann'
+        }
+      }
+    }, context)
+
+    assert.equal(usernameResults.data.length, 1, 'search:true username should use exact matching')
+    assert.equal(usernameResults.data[0].attributes.username, 'ann')
+
+    const bioResults = await api.resources.users.query({
+      queryParams: {
+        filters: {
+          bio: 'Writ'
+        }
+      }
+    }, context)
+
+    assert.equal(bioResults.data.length, 2, 'explicit like operator should still support partial matching')
+  })
+
   it('should work with only explicit searchSchema (no search:true)', async () => {
     // First do a query to trigger schema compilation
     await api.resources.orders.query({

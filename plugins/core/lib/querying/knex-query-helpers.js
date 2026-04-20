@@ -2,11 +2,9 @@ import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-searc
 
 // Resolve operator with sensible defaults for fields declared in searchSchema.
 // - If filterOperator is provided, use it as-is
-// - If field type is string and no operator provided, default to 'like' (contains)
-// - Otherwise default to '='
+// - If no operator is provided, default to '='
 export function resolveSearchOperator (fieldDef) {
   if (fieldDef && fieldDef.filterOperator) return String(fieldDef.filterOperator)
-  if (fieldDef && fieldDef.type === 'string') return 'like'
   return '='
 }
 
