@@ -15,16 +15,13 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 3. **[Field Transformations](GUIDE_3_Field_Transformations.md)**  
    Transform data with virtual fields, getters, setters, computed fields, and visibility control.
 
-4. **[Authentication and Permissions](GUIDE_4_Authentication_And_Permissions.md)**  
-   Implement security with authentication strategies and fine-grained permissions.
-
-5. **[Non-Database Resources](GUIDE_5_Non-Db_Resources.md)**  
+4. **[Non-Database Resources](GUIDE_5_Non-Db_Resources.md)**  
    Connect your API to alternative data sources beyond traditional databases.
 
-6. **[Positioning](GUIDE_6_Positioning.md)**  
+5. **[Positioning](GUIDE_6_Positioning.md)**  
    Implement drag-and-drop functionality with automatic position management.
 
-7. **[Hooks, Data Management, and Plugins](GUIDE_7_Hooks_Data_Management_And_Plugins.md)**  
+6. **[Hooks, Data Management, and Plugins](GUIDE_7_Hooks_Data_Management_And_Plugins.md)**  
    Master the hook system for data validation, transformation, and business logic.
 
 
