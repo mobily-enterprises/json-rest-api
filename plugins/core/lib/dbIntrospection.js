@@ -193,7 +193,9 @@ function buildColumnSnapshot ({
   datetimePrecision = null,
   characterSetName = '',
   collationName = '',
-  ordinalPosition = null
+  ordinalPosition = null,
+  enumValues = null,
+  setValues = null
 } = {}) {
   const normalizedName = normalizeText(name)
   const normalizedDataType = normalizeText(dataType).toLowerCase()
@@ -223,8 +225,8 @@ function buildColumnSnapshot ({
     characterSetName: normalizeText(characterSetName),
     collationName: normalizeText(collationName),
     ordinalPosition: toNullableNumber(ordinalPosition),
-    enumValues: parseEnumLikeValues(normalizedColumnType, 'enum'),
-    setValues: parseEnumLikeValues(normalizedColumnType, 'set')
+    enumValues: Array.isArray(enumValues) ? enumValues : parseEnumLikeValues(normalizedColumnType, 'enum'),
+    setValues: Array.isArray(setValues) ? setValues : parseEnumLikeValues(normalizedColumnType, 'set')
   }
 }
 
@@ -662,6 +664,23 @@ function parseSqliteCheckEntry (entry = '') {
   }
 }
 
+function parseSqliteInlineEnumValues (entry = '', columnName = '') {
+  const normalizedColumnName = normalizeText(columnName)
+  if (!normalizedColumnName) return []
+
+  const escapedColumnName = normalizedColumnName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(
+    `check\\s*\\(\\s*(?:"${escapedColumnName}"|\`${escapedColumnName}\`|\\[${escapedColumnName}\\]|${escapedColumnName})\\s+in\\s*\\(([^)]*)\\)\\s*\\)`,
+    'i'
+  )
+  const match = String(entry).match(pattern)
+  if (!match?.[1]) {
+    return []
+  }
+
+  return parseEnumLikeValues(`enum(${match[1]})`, 'enum')
+}
+
 function parseSqliteConstraintMetadata (entries = []) {
   const foreignKeys = []
   const checks = []
@@ -771,6 +790,9 @@ async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
       const declared = parseSqliteDeclaredType(row.type)
       const derived = deriveSqliteColumnNumbers(declared.dataType, declared.args)
       const upperEntry = tableEntriesByLeadingIdentifier.get(normalizeText(row.name)) || ''
+      const inlineEnumValues = declared.dataType === 'text'
+        ? parseSqliteInlineEnumValues(upperEntry, row.name)
+        : []
       const autoIncrement = Number(row.pk) > 0 &&
         declared.dataType === 'integer' &&
         /\bPRIMARY\s+KEY\b/i.test(upperEntry)
@@ -788,7 +810,8 @@ async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
         numericPrecision: derived.numericPrecision,
         numericScale: derived.numericScale,
         datetimePrecision: derived.datetimePrecision,
-        ordinalPosition: Number(row.cid) + 1
+        ordinalPosition: Number(row.cid) + 1,
+        enumValues: inlineEnumValues
       })
     })
 

@@ -1,6 +1,12 @@
 import { requirePackage } from 'hooked-api'
 import { createSchema } from 'json-rest-schema'
-import { createKnexTable, addKnexFields, alterKnexFields } from './lib/dbTablesOperations.js'
+import {
+  createKnexTable,
+  addKnexFields,
+  alterKnexFields,
+  generateKnexMigration,
+  generateKnexMigrationDiff
+} from './lib/dbTablesOperations.js'
 import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
@@ -76,6 +82,24 @@ export const RestApiKnexPlugin = {
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
     helpers.getStorageAdapter = getScopeStorageAdapter
 
+    const buildScopeTableSchema = (vars = {}) => {
+      const schemaStructure = vars.schemaInfo?.schemaStructure || {}
+      const filteredSchema = {}
+
+      Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
+        if (!fieldDef.virtual) {
+          filteredSchema[fieldName] = fieldDef
+        }
+      })
+
+      return {
+        structure: filteredSchema,
+        indexes: vars.schemaInfo?.indexes || [],
+        foreignKeys: vars.schemaInfo?.foreignKeys || [],
+        checkConstraints: vars.schemaInfo?.checkConstraints || []
+      }
+    }
+
     // Check database capabilities
     const hasWindowFunctions = await supportsWindowFunctions(knex)
     const dbInfo = await getDatabaseInfo(knex)
@@ -129,20 +153,7 @@ export const RestApiKnexPlugin = {
 
     // Helper scope method to get all schema-related information
     addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
-      // Create a filtered schema that excludes virtual fields
-      const schemaStructure = vars.schemaInfo.schemaStructure || {}
-      const filteredSchema = {}
-
-      // Copy only non-virtual fields to the filtered schema
-      Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
-        if (!fieldDef.virtual) {
-          filteredSchema[fieldName] = fieldDef
-        }
-      })
-
-      // Create schema object from filtered fields
-      const tableSchemaInstance = createSchema(filteredSchema)
-
+      const tableSchemaInstance = buildScopeTableSchema(vars)
       await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
     })
 
@@ -151,6 +162,36 @@ export const RestApiKnexPlugin = {
         tableName: vars.schemaInfo.tableName,
         idColumn: vars.schemaInfo.idProperty
       })
+    })
+
+    addScopeMethod('generateKnexMigration', async ({ vars, scopeOptions }) => {
+      return generateKnexMigration(
+        vars.schemaInfo.tableName,
+        buildScopeTableSchema(vars),
+        {
+          ...scopeOptions,
+          idProperty: vars.schemaInfo.idProperty,
+          dialect: api.knex.instance?.client?.config?.client
+        }
+      )
+    })
+
+    addScopeMethod('generateKnexMigrationDiff', async ({ vars, params }) => {
+      const snapshot = await introspectKnexTableSnapshot(api.knex.instance, {
+        tableName: vars.schemaInfo.tableName,
+        idColumn: vars.schemaInfo.idProperty
+      })
+
+      return generateKnexMigrationDiff(
+        vars.schemaInfo.tableName,
+        snapshot,
+        buildScopeTableSchema(vars),
+        {
+          ...(params?.options || {}),
+          idProperty: vars.schemaInfo.idProperty,
+          dialect: snapshot.dialect || api.knex.instance?.client?.config?.client
+        }
+      )
     })
 
     // Helper scope method to alter existing fields in a table

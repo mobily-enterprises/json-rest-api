@@ -96,13 +96,19 @@ Work List
    - `RestApiKnexPlugin` now exposes `api.resources.{resource}.introspectKnexTableSnapshot()` for table-backed resources
    - verified with real SQLite snapshot tests, MySQL raw-double snapshot tests, and a public scope-method test
 
-7. [pending] Add deterministic migration generation and diffing in json-rest-api.
+7. [done] Add deterministic migration generation and diffing in json-rest-api.
    Deliverables:
    - create and alter support
    - named/composite indexes
    - FK rules
    - enum/set handling
    - defaults and safety warnings for destructive changes
+   Notes:
+   - `dbTablesOperations` now normalizes table-level metadata (`indexes`, `foreignKeys`, `checkConstraints`) and uses one contract for live table creation, create-migration generation, and snapshot diffing
+   - field-level `unique` / `index` / `references` are compiled into deterministic named indexes and foreign keys instead of relying on ad hoc column builder side effects
+   - added `generateKnexMigrationDiff(tableName, currentSnapshot, schema, options)` returning `{ migration, warnings, plan }`
+   - additive diff generation supports columns, indexes, and foreign keys; destructive or unsupported changes stay explicit as warnings
+   - `RestApiKnexPlugin` now exposes `generateKnexMigration()` and `generateKnexMigrationDiff()` on table-backed scopes and threads table-level metadata through `schemaInfo`
 
 8. [pending] Add a first-class structured filter DSL in json-rest-api.
    Deliverables:
