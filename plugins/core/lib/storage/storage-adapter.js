@@ -1,3 +1,14 @@
+import {
+  getFieldValue as getLegacyFieldValue,
+  getIdColumn,
+  getStorageColumn,
+  translateAttributesForStorage,
+} from './storage-mapping.js'
+import {
+  getCanonicalFieldValue,
+  translateCanonicalAttributesForStorage,
+} from './canonical-storage-mapping.js'
+
 const passthrough = (value) => value
 const identityTranslate = (_field, value) => value
 const identityScope = (query) => query
@@ -22,6 +33,59 @@ const normalizeBelongsToValue = (value) => {
   return String(value)
 }
 
+const translateSourceColumn = (source, adapter) => {
+  if (!adapter || source === '*') return source
+  return adapter.translateColumn(source) || source
+}
+
+export const createSelectTranslator = (adapter) => {
+  if (!adapter) return null
+
+  return (field, alias) => {
+    if (field === '*') {
+      return alias ? `${alias}.*` : '*'
+    }
+
+    const translated = adapter.translateColumn(field)
+    const result = translated || field
+
+    if (field === 'id' && result !== 'id') {
+      const qualified = alias ? `${alias}.${result}` : result
+      return `${qualified} as id`
+    }
+
+    if (!alias) {
+      return result
+    }
+
+    if (result.includes('.')) {
+      return result
+    }
+
+    return `${alias}.${result}`
+  }
+}
+
+export const translateSelectFieldsForAdapter = (fields, adapter) => {
+  if (!adapter || !fields) return fields
+
+  const translateField = createSelectTranslator(adapter)
+
+  return fields.map((field) => {
+    if (typeof field !== 'string') return field
+    if (field === '*') return '*'
+
+    const aliasMatch = field.match(/\s+as\s+/i)
+    if (aliasMatch) {
+      const [source, alias] = field.split(/\s+as\s+/i)
+      const translatedSource = translateSourceColumn(source.trim(), adapter)
+      return `${translatedSource} as ${alias.trim()}`
+    }
+
+    return translateField(field)
+  })
+}
+
 const baseAdapter = ({
   knex,
   tableName,
@@ -29,6 +93,8 @@ const baseAdapter = ({
   translateColumn,
   translateFilterValue = identityTranslate,
   applyResourceScope = identityScope,
+  toStorageRow = passthrough,
+  getFieldValue = (record, fieldName) => record?.[fieldName],
   isCanonical = false,
 }) => {
   const buildBaseQuery = ({ transaction } = {}) => {
@@ -43,6 +109,8 @@ const baseAdapter = ({
     translateColumn,
     translateFilterValue,
     applyResourceScope,
+    toStorageRow,
+    getFieldValue,
     buildBaseQuery,
     selectColumns: (builder, columns) => selectColumnsOnBuilder(builder, columns),
   }
@@ -50,9 +118,11 @@ const baseAdapter = ({
 
 const createLegacyAdapter = ({ knex, schemaInfo }) => {
   const tableName = schemaInfo.tableName
-  const idColumn = schemaInfo.idProperty || 'id'
+  const idColumn = getIdColumn(schemaInfo)
 
-  const translateColumn = (column) => column
+  const translateColumn = (field) => getStorageColumn(schemaInfo, field)
+  const toStorageRow = (attributes, options = {}) => translateAttributesForStorage(attributes, schemaInfo, options)
+  const getFieldValue = (record, fieldName) => getLegacyFieldValue(record, schemaInfo, fieldName)
 
   return baseAdapter({
     knex,
@@ -61,6 +131,8 @@ const createLegacyAdapter = ({ knex, schemaInfo }) => {
     translateColumn,
     translateFilterValue: identityTranslate,
     applyResourceScope: identityScope,
+    toStorageRow,
+    getFieldValue,
     isCanonical: false,
   })
 }
@@ -136,6 +208,9 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
       .where(canonical.resourceColumn, descriptor.resource)
   }
 
+  const toStorageRow = (attributes) => translateCanonicalAttributesForStorage(attributes, descriptor)
+  const getFieldValue = (record, fieldName) => getCanonicalFieldValue(record, descriptor, fieldName)
+
   return baseAdapter({
     knex,
     tableName: canonical.tableName,
@@ -143,6 +218,8 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
     translateColumn,
     translateFilterValue,
     applyResourceScope,
+    toStorageRow,
+    getFieldValue,
     isCanonical: true,
   })
 }

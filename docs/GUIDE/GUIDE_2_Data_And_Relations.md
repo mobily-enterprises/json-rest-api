@@ -49,7 +49,7 @@ This guide has been split into the following sections for easier navigation:
 
 ## [2.8 Effects of PUT and PATCH](./GUIDE_2_8_Effects_of_PUT_and_PATCH.md)
 - Understanding the difference between PUT and PATCH
-- How PUT affects relationships (complete replacement)
+- How PUT affects relationships and existing stored fields
 - How PATCH affects relationships (partial updates)
 - Managing belongsTo relationships
 - Handling hasMany relationships

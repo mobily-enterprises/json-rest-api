@@ -2,6 +2,8 @@
  * @file Creates Knex table definitions from json-rest-schema definitions
  */
 
+import { normalizeFieldStorage } from './storage/storage-mapping.js'
+
 /**
  * Maps json-rest-schema types to Knex column types
  * @param {object} table - The Knex table builder instance
@@ -53,6 +55,34 @@ function mapTypeToKnex (table, columnName, definition) {
     case 'none':
     default:
       return table.string(columnName)
+  }
+}
+
+function getColumnNameForDefinition (fieldName, definition, idColumn = 'id') {
+  return normalizeFieldStorage(fieldName, definition, { idColumn }).column
+}
+
+function resolveTableSchemaContext (schemaLike, options = {}) {
+  const schemaStructure = schemaLike.structure || schemaLike || {}
+  const configuredIdColumn = options.idProperty || schemaStructure.id?.storage?.column || 'id'
+
+  let resourceIdField = null
+  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+    if (definition?.type !== 'id') continue
+    const columnName = getColumnNameForDefinition(fieldName, definition, configuredIdColumn)
+    if (columnName === configuredIdColumn) {
+      resourceIdField = fieldName
+      break
+    }
+  }
+
+  return {
+    schemaStructure,
+    idColumn: configuredIdColumn,
+    resourceIdField,
+    hasPrimaryIdField: resourceIdField
+      ? schemaStructure[resourceIdField]?.primary === true
+      : false
   }
 }
 
@@ -120,27 +150,27 @@ export async function createKnexTable (knex, schemaInfo, tableSchemaInstance, op
   const { autoIncrement = true, timestamps = false } = options
 
   const tableName = schemaInfo.tableName
-  const idProperty = schemaInfo.idProperty
-  const tableSchemaStructure = tableSchemaInstance.structure
+  const {
+    schemaStructure: tableSchemaStructure,
+    idColumn,
+    resourceIdField,
+    hasPrimaryIdField
+  } = resolveTableSchemaContext(tableSchemaInstance, { idProperty: schemaInfo.idProperty })
 
   return knex.schema.createTable(tableName, (table) => {
-    // Check if schema has the idProperty field with primary key
-    const hasIdField = tableSchemaStructure[idProperty] && tableSchemaStructure[idProperty].primary === true
-
-    // Add auto-incrementing ID if no primary key is defined and autoIncrement is true
-    if (!hasIdField && autoIncrement) {
-      table.increments(idProperty).primary()
+    if (!hasPrimaryIdField && autoIncrement) {
+      table.increments(idColumn).primary()
     }
 
     // Process each field in the schema
     for (const [fieldName, definition] of Object.entries(tableSchemaStructure)) {
-      // Skip if this is the ID field and we already handled it
-      if (fieldName === idProperty && !hasIdField && autoIncrement) {
+      if (fieldName === resourceIdField && !hasPrimaryIdField && autoIncrement) {
         continue
       }
 
       // Create the column with the appropriate type
-      const column = mapTypeToKnex(table, fieldName, definition)
+      const columnName = getColumnNameForDefinition(fieldName, definition, idColumn)
+      const column = mapTypeToKnex(table, columnName, definition)
 
       // Apply constraints
       applyConstraints(column, definition)
@@ -153,10 +183,13 @@ export async function createKnexTable (knex, schemaInfo, tableSchemaInstance, op
   })
 }
 
-export async function addKnexFields (knex, tableName, schema) {
+export async function addKnexFields (knex, tableName, schema, options = {}) {
+  const { schemaStructure, idColumn } = resolveTableSchemaContext(schema, options)
+
   return knex.schema.alterTable(tableName, (table) => {
-    for (const [fieldName, definition] of Object.entries(schema.structure)) {
-      const column = mapTypeToKnex(table, fieldName, definition)
+    for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+      const columnName = getColumnNameForDefinition(fieldName, definition, idColumn)
+      const column = mapTypeToKnex(table, columnName, definition)
       applyConstraints(column, definition)
     }
   })
@@ -164,10 +197,13 @@ export async function addKnexFields (knex, tableName, schema) {
 
 // Helper function to alter multiple fields in an existing table
 export async function alterKnexFields (knex, tableName, fields, options = {}) {
+  const { schemaStructure, idColumn } = resolveTableSchemaContext(fields, options)
+
   return knex.schema.alterTable(tableName, (table) => {
-    for (const [fieldName, definition] of Object.entries(fields)) {
+    for (const [fieldName, definition] of Object.entries(schemaStructure)) {
       // Create the column with alter flag
-      const column = mapTypeToKnex(table, fieldName, definition)
+      const columnName = getColumnNameForDefinition(fieldName, definition, idColumn)
+      const column = mapTypeToKnex(table, columnName, definition)
 
       // Mark this as an alteration
       column.alter()
@@ -187,70 +223,73 @@ export async function alterKnexFields (knex, tableName, fields, options = {}) {
  */
 export function generateKnexMigration (tableName, schema, options = {}) {
   const { autoIncrement = true, timestamps = false } = options
+  const {
+    schemaStructure,
+    idColumn,
+    resourceIdField,
+    hasPrimaryIdField
+  } = resolveTableSchemaContext(schema, options)
 
   let migration = `exports.up = function(knex) {
   return knex.schema.createTable('${tableName}', (table) => {\n`
 
-  // Check if schema has an 'id' field with primary key
-  const hasIdField = schema.structure.id && schema.structure.id.primary === true
-
-  // Add auto-incrementing ID if needed
-  if (!hasIdField && autoIncrement) {
-    migration += '    table.increments(\'id\').primary();\n'
+  if (!hasPrimaryIdField && autoIncrement) {
+    migration += `    table.increments('${idColumn}').primary();\n`
   }
 
   // Process each field
-  for (const [fieldName, definition] of Object.entries(schema.structure)) {
-    if (fieldName === 'id' && !hasIdField && autoIncrement) {
+  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+    if (fieldName === resourceIdField && !hasPrimaryIdField && autoIncrement) {
       continue
     }
 
     let line = '    '
+    const columnName = getColumnNameForDefinition(fieldName, definition, idColumn)
 
     // Map type
     switch (definition.type) {
       case 'string':
         line += definition.maxLength
-          ? `table.string('${fieldName}', ${definition.maxLength})`
-          : `table.string('${fieldName}')`
+          ? `table.string('${columnName}', ${definition.maxLength})`
+          : `table.string('${columnName}')`
         break
       case 'number':
         if (definition.precision !== undefined && definition.scale !== undefined) {
-          line += `table.decimal('${fieldName}', ${definition.precision}, ${definition.scale})`
+          line += `table.decimal('${columnName}', ${definition.precision}, ${definition.scale})`
         } else {
-          line += `table.float('${fieldName}')`
+          line += `table.float('${columnName}')`
         }
         break
       case 'id':
-        line += `table.integer('${fieldName}')`
+        line += `table.integer('${columnName}')`
         if (definition.unsigned !== false) line += '.unsigned()'
         break
       case 'boolean':
-        line += `table.boolean('${fieldName}')`
+        line += `table.boolean('${columnName}')`
         break
       case 'date':
-        line += `table.date('${fieldName}')`
+        line += `table.date('${columnName}')`
         break
       case 'dateTime':
-        line += `table.datetime('${fieldName}')`
+        line += `table.datetime('${columnName}')`
         break
       case 'time':
-        line += `table.time('${fieldName}')`
+        line += `table.time('${columnName}')`
         break
       case 'timestamp':
-        line += `table.integer('${fieldName}')`
+        line += `table.integer('${columnName}')`
         break
       case 'array':
       case 'object':
       case 'serialize':
-        line += `table.json('${fieldName}')`
+        line += `table.json('${columnName}')`
         break
       case 'blob':
       case 'file':
-        line += `table.binary('${fieldName}')`
+        line += `table.binary('${columnName}')`
         break
       default:
-        line += `table.string('${fieldName}')`
+        line += `table.string('${columnName}')`
     }
 
     // Add constraints

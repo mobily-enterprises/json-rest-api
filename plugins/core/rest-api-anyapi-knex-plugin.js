@@ -35,7 +35,14 @@ import {
   crossTableFiltersHook,
   basicFiltersHook,
 } from './lib/querying/knex-query-helpers.js'
-import { createStorageAdapter } from './lib/storage/storage-adapter.js'
+import {
+  createStorageAdapter,
+  translateSelectFieldsForAdapter,
+} from './lib/storage/storage-adapter.js'
+import {
+  translateCanonicalAttributesForStorage,
+  translateCanonicalRecordFromStorage,
+} from './lib/storage/canonical-storage-mapping.js'
 
 const DEFAULT_TENANT = 'default'
 const LINKS_TABLE = 'any_links'
@@ -919,7 +926,9 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const attributes = context.inputRecord?.data?.attributes || {}
-      const row = translateAttributesForStorage(attributes, descriptor)
+      const row = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(attributes)
+        : translateCanonicalAttributesForStorage(attributes, descriptor)
       row[canonical.tenantColumn] = descriptor.tenant
       row[canonical.resourceColumn] = descriptor.resource
 
@@ -943,7 +952,9 @@ export const RestApiAnyapiKnexPlugin = {
       const { canonical } = descriptor
       const id = context.id
       const attributes = context.inputRecord?.data?.attributes || {}
-      const row = translateAttributesForStorage(attributes, descriptor)
+      const row = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(attributes)
+        : translateCanonicalAttributesForStorage(attributes, descriptor)
 
       row[canonical.resourceColumn] = descriptor.resource
       row[canonical.tenantColumn] = descriptor.tenant
@@ -974,7 +985,9 @@ export const RestApiAnyapiKnexPlugin = {
       const { canonical } = descriptor
       const id = context.id
       const attributes = context.inputRecord?.data?.attributes || {}
-      const row = translateAttributesForStorage(attributes, descriptor)
+      const row = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(attributes)
+        : translateCanonicalAttributesForStorage(attributes, descriptor)
 
       const updateRow = Object.fromEntries(
         Object.entries(row).filter(([, value]) => value !== undefined)
@@ -1028,7 +1041,7 @@ export const RestApiAnyapiKnexPlugin = {
         .first()
 
       if (!row) return null
-      const translated = translateRecordFromStorage(row, descriptor)
+      const translated = translateCanonicalRecordFromStorage(row, descriptor)
       const minimal = {
         type: descriptor.resource,
         id: String(row.id),
@@ -1105,7 +1118,7 @@ export const RestApiAnyapiKnexPlugin = {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateRecordFromStorage(row, targetDescriptor)
+            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
             const includeResource = {
               type: targetDescriptor.resource,
               id: String(row.id),
@@ -1168,7 +1181,7 @@ export const RestApiAnyapiKnexPlugin = {
               const includeKey = `${targetDescriptor.resource}:${row.id}`
               if (seen.has(includeKey)) continue
               seen.add(includeKey)
-              const translated = translateRecordFromStorage(row, targetDescriptor)
+              const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
               const includeResource = {
                 type: targetDescriptor.resource,
                 id: String(row.id),
@@ -1276,7 +1289,7 @@ export const RestApiAnyapiKnexPlugin = {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateRecordFromStorage(row, targetDescriptor)
+            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
             const includeResource = {
               type: targetDescriptor.resource,
               id: String(row.id),
@@ -1333,7 +1346,7 @@ export const RestApiAnyapiKnexPlugin = {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateRecordFromStorage(row, targetDescriptor)
+            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
             const includeResource = {
               type: targetDescriptor.resource,
               id: String(row.id),
@@ -1530,7 +1543,7 @@ export const RestApiAnyapiKnexPlugin = {
 
       if (!row) return null
 
-      const record = translateRecordFromStorage(row, descriptor)
+      const record = translateCanonicalRecordFromStorage(row, descriptor)
       const data = {
         type: descriptor.resource,
         id: String(row.id),
@@ -1699,26 +1712,6 @@ export const RestApiAnyapiKnexPlugin = {
       return { resourceToTableName, tableNameToResource }
     }
 
-    const translateSelectFieldsForAdapter = (fields, adapter) => {
-      if (!adapter || !fields) return fields
-
-      return fields.map((field) => {
-        if (typeof field !== 'string') return field
-
-        if (field === '*') return '*'
-
-        const aliasMatch = field.match(/\s+as\s+/i)
-        if (aliasMatch) {
-          const [source, alias] = field.split(/\s+as\s+/i)
-          const translatedSource = adapter.translateColumn(source.trim()) || source.trim()
-          return `${translatedSource} as ${alias.trim()}`
-        }
-
-        const translated = adapter.translateColumn(field)
-        return translated || field
-      })
-    }
-
     const scopesProxy = new Proxy({}, {
       get (_target, prop) {
         if (typeof prop !== 'string') {
@@ -1861,7 +1854,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       const data = rows.map((row) => {
-        const translated = translateRecordFromStorage(row, descriptor)
+        const translated = translateCanonicalRecordFromStorage(row, descriptor)
         const resource = {
           type: descriptor.resource,
           id: String(row.id),
@@ -2193,65 +2186,4 @@ export const RestApiAnyapiKnexPlugin = {
       throw new Error('alterKnexFields is not supported by AnyAPI Knex plugin yet')
     })
   },
-}
-
-const translateAttributesForStorage = (attributes, descriptor) => {
-  const row = {}
-  for (const [fieldName, value] of Object.entries(attributes)) {
-    const slot = descriptor.fields[fieldName]
-    if (!slot) continue
-
-    if (slot.slotType === 'belongsTo') {
-      row[slot.slot] = value == null ? null : String(value)
-    } else {
-      row[slot.slot] = value
-    }
-
-    if (slot.slotType === 'belongsTo') {
-      const alias = slot.alias || descriptor.fields[fieldName]?.alias
-      const belongsToInfo = alias ? descriptor.belongsTo?.[alias] : null
-      if (belongsToInfo) {
-        row[belongsToInfo.typeColumn] = value == null ? null : belongsToInfo.target
-      }
-    }
-  }
-  return row
-}
-
-const translateRecordFromStorage = (row, descriptor) => {
-  const attributes = {}
-  for (const [slot, logical] of Object.entries(descriptor.reverseAttributes)) {
-    if (slot in row) {
-      attributes[logical] = row[slot]
-    }
-  }
-
-  const relationships = {}
-  for (const [alias, info] of Object.entries(descriptor.belongsTo || {})) {
-    const idValue = row[info.idColumn]
-    const relationshipData = idValue == null
-      ? null
-      : { type: info.target, id: String(idValue) }
-
-    relationships[alias] = { data: relationshipData }
-  }
-
-  for (const [alias, info] of Object.entries(descriptor.polymorphicBelongsTo || {})) {
-    const typeValue = info.typeColumn ? row[info.typeColumn] : null
-    const idValue = info.idColumn ? row[info.idColumn] : null
-
-    let relationshipData = null
-    if (typeValue != null && idValue != null) {
-      relationshipData = {
-        type: String(typeValue),
-        id: String(idValue),
-      }
-    } else if (typeValue == null && idValue == null) {
-      relationshipData = null
-    }
-
-    relationships[alias] = { data: relationshipData }
-  }
-
-  return { attributes, relationships }
 }

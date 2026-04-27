@@ -25,7 +25,7 @@
   "description": "REST API plugin for hooked-api with JSON:API compliance",
   "dependencies": {
     "hooked-api": "^1.0.24",
-    "json-rest-schema": "^1.0.12",
+    "json-rest-schema": "^1.0.13",
     "semver": "^7.7.2"
   },
   "peerDependencies": {

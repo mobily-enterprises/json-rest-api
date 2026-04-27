@@ -1,5 +1,6 @@
 import { createSchema } from 'json-rest-schema'
 import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema, sortFieldsByDependencies } from './schema-helpers.js'
+import { buildStorageInfo } from '../storage/storage-mapping.js'
 
 /**
  * Compiles and enriches schemas for a resource scope
@@ -315,6 +316,12 @@ export async function compileSchemas (scope, deps) {
     }
   }
 
+  const idProperty = scope.scopeOptions.idProperty || scope.vars.idProperty || 'id'
+  const storageInfo = buildStorageInfo({
+    schemaStructure: schemaObject.structure,
+    idProperty
+  })
+
   // Cache everything
   scope.vars.schemaInfo = {
 
@@ -327,7 +334,8 @@ export async function compileSchemas (scope, deps) {
     computed: computedFields,
     schemaRelationships,
     tableName: scope.scopeOptions.tableName || scopeName,
-    idProperty: scope.scopeOptions.idProperty || scope.vars.idProperty,
+    idProperty,
+    storageInfo,
     fieldGetters,
     sortedGetterFields,
     fieldSetters,

@@ -206,9 +206,7 @@ async function registerSubscription ({
       }
     }
 
-    const { validatedObject, errors } = await searchSchemaInstance.validate(validatedFilters, {
-      onlyObjectValues: true
-    })
+    const { validatedObject, errors } = await searchSchemaInstance.patch(validatedFilters)
 
     if (errors && Object.keys(errors).length > 0) {
       const error = new Error('Invalid filter values')

@@ -62,14 +62,13 @@ describe('Field Getters', () => {
     it('should handle null and undefined values', async () => {
       const user = await api.resources.users.post({
         email: null,
-        name: undefined,
         phone: null,
         metadata_json: null,
         tags_csv: null
       })
 
       assert.equal(user.email, undefined) // null?.toLowerCase().trim() returns undefined
-      assert.equal(user.name, undefined) // undefined is passed, getter returns undefined
+      assert.equal(user.name, undefined) // omitted nullable field remains unset
       assert.equal(user.phone, null) // getter explicitly returns null for falsy values
       assert.deepEqual(user.metadata_json, {})
       assert.deepEqual(user.tags_csv, [])

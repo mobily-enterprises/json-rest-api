@@ -161,6 +161,14 @@ describe('Custom idProperty Relationship Operations', () => {
       assert.equal(getResult.included.length, 1)
       assert.equal(getResult.included[0].type, 'countries')
       assert.equal(getResult.included[0].attributes.name, 'United States')
+      assert.equal(
+        getResult.data.relationships.country.links.self,
+        `/publishers/${publisherResult.data.id}/relationships/country`
+      )
+      assert.equal(
+        getResult.data.relationships.country.links.related,
+        `/publishers/${publisherResult.data.id}/country`
+      )
     })
 
     it('should update belongsTo relationship via PATCH', async () => {
@@ -894,6 +902,31 @@ describe('Custom idProperty Relationship Operations', () => {
       assert.equal(putResult.data.attributes.name, 'Replaced Publisher')
       assertResourceRelationship(putResult.data, 'country',
         resourceIdentifier('countries', country.data.id))
+    })
+
+    it('should reject PUT when an existing persisted attribute is omitted', async () => {
+      const country = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+      })
+
+      await assert.rejects(
+        async () => api.resources.countries.put({
+          inputRecord: {
+            data: {
+              type: 'countries',
+              id: country.data.id,
+              attributes: {
+                name: 'Renamed Country'
+              }
+            }
+          }
+        }),
+        (error) => {
+          assert.equal(error.message, 'PUT request omits persisted fields that already have stored values')
+          assert(error.details.fields.includes('data.attributes.code'))
+          return true
+        }
+      )
     })
   })
 })

@@ -1,6 +1,7 @@
 import { getForeignKeyFields as getForeignKeyFieldsFromUtils } from '../querying-writing/field-utils.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, getSchemaStructure } from '../querying-writing/knex-constants.js'
 import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-helpers.js'
+import { translateRecordFromStorage } from '../storage/storage-mapping.js'
 
 /**
  * Transforms a flat database record into JSON:API resource format
@@ -75,14 +76,16 @@ import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './url-help
 const toJsonApi = (scope, record, deps) => {
   if (!record) return null
 
-  const schemaInstance = scope.vars.schemaInfo.schemaInstance
+  const schemaInfo = scope.vars.schemaInfo
+  const schemaInstance = schemaInfo.schemaInstance
+  const logicalRecord = translateRecordFromStorage(record, schemaInfo)
 
   const { context } = deps
   const scopeName = context.scopeName
   const idProperty = context.schemaInfo?.idProperty || 'id'
   const polymorphicFields = context.polymorphicFields || new Set()
 
-  const { id, ...allAttributes } = record
+  const { id, ...allAttributes } = logicalRecord
 
   const foreignKeys = schemaInstance ? getForeignKeyFieldsFromUtils(schemaInstance) : new Set()
 

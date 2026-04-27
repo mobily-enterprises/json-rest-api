@@ -5,6 +5,7 @@ import { updateManyToManyRelationship, createPivotRecords } from '../lib/writing
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
 import {
   setupCommonRequest,
+  validateCompleteReplacePayload,
   validateResourceAttributesBeforeWrite,
   validateRelationshipAccess,
   applyFieldSetters,
@@ -17,7 +18,9 @@ import {
  * PUT
  * Updates an existing top-level resource by completely replacing it.
  * This method supports updating both attributes and relationships (1:1 and n:n).
- * PUT is a complete replacement - any relationships not provided will be removed/nulled.
+ * Existing persisted values cannot be silently dropped: if a stored attribute or belongsTo
+ * relationship already has a value, PUT must include it explicitly. Relationship collections
+ * still follow replacement semantics when a relationships object is provided.
  * This method does NOT support creating new related resources via an `included` array.
  */
 export default async function putMethod ({
@@ -54,12 +57,9 @@ export default async function putMethod ({
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPut')
 
-    // Validate PUT payload to ensure it's a complete resource replacement operation.
-    // PUT requires the full resource representation including ID (unlike POST which generates ID).
-    // It validates that data.id matches the URL parameter, prevents 'included' array (which is
-    // read-only), and ensures the payload represents a complete replacement. Any fields not
-    // provided will be removed or reset to defaults - this is the key difference from PATCH.
-    // Example: PUT to /articles/123 must have data.id: '123' and all required fields.
+    // Validate PUT payload shape.
+    // PUT requires the full resource target including ID, but field-level replacement
+    // completeness is enforced later once we know the current stored record.
     validatePutPayload(context.inputRecord, scopes)
 
     // Validate that user has read access to all related resources
@@ -73,13 +73,6 @@ export default async function putMethod ({
       scope,
       { context }
     )
-
-    await validateResourceAttributesBeforeWrite({
-      context,
-      schema,
-      belongsToUpdates,
-      runHooks
-    })
 
     // Check existence first
     context.exists = await helpers.dataExists({
@@ -108,8 +101,20 @@ export default async function putMethod ({
       context.minimalRecord = minimalRecord
     }
 
+    validateCompleteReplacePayload({
+      context,
+      belongsToUpdates
+    })
+
+    await validateResourceAttributesBeforeWrite({
+      context,
+      schema,
+      belongsToUpdates,
+      runHooks
+    })
+
     // For PUT, we also need to handle relationships that are NOT provided
-    // (they should be set to null/empty as PUT is a complete replacement)
+    // (they should be set to null/empty when a relationships object is provided)
     const allRelationships = {}
 
     // Collect all defined relationships for this resource

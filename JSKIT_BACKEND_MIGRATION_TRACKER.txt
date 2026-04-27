@@ -1,0 +1,133 @@
+JSKIT Backend Migration Tracker
+
+Scope
+- Move DB, schema, casting, and normalization ownership out of jskit-ai.
+- Enrich json-rest-schema and json-rest-api so they can natively cover the required capability set.
+- Do not add compatibility runtimes.
+- Do not bend json-rest-api or json-rest-schema around jskit-ai shapes unless the capability is a clean native addition.
+
+Status Legend
+- done
+- in_progress
+- pending
+- blocked
+
+Execution Rule
+- Complete one numbered point at a time.
+- After each point, write a full report:
+  - what changed
+  - how it worked before
+  - how it works now
+  - relevant code snippets
+- Stop and wait for the next user prompt before starting the next numbered point.
+
+Work List
+
+0. [done] Create and maintain this tracker as the canonical work ledger.
+   Notes:
+   - This file is the progress source of truth for the migration work.
+   - Status changes must be recorded here before moving to the next point.
+
+1. [done] Tighten json-rest-schema scalar semantics.
+   Deliverables:
+   - make `id` represent the real external/resource ID contract
+   - tighten boolean parsing
+   - tighten number/integer parsing where schema should reject invalid inputs instead of silently coercing
+
+2. [done] Define a native json-rest-schema create/replace/patch validation contract.
+   Deliverables:
+   - explicit operation mode semantics
+   - presence-aware field handling
+   - patch behavior that preserves omission and only normalizes touched fields
+   - switch json-rest-api call sites to the explicit schema contract
+   Notes:
+   - verification blocker removed by deleting stale DB-helper tests from `json-rest-schema`
+   - DB-helper coverage now lives in `json-rest-api`, which owns `createKnexTable()` and `generateKnexMigration()`
+   - verified end-to-end against a local symlinked `json-rest-schema@1.0.13`; `json-rest-api` test suite passes with the new schema contract
+
+3. [done] Add transport-schema export from json-rest-schema.
+   Deliverables:
+   - export usable by JSON Schema / Ajv style consumers
+   - enough structure for pre-handler validation in connectors such as Fastify
+   Notes:
+   - added `schema.toJsonSchema({ mode, additionalProperties })` in `json-rest-schema`
+   - export is draft-07, mode-aware, and transport-facing rather than a clone of every in-process coercion path
+   - custom transport export hooks are supported through `handler.toJsonSchema`
+   - unknown external metadata keys are ignored; custom registered validators without a transport hook fail loudly
+
+4. [done] Extend json-rest-schema field metadata only where it remains schema-level meaning.
+   Deliverables:
+   - preserve useful passive metadata such as nullability, defaults, precision, scale, unsigned, enum values, and temporal precision
+   Notes:
+   - made `enum` a first-class built-in rule in `json-rest-schema`
+   - added canonical passive metadata support for `temporalPrecision`
+   - transport export now preserves passive schema metadata under `x-json-rest-schema.metadata`
+   - passive metadata remains schema-owned metadata; no DB-specific runtime logic was added to `json-rest-schema`
+
+5. [done] Add repository/storage mapping in json-rest-api.
+   Deliverables:
+   - API field to DB column mapping
+   - virtual/non-column fields
+   - write serializers where persistence formatting is required
+   Notes:
+   - added `field.storage = { column, serialize }` as the native repository/storage surface in `json-rest-api`
+   - storage metadata is compiled once into `schemaInfo.storageInfo`
+   - Knex writes now translate logical attributes to storage columns through the compiled mapping
+   - table creation and migration generation now respect storage column overrides
+   - JSON:API transformers translate storage rows back to logical field names before response shaping
+   - storage adapters now own row/id/select translation used by Knex callers, reducing repeated mapping helpers
+   - runtime row access now uses the same logical field path for `id` as for other fields: `getFieldValue(record, 'id')`
+   - include handling and relationship links now use logical record IDs consistently, including custom-id resources
+   - direct DB helper surfaces now support logical `id` fields mapped to custom storage columns without duplicate-column drift
+   - verified with dedicated storage-mapping tests and the full `json-rest-api` suite
+
+6. [pending] Add DB introspection snapshot support in json-rest-api.
+   Deliverables:
+   - column type and shape introspection
+   - enum/set values
+   - indexes
+   - foreign keys
+   - check constraints
+   - precision/scale/temporal precision
+
+7. [pending] Add deterministic migration generation and diffing in json-rest-api.
+   Deliverables:
+   - create and alter support
+   - named/composite indexes
+   - FK rules
+   - enum/set handling
+   - defaults and safety warnings for destructive changes
+
+8. [pending] Add a first-class structured filter DSL in json-rest-api.
+   Deliverables:
+   - flag
+   - enum / enumMany
+   - id / idMany
+   - date / dateRange
+   - numberRange
+   - presence
+   - invalid-value policy
+   - optional lookup-backed filters
+
+9. [pending] Add visibility/ownership policy handling in json-rest-api.
+   Deliverables:
+   - public
+   - workspace
+   - user
+   - workspace_user
+
+10. [pending] Add runtime projection and list-control features in json-rest-api.
+    Deliverables:
+    - SQL-backed virtual output projections
+    - explicit search-column control
+    - deterministic ordered-list / cursor behavior
+
+11. [pending] Add a Fastify-oriented connector layer in json-rest-api.
+    Deliverables:
+    - consume exported schema before request handling
+    - no jskit-ai compatibility shim
+
+12. [pending] Remove the corresponding DB/schema/normalization ownership from jskit-ai and verify parity.
+    Deliverables:
+    - no jskit-ai-owned DB/schema normalization path remains for the migrated surface
+    - verification notes for anything still intentionally left outside scope

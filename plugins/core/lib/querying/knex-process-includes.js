@@ -111,7 +111,6 @@ export const processIncludes = async (scope, records, deps) => {
 
     const db = context.transaction || knex
     const queryParams = context.queryParams
-    const idProperty = context.schemaInfo.idProperty
 
     if (!queryParams.include) {
       return []
@@ -124,8 +123,7 @@ export const processIncludes = async (scope, records, deps) => {
         records,
         scopeName,
         includeParam: queryParams.include,
-        fields: queryParams.fields || {},
-        idProperty
+        fields: queryParams.fields || {}
       },
       {
         context: {

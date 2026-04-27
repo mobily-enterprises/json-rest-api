@@ -25,31 +25,7 @@ import {
   parseCursor
 } from './lib/querying/knex-pagination-helpers.js'
 import { getUrlPrefix } from './lib/querying/url-helpers.js'
-import { createStorageAdapter } from './lib/storage/storage-adapter.js'
-
-/**
- * Strips non-database fields (computed and virtual) from attributes before database operations
- * @param {Object} attributes - The attributes object
- * @param {Object} schemaInfo - The schema info containing computed field definitions and schema structure
- * @returns {Object} Attributes with computed and virtual fields removed
- */
-const stripNonDatabaseFields = (attributes, schemaInfo) => {
-  if (!attributes || !schemaInfo) return attributes || {}
-
-  const { computed = {}, schemaStructure = {} } = schemaInfo
-  return Object.entries(attributes)
-    .filter(([key]) => {
-      // Remove computed fields
-      if (key in computed) return false
-      // Remove fields marked as virtual in the schema
-      const fieldDef = schemaStructure[key]
-      if (fieldDef && fieldDef.virtual === true) {
-        return false
-      }
-      return true
-    })
-    .reduce((acc, [key, val]) => ({ ...acc, [key]: val }), {})
-}
+import { createSelectTranslator, createStorageAdapter } from './lib/storage/storage-adapter.js'
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
@@ -98,24 +74,6 @@ export const RestApiKnexPlugin = {
 
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
     helpers.getStorageAdapter = getScopeStorageAdapter
-
-    const createSelectTranslator = (adapter) => {
-      if (!adapter) return null
-      return (field, alias) => {
-        if (field === '*') {
-          return alias ? `${alias}.*` : '*'
-        }
-        const translated = adapter.translateColumn(field)
-        const result = translated || field
-        if (!alias) {
-          return result
-        }
-        if (result.includes('.')) {
-          return result
-        }
-        return `${alias}.${result}`
-      }
-    }
 
     // Check database capabilities
     const hasWindowFunctions = await supportsWindowFunctions(knex)
@@ -198,7 +156,7 @@ export const RestApiKnexPlugin = {
         api.knex.instance,
         vars.schemaInfo.tableName,
         params.fields,
-        params.options // Pass through any additional options
+        { ...params.options, idProperty: vars.schemaInfo.idProperty }
       )
     })
 
@@ -207,7 +165,12 @@ export const RestApiKnexPlugin = {
       // Create schema object from filtered fields
       const partialTableSchema = createSchema(params.fields)
 
-      await addKnexFields(api.knex.instance, vars.schemaInfo.tableName, partialTableSchema)
+      await addKnexFields(
+        api.knex.instance,
+        vars.schemaInfo.tableName,
+        partialTableSchema,
+        { idProperty: vars.schemaInfo.idProperty }
+      )
     })
 
     helpers.newTransaction = async () => {
@@ -913,7 +876,12 @@ export const RestApiKnexPlugin = {
       const attributes = inputRecord.data.attributes
 
       // Strip non-database fields (computed and virtual) before insert
-      const dbAttributes = stripNonDatabaseFields(attributes, context.schemaInfo)
+      const dbAttributes = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(attributes, {
+          context,
+          operation: 'post'
+        })
+        : attributes
 
       // Insert and get the new ID
       const result = await db(tableName).insert(dbAttributes).returning(idProperty)
@@ -964,7 +932,12 @@ export const RestApiKnexPlugin = {
       const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
 
       // Strip non-database fields (computed and virtual) before database operation
-      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo)
+      const finalAttributes = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(mergedAttributes, {
+          context,
+          operation: 'put'
+        })
+        : mergedAttributes
 
       // Map 'id' to actual idProperty if needed (for PUT with specific ID)
       if (idProperty !== 'id' && inputRecord.data.id) {
@@ -1063,7 +1036,12 @@ export const RestApiKnexPlugin = {
       const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
 
       // Strip non-database fields (computed and virtual) before database operation
-      const finalAttributes = stripNonDatabaseFields(mergedAttributes, context.schemaInfo)
+      const finalAttributes = storageAdapter?.toStorageRow
+        ? storageAdapter.toStorageRow(mergedAttributes, {
+          context,
+          operation: 'patch'
+        })
+        : mergedAttributes
 
       log.debug('[Knex] PATCH finalAttributes:', finalAttributes)
 

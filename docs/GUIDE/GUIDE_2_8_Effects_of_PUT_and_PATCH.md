@@ -314,66 +314,17 @@ await api.resources.books.put({
   // publisher_id and genres NOT included!
 });
 ```
-**Effects on the database:**
+**Result: request rejected**
 
-| Table | Changes |
-|-------|---------|
-| **books** | • title: Updated<br>• author_id: Remains 1 (Tolkien)<br>• publisher_id: **SET TO NULL** |
-| **book_genres** | **ALL 3 RECORDS DELETED** - Book no longer has any genres |
-| **Other books** | **NO CHANGES** - LOTR and Silmarillion unchanged |
+PUT now fails fast when you omit a persisted field that already has a stored value. Since this book already has a `publisher_id`, leaving it out would silently discard data, so the API rejects the request instead of clearing it.
 
-Again, PUT is a **complete replacement** operation. Since we didn't include `publisher_id` or `genres` in our request, the API treats this as "I want a book with no publisher and no genres." The result:
-- `publisher_id` becomes NULL (it's nullable, so this is allowed)  
-- All genre relationships are removed from the pivot table
-- Missing fields are NOT preserved from the current state - they're cleared
+Relationship collections still follow replacement semantics when you provide a `relationships` object. The rejection in this example happens because `publisher_id` is an existing stored belongsTo value that was omitted entirely.
 
 **Expected output**
 
 ```text
-Book state BEFORE the change: {
-  id: '1',
-  title: 'The Hobbit',
-  isbn: '9780547928227',
-  published_year: 1937,
-  page_count: 310,
-  genres_ids: [ '1', '2', '3' ],
-  genres: [
-    { id: '1', name: 'Fantasy' },
-    { id: '2', name: 'Adventure' },
-    { id: '3', name: 'Classic' }
-  ],
-  author_id: '1',
-  author: {
-    id: '1',
-    name: 'J.R.R.',
-    surname: 'Tolkien',
-    birth_year: 1892,
-    books_ids: []
-  },
-  publisher_id: '1',
-  publisher: {
-    id: '1',
-    name: 'Penguin Random House',
-    country: 'USA',
-    books_ids: []
-  }
-}
-Book state AFTER the change: {
-  id: '1',
-  title: 'The Hobbit - Revised',
-  isbn: '9780547928227',
-  published_year: 1937,
-  page_count: 310,
-  genres_ids: [],
-  author_id: '1',
-  author: {
-    id: '1',
-    name: 'J.R.R.',
-    surname: 'Tolkien',
-    birth_year: 1892,
-    books_ids: []
-  }
-}
+RestApiValidationError: PUT request omits persisted fields that already have stored values
+fields: [ 'data.attributes.publisher_id' ]
 ```
 
 ### Example 3: PUT with Explicit Nulls
@@ -400,9 +351,10 @@ await api.resources.books.put({
 | **book_genres** | **ALL 3 RECORDS DELETED** |
 | **Other books** | **NO CHANGES** |
 
-This example shows PUT with **explicit nulls and empty arrays**. There's no difference between omitting a field and explicitly setting it to null/[] in a PUT operation - both result in clearing the data. This reinforces that PUT is about **complete state replacement**:
+This example shows PUT with **explicit nulls and empty arrays**. Explicit clearing is still allowed when the schema permits it, but it must be intentional. This reinforces that PUT is about **complete state replacement**:
 - You must include ALL data you want to keep
-- Anything missing or null is cleared
+- Existing stored values are not cleared by omission; omission is rejected
+- Explicit `null` / `[]` is how you clear data intentionally
 - Required fields (like `author_id`) must always be provided and cannot be null
 
 
@@ -782,8 +734,8 @@ This preservation is crucial for:
 ## Best Practices
 
 1. **Use PATCH for targeted updates** - When you only want to change specific fields
-2. **Use PUT when replacing everything** - When you have the complete new state
-3. **Always include relationships you want to keep with PUT** - They will be cleared otherwise
+2. **Use PUT when replacing everything** - When you are explicitly resending the stored values you want to keep
+3. **Always include existing stored fields you want to preserve with PUT** - Omitted persisted values are rejected
 4. **Remember required fields** - PUT must include all required fields like author_id
 5. **Child records are independent** - Other books by the same author are never affected
 
@@ -791,6 +743,6 @@ This preservation is crucial for:
 
 Now that you understand how updates affect relationships:
 - Practice with PATCH for surgical updates
-- Use PUT for complete replacements
+- Use PUT for explicit full-state replacements
 - Plan your API calls to avoid unintended data loss
 - Remember that the intelligent sync preserves pivot table metadata

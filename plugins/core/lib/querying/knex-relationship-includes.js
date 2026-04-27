@@ -80,27 +80,50 @@ import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
+import {
+  getFieldValue as getStorageFieldValue,
+  getIdColumn as getStorageIdColumn,
+  getStorageColumn as getMappedStorageColumn,
+} from '../storage/storage-mapping.js'
+import { translateSelectFieldsForAdapter } from '../storage/storage-adapter.js'
 
-const translateSelectFieldsForAdapter = (fields, adapter) => {
-  if (!adapter || !fields) return fields
+const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
-  const translateField = (field) => {
-    if (typeof field !== 'string') return field
-
-    if (field === '*') return '*'
-
-    const aliasMatch = field.match(/\s+as\s+/i)
-    if (aliasMatch) {
-      const [source, alias] = field.split(/\s+as\s+/i)
-      const translatedSource = adapter.translateColumn(source.trim()) || source.trim()
-      return `${translatedSource} as ${alias.trim()}`
-    }
-
-    const translated = adapter.translateColumn(field)
-    return translated || field
+const getIdColumnForScope = (scopes, scopeName) => {
+  const adapter = getScopeStorageAdapter(scopes, scopeName)
+  if (adapter?.getIdColumn) {
+    return adapter.getIdColumn()
   }
 
-  return fields.map(translateField)
+  return getStorageIdColumn(scopes[scopeName]?.vars?.schemaInfo || {})
+}
+
+const getFieldValueForScope = (scopes, scopeName, record, fieldName) => {
+  const adapter = getScopeStorageAdapter(scopes, scopeName)
+  if (adapter?.getFieldValue) {
+    return adapter.getFieldValue(record, fieldName)
+  }
+
+  return getStorageFieldValue(record, scopes[scopeName]?.vars?.schemaInfo || {}, fieldName)
+}
+
+const translateColumnForScope = (scopes, scopeName, fieldName) => {
+  const adapter = getScopeStorageAdapter(scopes, scopeName)
+  if (adapter?.translateColumn) {
+    return adapter.translateColumn(fieldName)
+  }
+
+  return getMappedStorageColumn(scopes[scopeName]?.vars?.schemaInfo || {}, fieldName)
+}
+
+const buildRelationshipLinks = (scopes, scopeName, record, relationshipName) => {
+  const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
+  const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
+
+  return {
+    self: `${urlPrefix}/${scopeName}/${recordId}/relationships/${relationshipName}`,
+    related: `${urlPrefix}/${scopeName}/${recordId}/${relationshipName}`
+  }
 }
 
 /**
@@ -162,12 +185,12 @@ const translateSelectFieldsForAdapter = (fields, adapter) => {
  * 3. Collects unique IDs for each type
  * 4. Returns map used for batch WHERE IN queries
  */
-export const groupByPolymorphicType = (records, typeField, idField) => {
+export const groupByPolymorphicType = (records, typeField, idField, getFieldValue = (record, fieldName) => record[fieldName]) => {
   const grouped = {}
 
   records.forEach(record => {
-    const type = record[typeField]
-    const id = record[idField]
+    const type = getFieldValue(record, typeField)
+    const id = getFieldValue(record, idField)
 
     // Skip if either type or id is missing
     if (!type || !id) return
@@ -295,7 +318,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
       // Process belongsTo relationships from schema
       for (const [fieldName, fieldDef] of Object.entries(schema)) {
         if (fieldDef.belongsTo && fieldDef.as) {
-          const foreignKeyValue = record[fieldName]
+          const foreignKeyValue = getFieldValueForScope(scopes, scopeName, record, fieldName)
           if (foreignKeyValue != null) {
             record[RELATIONSHIP_METADATA_KEY][fieldDef.as] = {
               data: {
@@ -320,8 +343,8 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
         } else if (relDef.belongsToPolymorphic) {
           // Process polymorphic relationships defined in relationships section
           const { typeField, idField } = relDef.belongsToPolymorphic
-          const type = record[typeField]
-          const id = record[idField]
+          const type = getFieldValueForScope(scopes, scopeName, record, typeField)
+          const id = getFieldValueForScope(scopes, scopeName, record, idField)
 
           if (type && id) {
             record[RELATIONSHIP_METADATA_KEY][relName] = {
@@ -361,7 +384,6 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  *   - processedPaths: Set - Set of already processed paths
  *   - currentPath: string - Current include path for tracking
  *   - fields: Object - Sparse fieldsets configuration
- *   - idProperty: string - The ID property name
  * @param {Object} deps - Dependencies object containing:
  *   - context.scopes: Object - The hooked-api scopes object
  *   - context.log: Object - Logger instance
@@ -369,7 +391,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  * @returns {Promise<void>}
  */
 export const loadBelongsTo = async (scope, deps) => {
-  const { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty } = scope
+  const { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields } = scope
   const { scopes, log, knex, capabilities } = deps.context
   try {
     log.trace('[INCLUDE] Loading belongsTo:', {
@@ -387,7 +409,7 @@ export const loadBelongsTo = async (scope, deps) => {
 
     // Collect all foreign key values
     const foreignKeyValues = records
-      .map(r => r[fieldName])
+      .map(record => getFieldValueForScope(scopes, scopeName, record, fieldName))
       .filter(val => val != null) // Filter out null/undefined
 
     const uniqueIds = [...new Set(foreignKeyValues)]
@@ -404,12 +426,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: null }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
-            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
         }
 
         record[RELATIONSHIPS_KEY][includeName] = relationshipObject
@@ -419,7 +437,7 @@ export const loadBelongsTo = async (scope, deps) => {
 
     // Get target table info
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
-    const targetIdProperty = scopes[targetScope].vars.schemaInfo.idProperty
+    const targetIdColumn = getIdColumnForScope(scopes, targetScope)
     const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
 
     // Build field selection for sparse fieldsets
@@ -437,13 +455,13 @@ export const loadBelongsTo = async (scope, deps) => {
       : null
 
     // Load the target records
-    let query = knex(targetTableName).whereIn(targetIdProperty, uniqueIds)
+    let query = knex(targetTableName).whereIn(targetIdColumn, uniqueIds)
     if (fieldSelectionInfo) {
       const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
       query = query.select(selectFields)
-    } else if (targetIdProperty !== 'id') {
-      // If no field selection but custom idProperty, we need to alias it
-      query = query.select('*', `${targetIdProperty} as id`)
+    } else if (targetIdColumn !== 'id') {
+      // If no field selection but the storage ID column is not `id`, alias it for response shaping.
+      query = query.select('*', `${targetIdColumn} as id`)
     }
     const targetRecords = await query
 
@@ -452,9 +470,9 @@ export const loadBelongsTo = async (scope, deps) => {
 
     // Create lookup map
     const targetById = {}
-    targetRecords.forEach(record => {
-      targetById[record.id || record[targetIdProperty]] = record
-    })
+      targetRecords.forEach(record => {
+        targetById[getFieldValueForScope(scopes, targetScope, record, 'id')] = record
+      })
 
     // Set relationships on original records
     const targetRecordsToProcess = []
@@ -462,7 +480,7 @@ export const loadBelongsTo = async (scope, deps) => {
     records.forEach(record => {
       if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
 
-      const targetId = record[fieldName]
+      const targetId = getFieldValueForScope(scopes, scopeName, record, fieldName)
       const targetRecord = targetById[targetId]
 
       if (targetRecord) {
@@ -488,12 +506,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: { type: targetScope, id: String(targetId) } }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
-            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
         }
 
         record[RELATIONSHIPS_KEY][includeName] = relationshipObject
@@ -512,12 +526,8 @@ export const loadBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: null }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record[idProperty]}/relationships/${includeName}`,
-            related: `${urlPrefix}/${scopeName}/${record[idProperty]}/${includeName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
         }
 
         record[RELATIONSHIPS_KEY][includeName] = relationshipObject
@@ -529,7 +539,7 @@ export const loadBelongsTo = async (scope, deps) => {
       const nextPath = `${currentPath}.${includeName}`
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
-          { records: targetRecordsToProcess, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { records: targetRecordsToProcess, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
           { context: { scopes, log, knex, capabilities } }
         )
       }
@@ -592,7 +602,7 @@ export const loadHasMany = async (scope, deps) => {
     })
 
     // Collect all parent IDs
-    const mainIds = records.map(r => r.id).filter(Boolean)
+    const mainIds = records.map(record => getFieldValueForScope(scopes, scopeName, record, 'id')).filter(Boolean)
 
     if (mainIds.length === 0) {
       log.trace('[INCLUDE] No parent IDs found, skipping hasMany load')
@@ -631,12 +641,8 @@ export const loadHasMany = async (scope, deps) => {
           const relationshipObject = { data: [] }
 
           // Add links if urlPrefix is configured
-          const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
           if (scopeName) {
-            relationshipObject.links = {
-              self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
-              related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
-            }
+            relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
           }
 
           record[RELATIONSHIPS_KEY][includeName] = relationshipObject
@@ -656,7 +662,7 @@ export const loadHasMany = async (scope, deps) => {
       const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
       const targetScopeObject = scopes[targetScope]
       const storageAdapter = targetScopeObject.vars.storageAdapter
-      const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty
+      const targetIdColumn = getIdColumnForScope(scopes, targetScope)
       const fieldSelectionInfo = fields?.[targetScope]
         ? await buildFieldSelection(targetScopeObject, {
           context: {
@@ -690,25 +696,24 @@ export const loadHasMany = async (scope, deps) => {
           })
         }
 
-        const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id'
         const windowQuery = knex
           .select(`${targetTable}.*`)
 
         // Add id alias if needed
-        if (targetIdProperty !== 'id') {
-          windowQuery.select(`${targetTable}.${targetIdProperty} as id`)
+        if (targetIdColumn !== 'id') {
+          windowQuery.select(`${targetTable}.${targetIdColumn} as id`)
         }
 
         windowQuery.select(
           knex.raw(
             'ROW_NUMBER() OVER (PARTITION BY pivot.?? ORDER BY ' +
-            buildOrderByClause(relDef.include?.orderBy || [targetIdProperty], targetTable) +
+            buildOrderByClause(relDef.include?.orderBy || [targetIdColumn], targetTable) +
             ') as ' + ROW_NUMBER_KEY,
             [foreignKey]
           )
         )
           .from(targetTable)
-          .join(`${pivotTable} as pivot`, `${targetTable}.${targetIdProperty}`, 'pivot.' + otherKey)
+          .join(`${pivotTable} as pivot`, `${targetTable}.${targetIdColumn}`, 'pivot.' + otherKey)
           .whereIn(`pivot.${foreignKey}`, mainIds)
 
         // Wrap to filter by row number
@@ -723,15 +728,14 @@ export const loadHasMany = async (scope, deps) => {
         targetRecords.forEach(record => delete record[ROW_NUMBER_KEY])
       } else {
       // Standard query without per-parent limits
-        const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id'
-        let query = knex(targetTable).whereIn(targetIdProperty, targetIds)
+        let query = knex(targetTable).whereIn(targetIdColumn, targetIds)
 
         if (fieldSelectionInfo) {
           const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
           query = query.select(selectFields)
-        } else if (targetIdProperty !== 'id') {
-        // If no field selection but custom idProperty, we need to alias it
-          query = query.select('*', `${targetIdProperty} as id`)
+        } else if (targetIdColumn !== 'id') {
+        // If no field selection but the storage ID column is not `id`, alias it for response shaping.
+          query = query.select('*', `${targetIdColumn} as id`)
         }
 
         // Apply standard include config (global limits)
@@ -751,7 +755,7 @@ export const loadHasMany = async (scope, deps) => {
       // Step 6: Create lookup map for target records
       const targetById = {}
       targetRecords.forEach(record => {
-        targetById[record.id] = record
+        targetById[getFieldValueForScope(scopes, targetScope, record, 'id')] = record
       })
 
       // Step 7: Group pivot records by parent ID
@@ -769,14 +773,16 @@ export const loadHasMany = async (scope, deps) => {
       records.forEach(record => {
         if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
 
-        const childIds = pivotsByParent[record.id] || []
+        const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
+        const childIds = pivotsByParent[recordId] || []
 
         const relData = childIds
           .map(childId => targetById[childId])
           .filter(Boolean)
           .map(childRecord => {
           // Add to included
-            const resourceKey = `${targetScope}:${childRecord.id}`
+            const childRecordId = getFieldValueForScope(scopes, targetScope, childRecord, 'id')
+            const resourceKey = `${targetScope}:${childRecordId}`
             if (!included.has(resourceKey)) {
               const jsonApiRecord = toJsonApiRecord(
                 scopes[targetScope],
@@ -798,24 +804,20 @@ export const loadHasMany = async (scope, deps) => {
 
               included.set(resourceKey, jsonApiRecord)
             }
-            return { type: targetScope, id: String(childRecord.id) }
+            return { type: targetScope, id: String(childRecordId) }
           })
 
         const relationshipObject = { data: relData }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
-            related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
         }
 
         record[RELATIONSHIPS_KEY][includeName] = relationshipObject
 
         // Update the record in the included Map if it exists
-        const recordKey = `${scopeName}:${record.id}`
+        const recordKey = `${scopeName}:${recordId}`
         if (included.has(recordKey)) {
           const existingRecord = included.get(recordKey)
           if (!existingRecord.relationships) {
@@ -830,7 +832,7 @@ export const loadHasMany = async (scope, deps) => {
         const nextPath = `${currentPath}.${includeName}`
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
-            { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+            { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
             { context: { scopes, log, knex, capabilities } }
           )
         }
@@ -854,7 +856,6 @@ export const loadHasMany = async (scope, deps) => {
       const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
       const targetScopeObject = scopes[targetScope]
       const storageAdapter = targetScopeObject.vars.storageAdapter
-      const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty
       const fieldSelectionInfo = fields?.[targetScope]
         ? await buildFieldSelection(targetScopeObject, {
           context: {
@@ -905,7 +906,8 @@ export const loadHasMany = async (scope, deps) => {
 
       // Build standard query if not using window functions
       if (!usingWindowFunction) {
-        query = knex(targetTable).whereIn(foreignKey, mainIds)
+        const foreignKeyColumn = translateColumnForScope(scopes, targetScope, foreignKey)
+        query = knex(targetTable).whereIn(foreignKeyColumn, mainIds)
 
         if (fieldSelectionInfo) {
           const selectFieldsStd = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
@@ -941,7 +943,7 @@ export const loadHasMany = async (scope, deps) => {
       // Group by parent ID
       const childrenByParent = {}
       targetRecords.forEach(record => {
-        const parentId = record[foreignKey]
+        const parentId = getFieldValueForScope(scopes, targetScope, record, foreignKey)
         if (!childrenByParent[parentId]) {
           childrenByParent[parentId] = []
         }
@@ -952,10 +954,12 @@ export const loadHasMany = async (scope, deps) => {
       records.forEach(record => {
         if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
 
-        const children = childrenByParent[record.id] || []
+        const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
+        const children = childrenByParent[recordId] || []
         const relData = children.map(childRecord => {
         // Add to included
-          const resourceKey = `${targetScope}:${childRecord.id}`
+          const childRecordId = getFieldValueForScope(scopes, targetScope, childRecord, 'id')
+          const resourceKey = `${targetScope}:${childRecordId}`
           if (!included.has(resourceKey)) {
             const jsonApiRecord = toJsonApiRecord(
               scopes[targetScope],
@@ -977,24 +981,20 @@ export const loadHasMany = async (scope, deps) => {
 
             included.set(resourceKey, jsonApiRecord)
           }
-          return { type: targetScope, id: String(childRecord.id) }
+          return { type: targetScope, id: String(childRecordId) }
         })
 
         const relationshipObject = { data: relData }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
-            related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
         }
 
         record[RELATIONSHIPS_KEY][includeName] = relationshipObject
 
         // Update the record in the included Map if it exists
-        const recordKey = `${scopeName}:${record.id}`
+        const recordKey = `${scopeName}:${recordId}`
         if (included.has(recordKey)) {
           const existingRecord = included.get(recordKey)
           if (!existingRecord.relationships) {
@@ -1009,7 +1009,7 @@ export const loadHasMany = async (scope, deps) => {
         const nextPath = `${currentPath}.${includeName}`
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
-            { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+            { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
             { context: { scopes, log, knex, capabilities } }
           )
         }
@@ -1057,8 +1057,7 @@ export const loadHasOne = async (scope, deps) => {
   }
 
   // Get parent IDs
-  const idProperty = scopes[scopeName]?.vars?.schemaInfo?.idProperty || 'id'
-  const mainIds = [...new Set(records.map(r => r[idProperty]).filter(Boolean))]
+  const mainIds = [...new Set(records.map(record => getFieldValueForScope(scopes, scopeName, record, 'id')).filter(Boolean))]
 
   if (mainIds.length === 0) {
     log.trace('[INCLUDE] No parent IDs found, skipping hasOne load')
@@ -1081,7 +1080,6 @@ export const loadHasOne = async (scope, deps) => {
   const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
   const targetScopeObject = scopes[targetScope]
   const storageAdapter = targetScopeObject.vars.storageAdapter
-  const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty
 
   // Build field selection for sparse fieldsets
   const fieldSelectionInfo = fields?.[targetScope]
@@ -1096,7 +1094,8 @@ export const loadHasOne = async (scope, deps) => {
     : null
 
   // Query related records
-  let query = knex(targetTable).whereIn(foreignKey, mainIds)
+  const foreignKeyColumn = translateColumnForScope(scopes, targetScope, foreignKey)
+  let query = knex(targetTable).whereIn(foreignKeyColumn, mainIds)
 
   if (fieldSelectionInfo?.fieldsToSelect) {
     const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
@@ -1108,7 +1107,7 @@ export const loadHasOne = async (scope, deps) => {
   // Create a map of parent ID to related record (should be one-to-one)
   const relatedByParentId = {}
   for (const related of relatedRecords) {
-    const parentId = related[foreignKey]
+    const parentId = getFieldValueForScope(scopes, targetScope, related, foreignKey)
     if (relatedByParentId[parentId]) {
       log.warn(`[INCLUDE] Multiple records found for hasOne relationship '${includeName}' with ${foreignKey}=${parentId}`)
     }
@@ -1117,7 +1116,7 @@ export const loadHasOne = async (scope, deps) => {
 
   // Process each parent record
   for (const record of records) {
-    const recordId = record[idProperty]
+    const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
     const relatedRecord = relatedByParentId[recordId]
 
     if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
@@ -1136,12 +1135,13 @@ export const loadHasOne = async (scope, deps) => {
       )
 
       // Set single object (not array) for hasOne
+      const relatedRecordId = getFieldValueForScope(scopes, targetScope, relatedRecord, 'id')
       record[RELATIONSHIPS_KEY][includeName] = {
-        data: { type: targetScope, id: String(relatedRecord[targetIdProperty]) }
+        data: { type: targetScope, id: String(relatedRecordId) }
       }
 
       // Add to included if not already there
-      const key = `${targetScope}:${relatedRecord[targetIdProperty]}`
+      const key = `${targetScope}:${relatedRecordId}`
       if (!included.has(key)) {
         included.set(key, transformed)
       }
@@ -1200,7 +1200,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
     const grouped = groupByPolymorphicType(
       records,
       typeField,
-      idField
+      idField,
+      (record, fieldName) => getFieldValueForScope(scopes, scopeName, record, fieldName)
     )
 
     log.trace('[INCLUDE] Grouped by type:', {
@@ -1224,7 +1225,6 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
 
       // Build field selection for sparse fieldsets
       const targetScopeObject = scopes[targetType]
-      // const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty;
       const storageAdapter = targetScopeObject.vars.storageAdapter
       const fieldSelectionInfo = fields?.[targetType]
         ? await buildFieldSelection(targetScopeObject, {
@@ -1243,14 +1243,14 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       })
 
       // Query for this type
-      const targetIdProperty = scopes[targetType]?.vars?.schemaInfo?.idProperty || 'id'
-      let query = knex(targetTable).whereIn(targetIdProperty, targetIds)
+      const targetIdColumn = getIdColumnForScope(scopes, targetType)
+      let query = knex(targetTable).whereIn(targetIdColumn, targetIds)
       if (fieldSelectionInfo) {
         const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
         query = query.select(selectFields)
-      } else if (targetIdProperty !== 'id') {
-      // If no field selection but custom idProperty, we need to alias it
-        query = query.select('*', `${targetIdProperty} as id`)
+      } else if (targetIdColumn !== 'id') {
+      // If no field selection but the storage ID column is not `id`, alias it for response shaping.
+        query = query.select('*', `${targetIdColumn} as id`)
       }
       const targetRecords = await query
 
@@ -1260,13 +1260,13 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       // Create lookup map
       const targetById = {}
       targetRecords.forEach(record => {
-        targetById[record.id] = record
+        targetById[getFieldValueForScope(scopes, targetType, record, 'id')] = record
       })
 
       // Add to included and set relationships
       records.forEach(record => {
-        if (record[typeField] === targetType) {
-          const targetId = record[idField]
+        if (getFieldValueForScope(scopes, scopeName, record, typeField) === targetType) {
+          const targetId = getFieldValueForScope(scopes, scopeName, record, idField)
           const targetRecord = targetById[targetId]
 
           if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
@@ -1301,12 +1301,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
             }
 
             // Add links if urlPrefix is configured
-            const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
             if (scopeName) {
-              relationshipObject.links = {
-                self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
-                related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
-              }
+              relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, relName)
             }
 
             record[RELATIONSHIPS_KEY][relName] = relationshipObject
@@ -1314,12 +1310,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
             const relationshipObject = { data: null }
 
             // Add links if urlPrefix is configured
-            const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
             if (scopeName) {
-              relationshipObject.links = {
-                self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
-                related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
-              }
+              relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, relName)
             }
 
             record[RELATIONSHIPS_KEY][relName] = relationshipObject
@@ -1332,7 +1324,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
         const nextPath = `${currentPath}.${relName}`
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
-            { records: targetRecords, scopeName: targetType, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+            { records: targetRecords, scopeName: targetType, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
             { context: { scopes, log, knex, capabilities } }
           )
         }
@@ -1346,12 +1338,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
         const relationshipObject = { data: null }
 
         // Add links if urlPrefix is configured
-        const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
         if (scopeName) {
-          relationshipObject.links = {
-            self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${relName}`,
-            related: `${urlPrefix}/${scopeName}/${record.id}/${relName}`
-          }
+          relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, relName)
         }
 
         record[RELATIONSHIPS_KEY][relName] = relationshipObject
@@ -1429,7 +1417,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
     const targetTable = scopes[targetScope].vars.schemaInfo.tableName
 
     // Collect parent IDs
-    const parentIds = records.map(r => r.id).filter(Boolean)
+    const parentIds = records.map(record => getFieldValueForScope(scopes, scopeName, record, 'id')).filter(Boolean)
     if (parentIds.length === 0) return
 
     log.debug(`[INCLUDE] Loading ${targetScope} records via ${viaRelName}:`, {
@@ -1443,7 +1431,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
     const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
     const targetScopeObject = scopes[targetScope]
     const storageAdapter = targetScopeObject.vars.storageAdapter
-    const targetIdProperty = targetScopeObject.vars.schemaInfo.idProperty
+    const targetIdColumn = getIdColumnForScope(scopes, targetScope)
     const fieldSelectionInfo = fields?.[targetScope]
       ? await buildFieldSelection(targetScopeObject, {
         context: {
@@ -1456,16 +1444,18 @@ export const loadReversePolymorphic = async (scope, deps) => {
       : null
 
     // Query for records pointing back to our scope
+    const typeColumn = translateColumnForScope(scopes, targetScope, typeField)
+    const idColumn = translateColumnForScope(scopes, targetScope, idField)
     let query = knex(targetTable)
-      .where(typeField, scopeName)
-      .whereIn(idField, parentIds)
+      .where(typeColumn, scopeName)
+      .whereIn(idColumn, parentIds)
 
     if (fieldSelectionInfo) {
       const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
       query = query.select(selectFields)
-    } else if (targetIdProperty !== 'id') {
-    // If no field selection but custom idProperty, we need to alias it
-      query = query.select('*', `${targetIdProperty} as id`)
+    } else if (targetIdColumn !== 'id') {
+    // If no field selection but the storage ID column is not `id`, alias it for response shaping.
+      query = query.select('*', `${targetIdColumn} as id`)
     }
 
     // Apply include configuration (limits, ordering, etc.)
@@ -1489,7 +1479,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
     // Group by parent ID
     const childrenByParent = {}
     targetRecords.forEach(record => {
-      const parentId = record[idField]
+      const parentId = getFieldValueForScope(scopes, targetScope, record, idField)
       if (!childrenByParent[parentId]) {
         childrenByParent[parentId] = []
       }
@@ -1500,10 +1490,12 @@ export const loadReversePolymorphic = async (scope, deps) => {
     records.forEach(record => {
       if (!record[RELATIONSHIPS_KEY]) record[RELATIONSHIPS_KEY] = {}
 
-      const children = childrenByParent[record.id] || []
+      const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
+      const children = childrenByParent[recordId] || []
       const relData = children.map(childRecord => {
       // Add to included
-        const resourceKey = `${targetScope}:${childRecord.id}`
+        const childRecordId = getFieldValueForScope(scopes, targetScope, childRecord, 'id')
+        const resourceKey = `${targetScope}:${childRecordId}`
         if (!included.has(resourceKey)) {
           const jsonApiRecord = toJsonApiRecord(
             scopes[targetScope],
@@ -1525,18 +1517,14 @@ export const loadReversePolymorphic = async (scope, deps) => {
 
           included.set(resourceKey, jsonApiRecord)
         }
-        return { type: targetScope, id: String(childRecord.id) }
+        return { type: targetScope, id: String(childRecordId) }
       })
 
       const relationshipObject = { data: relData }
 
       // Add links if urlPrefix is configured
-      const urlPrefix = scopes[scopeName]?.vars?.returnBasePath || scopes[scopeName]?.vars?.mountPath || ''
       if (scopeName) {
-        relationshipObject.links = {
-          self: `${urlPrefix}/${scopeName}/${record.id}/relationships/${includeName}`,
-          related: `${urlPrefix}/${scopeName}/${record.id}/${includeName}`
-        }
+        relationshipObject.links = buildRelationshipLinks(scopes, scopeName, record, includeName)
       }
 
       record[RELATIONSHIPS_KEY][includeName] = relationshipObject
@@ -1547,7 +1535,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
       const nextPath = `${currentPath}.${includeName}`
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
-          { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields, idProperty: targetIdProperty },
+          { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
           { context: { scopes, log, knex } }
         )
       }
@@ -1588,7 +1576,6 @@ export const loadReversePolymorphic = async (scope, deps) => {
  *   - processedPaths: Set - Set tracking processed paths to prevent cycles
  *   - currentPath: string - Current path in the include tree (default '')
  *   - fields: Object - Sparse fieldsets configuration (default {})
- *   - idProperty: string - The ID property name
  * @param {Object} deps - Dependencies object containing:
  *   - context.scopes: Object - The hooked-api scopes object
  *   - context.log: Object - Logger instance
@@ -1596,7 +1583,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
  * @returns {Promise<void>}
  */
 export const processIncludes = async (scope, deps) => {
-  const { records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {}, idProperty } = scope
+  const { records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {} } = scope
   const { scopes, log, knex, capabilities } = deps.context
   try {
     log.trace('[INCLUDE] Processing includes:', {
@@ -1636,7 +1623,7 @@ export const processIncludes = async (scope, deps) => {
         for (const [fieldName, fieldDef] of Object.entries(schemaInstance.structure || {})) {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
             await loadBelongsTo(
-              { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields, idProperty },
+              { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields },
               { context: { scopes, log, knex, capabilities } }
             )
             handled = true
@@ -1737,7 +1724,6 @@ export const processIncludes = async (scope, deps) => {
  *   - scopeName: string - The scope name of the main resources
  *   - includeParam: string - The include parameter value (e.g., "author,comments.author")
  *   - fields: Object - Sparse fieldsets configuration
- *   - idProperty: string - The ID property name
  * @param {Object} deps - Dependencies object containing:
  *   - context.scopes: Object - The hooked-api scopes object
  *   - context.log: Object - Logger instance
@@ -1750,8 +1736,7 @@ export const processIncludes = async (scope, deps) => {
  *     records: articleRecords,
  *     scopeName: 'articles',
  *     includeParam: 'author,comments.author',
- *     fields: { articles: 'title,body', people: 'name' },
- *     idProperty: 'id'
+ *     fields: { articles: 'title,body', people: 'name' }
  *   },
  *   { context: { scopes, log, knex } }
  * );
@@ -1765,7 +1750,7 @@ export const processIncludes = async (scope, deps) => {
  * // result.recordsWithRelationships = original records with _relationships added
  */
 export const buildIncludedResources = async (scope, deps) => {
-  const { records, scopeName, includeParam, fields, idProperty } = scope
+  const { records, scopeName, includeParam, fields } = scope
   const { scopes, log, knex, capabilities } = deps.context
   try {
     log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length })
@@ -1799,7 +1784,7 @@ export const buildIncludedResources = async (scope, deps) => {
 
     // Process all includes
     await processIncludes(
-      { records, scopeName, includeTree, included, processedPaths, currentPath: '', fields, idProperty },
+      { records, scopeName, includeTree, included, processedPaths, currentPath: '', fields },
       { context: { scopes, log, knex, capabilities } }
     )
 
@@ -1896,14 +1881,15 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       }
       const targetScope = scopes[relDef.target]
       const targetTable = targetScope?.vars?.schemaInfo?.tableName || relDef.target
-      const targetIdProperty = targetScope?.vars?.schemaInfo?.idProperty || 'id'
+      const targetIdColumn = getIdColumnForScope(scopes, relDef.target)
+      const foreignKeyColumn = translateColumnForScope(scopes, relDef.target, foreignKey)
 
       const results = await knex(targetTable)
-        .whereIn(foreignKey, recordIds)
-        .select(targetIdProperty !== 'id' ? `${targetIdProperty} as id` : 'id', foreignKey)
+        .whereIn(foreignKeyColumn, recordIds)
+        .select(targetIdColumn !== 'id' ? `${targetIdColumn} as id` : 'id', foreignKeyColumn)
 
       results.forEach(row => {
-        const parentId = String(row[foreignKey])
+        const parentId = String(row[foreignKeyColumn])
         if (!idsMap[parentId]) idsMap[parentId] = []
         idsMap[parentId].push(String(row.id))
       })
@@ -1944,15 +1930,17 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
 
         // Get the actual table name
         const targetTable = scopes[targetScope]?.vars?.schemaInfo?.tableName || targetScope
-        const targetIdProperty = scopes[targetScope]?.vars?.schemaInfo?.idProperty || 'id'
+        const targetIdColumn = getIdColumnForScope(scopes, targetScope)
+        const typeColumn = translateColumnForScope(scopes, targetScope, typeField)
+        const idColumn = translateColumnForScope(scopes, targetScope, idField)
 
         const results = await knex(targetTable)
-          .where(typeField, scopeName)
-          .whereIn(idField, recordIds)
-          .select(targetIdProperty !== 'id' ? `${targetIdProperty} as id` : 'id', idField)
+          .where(typeColumn, scopeName)
+          .whereIn(idColumn, recordIds)
+          .select(targetIdColumn !== 'id' ? `${targetIdColumn} as id` : 'id', idColumn)
 
         results.forEach(row => {
-          const parentId = String(row[idField])
+          const parentId = String(row[idColumn])
           if (!idsMap[parentId]) idsMap[parentId] = []
           idsMap[parentId].push(String(row.id))
         })
@@ -1966,7 +1954,7 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
           record[RELATIONSHIPS_KEY] = {}
         }
 
-        const ids = idsMap[String(record.id)] || []
+        const ids = idsMap[String(getFieldValueForScope(scopes, scopeName, record, 'id'))] || []
         // For manyToMany, the target type is the relationship name itself
         // For hasMany/hasOne, the target type is specified in the target property
         const targetType = (relDef.type === 'manyToMany') ? relName : relDef.target

@@ -330,7 +330,6 @@ describe('Relationship Operations', () => {
           }
         }
       }
-      console.log('THE NEXT LINE WILL BLOCK THE TEST')
       await basicApi.resources.books.put({
         id: bookResult.data.id,
         inputRecord: putDoc,
@@ -590,7 +589,7 @@ describe('Relationship Operations', () => {
       assert(publisher.relationships.country)
     })
 
-    it('should handle PUT with partial relationships object', async () => {
+    it('should clear omitted relationships when PUT provides a relationships object', async () => {
       // Create resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
@@ -640,7 +639,8 @@ describe('Relationship Operations', () => {
         simplified: false
       })
 
-      // PUT with only publisher relationship (should preserve authors since relationships object is partial)
+      // PUT with only publisher relationship. Omitted relationships are cleared
+      // once a relationships object is provided for a complete replacement.
       const putDoc = {
         data: {
           type: 'books',

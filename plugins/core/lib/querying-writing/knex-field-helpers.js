@@ -153,15 +153,9 @@ export const buildFieldSelection = async (scope, deps) => {
   const { context } = deps
   const scopeName = context.scopeName
   const requestedFields = context.queryParams?.fields?.[scopeName]
-  const idProperty = context.schemaInfo.idProperty
 
-  // Always include the ID field - required for JSON:API
-  // Handle aliasing if idProperty is not 'id'
-  if (idProperty !== 'id') {
-    fieldsToSelect.add(`${idProperty} as id`)
-  } else {
-    fieldsToSelect.add('id')
-  }
+  // Always include the logical ID field - the storage adapter translates it.
+  fieldsToSelect.add('id')
 
   // Handle both Schema objects and plain objects
   if (!schemaStructure) {
@@ -320,7 +314,7 @@ export const buildFieldSelection = async (scope, deps) => {
     fieldsToSelect: Array.from(fieldsToSelect),      // Fields to SELECT from database
     requestedFields: requested,                       // Fields explicitly requested by user
     computedDependencies: Array.from(computedDependencies),  // Dependencies to remove from response
-    idProperty                                        // Pass idProperty for reference
+    idProperty: 'id'                                  // Logical field name reference
   }
 }
 

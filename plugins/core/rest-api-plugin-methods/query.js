@@ -96,10 +96,8 @@ export default async function queryMethod ({
       )
     }
 
-    // Validate the filter parameters searchSchema
-    const { validatedObject, errors } = await searchSchema.validate(context.queryParams.filters, {
-      onlyObjectValues: true // Partial validation for filters
-    })
+    // Validate only the filters that were explicitly provided.
+    const { validatedObject, errors } = await searchSchema.patch(context.queryParams.filters)
 
     // If there are validation errors, throw an error
     if (Object.keys(errors).length > 0) {

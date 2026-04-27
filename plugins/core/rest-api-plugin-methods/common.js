@@ -261,6 +261,61 @@ export const getMethodHookSuffix = (method) => {
   return method.charAt(0).toUpperCase() + method.slice(1)
 }
 
+export const validateCompleteReplacePayload = ({
+  context,
+  belongsToUpdates
+}) => {
+  const schemaInfo = context.schemaInfo || {}
+  const schemaStructure = schemaInfo.schemaStructure || {}
+  const idProperty = schemaInfo.idProperty || 'id'
+  const originalInputAttributes = context.originalInputAttributes || context.inputRecord?.data?.attributes || {}
+  const missingFields = []
+
+  for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
+    if (!fieldDef) continue
+    if (fieldName === idProperty) continue
+    if (fieldDef.computed === true || fieldDef.virtual === true) continue
+    if (fieldDef.type === undefined) continue
+
+    if (fieldDef.belongsTo && fieldDef.as) {
+      if (Object.hasOwn(belongsToUpdates, fieldName)) continue
+
+      const existingRelationshipData = context.minimalRecord?.relationships?.[fieldDef.as]?.data
+      if (existingRelationshipData?.id !== undefined && existingRelationshipData?.id !== null) {
+        missingFields.push({
+          field: `data.relationships.${fieldDef.as}.data.id`,
+          message: `PUT requests must explicitly include relationship '${fieldDef.as}' when it already has a value`
+        })
+      }
+      continue
+    }
+
+    if (Object.hasOwn(originalInputAttributes, fieldName)) continue
+
+    const existingValue = context.minimalRecord?.attributes?.[fieldName]
+    if (existingValue !== undefined && existingValue !== null) {
+      missingFields.push({
+        field: `data.attributes.${fieldName}`,
+        message: `PUT requests must explicitly include attribute '${fieldName}' when it already has a value`
+      })
+    }
+  }
+
+  if (missingFields.length > 0) {
+    throw new RestApiValidationError(
+      'PUT request omits persisted fields that already have stored values',
+      {
+        fields: missingFields.map(({ field }) => field),
+        violations: missingFields.map(({ field, message }) => ({
+          field,
+          rule: 'complete_replacement',
+          message
+        }))
+      }
+    )
+  }
+}
+
 /**
  * Validates resource attributes before write operations
  *
@@ -285,9 +340,8 @@ export const validateResourceAttributesBeforeWrite = async ({
   await runHooks('beforeSchemaValidate')
   await runHooks(`beforeSchemaValidate${methodSpecificHookSuffix}`)
 
-  // Store original input attributes before validation adds defaults (primarily for POST)
-  // Only if it's not already set and the current method is POST
-  if (!context.originalInputAttributes && context.method === 'post') {
+  // Store original input attributes before validation adds defaults or casts.
+  if (!context.originalInputAttributes) {
     context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) }
   }
 
@@ -361,9 +415,13 @@ export const validateResourceAttributesBeforeWrite = async ({
       return acc
     }, {})
 
-  const validationOptions = isPartialValidation ? { onlyObjectValues: true } : {}
+  const validationMethod = isPartialValidation
+    ? 'patch'
+    : context.method === 'put'
+      ? 'replace'
+      : 'create'
 
-  const { validatedObject, errors } = await schema.validate(attributesForValidation, validationOptions)
+  const { validatedObject, errors } = await schema[validationMethod](attributesForValidation)
 
   if (Object.keys(errors).length > 0) {
     // --- START OF MODIFICATION ---
@@ -493,29 +551,31 @@ export const applyFieldSetters = async (attributes, schemaInfo, context, api, he
   const transformedAttributes = { ...attributes }
 
   for (const fieldName of sortedSetterFields) {
-    // Only process fields that exist in the attributes
-    if (fieldName in transformedAttributes) {
-      const setterInfo = fieldSetters[fieldName]
-      try {
-        const setterContext = {
-          attributes: transformedAttributes, // Current state with previous setters applied
-          fieldName,
-          originalValue: attributes[fieldName],
-          originalAttributes: attributes,
-          scopeName: context.scopeName,
-          method: context.method,
-          api,
-          helpers,
-          auth: context.auth
-        }
-        transformedAttributes[fieldName] = await setterInfo.setter(
-          transformedAttributes[fieldName],
-          setterContext
-        )
-      } catch (error) {
-        console.warn(`Setter for field '${fieldName}' failed:`, error)
-        // Keep original value if setter fails
+    const setterInfo = fieldSetters[fieldName]
+    const fieldPresent = fieldName in transformedAttributes
+    const hasDependencies = Array.isArray(setterInfo.runSetterAfter) && setterInfo.runSetterAfter.length > 0
+
+    if (!fieldPresent && !hasDependencies) continue
+
+    try {
+      const setterContext = {
+        attributes: transformedAttributes, // Current state with previous setters applied
+        fieldName,
+        originalValue: attributes[fieldName],
+        originalAttributes: attributes,
+        scopeName: context.scopeName,
+        method: context.method,
+        api,
+        helpers,
+        auth: context.auth
       }
+      transformedAttributes[fieldName] = await setterInfo.setter(
+        transformedAttributes[fieldName],
+        setterContext
+      )
+    } catch (error) {
+      console.warn(`Setter for field '${fieldName}' failed:`, error)
+      // Keep original value if setter fails
     }
   }
 

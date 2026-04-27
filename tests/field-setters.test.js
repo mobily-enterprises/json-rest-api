@@ -132,9 +132,6 @@ describe('Field Setters', () => {
         data: 'sensitive information'
       })
 
-      console.log('**********************************************')
-      console.log(record)
-      // Check if record has id
       assert.ok(record.id, 'Record should have an id')
 
       // Get the record to verify async setters were applied
@@ -222,7 +219,6 @@ describe('Field Setters', () => {
     it('should handle null and undefined values in setters', async () => {
       const data = await api.resources.nullable_data.post({
         field1: null,
-        field2: undefined,
         field3: '',
         field4: 0
       })

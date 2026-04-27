@@ -1,5 +1,6 @@
 import { toJsonApiRecord } from '../querying/knex-json-api-transformers-querying.js'
 import { getSchemaStructure } from './knex-constants.js'
+import { translateRecordFromStorage } from '../storage/storage-mapping.js'
 
 /**
  * Converts database record to JSON:API format with belongsTo relationships
@@ -92,17 +93,17 @@ import { getSchemaStructure } from './knex-constants.js'
 export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
   if (!record) return null
 
+  const schemaInfo = scope.vars.schemaInfo
+  const logicalRecord = translateRecordFromStorage(record, schemaInfo)
+
   // Get the basic JSON:API structure (without relationships)
-  const jsonApiRecord = toJsonApiRecord(scope, record, scopeName)
+  const jsonApiRecord = toJsonApiRecord(scope, logicalRecord, scopeName)
 
   // Extract schema info from scope
   const {
-    vars: {
-      schemaInfo: { schemaInstance, schemaRelationships: relationships, idProperty }
-    }
-  } = scope
-
-  const idField = idProperty || 'id'
+    schemaInstance,
+    schemaRelationships: relationships
+  } = schemaInfo
 
   // Get schema structure
   const schemaStructure = getSchemaStructure(schemaInstance)
@@ -113,13 +114,13 @@ export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
   // Process regular belongsTo relationships from schema
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (fieldDef.belongsTo && fieldDef.as) {
-      const foreignKeyValue = record[fieldName]
+      const fieldValue = logicalRecord[fieldName]
 
-      if (foreignKeyValue !== null && foreignKeyValue !== undefined) {
+      if (fieldValue !== null && fieldValue !== undefined) {
         jsonApiRecord.relationships[fieldDef.as] = {
           data: {
             type: fieldDef.belongsTo,
-            id: String(foreignKeyValue)
+            id: String(fieldValue)
           }
         }
       } else {
@@ -134,8 +135,8 @@ export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
   // Process polymorphic belongsTo relationships
   Object.entries(relationships || {}).forEach(([relName, relDef]) => {
     if (relDef.belongsToPolymorphic) {
-      const typeValue = record[relDef.typeField]
-      const idValue = record[relDef.idField]
+      const typeValue = logicalRecord[relDef.typeField]
+      const idValue = logicalRecord[relDef.idField]
 
       if (typeValue && idValue) {
         jsonApiRecord.relationships[relName] = {
