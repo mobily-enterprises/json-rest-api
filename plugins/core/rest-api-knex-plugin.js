@@ -1,6 +1,7 @@
 import { requirePackage } from 'hooked-api'
 import { createSchema } from 'json-rest-schema'
 import { createKnexTable, addKnexFields, alterKnexFields } from './lib/dbTablesOperations.js'
+import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
 import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
 import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js'
@@ -143,6 +144,13 @@ export const RestApiKnexPlugin = {
       const tableSchemaInstance = createSchema(filteredSchema)
 
       await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
+    })
+
+    addScopeMethod('introspectKnexTableSnapshot', async ({ vars }) => {
+      return introspectKnexTableSnapshot(api.knex.instance, {
+        tableName: vars.schemaInfo.tableName,
+        idColumn: vars.schemaInfo.idProperty
+      })
     })
 
     // Helper scope method to alter existing fields in a table

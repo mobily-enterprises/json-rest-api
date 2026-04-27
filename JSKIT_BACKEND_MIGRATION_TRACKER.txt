@@ -81,7 +81,7 @@ Work List
    - direct DB helper surfaces now support logical `id` fields mapped to custom storage columns without duplicate-column drift
    - verified with dedicated storage-mapping tests and the full `json-rest-api` suite
 
-6. [pending] Add DB introspection snapshot support in json-rest-api.
+6. [done] Add DB introspection snapshot support in json-rest-api.
    Deliverables:
    - column type and shape introspection
    - enum/set values
@@ -89,6 +89,12 @@ Work List
    - foreign keys
    - check constraints
    - precision/scale/temporal precision
+   Notes:
+   - added `introspectKnexTableSnapshot(knex, { tableName, idColumn })` as the native normalized snapshot helper
+   - snapshot support is dialect-aware for `better-sqlite3`/SQLite and `mysql2`
+   - SQLite captures named check constraints and foreign keys from table SQL, while indexes/columns/foreign-key actions come from PRAGMA metadata
+   - `RestApiKnexPlugin` now exposes `api.resources.{resource}.introspectKnexTableSnapshot()` for table-backed resources
+   - verified with real SQLite snapshot tests, MySQL raw-double snapshot tests, and a public scope-method test
 
 7. [pending] Add deterministic migration generation and diffing in json-rest-api.
    Deliverables:
