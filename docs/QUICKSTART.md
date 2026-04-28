@@ -336,7 +336,7 @@ You've successfully set up a basic JSON REST API! This quickstart covered the es
 
 Check out the [full guide](./GUIDE) to learn about:
 - Advanced relationships (many-to-many, polymorphic)
-- Authentication and authorization
+- Permission hooks, request auth context, and autofiltering
 - Hooks and middleware
 - Custom validation
 - Pagination strategies

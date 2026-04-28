@@ -30,7 +30,7 @@ json-rest-api is a full-featured, plugin-based JSON:API implementation built on 
 | WebSocket support | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Bulk operations | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Positioning/sorting | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Authentication | ✅ | ❌ | ⚠️ | ❌ | ❌ |
+| Permission hooks / app-owned auth integration | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | **Developer Experience** |
 | TypeScript support | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Active maintenance | ✅ (2025) | ✅ (2024) | ✅ (2024) | 🟡 (2022) | ❌ (2022) |
