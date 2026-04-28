@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api'
-import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../../index.js'
+import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin, QueryProjectionsPlugin } from '../../index.js'
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js'
 import express from 'express'
 import { createServer } from 'http'
@@ -963,6 +963,83 @@ export async function createFieldGettersApi (knex, pluginOptions = {}) {
   return api
 }
 
+export async function createProjectedFieldsApi (knex, pluginOptions = {}) {
+  const api = new Api({
+    name: 'projected-fields-test-api',
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  const tenantId = storageMode.isAnyApi() ? 'projected_fields_tenant' : storageMode.defaultTenant
+  const previousTenant = storageMode.currentTenant
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
+    },
+    sortableFields: ['id', 'first_name', 'last_name'],
+    ...pluginOptions['rest-api']
+  })
+  await api.use(QueryProjectionsPlugin)
+
+  await useStoragePlugin(api, knex, { tenantId })
+  await resetAnyApiTables(knex)
+
+  await api.addResource('authors', {
+    schema: {
+      id: { type: 'id' },
+      first_name: { type: 'string', required: true, max: 100 },
+      last_name: { type: 'string', required: true, max: 100 }
+    },
+    queryFields: {
+      full_name: {
+        type: 'string',
+        sortable: true,
+        select: ({ knex, column }) => knex.raw(
+          "trim(coalesce(??, '') || ' ' || coalesce(??, ''))",
+          [column('first_name'), column('last_name')]
+        )
+      }
+    },
+    relationships: {
+      books: { type: 'hasMany', target: 'books', foreignKey: 'author_id' }
+    },
+    sortableFields: ['id', 'first_name', 'last_name'],
+    defaultSort: ['full_name'],
+    tableName: 'projected_authors'
+  })
+  await api.resources.authors.createKnexTable()
+  mapTable('projected_authors', 'authors')
+
+  await api.addResource('books', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200 },
+      author_id: { type: 'id', required: true, belongsTo: 'authors', as: 'author' }
+    },
+    tableName: 'projected_books'
+  })
+  await api.resources.books.createKnexTable()
+  mapTable('projected_books', 'books')
+
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(previousTenant)
+  }
+
+  return api
+}
+
 /**
  * Creates an API with field setters for testing
  */
@@ -1226,6 +1303,7 @@ export async function createAutoFilterApi (knex, pluginOptions = {}) {
     resolvers: {
       workspace: ({ context }) => context.scopeValues?.workspaceId,
       user: ({ context }) => context.scopeValues?.userId,
+      currentProject: ({ context }) => context.scopeValues?.projectId ?? null,
       ...(autofilterOptions.resolvers || {})
     },
     presets: {
@@ -1302,6 +1380,20 @@ export async function createAutoFilterApi (knex, pluginOptions = {}) {
   })
   await api.resources.tasks.createKnexTable()
   mapTable('autofilter_tasks', 'tasks')
+
+  await api.addResource('optional_tasks', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200 },
+      project_id: { type: 'number', belongsTo: 'projects', as: 'project', nullable: true }
+    },
+    autofilter: {
+      filters: [{ field: 'project_id', resolver: 'currentProject' }]
+    },
+    tableName: 'autofilter_optional_tasks'
+  })
+  await api.resources.optional_tasks.createKnexTable()
+  mapTable('autofilter_optional_tasks', 'optional_tasks')
 
   await api.addResource('system_settings', {
     schema: {
@@ -1709,7 +1801,9 @@ export async function createVirtualFieldsApi (knex, pluginOptions = {}) {
 }
 
 /**
- * Creates an API configuration for testing searchSchema merge behavior
+ * Creates an API configuration for testing searchSchema merge behavior.
+ * Shared suites assert merge/validation behavior across storage backends;
+ * backend-specific execution cases live in storage-specific tests.
  */
 export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
   const api = new Api({

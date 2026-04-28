@@ -74,7 +74,7 @@
  * 6. Return array of unique included resources
  */
 
-import { buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
+import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { getForeignKeyFields } from '../querying-writing/field-utils.js'
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
@@ -85,7 +85,6 @@ import {
   getIdColumn as getStorageIdColumn,
   getStorageColumn as getMappedStorageColumn,
 } from '../storage/storage-mapping.js'
-import { translateSelectFieldsForAdapter } from '../storage/storage-adapter.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
@@ -123,6 +122,59 @@ const buildRelationshipLinks = (scopes, scopeName, record, relationshipName) => 
   return {
     self: `${urlPrefix}/${scopeName}/${recordId}/relationships/${relationshipName}`,
     related: `${urlPrefix}/${scopeName}/${recordId}/${relationshipName}`
+  }
+}
+
+const buildScopedIncludeContext = ({ requestContext, scopeName, scopeObject, storageAdapter }) => {
+  const queryParams = requestContext?.queryParams
+    ? { ...requestContext.queryParams }
+    : {}
+
+  if ('filters' in queryParams) {
+    delete queryParams.filters
+  }
+
+  return {
+    ...(requestContext || {}),
+    scopeName,
+    schemaInfo: scopeObject.vars.schemaInfo,
+    storageAdapter,
+    queryParams
+  }
+}
+
+const applyScopeFiltersToIncludeQuery = async ({
+  query,
+  scopes,
+  scopeName,
+  requestContext,
+  db,
+  tableName
+}) => {
+  const scopeObject = scopes[scopeName]
+  if (!scopeObject?.applyQueryFilters) {
+    return query
+  }
+
+  const storageAdapter = scopeObject.vars.storageAdapter
+
+  const queryState = await scopeObject.applyQueryFilters({
+    query,
+    filters: undefined,
+    scopeName,
+    tableName: tableName || scopeObject.vars.schemaInfo.tableName,
+    db,
+    schemaInfo: scopeObject.vars.schemaInfo,
+    storageAdapter
+  }, buildScopedIncludeContext({
+    requestContext,
+    scopeName,
+    scopeObject,
+    storageAdapter
+  }))
+
+  return {
+    query: queryState?.query || query
   }
 }
 
@@ -392,7 +444,7 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
  */
 export const loadBelongsTo = async (scope, deps) => {
   const { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Loading belongsTo:', {
       fieldName,
@@ -446,6 +498,7 @@ export const loadBelongsTo = async (scope, deps) => {
     const fieldSelectionInfo = fields?.[targetScope]
       ? await buildFieldSelection(targetScopeObject, {
         context: {
+          ...(requestContext || {}),
           scopeName: targetScope,
           queryParams: { fields: { [targetScope]: fields[targetScope] } },
           schemaInfo: targetScopeObject.vars.schemaInfo,
@@ -457,12 +510,36 @@ export const loadBelongsTo = async (scope, deps) => {
     // Load the target records
     let query = knex(targetTableName).whereIn(targetIdColumn, uniqueIds)
     if (fieldSelectionInfo) {
-      const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-      query = query.select(selectFields)
+      const selectionState = await applyFieldSelectionToQuery({
+        query,
+        scope: targetScopeObject,
+        fieldSelectionInfo,
+        tableName: targetTableName,
+        useTablePrefix: false,
+        storageAdapter,
+        db: knex,
+        context: {
+          ...(requestContext || {}),
+          scopeName: targetScope,
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
+        },
+        scopeName: targetScope
+      })
+      query = selectionState.query
     } else if (targetIdColumn !== 'id') {
       // If no field selection but the storage ID column is not `id`, alias it for response shaping.
       query = query.select('*', `${targetIdColumn} as id`)
     }
+    const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+      query,
+      scopes,
+      scopeName: targetScope,
+      requestContext,
+      db: knex,
+      tableName: targetTableName
+    })
+    query = scopedQueryState.query
     const targetRecords = await query
 
     // Load relationship metadata for all target records
@@ -540,7 +617,7 @@ export const loadBelongsTo = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecordsToProcess, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
-          { context: { scopes, log, knex, capabilities } }
+          { context: { scopes, log, knex, capabilities, requestContext } }
         )
       }
     }
@@ -590,7 +667,7 @@ export const loadBelongsTo = async (scope, deps) => {
  */
 export const loadHasMany = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Loading hasMany/manyToMany relationship:', {
       scopeName,
@@ -663,9 +740,10 @@ export const loadHasMany = async (scope, deps) => {
       const targetScopeObject = scopes[targetScope]
       const storageAdapter = targetScopeObject.vars.storageAdapter
       const targetIdColumn = getIdColumnForScope(scopes, targetScope)
-      const fieldSelectionInfo = fields?.[targetScope]
-        ? await buildFieldSelection(targetScopeObject, {
+    const fieldSelectionInfo = fields?.[targetScope]
+      ? await buildFieldSelection(targetScopeObject, {
           context: {
+            ...(requestContext || {}),
             scopeName: targetScope,
             queryParams: { fields: { [targetScope]: fields[targetScope] } },
             schemaInfo: targetScopeObject.vars.schemaInfo,
@@ -677,7 +755,7 @@ export const loadHasMany = async (scope, deps) => {
       // Step 4: For many-to-many with limits, we need a different approach
       let targetRecords
 
-      if (relDef.include?.strategy === 'window') {
+      if (relDef.include?.strategy === 'window' && !fieldSelectionInfo?.queryFieldsToSelect?.length) {
       // For many-to-many with window functions, we need to limit per parent
       // This requires joining back through the pivot table
 
@@ -696,7 +774,7 @@ export const loadHasMany = async (scope, deps) => {
           })
         }
 
-        const windowQuery = knex
+        let windowQuery = knex
           .select(`${targetTable}.*`)
 
         // Add id alias if needed
@@ -716,6 +794,16 @@ export const loadHasMany = async (scope, deps) => {
           .join(`${pivotTable} as pivot`, `${targetTable}.${targetIdColumn}`, 'pivot.' + otherKey)
           .whereIn(`pivot.${foreignKey}`, mainIds)
 
+        const scopedWindowQueryState = await applyScopeFiltersToIncludeQuery({
+          query: windowQuery,
+          scopes,
+          scopeName: targetScope,
+          requestContext,
+          db: knex,
+          tableName: targetTable
+        })
+        windowQuery = scopedWindowQueryState.query
+
         // Wrap to filter by row number
         const limitedQuery = knex
           .select('*')
@@ -731,12 +819,37 @@ export const loadHasMany = async (scope, deps) => {
         let query = knex(targetTable).whereIn(targetIdColumn, targetIds)
 
         if (fieldSelectionInfo) {
-          const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-          query = query.select(selectFields)
+          const selectionState = await applyFieldSelectionToQuery({
+            query,
+            scope: targetScopeObject,
+            fieldSelectionInfo,
+            tableName: targetTable,
+            useTablePrefix: false,
+            storageAdapter,
+            db: knex,
+            context: {
+              ...(requestContext || {}),
+              scopeName: targetScope,
+              schemaInfo: targetScopeObject.vars.schemaInfo,
+              storageAdapter,
+            },
+            scopeName: targetScope
+          })
+          query = selectionState.query
         } else if (targetIdColumn !== 'id') {
         // If no field selection but the storage ID column is not `id`, alias it for response shaping.
           query = query.select('*', `${targetIdColumn} as id`)
         }
+
+        const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+          query,
+          scopes,
+          scopeName: targetScope,
+          requestContext,
+          db: knex,
+          tableName: targetTable
+        })
+        query = scopedQueryState.query
 
         // Apply standard include config (global limits)
         if (relDef.include) {
@@ -833,7 +946,7 @@ export const loadHasMany = async (scope, deps) => {
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
             { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
-            { context: { scopes, log, knex, capabilities } }
+            { context: { scopes, log, knex, capabilities, requestContext } }
           )
         }
       }
@@ -874,9 +987,11 @@ export const loadHasMany = async (scope, deps) => {
       if (relDef.include?.strategy === 'window') {
         try {
         // Try to build window function query
-          const selectFields = fieldSelectionInfo
-            ? translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-            : null
+          if (fieldSelectionInfo?.queryFieldsToSelect?.length) {
+            throw new Error('Query projection fields require the standard include query path.')
+          }
+
+          const selectFields = fieldSelectionInfo?.fieldsToSelect || null
 
           query = buildWindowedIncludeQuery(
             knex,
@@ -888,6 +1003,15 @@ export const loadHasMany = async (scope, deps) => {
             capabilities,
             targetScopeObject.vars  // Pass target scope vars
           )
+          const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+            query,
+            scopes,
+            scopeName: targetScope,
+            requestContext,
+            db: knex,
+            tableName: targetTable
+          })
+          query = scopedQueryState.query
           usingWindowFunction = true
           log.debug('[INCLUDE] Using window function strategy with limits')
         } catch (error) {
@@ -910,9 +1034,34 @@ export const loadHasMany = async (scope, deps) => {
         query = knex(targetTable).whereIn(foreignKeyColumn, mainIds)
 
         if (fieldSelectionInfo) {
-          const selectFieldsStd = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-          query = query.select(selectFieldsStd)
+          const selectionState = await applyFieldSelectionToQuery({
+            query,
+            scope: targetScopeObject,
+            fieldSelectionInfo,
+            tableName: targetTable,
+            useTablePrefix: false,
+            storageAdapter,
+            db: knex,
+            context: {
+              ...(requestContext || {}),
+              scopeName: targetScope,
+              schemaInfo: targetScopeObject.vars.schemaInfo,
+              storageAdapter,
+            },
+            scopeName: targetScope
+          })
+          query = selectionState.query
         }
+
+        const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+          query,
+          scopes,
+          scopeName: targetScope,
+          requestContext,
+          db: knex,
+          tableName: targetTable
+        })
+        query = scopedQueryState.query
 
         // Apply standard config with defaults
         const targetVars = scopes[targetScope].vars
@@ -1010,7 +1159,7 @@ export const loadHasMany = async (scope, deps) => {
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
             { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
-            { context: { scopes, log, knex, capabilities } }
+            { context: { scopes, log, knex, capabilities, requestContext } }
           )
         }
       }
@@ -1047,7 +1196,7 @@ export const loadHasMany = async (scope, deps) => {
  */
 export const loadHasOne = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope
-  const { context: { scopes, log, knex, capabilities } } = deps
+  const { context: { scopes, log, knex, capabilities, requestContext } } = deps
 
   log = log?.child ? log.child({ method: 'loadHasOne' }) : console
 
@@ -1085,6 +1234,7 @@ export const loadHasOne = async (scope, deps) => {
   const fieldSelectionInfo = fields?.[targetScope]
     ? await buildFieldSelection(targetScopeObject, {
       context: {
+        ...(requestContext || {}),
         scopeName: targetScope,
         queryParams: { fields: { [targetScope]: fields[targetScope] } },
         schemaInfo: targetScopeObject.vars.schemaInfo,
@@ -1097,10 +1247,35 @@ export const loadHasOne = async (scope, deps) => {
   const foreignKeyColumn = translateColumnForScope(scopes, targetScope, foreignKey)
   let query = knex(targetTable).whereIn(foreignKeyColumn, mainIds)
 
-  if (fieldSelectionInfo?.fieldsToSelect) {
-    const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-    query = query.select(selectFields)
+  if (fieldSelectionInfo) {
+    const selectionState = await applyFieldSelectionToQuery({
+      query,
+      scope: targetScopeObject,
+      fieldSelectionInfo,
+      tableName: targetTable,
+      useTablePrefix: false,
+      storageAdapter,
+      db: knex,
+      context: {
+        ...(requestContext || {}),
+        scopeName: targetScope,
+        schemaInfo: targetScopeObject.vars.schemaInfo,
+        storageAdapter,
+      },
+      scopeName: targetScope
+    })
+    query = selectionState.query
   }
+
+  const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+    query,
+    scopes,
+    scopeName: targetScope,
+    requestContext,
+    db: knex,
+    tableName: targetTable
+  })
+  query = scopedQueryState.query
 
   const relatedRecords = await query
 
@@ -1153,7 +1328,7 @@ export const loadHasOne = async (scope, deps) => {
           processedPaths.add(newPath)
           await processIncludes(
             { records: [relatedRecord], scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: newPath, fields },
-            { context: { scopes, log, knex, capabilities } }
+            { context: { scopes, log, knex, capabilities, requestContext } }
           )
         }
       }
@@ -1187,7 +1362,7 @@ export const loadHasOne = async (scope, deps) => {
  */
 export const loadPolymorphicBelongsTo = async (scope, deps) => {
   const { records, scopeName, relName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Loading polymorphic belongsTo:', {
       relName,
@@ -1229,6 +1404,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       const fieldSelectionInfo = fields?.[targetType]
         ? await buildFieldSelection(targetScopeObject, {
           context: {
+            ...(requestContext || {}),
             scopeName: targetType,
             queryParams: { fields: { [targetType]: fields[targetType] } },
             schemaInfo: targetScopeObject.vars.schemaInfo,
@@ -1246,12 +1422,36 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       const targetIdColumn = getIdColumnForScope(scopes, targetType)
       let query = knex(targetTable).whereIn(targetIdColumn, targetIds)
       if (fieldSelectionInfo) {
-        const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-        query = query.select(selectFields)
+        const selectionState = await applyFieldSelectionToQuery({
+          query,
+          scope: targetScopeObject,
+          fieldSelectionInfo,
+          tableName: targetTable,
+          useTablePrefix: false,
+          storageAdapter,
+          db: knex,
+          context: {
+            ...(requestContext || {}),
+            scopeName: targetType,
+            schemaInfo: targetScopeObject.vars.schemaInfo,
+            storageAdapter,
+          },
+          scopeName: targetType
+        })
+        query = selectionState.query
       } else if (targetIdColumn !== 'id') {
       // If no field selection but the storage ID column is not `id`, alias it for response shaping.
         query = query.select('*', `${targetIdColumn} as id`)
       }
+      const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: targetType,
+        requestContext,
+        db: knex,
+        tableName: targetTable
+      })
+      query = scopedQueryState.query
       const targetRecords = await query
 
       // Load relationship metadata for all target records
@@ -1325,7 +1525,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
         if (!processedPaths.has(nextPath)) {
           await processIncludes(
             { records: targetRecords, scopeName: targetType, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
-            { context: { scopes, log, knex, capabilities } }
+            { context: { scopes, log, knex, capabilities, requestContext } }
           )
         }
       }
@@ -1389,7 +1589,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
  */
 export const loadReversePolymorphic = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Loading reverse polymorphic (via):', {
       scopeName,
@@ -1435,6 +1635,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
     const fieldSelectionInfo = fields?.[targetScope]
       ? await buildFieldSelection(targetScopeObject, {
         context: {
+          ...(requestContext || {}),
           scopeName: targetScope,
           queryParams: { fields: { [targetScope]: fields[targetScope] } },
           schemaInfo: targetScopeObject.vars.schemaInfo,
@@ -1451,12 +1652,37 @@ export const loadReversePolymorphic = async (scope, deps) => {
       .whereIn(idColumn, parentIds)
 
     if (fieldSelectionInfo) {
-      const selectFields = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, storageAdapter)
-      query = query.select(selectFields)
+      const selectionState = await applyFieldSelectionToQuery({
+        query,
+        scope: targetScopeObject,
+        fieldSelectionInfo,
+        tableName: targetTable,
+        useTablePrefix: false,
+        storageAdapter,
+        db: knex,
+        context: {
+          ...(requestContext || {}),
+          scopeName: targetScope,
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
+        },
+        scopeName: targetScope
+      })
+      query = selectionState.query
     } else if (targetIdColumn !== 'id') {
     // If no field selection but the storage ID column is not `id`, alias it for response shaping.
       query = query.select('*', `${targetIdColumn} as id`)
     }
+
+    const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+      query,
+      scopes,
+      scopeName: targetScope,
+      requestContext,
+      db: knex,
+      tableName: targetTable
+    })
+    query = scopedQueryState.query
 
     // Apply include configuration (limits, ordering, etc.)
     const targetVars = scopes[targetScope].vars
@@ -1536,7 +1762,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
       if (!processedPaths.has(nextPath)) {
         await processIncludes(
           { records: targetRecords, scopeName: targetScope, includeTree: subIncludes, included, processedPaths, currentPath: nextPath, fields },
-          { context: { scopes, log, knex } }
+          { context: { scopes, log, knex, capabilities, requestContext } }
         )
       }
     }
@@ -1584,7 +1810,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
  */
 export const processIncludes = async (scope, deps) => {
   const { records, scopeName, includeTree, included, processedPaths, currentPath = '', fields = {} } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Processing includes:', {
       scopeName,
@@ -1624,7 +1850,7 @@ export const processIncludes = async (scope, deps) => {
           if (fieldDef.as === includeName && fieldDef.belongsTo) {
             await loadBelongsTo(
               { records, scopeName, fieldName, fieldDef, includeName, subIncludes, included, processedPaths, currentPath, fields },
-              { context: { scopes, log, knex, capabilities } }
+              { context: { scopes, log, knex, capabilities, requestContext } }
             )
             handled = true
             break
@@ -1645,7 +1871,7 @@ export const processIncludes = async (scope, deps) => {
               })
               await loadHasOne(
                 { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                { context: { scopes, log, knex, capabilities } }
+                { context: { scopes, log, knex, capabilities, requestContext } }
               )
               handled = true
             } else if (relDef.type === 'hasMany' || relDef.type === 'manyToMany') {
@@ -1653,7 +1879,7 @@ export const processIncludes = async (scope, deps) => {
               if (relDef.via) {
                 await loadReversePolymorphic(
                   { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                  { context: { scopes, log, knex, capabilities } }
+                  { context: { scopes, log, knex, capabilities, requestContext } }
                 )
               } else {
                 log.debug('[INCLUDE] About to call loadHasMany:', {
@@ -1665,14 +1891,14 @@ export const processIncludes = async (scope, deps) => {
                 })
                 await loadHasMany(
                   { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                  { context: { scopes, log, knex, capabilities } }
+                  { context: { scopes, log, knex, capabilities, requestContext } }
                 )
               }
               handled = true
             } else if (relDef.belongsToPolymorphic) {
               await loadPolymorphicBelongsTo(
                 { records, scopeName, relName: includeName, relDef, subIncludes, included, processedPaths, currentPath, fields },
-                { context: { scopes, log, knex, capabilities } }
+                { context: { scopes, log, knex, capabilities, requestContext } }
               )
               handled = true
             }
@@ -1751,7 +1977,7 @@ export const processIncludes = async (scope, deps) => {
  */
 export const buildIncludedResources = async (scope, deps) => {
   const { records, scopeName, includeParam, fields } = scope
-  const { scopes, log, knex, capabilities } = deps.context
+  const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
     log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length })
 
@@ -1785,7 +2011,7 @@ export const buildIncludedResources = async (scope, deps) => {
     // Process all includes
     await processIncludes(
       { records, scopeName, includeTree, included, processedPaths, currentPath: '', fields },
-      { context: { scopes, log, knex, capabilities } }
+      { context: { scopes, log, knex, capabilities, requestContext } }
     )
 
     // Convert Map to array for JSON:API format
@@ -1858,7 +2084,7 @@ export const buildIncludedResources = async (scope, deps) => {
  * @param {Object} knex - Knex instance for database queries
  * @returns {Promise<void>} Modifies records in place by adding relationship data
  */
-export const loadRelationshipIdentifiers = async (records, scopeName, scopes, knex) => {
+export const loadRelationshipIdentifiers = async (records, scopeName, scopes, knex, requestContext = null) => {
   if (!records.length) return
 
   const schemaInfo = scopes[scopeName]?.vars?.schemaInfo
@@ -1884,9 +2110,21 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       const targetIdColumn = getIdColumnForScope(scopes, relDef.target)
       const foreignKeyColumn = translateColumnForScope(scopes, relDef.target, foreignKey)
 
-      const results = await knex(targetTable)
+      let query = knex(targetTable)
         .whereIn(foreignKeyColumn, recordIds)
         .select(targetIdColumn !== 'id' ? `${targetIdColumn} as id` : 'id', foreignKeyColumn)
+
+      const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: relDef.target,
+        requestContext,
+        db: knex,
+        tableName: targetTable
+      })
+      query = scopedQueryState.query
+
+      const results = await query
 
       results.forEach(row => {
         const parentId = String(row[foreignKeyColumn])
@@ -1908,13 +2146,34 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
       const pivotScope = scopes[through]
       const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || through
 
-      const results = await knex(pivotTable)
-        .whereIn(fk, recordIds)
-        .select(fk, ok)
+      const targetScopeName = relDef.target || relName
+      const targetTable = scopes[targetScopeName]?.vars?.schemaInfo?.tableName || targetScopeName
+      const targetIdColumn = getIdColumnForScope(scopes, targetScopeName)
+      let query = knex(targetTable)
+        .join(`${pivotTable} as pivot`, `${targetTable}.${targetIdColumn}`, `pivot.${ok}`)
+        .whereIn(`pivot.${fk}`, recordIds)
+        .select(
+          `pivot.${fk} as __parent_id`,
+          targetIdColumn !== 'id'
+            ? `${targetTable}.${targetIdColumn} as id`
+            : `${targetTable}.id as id`
+        )
+
+      const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: targetScopeName,
+        requestContext,
+        db: knex,
+        tableName: targetTable
+      })
+      query = scopedQueryState.query
+
+      const results = await query
 
       results.forEach(row => {
-        const parentId = String(row[fk])
-        const childId = String(row[ok])
+        const parentId = String(row.__parent_id)
+        const childId = String(row.id)
         if (!idsMap[parentId]) idsMap[parentId] = []
         idsMap[parentId].push(childId)
       })
@@ -1934,10 +2193,22 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         const typeColumn = translateColumnForScope(scopes, targetScope, typeField)
         const idColumn = translateColumnForScope(scopes, targetScope, idField)
 
-        const results = await knex(targetTable)
+        let query = knex(targetTable)
           .where(typeColumn, scopeName)
           .whereIn(idColumn, recordIds)
           .select(targetIdColumn !== 'id' ? `${targetIdColumn} as id` : 'id', idColumn)
+
+        const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+          query,
+          scopes,
+          scopeName: targetScope,
+          requestContext,
+          db: knex,
+          tableName: targetTable
+        })
+        query = scopedQueryState.query
+
+        const results = await query
 
         results.forEach(row => {
           const parentId = String(row[idColumn])

@@ -475,11 +475,10 @@ export const validateResourceAttributesBeforeWrite = async ({
  * @param {object} context - The context object containing authentication info
  * @param {object} inputRecord - The input record containing relationships to validate
  * @param {object} helpers - Data helpers including dataGetMinimal
- * @param {function} runHooks - Function to run hooks
  * @param {object} api - API instance to access resources
  * @throws {Error} If user doesn't have access to any related resource
  */
-export const validateRelationshipAccess = async (context, inputRecord, helpers, runHooks, api) => {
+export const validateRelationshipAccess = async (context, inputRecord, helpers, api) => {
   if (!inputRecord?.data?.relationships) return
 
   for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
@@ -506,15 +505,31 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
         isUpdate: false
       }
 
-      const runScopedLookupHooks = typeof api._runHooks === 'function'
-        ? (hookName) => api._runHooks(hookName, getContext, item.type)
-        : runHooks
+      const targetScope = api.resources?.[item.type]
+      const applyQueryFilters = targetScope?.applyQueryFilters
+        ? async ({ query, filters, tableName, db, scopeName, storageAdapter, isAnyApi }) => {
+          const queryState = await targetScope.applyQueryFilters({
+            query,
+            filters,
+            schemaInfo: getContext.schemaInfo,
+            scopeName,
+            tableName,
+            db,
+            isAnyApi,
+            storageAdapter
+          }, getContext)
+
+          return {
+            query: queryState?.query || query
+          }
+        }
+        : undefined
 
       // Get the minimal record
       const record = await helpers.dataGetMinimal({
         scopeName: item.type,
         context: getContext,
-        runHooks: runScopedLookupHooks
+        applyQueryFilters
       })
 
       if (!record) {

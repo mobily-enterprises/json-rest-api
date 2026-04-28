@@ -16,6 +16,7 @@ import patchMethod from './rest-api-plugin-methods/patch.js'
 import deleteMethod from './rest-api-plugin-methods/delete.js'
 import enrichAttributesMethod from './rest-api-plugin-methods/enrich-attributes.js'
 import checkPermissionsMethod from './rest-api-plugin-methods/check-permissions.js'
+import applyQueryFiltersMethod from './rest-api-plugin-methods/apply-query-filters.js'
 import addRouteMethod from './rest-api-plugin-methods/add-route.js'
 import releaseMethod from './rest-api-plugin-methods/release.js'
 import { defaultDataHelpers } from './lib/querying-writing/default-data-helpers.js'
@@ -148,6 +149,7 @@ export const RestApiPlugin = {
     // Non-URL methods
     addScopeMethod('enrichAttributes', enrichAttributesMethod)
     addScopeMethod('checkPermissions', checkPermissionsMethod)
+    addScopeMethod('applyQueryFilters', applyQueryFiltersMethod)
 
     // *********
     // Helpers

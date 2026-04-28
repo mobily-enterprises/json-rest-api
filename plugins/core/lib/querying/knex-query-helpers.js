@@ -1,4 +1,5 @@
 import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-search.js'
+import { createStorageAdapterUtilities } from './storage-adapter-utils.js'
 
 // Resolve operator with sensible defaults for fields declared in searchSchema.
 // - If filterOperator is provided, use it as-is
@@ -70,58 +71,6 @@ export function applyWhereForOperator ({ builder, columnRef, operator, value, kn
 
   // Default
   builder[method](columnRef, operator || '=', firstVal)
-}
-
-const createAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
-  const context = hookParams.context || {}
-  const storageCache = new Map()
-
-  const fetchStorageAdapter = (scopeName) => {
-    if (!scopeName) return null
-    if (storageCache.has(scopeName)) return storageCache.get(scopeName)
-
-    let adapter = null
-    if (scopeName === context?.knexQuery?.scopeName) {
-      adapter = context.storageAdapter ||
-        context.knexQuery?.storageAdapter ||
-        (typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null)
-      if (adapter && !context.storageAdapter) {
-        context.storageAdapter = adapter
-      }
-    } else {
-      adapter = typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null
-    }
-
-    storageCache.set(scopeName, adapter)
-    return adapter
-  }
-
-  const defaultAliasForScope = (scopeName) => {
-    if (scopeName === context?.knexQuery?.scopeName) {
-      return context.knexQuery?.tableName || scopeName
-    }
-    return scopeName
-  }
-
-  const translateColumn = (scopeName, field, alias = defaultAliasForScope(scopeName)) => {
-    const adapter = fetchStorageAdapter(scopeName)
-    const translated = adapter?.translateColumn?.(field) ?? field
-    if (!alias) return translated
-    return `${alias}.${translated}`
-  }
-
-  const translateFilterValue = (scopeName, field, value) => {
-    const adapter = fetchStorageAdapter(scopeName)
-    if (!adapter?.translateFilterValue) return value
-    return adapter.translateFilterValue(field, value)
-  }
-
-  return {
-    fetchStorageAdapter,
-    defaultAliasForScope,
-    translateColumn,
-    translateFilterValue,
-  }
 }
 
 /**
@@ -199,7 +148,7 @@ const createAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
  */
 export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies
-  const adapterUtils = createAdapterUtilities(hookParams, dependencies)
+  const adapterUtils = createStorageAdapterUtilities(hookParams, dependencies)
 
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName
@@ -523,7 +472,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
  */
 export const crossTableFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies
-  const adapterUtils = createAdapterUtilities(hookParams, dependencies)
+  const adapterUtils = createStorageAdapterUtilities(hookParams, dependencies)
 
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName
@@ -936,7 +885,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
  */
 export const basicFiltersHook = async (hookParams, dependencies) => {
   const { log, scopes, knex } = dependencies
-  const adapterUtils = createAdapterUtilities(hookParams, dependencies)
+  const adapterUtils = createStorageAdapterUtilities(hookParams, dependencies)
 
   // Extract context
   const scopeName = hookParams.context?.knexQuery?.scopeName

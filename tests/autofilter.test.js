@@ -9,6 +9,7 @@ import {
   createRelationship,
   resourceIdentifier
 } from './helpers/test-utils.js'
+import { storageMode } from './helpers/storage-mode.js'
 import { createAutoFilterApi } from './fixtures/api-configs.js'
 
 const knex = knexLib({
@@ -21,12 +22,37 @@ const knex = knexLib({
 
 let api
 
-const scopedContext = (workspaceId, userId) => ({
+const scopedContext = (workspaceId, userId, projectId) => ({
   scopeValues: {
     workspaceId,
-    userId
+    userId,
+    ...(projectId !== undefined ? { projectId } : {})
   }
 })
+
+const moveTaskOutOfScope = async ({ taskId, workspaceId, userId }) => {
+  if (storageMode.isAnyApi()) {
+    const descriptor = await api.anyapi.registry.getDescriptor(api.anyapi.tenantId, 'tasks')
+    await knex('any_records')
+      .where({
+        id: Number(taskId),
+        tenant_id: api.anyapi.tenantId,
+        resource: 'tasks'
+      })
+      .update({
+        [descriptor.fields.workspace_id.slot]: workspaceId,
+        [descriptor.fields.user_id.slot]: userId
+      })
+    return
+  }
+
+  await knex('autofilter_tasks')
+    .where({ id: Number(taskId) })
+    .update({
+      workspace_id: workspaceId,
+      user_id: userId
+    })
+}
 
 describe('AutoFilter Plugin', () => {
   before(async () => {
@@ -43,6 +69,7 @@ describe('AutoFilter Plugin', () => {
       'autofilter_user_notes',
       'autofilter_projects',
       'autofilter_tasks',
+      'autofilter_optional_tasks',
       'autofilter_system_settings'
     ])
   })
@@ -302,6 +329,98 @@ describe('AutoFilter Plugin', () => {
     )
   })
 
+  it('scopes included resources through the same autofilter path as top-level queries', async () => {
+    const project = await api.resources.projects.post({
+      inputRecord: createJsonApiDocument('projects', {
+        name: 'Scoped include project'
+      }),
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    const visibleTask = await api.resources.tasks.post({
+      inputRecord: createJsonApiDocument('tasks',
+        {
+          title: 'Visible task'
+        },
+        {
+          project: createRelationship(resourceIdentifier('projects', project.data.id))
+        }
+      ),
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    const hiddenTask = await api.resources.tasks.post({
+      inputRecord: createJsonApiDocument('tasks',
+        {
+          title: 'Out-of-scope task'
+        },
+        {
+          project: createRelationship(resourceIdentifier('projects', project.data.id))
+        }
+      ),
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    await moveTaskOutOfScope({
+      taskId: hiddenTask.data.id,
+      workspaceId: 'workspace-b',
+      userId: 202
+    })
+
+    const result = await api.resources.projects.get({
+      id: project.data.id,
+      queryParams: {
+        include: ['tasks']
+      },
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    validateJsonApiStructure(result)
+    assert.deepEqual(result.data.relationships.tasks.data, [
+      resourceIdentifier('tasks', visibleTask.data.id)
+    ])
+    assert.equal(result.included?.length, 1)
+    assert.equal(result.included?.[0]?.id, visibleTask.data.id)
+    assert.equal(result.included?.[0]?.attributes.title, 'Visible task')
+  })
+
+  it('treats null belongsTo autofilter values as valid null linkage on writes', async () => {
+    const implicitNull = await api.resources.optional_tasks.post({
+      inputRecord: createJsonApiDocument('optional_tasks', {
+        title: 'Implicit null project'
+      }),
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    const explicitNull = await api.resources.optional_tasks.post({
+      inputRecord: createJsonApiDocument(
+        'optional_tasks',
+        {
+          title: 'Explicit null project'
+        },
+        {
+          project: { data: null }
+        }
+      ),
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    const implicitFetched = await api.resources.optional_tasks.get({
+      id: implicitNull.data.id,
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    const explicitFetched = await api.resources.optional_tasks.get({
+      id: explicitNull.data.id,
+      simplified: false
+    }, scopedContext('workspace-a', 101))
+
+    validateJsonApiStructure(implicitFetched)
+    validateJsonApiStructure(explicitFetched)
+    assert.equal(implicitFetched.data.relationships.project.data, null)
+    assert.equal(explicitFetched.data.relationships.project.data, null)
+  })
+
   it('fails cleanly when a required autofilter value is missing', async () => {
     await assert.rejects(
       async () => {
@@ -330,7 +449,7 @@ describe('AutoFilter Plugin', () => {
   it('exposes compiled preset configuration without auth semantics', () => {
     assert.deepEqual(api.autofilter.getConfig(), {
       presets: ['public', 'workspace', 'user', 'workspace_user'],
-      resolvers: ['workspace', 'user']
+      resolvers: ['workspace', 'user', 'currentProject']
     })
 
     assert.deepEqual(api.autofilter.getScopeConfig('projects'), {

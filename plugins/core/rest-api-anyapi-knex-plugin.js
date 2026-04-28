@@ -5,6 +5,7 @@ import { createSchema } from 'json-rest-schema'
 import {
   DEFAULT_QUERY_LIMIT,
   DEFAULT_MAX_QUERY_LIMIT,
+  COMPUTED_DEPENDENCIES_KEY,
 } from './lib/querying-writing/knex-constants.js'
 import {
   calculatePaginationMeta,
@@ -29,7 +30,7 @@ import {
   ensureSearchFieldsAreIndexed,
   generateSearchSchemaFromSchema,
 } from './lib/querying-writing/schema-helpers.js'
-import { buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js'
+import { applyFieldSelectionToQuery, buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js'
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
@@ -37,12 +38,12 @@ import {
 } from './lib/querying/knex-query-helpers.js'
 import {
   createStorageAdapter,
-  translateSelectFieldsForAdapter,
 } from './lib/storage/storage-adapter.js'
 import {
   translateCanonicalAttributesForStorage,
   translateCanonicalRecordFromStorage,
 } from './lib/storage/canonical-storage-mapping.js'
+import { normalizeStableSort, parseSortEntry } from './lib/querying/sort-helpers.js'
 
 const DEFAULT_TENANT = 'default'
 const LINKS_TABLE = 'any_links'
@@ -114,6 +115,10 @@ export const RestApiAnyapiKnexPlugin = {
       return descriptor
     }
 
+    const getAllowedQueryFieldNames = (scopeName) => (
+      Object.keys(api.resources?.[scopeName]?.vars?.queryFields || {})
+    )
+
     const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
       // Filtering is handled by the query hooks to keep behavior consistent
       // (operators, null handling, multi-field, joins, polymorphic, etc.).
@@ -155,7 +160,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
     }
 
-    const applySortingToQuery = ({ query, sort, descriptor, scope }) => {
+    const applySortingToQuery = ({ query, sort, descriptor, scope, queryFieldRuntimeByField = new Map() }) => {
       let sortList = Array.isArray(sort) ? sort : (sort ? [sort] : [])
 
       if (sortList.length === 0 && scope?.vars?.defaultSort) {
@@ -171,19 +176,31 @@ export const RestApiAnyapiKnexPlugin = {
         }
       }
 
-      const effectiveSort = sortList.length > 0 ? sortList : ['id']
+      const effectiveSort = normalizeStableSort(sortList.length > 0 ? sortList : ['id'], { idField: 'id' })
       const descriptors = []
 
       for (const entry of effectiveSort) {
-        const desc = typeof entry === 'string' && entry.startsWith('-')
-        const field = typeof entry === 'string' ? (desc ? entry.slice(1) : entry) : entry
+        const { field, direction, sqlDirection } = parseSortEntry(entry)
+        const queryFieldRuntime = queryFieldRuntimeByField.get(field)
+        if (queryFieldRuntime) {
+          query.orderByRaw(`(${queryFieldRuntime.sql}) ${sqlDirection}`, queryFieldRuntime.bindings)
+          descriptors.push({
+            field,
+            direction,
+            definition: queryFieldRuntime.definition,
+            isRelationship: false,
+            queryFieldRuntime,
+          })
+          continue
+        }
+
         const fieldInfo = resolveFieldInfo(descriptor, field)
         if (!fieldInfo?.column) continue
-        query.orderBy(fieldInfo.column, desc ? 'desc' : 'asc')
+        query.orderBy(fieldInfo.column, direction)
         descriptors.push({
           field,
           column: fieldInfo.column,
-          direction: desc ? 'desc' : 'asc',
+          direction,
           definition: fieldInfo.definition || null,
           isRelationship: fieldInfo.isRelationship || false,
         })
@@ -290,6 +307,21 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       const buildCursorPredicate = (cursorValues, operatorSelector) => {
+        const appendPredicate = (chain, descriptor, operator, value) => {
+          if (descriptor.queryFieldRuntime) {
+            chain.push({
+              sql: `(${descriptor.queryFieldRuntime.sql})`,
+              operator,
+              value,
+              bindings: descriptor.queryFieldRuntime.bindings || []
+            })
+            return
+          }
+
+          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
+          chain.push({ column: columnRef, operator, value })
+        }
+
         if (!descriptors || descriptors.length === 0) {
           return
         }
@@ -298,12 +330,14 @@ export const RestApiAnyapiKnexPlugin = {
           const descriptor = descriptors[0]
           const value = cursorValues[descriptor.field]
           if (value === undefined) return
-          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
           const operator = operatorSelector(descriptor.direction)
-          if (adapter) {
+          if (descriptor.queryFieldRuntime) {
+            query.whereRaw(`(${descriptor.queryFieldRuntime.sql}) ${operator} ?`, [...descriptor.queryFieldRuntime.bindings, value])
+          } else if (adapter) {
+            const columnRef = adapter.translateColumn(descriptor.column)
             query.whereRaw(`${columnRef} ${operator} ?`, [value])
           } else {
-            query.where(columnRef, operator, value)
+            query.where(descriptor.column, operator, value)
           }
           return
         }
@@ -319,13 +353,11 @@ export const RestApiAnyapiKnexPlugin = {
             const prev = descriptors[i]
             const prevValue = cursorValues[prev.field]
             if (prevValue === undefined) return
-            const prevColumn = adapter ? adapter.translateColumn(prev.column) : prev.column
-            chain.push({ column: prevColumn, operator: '=', value: prevValue })
+            appendPredicate(chain, prev, '=', prevValue)
           }
 
           const operator = operatorSelector(descriptor.direction)
-          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
-          chain.push({ column: columnRef, operator, value })
+          appendPredicate(chain, descriptor, operator, value)
           translatedConditions.push(chain)
         })
 
@@ -336,9 +368,10 @@ export const RestApiAnyapiKnexPlugin = {
         const predicateParts = []
         const predicateBindings = []
         translatedConditions.forEach((chain) => {
-          const chainParts = chain.map(({ column, operator, value }) => {
+          const chainParts = chain.map(({ column, sql, operator, value, bindings = [] }) => {
+            predicateBindings.push(...bindings)
             predicateBindings.push(value)
-            return `${column} ${operator} ?`
+            return `${sql || column} ${operator} ?`
           })
           predicateParts.push(`(${chainParts.join(' AND ')})`)
         })
@@ -1024,7 +1057,7 @@ export const RestApiAnyapiKnexPlugin = {
       return result
     }
 
-    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context, runHooks, applyQueryFilters }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
@@ -1039,7 +1072,18 @@ export const RestApiAnyapiKnexPlugin = {
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
 
-      if (runHooks) {
+      if (typeof applyQueryFilters === 'function') {
+        const scopedQueryState = await applyQueryFilters({
+          query,
+          filters: context.queryParams?.filters,
+          tableName: canonical.tableName,
+          db: context.db,
+          scopeName,
+          storageAdapter,
+          isAnyApi: true
+        })
+        query = scopedQueryState?.query || scopedQueryState || query
+      } else if (runHooks) {
         context.knexQuery = {
           query,
           filters: context.queryParams?.filters,
@@ -1062,7 +1106,11 @@ export const RestApiAnyapiKnexPlugin = {
       const row = await query.first()
 
       if (!row) return null
-      const translated = translateCanonicalRecordFromStorage(row, descriptor)
+      const translated = translateCanonicalRecordFromStorage(
+        row,
+        descriptor,
+        { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
+      )
       const minimal = {
         type: descriptor.resource,
         id: String(row.id),
@@ -1103,17 +1151,102 @@ export const RestApiAnyapiKnexPlugin = {
       return tree
     }
 
+    const applyIncludeFieldSelection = async ({ query, resourceName, tableName, context }) => {
+      const targetScope = api.resources?.[resourceName]
+      if (!targetScope) {
+        return { query, fieldSelectionInfo: null }
+      }
+
+      const storageAdapter = getScopeStorageAdapter(resourceName)
+      const fieldSelectionInfo = await buildFieldSelection(targetScope, {
+        context: {
+          ...context,
+          scopeName: resourceName,
+          schemaInfo: targetScope.vars.schemaInfo,
+          storageAdapter,
+        }
+      })
+
+      const selectionState = await applyFieldSelectionToQuery({
+        query,
+        scope: targetScope,
+        fieldSelectionInfo,
+        tableName,
+        useTablePrefix: false,
+        storageAdapter,
+        db: context.db || context.transaction || api.knex.instance,
+        context,
+        scopeName: resourceName
+      })
+
+      return {
+        query: selectionState.query,
+        fieldSelectionInfo
+      }
+    }
+
+    const applyTargetScopeFilters = async ({ query, resourceName, tableName, context, filters }) => {
+      const targetScope = api.resources?.[resourceName]
+      if (!targetScope?.applyQueryFilters) {
+        return { query }
+      }
+
+      const storageAdapter = getScopeStorageAdapter(resourceName)
+      const queryState = await targetScope.applyQueryFilters({
+        query,
+        filters,
+        schemaInfo: targetScope.vars?.schemaInfo,
+        scopeName: resourceName,
+        tableName,
+        db: context.db || context.transaction || api.knex.instance,
+        isAnyApi: true,
+        storageAdapter
+      }, {
+        ...context,
+        scopeName: resourceName,
+        schemaInfo: targetScope.vars?.schemaInfo,
+        storageAdapter
+      })
+
+      return {
+        query: queryState?.query || query
+      }
+    }
+
+    const buildIncludedResource = ({ row, descriptor, context, fieldSelectionInfo = null }) => {
+      const translated = translateCanonicalRecordFromStorage(
+        row,
+        descriptor,
+        { allowedExtraFields: getAllowedQueryFieldNames(descriptor.resource) }
+      )
+      const includeResource = {
+        type: descriptor.resource,
+        id: String(row.id),
+        attributes: translated.attributes,
+      }
+
+      if (translated.relationships && Object.keys(translated.relationships).length > 0) {
+        includeResource.relationships = translated.relationships
+      }
+
+      if (fieldSelectionInfo?.computedDependencies?.length) {
+        includeResource[COMPUTED_DEPENDENCIES_KEY] = fieldSelectionInfo.computedDependencies
+      }
+
+      const targetScope = api.resources?.[descriptor.resource]
+      if (targetScope) {
+        includeResource.links = includeResource.links || {}
+        includeResource.links.self = buildResourceUrl(context, targetScope, descriptor.resource, includeResource.id)
+      }
+
+      return includeResource
+    }
+
     const collectIncludes = async ({ descriptor, resources, includeTree, context, includes, seen }) => {
       const entries = Object.entries(includeTree || {})
       if (entries.length === 0 || !resources || resources.length === 0) return
 
       const db = context.db || context.transaction || api.knex.instance
-      const addSelfLink = (resource, resourceType) => {
-        const targetScope = api.resources?.[resourceType]
-        if (!targetScope) return
-        resource.links = resource.links || {}
-        resource.links.self = buildResourceUrl(context, targetScope, resourceType, resource.id)
-      }
 
       for (const [relName, childTree] of entries) {
         const childKeys = Object.keys(childTree || {})
@@ -1129,26 +1262,30 @@ export const RestApiAnyapiKnexPlugin = {
           const targetDescriptor = await registry.getDescriptor(tenantId, belongsToInfo.target)
           if (!targetDescriptor) continue
 
-          const rows = await db(targetDescriptor.canonical.tableName)
+          let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .whereIn('id', ids)
+          const selectionState = await applyIncludeFieldSelection({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = selectionState.query
+          const rows = await query
 
           const newResources = []
           for (const row of rows) {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
-            const includeResource = {
-              type: targetDescriptor.resource,
-              id: String(row.id),
-              attributes: translated.attributes,
-            }
-            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-              includeResource.relationships = translated.relationships
-            }
-            addSelfLink(includeResource, targetDescriptor.resource)
+            const includeResource = buildIncludedResource({
+              row,
+              descriptor: targetDescriptor,
+              context,
+              fieldSelectionInfo: selectionState.fieldSelectionInfo
+            })
             includes.push(includeResource)
             newResources.push(includeResource)
           }
@@ -1193,25 +1330,29 @@ export const RestApiAnyapiKnexPlugin = {
               continue
             }
 
-            const rows = await db(targetDescriptor.canonical.tableName)
+            let query = db(targetDescriptor.canonical.tableName)
               .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
               .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
               .whereIn('id', [...idSet])
+            const selectionState = await applyIncludeFieldSelection({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = selectionState.query
+            const rows = await query
 
             for (const row of rows) {
               const includeKey = `${targetDescriptor.resource}:${row.id}`
               if (seen.has(includeKey)) continue
               seen.add(includeKey)
-              const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
-              const includeResource = {
-                type: targetDescriptor.resource,
-                id: String(row.id),
-                attributes: translated.attributes,
-              }
-              if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-                includeResource.relationships = translated.relationships
-              }
-              addSelfLink(includeResource, targetDescriptor.resource)
+              const includeResource = buildIncludedResource({
+                row,
+                descriptor: targetDescriptor,
+                context,
+                fieldSelectionInfo: selectionState.fieldSelectionInfo
+              })
               includes.push(includeResource)
               newResources.push(includeResource)
             }
@@ -1277,6 +1418,7 @@ export const RestApiAnyapiKnexPlugin = {
 
           let rows = []
           let groupingColumn = null
+          let fieldSelectionInfo = null
 
           if (hasManyInfo.foreignKey) {
             const foreignField = targetDescriptor.fields?.[hasManyInfo.foreignKey]
@@ -1284,21 +1426,53 @@ export const RestApiAnyapiKnexPlugin = {
               continue
             }
             groupingColumn = foreignField.slot
-            rows = await db(targetDescriptor.canonical.tableName)
+            let query = db(targetDescriptor.canonical.tableName)
               .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
               .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
               .whereIn(groupingColumn, parentIds)
+            const selectionState = await applyIncludeFieldSelection({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = selectionState.query
+            const scopedQueryState = await applyTargetScopeFilters({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = scopedQueryState.query
+            fieldSelectionInfo = selectionState.fieldSelectionInfo
+            rows = await query
           } else if (hasManyInfo.via) {
             const polyInfo = targetDescriptor.polymorphicBelongsTo?.[hasManyInfo.via]
             if (!polyInfo?.idColumn || !polyInfo?.typeColumn) {
               continue
             }
             groupingColumn = polyInfo.idColumn
-            rows = await db(targetDescriptor.canonical.tableName)
+            let query = db(targetDescriptor.canonical.tableName)
               .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
               .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
               .where(polyInfo.typeColumn, descriptor.resource)
               .whereIn(groupingColumn, queryIds)
+            const selectionState = await applyIncludeFieldSelection({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = selectionState.query
+            const scopedQueryState = await applyTargetScopeFilters({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = scopedQueryState.query
+            fieldSelectionInfo = selectionState.fieldSelectionInfo
+            rows = await query
           }
 
           if (!groupingColumn || rows.length === 0) {
@@ -1310,16 +1484,12 @@ export const RestApiAnyapiKnexPlugin = {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
-            const includeResource = {
-              type: targetDescriptor.resource,
-              id: String(row.id),
-              attributes: translated.attributes,
-            }
-            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-              includeResource.relationships = translated.relationships
-            }
-            addSelfLink(includeResource, targetDescriptor.resource)
+            const includeResource = buildIncludedResource({
+              row,
+              descriptor: targetDescriptor,
+              context,
+              fieldSelectionInfo
+            })
             includes.push(includeResource)
             newResources.push(includeResource)
           }
@@ -1357,26 +1527,30 @@ export const RestApiAnyapiKnexPlugin = {
           const targetDescriptor = await registry.getDescriptor(tenantId, info.relInfo.target)
           if (!targetDescriptor) continue
 
-          const rows = await db(targetDescriptor.canonical.tableName)
+          let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .whereIn('id', childIds)
+          const selectionState = await applyIncludeFieldSelection({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = selectionState.query
+          const rows = await query
 
           const newResources = []
           for (const row of rows) {
             const includeKey = `${targetDescriptor.resource}:${row.id}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
-            const translated = translateCanonicalRecordFromStorage(row, targetDescriptor)
-            const includeResource = {
-              type: targetDescriptor.resource,
-              id: String(row.id),
-              attributes: translated.attributes,
-            }
-            if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-              includeResource.relationships = translated.relationships
-            }
-            addSelfLink(includeResource, targetDescriptor.resource)
+            const includeResource = buildIncludedResource({
+              row,
+              descriptor: targetDescriptor,
+              context,
+              fieldSelectionInfo: selectionState.fieldSelectionInfo
+            })
             includes.push(includeResource)
             newResources.push(includeResource)
           }
@@ -1444,10 +1618,18 @@ export const RestApiAnyapiKnexPlugin = {
           if (!foreignField?.slot) continue
           const column = foreignField.slot
 
-          const rows = await db(targetDescriptor.canonical.tableName)
+          let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .whereIn(column, normalizedParentIds)
+          const scopedQueryState = await applyTargetScopeFilters({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = scopedQueryState.query
+          const rows = await query
 
           const grouped = rows.reduce((acc, row) => {
             const parentId = row[column]
@@ -1481,11 +1663,19 @@ export const RestApiAnyapiKnexPlugin = {
               .filter((value) => value !== null),
           ]))
 
-          const rows = await db(targetDescriptor.canonical.tableName)
+          let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
             .where(polyInfo.typeColumn, descriptor.resource)
             .whereIn(polyInfo.idColumn, queryIds)
+          const scopedQueryState = await applyTargetScopeFilters({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = scopedQueryState.query
+          const rows = await query
 
           const grouped = rows.reduce((acc, row) => {
             const parentId = row[polyInfo.idColumn]
@@ -1556,15 +1746,35 @@ export const RestApiAnyapiKnexPlugin = {
         context.computedDependencies = []
       }
 
-      const row = await context.db(canonical.tableName)
+      let query = context.db(canonical.tableName)
         .where('id', id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
-        .first()
+
+      if (scope && fieldSelectionInfo) {
+        const selectionState = await applyFieldSelectionToQuery({
+          query,
+          scope,
+          fieldSelectionInfo,
+          tableName: canonical.tableName,
+          useTablePrefix: false,
+          storageAdapter,
+          db: context.db,
+          context,
+          scopeName
+        })
+        query = selectionState.query
+      }
+
+      const row = await query.first()
 
       if (!row) return null
 
-      const record = translateCanonicalRecordFromStorage(row, descriptor)
+      const record = translateCanonicalRecordFromStorage(
+        row,
+        descriptor,
+        { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
+      )
       const data = {
         type: descriptor.resource,
         id: String(row.id),
@@ -1626,10 +1836,11 @@ export const RestApiAnyapiKnexPlugin = {
     const rehydrateSchemaInfo = async (scopeName) => {
       const scope = api.resources?.[scopeName] || scopes?.[scopeName] || {}
       const storedOptions = scopeOptionsRegistry.get(scopeName) || {}
+      const rawSchema = scope.scopeOptions?.schema || storedOptions.schema || {}
 
       if (!scope.scopeOptions) {
         scope.scopeOptions = {
-          schema: storedOptions.schema || {},
+          schema: rawSchema,
           relationships: storedOptions.relationships || {},
           searchSchema: storedOptions.searchSchema || null,
           tableName: storedOptions.tableName || scopeName,
@@ -1645,7 +1856,6 @@ export const RestApiAnyapiKnexPlugin = {
 
       const mergedSchema = { ...(existingInfo.schemaInstance?.structure || {}) }
       const computed = { ...(existingInfo.computed || {}) }
-
       for (const [fieldName, definition] of Object.entries(descriptor.schema || {})) {
         if (definition?.computed) {
           if (!computed[fieldName]) {
@@ -1823,11 +2033,26 @@ export const RestApiAnyapiKnexPlugin = {
 
       const countQuery = queryBuilder.clone()
 
+      const selectionState = scope && fieldSelectionInfo
+        ? await applyFieldSelectionToQuery({
+            query: queryBuilder,
+            scope,
+            fieldSelectionInfo,
+            tableName: adapter.tableAlias,
+            useTablePrefix: false,
+            storageAdapter,
+            db,
+            context,
+            scopeName
+          })
+        : { query: queryBuilder, queryFieldRuntimeByField: new Map() }
+
       const sortDescriptors = applySortingToQuery({
-        query: queryBuilder,
+        query: selectionState.query,
         sort: queryParams.sort,
         descriptor,
         scope,
+        queryFieldRuntimeByField: selectionState.queryFieldRuntimeByField
       })
 
       if (queryParams?.page?.after) {
@@ -1841,14 +2066,6 @@ export const RestApiAnyapiKnexPlugin = {
         adapter,
       })
 
-      if (queryParams?.page?.after) {
-      }
-
-      if (fieldSelectionInfo && fieldSelectionInfo.fieldsToSelect && fieldSelectionInfo.fieldsToSelect.length > 0) {
-        const translatedSelect = translateSelectFieldsForAdapter(fieldSelectionInfo.fieldsToSelect, adapter)
-        queryBuilder.select(translatedSelect)
-      }
-
       let rows = await queryBuilder
       let cursorRecords = null
       let hasMore = false
@@ -1860,6 +2077,8 @@ export const RestApiAnyapiKnexPlugin = {
           for (const descriptorEntry of cursorDescriptors) {
             if (descriptorEntry.field === 'id') {
               record.id = row.id
+            } else if (descriptorEntry.queryFieldRuntime) {
+              record[descriptorEntry.field] = row[descriptorEntry.field]
             } else if (descriptorEntry.column) {
               record[descriptorEntry.field] = row[descriptorEntry.column]
             }
@@ -1875,7 +2094,11 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       const data = rows.map((row) => {
-        const translated = translateCanonicalRecordFromStorage(row, descriptor)
+        const translated = translateCanonicalRecordFromStorage(
+          row,
+          descriptor,
+          { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
+        )
         const resource = {
           type: descriptor.resource,
           id: String(row.id),

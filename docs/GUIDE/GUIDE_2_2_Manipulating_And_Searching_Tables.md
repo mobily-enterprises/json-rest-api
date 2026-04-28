@@ -306,6 +306,10 @@ The `searchSchema` gives you:
 * Flexibility to extend: Add virtual fields or complex filters via searchSchema while basic fields use `search: true`
 * Best of both worlds: Explicit control for complex cases, automatic setup for simple ones
 
+`searchSchema` also defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. Treat `searchSchema` as an allowlist plus normalization layer for filter input: the actual meaning of each key is still implemented by the backend through mappings such as `actualField`, multi-field rules such as `oneOf`, standard operators, or custom `applyFilter` logic. It is not a portable filter DSL.
+
+The merge rules and validation surface are shared across storage backends. Advanced execution semantics are still backend-owned. In practice, that means alias filters such as `oneOf` and custom `applyFilter` functions should be validated against the backend you actually run, and the SQL-heavy examples in this chapter assume the Knex-backed query layer.
+
 `searchSchema` also gives you the ability to define a search field that will search in multiple fields. For example:
 
 ```javascript

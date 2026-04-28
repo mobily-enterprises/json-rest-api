@@ -8,9 +8,8 @@ import {
   generateKnexMigrationDiff
 } from './lib/dbTablesOperations.js'
 import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
-import { buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
+import { applyFieldSelectionToQuery, buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
 import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
-import { buildQuerySelection } from './lib/querying/knex-query-helpers-base.js'
 import { toJsonApiRecord, buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js'
 import { processBelongsToRelationships } from './lib/writing/knex-json-api-transformers-writing.js'
 import { toJsonApiRecordWithBelongsTo } from './lib/querying-writing/knex-json-api-transformers.js'
@@ -32,7 +31,8 @@ import {
   parseCursor
 } from './lib/querying/knex-pagination-helpers.js'
 import { getUrlPrefix } from './lib/querying/url-helpers.js'
-import { createSelectTranslator, createStorageAdapter } from './lib/storage/storage-adapter.js'
+import { createStorageAdapter } from './lib/storage/storage-adapter.js'
+import { normalizeStableSort, parseSortEntry } from './lib/querying/sort-helpers.js'
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
@@ -98,6 +98,80 @@ export const RestApiKnexPlugin = {
         foreignKeys: vars.schemaInfo?.foreignKeys || [],
         checkConstraints: vars.schemaInfo?.checkConstraints || []
       }
+    }
+
+    const applyQueryFieldOrder = (query, queryFieldRuntime, direction) => {
+      query.orderByRaw(`(${queryFieldRuntime.sql}) ${direction}`, queryFieldRuntime.bindings)
+    }
+
+    const applyQueryFieldPredicate = (builder, queryFieldRuntime, operator, value) => {
+      builder.whereRaw(`(${queryFieldRuntime.sql}) ${operator} ?`, [...queryFieldRuntime.bindings, value])
+    }
+
+    const buildLegacySortDescriptors = ({
+      query,
+      sort,
+      schemaInfo,
+      sortableFields,
+      storageAdapter,
+      queryFieldRuntimeByField = new Map()
+    }) => {
+      const effectiveSort = normalizeStableSort(sort, { idField: 'id' })
+      const descriptors = []
+
+      for (const sortEntry of effectiveSort) {
+        const { field, direction, sqlDirection } = parseSortEntry(sortEntry)
+
+        if (field !== 'id' && sortableFields?.length > 0 && !sortableFields.includes(field)) {
+          log.warn(`Ignoring non-sortable field: ${field}`)
+          continue
+        }
+
+        const queryFieldRuntime = queryFieldRuntimeByField.get(field)
+        if (queryFieldRuntime) {
+          applyQueryFieldOrder(query, queryFieldRuntime, sqlDirection)
+          descriptors.push({
+            field,
+            direction: sqlDirection,
+            queryFieldRuntime,
+            definition: queryFieldRuntime.definition,
+            isRelationship: false
+          })
+          continue
+        }
+
+        let dbField = field
+        const searchField = schemaInfo.searchSchemaStructure?.[field]
+        if (searchField?.actualField) {
+          dbField = searchField.actualField
+        }
+
+        const translatedField = storageAdapter?.translateColumn
+          ? storageAdapter.translateColumn(dbField)
+          : dbField
+
+        query.orderBy(translatedField, direction)
+        descriptors.push({
+          field,
+          direction: sqlDirection,
+          column: translatedField,
+          definition: schemaInfo.schemaStructure?.[field] || { type: field === 'id' ? 'id' : undefined },
+          isRelationship: Boolean(searchField?.isRelationship)
+        })
+      }
+
+      if (descriptors.length === 0) {
+        query.orderBy('id', 'asc')
+        descriptors.push({
+          field: 'id',
+          direction: 'ASC',
+          column: 'id',
+          definition: { type: 'id' },
+          isRelationship: false
+        })
+      }
+
+      return descriptors
     }
 
     // Check database capabilities
@@ -329,15 +403,18 @@ export const RestApiKnexPlugin = {
       // Permission checks will handle access control
       let query = db(tableName).where(idProperty, id)
 
-      // Apply field selection
-      const selectTranslator = createSelectTranslator(storageAdapter)
-      query = buildQuerySelection(
+      const selectionState = await applyFieldSelectionToQuery({
         query,
+        scope,
+        fieldSelectionInfo,
         tableName,
-        fieldSelectionInfo.fieldsToSelect,
-        false,
-        selectTranslator ? { translateColumn: selectTranslator } : undefined
-      )
+        useTablePrefix: false,
+        storageAdapter,
+        db,
+        context,
+        scopeName
+      })
+      query = selectionState.query
 
       const record = await query.first()
 
@@ -354,7 +431,7 @@ export const RestApiKnexPlugin = {
 
       // Load relationship identifiers for all hasMany relationships
       const records = [record] // Wrap in array for processing
-      await loadRelationshipIdentifiers(records, scopeName, scopes, db)
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db, context)
 
       // Process includes
       const included = await processIncludes(scope, records, {
@@ -381,7 +458,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
-    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context, runHooks, applyQueryFilters }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
@@ -404,7 +481,17 @@ export const RestApiKnexPlugin = {
         query = query.select('*', `${idProperty} as id`)
       }
 
-      if (runHooks) {
+      if (typeof applyQueryFilters === 'function') {
+        const scopedQueryState = await applyQueryFilters({
+          query,
+          filters: context.queryParams?.filters,
+          tableName,
+          db,
+          scopeName,
+          storageAdapter
+        })
+        query = scopedQueryState?.query || scopedQueryState || query
+      } else if (runHooks) {
         context.knexQuery = {
           query,
           filters: context.queryParams?.filters,
@@ -413,6 +500,7 @@ export const RestApiKnexPlugin = {
           tableName,
           db,
           adapter: storageAdapter,
+          storageAdapter,
         }
 
         await runHooks('knexQueryFiltering')
@@ -492,14 +580,19 @@ export const RestApiKnexPlugin = {
       // Start building query with table prefix (for JOIN support)
       let query = db(tableName)
 
-      const selectTranslator = createSelectTranslator(storageAdapter)
-      query = buildQuerySelection(
+      const selectionState = await applyFieldSelectionToQuery({
         query,
+        scope,
+        fieldSelectionInfo,
         tableName,
-        fieldSelectionInfo.fieldsToSelect,
-        true,
-        selectTranslator ? { translateColumn: selectTranslator } : undefined
-      )
+        useTablePrefix: true,
+        storageAdapter,
+        db,
+        context,
+        scopeName
+      })
+      query = selectionState.query
+      const queryFieldRuntimeByField = selectionState.queryFieldRuntimeByField
 
       /* ═══════════════════════════════════════════════════════════════════
        * FILTERING HOOKS
@@ -544,33 +637,14 @@ export const RestApiKnexPlugin = {
 
       log.trace('[DATA-QUERY] Finished knexQueryFiltering hook')
 
-      // Apply sorting directly (no hooks)
-      if (queryParams.sort && queryParams.sort.length > 0) {
-        queryParams.sort.forEach(sortField => {
-          const desc = sortField.startsWith('-')
-          const field = desc ? sortField.substring(1) : sortField
-
-          // Check if field is sortable
-          if (sortableFields && sortableFields.length > 0 && !sortableFields.includes(field)) {
-            log.warn(`Ignoring non-sortable field: ${field}`)
-            return // Skip non-sortable fields
-          }
-
-          // Map relationship names to actual database columns for sorting
-          // Check if this is a relationship field that needs to be mapped
-          let dbField = field
-          const searchField = schemaInfo.searchSchemaStructure?.[field]
-          if (searchField?.actualField) {
-            // This is a relationship field, use the actual database column
-            dbField = searchField.actualField
-          }
-          const translatedField = storageAdapter?.translateColumn
-            ? storageAdapter.translateColumn(dbField)
-            : dbField
-
-          query.orderBy(translatedField, desc ? 'desc' : 'asc')
-        })
-      }
+      const sortDescriptors = buildLegacySortDescriptors({
+        query,
+        sort: queryParams.sort,
+        schemaInfo,
+        sortableFields,
+        storageAdapter,
+        queryFieldRuntimeByField
+      })
 
       // Apply pagination
       // Check if page object has any actual pagination parameters
@@ -614,9 +688,6 @@ export const RestApiKnexPlugin = {
           // Fetch one extra record to determine if there are more
           query.limit(pageSize + 1)
 
-          // Get the configured ID property
-          const idProperty = context.schemaInfo.idProperty || 'id'
-
           if (queryParams.page.after) {
             let cursorData
             try {
@@ -635,32 +706,13 @@ export const RestApiKnexPlugin = {
               )
             }
 
-            // Build sort fields array with directions
-            const sortFields = []
-            if (queryParams.sort && queryParams.sort.length > 0) {
-              queryParams.sort.forEach(sortField => {
-                const desc = sortField.startsWith('-')
-                const field = desc ? sortField.substring(1) : sortField
-                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' })
-              })
-            } else if (scope.vars.defaultSort) {
-              sortFields.push({
-                field: scope.vars.defaultSort.field || idProperty,
-                direction: scope.vars.defaultSort.direction || 'ASC'
-              })
-            } else {
-              sortFields.push({ field: idProperty, direction: 'ASC' })
-            }
-
             // Build compound WHERE clause for multi-field cursor
             query.where(function () {
-              sortFields.forEach((sortInfo, index) => {
-                const { field, direction } = sortInfo
-                const qualifiedField = `${tableName}.${field}`
-                const cursorValue = cursorData[field]
+              sortDescriptors.forEach((sortInfo, index) => {
+                const cursorValue = cursorData[sortInfo.field]
 
                 if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${field}`)
+                  log.warn(`Cursor missing value for sort field: ${sortInfo.field}`)
                   return
                 }
 
@@ -668,19 +720,27 @@ export const RestApiKnexPlugin = {
                 this.orWhere(function () {
                   // All previous fields must be equal
                   for (let i = 0; i < index; i++) {
-                    const prevField = sortFields[i].field
-                    const prevQualifiedField = `${tableName}.${prevField}`
-                    const prevValue = cursorData[prevField]
+                    const prevSortInfo = sortDescriptors[i]
+                    const prevValue = cursorData[prevSortInfo.field]
                     if (prevValue !== undefined) {
-                      this.where(prevQualifiedField, '=', prevValue)
+                      if (prevSortInfo.queryFieldRuntime) {
+                        applyQueryFieldPredicate(this, prevSortInfo.queryFieldRuntime, '=', prevValue)
+                      } else {
+                        this.where(prevSortInfo.column, '=', prevValue)
+                      }
                     }
                   }
 
                   // Current field must be greater/less than cursor value
-                  if (direction === 'DESC') {
-                    this.where(qualifiedField, '<', cursorValue)
+                  if (sortInfo.queryFieldRuntime) {
+                    applyQueryFieldPredicate(
+                      this,
+                      sortInfo.queryFieldRuntime,
+                      sortInfo.direction === 'DESC' ? '<' : '>',
+                      cursorValue
+                    )
                   } else {
-                    this.where(qualifiedField, '>', cursorValue)
+                    this.where(sortInfo.column, sortInfo.direction === 'DESC' ? '<' : '>', cursorValue)
                   }
                 })
               })
@@ -703,32 +763,13 @@ export const RestApiKnexPlugin = {
               )
             }
 
-            // Build sort fields array with directions
-            const sortFields = []
-            if (queryParams.sort && queryParams.sort.length > 0) {
-              queryParams.sort.forEach(sortField => {
-                const desc = sortField.startsWith('-')
-                const field = desc ? sortField.substring(1) : sortField
-                sortFields.push({ field, direction: desc ? 'DESC' : 'ASC' })
-              })
-            } else if (scope.vars.defaultSort) {
-              sortFields.push({
-                field: scope.vars.defaultSort.field || idProperty,
-                direction: scope.vars.defaultSort.direction || 'ASC'
-              })
-            } else {
-              sortFields.push({ field: idProperty, direction: 'ASC' })
-            }
-
             // Build compound WHERE clause for multi-field cursor (reversed for before)
             query.where(function () {
-              sortFields.forEach((sortInfo, index) => {
-                const { field, direction } = sortInfo
-                const qualifiedField = `${tableName}.${field}`
-                const cursorValue = cursorData[field]
+              sortDescriptors.forEach((sortInfo, index) => {
+                const cursorValue = cursorData[sortInfo.field]
 
                 if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${field}`)
+                  log.warn(`Cursor missing value for sort field: ${sortInfo.field}`)
                   return
                 }
 
@@ -736,19 +777,27 @@ export const RestApiKnexPlugin = {
                 this.orWhere(function () {
                   // All previous fields must be equal
                   for (let i = 0; i < index; i++) {
-                    const prevField = sortFields[i].field
-                    const prevQualifiedField = `${tableName}.${prevField}`
-                    const prevValue = cursorData[prevField]
+                    const prevSortInfo = sortDescriptors[i]
+                    const prevValue = cursorData[prevSortInfo.field]
                     if (prevValue !== undefined) {
-                      this.where(prevQualifiedField, '=', prevValue)
+                      if (prevSortInfo.queryFieldRuntime) {
+                        applyQueryFieldPredicate(this, prevSortInfo.queryFieldRuntime, '=', prevValue)
+                      } else {
+                        this.where(prevSortInfo.column, '=', prevValue)
+                      }
                     }
                   }
 
                   // Current field must be less/greater than cursor value (reversed)
-                  if (direction === 'DESC') {
-                    this.where(qualifiedField, '>', cursorValue)
+                  if (sortInfo.queryFieldRuntime) {
+                    applyQueryFieldPredicate(
+                      this,
+                      sortInfo.queryFieldRuntime,
+                      sortInfo.direction === 'DESC' ? '>' : '<',
+                      cursorValue
+                    )
                   } else {
-                    this.where(qualifiedField, '<', cursorValue)
+                    this.where(sortInfo.column, sortInfo.direction === 'DESC' ? '>' : '<', cursorValue)
                   }
                 })
               })
@@ -875,12 +924,7 @@ export const RestApiKnexPlugin = {
           records.pop()
         }
 
-        // Determine sort fields for cursor
-        const idProperty = context.schemaInfo.idProperty || 'id'
-        let sortFields = [idProperty]
-        if (queryParams.sort && queryParams.sort.length > 0) {
-          sortFields = queryParams.sort.map(s => s.startsWith('-') ? s.substring(1) : s)
-        }
+        const sortFields = sortDescriptors.map((descriptor) => descriptor.field)
 
         context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields)
         const urlPrefix = getUrlPrefix(context, scope)
@@ -896,7 +940,7 @@ export const RestApiKnexPlugin = {
       }
 
       // Load relationship identifiers for all hasMany relationships
-      await loadRelationshipIdentifiers(records, scopeName, scopes, db)
+      await loadRelationshipIdentifiers(records, scopeName, scopes, db, context)
 
       // Process includes
       const included = await processIncludes(scope, records, {

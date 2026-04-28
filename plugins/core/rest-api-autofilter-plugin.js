@@ -1,4 +1,5 @@
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { createStorageAdapterUtilities } from './lib/querying/storage-adapter-utils.js'
 
 const PUBLIC_PRESET_NAME = 'public'
 
@@ -161,29 +162,6 @@ function compileAutoFilterDefinition ({ scopeName, scopeOptions = {}, schemaStru
   }
 }
 
-function resolveStorageAdapter ({ helpers, scopeName, hookContext = {} }) {
-  if (!scopeName) return null
-  if (hookContext.storageAdapter) return hookContext.storageAdapter
-  if (hookContext.knexQuery?.storageAdapter) return hookContext.knexQuery.storageAdapter
-  if (hookContext.knexQuery?.adapter) return hookContext.knexQuery.adapter
-  if (helpers.getStorageAdapter) {
-    return helpers.getStorageAdapter(scopeName)
-  }
-  return null
-}
-
-function translateColumnReference ({ helpers, field, tableName, scopeName, hookContext }) {
-  const storageAdapter = resolveStorageAdapter({ helpers, scopeName, hookContext })
-  const translated = storageAdapter?.translateColumn?.(field) ?? field
-  return tableName ? `${tableName}.${translated}` : translated
-}
-
-function translateFilterValue ({ helpers, field, value, scopeName, hookContext }) {
-  const storageAdapter = resolveStorageAdapter({ helpers, scopeName, hookContext })
-  if (!storageAdapter?.translateFilterValue) return value
-  return storageAdapter.translateFilterValue(field, value)
-}
-
 async function resolveFilterValue ({ filter, context, scopeName, api, helpers, scopes, vars, log }) {
   const value = await filter.resolve({
     context,
@@ -219,6 +197,13 @@ function applyResolvedInputValue ({ context, filter, resolvedValue, injectMissin
     const relationshipData = relationship?.data
 
     if (relationshipData !== undefined) {
+      if (relationshipData === null) {
+        if (resolvedValue !== null) {
+          throw buildAutofilterConsistencyError({ filter, resolvedValue })
+        }
+        return
+      }
+
       if (Array.isArray(relationshipData) || !valuesEqual(relationshipData?.id, resolvedValue)) {
         throw buildAutofilterConsistencyError({ filter, resolvedValue })
       }
@@ -235,12 +220,14 @@ function applyResolvedInputValue ({ context, filter, resolvedValue, injectMissin
     }
 
     if (injectMissing) {
-      relationships[filter.relationshipName] = {
-        data: {
-          type: filter.relationshipType,
-          id: resolvedValue === null ? null : String(resolvedValue)
-        }
-      }
+      relationships[filter.relationshipName] = resolvedValue === null
+        ? { data: null }
+        : {
+            data: {
+              type: filter.relationshipType,
+              id: String(resolvedValue)
+            }
+          }
     }
 
     return
@@ -327,6 +314,9 @@ export const AutoFilterPlugin = {
 
       const compiledConfig = scopes[scopeName]?.vars?.autofilter
       if (!compiledConfig || compiledConfig.filters.length === 0) return
+      const adapterUtils = createStorageAdapterUtilities({ context }, {
+        getStorageAdapter: helpers.getStorageAdapter
+      })
 
       for (const filter of compiledConfig.filters) {
         const resolvedValue = await resolveFilterValue({
@@ -342,21 +332,8 @@ export const AutoFilterPlugin = {
 
         if (resolvedValue === undefined) continue
 
-        const columnRef = translateColumnReference({
-          helpers,
-          field: filter.field,
-          tableName,
-          scopeName,
-          hookContext: context
-        })
-
-        const translatedValue = translateFilterValue({
-          helpers,
-          field: filter.field,
-          value: resolvedValue,
-          scopeName,
-          hookContext: context
-        })
+        const columnRef = adapterUtils.translateColumn(scopeName, filter.field, tableName)
+        const translatedValue = adapterUtils.translateFilterValue(scopeName, filter.field, resolvedValue)
 
         if (translatedValue === null) {
           query.whereNull(columnRef)

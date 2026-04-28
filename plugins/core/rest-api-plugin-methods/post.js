@@ -59,7 +59,7 @@ export default async function postMethod ({
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access
-    await validateRelationshipAccess(context, context.inputRecord, helpers, runHooks, api)
+    await validateRelationshipAccess(context, context.inputRecord, helpers, api)
 
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage

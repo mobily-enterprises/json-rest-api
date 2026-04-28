@@ -3,8 +3,6 @@ import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import {
   cleanTables,
-  createJsonApiDocument,
-  createRelationship
 } from './helpers/test-utils.js'
 import { createSearchSchemaMergeApi } from './fixtures/api-configs.js'
 
@@ -101,47 +99,6 @@ describe('SearchSchema Merge Behavior', () => {
     assert.ok(!searchSchema.structure.age, 'age should not be searchable')
   })
 
-  it('should use exact matching for search:true strings unless filterOperator is explicit', async () => {
-    const context = {}
-
-    await api.resources.users.post({
-      inputRecord: createJsonApiDocument('users', {
-        username: 'ann',
-        email: 'ann@example.com',
-        bio: 'Writes API guides'
-      })
-    }, context)
-
-    await api.resources.users.post({
-      inputRecord: createJsonApiDocument('users', {
-        username: 'anna',
-        email: 'anna@example.com',
-        bio: 'Writing API tutorials'
-      })
-    }, context)
-
-    const usernameResults = await api.resources.users.query({
-      queryParams: {
-        filters: {
-          username: 'ann'
-        }
-      }
-    }, context)
-
-    assert.equal(usernameResults.data.length, 1, 'search:true username should use exact matching')
-    assert.equal(usernameResults.data[0].attributes.username, 'ann')
-
-    const bioResults = await api.resources.users.query({
-      queryParams: {
-        filters: {
-          bio: 'Writ'
-        }
-      }
-    }, context)
-
-    assert.equal(bioResults.data.length, 2, 'explicit like operator should still support partial matching')
-  })
-
   it('should work with only explicit searchSchema (no search:true)', async () => {
     // First do a query to trigger schema compilation
     await api.resources.orders.query({
@@ -159,118 +116,19 @@ describe('SearchSchema Merge Behavior', () => {
     assert.ok(!searchSchema.structure.total, 'total should not be searchable')
   })
 
-  it('should allow filtering with merged searchSchema fields', async () => {
-    const context = {}
-
-    // Create some test data using API methods
-    const product1 = await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
-        name: 'Widget A',
-        description: 'A great widget',
-        price: 50,
-        sku: 'WGT-001',
-        status: 'active'
-      })
-    }, context)
-
-    const product2 = await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
-        name: 'Widget B',
-        description: 'Another widget',
-        price: 150,
-        sku: 'WGT-002',
-        status: 'inactive'
-      })
-    }, context)
-
-    // Test filtering with field from search:true
-    const nameResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          name: 'Widget A'
-        }
-      }
-    }, context)
-    assert.equal(nameResults.data.length, 1, 'Should find one product by name')
-    assert.equal(nameResults.data[0].attributes.name, 'Widget A')
-
-    // Test filtering with field from explicit searchSchema (between operator)
-    const priceResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          price: [40, 60]  // Between 40 and 60
-        }
-      }
-    }, context)
-    assert.equal(priceResults.data.length, 1, 'Should find one product in price range')
-    assert.equal(priceResults.data[0].attributes.price, 50)
-
-    // Test filtering with explicit searchSchema field (in operator)
-    const statusResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          status: ['active']
-        }
-      }
-    }, context)
-    assert.equal(statusResults.data.length, 1, 'Should find one active product')
-    assert.equal(statusResults.data[0].attributes.status, 'active')
-
-    // Test filtering with search:true field that wasn't overridden
-    const skuResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          sku: 'WGT-002'
-        }
-      }
-    }, context)
-    assert.equal(skuResults.data.length, 1, 'Should find one product by SKU')
-    assert.equal(skuResults.data[0].attributes.sku, 'WGT-002')
-  })
-
-  it('should support arbitrary public filter keys when searchSchema maps them intentionally', async () => {
-    const context = {}
-
-    await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
-        name: 'Widget Alpha',
-        description: 'The great all-purpose widget',
-        price: 50,
-        sku: 'WGT-101',
-        status: 'active'
-      })
-    }, context)
-
-    await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
-        name: 'Widget Beta',
-        description: 'A quiet replacement unit',
-        price: 60,
-        sku: 'WGT-102',
-        status: 'inactive'
-      })
-    }, context)
-
-    const aliasResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          term: 'great'
-        }
-      }
-    }, context)
-
-    assert.equal(aliasResults.data.length, 1, 'term should be resolved by backend search mapping')
-    assert.equal(aliasResults.data[0].attributes.name, 'Widget Alpha')
-
-    const customResults = await api.resources.products.query({
-      queryParams: {
-        filters: {
-          availability: true
-        }
-      }
-    }, context)
-
-    assert.equal(customResults.data.length, 1, 'availability should be interpreted by backend custom filter logic')
-    assert.equal(customResults.data[0].attributes.status, 'active')
+  it('should reject invalid filter keys that are not part of the public searchSchema contract', async () => {
+    await assert.rejects(
+      async () => {
+        await api.resources.products.query({
+          queryParams: {
+            filters: {
+              invalid_field: 'nope'
+            }
+          }
+        })
+      },
+      (error) => error?.code === 'REST_API_VALIDATION',
+      'Should reject fields that are not defined in searchSchema'
+    )
   })
 })

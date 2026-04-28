@@ -103,7 +103,7 @@ await api.addResource('authors', {
 await api.resources.authors.createKnexTable();
 ```
 
-`searchSchema` defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. In the Knex backend, their meaning is implemented server-side through options like `actualField`, `oneOf`, `filterOperator`, or custom `applyFilter` functions. In other words, `searchSchema` is an allowlist plus normalization layer, not a portable filter DSL.
+`searchSchema` defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. Keep the quickstart mental model simple: `searchSchema` is the resource's public filter contract. For advanced mapping, multi-field search, and custom backend filtering, see [Manipulating and Searching Tables](GUIDE/GUIDE_2_2_Manipulating_And_Searching_Tables.md).
 
 ## Run the program
 
