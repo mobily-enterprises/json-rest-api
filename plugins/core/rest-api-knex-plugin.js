@@ -32,7 +32,13 @@ import {
 } from './lib/querying/knex-pagination-helpers.js'
 import { getUrlPrefix } from './lib/querying/url-helpers.js'
 import { createStorageAdapter } from './lib/storage/storage-adapter.js'
-import { normalizeStableSort, parseSortEntry } from './lib/querying/sort-helpers.js'
+import {
+  applyCursorPredicate,
+  applyQueryFieldOrder,
+  buildEffectiveSortList,
+  parseSortEntry
+} from './lib/querying/query-field-sort-helpers.js'
+import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
@@ -100,23 +106,16 @@ export const RestApiKnexPlugin = {
       }
     }
 
-    const applyQueryFieldOrder = (query, queryFieldRuntime, direction) => {
-      query.orderByRaw(`(${queryFieldRuntime.sql}) ${direction}`, queryFieldRuntime.bindings)
-    }
-
-    const applyQueryFieldPredicate = (builder, queryFieldRuntime, operator, value) => {
-      builder.whereRaw(`(${queryFieldRuntime.sql}) ${operator} ?`, [...queryFieldRuntime.bindings, value])
-    }
-
     const buildLegacySortDescriptors = ({
       query,
       sort,
       schemaInfo,
       sortableFields,
       storageAdapter,
+      defaultSort,
       queryFieldRuntimeByField = new Map()
     }) => {
-      const effectiveSort = normalizeStableSort(sort, { idField: 'id' })
+      const effectiveSort = buildEffectiveSortList(sort, { defaultSort, idField: 'id' })
       const descriptors = []
 
       for (const sortEntry of effectiveSort) {
@@ -490,7 +489,7 @@ export const RestApiKnexPlugin = {
           scopeName,
           storageAdapter
         })
-        query = scopedQueryState?.query || scopedQueryState || query
+        query = unwrapQueryBuilderState(scopedQueryState, query)
       } else if (runHooks) {
         context.knexQuery = {
           query,
@@ -642,6 +641,7 @@ export const RestApiKnexPlugin = {
         sort: queryParams.sort,
         schemaInfo,
         sortableFields,
+        defaultSort: scope.vars.defaultSort,
         storageAdapter,
         queryFieldRuntimeByField
       })
@@ -706,45 +706,16 @@ export const RestApiKnexPlugin = {
               )
             }
 
-            // Build compound WHERE clause for multi-field cursor
-            query.where(function () {
-              sortDescriptors.forEach((sortInfo, index) => {
-                const cursorValue = cursorData[sortInfo.field]
-
-                if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${sortInfo.field}`)
-                  return
-                }
-
-                // Build condition for this level and all previous levels
-                this.orWhere(function () {
-                  // All previous fields must be equal
-                  for (let i = 0; i < index; i++) {
-                    const prevSortInfo = sortDescriptors[i]
-                    const prevValue = cursorData[prevSortInfo.field]
-                    if (prevValue !== undefined) {
-                      if (prevSortInfo.queryFieldRuntime) {
-                        applyQueryFieldPredicate(this, prevSortInfo.queryFieldRuntime, '=', prevValue)
-                      } else {
-                        this.where(prevSortInfo.column, '=', prevValue)
-                      }
-                    }
-                  }
-
-                  // Current field must be greater/less than cursor value
-                  if (sortInfo.queryFieldRuntime) {
-                    applyQueryFieldPredicate(
-                      this,
-                      sortInfo.queryFieldRuntime,
-                      sortInfo.direction === 'DESC' ? '<' : '>',
-                      cursorValue
-                    )
-                  } else {
-                    this.where(sortInfo.column, sortInfo.direction === 'DESC' ? '<' : '>', cursorValue)
-                  }
-                })
-              })
-            })
+            applyCursorPredicate(
+              query,
+              sortDescriptors,
+              cursorData,
+              (direction) => (direction === 'DESC' ? '<' : '>'),
+              (builder, descriptor, operator, value) => builder.where(descriptor.column, operator, value),
+              {
+                onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
+              }
+            )
           } else if (queryParams.page.before) {
             let cursorData
             try {
@@ -763,45 +734,16 @@ export const RestApiKnexPlugin = {
               )
             }
 
-            // Build compound WHERE clause for multi-field cursor (reversed for before)
-            query.where(function () {
-              sortDescriptors.forEach((sortInfo, index) => {
-                const cursorValue = cursorData[sortInfo.field]
-
-                if (cursorValue === undefined) {
-                  log.warn(`Cursor missing value for sort field: ${sortInfo.field}`)
-                  return
-                }
-
-                // Build condition for this level and all previous levels
-                this.orWhere(function () {
-                  // All previous fields must be equal
-                  for (let i = 0; i < index; i++) {
-                    const prevSortInfo = sortDescriptors[i]
-                    const prevValue = cursorData[prevSortInfo.field]
-                    if (prevValue !== undefined) {
-                      if (prevSortInfo.queryFieldRuntime) {
-                        applyQueryFieldPredicate(this, prevSortInfo.queryFieldRuntime, '=', prevValue)
-                      } else {
-                        this.where(prevSortInfo.column, '=', prevValue)
-                      }
-                    }
-                  }
-
-                  // Current field must be less/greater than cursor value (reversed)
-                  if (sortInfo.queryFieldRuntime) {
-                    applyQueryFieldPredicate(
-                      this,
-                      sortInfo.queryFieldRuntime,
-                      sortInfo.direction === 'DESC' ? '>' : '<',
-                      cursorValue
-                    )
-                  } else {
-                    this.where(sortInfo.column, sortInfo.direction === 'DESC' ? '>' : '<', cursorValue)
-                  }
-                })
-              })
-            })
+            applyCursorPredicate(
+              query,
+              sortDescriptors,
+              cursorData,
+              (direction) => (direction === 'DESC' ? '>' : '<'),
+              (builder, descriptor, operator, value) => builder.where(descriptor.column, operator, value),
+              {
+                onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
+              }
+            )
           }
         }
         // Default pagination if only size is specified - treat as cursor-based for "load more"

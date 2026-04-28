@@ -11,6 +11,7 @@
 // Core plugins
 export { RestApiPlugin } from './plugins/core/rest-api-plugin.js'
 export { AutoFilterPlugin } from './plugins/core/rest-api-autofilter-plugin.js'
+export { QueryProjectionsPlugin } from './plugins/core/rest-api-query-projections-plugin.js'
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js'
 export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js'
 export { LabelPlugin } from './plugins/core/rest-api-label-plugin.js'

@@ -1010,6 +1010,15 @@ export async function createProjectedFieldsApi (knex, pluginOptions = {}) {
           "trim(coalesce(??, '') || ' ' || coalesce(??, ''))",
           [column('first_name'), column('last_name')]
         )
+      },
+      sort_name: {
+        type: 'string',
+        sortable: true,
+        normallyHidden: true,
+        select: ({ knex, column }) => knex.raw(
+          "trim(coalesce(??, '') || ' ' || coalesce(??, ''))",
+          [column('first_name'), column('last_name')]
+        )
       }
     },
     relationships: {

@@ -2,6 +2,8 @@
 
 This guide provides a comprehensive reference for all hooks available in the json-rest-api system, including system-wide hooks from hooked-api and method-specific hooks from the REST API plugin.
 
+If you are building a reusable plugin rather than just attaching hooks to one API, see [Writing Plugins](GUIDE_X_Writing_Plugins.md). This guide focuses on hook behavior; the plugin guide focuses on the supported extension surface.
+
 An important concept when working with hooks is understanding how simplified mode affects data flow.
 
 Inside hooks, JSON:API format is king _regardless of simplified mode_.

@@ -1,3 +1,7 @@
+import { buildQuerySelection } from '../querying/knex-query-helpers-base.js'
+import { createSelectTranslator } from '../storage/storage-adapter.js'
+import { buildQueryFieldRuntimes } from './query-field-helpers.js'
+
 /**
  * Checks if a field exists only in code, not in the database
  *
@@ -143,11 +147,13 @@ export const buildFieldSelection = async (scope, deps) => {
   const computedDependencies = new Set()
 
   // Extract values from scope
+  const scopeSchemaInfo = scope?.vars?.schemaInfo || {}
   const {
-    vars: {
-      schemaInfo: { schemaInstance, computed: computedFields = {}, schemaStructure }
-    }
-  } = scope
+    schemaInstance,
+    computed: computedFields = {}
+  } = scopeSchemaInfo
+  let schemaStructure = scopeSchemaInfo.schemaStructure
+  const queryFields = scope?.vars?.queryFields || {}
 
   // Extract values from deps
   const { context } = deps
@@ -164,6 +170,8 @@ export const buildFieldSelection = async (scope, deps) => {
 
   // Get computed fields and virtual fields from schema
   const computedFieldNames = new Set(Object.keys(computedFields))
+  const queryFieldNames = new Set(Object.keys(queryFields))
+  const queryFieldsToSelect = new Set()
 
   // Find fields marked as virtual in the schema
   const virtualFieldNames = new Set()
@@ -188,6 +196,12 @@ export const buildFieldSelection = async (scope, deps) => {
     // Sparse fieldsets requested - only select specified fields
     // Example: ?fields[products]=name,price,profit_margin
     requested.forEach(field => {
+      if (queryFieldNames.has(field)) {
+        if (queryFields[field]?.hidden === true) return
+        queryFieldsToSelect.add(field)
+        return
+      }
+
       // Skip computed and virtual fields - they don't exist in database
       // Computed fields will be calculated later in enrichAttributes
       // Virtual fields are handled separately (from request input)
@@ -243,6 +257,7 @@ export const buildFieldSelection = async (scope, deps) => {
         }
       })
     }
+
   } else {
     // No sparse fieldsets - return all visible fields
     // This is the default behavior when no ?fields parameter is provided
@@ -283,6 +298,24 @@ export const buildFieldSelection = async (scope, deps) => {
         }
       }
     }
+
+    for (const [fieldName, fieldDef] of Object.entries(queryFields)) {
+      if (fieldDef.hidden === true || fieldDef.normallyHidden === true) continue
+      queryFieldsToSelect.add(fieldName)
+    }
+  }
+
+  const sortFields = Array.isArray(context.queryParams?.sort)
+    ? context.queryParams.sort
+    : []
+
+  for (const sortField of sortFields) {
+    if (typeof sortField !== 'string') continue
+    const normalizedField = sortField.startsWith('-') ? sortField.slice(1) : sortField
+
+    if (queryFieldNames.has(normalizedField)) {
+      queryFieldsToSelect.add(normalizedField)
+    }
   }
 
   // Always include foreign keys for relationships (unless hidden)
@@ -312,9 +345,52 @@ export const buildFieldSelection = async (scope, deps) => {
   // 3. enrichAttributes to remove dependencies from final response
   return {
     fieldsToSelect: Array.from(fieldsToSelect),      // Fields to SELECT from database
+    queryFieldsToSelect: Array.from(queryFieldsToSelect),
     requestedFields: requested,                       // Fields explicitly requested by user
     computedDependencies: Array.from(computedDependencies),  // Dependencies to remove from response
     idProperty: 'id'                                  // Logical field name reference
+  }
+}
+
+export const applyFieldSelectionToQuery = async ({
+  query,
+  scope,
+  fieldSelectionInfo,
+  tableName,
+  useTablePrefix = false,
+  storageAdapter = null,
+  db = null,
+  context = null,
+  scopeName = ''
+}) => {
+  const selectTranslator = createSelectTranslator(storageAdapter)
+
+  const selectedQuery = buildQuerySelection(
+    query,
+    tableName,
+    fieldSelectionInfo?.fieldsToSelect || [],
+    useTablePrefix,
+    selectTranslator ? { translateColumn: selectTranslator } : undefined
+  )
+
+  const queryFieldRuntimeByField = await buildQueryFieldRuntimes({
+    queryFieldNames: fieldSelectionInfo?.queryFieldsToSelect || [],
+    queryFields: scope?.vars?.queryFields || {},
+    schemaInfo: scope?.vars?.schemaInfo || {},
+    tableName,
+    storageAdapter,
+    db,
+    context,
+    scopeName
+  })
+
+  for (const [fieldName, runtime] of queryFieldRuntimeByField.entries()) {
+    selectedQuery.select({ [fieldName]: runtime.expression })
+  }
+
+  return {
+    query: selectedQuery,
+    queryFieldRuntimeByField
   }
 }
 

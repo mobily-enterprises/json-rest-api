@@ -23,12 +23,15 @@ export const translateCanonicalAttributesForStorage = (attributes = {}, descript
   return row
 }
 
-export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}) => {
+export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, options = {}) => {
   const attributes = {}
+  const consumedColumns = new Set(['id'])
+  const allowedExtraFields = new Set(options.allowedExtraFields || [])
 
   for (const [slot, logical] of Object.entries(descriptor.reverseAttributes || {})) {
     if (slot in row) {
       attributes[logical] = row[slot]
+      consumedColumns.add(slot)
     }
   }
 
@@ -36,6 +39,10 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}) =
 
   for (const [alias, info] of Object.entries(descriptor.belongsTo || {})) {
     const idValue = row[info.idColumn]
+    consumedColumns.add(info.idColumn)
+    if (info.typeColumn) {
+      consumedColumns.add(info.typeColumn)
+    }
     const relationshipData = idValue == null
       ? null
       : { type: info.target, id: String(idValue) }
@@ -46,6 +53,12 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}) =
   for (const [alias, info] of Object.entries(descriptor.polymorphicBelongsTo || {})) {
     const typeValue = info.typeColumn ? row[info.typeColumn] : null
     const idValue = info.idColumn ? row[info.idColumn] : null
+    if (info.typeColumn) {
+      consumedColumns.add(info.typeColumn)
+    }
+    if (info.idColumn) {
+      consumedColumns.add(info.idColumn)
+    }
 
     let relationshipData = null
     if (typeValue != null && idValue != null) {
@@ -56,6 +69,25 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}) =
     }
 
     relationships[alias] = { data: relationshipData }
+  }
+
+  const canonical = descriptor.canonical || {}
+  const internalColumns = new Set([
+    canonical.tenantColumn,
+    canonical.resourceColumn,
+    'created_at',
+    'updated_at',
+    'deleted_at'
+  ].filter(Boolean))
+
+  for (const [columnName, value] of Object.entries(row)) {
+    if (consumedColumns.has(columnName) || internalColumns.has(columnName)) {
+      continue
+    }
+    if (!allowedExtraFields.has(columnName)) {
+      continue
+    }
+    attributes[columnName] = value
   }
 
   return { attributes, relationships }

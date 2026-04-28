@@ -11,6 +11,8 @@ Field transformations allow you to:
 - Calculate values from other fields (computed fields)
 - Control which fields are visible in responses (hidden fields)
 
+For SQL-backed derived values that must participate in sorting or cursor pagination, use [Query Projections](GUIDE_X_Query_Projections.md). Those are query-layer fields, not normal computed fields.
+
 ## The Data Transformation Pipeline
 
 Understanding when each transformation occurs is crucial for building robust APIs:
@@ -234,6 +236,8 @@ setter: (value, context) => {
 ## Computed Fields
 
 Computed fields are output-only fields calculated from other fields. They're never stored and always calculated fresh when requested.
+
+If a derived field must participate in SQL list behavior such as sorting or cursor pagination, use a query projection instead. Query projections are documented separately in [Query Projections](GUIDE_X_Query_Projections.md).
 
 ### Basic Computed Fields
 

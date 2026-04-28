@@ -33,6 +33,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
   const computedFields = scopes[scopeName]?.vars?.schemaInfo?.computed || {}
   const fieldGetters = scopes[scopeName]?.vars?.schemaInfo?.fieldGetters || {}
   const sortedGetterFields = scopes[scopeName]?.vars?.schemaInfo?.sortedGetterFields || []
+  const queryFields = scopes[scopeName]?.vars?.queryFields || {}
 
   // Make a copy of attributes for transformation
   const transformedAttributes = { ...attributes }
@@ -72,7 +73,11 @@ export default async function enrichAttributesMethod ({ context, params, runHook
   // Filter hidden fields from attributes based on visibility rules
   // This removes hidden:true fields and normallyHidden:true fields (unless requested)
   const requestedFields = parentContext?.queryParams?.fields?.[scopeName]
-  const filteredAttributes = filterHiddenFields(transformedAttributes, { structure: schemaStructure }, requestedFields)
+  const filteredAttributes = filterHiddenFields(
+    transformedAttributes,
+    { structure: { ...schemaStructure, ...queryFields } },
+    requestedFields
+  )
 
   // Handle virtual fields - they need to be added from parent context if available
   // Virtual fields come from input and need to be preserved in responses

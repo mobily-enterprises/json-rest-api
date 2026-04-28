@@ -5,6 +5,7 @@ import {
 } from '../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
+import { unwrapQueryBuilderState } from '../lib/querying/query-builder-utils.js'
 
 /**
  * Gets an enhanced logger instance with full error details and stack traces
@@ -520,7 +521,7 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
           }, getContext)
 
           return {
-            query: queryState?.query || query
+            query: unwrapQueryBuilderState(queryState, query)
           }
         }
         : undefined

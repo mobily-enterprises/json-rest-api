@@ -78,6 +78,7 @@ import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-wri
 import { getForeignKeyFields } from '../querying-writing/field-utils.js'
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
+import { unwrapQueryBuilderState } from './query-builder-utils.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import {
@@ -153,7 +154,7 @@ const applyScopeFiltersToIncludeQuery = async ({
 }) => {
   const scopeObject = scopes[scopeName]
   if (!scopeObject?.applyQueryFilters) {
-    return query
+    return { query }
   }
 
   const storageAdapter = scopeObject.vars.storageAdapter
@@ -174,7 +175,7 @@ const applyScopeFiltersToIncludeQuery = async ({
   }))
 
   return {
-    query: queryState?.query || query
+    query: unwrapQueryBuilderState(queryState, query)
   }
 }
 

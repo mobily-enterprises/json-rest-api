@@ -2,6 +2,8 @@
 
 Pagination and ordering are essential features for working with large datasets. The json-rest-api library provides powerful pagination that applies not just to main resources, but also to included relationships. This means you can limit and order both parent records AND their children independently.
 
+For derived fields that must participate in `ORDER BY` and cursor pagination, see [Query Projections](GUIDE_X_Query_Projections.md). Regular computed fields are response-layer only and are not the right tool for stable SQL ordering.
+
 Let's create a comprehensive example with posts, comments, and tags to demonstrate all pagination and ordering features:
 
 ```javascript

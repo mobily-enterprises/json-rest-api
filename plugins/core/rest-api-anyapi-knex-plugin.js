@@ -43,7 +43,13 @@ import {
   translateCanonicalAttributesForStorage,
   translateCanonicalRecordFromStorage,
 } from './lib/storage/canonical-storage-mapping.js'
-import { normalizeStableSort, parseSortEntry } from './lib/querying/sort-helpers.js'
+import {
+  buildCursorPredicateChains,
+  applyQueryFieldOrder,
+  buildEffectiveSortList,
+  parseSortEntry
+} from './lib/querying/query-field-sort-helpers.js'
+import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
 
 const DEFAULT_TENANT = 'default'
 const LINKS_TABLE = 'any_links'
@@ -161,29 +167,17 @@ export const RestApiAnyapiKnexPlugin = {
     }
 
     const applySortingToQuery = ({ query, sort, descriptor, scope, queryFieldRuntimeByField = new Map() }) => {
-      let sortList = Array.isArray(sort) ? sort : (sort ? [sort] : [])
-
-      if (sortList.length === 0 && scope?.vars?.defaultSort) {
-        const defaultSort = scope.vars.defaultSort
-        if (Array.isArray(defaultSort)) {
-          sortList = defaultSort
-        } else if (typeof defaultSort === 'string') {
-          sortList = [defaultSort]
-        } else if (defaultSort && typeof defaultSort === 'object') {
-          const field = defaultSort.field || defaultSort.column || 'id'
-          const direction = (defaultSort.direction || '').toLowerCase() === 'desc' ? '-' : ''
-          sortList = [`${direction}${field}`]
-        }
-      }
-
-      const effectiveSort = normalizeStableSort(sortList.length > 0 ? sortList : ['id'], { idField: 'id' })
+      const effectiveSort = buildEffectiveSortList(sort, {
+        defaultSort: scope?.vars?.defaultSort,
+        idField: 'id'
+      })
       const descriptors = []
 
       for (const entry of effectiveSort) {
         const { field, direction, sqlDirection } = parseSortEntry(entry)
         const queryFieldRuntime = queryFieldRuntimeByField.get(field)
         if (queryFieldRuntime) {
-          query.orderByRaw(`(${queryFieldRuntime.sql}) ${sqlDirection}`, queryFieldRuntime.bindings)
+          applyQueryFieldOrder(query, queryFieldRuntime, sqlDirection)
           descriptors.push({
             field,
             direction,
@@ -306,80 +300,37 @@ export const RestApiAnyapiKnexPlugin = {
         return typed
       }
 
-      const buildCursorPredicate = (cursorValues, operatorSelector) => {
-        const appendPredicate = (chain, descriptor, operator, value) => {
-          if (descriptor.queryFieldRuntime) {
-            chain.push({
-              sql: `(${descriptor.queryFieldRuntime.sql})`,
-              operator,
-              value,
-              bindings: descriptor.queryFieldRuntime.bindings || []
-            })
-            return
-          }
+      const applyRawCursorPredicate = (cursorValues, operatorSelector) => {
+        const predicateChains = buildCursorPredicateChains(
+          descriptors,
+          cursorValues,
+          operatorSelector,
+          { onMissingValue: () => {} }
+        )
 
-          const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
-          chain.push({ column: columnRef, operator, value })
-        }
-
-        if (!descriptors || descriptors.length === 0) {
-          return
-        }
-
-        if (descriptors.length === 1) {
-          const descriptor = descriptors[0]
-          const value = cursorValues[descriptor.field]
-          if (value === undefined) return
-          const operator = operatorSelector(descriptor.direction)
-          if (descriptor.queryFieldRuntime) {
-            query.whereRaw(`(${descriptor.queryFieldRuntime.sql}) ${operator} ?`, [...descriptor.queryFieldRuntime.bindings, value])
-          } else if (adapter) {
-            const columnRef = adapter.translateColumn(descriptor.column)
-            query.whereRaw(`${columnRef} ${operator} ?`, [value])
-          } else {
-            query.where(descriptor.column, operator, value)
-          }
-          return
-        }
-
-        const translatedConditions = []
-
-        descriptors.forEach((descriptor, index) => {
-          const value = cursorValues[descriptor.field]
-          if (value === undefined) return
-
-          const chain = []
-          for (let i = 0; i < index; i += 1) {
-            const prev = descriptors[i]
-            const prevValue = cursorValues[prev.field]
-            if (prevValue === undefined) return
-            appendPredicate(chain, prev, '=', prevValue)
-          }
-
-          const operator = operatorSelector(descriptor.direction)
-          appendPredicate(chain, descriptor, operator, value)
-          translatedConditions.push(chain)
-        })
-
-        if (translatedConditions.length === 0) {
+        if (predicateChains.length === 0) {
           return
         }
 
         const predicateParts = []
         const predicateBindings = []
-        translatedConditions.forEach((chain) => {
-          const chainParts = chain.map(({ column, sql, operator, value, bindings = [] }) => {
-            predicateBindings.push(...bindings)
+
+        predicateChains.forEach((chain) => {
+          const chainParts = chain.map(({ descriptor, operator, value }) => {
+            if (descriptor.queryFieldRuntime) {
+              predicateBindings.push(...(descriptor.queryFieldRuntime.bindings || []), value)
+              return `(${descriptor.queryFieldRuntime.sql}) ${operator} ?`
+            }
+
+            const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
             predicateBindings.push(value)
-            return `${sql || column} ${operator} ?`
+            return `${columnRef} ${operator} ?`
           })
+
           predicateParts.push(`(${chainParts.join(' AND ')})`)
         })
 
-        if (predicateParts.length > 0) {
-          const combined = predicateParts.join(' OR ')
-          query.whereRaw(`(${combined})`, predicateBindings)
-        }
+        query.whereRaw(`(${predicateParts.join(' OR ')})`, predicateBindings)
       }
 
       const ensurePageSize = () => {
@@ -418,11 +369,11 @@ export const RestApiAnyapiKnexPlugin = {
         if (pageParams.after) {
           const cursorMap = parseCursorOrThrow(pageParams.after, 'after')
           const cursorValues = coerceCursorValues(cursorMap)
-          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'))
+          applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'))
         } else if (pageParams.before) {
           const cursorMap = parseCursorOrThrow(pageParams.before, 'before')
           const cursorValues = coerceCursorValues(cursorMap)
-          buildCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'))
+          applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'))
         }
 
         return {
@@ -1082,7 +1033,7 @@ export const RestApiAnyapiKnexPlugin = {
           storageAdapter,
           isAnyApi: true
         })
-        query = scopedQueryState?.query || scopedQueryState || query
+        query = unwrapQueryBuilderState(scopedQueryState, query)
       } else if (runHooks) {
         context.knexQuery = {
           query,
@@ -1209,7 +1160,7 @@ export const RestApiAnyapiKnexPlugin = {
       })
 
       return {
-        query: queryState?.query || query
+        query: unwrapQueryBuilderState(queryState, query)
       }
     }
 

@@ -2,6 +2,7 @@ import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { validateQueryPayload } from '../lib/querying-writing/payload-validators.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
 import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
+import { getEffectiveSortableFields } from '../lib/querying/query-field-sort-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { cascadeConfig } from './common.js'
 
@@ -66,7 +67,7 @@ export default async function queryMethod ({
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
   // Sortable fields and sort (mab)
-  context.sortableFields = vars.sortableFields
+  context.sortableFields = getEffectiveSortableFields(vars)
   // Apply default sort if no sort specified
   if (context.queryParams.sort.length === 0 && vars.defaultSort) {
     context.queryParams.sort = Array.isArray(vars.defaultSort) ? vars.defaultSort : [vars.defaultSort]

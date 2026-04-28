@@ -130,7 +130,8 @@ export const processIncludes = async (scope, records, deps) => {
           scopes,
           log,
           knex: db,
-          capabilities: api?.knex?.capabilities
+          capabilities: api?.knex?.capabilities,
+          requestContext: context
         }
       }
     )
