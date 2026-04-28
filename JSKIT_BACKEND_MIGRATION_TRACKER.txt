@@ -121,12 +121,16 @@ Work List
    - documented that searchSchema keys are public filter names, not a portable operator language
    - verified that alias filters (`oneOf`) and custom backend filters (`applyFilter`) work as intended in the Knex path
 
-9. [pending] Add visibility/ownership policy handling in json-rest-api.
+9. [pending] Add declarative resource scoping handling in json-rest-api.
    Deliverables:
    - public
    - workspace
    - user
    - workspace_user
+   Notes:
+   - auth/admission semantics are out of scope for `json-rest-api`
+   - core keeps `checkPermissions` hooks as a neutral extension point only
+   - shipped `AccessPlugin` removed before this point so scoping does not inherit built-in auth assumptions
 
 10. [pending] Add runtime projection and list-control features in json-rest-api.
     Deliverables:
