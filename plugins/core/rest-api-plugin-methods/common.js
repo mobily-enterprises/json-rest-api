@@ -1,4 +1,5 @@
 import {
+  RestApiResourceError,
   RestApiValidationError,
   RestApiPayloadError
 } from '../../../lib/rest-api-errors.js'
@@ -500,19 +501,31 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
         id: item.id,
         schemaInfo: relatedScope.vars.schemaInfo,
         scopeName: item.type,
+        queryParams: {},
         method: 'get', // We're checking read permission
         isUpdate: false
       }
+
+      const runScopedLookupHooks = typeof api._runHooks === 'function'
+        ? (hookName) => api._runHooks(hookName, getContext, item.type)
+        : runHooks
 
       // Get the minimal record
       const record = await helpers.dataGetMinimal({
         scopeName: item.type,
         context: getContext,
-        runHooks
+        runHooks: runScopedLookupHooks
       })
 
       if (!record) {
-        throw new Error(`Cannot create relationship to non-existent ${item.type} with id ${item.id}`)
+        throw new RestApiResourceError(
+          `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
+          {
+            subtype: 'not_found',
+            resourceType: item.type,
+            resourceId: item.id
+          }
+        )
       }
 
       // Check permissions using the related scope's checkPermissions

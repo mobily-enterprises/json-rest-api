@@ -381,7 +381,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
-    helpers.dataGetMinimal = async ({ scopeName, context }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
@@ -394,13 +394,32 @@ export const RestApiKnexPlugin = {
 
       log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`)
 
-      // Build query - no filtering hooks for single records
-      // Permission checks will handle access control
+      // Build query.
+      // Single-record lookups still go through knexQueryFiltering when hooks are available,
+      // so resource scoping plugins can treat GET/PUT/PATCH/DELETE the same way as collections.
       let query = db(tableName).where(idProperty, id)
 
       // Add alias if idProperty is not 'id'
       if (idProperty !== 'id') {
         query = query.select('*', `${idProperty} as id`)
+      }
+
+      if (runHooks) {
+        context.knexQuery = {
+          query,
+          filters: context.queryParams?.filters,
+          schemaInfo: context.schemaInfo,
+          scopeName,
+          tableName,
+          db,
+          adapter: storageAdapter,
+        }
+
+        await runHooks('knexQueryFiltering')
+
+        if (context.knexQuery) {
+          delete context.knexQuery
+        }
       }
 
       // Execute query

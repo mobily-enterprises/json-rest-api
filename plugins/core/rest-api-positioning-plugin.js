@@ -27,7 +27,7 @@ export const PositioningPlugin = {
     // Get configuration - hooked-api namespaces options by plugin name
     const positioningOptions = pluginOptions || {}
 
-    // Store configuration in vars (data only) - inspired by multihome pattern
+    // Store configuration in vars (data only) so hooks can use it without re-reading plugin options.
     vars.positioning = {
       field: positioningOptions.field || 'position',
       filters: positioningOptions.filters || [],

@@ -36,8 +36,8 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[CORS Configuration](GUIDE_X_Cors.md)**  
   Set up Cross-Origin Resource Sharing for browser-based applications.
 
-- **[Multihome Support](GUIDE_X_Multihome.md)**  
-  Run multiple API instances or serve different domains from a single server.
+- **[Autofiltering](GUIDE_X_Autofiltering.md)**  
+  Scope datasets automatically using configured context values, without baking in auth semantics.
 
 - **[Socket.IO Integration](GUIDE_X_SocketIO.md)**  
   Add real-time capabilities to your API with WebSocket support.

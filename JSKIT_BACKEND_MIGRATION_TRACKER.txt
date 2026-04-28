@@ -121,16 +121,20 @@ Work List
    - documented that searchSchema keys are public filter names, not a portable operator language
    - verified that alias filters (`oneOf`) and custom backend filters (`applyFilter`) work as intended in the Knex path
 
-9. [pending] Add declarative resource scoping handling in json-rest-api.
+9. [done] Add declarative autofiltering/scoping in json-rest-api.
    Deliverables:
    - public
    - workspace
    - user
    - workspace_user
    Notes:
-   - auth/admission semantics are out of scope for `json-rest-api`
-   - core keeps `checkPermissions` hooks as a neutral extension point only
-   - shipped `AccessPlugin` removed before this point so scoping does not inherit built-in auth assumptions
+   - replaced the purpose-specific multihome surface with a generic `AutoFilterPlugin`
+   - resources now declare `autofilter` presets or inline filters, while the plugin resolves scope values from configured resolver functions
+   - `workspace`, `user`, `workspace_user`, and `public` are example presets, not built-in auth meanings
+   - the plugin scopes collection queries and single-record lookups, stamps scoped fields on `POST`/`PUT`, and rejects inconsistent scoped updates
+   - scoped `belongsTo` relationships are supported by injecting or validating JSON:API relationship identifiers before write validation
+   - auth/admission semantics remain out of scope for `json-rest-api`; core keeps `checkPermissions` hooks as a neutral extension point only
+   - shipped `AccessPlugin` was removed before this point so scoping does not inherit built-in auth assumptions
 
 10. [pending] Add runtime projection and list-control features in json-rest-api.
     Deliverables:

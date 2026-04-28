@@ -1024,7 +1024,7 @@ export const RestApiAnyapiKnexPlugin = {
       return result
     }
 
-    helpers.dataGetMinimal = async ({ scopeName, context }) => {
+    helpers.dataGetMinimal = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
@@ -1034,11 +1034,32 @@ export const RestApiAnyapiKnexPlugin = {
       const id = context.id
       const scope = api.resources?.[scopeName]
 
-      const row = await context.db(canonical.tableName)
+      let query = context.db(canonical.tableName)
         .where('id', id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
-        .first()
+
+      if (runHooks) {
+        context.knexQuery = {
+          query,
+          filters: context.queryParams?.filters,
+          schemaInfo: context.schemaInfo,
+          scopeName,
+          tableName: canonical.tableName,
+          db: context.db,
+          isAnyApi: true,
+          adapter: storageAdapter,
+          storageAdapter,
+        }
+
+        await runHooks('knexQueryFiltering')
+
+        if (context.knexQuery) {
+          delete context.knexQuery
+        }
+      }
+
+      const row = await query.first()
 
       if (!row) return null
       const translated = translateCanonicalRecordFromStorage(row, descriptor)

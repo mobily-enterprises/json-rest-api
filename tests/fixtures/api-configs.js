@@ -1180,14 +1180,14 @@ export async function createFieldSettersApi (knex, pluginOptions = {}) {
   return api
 }
 
-export async function createMultiHomeApi (knex, pluginOptions = {}) {
-  const { MultiHomePlugin } = await import('../../plugins/core/rest-api-multihome-plugin.js')
+export async function createAutoFilterApi (knex, pluginOptions = {}) {
+  const { AutoFilterPlugin } = await import('../../plugins/core/rest-api-autofilter-plugin.js')
 
   const api = new Api({
-    name: 'multihome-test-api',
+    name: 'autofilter-test-api',
   })
 
-  const tenantId = storageMode.isAnyApi() ? 'multihome_tenant' : storageMode.defaultTenant
+  const tenantId = storageMode.isAnyApi() ? 'autofilter_tenant' : storageMode.defaultTenant
   const previousTenant = storageMode.currentTenant
   if (storageMode.isAnyApi()) {
     storageMode.setCurrentTenant(tenantId)
@@ -1206,7 +1206,7 @@ export async function createMultiHomeApi (knex, pluginOptions = {}) {
       put: 'no',
       patch: 'minimal'
     },
-    sortableFields: ['id', 'title', 'name', 'tenant_id']
+    sortableFields: ['id', 'title', 'name', 'workspace_id', 'user_id']
   })
 
   await useStoragePlugin(api, knex, { tenantId })
@@ -1217,34 +1217,76 @@ export async function createMultiHomeApi (knex, pluginOptions = {}) {
     await api.use(ExpressPlugin, pluginOptions.express || {})
   }
 
-  // Add MultiHome plugin with configuration
-  await api.use(MultiHomePlugin, {
-    field: pluginOptions.field || 'tenant_id',
-    excludeResources: pluginOptions.excludeResources || ['system_settings'],
-    requireAuth: pluginOptions.requireAuth !== undefined ? pluginOptions.requireAuth : true,
-    allowMissing: pluginOptions.allowMissing || false,
-    extractor: pluginOptions.extractor || ((request) => {
-      // Default to header extraction for tests
-      return request.headers?.['x-tenant-id'] || null
-    })
+  const autofilterOptions = pluginOptions.autofilter || {}
+  const workspaceField = pluginOptions.workspaceField || 'workspace_id'
+  const userField = pluginOptions.userField || 'user_id'
+
+  await api.use(AutoFilterPlugin, {
+    ...autofilterOptions,
+    resolvers: {
+      workspace: ({ context }) => context.scopeValues?.workspaceId,
+      user: ({ context }) => context.scopeValues?.userId,
+      ...(autofilterOptions.resolvers || {})
+    },
+    presets: {
+      public: { filters: [] },
+      workspace: {
+        filters: [{ field: workspaceField, resolver: 'workspace' }]
+      },
+      user: {
+        filters: [{ field: userField, resolver: 'user' }]
+      },
+      workspace_user: {
+        filters: [
+          { field: workspaceField, resolver: 'workspace' },
+          { field: userField, resolver: 'user' }
+        ]
+      },
+      ...(autofilterOptions.presets || {})
+    }
   })
 
-  // Tenant-specific resources
+  await api.addResource('workspace_reports', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200 },
+      workspace_id: { type: 'string', required: true }
+    },
+    autofilter: 'workspace',
+    tableName: 'autofilter_workspace_reports'
+  })
+  await api.resources.workspace_reports.createKnexTable()
+  mapTable('autofilter_workspace_reports', 'workspace_reports')
+
+  await api.addResource('user_notes', {
+    schema: {
+      id: { type: 'id' },
+      body: { type: 'string', required: true, max: 500 },
+      user_id: { type: 'number', required: true }
+    },
+    autofilter: 'user',
+    tableName: 'autofilter_user_notes'
+  })
+  await api.resources.user_notes.createKnexTable()
+  mapTable('autofilter_user_notes', 'user_notes')
+
   await api.addResource('projects', {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
       description: { type: 'string', max: 1000 },
       status: { type: 'string', defaultTo: 'active' },
-      tenant_id: { type: 'string', required: true }
+      workspace_id: { type: 'string', required: true },
+      user_id: { type: 'number', required: true }
     },
     relationships: {
       tasks: { type: 'hasMany', target: 'tasks', foreignKey: 'project_id' }
     },
-    tableName: 'multihome_projects'
+    autofilter: 'workspace_user',
+    tableName: 'autofilter_projects'
   })
   await api.resources.projects.createKnexTable()
-  mapTable('multihome_projects', 'projects')
+  mapTable('autofilter_projects', 'projects')
 
   await api.addResource('tasks', {
     schema: {
@@ -1252,37 +1294,26 @@ export async function createMultiHomeApi (knex, pluginOptions = {}) {
       title: { type: 'string', required: true, max: 200 },
       completed: { type: 'boolean', defaultTo: false },
       project_id: { type: 'number', belongsTo: 'projects', as: 'project' },
-      tenant_id: { type: 'string', required: true }
+      workspace_id: { type: 'string', required: true },
+      user_id: { type: 'number', required: true }
     },
-    tableName: 'multihome_tasks'
+    autofilter: 'workspace_user',
+    tableName: 'autofilter_tasks'
   })
   await api.resources.tasks.createKnexTable()
-  mapTable('multihome_tasks', 'tasks')
+  mapTable('autofilter_tasks', 'tasks')
 
-  await api.addResource('users', {
-    schema: {
-      id: { type: 'id' },
-      email: { type: 'string', required: true, unique: true },
-      name: { type: 'string', required: true },
-      role: { type: 'string', defaultTo: 'member', search: true },
-      tenant_id: { type: 'string', required: true }
-    },
-    tableName: 'multihome_users'
-  })
-  await api.resources.users.createKnexTable()
-  mapTable('multihome_users', 'users')
-
-  // Global resource (excluded from multihome)
   await api.addResource('system_settings', {
     schema: {
       id: { type: 'id' },
       key: { type: 'string', required: true, unique: true },
       value: { type: 'string', required: true }
     },
-    tableName: 'multihome_system_settings'
+    autofilter: 'public',
+    tableName: 'autofilter_system_settings'
   })
   await api.resources.system_settings.createKnexTable()
-  mapTable('multihome_system_settings', 'system_settings')
+  mapTable('autofilter_system_settings', 'system_settings')
 
   if (storageMode.isAnyApi()) {
     storageMode.setCurrentTenant(previousTenant)
@@ -1779,4 +1810,3 @@ export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
 
   return api
 }
-

@@ -207,12 +207,12 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   const query = hookParams.context?.knexQuery?.query
   const db = hookParams.context?.knexQuery?.db || knex
 
-  const schemaInfo = scopes[scopeName].vars.schemaInfo
-  const tableAlias = adapterUtils.defaultAliasForScope(scopeName)
-
-  if (!filters) {
+  if (!scopeName || !filters || !scopes[scopeName]) {
     return
   }
+
+  const schemaInfo = scopes[scopeName].vars.schemaInfo
+  const tableAlias = adapterUtils.defaultAliasForScope(scopeName)
 
   // Step 1: Identify polymorphic searches
   const polymorphicSearches = new Map()
@@ -531,15 +531,15 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   const query = hookParams.context?.knexQuery?.query
   const db = hookParams.context?.knexQuery?.db || knex
 
+  if (!scopeName || !filters || !scopes[scopeName]) {
+    return
+  }
+
   const schemaInfo = scopes[scopeName].vars.schemaInfo
   const tableName = schemaInfo.tableName
   const tableAlias = adapterUtils.defaultAliasForScope(scopeName)
   const aliasScopeMap = new Map()
   aliasScopeMap.set(tableAlias, scopeName)
-
-  if (!filters) {
-    return
-  }
 
   // Step 1: Analyze indexes
   const requiredIndexes = analyzeRequiredIndexes(scopes, log, scopeName, schemaInfo)
@@ -944,6 +944,10 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   const query = hookParams.context?.knexQuery?.query
   const db = hookParams.context?.knexQuery?.db || knex
 
+  if (!scopeName || !filters || !scopes[scopeName]) {
+    return
+  }
+
   const schemaInfo = scopes[scopeName].vars.schemaInfo
   const tableName = schemaInfo.tableName
   const tableAlias = adapterUtils.defaultAliasForScope(scopeName)
@@ -955,11 +959,6 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
     searchSchemaKeys: Object.keys(schemaInfo.searchSchemaStructure || {}),
     tableName
   })
-
-  if (!filters) {
-    log.trace('[DEBUG basicFiltersHook] Returning early - no filters')
-    return
-  }
 
   // Check if we have any JOINs applied (to know if we need to qualify fields)
   // Instead of relying on hasJoins flag, always qualify fields for safety
