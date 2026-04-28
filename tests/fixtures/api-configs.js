@@ -1825,11 +1825,26 @@ export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
         type: 'array',
         filterOperator: 'between'
       },
+      // Arbitrary public filter name that searches across multiple fields.
+      // The key `term` is part of the API contract even though there is no `term` column.
+      term: {
+        type: 'string',
+        oneOf: ['name', 'description'],
+        filterOperator: 'like'
+      },
       // This is a virtual field
       category_name: {
         type: 'string',
         actualField: 'category.name',
         filterOperator: 'like'
+      },
+      // Arbitrary public filter name with fully custom server-side meaning.
+      // The Knex query layer decides what `availability` means.
+      availability: {
+        type: 'boolean',
+        applyFilter: (query, value) => {
+          query.where('status', value ? 'active' : 'inactive')
+        }
       },
       // This is an explicit field not marked with search:true
       // 'in' operator requires array type for validation

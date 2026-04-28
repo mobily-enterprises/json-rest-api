@@ -63,10 +63,17 @@ describe('SearchSchema Merge Behavior', () => {
     assert.ok(searchSchema.structure.price, 'price field should be searchable')
     assert.equal(searchSchema.structure.price.filterOperator, 'between', 'price should use between operator from searchSchema')
 
+    // Check that arbitrary public filter keys are allowed when defined intentionally
+    assert.ok(searchSchema.structure.term, 'term alias should be searchable')
+    assert.deepEqual(searchSchema.structure.term.oneOf, ['name', 'description'], 'term should map to multiple fields')
+
     // Check that virtual fields from searchSchema are present
     assert.ok(searchSchema.structure.category_name, 'category_name virtual field should be searchable')
     assert.equal(searchSchema.structure.category_name.filterOperator, 'like', 'category_name should use like operator')
     assert.equal(searchSchema.structure.category_name.actualField, 'category.name', 'category_name should map to category.name')
+
+    assert.ok(searchSchema.structure.availability, 'availability custom filter should be searchable')
+    assert.equal(typeof searchSchema.structure.availability.applyFilter, 'function', 'availability should use custom backend logic')
 
     // Check explicit searchSchema field not marked with search:true
     assert.ok(searchSchema.structure.status, 'status field should be searchable from searchSchema')
@@ -219,5 +226,51 @@ describe('SearchSchema Merge Behavior', () => {
     }, context)
     assert.equal(skuResults.data.length, 1, 'Should find one product by SKU')
     assert.equal(skuResults.data[0].attributes.sku, 'WGT-002')
+  })
+
+  it('should support arbitrary public filter keys when searchSchema maps them intentionally', async () => {
+    const context = {}
+
+    await api.resources.products.post({
+      inputRecord: createJsonApiDocument('products', {
+        name: 'Widget Alpha',
+        description: 'The great all-purpose widget',
+        price: 50,
+        sku: 'WGT-101',
+        status: 'active'
+      })
+    }, context)
+
+    await api.resources.products.post({
+      inputRecord: createJsonApiDocument('products', {
+        name: 'Widget Beta',
+        description: 'A quiet replacement unit',
+        price: 60,
+        sku: 'WGT-102',
+        status: 'inactive'
+      })
+    }, context)
+
+    const aliasResults = await api.resources.products.query({
+      queryParams: {
+        filters: {
+          term: 'great'
+        }
+      }
+    }, context)
+
+    assert.equal(aliasResults.data.length, 1, 'term should be resolved by backend search mapping')
+    assert.equal(aliasResults.data[0].attributes.name, 'Widget Alpha')
+
+    const customResults = await api.resources.products.query({
+      queryParams: {
+        filters: {
+          availability: true
+        }
+      }
+    }, context)
+
+    assert.equal(customResults.data.length, 1, 'availability should be interpreted by backend custom filter logic')
+    assert.equal(customResults.data[0].attributes.status, 'active')
   })
 })
