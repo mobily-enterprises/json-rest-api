@@ -27,7 +27,7 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
   
   <div class="feature-card">
     <h3>🔌 Plugin Architecture</h3>
-    <p>Extend your API with powerful plugins. Authentication, validation, CORS, and more - just plug and play.</p>
+    <p>Extend your API with focused plugins for transports, dataset scoping, query fields, CORS, and more.</p>
   </div>
   
   <div class="feature-card">

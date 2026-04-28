@@ -928,6 +928,32 @@ Each resource (added via `api.addResource()`) gets these methods automatically:
   await api.resources.countries.createKnexTable();
   ```
 
+- **`api.resources.{resourceName}.introspectKnexTableSnapshot()`** - Returns a normalized snapshot of the live physical table
+  ```javascript
+  const snapshot = await api.resources.countries.introspectKnexTableSnapshot();
+  ```
+
+- **`api.resources.{resourceName}.generateKnexMigration()`** - Generates a Knex create migration string for the resource
+  ```javascript
+  const migration = await api.resources.countries.generateKnexMigration();
+  ```
+
+- **`api.resources.{resourceName}.generateKnexMigrationDiff()`** - Generates an additive diff migration from the live table snapshot
+  ```javascript
+  const diff = await api.resources.countries.generateKnexMigrationDiff();
+  ```
+
+- **`api.resources.{resourceName}.addKnexFields({ fields })`** / **`alterKnexFields({ fields })`** - Column-only helpers for existing tables
+  ```javascript
+  await api.resources.countries.addKnexFields({
+    fields: {
+      iso3: { type: 'string', maxLength: 3 }
+    }
+  });
+  ```
+
+For full examples of snapshots, migration generation, diffing, and table metadata such as indexes / foreign keys / checks, see [Knex Schema and Migrations](GUIDE_X_Knex_Schema_And_Migrations.md).
+
 
 ## API Namespaces (internal, for plugin developers)
 
@@ -943,6 +969,7 @@ These helpers and methods provide a complete toolkit for:
 - Managing database transactions
 - Generating proper URLs and links
 - Accessing the underlying database when needed
+- Inspecting live tables and generating Knex migrations when using table-backed resources
 - Integrating with web frameworks like Express
 
 The architecture ensures clean separation between HTTP transport, business logic, and data persistence layers.

@@ -105,6 +105,8 @@ await api.resources.authors.createKnexTable();
 
 `searchSchema` defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. Keep the quickstart mental model simple: `searchSchema` is the resource's public filter contract. For advanced mapping, multi-field search, and custom backend filtering, see [Manipulating and Searching Tables](GUIDE/GUIDE_2_2_Manipulating_And_Searching_Tables.md).
 
+If you want to inspect the physical table shape or generate Knex migrations directly from your resource definitions, see [Knex Schema and Migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
+
 ## Run the program
 
 ```bash

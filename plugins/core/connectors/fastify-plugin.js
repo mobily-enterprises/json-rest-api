@@ -1,19 +1,20 @@
 import { createContext } from './lib/request-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
-import { buildFastifyRouteSchema } from './lib/fastify-transport-schemas.js'
-import { getUrlPrefix } from '../lib/querying/url-helpers.js'
+import { buildTransportRouteSchema } from './lib/transport-route-schemas.js'
 import {
   isWriteMethod,
   isAllowedWriteContentType,
-  getUnsupportedMediaTypeErrorBody,
-  determineResponseStatus,
-  mapRestApiErrorToHttp
+  getUnsupportedMediaTypeErrorBody
 } from './lib/transport-http-helpers.js'
-
-function getQueryString (request) {
-  const rawUrl = request?.raw?.url || request?.url || ''
-  return rawUrl.split('?')[1] || ''
-}
+import {
+  extractQueryString,
+  buildTransportRequestData,
+  createConnectorContext,
+  runTransportRequestLifecycle,
+  buildTransportRejectionBody,
+  executeConnectorRoute,
+  handleConnectorError
+} from './lib/connector-core.js'
 
 function applyHeaders (reply, headers = {}) {
   for (const [headerName, headerValue] of Object.entries(headers)) {
@@ -80,7 +81,7 @@ export const FastifyPlugin = {
     registerVendorJsonParser(app)
 
     const buildFastifyHandler = ({ method, path, handler, routeMeta }) => {
-      const routeSchema = buildFastifyRouteSchema({ routeMeta, api })
+      const routeSchema = buildTransportRouteSchema({ routeMeta, api })
 
       const fastifyErrorHandler = async (error, request, reply) => {
         enhancedLog.logError('Fastify request error', error, {
@@ -88,16 +89,16 @@ export const FastifyPlugin = {
           path: request.url
         })
 
-        const context = request.jsonRestContext || createContext(request, reply, 'fastify')
-        const { status, body } = mapRestApiErrorToHttp(error)
+        const context = request.jsonRestContext || null
+        const transportData = context?.transport || null
+        const { status, body, headers } = await handleConnectorError({
+          error,
+          context,
+          transportData,
+          runHooks
+        })
 
-        if (context.transport) {
-          context.transport.response.status = status
-          context.transport.response.body = body
-          await runHooks('transport:response', context)
-          applyHeaders(reply, context.transport.response.headers)
-        }
-
+        applyHeaders(reply, headers)
         reply.code(status)
         reply.type('application/vnd.api+json')
         return reply.send(body)
@@ -125,88 +126,71 @@ export const FastifyPlugin = {
         errorHandler: fastifyErrorHandler,
         preValidation,
         handler: async (request, reply) => {
-          const context = createContext(request, reply, 'fastify')
-
-          context.urlPrefix = getUrlPrefix(
-            context,
-            { vars: { transport: { mountPath } } },
-            request
-          )
-
-          const transportData = {
-            request: {
-              method: request.method,
-              url: request.url,
-              path: request.url,
-              headers: request.headers,
-              body: request.body,
-              params: request.params,
-              query: request.query
-            },
-            response: {
-              headers: {},
-              status: null
-            }
-          }
-
-          context.transport = transportData
+          const requestData = buildTransportRequestData({
+            method: request.method,
+            url: request.url,
+            path: request.url,
+            headers: request.headers,
+            body: request.body,
+            params: request.params,
+            query: request.query
+          })
+          const { context, transportData } = createConnectorContext({
+            request,
+            reply,
+            source: 'fastify',
+            mountPath,
+            requestData,
+            createContext
+          })
           request.jsonRestContext = context
 
-          await runHooks('transport:request', context)
+          const { rejected, handled } = await runTransportRequestLifecycle({
+            context,
+            runHooks
+          })
 
-          if (context.rejection) {
-            const rejectionBody = {
-              errors: [{
-                status: String(context.rejection.status || 500),
-                title: context.rejection.title || 'Request Rejected',
-                detail: context.rejection.message
-              }]
-            }
+          if (rejected) {
+            const rejectionBody = buildTransportRejectionBody(context)
             applyHeaders(reply, transportData.response.headers)
             reply.code(context.rejection.status || 500)
             reply.type('application/vnd.api+json')
             return reply.send(rejectionBody)
           }
 
-          if (context.handled) {
+          if (handled) {
             return
           }
 
-          const result = await handler({
-            queryString: getQueryString(request),
+          const outcome = await executeConnectorRoute({
+            method,
+            handler,
+            queryString: extractQueryString(request?.raw?.url || request?.url || ''),
             headers: request.headers,
             params: request.params,
             body: request.body,
-            context
+            context,
+            transportData,
+            routeMeta,
+            helpers,
+            mountPath,
+            runHooks
           })
 
-          const responseStatus = determineResponseStatus(method, result)
-
-          if (result?.headers) {
-            applyHeaders(reply, result.headers)
-          }
-
-          transportData.response.status = responseStatus
-          transportData.response.body = result
-          await runHooks('transport:response', context)
-          applyHeaders(reply, transportData.response.headers)
-
+          applyHeaders(reply, outcome.headers)
           reply.type('application/vnd.api+json')
 
-          if (method === 'POST' && context.id && routeMeta?.scopeName && helpers.getLocation) {
-            const location = helpers.getLocation({ scopeName: routeMeta.scopeName, id: context.id })
-            const baseUrl = context.urlPrefix || mountPath
-            reply.header('Location', `${baseUrl}${location}`)
+          if (outcome.location) {
+            reply.header('Location', outcome.location)
           }
 
-          if (responseStatus === 204) {
+          if (outcome.status === 204) {
             reply.code(204)
             return reply.send()
           }
 
-          const responseBody = result && result.body !== undefined ? result.body : result
-          reply.code(responseStatus)
-          return reply.send(responseBody)
+          reply.code(outcome.status)
+          return reply.send(outcome.body)
         }
       }
     }

@@ -151,7 +151,7 @@ function buildRelationshipsSchema (schemaInfo) {
   }
 }
 
-function buildFastifyRelationshipBodySchema (operation) {
+function buildRelationshipRouteBodySchema (operation) {
   if (!['postRelationship', 'patchRelationship', 'deleteRelationship'].includes(operation)) {
     return null
   }
@@ -173,7 +173,7 @@ function buildFastifyRelationshipBodySchema (operation) {
   }
 }
 
-export function buildFastifyResourceBodySchema ({ scopeName, schemaInfo, mode }) {
+export function buildTransportResourceBodySchema ({ scopeName, schemaInfo, mode }) {
   const dataProperties = {
     type: { const: scopeName }
   }
@@ -215,13 +215,13 @@ export function buildFastifyResourceBodySchema ({ scopeName, schemaInfo, mode })
   }
 }
 
-export function buildFastifyRouteSchema ({ routeMeta, api }) {
+export function buildTransportRouteSchema ({ routeMeta, api }) {
   if (!routeMeta) {
     return null
   }
 
   if (routeMeta.kind === 'relationship') {
-    const relationshipBodySchema = buildFastifyRelationshipBodySchema(routeMeta.operation)
+    const relationshipBodySchema = buildRelationshipRouteBodySchema(routeMeta.operation)
     return relationshipBodySchema ? { body: relationshipBodySchema } : null
   }
 
@@ -242,7 +242,7 @@ export function buildFastifyRouteSchema ({ routeMeta, api }) {
       : 'patch'
 
   return {
-    body: buildFastifyResourceBodySchema({
+    body: buildTransportResourceBodySchema({
       scopeName: routeMeta.scopeName,
       schemaInfo,
       mode

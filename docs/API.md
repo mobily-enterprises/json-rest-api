@@ -4,13 +4,15 @@ This reference provides comprehensive documentation for all methods, parameters,
 
 ## Important Notes
 
-1. **Context Parameter**: The `context` parameter shown in method signatures is typically managed internally by the framework. When using the API programmatically, you usually don't need to provide it unless you're implementing custom authentication or request-specific data.
+1. **Context Parameter**: The `context` parameter shown in method signatures is typically managed internally by the framework. When using the API programmatically, you usually don't need to provide it unless you're implementing custom request identity/auth context or other request-specific data.
 
-2. **Simplified Mode Defaults**: 
+2. **App-Owned Auth Context**: `json-rest-api` does not define authentication semantics. If you use `context.auth` in hooks, treat it as application-owned data supplied by your transport or surrounding stack.
+
+3. **Simplified Mode Defaults**: 
    - `simplifiedApi`: `true` (default for programmatic API calls)
    - `simplifiedTransport`: `false` (default for HTTP transport)
 
-3. **All parameters must be passed within a single params object** as the first argument to each method.
+4. **All parameters must be passed within a single params object** as the first argument to each method.
 
 ## Table of Contents
 
@@ -1400,7 +1402,7 @@ Each API method has its own specific hook execution order. Here's the exact sequ
 
 1. **Processing Hooks**: Only POST, PUT, and PATCH have `beforeProcessing` hooks
 2. **Schema Validation**: Only POST, PUT, and PATCH have schema validation hooks
-3. **Permission Checks**: GET uses `checkDataPermissions`, while relationship methods use `checkPermissions`
+3. **Permission Hooks**: GET uses `checkDataPermissions`, while relationship methods use `checkPermissions`
 4. **Query Filtering**: Only QUERY method triggers `knexQueryFiltering` hooks
 5. **Enrichment**: Only GET and QUERY have `enrichRecord` hooks
 6. **Relationships**: Only GET has `enrichRecordWithRelationships`
@@ -1421,7 +1423,7 @@ Each hook receives a context object with different properties based on the hook 
     queryParams: {...},
     simplified: true
   },
-  auth: {...},                 // Authentication info
+  auth: {...},                 // App-provided auth/identity context if present
   transaction: {...},          // Database transaction
   schemaInfo: {...},           // Resource schema
   db: {...}                    // Database connection
@@ -1490,7 +1492,7 @@ api.resource('articles').hook('afterSchemaValidate', async (context) => {
 }
 ```
 
-**Purpose:** Authorization checks - throw error to deny access
+**Purpose:** Permission or visibility checks implemented by your app hooks. Throw an error to deny the operation.
 
 **Example:**
 ```javascript
@@ -2243,13 +2245,9 @@ api.addResource({
       }
     },
     
-    // Permissions
-    permissions: {
-      create: ['author', 'admin'],
-      read: ['*'],
-      update: ['author', 'editor', 'admin'],
-      delete: ['admin']
-    },
+    // No built-in permissions option exists here.
+    // Use permission hooks for access decisions, and optional plugins
+    // such as AutoFilterPlugin for dataset scoping.
     
     // Soft delete configuration
     softDelete: {
@@ -2498,6 +2496,45 @@ try {
 ```
 
 **Important:** When you provide a transaction, you're responsible for committing/rolling back. When you don't provide one, the library auto-commits.
+
+### Knex Schema Helpers
+
+When a resource is backed by `RestApiKnexPlugin`, its scope also exposes table-management helpers:
+
+```javascript
+await api.resources.articles.createKnexTable()
+
+const snapshot = await api.resources.articles.introspectKnexTableSnapshot()
+const createMigration = await api.resources.articles.generateKnexMigration()
+const diff = await api.resources.articles.generateKnexMigrationDiff()
+```
+
+Available helpers:
+
+- `createKnexTable()`
+- `addKnexFields({ fields })`
+- `alterKnexFields({ fields })`
+- `introspectKnexTableSnapshot()`
+- `generateKnexMigration()`
+- `generateKnexMigrationDiff()`
+
+`generateKnexMigrationDiff()` returns:
+
+```javascript
+{
+  migration,
+  warnings,
+  plan
+}
+```
+
+Important boundaries:
+
+- this is a live-table snapshot diff, not migration-history reconstruction
+- `addKnexFields()` and `alterKnexFields()` are field-only helpers
+- indexes, foreign keys, and check constraints belong on the full table schema surface
+
+For full examples and dialect notes, see [Knex Schema and Migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
 
 ### Batch Operations
 

@@ -21,10 +21,17 @@ import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import {
   isWriteMethod,
   isAllowedWriteContentType,
-  getUnsupportedMediaTypeErrorBody,
-  determineResponseStatus,
-  mapRestApiErrorToHttp
+  getUnsupportedMediaTypeErrorBody
 } from './lib/transport-http-helpers.js'
+import {
+  extractQueryString,
+  buildTransportRequestData,
+  createConnectorContext,
+  runTransportRequestLifecycle,
+  buildTransportRejectionBody,
+  executeConnectorRoute,
+  handleConnectorError
+} from './lib/connector-core.js'
 
 export const ExpressPlugin = {
   name: 'express',
@@ -122,58 +129,39 @@ export const ExpressPlugin = {
 
     // Add transport hook middleware
     router.use(async (req, res, next) => {
-      const context = createContext(req, res, 'express')
+      const requestData = buildTransportRequestData({
+        method: req.method,
+        url: req.url,
+        path: req.path,
+        headers: req.headers,
+        body: req.body,
+        params: req.params,
+        query: req.query
+      })
+      const { context, transportData } = createConnectorContext({
+        request: req,
+        reply: res,
+        source: 'express',
+        mountPath: basePath,
+        requestData,
+        createContext,
+        urlPrefixOverride: req.urlPrefixOverride
+      })
+      const { rejected, handled } = await runTransportRequestLifecycle({
+        context,
+        runHooks
+      })
 
-      // Check for Express middleware override first
-      if (req.urlPrefixOverride) {
-        context.urlPrefixOverride = req.urlPrefixOverride
-      }
-
-      // Calculate and cache URL prefix (getUrlPrefix handles all logic)
-      const { getUrlPrefix } = await import('../lib/querying/url-helpers.js')
-      context.urlPrefix = getUrlPrefix(context, { vars: { transport: { mountPath: basePath } } }, req)
-
-      // Transport-specific data for hooks
-      const transportData = {
-        request: {
-          method: req.method,
-          url: req.url,
-          path: req.path,
-          headers: req.headers,
-          body: req.body,
-          params: req.params,
-          query: req.query
-        },
-        response: {
-          headers: {},
-          status: null
-        }
-      }
-
-      // Add transport data to context
-      context.transport = transportData
-
-      // Run transport hooks - don't check return value for consistency with other hooks
-      // Hooks communicate via context flags (rejection, handled) not return values
-      await runHooks('transport:request', context)
-
-      // Check if request was rejected (e.g., authentication failure)
-      if (context.rejection) {
-        // Apply response headers from hooks
+      if (rejected) {
         if (transportData.response.headers) {
           res.set(transportData.response.headers)
         }
-        return res.status(context.rejection.status || 500).json({
-          errors: [{
-            status: String(context.rejection.status || 500),
-            title: context.rejection.title || 'Request Rejected',
-            detail: context.rejection.message
-          }]
-        })
+        return res.status(context.rejection.status || 500).json(
+          buildTransportRejectionBody(context)
+        )
       }
 
-      // Check if request was already handled by a hook
-      if (context.handled) {
+      if (handled) {
         return
       }
 
@@ -209,21 +197,16 @@ export const ExpressPlugin = {
         url: req.url
       })
 
-      const { status, body: errorResponse } = mapRestApiErrorToHttp(error)
+      const { status, body: errorResponse, headers } = await handleConnectorError({
+        error,
+        context: req.context,
+        transportData: req.transportData,
+        runHooks
+      })
 
-      // Run transport:response hook for errors
-      if (req.transportData && req.context) {
-        req.transportData.response.status = status
-        req.transportData.response.body = errorResponse
-        req.context.transport = req.transportData
-        await runHooks('transport:response', req.context)
-
-        // Apply response headers from hooks
-        if (req.transportData.response.headers) {
-          res.set(req.transportData.response.headers)
-        }
+      if (headers) {
+        res.set(headers)
       }
-
       res.status(status).json(errorResponse)
     }
 
@@ -231,7 +214,7 @@ export const ExpressPlugin = {
      * Listen to addRoute hook to create Express routes
      */
     addHook('addRoute', 'expressRouteCreator', {}, async ({ context }) => {
-      const { method, path, handler } = context
+      const { method, path, handler, routeMeta } = context
 
       // Apply any global before middleware
       const beforeMiddleware = expressOptions.middleware?.beforeAll || []
@@ -240,63 +223,62 @@ export const ExpressPlugin = {
         // Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
         const expressHandler = async (req, res) => {
           try {
-            // Extract request data
-            const queryString = req.url.split('?')[1] || ''
-            const context = req.context || createContext(req, res, 'express')
+            let context = req.context
+            let transportData = req.transportData
 
-            // Call the generic handler
-            const result = await handler({
-              queryString,
+            if (!context || !transportData) {
+              const requestData = buildTransportRequestData({
+                method: req.method,
+                url: req.url,
+                path: req.path,
+                headers: req.headers,
+                body: req.body,
+                params: req.params,
+                query: req.query
+              })
+              const setup = createConnectorContext({
+                request: req,
+                reply: res,
+                source: 'express',
+                mountPath: basePath,
+                requestData,
+                createContext,
+                urlPrefixOverride: req.urlPrefixOverride
+              })
+              context = setup.context
+              transportData = setup.transportData
+              req.context = context
+              req.transportData = transportData
+            }
+
+            const outcome = await executeConnectorRoute({
+              method: req.method,
+              handler,
+              queryString: extractQueryString(req.url),
               headers: req.headers,
               params: req.params,
               body: req.body,
-              context
+              context,
+              transportData,
+              routeMeta,
+              helpers,
+              mountPath: basePath,
+              runHooks
             })
-
-            // Prepare response status
-            const responseStatus = determineResponseStatus(req.method, result)
-
-            // Apply headers from the handler result
-            if (result && result.headers) {
-              res.set(result.headers)
-            }
-
-            // Update transport data for response (if transport data exists)
-            if (req.transportData) {
-              req.transportData.response.status = responseStatus
-              req.transportData.response.body = result
-              context.transport = req.transportData
-              await runHooks('transport:response', context)
-              if (req.transportData.response.headers) {
-                res.set(req.transportData.response.headers)
-              }
-            }
+            res.set(outcome.headers)
 
             // Set content type
             res.set('Content-Type', 'application/vnd.api+json')
 
-            // Set Location header for successful POST requests
-            if (req.method === 'POST' && context.id) {
-              // Extract scopeName from the path (e.g., /api/countries -> countries)
-              const pathParts = path.split('/')
-              const scopeName = pathParts[pathParts.length - 1]
-
-              // Set Location header for any successful POST (201 or 204)
-              if (helpers.getLocation) {
-                const location = helpers.getLocation({ scopeName, id: context.id })
-                const baseUrl = context.urlPrefix || basePath
-                res.set('Location', `${baseUrl}${location}`)
-              }
+            if (outcome.location) {
+              res.set('Location', outcome.location)
             }
 
             // Handle response based on status
-            if (responseStatus === 204) {
+            if (outcome.status === 204) {
               res.sendStatus(204)
             } else {
-              // If result has a body property, that's what we should send
-              // This happens when handler returns { statusCode, body, headers }
-              const responseBody = result && result.body !== undefined ? result.body : result
-              res.status(responseStatus).json(responseBody)
+              res.status(outcome.status).json(outcome.body)
             }
           } catch (error) {
             handleError(error, req, res)

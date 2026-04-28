@@ -2,54 +2,11 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { Api } from 'hooked-api'
 import { RestApiPlugin, FastifyPlugin } from '../index.js'
-
-class FakeFastifyApp {
-  constructor () {
-    this.routes = []
-    this.parsers = []
-  }
-
-  route (definition) {
-    this.routes.push(definition)
-  }
-
-  addContentTypeParser (contentType, options, parser) {
-    this.parsers.push({ contentType, options, parser })
-  }
-
-  hasContentTypeParser (contentType) {
-    return this.parsers.some((entry) => entry.contentType === contentType)
-  }
-}
-
-class FakeReply {
-  constructor () {
-    this.statusCode = null
-    this.contentType = null
-    this.headers = {}
-    this.payload = undefined
-  }
-
-  code (statusCode) {
-    this.statusCode = statusCode
-    return this
-  }
-
-  type (contentType) {
-    this.contentType = contentType
-    return this
-  }
-
-  header (name, value) {
-    this.headers[name] = value
-    return this
-  }
-
-  send (payload) {
-    this.payload = payload
-    return this
-  }
-}
+import {
+  FakeFastifyApp,
+  FakeReply,
+  findFastifyRoute
+} from './helpers/fake-fastify.js'
 
 async function createFastifyConnectorApi () {
   const app = new FakeFastifyApp()
@@ -88,10 +45,6 @@ async function createFastifyConnectorApi () {
   return { api, app }
 }
 
-function findRoute (app, method, url) {
-  return app.routes.find((route) => route.method === method && route.url === url)
-}
-
 describe('Fastify Plugin', () => {
   let api
   let app
@@ -101,13 +54,13 @@ describe('Fastify Plugin', () => {
   })
 
   it('registers Fastify write routes with schema-backed JSON:API body validation', () => {
-    const postRoute = findRoute(app, 'POST', '/api/articles')
-    const putRoute = findRoute(app, 'PUT', '/api/articles/:id')
-    const patchRoute = findRoute(app, 'PATCH', '/api/articles/:id')
-    const getRoute = findRoute(app, 'GET', '/api/articles/:id')
-    const postRelationshipRoute = findRoute(app, 'POST', '/api/articles/:id/relationships/:relationshipName')
-    const patchRelationshipRoute = findRoute(app, 'PATCH', '/api/articles/:id/relationships/:relationshipName')
-    const deleteRelationshipRoute = findRoute(app, 'DELETE', '/api/articles/:id/relationships/:relationshipName')
+    const postRoute = findFastifyRoute(app, 'POST', '/api/articles')
+    const putRoute = findFastifyRoute(app, 'PUT', '/api/articles/:id')
+    const patchRoute = findFastifyRoute(app, 'PATCH', '/api/articles/:id')
+    const getRoute = findFastifyRoute(app, 'GET', '/api/articles/:id')
+    const postRelationshipRoute = findFastifyRoute(app, 'POST', '/api/articles/:id/relationships/:relationshipName')
+    const patchRelationshipRoute = findFastifyRoute(app, 'PATCH', '/api/articles/:id/relationships/:relationshipName')
+    const deleteRelationshipRoute = findFastifyRoute(app, 'DELETE', '/api/articles/:id/relationships/:relationshipName')
 
     assert.ok(postRoute?.schema?.body, 'POST route should have a body schema')
     assert.ok(putRoute?.schema?.body, 'PUT route should have a body schema')
@@ -147,7 +100,7 @@ describe('Fastify Plugin', () => {
     assert.ok(parser, 'Fastify connector should register the JSON:API parser')
     assert.deepEqual(parser.options, { parseAs: 'string' })
 
-    const postRoute = findRoute(app, 'POST', '/api/articles')
+    const postRoute = findFastifyRoute(app, 'POST', '/api/articles')
     const reply = new FakeReply()
 
     await postRoute.preValidation(
@@ -181,7 +134,7 @@ describe('Fastify Plugin', () => {
       handler: async () => ({ ok: true })
     })
 
-    const customRoute = findRoute(app, 'POST', '/api/custom-endpoint')
+    const customRoute = findFastifyRoute(app, 'POST', '/api/custom-endpoint')
     assert.ok(customRoute)
     assert.equal(customRoute.schema, undefined)
   })

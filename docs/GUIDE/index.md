@@ -39,6 +39,9 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[Autofiltering](GUIDE_X_Autofiltering.md)**  
   Scope datasets automatically using configured context values, without baking in auth semantics.
 
+- **[Knex Schema and Migrations](GUIDE_X_Knex_Schema_And_Migrations.md)**  
+  Create tables, inspect live table snapshots, and generate create or additive diff migrations from table-backed resource scopes.
+
 - **[Query Projections](GUIDE_X_Query_Projections.md)**  
   Use the optional query-projections plugin to add SQL-backed, output-only derived fields that can participate in sorting and cursor pagination.
 
