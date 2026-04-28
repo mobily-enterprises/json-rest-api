@@ -41,8 +41,14 @@ export function getUrlPrefix (context, scope, req = null) {
 
   // Priority 3: Calculate from request if provided
   if (req) {
-    const protocol = req.get?.('x-forwarded-proto') || req.protocol || 'http'
-    const host = req.get?.('x-forwarded-host') || req.get?.('host')
+    const protocol = req.get?.('x-forwarded-proto') ||
+      req.headers?.['x-forwarded-proto'] ||
+      req.protocol ||
+      'http'
+    const host = req.get?.('x-forwarded-host') ||
+      req.headers?.['x-forwarded-host'] ||
+      req.get?.('host') ||
+      req.headers?.host
     const mountPath = scope?.vars?.transport?.mountPath || ''
 
     if (host) {

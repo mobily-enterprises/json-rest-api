@@ -45,6 +45,9 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[Writing Plugins](GUIDE_X_Writing_Plugins.md)**  
   Build plugins against the supported extension surface, including hooks, scope methods, and query-only read fields.
 
+- **[Fastify Integration](GUIDE_X_Fastify.md)**  
+  Register REST routes on Fastify and reject malformed write payloads at the transport layer using exported resource schemas.
+
 - **[Socket.IO Integration](GUIDE_X_SocketIO.md)**  
   Add real-time capabilities to your API with WebSocket support.
 

@@ -36,35 +36,40 @@ export default async function registerRelationshipRoutes ({ context, api, log })
   await api.addRoute({
     method: 'GET',
     path: `${scopePath}/:id/relationships/:relationshipName`,
-    handler: createRouteHandler('getRelationship')
+    handler: createRouteHandler('getRelationship'),
+    routeMeta: { kind: 'relationship', scopeName, operation: 'getRelationship' }
   })
 
   // GET /api/{scope}/{id}/{relationshipName}
   await api.addRoute({
     method: 'GET',
     path: `${scopePath}/:id/:relationshipName`,
-    handler: createRouteHandler('getRelated')
+    handler: createRouteHandler('getRelated'),
+    routeMeta: { kind: 'relationship', scopeName, operation: 'getRelated' }
   })
 
   // POST /api/{scope}/{id}/relationships/{relationshipName}
   await api.addRoute({
     method: 'POST',
     path: `${scopePath}/:id/relationships/:relationshipName`,
-    handler: createRouteHandler('postRelationship')
+    handler: createRouteHandler('postRelationship'),
+    routeMeta: { kind: 'relationship', scopeName, operation: 'postRelationship' }
   })
 
   // PATCH /api/{scope}/{id}/relationships/{relationshipName}
   await api.addRoute({
     method: 'PATCH',
     path: `${scopePath}/:id/relationships/:relationshipName`,
-    handler: createRouteHandler('patchRelationship')
+    handler: createRouteHandler('patchRelationship'),
+    routeMeta: { kind: 'relationship', scopeName, operation: 'patchRelationship' }
   })
 
   // DELETE /api/{scope}/{id}/relationships/{relationshipName}
   await api.addRoute({
     method: 'DELETE',
     path: `${scopePath}/:id/relationships/:relationshipName`,
-    handler: createRouteHandler('deleteRelationship')
+    handler: createRouteHandler('deleteRelationship'),
+    routeMeta: { kind: 'relationship', scopeName, operation: 'deleteRelationship' }
   })
 
   log.trace(`Registered relationship routes for scope: ${scopeName}`)

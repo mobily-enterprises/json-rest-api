@@ -60,42 +60,48 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
   await api.addRoute({
     method: 'GET',
     path: scopePath,
-    handler: createRouteHandler(scopeName, 'query')
+    handler: createRouteHandler(scopeName, 'query'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'query' }
   })
 
   // GET /api/{scope}/{id} - Get single resource
   await api.addRoute({
     method: 'GET',
     path: `${scopePath}/:id`,
-    handler: createRouteHandler(scopeName, 'get')
+    handler: createRouteHandler(scopeName, 'get'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'get' }
   })
 
   // POST /api/{scope} - Create resource
   await api.addRoute({
     method: 'POST',
     path: scopePath,
-    handler: createRouteHandler(scopeName, 'post')
+    handler: createRouteHandler(scopeName, 'post'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'post' }
   })
 
   // PUT /api/{scope}/{id} - Replace resource
   await api.addRoute({
     method: 'PUT',
     path: `${scopePath}/:id`,
-    handler: createRouteHandler(scopeName, 'put')
+    handler: createRouteHandler(scopeName, 'put'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'put' }
   })
 
   // PATCH /api/{scope}/{id} - Update resource
   await api.addRoute({
     method: 'PATCH',
     path: `${scopePath}/:id`,
-    handler: createRouteHandler(scopeName, 'patch')
+    handler: createRouteHandler(scopeName, 'patch'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'patch' }
   })
 
   // DELETE /api/{scope}/{id} - Delete resource
   await api.addRoute({
     method: 'DELETE',
     path: `${scopePath}/:id`,
-    handler: createRouteHandler(scopeName, 'delete')
+    handler: createRouteHandler(scopeName, 'delete'),
+    routeMeta: { kind: 'resource', scopeName, operation: 'delete' }
   })
 
   log.info(`Routes registered for scope '${scopeName}'`)

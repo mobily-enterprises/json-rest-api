@@ -148,10 +148,16 @@ Work List
     - query-field selection is supported on the Knex path and the AnyAPI Knex path, including included resources
     - documented as a separate advanced guide so it does not blur with response-layer computed fields
 
-11. [pending] Add a Fastify-oriented connector layer in json-rest-api.
+11. [done] Add a Fastify-oriented connector layer in json-rest-api.
     Deliverables:
     - consume exported schema before request handling
     - no jskit-ai compatibility shim
+    Notes:
+    - added `FastifyPlugin` as a transport connector that registers REST routes on a supplied Fastify instance
+    - resource `POST`/`PUT`/`PATCH` routes now attach transport-facing JSON Schemas built from `schema.toJsonSchema({ mode })`, wrapped in the JSON:API document envelope
+    - connector-level transport schemas strip output-only/computed fields and direct `belongsTo` foreign keys from `data.attributes`, matching the existing transport write contract
+    - connector registers an `application/vnd.api+json` parser and rejects unsupported write content types before route handlers run
+    - no jskit-ai compatibility shim or duplicate hand-written field validation layer was added
 
 12. [pending] Remove the corresponding DB/schema/normalization ownership from jskit-ai and verify parity.
     Deliverables:

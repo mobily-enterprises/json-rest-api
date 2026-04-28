@@ -22,7 +22,7 @@ export { RestApiAnyapiKnexPlugin } from './plugins/core/rest-api-anyapi-knex-plu
 
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js'
-// Future: export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js';
+export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js'
 // Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
 
 // Storage plugins for file handling

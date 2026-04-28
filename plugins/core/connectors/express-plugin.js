@@ -18,6 +18,13 @@ import { requirePackage } from 'hooked-api'
 import { parseJsonApiQuery } from '../lib/querying-writing/connectors-query-parser.js'
 import { createContext } from './lib/request-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
+import {
+  isWriteMethod,
+  isAllowedWriteContentType,
+  getUnsupportedMediaTypeErrorBody,
+  determineResponseStatus,
+  mapRestApiErrorToHttp
+} from './lib/transport-http-helpers.js'
 
 export const ExpressPlugin = {
   name: 'express',
@@ -179,18 +186,13 @@ export const ExpressPlugin = {
     // Content type validation middleware
     if (strictContentType) {
       router.use((req, res, next) => {
-        if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        if (isWriteMethod(req.method)) {
           const contentType = req.get('Content-Type')
 
-          if (contentType && !contentType.includes('application/vnd.api+json') &&
-              !contentType.includes('application/json') && !contentType.includes('multipart/form-data')) {
-            return res.status(415).json({
-              errors: [{
-                status: '415',
-                title: 'Unsupported Media Type',
-                detail: 'Content-Type must be application/vnd.api+json or application/json'
-              }]
-            })
+          if (!isAllowedWriteContentType(contentType, { allowMultipart: true })) {
+            return res.status(415).json(
+              getUnsupportedMediaTypeErrorBody({ allowMultipart: true })
+            )
           }
         }
         next()
@@ -207,63 +209,7 @@ export const ExpressPlugin = {
         url: req.url
       })
 
-      let status = 500
-      const errorResponse = {
-        errors: [{
-          status: '500',
-          title: 'Internal Server Error',
-          detail: error.message
-        }]
-      }
-
-      // Map error codes to HTTP status
-      if (error.code === 'REST_API_VALIDATION') {
-        status = 422
-        errorResponse.errors = [{
-          status: '422',
-          title: 'Validation Error',
-          detail: error.message,
-          source: error.details
-        }]
-        if (error.details?.violations) {
-          errorResponse.errors = error.details.violations.map(v => ({
-            status: '422',
-            title: 'Validation Error',
-            detail: v.message,
-            source: { pointer: v.field }
-          }))
-        }
-      } else if (error.code === 'REST_API_RESOURCE') {
-        switch (error.subtype) {
-          case 'not_found':
-            status = 404
-            errorResponse.errors[0].status = '404'
-            errorResponse.errors[0].title = 'Not Found'
-            break
-          case 'conflict':
-            status = 409
-            errorResponse.errors[0].status = '409'
-            errorResponse.errors[0].title = 'Conflict'
-            break
-          case 'forbidden':
-            status = 403
-            errorResponse.errors[0].status = '403'
-            errorResponse.errors[0].title = 'Forbidden'
-            break
-          default:
-            status = 400
-            errorResponse.errors[0].status = '400'
-            errorResponse.errors[0].title = 'Bad Request'
-        }
-      } else if (error.code === 'REST_API_PAYLOAD') {
-        status = 400
-        errorResponse.errors = [{
-          status: '400',
-          title: 'Bad Request',
-          detail: error.message,
-          source: { pointer: error.path }
-        }]
-      }
+      const { status, body: errorResponse } = mapRestApiErrorToHttp(error)
 
       // Run transport:response hook for errors
       if (req.transportData && req.context) {
@@ -308,22 +254,7 @@ export const ExpressPlugin = {
             })
 
             // Prepare response status
-            let responseStatus = 200
-            if (result && typeof result.statusCode === 'number') {
-              responseStatus = result.statusCode
-            } else if (req.method === 'POST' && result) {
-              // POST with content returns 201 Created
-              responseStatus = 201
-            } else if (req.method === 'POST' && !result) {
-              // POST without content returns 204 No Content
-              responseStatus = 204
-            } else if (req.method === 'DELETE') {
-              // DELETE always returns 204 No Content
-              responseStatus = 204
-            } else if ((req.method === 'PUT' || req.method === 'PATCH') && !result) {
-              // PUT/PATCH return 204 when no content is returned
-              responseStatus = 204
-            }
+            const responseStatus = determineResponseStatus(req.method, result)
 
             // Apply headers from the handler result
             if (result && result.headers) {
