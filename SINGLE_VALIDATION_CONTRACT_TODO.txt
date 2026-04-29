@@ -1,0 +1,172 @@
+Single Validation Contract TODO
+
+Goal
+- Make `json-rest-schema` the single authored validation contract in `json-rest-api`.
+- Keep plain JSON Schema only as a derived transport artifact for connectors.
+- Remove the split between:
+  - resource/search validation via `json-rest-schema`
+  - hand-written JSON:API/query validators in `plugins/core/lib/querying-writing/payload-validators.js`
+
+Current audit status
+- [done] Audit the live validation paths and identify the actual indirection.
+
+Root cause
+- Validation is split across three places:
+  1. `plugins/core/lib/querying-writing/compile-schemas.js`
+     - compiles resource and search schemas with `createSchema(...)`
+  2. `plugins/core/lib/querying-writing/payload-validators.js`
+     - manually validates JSON:API request envelopes and query parameter objects
+  3. `plugins/core/connectors/lib/transport-route-schemas.js`
+     - separately builds connector-facing JSON Schemas from `schemaInfo`
+- This duplicates contract meaning across runtime and transport.
+- Route methods still call imperative payload validators before calling
+  `schemaInstance.create()`, `schemaInstance.replace()`, or `schemaInstance.patch()`.
+- `setupCommonRequest()` in `plugins/core/rest-api-plugin-methods/common.js`
+  also repeats some checks that are already transport-contract concerns.
+
+What the neat end state looks like
+- Authored contract:
+  - `json-rest-schema` only
+- Derived transport schema:
+  - plain JSON Schema, generated from the same compiled contract
+- Runtime write validation:
+  - uses the same compiled contract as Fastify pre-validation
+- Remaining imperative checks:
+  - only stateful/business checks that are not schema concerns
+  - examples: permission checks, record existence, relationship access, complete-replace semantics
+
+What should stay imperative
+- `validateRelationshipAccess()` in `plugins/core/rest-api-plugin-methods/common.js`
+- `validateCompleteReplacePayload()` in `plugins/core/rest-api-plugin-methods/common.js`
+- path/body cross-source checks such as URL id vs body id consistency
+- permission and data existence checks
+
+What should stop existing
+- `validateGetPayload()`
+- `validateQueryPayload()`
+- `validatePostPayload()`
+- `validatePutPayload()`
+- `validatePatchPayload()`
+- duplicate route/body/query syntax checks spread across route methods and `setupCommonRequest()`
+
+Work list
+
+1. [done] Define one compiled request-contract surface for resource `get/query/post/put/patch`.
+   Target files:
+   - `plugins/core/lib/querying-writing/compile-schemas.js`
+   - `plugins/core/connectors/lib/transport-route-schemas.js`
+   Deliverables:
+   - compile request contracts once per scope
+   - store them on `scope.vars.schemaInfo` or an adjacent compiled-contract object
+   - separate:
+     - write document contracts (`post`, `put`, `patch`)
+     - query/get contracts (`get`, `query`)
+     - relationship route contracts
+   Status:
+   - resource route contracts now compile once in `request-contracts.js`
+   - relationship route contracts are still separate and remain pending work
+
+2. [done] Replace manual write-document validation with compiled schema contracts.
+   Target files:
+   - `plugins/core/lib/querying-writing/payload-validators.js`
+   - `plugins/core/rest-api-plugin-methods/post.js`
+   - `plugins/core/rest-api-plugin-methods/put.js`
+   - `plugins/core/rest-api-plugin-methods/patch.js`
+   Deliverables:
+   - one compiled JSON:API document contract per write mode
+   - `data.type` constrained to the scope name inside the contract
+   - `data.id` required/optional according to mode
+   - `attributes` contract derived from `schemaInstance.toJsonSchema({ mode })`
+   - relationship identifier contracts derived from `schemaRelationships` and `belongsTo` metadata
+   - `included` rules expressed once in the contract rather than repeated manually
+
+3. [done] Replace manual GET/query parameter validation with compiled schema contracts.
+   Target files:
+   - `plugins/core/lib/querying-writing/payload-validators.js`
+   - `plugins/core/rest-api-plugin-methods/get.js`
+   - `plugins/core/rest-api-plugin-methods/query.js`
+   Deliverables:
+   - a compiled `get` contract for:
+     - `id`
+     - `queryParams.include`
+     - `queryParams.fields`
+   - a compiled `query` contract for:
+     - `include`
+     - `fields`
+     - `filters`
+     - `sort`
+     - `page`
+   - include-depth validation and sortable-field restrictions represented in the compiled contract, not duplicated in ad hoc code
+   Notes:
+   - `searchSchemaInstance` should remain the value contract for `filters`
+   - the query contract should validate the envelope/shape, not duplicate filter semantics
+
+4. [done] Collapse Fastify pre-validation and in-process validation onto the same source for resource write routes.
+   Target files:
+   - `plugins/core/connectors/lib/transport-route-schemas.js`
+   - `plugins/core/connectors/fastify-plugin.js`
+   - route methods in `plugins/core/rest-api-plugin-methods/`
+   Deliverables:
+   - Fastify consumes transport JSON Schema exported from the compiled request contract
+   - route methods consume the same compiled contract directly for runtime validation
+   - no second hand-written envelope contract path
+
+5. [done] Shrink `setupCommonRequest()` to non-schema responsibilities.
+   Target file:
+   - `plugins/core/rest-api-plugin-methods/common.js`
+   Deliverables:
+   - keep simplified-mode conversion, transaction setup, context wiring
+   - keep stateful/business checks only
+   - remove syntax/envelope checks that belong in the compiled contract
+   - keep only cross-input checks that a single schema cannot express cleanly
+
+6. [done] Delete `payload-validators.js`.
+   Target file:
+   - `plugins/core/lib/querying-writing/payload-validators.js`
+   Deliverables:
+   - no route method imports it anymore
+   - helper logic worth keeping is either:
+     - absorbed into compiled contracts
+     - or moved into narrowly named stateful helpers
+
+7. [done] Tighten tests around the single-contract flow.
+   Target areas:
+   - `tests/fastify-plugin.test.js`
+   - route method coverage exercised by the existing REST suites
+   - add one focused contract test suite if needed
+   Deliverables:
+   - prove Fastify pre-validation and runtime validation reject the same bad inputs
+   - cover:
+     - wrong `data.type`
+     - missing/invalid `data.id`
+     - invalid relationships
+     - invalid query/include/page/sort shapes
+   - verify there is no drift between transport schema and runtime schema behavior
+
+8. [done] Proof cleanup.
+   Deliverables:
+   - `rg` proof that route methods no longer import `payload-validators.js`
+   - `rg` proof that `validateGetPayload`, `validateQueryPayload`, `validatePostPayload`,
+     `validatePutPayload`, and `validatePatchPayload` are gone
+   - `npm test`
+
+Current state
+- Resource `get/query/post/put/patch` now use one compiled contract source.
+- Fastify transport schemas for those resource routes are derived from the same compiled contract.
+- `payload-validators.js` is deleted.
+- `npm test` passes.
+- The main remaining simplification is the separate relationship-route contract path.
+
+File map for the next implementation pass
+- Remaining relationship-route cleanup:
+  - `plugins/core/rest-api-plugin-methods/post-relationship.js`
+  - `plugins/core/rest-api-plugin-methods/patch-relationship.js`
+  - `plugins/core/rest-api-plugin-methods/delete-relationship.js`
+- Transport schema generator to reuse, not duplicate:
+  - `plugins/core/connectors/lib/transport-route-schemas.js`
+
+Explicit non-goals
+- Do not move permission checks into schemas.
+- Do not move DB existence checks into schemas.
+- Do not turn `searchSchema` into a generic filter DSL.
+- Do not add a compatibility layer that preserves both manual validators and compiled contracts.

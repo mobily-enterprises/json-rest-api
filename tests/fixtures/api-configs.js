@@ -125,7 +125,8 @@ export async function createBasicApi (knex, pluginOptions = {}) {
         country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
       },
       relationships: {
-        books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
+        books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' },
+        authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' }
       },
       tableName: `${tablePrefix}_publishers`
     })
@@ -136,7 +137,8 @@ export async function createBasicApi (knex, pluginOptions = {}) {
     await api.addResource('authors', {
       schema: {
         id: { type: 'id' },
-        name: { type: 'string', required: true, max: 200 }
+        name: { type: 'string', required: true, max: 200 },
+        publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher' }
       },
       relationships: {
         books: { type: 'manyToMany', through: 'book_authors', foreignKey: 'author_id', otherKey: 'book_id' }

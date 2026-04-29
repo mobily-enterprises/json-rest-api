@@ -1,9 +1,8 @@
-import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { validateQueryPayload } from '../lib/querying-writing/payload-validators.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
 import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
 import { getEffectiveSortableFields } from '../lib/querying/query-field-sort-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
+import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { cascadeConfig } from './common.js'
 
 /**
@@ -62,7 +61,6 @@ export default async function queryMethod ({
   context.scopeName = scopeName
 
   // These are just shortcuts used in this function and will be returned
-  const searchSchema = context.schemaInfo.searchSchemaInstance
   const schemaStructure = context.schemaInfo.schemaInstance.structure
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
@@ -73,53 +71,18 @@ export default async function queryMethod ({
     context.queryParams.sort = Array.isArray(vars.defaultSort) ? vars.defaultSort : [vars.defaultSort]
   }
 
-  // Validate query parameters to ensure they follow JSON:API specification and security rules.
-  // This checks that filters are valid field names, sort fields exist in sortableFields array
-  // (preventing SQL injection), pagination uses valid page[size]/page[number] format, and include
-  // paths reference real relationships. Example: sort: ['-createdAt', 'title'] is checked against
-  // sortableFields to ensure users can't sort by sensitive fields like 'password_hash'.
-  validateQueryPayload({ queryParams: context.queryParams }, context.sortableFields, vars.includeDepthLimit)
-
-  // Validate search/filter parameters against searchSchema
-  if (context.queryParams.filters && Object.keys(context.queryParams.filters).length > 0) {
-    // Only allow filtering if searchSchema is defined
-    if (!searchSchema) {
-      throw new RestApiValidationError(
-        `Filtering is not enabled for resource '${scopeName}'. To enable filtering, add 'search: true' to schema fields or define a searchSchema.`,
-        {
-          fields: Object.keys(context.queryParams.filters).map(field => `filters.${field}`),
-          violations: [{
-            field: 'filters',
-            rule: 'filtering_not_enabled',
-            message: 'Resource does not have searchable fields defined'
-          }]
-        }
-      )
-    }
-
-    // Validate only the filters that were explicitly provided.
-    const { validatedObject, errors } = await searchSchema.patch(context.queryParams.filters)
-
-    // If there are validation errors, throw an error
-    if (Object.keys(errors).length > 0) {
-      const violations = Object.entries(errors).map(([field, error]) => ({
-        field: `filters.${field}`,
-        rule: error.code || 'invalid_value',
-        message: error.message
-      }))
-
-      throw new RestApiValidationError(
-        'Invalid filter parameters',
-        {
-          fields: Object.keys(errors).map(field => `filters.${field}`),
-          violations
-        }
-      )
-    }
-
-    // Replace filter with validated/transformed values
-    context.queryParams.filters = validatedObject
-  }
+  const requestContracts = getRequestContracts({
+    scopeName,
+    schemaInfo: context.schemaInfo,
+    includeDepthLimit: vars.includeDepthLimit,
+    sortableFields: context.sortableFields
+  })
+  const validatedRequest = validateRequestContractOrThrow(
+    requestContracts.query,
+    { queryParams: context.queryParams },
+    'Query parameters are invalid'
+  )
+  context.queryParams = validatedRequest.queryParams || {}
 
   // Centralised checkPermissions function
   await scope.checkPermissions({

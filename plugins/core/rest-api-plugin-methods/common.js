@@ -1,7 +1,6 @@
 import {
   RestApiResourceError,
-  RestApiValidationError,
-  RestApiPayloadError
+  RestApiValidationError
 } from '../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
@@ -141,56 +140,6 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
     context.inputRecord = transformSimplifiedToJsonApi(
       { inputRecord: context.inputRecord },
       { context: { scopeName, schemaStructure, schemaRelationships } }
-    )
-  } else {
-    // Strict mode: validate no belongsTo fields in attributes
-    if (context.inputRecord?.data?.attributes) {
-      for (const [key, fieldDef] of Object.entries(schemaStructure)) {
-        if (fieldDef.belongsTo && key in context.inputRecord.data.attributes) {
-          throw new RestApiValidationError(
-            `Field '${key}' is a foreign key and must be set via relationships, not attributes`,
-            { fields: [`data.attributes.${key}`] }
-          )
-        }
-      }
-    }
-  }
-
-  if (context.inputRecord.data.type !== scopeName) {
-    throw new RestApiValidationError(
-      `Resource type mismatch. Expected '${scopeName}' but got '${context.inputRecord.data.type}'`,
-      {
-        fields: ['data.type'],
-        violations: [{
-          field: 'data.type',
-          rule: 'resource_type_match',
-          message: `Resource type must be '${scopeName}'`
-        }]
-      }
-    )
-  }
-
-  // Remove included validation since JSON:API doesn't support it
-  if (context.inputRecord.included) {
-    throw new RestApiPayloadError(
-      context.method + ' requests cannot include an "included" array. JSON:API does not support creating multiple resources in a single request.',
-      { path: 'included', expected: 'undefined', received: 'array' }
-    )
-  }
-
-  // If both URL path ID and request body ID are provided, they must match
-  // Convert both to strings for comparison since databases may return numeric IDs
-  if (context.id && context.inputRecord.data.id && String(context.id) !== String(context.inputRecord.data.id)) {
-    throw new RestApiValidationError(
-      `ID mismatch. URL path ID '${context.id}' does not match request body ID '${context.inputRecord.data.id}'`,
-      {
-        fields: ['data.id'],
-        violations: [{
-          field: 'data.id',
-          rule: 'id_consistency',
-          message: 'Request body ID must match URL path ID when both are provided'
-        }]
-      }
     )
   }
 

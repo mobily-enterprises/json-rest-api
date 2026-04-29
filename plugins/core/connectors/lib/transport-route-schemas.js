@@ -1,3 +1,5 @@
+import { getRequestContracts } from '../../lib/querying-writing/request-contracts.js'
+
 const STRING_OR_NUMBER_SCHEMA = {
   anyOf: [
     { type: 'string' },
@@ -5,149 +7,35 @@ const STRING_OR_NUMBER_SCHEMA = {
   ]
 }
 
-const NULLABLE_STRING_OR_NUMBER_SCHEMA = {
-  anyOf: [
-    { type: 'string' },
-    { type: 'number' },
-    { type: 'null' }
-  ]
-}
-
-function cloneSchema (schema) {
-  return structuredClone(schema)
-}
-
-function removeRequiredField (schema, fieldName) {
-  if (!Array.isArray(schema.required)) return
-  schema.required = schema.required.filter((entry) => entry !== fieldName)
-  if (schema.required.length === 0) {
-    delete schema.required
-  }
-}
-
-function buildAttributesSchema (schemaInfo, mode) {
-  const attributesSchema = cloneSchema(
-    schemaInfo.schemaInstance.toJsonSchema({
-      mode,
-      additionalProperties: false
-    })
-  )
-
-  delete attributesSchema.$schema
-
-  const schemaStructure = schemaInfo.schemaStructure || {}
-  const idProperty = schemaInfo.idProperty || 'id'
-
-  delete attributesSchema.properties?.[idProperty]
-  removeRequiredField(attributesSchema, idProperty)
-
-  for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-    if (!fieldDef) continue
-
-    if (fieldDef.computed === true) {
-      delete attributesSchema.properties?.[fieldName]
-      removeRequiredField(attributesSchema, fieldName)
-      continue
-    }
-
-    if (fieldDef.belongsTo && fieldDef.as) {
-      delete attributesSchema.properties?.[fieldName]
-      removeRequiredField(attributesSchema, fieldName)
-    }
-  }
-
-  return attributesSchema
-}
-
-function buildResourceIdentifierSchema (allowedTypes = null) {
-  const typeSchema = Array.isArray(allowedTypes) && allowedTypes.length > 0
-    ? { enum: allowedTypes }
-    : { type: 'string', minLength: 1 }
-
+function buildResourceIdentifierSchema () {
   return {
     type: 'object',
     additionalProperties: false,
     required: ['type', 'id'],
     properties: {
-      type: typeSchema,
+      type: { type: 'string', minLength: 1 },
       id: STRING_OR_NUMBER_SCHEMA
     }
   }
 }
 
-function buildRelationshipValueSchema (allowedTypes = null) {
-  const identifierSchema = buildResourceIdentifierSchema(allowedTypes)
-
-  return {
-    anyOf: [
-      { type: 'null' },
-      identifierSchema,
-      {
-        type: 'array',
-        items: identifierSchema
-      }
-    ]
-  }
-}
-
-function buildRelationshipsSchema (schemaInfo) {
-  const properties = {}
-  const schemaStructure = schemaInfo.schemaStructure || {}
-  const schemaRelationships = schemaInfo.schemaRelationships || {}
-
-  for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-    if (!fieldDef?.belongsTo || !fieldDef.as) continue
-    properties[fieldDef.as] = {
-      type: 'object',
-      additionalProperties: false,
-      required: ['data'],
-      properties: {
-        data: buildRelationshipValueSchema([fieldDef.belongsTo])
-      }
-    }
-  }
-
-  for (const [relationshipName, relDef] of Object.entries(schemaRelationships)) {
-    if (!relDef) continue
-
-    if (relDef.belongsToPolymorphic?.types?.length) {
-      properties[relationshipName] = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['data'],
-        properties: {
-          data: buildRelationshipValueSchema(relDef.belongsToPolymorphic.types)
+function buildRelationshipValueSchema (operation) {
+  if (operation === 'patchRelationship') {
+    return {
+      anyOf: [
+        { type: 'null' },
+        buildResourceIdentifierSchema(),
+        {
+          type: 'array',
+          items: buildResourceIdentifierSchema()
         }
-      }
-      continue
-    }
-
-    if (relDef.type === 'manyToMany') {
-      const allowedTypes = relDef.target ? [relDef.target] : null
-      properties[relationshipName] = {
-        type: 'object',
-        additionalProperties: false,
-        required: ['data'],
-        properties: {
-          data: buildRelationshipValueSchema(allowedTypes)
-        }
-      }
-    }
-  }
-
-  const genericRelationshipSchema = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['data'],
-    properties: {
-      data: buildRelationshipValueSchema()
+      ]
     }
   }
 
   return {
-    type: 'object',
-    properties,
-    additionalProperties: genericRelationshipSchema
+    type: 'array',
+    items: buildResourceIdentifierSchema()
   }
 }
 
@@ -156,61 +44,12 @@ function buildRelationshipRouteBodySchema (operation) {
     return null
   }
 
-  const dataSchema = operation === 'patchRelationship'
-    ? buildRelationshipValueSchema()
-    : {
-        type: 'array',
-        items: buildResourceIdentifierSchema()
-      }
-
   return {
     type: 'object',
     additionalProperties: false,
     required: ['data'],
     properties: {
-      data: dataSchema
-    }
-  }
-}
-
-export function buildTransportResourceBodySchema ({ scopeName, schemaInfo, mode }) {
-  const dataProperties = {
-    type: { const: scopeName }
-  }
-  const dataRequired = ['type']
-  const attributesSchema = buildAttributesSchema(schemaInfo, mode)
-  const relationshipsSchema = buildRelationshipsSchema(schemaInfo)
-
-  dataProperties.attributes = attributesSchema
-  dataProperties.relationships = relationshipsSchema
-
-  if (mode === 'create') {
-    dataProperties.id = NULLABLE_STRING_OR_NUMBER_SCHEMA
-  } else {
-    dataProperties.id = STRING_OR_NUMBER_SCHEMA
-    dataRequired.push('id')
-  }
-
-  const dataSchema = {
-    type: 'object',
-    additionalProperties: false,
-    required: dataRequired,
-    properties: dataProperties
-  }
-
-  if (mode === 'patch') {
-    dataSchema.anyOf = [
-      { required: ['attributes'] },
-      { required: ['relationships'] }
-    ]
-  }
-
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['data'],
-    properties: {
-      data: dataSchema
+      data: buildRelationshipValueSchema(operation)
     }
   }
 }
@@ -235,17 +74,19 @@ export function buildTransportRouteSchema ({ routeMeta, api }) {
     return null
   }
 
-  const mode = routeMeta.operation === 'post'
-    ? 'create'
-    : routeMeta.operation === 'put'
-      ? 'replace'
-      : 'patch'
+  const requestContracts = getRequestContracts({
+    scopeName: routeMeta.scopeName,
+    schemaInfo,
+    includeDepthLimit: scope?.vars?.includeDepthLimit,
+    sortableFields: scope?.vars?.sortableFields
+  })
+
+  const contract = requestContracts[routeMeta.operation]
+  if (!contract?.schema) {
+    return null
+  }
 
   return {
-    body: buildTransportResourceBodySchema({
-      scopeName: routeMeta.scopeName,
-      schemaInfo,
-      mode
-    })
+    body: contract.schema.toJsonSchema({ mode: contract.mode, additionalProperties: false })
   }
 }

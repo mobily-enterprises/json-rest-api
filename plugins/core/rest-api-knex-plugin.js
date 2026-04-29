@@ -926,8 +926,14 @@ export const RestApiKnexPlugin = {
 
       log.debug(`[Knex] POST ${tableName}`, inputRecord)
 
-      // Extract attributes from JSON:API format
-      const attributes = inputRecord.data.attributes
+      // Extract attributes from JSON:API format.
+      // POST may legitimately provide a resource id when the table uses a custom primary key
+      // (for example, one-to-one rows keyed by user_id/workspace_id). Keep that id in the
+      // attribute bag so storage translation can write it to the configured id column.
+      const attributes = {
+        ...(inputRecord.data.attributes || {}),
+        ...(inputRecord.data.id !== undefined ? { id: inputRecord.data.id } : {})
+      }
 
       // Strip non-database fields (computed and virtual) before insert
       const dbAttributes = storageAdapter?.toStorageRow

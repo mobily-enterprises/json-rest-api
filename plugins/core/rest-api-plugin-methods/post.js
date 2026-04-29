@@ -1,5 +1,5 @@
-import { validatePostPayload } from '../lib/querying-writing/payload-validators.js'
 import { processRelationships } from '../lib/writing/relationship-processor.js'
+import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import {
   setupCommonRequest,
@@ -50,12 +50,17 @@ export default async function postMethod ({
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPost')
 
-    // Validate POST payload to ensure it follows JSON:API format and references valid resources.
-    // This checks the payload has required 'data' object with 'type' and 'attributes', validates
-    // that data.type matches a real resource type (preventing creation of non-existent resources),
-    // and ensures any relationships reference valid resource types with proper ID format.
-    // Example: data.type: 'articles' must be a registered scope, relationships.author must reference 'users'.
-    validatePostPayload(context.inputRecord, scopes)
+    const requestContracts = getRequestContracts({
+      scopeName,
+      schemaInfo: context.schemaInfo,
+      includeDepthLimit: vars.includeDepthLimit,
+      sortableFields: vars.sortableFields
+    })
+    context.inputRecord = validateRequestContractOrThrow(
+      requestContracts.post,
+      context.inputRecord,
+      'POST request body is invalid'
+    )
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access

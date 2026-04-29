@@ -1,8 +1,8 @@
-import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { validatePatchPayload } from '../lib/querying-writing/payload-validators.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateManyToManyRelationship } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
+import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import {
   setupCommonRequest,
   validateResourceAttributesBeforeWrite,
@@ -49,19 +49,35 @@ export default async function patchMethod ({
       api,
       helpers
     })
-    context.id = context.inputRecord.data.id
-
     // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPatch')
 
-    // Validate PATCH payload to ensure the partial update actually contains changes.
-    // PATCH requests must include either attributes to update or relationships to modify -
-    // an empty PATCH is invalid. This prevents accidental no-op requests and ensures clients
-    // are explicit about what they want to change. Unlike PUT, PATCH preserves all fields
-    // not mentioned in the request.
-    // Example: data must have either attributes: {title: 'New'} or relationships: {author: {...}}
-    validatePatchPayload(context.inputRecord, scopes)
+    const requestContracts = getRequestContracts({
+      scopeName,
+      schemaInfo: context.schemaInfo,
+      includeDepthLimit: vars.includeDepthLimit,
+      sortableFields: vars.sortableFields
+    })
+    context.inputRecord = validateRequestContractOrThrow(
+      requestContracts.patch,
+      context.inputRecord,
+      'PATCH request body is invalid'
+    )
+    if (params.id && String(params.id) !== String(context.inputRecord.data.id)) {
+      throw new RestApiValidationError(
+        `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.inputRecord.data.id}'`,
+        {
+          fields: ['data.id'],
+          violations: [{
+            field: 'data.id',
+            rule: 'id_consistency',
+            message: 'Request body ID must match URL path ID when both are provided'
+          }]
+        }
+      )
+    }
+    context.id = params.id || context.inputRecord.data.id
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access
