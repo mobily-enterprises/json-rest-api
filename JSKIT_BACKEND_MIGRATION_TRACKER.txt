@@ -163,3 +163,18 @@ Work List
     Deliverables:
     - no jskit-ai-owned DB/schema normalization path remains for the migrated surface
     - verification notes for anything still intentionally left outside scope
+
+ADDENDUM ITEMS TO POINT 12:
+
+* This is the reason we did points 1 to 11 (!).
+* Needs to be done with a lot of care, since it's harder than it looks 
+* You MUST read AGENTS.md in jskit-ai VERY carefully, follow it VERY carefully. One of the previous attempts (4 failed in total) was unsuccessful because this step was missed. That file has important instructions on how to avoid repeated helpers and a pointer to important function maps
+* There must be NOTHING left of the in house DB stuff. jskit is only a user of what json-rest-api offers.
+* NO SHIMS. NO COMPATIBILITY LAYERS. NO LAYERS AT ALL. NO RUNTIMES.
+* In an earlier attempt, you made a runtime that mimiked the repository's functions. NO. Repository functions will use json-rest-api's functions to do what they need to do
+* A repository should be simple. It can have helper functions, but if it has a LOT of helper functions, there is a problem -- interrupt and let's talk. This happened in the workspace repository
+* Multi homing is to be done with the generic filtering option of json-rest-api
+* Take a LOT of care with the definiton of the resource file. Do NOT keep the old Type + Normalisation flow. That is GONE. We now have json-rest-schema, and that's what you need to use. One of the 4 failed attempts failed because you were stubborn about reusing that paradigm
+* The resource file (which is what is used by the server, AND by the client) needs to be clean, and contain the right information (schemas, relationships, etc). It's a DATA ONLY file.
+* The goal is to devoid jskit of any db logic/layering/
+

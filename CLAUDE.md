@@ -71,7 +71,7 @@ This separation ensures backend developers have full control and visibility into
    - `url-helpers.js` - Centralized URL generation functions
    - `knex-json-api-transformers-querying.js` - JSON:API transformations
    - `relationship-processor.js` - Handles relationship updates
-   - `payload-validators.js` - Request validation
+   - `request-contracts.js` - Compiled request validation contracts
    - `knex-query-helpers.js` - Database query building
    - `simplified-helpers.js` - Simplified API mode transformations
 
@@ -158,4 +158,3 @@ const book = await api.resources.books.post({
 3. **ID Type Confusion**: SQLite returns numeric IDs, but JSON:API expects strings
 4. **Context Placement**: Context is a separate parameter, not inside the first parameter
 5. **Cleanup**: Always destroy knex connection in `after()` hook
-

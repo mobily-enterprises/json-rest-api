@@ -1,8 +1,8 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { validateGetPayload } from '../lib/querying-writing/payload-validators.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
 import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
+import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { cascadeConfig } from './common.js'
 
 /**
@@ -41,11 +41,11 @@ export default async function getMethod ({
 
   // Assign common context properties
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
-  context.queryParams = params.queryParams || {}
-
-  // These only make sense as parameter per query
-  context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {})
-  context.queryParams.include = cascadeConfig('include', [context.queryParams], [])
+  const rawQueryParams = params.queryParams || {}
+  context.queryParams = {
+    fields: cascadeConfig('fields', [rawQueryParams], {}),
+    include: cascadeConfig('include', [rawQueryParams], [])
+  }
 
   context.transaction = params.transaction
   context.db = context.transaction || api.knex.instance
@@ -56,14 +56,23 @@ export default async function getMethod ({
   const schemaStructure = context.schemaInfo.schemaInstance.structure
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
-  context.id = params.id
+  const requestContracts = getRequestContracts({
+    scopeName,
+    schemaInfo: context.schemaInfo,
+    includeDepthLimit: vars.includeDepthLimit,
+    sortableFields: vars.sortableFields
+  })
+  const validatedRequest = validateRequestContractOrThrow(
+    requestContracts.get,
+    {
+      id: params.id,
+      queryParams: context.queryParams
+    },
+    'GET request parameters are invalid'
+  )
 
-  // Validate GET request to ensure required parameters are present and properly formatted.
-  // This checks that 'id' parameter exists and is not empty (you can't GET without an ID),
-  // validates 'include' contains valid relationship names (not arbitrary fields), and ensures
-  // 'fields' for sparse fieldsets follow the format fields[type]=comma,separated,list.
-  // Example: validates id: '123' exists, include: ['author', 'tags'] are real relationships.
-  validateGetPayload({ id: context.id, queryParams: context.queryParams }, vars.includeDepthLimit)
+  context.id = validatedRequest.id
+  context.queryParams = validatedRequest.queryParams || {}
 
   // Fetch minimal record for authorization checks
   const minimalRecord = await helpers.dataGetMinimal({

@@ -1,8 +1,8 @@
-import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { validatePutPayload } from '../lib/querying-writing/payload-validators.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateManyToManyRelationship, createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
+import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import {
   setupCommonRequest,
   validateCompleteReplacePayload,
@@ -51,16 +51,35 @@ export default async function putMethod ({
       api,
       helpers
     })
-    context.id = context.inputRecord.data.id
-
     // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPut')
 
-    // Validate PUT payload shape.
-    // PUT requires the full resource target including ID, but field-level replacement
-    // completeness is enforced later once we know the current stored record.
-    validatePutPayload(context.inputRecord, scopes)
+    const requestContracts = getRequestContracts({
+      scopeName,
+      schemaInfo: context.schemaInfo,
+      includeDepthLimit: vars.includeDepthLimit,
+      sortableFields: vars.sortableFields
+    })
+    context.inputRecord = validateRequestContractOrThrow(
+      requestContracts.put,
+      context.inputRecord,
+      'PUT request body is invalid'
+    )
+    if (params.id && String(params.id) !== String(context.inputRecord.data.id)) {
+      throw new RestApiValidationError(
+        `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.inputRecord.data.id}'`,
+        {
+          fields: ['data.id'],
+          violations: [{
+            field: 'data.id',
+            rule: 'id_consistency',
+            message: 'Request body ID must match URL path ID when both are provided'
+          }]
+        }
+      )
+    }
+    context.id = params.id || context.inputRecord.data.id
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access
