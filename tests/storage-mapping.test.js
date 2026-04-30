@@ -70,13 +70,12 @@ describe('Storage mapping', () => {
     await api.addResource('profiles', {
       schema: {
         id: { type: 'id' },
-        displayName: { type: 'string', required: true, storage: { column: 'display_name' } },
-        loginCount: { type: 'number', defaultTo: 0, storage: { column: 'login_count' } },
+        displayName: { type: 'string', required: true, search: true },
+        loginCount: { type: 'number', defaultTo: 0 },
         lastSeenAt: {
           type: 'dateTime',
           nullable: true,
           storage: {
-            column: 'last_seen_at',
             serialize: serializeDateTimeForSql
           }
         },
@@ -84,14 +83,25 @@ describe('Storage mapping', () => {
           type: 'id',
           nullable: true,
           belongsTo: 'countries',
-          as: 'country',
-          storage: { column: 'country_id' }
+          as: 'country'
         },
+        externalRef: { type: 'string', nullable: true, search: true, storage: { column: 'legacy_ref' } },
         confirmationToken: { type: 'string', virtual: true }
       },
       tableName: 'mapped_profiles'
     })
     await api.resources.profiles.createKnexTable()
+
+    await api.addResource('verbatim_profiles', {
+      storage: { naming: 'exact' },
+      schema: {
+        id: { type: 'id' },
+        displayName: { type: 'string', required: true },
+        loginCount: { type: 'number', defaultTo: 0 }
+      },
+      tableName: 'verbatim_profiles'
+    })
+    await api.resources.verbatim_profiles.createKnexTable()
   })
 
   after(async () => {
@@ -99,7 +109,7 @@ describe('Storage mapping', () => {
   })
 
   beforeEach(async () => {
-    await cleanTables(knex, ['mapped_profiles', 'mapped_countries'])
+    await cleanTables(knex, ['mapped_profiles', 'mapped_countries', 'verbatim_profiles'])
   })
 
   it('persists mapped columns while exposing logical field names', async () => {
@@ -116,6 +126,7 @@ describe('Storage mapping', () => {
           displayName: 'Mercury',
           loginCount: 7,
           lastSeenAt: '2026-01-02T03:04:05Z',
+          externalRef: 'legacy-001',
           confirmationToken: 'secret-token'
         },
         {
@@ -140,6 +151,7 @@ describe('Storage mapping', () => {
     assert.equal(dbRecord.login_count, 7)
     assert.equal(dbRecord.last_seen_at, '2026-01-02 03:04:05')
     assert.equal(String(dbRecord.country_id), country.data.id)
+    assert.equal(dbRecord.legacy_ref, 'legacy-001')
     assert.ok(!('displayName' in dbRecord))
     assert.ok(!('countryId' in dbRecord))
     assert.ok(!('confirmationToken' in dbRecord))
@@ -164,6 +176,22 @@ describe('Storage mapping', () => {
       'country',
       resourceIdentifier('countries', country.data.id)
     )
+
+    const queryResult = await api.resources.profiles.query({
+      queryParams: {
+        filters: {
+          displayName: 'Mercury',
+          externalRef: 'legacy-001'
+        }
+      }
+    })
+
+    validateJsonApiStructure(queryResult, true)
+    assert.equal(queryResult.data.length, 1)
+    assertResourceAttributes(queryResult.data[0], {
+      displayName: 'Mercury',
+      externalRef: 'legacy-001'
+    })
   })
 
   it('applies storage mapping on PATCH updates and sparse fieldsets', async () => {
@@ -206,5 +234,26 @@ describe('Storage mapping', () => {
     assert.equal(dbRecord.display_name, 'After')
     assert.equal(dbRecord.last_seen_at, '2026-02-03 04:05:06')
     assert.ok(!('displayName' in dbRecord))
+  })
+
+  it('can opt out of snake_case translation for an entire resource', async () => {
+    const created = await api.resources.verbatim_profiles.post({
+      inputRecord: createJsonApiDocument('verbatim_profiles', {
+        displayName: 'Exact Mode',
+        loginCount: 3
+      })
+    })
+
+    validateJsonApiStructure(created)
+    assertResourceAttributes(created.data, {
+      displayName: 'Exact Mode',
+      loginCount: 3
+    })
+
+    const dbRecord = await knex('verbatim_profiles').where('id', created.data.id).first()
+    assert.equal(dbRecord.displayName, 'Exact Mode')
+    assert.equal(dbRecord.loginCount, 3)
+    assert.equal(Object.hasOwn(dbRecord, 'display_name'), false)
+    assert.equal(Object.hasOwn(dbRecord, 'login_count'), false)
   })
 })

@@ -29,8 +29,8 @@ Example:
 await api.addResource('memberships', {
   schema: {
     id: { type: 'id' },
-    workspaceId: { type: 'id', required: true, storage: { column: 'workspace_id' } },
-    userId: { type: 'id', required: true, storage: { column: 'user_id' } },
+    workspaceId: { type: 'id', required: true },
+    userId: { type: 'id', required: true },
     role: { type: 'string', enum: ['owner', 'member'], required: true, defaultTo: 'member' }
   },
 
@@ -61,6 +61,83 @@ await api.addResource('memberships', {
   ],
 
   tableName: 'memberships'
+})
+```
+
+## Default Column Naming
+
+Table-backed resources keep logical field names in the resource schema and map them to physical columns for Knex operations.
+
+By default, physical columns use snake_case:
+
+- `workspaceId` -> `workspace_id`
+- `userId` -> `user_id`
+- `createdAt` -> `created_at`
+
+This keeps the API surface expressive without repeating `storage.column` on every camelCase field.
+
+You only need `storage.column` when a field should use a non-standard column name:
+
+```js
+await api.addResource('profiles', {
+  schema: {
+    id: { type: 'id' },
+    displayName: { type: 'string', required: true },
+    legacyRef: { type: 'string', storage: { column: 'legacy_profile_ref' } }
+  },
+  tableName: 'profiles'
+})
+```
+
+If you need physical columns to match the logical field names exactly for a whole resource, opt out explicitly:
+
+```js
+await api.addResource('verbatim_profiles', {
+  storage: { naming: 'exact' },
+  schema: {
+    id: { type: 'id' },
+    displayName: { type: 'string', required: true }
+  },
+  tableName: 'verbatim_profiles'
+})
+```
+
+## Logical IDs and `idProperty`
+
+`idProperty` names the physical primary-key column for table-backed resources. The API contract still uses the logical resource id.
+
+```js
+await api.addResource('profiles', {
+  idProperty: 'user_id',
+  schema: {
+    id: { type: 'id', required: true, storage: { column: 'user_id' } },
+    displayName: { type: 'string', required: true },
+    loginCount: { type: 'number', defaultTo: 0 }
+  },
+  tableName: 'profiles'
+})
+```
+
+With this definition:
+
+- writes send the resource id as `id` or `data.id`
+- reads return the resource id as `id` or `data.id`
+- the primary key is stored in `user_id`
+- `displayName` and `loginCount` are stored in `display_name` and `login_count`
+
+The resource id is not part of `attributes`:
+
+```js
+await api.resources.profiles.post({
+  inputRecord: {
+    data: {
+      type: 'profiles',
+      id: '42',
+      attributes: {
+        displayName: 'Mercury'
+      }
+    }
+  }
 })
 ```
 

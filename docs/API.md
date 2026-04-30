@@ -593,8 +593,8 @@ const result = await api.resources.[resourceType].put(params, context)
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Complete resource data |
-| `inputRecord.id` | String | Yes (simplified) | Resource ID |
-| `inputRecord.data.id` | String | Yes (JSON:API) | Must match the resource ID |
+| `inputRecord.id` | String | Yes (simplified) | Logical resource ID |
+| `inputRecord.data.id` | String | Yes (JSON:API) | Logical resource ID |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
 | `inputRecord.data.attributes` | Object | Yes (JSON:API) | All resource attributes |
 | `inputRecord.data.relationships` | Object | No | All relationships (missing ones are nulled) |
@@ -602,6 +602,8 @@ const result = await api.resources.[resourceType].put(params, context)
 | `simplified` | Boolean | No | Override simplified mode (default: true) |
 | `transaction` | Object | No | Database transaction object |
 | `returnFullRecord` | String | No | Override return setting |
+
+`inputRecord.id` and `inputRecord.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
 
 #### Return Value
 
@@ -720,8 +722,8 @@ const result = await api.resources.[resourceType].patch(params, context)
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Partial resource data |
-| `inputRecord.id` | String | Yes (simplified) | Resource ID |
-| `inputRecord.data.id` | String | Yes (JSON:API) | Resource ID |
+| `inputRecord.id` | String | Yes (simplified) | Logical resource ID |
+| `inputRecord.data.id` | String | Yes (JSON:API) | Logical resource ID |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
 | `inputRecord.data.attributes` | Object | No | Attributes to update |
 | `inputRecord.data.relationships` | Object | No | Relationships to update |
@@ -2128,7 +2130,7 @@ api.addResource({
   name: 'articles',
   
   // Primary key configuration
-  idProperty: 'id',                 // Custom primary key field (default: 'id')
+  idProperty: 'id',                 // Physical primary-key column name for table-backed resources
   
   schema: {
     // Attributes
@@ -2275,18 +2277,38 @@ api.addResource({
 
 #### ID Property Configuration
 ```javascript
-// Custom primary key
+// Physical primary key column: user_id
 api.addResource({
   name: 'users',
-  idProperty: 'user_id',  // Use 'user_id' instead of 'id'
+  idProperty: 'user_id',
   schema: {
-    attributes: {
-      user_id: { type: 'number', required: true },
-      email: { type: 'string', required: true }
-    }
+    id: { type: 'id', required: true, storage: { column: 'user_id' } },
+    email: { type: 'string', required: true },
+    displayName: { type: 'string' }
   }
 });
 ```
+
+`idProperty` names the physical primary-key column for table-backed resources. At the API layer, the resource id remains `id`, so writes use `inputRecord.id` or `inputRecord.data.id`, reads return `id` or `data.id`, and the resource id is not part of `attributes`.
+
+#### Storage Column Naming
+
+Table-backed resources use snake_case physical columns by default. For example, `displayName` maps to `display_name`.
+
+Use `storage.column` when a field needs a specific column name:
+
+```javascript
+api.addResource({
+  name: 'profiles',
+  schema: {
+    id: { type: 'id' },
+    displayName: { type: 'string', required: true },
+    legacyRef: { type: 'string', storage: { column: 'legacy_profile_ref' } }
+  }
+});
+```
+
+If physical columns should match logical field names exactly for an entire resource, use `storage: { naming: 'exact' }`.
 
 #### Virtual Fields
 Virtual fields are excluded from database operations but can be used for temporary UI state:

@@ -118,10 +118,10 @@ describe('dbTablesOperations.createKnexTable', () => {
 
     await db('users').insert({ username: 'testuser' })
     const user = await db('users').where('username', 'testuser').first()
-    await db('posts').insert({ title: 'Test Post', userId: user.id })
+    await db('posts').insert({ title: 'Test Post', user_id: user.id })
 
     const posts = await db('posts')
-      .join('users', 'posts.userId', 'users.id')
+      .join('users', 'posts.user_id', 'users.id')
       .select('posts.title', 'users.username')
 
     assert.equal(posts.length, 1)
@@ -173,10 +173,11 @@ describe('dbTablesOperations.createKnexTable', () => {
     })
   })
 
-  it('uses storage column overrides when creating tables', async () => {
+  it('defaults storage columns to snake_case and keeps per-field overrides', async () => {
     const schema = makeTableSchema({
-      displayName: { type: 'string', required: true, storage: { column: 'display_name' } },
-      lastSeenAt: { type: 'dateTime', storage: { column: 'last_seen_at' } }
+      displayName: { type: 'string', required: true },
+      lastSeenAt: { type: 'dateTime' },
+      externalRef: { type: 'string', storage: { column: 'legacy_ref' } }
     })
 
     await createKnexTable(db, makeSchemaInfo('mapped_profiles'), schema)
@@ -185,7 +186,9 @@ describe('dbTablesOperations.createKnexTable', () => {
     assert.ok(info.id)
     assert.ok(info.display_name)
     assert.ok(info.last_seen_at)
+    assert.ok(info.legacy_ref)
     assert.equal(info.displayName, undefined)
+    assert.equal(info.external_ref, undefined)
   })
 
   it('supports logical id fields mapped to custom storage columns', async () => {
@@ -221,10 +224,10 @@ describe('dbTablesOperations.createKnexTable', () => {
     `)
 
     const schema = makeTableSchema({
-      workspaceId: { type: 'id', required: true, storage: { column: 'workspace_id' } },
-      userId: { type: 'id', required: true, storage: { column: 'user_id' } },
+      workspaceId: { type: 'id', required: true },
+      userId: { type: 'id', required: true },
       role: { type: 'string', enum: ['owner', 'member'], required: true, defaultTo: 'member' },
-      noteCount: { type: 'number', defaultTo: 0, storage: { column: 'note_count' } }
+      noteCount: { type: 'number', defaultTo: 0 }
     }, {
       indexes: [
         {
@@ -352,20 +355,22 @@ describe('dbTablesOperations.generateKnexMigration', () => {
     assert.ok(migration.includes("table.string('title', 200).notNullable()"))
     assert.ok(migration.includes("table.decimal('price', 10, 2)"))
     assert.ok(migration.includes(".defaultTo(true)"))
-    assert.ok(migration.includes("table.foreign(['categoryId'], 'products_categoryId_foreign').references(['id']).inTable('categories').onDelete('SET NULL')"))
+    assert.ok(migration.includes("table.foreign(['category_id'], 'products_category_id_foreign').references(['id']).inTable('categories').onDelete('SET NULL')"))
     assert.ok(migration.includes('table.timestamps(true, true)'))
   })
 
-  it('uses storage column overrides in generated migrations', () => {
+  it('uses default snake_case columns in generated migrations and keeps per-field overrides', () => {
     const schema = makeTableSchema({
-      displayName: { type: 'string', required: true, storage: { column: 'display_name' } },
-      loginCount: { type: 'number', defaultTo: 0, storage: { column: 'login_count' } }
+      displayName: { type: 'string', required: true },
+      loginCount: { type: 'number', defaultTo: 0 },
+      externalRef: { type: 'string', storage: { column: 'legacy_ref' } }
     })
 
     const migration = generateKnexMigration('mapped_profiles', schema)
 
     assert.ok(migration.includes("table.string('display_name').notNullable()"))
     assert.ok(migration.includes("table.float('login_count').defaultTo(0)"))
+    assert.ok(migration.includes("table.string('legacy_ref')"))
     assert.ok(!migration.includes("table.string('displayName')"))
   })
 
@@ -384,11 +389,11 @@ describe('dbTablesOperations.generateKnexMigration', () => {
 
   it('includes named composite indexes, foreign keys, checks, enum, and set columns in generated migrations', () => {
     const schema = makeTableSchema({
-      workspaceId: { type: 'id', required: true, storage: { column: 'workspace_id' } },
-      userId: { type: 'id', required: true, storage: { column: 'user_id' } },
+      workspaceId: { type: 'id', required: true },
+      userId: { type: 'id', required: true },
       role: { type: 'string', enum: ['owner', 'member'], required: true, defaultTo: 'member' },
       flags: { type: 'string', setValues: ['featured', 'archived'] },
-      noteCount: { type: 'number', defaultTo: 0, storage: { column: 'note_count' } }
+      noteCount: { type: 'number', defaultTo: 0 }
     }, {
       indexes: [
         {
@@ -502,10 +507,10 @@ describe('dbTablesOperations.generateKnexMigrationDiff', () => {
       idColumn: 'id'
     })
     const desiredSchema = makeTableSchema({
-      workspaceId: { type: 'id', required: true, storage: { column: 'workspace_id' } },
-      userId: { type: 'id', required: true, storage: { column: 'user_id' } },
+      workspaceId: { type: 'id', required: true },
+      userId: { type: 'id', required: true },
       role: { type: 'string', enum: ['owner', 'member'], required: true, defaultTo: 'member' },
-      noteCount: { type: 'number', defaultTo: 0, storage: { column: 'note_count' } }
+      noteCount: { type: 'number', defaultTo: 0 }
     }, {
       indexes: [
         {
@@ -737,8 +742,8 @@ describe('RestApiKnexPlugin migration scope methods', () => {
     await api.addResource('memberships', {
       schema: {
         id: { type: 'id' },
-        workspaceId: { type: 'id', required: true, storage: { column: 'workspace_id' } },
-        userId: { type: 'id', required: true, storage: { column: 'user_id' } },
+        workspaceId: { type: 'id', required: true },
+        userId: { type: 'id', required: true },
         role: { type: 'string', enum: ['owner', 'member'], required: true, defaultTo: 'member' }
       },
       indexes: [

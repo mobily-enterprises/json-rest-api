@@ -1,5 +1,8 @@
 const EMPTY_STORAGE_INFO = Object.freeze({
   idColumn: 'id',
+  storage: Object.freeze({
+    naming: 'snake_case'
+  }),
   fields: Object.freeze({}),
   columns: Object.freeze({})
 })
@@ -10,14 +13,75 @@ const isPlainObject = (value) => (
   !Array.isArray(value)
 )
 
-export const normalizeFieldStorage = (fieldName, definition = {}, { idColumn = 'id' } = {}) => {
-  const storage = definition.storage
+const SNAKE_CASE_STORAGE_NAMING = 'snake_case'
+const EXACT_STORAGE_NAMING = 'exact'
 
-  if (storage !== undefined && !isPlainObject(storage)) {
+const STORAGE_NAMING_ALIASES = Object.freeze({
+  snake: SNAKE_CASE_STORAGE_NAMING,
+  snake_case: SNAKE_CASE_STORAGE_NAMING,
+  snakeCase: SNAKE_CASE_STORAGE_NAMING,
+  exact: EXACT_STORAGE_NAMING,
+  field: EXACT_STORAGE_NAMING,
+  verbatim: EXACT_STORAGE_NAMING
+})
+
+const toSnakeCase = (value) => String(value)
+  .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+  .replace(/([A-Z]+)([A-Z][a-z0-9])/g, '$1_$2')
+  .toLowerCase()
+
+export const normalizeStorageConfig = (storage = undefined) => {
+  if (storage === undefined || storage === null) {
+    return {
+      naming: SNAKE_CASE_STORAGE_NAMING
+    }
+  }
+
+  if (!isPlainObject(storage)) {
+    throw new Error('Resource storage metadata must be an object.')
+  }
+
+  const rawNaming = storage.naming
+  const naming = rawNaming === undefined
+    ? SNAKE_CASE_STORAGE_NAMING
+    : STORAGE_NAMING_ALIASES[rawNaming]
+
+  if (!naming) {
+    throw new Error(
+      `Invalid resource storage.naming value '${String(rawNaming)}'. Expected 'snake_case' or 'exact'.`
+    )
+  }
+
+  return {
+    ...storage,
+    naming
+  }
+}
+
+const resolveDefaultStorageColumn = (fieldName, { idColumn = 'id', storageConfig = undefined } = {}) => {
+  if (fieldName === 'id') {
+    return idColumn
+  }
+
+  const normalizedStorage = normalizeStorageConfig(storageConfig)
+  if (normalizedStorage.naming === EXACT_STORAGE_NAMING) {
+    return fieldName
+  }
+
+  return toSnakeCase(fieldName)
+}
+
+export const normalizeFieldStorage = (fieldName, definition = {}, { idColumn = 'id', storageConfig = undefined } = {}) => {
+  const fieldStorage = definition.storage
+
+  if (fieldStorage !== undefined && !isPlainObject(fieldStorage)) {
     throw new Error(`Field '${fieldName}' has invalid storage metadata. Expected an object.`)
   }
 
-  const column = storage?.column ?? fieldName
+  const column = fieldStorage?.column ?? resolveDefaultStorageColumn(fieldName, {
+    idColumn,
+    storageConfig
+  })
   if (typeof column !== 'string' || column.trim() === '') {
     throw new Error(`Field '${fieldName}' has an invalid storage.column value.`)
   }
@@ -28,25 +92,29 @@ export const normalizeFieldStorage = (fieldName, definition = {}, { idColumn = '
     )
   }
 
-  if (storage?.serialize !== undefined && typeof storage.serialize !== 'function') {
+  if (fieldStorage?.serialize !== undefined && typeof fieldStorage.serialize !== 'function') {
     throw new Error(`Field '${fieldName}' has an invalid storage.serialize value. Expected a function.`)
   }
 
   return {
     column,
-    serialize: storage?.serialize || null,
+    serialize: fieldStorage?.serialize || null,
     persisted: definition.virtual !== true && definition.computed !== true
   }
 }
 
-export const buildStorageInfo = ({ schemaStructure = {}, idProperty = 'id' } = {}) => {
+export const buildStorageInfo = ({ schemaStructure = {}, idProperty = 'id', storage = undefined } = {}) => {
   const idColumn = idProperty || 'id'
+  const storageConfig = normalizeStorageConfig(storage)
   const fields = {}
   const columns = {}
   const usedColumns = new Map([[idColumn, 'id']])
 
   for (const [fieldName, definition] of Object.entries(schemaStructure)) {
-    const normalized = normalizeFieldStorage(fieldName, definition, { idColumn })
+    const normalized = normalizeFieldStorage(fieldName, definition, {
+      idColumn,
+      storageConfig
+    })
     const isIdSurrogateField = fieldName === idColumn && definition.type === 'id'
 
     if (fieldName !== 'id' && normalized.column === idColumn && !isIdSurrogateField) {
@@ -75,6 +143,7 @@ export const buildStorageInfo = ({ schemaStructure = {}, idProperty = 'id' } = {
 
   return {
     idColumn,
+    storage: storageConfig,
     fields,
     columns
   }
@@ -91,7 +160,8 @@ export const getStorageInfo = (schemaInfo = {}) => {
 
   return buildStorageInfo({
     schemaStructure: schemaInfo.schemaStructure,
-    idProperty: schemaInfo.idProperty || 'id'
+    idProperty: schemaInfo.idProperty || 'id',
+    storage: schemaInfo.storage
   })
 }
 

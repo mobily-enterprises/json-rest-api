@@ -8,6 +8,20 @@ import {
   findFastifyRoute
 } from './helpers/fake-fastify.js'
 
+function resolveSchemaNode (rootSchema, schemaNode) {
+  if (!schemaNode || !Array.isArray(schemaNode.allOf) || schemaNode.allOf.length !== 1) {
+    return schemaNode
+  }
+
+  const ref = schemaNode.allOf[0]?.$ref || ''
+  if (!ref.startsWith('#/definitions/')) {
+    return schemaNode
+  }
+
+  const definitionName = ref.slice('#/definitions/'.length)
+  return rootSchema?.definitions?.[definitionName] || schemaNode
+}
+
 async function createFastifyConnectorApi () {
   const app = new FakeFastifyApp()
   const api = new Api({
@@ -70,7 +84,7 @@ describe('Fastify Plugin', () => {
     assert.ok(patchRelationshipRoute?.schema?.body, 'PATCH relationship route should have a body schema')
     assert.ok(deleteRelationshipRoute?.schema?.body, 'DELETE relationship route should have a body schema')
 
-    const postDataSchema = postRoute.schema.body.properties.data
+    const postDataSchema = resolveSchemaNode(postRoute.schema.body, postRoute.schema.body.properties.data)
     const postAttributes = postDataSchema.properties.attributes
 
     assert.deepEqual(postDataSchema.required, ['type'])
@@ -78,14 +92,15 @@ describe('Fastify Plugin', () => {
     assert.equal(postAttributes.properties.author_id, undefined, 'belongsTo foreign key should not be accepted in attributes')
     assert.equal(postAttributes.properties.internal_summary, undefined, 'computed fields should not be accepted in attributes')
     assert.equal(postAttributes.properties.id, undefined, 'resource ids should not appear in attributes')
-    assert.ok(postDataSchema.properties.relationships.properties.author, 'declared belongsTo relationships should be represented in the transport schema')
+    const postRelationships = resolveSchemaNode(postRoute.schema.body, postDataSchema.properties.relationships)
+    assert.ok(postRelationships.properties.author, 'declared belongsTo relationships should be represented in the transport schema')
 
-    const putDataSchema = putRoute.schema.body.properties.data
+    const putDataSchema = resolveSchemaNode(putRoute.schema.body, putRoute.schema.body.properties.data)
     assert.ok(putDataSchema.required.includes('id'), 'PUT body schema should require data.id')
 
-    const patchDataSchema = patchRoute.schema.body.properties.data
-    assert.ok(Array.isArray(patchDataSchema.anyOf), 'PATCH body schema should require at least one writable section')
-    assert.deepEqual(patchDataSchema.anyOf, [
+    const patchDataSchemaNode = patchRoute.schema.body.properties.data
+    assert.ok(Array.isArray(patchDataSchemaNode.anyOf), 'PATCH body schema should require at least one writable section')
+    assert.deepEqual(patchDataSchemaNode.anyOf, [
       { required: ['attributes'] },
       { required: ['relationships'] }
     ])

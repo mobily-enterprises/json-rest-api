@@ -100,6 +100,7 @@ export const RestApiKnexPlugin = {
 
       return {
         structure: filteredSchema,
+        storage: vars.schemaInfo?.storage,
         indexes: vars.schemaInfo?.indexes || [],
         foreignKeys: vars.schemaInfo?.foreignKeys || [],
         checkConstraints: vars.schemaInfo?.checkConstraints || []

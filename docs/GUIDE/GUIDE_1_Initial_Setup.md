@@ -797,9 +797,30 @@ Here is a full list of parameters and their respective variables:
   - An object: `{ post: 'full', put: 'minimal', patch: 'no' }` (per-method configuration)
 - All parameters support the cascade: per-call → resource-level → plugin-level default
 
-# Custom ID parameter
+# Logical IDs and Physical Columns
 
-TODO: Explain how idParam works, clarify that for the api it's always 'id' and there is no ID in the attributes
+For table-backed resources, `idProperty` defines the physical primary-key column. The API surface still uses the logical resource id.
+
+- simplified writes use `inputRecord.id`
+- JSON:API writes use `inputRecord.data.id`
+- responses expose `id` or `data.id`
+- the resource id is not part of `attributes`
+
+```javascript
+await api.addResource('profiles', {
+  idProperty: 'user_id',
+  schema: {
+    id: { type: 'id', required: true, storage: { column: 'user_id' } },
+    displayName: { type: 'string', required: true },
+    loginCount: { type: 'number', defaultTo: 0 }
+  },
+  tableName: 'profiles'
+});
+```
+
+For table-backed resources, storage columns default to snake_case, so `displayName` maps to `display_name` and `loginCount` maps to `login_count`. Use `storage.column` for a per-field override, or `storage: { naming: 'exact' }` when physical column names should match logical field names exactly.
+
+For full examples of table creation, physical column naming, and migration generation, see [Knex Schema and Migrations](GUIDE_X_Knex_Schema_And_Migrations.md).
 
 # Helpers and Methods Provided by REST API Plugins
 

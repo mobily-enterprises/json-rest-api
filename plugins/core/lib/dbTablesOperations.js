@@ -103,13 +103,14 @@ function buildSetColumnType (values = []) {
   return `set(${normalized.map((value) => quoteJsString(value)).join(', ')})`
 }
 
-function createTableBuilderContext (schemaStructure = {}, idColumn = 'id') {
+function createTableBuilderContext (schemaStructure = {}, idColumn = 'id', storage = undefined) {
   return {
     schemaStructure,
     idProperty: idColumn,
     storageInfo: buildStorageInfo({
       schemaStructure,
-      idProperty: idColumn
+      idProperty: idColumn,
+      storage
     })
   }
 }
@@ -400,7 +401,8 @@ function buildImplicitIdDefinition (idColumn) {
 function resolveTableSchemaContext (schemaLike, options = {}) {
   const schemaStructure = schemaLike?.structure || schemaLike || {}
   const configuredIdColumn = options.idProperty || schemaStructure.id?.storage?.column || 'id'
-  const tableContext = createTableBuilderContext(schemaStructure, configuredIdColumn)
+  const storage = options.storage ?? schemaLike?.storage
+  const tableContext = createTableBuilderContext(schemaStructure, configuredIdColumn, storage)
 
   let resourceIdField = null
   for (const [fieldName, definition] of Object.entries(schemaStructure)) {
@@ -888,6 +890,7 @@ export async function createKnexTable (knex, schemaInfo, tableSchemaInstance, op
   const dialect = detectKnexDialect(knex)
   const tableSchemaContext = resolveTableSchemaContext(tableSchemaInstance, {
     idProperty: schemaInfo.idProperty,
+    storage: schemaInfo.storage,
     tableName
   })
 
@@ -918,6 +921,7 @@ export async function addKnexFields (knex, tableName, schema, options = {}) {
   assertNoTopLevelTableMetadata(schema, 'addKnexFields')
   const dialect = detectKnexDialect(knex)
   const tableSchemaContext = resolveTableSchemaContext(schema, {
+    storage: options.storage,
     ...options,
     tableName
   })
@@ -936,6 +940,7 @@ export async function alterKnexFields (knex, tableName, fields, options = {}) {
   assertNoTopLevelTableMetadata(fields, 'alterKnexFields')
   const dialect = detectKnexDialect(knex)
   const tableSchemaContext = resolveTableSchemaContext(fields, {
+    storage: options.storage,
     ...options,
     tableName
   })
@@ -961,6 +966,7 @@ export function generateKnexMigration (tableName, schema, options = {}) {
   const { autoIncrement = true, timestamps = false, dialect = '' } = options
   const tableSchemaContext = resolveTableSchemaContext(schema, {
     ...options,
+    storage: options.storage,
     tableName
   })
 
@@ -1028,6 +1034,7 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   const resolvedDialect = normalizeText(dialect || currentSnapshot?.dialect).toLowerCase()
   const tableSchemaContext = resolveTableSchemaContext(schema, {
     ...options,
+    storage: options.storage,
     tableName
   })
   const desiredColumns = buildDesiredColumnsMap(tableSchemaContext, { autoIncrement })
