@@ -943,12 +943,26 @@ export const RestApiKnexPlugin = {
         })
         : attributes
 
+      const explicitId = dbAttributes[idProperty] ?? inputRecord.data.id
+
       // Insert and get the new ID
       const result = await db(tableName).insert(dbAttributes).returning(idProperty)
 
-      // Extract the ID value (SQLite returns array of objects)
-      const id = result[0]?.[idProperty] || result[0]
-      return id
+      // Extract the ID value. Some dialects ignore .returning() for inserts and can
+      // yield 0 even when the caller explicitly supplied the primary key.
+      const returnedId = Array.isArray(result)
+        ? (result[0]?.[idProperty] ?? result[0])
+        : (result?.[idProperty] ?? result)
+
+      if (
+        explicitId !== undefined &&
+        explicitId !== null &&
+        (returnedId === undefined || returnedId === null || returnedId === 0 || returnedId === '0')
+      ) {
+        return explicitId
+      }
+
+      return returnedId
     }
 
     /**

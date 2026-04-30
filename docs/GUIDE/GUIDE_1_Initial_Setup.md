@@ -325,6 +325,8 @@ const result = await api.resources.countries.post({
 });
 ```
 
+If you need per-call options such as `transaction`, `returnFullRecord`, or `queryParams`, move the record under `inputRecord` and keep those options at the top level of the params object.
+
 By default, `simplifiedApi` is `true` for programmatic usage, making it easier to work with the API in your code while still maintaining full JSON:API compliance internally.
 
 #### API usage and returning records
@@ -828,8 +830,14 @@ When you install the REST API plugins, the following helpers are added to `api.h
   const trx = await api.helpers.newTransaction();
   try {
     // Use transaction in multiple operations
-    await api.resources.countries.post({ name: 'France', code: 'FR' }, { transaction: trx });
-    await api.resources.publishers.post({ name: 'French Press', country: 1 }, { transaction: trx });
+    await api.resources.countries.post({
+      inputRecord: { name: 'France', code: 'FR' },
+      transaction: trx
+    });
+    await api.resources.publishers.post({
+      inputRecord: { name: 'French Press', country: 1 },
+      transaction: trx
+    });
     await trx.commit();
   } catch (error) {
     await trx.rollback();

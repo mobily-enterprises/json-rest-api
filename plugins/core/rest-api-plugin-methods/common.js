@@ -296,16 +296,20 @@ export const validateResourceAttributesBeforeWrite = async ({
     context.originalInputAttributes = { ...(context.inputRecord.data.attributes || {}) }
   }
 
+  const schemaStructure = context.schemaInfo.schemaStructure || {}
+  const hasLogicalIdField = Object.hasOwn(schemaStructure, 'id')
+  const resourceId = context.inputRecord?.data?.id
+
   // Merge belongsTo updates with attributes for validation
   const attributesToValidate = {
     ...context.inputRecord.data.attributes,
-    ...belongsToUpdates
+    ...belongsToUpdates,
+    ...(hasLogicalIdField && resourceId !== undefined ? { id: resourceId } : {})
   }
 
   // Extract computed fields and foreign key fields before validation
   const computedFields = {}
   const foreignKeyFields = {}
-  const schemaStructure = context.schemaInfo.schemaStructure || {}
   Object.entries(attributesToValidate).forEach(([key, value]) => {
     const fieldDef = schemaStructure[key]
     // Computed fields should be stripped from input
@@ -375,11 +379,12 @@ export const validateResourceAttributesBeforeWrite = async ({
   const { validatedObject, errors } = await schema[validationMethod](attributesForValidation)
 
   if (Object.keys(errors).length > 0) {
-    // --- START OF MODIFICATION ---
-    const schemaStructure = context.schemaInfo.schemaInstance.structure // Get the schema structure for lookup
-
     const violations = Object.entries(errors).map(([field, error]) => {
       let fieldPath = `data.attributes.${field}` // Default path for attributes
+
+      if (field === 'id' && hasLogicalIdField) {
+        fieldPath = 'data.id'
+      }
 
       // Check if this field is a foreign key that has an 'as' alias
       const fieldDef = schemaStructure[field]
@@ -400,7 +405,6 @@ export const validateResourceAttributesBeforeWrite = async ({
         message: error.message
       }
     })
-    // --- END OF MODIFICATION ---
 
     throw new RestApiValidationError(
       'Schema validation failed for resource attributes',
@@ -411,9 +415,14 @@ export const validateResourceAttributesBeforeWrite = async ({
     )
   }
 
+  if (Object.hasOwn(validatedObject, 'id')) {
+    context.inputRecord.data.id = validatedObject.id
+  }
+  const { id: _validatedId, ...validatedAttributes } = validatedObject
+
   // Update attributes with validated values
   // Virtual fields have now been validated and cast properly
-  context.inputRecord.data.attributes = validatedObject
+  context.inputRecord.data.attributes = validatedAttributes
 
   await runHooks(`afterSchemaValidate${methodSpecificHookSuffix}`)
   await runHooks('afterSchemaValidate')

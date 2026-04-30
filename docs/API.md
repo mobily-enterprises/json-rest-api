@@ -14,6 +14,8 @@ This reference provides comprehensive documentation for all methods, parameters,
 
 4. **All parameters must be passed within a single params object** as the first argument to each method.
 
+5. **Simplified shorthand is payload-only**: when you pass attributes directly (for example, `post({ title: 'Hello' })`), that plain object is treated as the resource payload. If you also need per-call options such as `transaction`, `queryParams`, `simplified`, or `returnFullRecord`, put the record under `inputRecord` and keep those options at the top level of `params`.
+
 ## Table of Contents
 
 1. [Core API Methods](#core-api-methods)
