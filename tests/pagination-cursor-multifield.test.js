@@ -55,7 +55,7 @@ describe('Multi-field Cursor Pagination', () => {
       }
     })
 
-    it.skip('should handle cursor pagination with multi-field sorting without skipping records', async () => {
+    it('should handle cursor pagination with multi-field sorting without skipping records', async () => {
       // Sort by category first (which has duplicates), then by name
       const pageSize = 3
       const allProducts = []
@@ -102,7 +102,7 @@ describe('Multi-field Cursor Pagination', () => {
       assert.equal(ids.length, uniqueIds.length, 'Should have no duplicate products')
     })
 
-    it.skip('should handle DESC sorting with duplicates correctly', async () => {
+    it('should handle DESC sorting with duplicates correctly', async () => {
       // Sort by category DESC, then name ASC
       const firstPage = await api.resources.products.query({
         queryParams: {
@@ -189,7 +189,7 @@ describe('Multi-field Cursor Pagination', () => {
         'Green Gardens vegetables should be in alphabetical order by name')
     })
 
-    it.skip('should handle cursor pagination with numeric and text fields', async () => {
+    it('should handle cursor pagination with numeric and text fields', async () => {
       // Sort by price (numeric), then category (text), then name (text)
       const firstPage = await api.resources.products.query({
         queryParams: {
@@ -222,7 +222,7 @@ describe('Multi-field Cursor Pagination', () => {
         'Prices should be non-decreasing across pages')
     })
 
-    it.skip('should generate correct cursor values for multi-field sorting', async () => {
+    it('should generate correct cursor values for multi-field sorting', async () => {
       const result = await api.resources.products.query({
         queryParams: {
           page: { size: 3 },
@@ -244,7 +244,7 @@ describe('Multi-field Cursor Pagination', () => {
       assert(cursor.includes('name:'), 'Cursor should include name field')
     })
 
-    it.skip('should handle page[before] with multi-field sorting', async () => {
+    it('should handle page[before] with multi-field sorting', async () => {
       // First, get to the middle of the dataset
       const firstPage = await api.resources.products.query({
         queryParams: {
@@ -272,7 +272,7 @@ describe('Multi-field Cursor Pagination', () => {
             size: 4,
             before: secondPage.meta.pagination.cursor?.next ||
                     // If no next cursor, create one from the last record
-                    `category:${encodeURIComponent(secondPage.data[0].attributes.category)},name:${encodeURIComponent(secondPage.data[0].attributes.name)}`
+                    `category:${encodeURIComponent(secondPage.data[0].attributes.category)},name:${encodeURIComponent(secondPage.data[0].attributes.name)},id:${encodeURIComponent(secondPage.data[0].id)}`
           },
           sort: ['category', 'name']
         },
@@ -292,7 +292,7 @@ describe('Multi-field Cursor Pagination', () => {
       await cleanTables(knex, ['cursor_products', 'cursor_items'])
     })
 
-    it.skip('should handle all records having the same value in first sort field', async () => {
+    it('should handle all records having the same value in first sort field', async () => {
       // Create products all in the same category
       const products = [
         { name: 'Alpha', category: 'Electronics', brand: 'TechCo', price: 100, sku: 'TC-001' },
@@ -348,7 +348,7 @@ describe('Multi-field Cursor Pagination', () => {
       assert(gadgetIncIndex < firstTechCoIndex, 'GadgetInc products should come before TechCo')
     })
 
-    it.skip('should handle empty results with multi-field cursor', async () => {
+    it('should handle empty results with multi-field cursor', async () => {
       // Create one product
       await api.resources.products.post({
         inputRecord: createJsonApiDocument('products', {
@@ -375,7 +375,7 @@ describe('Multi-field Cursor Pagination', () => {
       assert(!firstPage.meta.pagination.cursor?.next, 'Should not have next cursor on last page')
     })
 
-    it.skip('should handle special characters in multi-field cursors', async () => {
+    it('should handle special characters in multi-field cursors', async () => {
       // Create products with special characters
       const products = [
         { name: 'Product: Special', category: 'Cat:1', brand: 'Brand,A', price: 10, sku: 'SP-001' },
@@ -418,7 +418,7 @@ describe('Multi-field Cursor Pagination', () => {
         'Should get different record on second page')
     })
 
-    it.skip('should maintain stable sorting with custom id property', async () => {
+    it('should maintain stable sorting with custom id property', async () => {
       // Create items using the resource with custom ID property
       const items = [
         { code: 'A001', name: 'Apple', category: 'Fruit', type: 'Fresh' },
@@ -464,7 +464,7 @@ describe('Multi-field Cursor Pagination', () => {
       }
     })
 
-    it.skip('should handle the exact bug scenario - multiple fruits with same category', async () => {
+    it('should handle the exact bug scenario - multiple fruits with same category', async () => {
       // This is the exact scenario from the bug report
       await cleanTables(knex, ['cursor_products'])
 
