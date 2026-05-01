@@ -5,6 +5,7 @@ import knexLib from 'knex'
 import { introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
 import { createKnexTable } from '../plugins/core/lib/dbTablesOperations.js'
 import { createBasicApi } from './fixtures/api-configs.js'
+import { storageMode } from './helpers/storage-mode.js'
 
 function createMysqlKnexRawDouble ({
   schemaName = 'appdb',
@@ -484,7 +485,9 @@ describe('dbIntrospection.introspectKnexTableSnapshot (mysql raw double)', () =>
   })
 })
 
-describe('RestApiKnexPlugin introspection scope method', () => {
+const describeKnexIntrospection = storageMode.isAnyApi() ? describe.skip : describe
+
+describeKnexIntrospection('RestApiKnexPlugin introspection scope method', () => {
   let db
   let api
 
