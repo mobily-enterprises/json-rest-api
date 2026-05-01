@@ -24,6 +24,7 @@ export default async function turnScopeInitIntoVars ({ context, scopes, vars: ap
 
   // Set idProperty as scope var
   if (typeof scopeOptions.idProperty !== 'undefined') vars.idProperty = scopeOptions.idProperty
+  if (typeof scopeOptions.normalizeId === 'function') vars.normalizeId = scopeOptions.normalizeId
 
   // Add validation for query limits
   if (vars.queryDefaultLimit && vars.queryMaxLimit) {

@@ -1,5 +1,6 @@
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../querying-writing/simplified-helpers.js'
+import { normalizeRelationshipIdentifiers } from '../querying-writing/resource-id-normalization.js'
 
 /**
  * Updates many-to-many relationships intelligently by synchronizing pivot table records
@@ -103,7 +104,8 @@ import { transformSimplifiedToJsonApi } from '../querying-writing/simplified-hel
 export const updateManyToManyRelationship = async (scope, deps) => {
   // Extract values from deps
   const { api, context } = deps
-  const { resourceId, relDef, relData, transaction: trx } = context
+  const { resourceId, relDef, transaction: trx } = context
+  const relData = normalizeRelationshipIdentifiers(context.relData || [], { api })
 
   // Get the knex instance from the pivot scope
   const pivotScope = api.resources[relDef.through]
@@ -257,6 +259,7 @@ export const updateManyToManyRelationship = async (scope, deps) => {
  * 6. Returns (no data returned, throws on error)
  */
 export const createPivotRecords = async (api, resourceId, relDef, relData, trx) => {
+  relData = normalizeRelationshipIdentifiers(relData, { api })
   if (relData.length === 0) return // Early exit if nothing to create
 
   // Get pivot table info

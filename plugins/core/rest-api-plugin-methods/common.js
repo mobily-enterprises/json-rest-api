@@ -3,6 +3,7 @@ import {
   RestApiValidationError
 } from '../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
+import { normalizeRelationshipIdentifiers } from '../lib/querying-writing/resource-id-normalization.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import { unwrapQueryBuilderState } from '../lib/querying/query-builder-utils.js'
 
@@ -443,8 +444,16 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
   for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
     if (!relData?.data) continue
 
+    const normalizedRelationshipData = normalizeRelationshipIdentifiers(relData.data, { api })
+    inputRecord.data.relationships[relName] = {
+      ...relData,
+      data: normalizedRelationshipData
+    }
+
     // Handle both single and array relationships
-    const relatedItems = Array.isArray(relData.data) ? relData.data : [relData.data]
+    const relatedItems = Array.isArray(normalizedRelationshipData)
+      ? normalizedRelationshipData
+      : [normalizedRelationshipData]
 
     for (const item of relatedItems) {
       // Get the scope for the related resource

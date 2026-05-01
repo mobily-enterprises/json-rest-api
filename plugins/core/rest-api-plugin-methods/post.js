@@ -1,6 +1,7 @@
 import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
+import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import {
   setupCommonRequest,
   validateResourceAttributesBeforeWrite,
@@ -61,6 +62,13 @@ export default async function postMethod ({
       context.inputRecord,
       'POST request body is invalid'
     )
+
+    if (context.inputRecord?.data?.id !== undefined) {
+      context.inputRecord.data.id = requireDocumentResourceId(context.inputRecord.data.id, {
+        scopeOptions,
+        vars
+      })
+    }
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access

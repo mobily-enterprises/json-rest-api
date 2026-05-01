@@ -199,6 +199,139 @@ export async function createBasicApi (knex, pluginOptions = {}) {
 }
 
 /**
+ * Creates a small API focused on resource ID normalization behavior.
+ */
+export async function createIdNormalizationApi (knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'id-normalization-test-api'
+  const tablePrefix = pluginOptions.tablePrefix || 'id_norm'
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry()
+  }
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  const previousTenant = storageMode.currentTenant
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'minimal'
+    },
+    ...(pluginOptions['rest-api'] || {})
+  })
+
+  try {
+    await withTenantContext(tenantId, async () => {
+      await useStoragePlugin(api, knex, { tenantId })
+      await resetAnyApiTables(knex)
+
+      await api.addResource('countries', {
+        schema: {
+          id: { type: 'string', required: true },
+          name: { type: 'string', required: true, max: 100 }
+        },
+        tableName: `${tablePrefix}_countries`,
+        ...(pluginOptions.countryResourceOptions || {})
+      })
+      await knex.schema.dropTableIfExists(`${tablePrefix}_countries`)
+      await knex.schema.createTable(`${tablePrefix}_countries`, (table) => {
+        table.string('id').primary()
+        table.string('name').notNullable()
+      })
+      mapTable(`${tablePrefix}_countries`, 'countries')
+
+      await api.addResource('publishers', {
+        schema: {
+          id: { type: 'string', required: true },
+          name: { type: 'string', required: true, max: 100 },
+          country_id: { type: 'string', nullable: true, belongsTo: 'countries', as: 'country' }
+        },
+        relationships: {
+          tags: { type: 'manyToMany', through: 'publisher_tags', foreignKey: 'publisher_id', otherKey: 'tag_id' }
+        },
+        tableName: `${tablePrefix}_publishers`,
+        ...(pluginOptions.publisherResourceOptions || {})
+      })
+      await knex.schema.dropTableIfExists(`${tablePrefix}_publishers`)
+      await knex.schema.createTable(`${tablePrefix}_publishers`, (table) => {
+        table.string('id').primary()
+        table.string('name').notNullable()
+        table.string('country_id').nullable()
+      })
+      mapTable(`${tablePrefix}_publishers`, 'publishers')
+
+      await api.addResource('tags', {
+        schema: {
+          id: { type: 'string', required: true },
+          name: { type: 'string', required: true, max: 100 }
+        },
+        tableName: `${tablePrefix}_tags`,
+        ...(pluginOptions.tagResourceOptions || {})
+      })
+      await knex.schema.dropTableIfExists(`${tablePrefix}_tags`)
+      await knex.schema.createTable(`${tablePrefix}_tags`, (table) => {
+        table.string('id').primary()
+        table.string('name').notNullable()
+      })
+      mapTable(`${tablePrefix}_tags`, 'tags')
+
+      await api.addResource('publisher_tags', {
+        schema: {
+          id: { type: 'id' },
+          publisher_id: { type: 'string', required: true, belongsTo: 'publishers', as: 'publisher' },
+          tag_id: { type: 'string', required: true, belongsTo: 'tags', as: 'tag' }
+        },
+        tableName: `${tablePrefix}_publisher_tags`
+      })
+      await knex.schema.dropTableIfExists(`${tablePrefix}_publisher_tags`)
+      await knex.schema.createTable(`${tablePrefix}_publisher_tags`, (table) => {
+        table.increments('id').primary()
+        table.string('publisher_id').notNullable()
+        table.string('tag_id').notNullable()
+      })
+      mapTable(`${tablePrefix}_publisher_tags`, 'publisher_tags')
+      if (storageMode.isAnyApi()) {
+        const descriptorTenant = api.anyapi?.tenantId || tenantId
+        const publishersDescriptor = await api.anyapi.registry.getDescriptor(descriptorTenant, 'publishers')
+        const tagsDescriptor = await api.anyapi.registry.getDescriptor(descriptorTenant, 'tags')
+        const relationshipKey = publishersDescriptor?.manyToMany?.tags?.relationship
+        const inverseRelationshipKey = tagsDescriptor?.manyToMany?.publishers?.relationship
+        storageMode.registerLink(
+          `${tablePrefix}_publisher_tags`,
+          'publishers',
+          'tags',
+          relationshipKey,
+          inverseRelationshipKey
+        )
+      }
+    })
+
+    return api
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant)
+    }
+  }
+}
+
+/**
  * Creates a basic API with bulk operations enabled
  */
 export async function createBulkOperationsApi (knex, pluginOptions = {}) {

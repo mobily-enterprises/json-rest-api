@@ -4,6 +4,10 @@ import { updateManyToManyRelationship } from '../lib/writing/many-to-many-manipu
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import {
+  requireDocumentResourceId,
+  requireExistingResourceId
+} from '../lib/querying-writing/resource-id-normalization.js'
+import {
   setupCommonRequest,
   validateResourceAttributesBeforeWrite,
   validateRelationshipAccess,
@@ -59,14 +63,37 @@ export default async function patchMethod ({
       includeDepthLimit: vars.includeDepthLimit,
       sortableFields: vars.sortableFields
     })
+    const normalizedPathId = params.id === undefined
+      ? null
+      : requireExistingResourceId(params.id, {
+          scopeOptions,
+          vars,
+          scopeName
+        })
+
+    if (normalizedPathId && !context.inputRecord?.data?.id) {
+      context.inputRecord = {
+        ...context.inputRecord,
+        data: {
+          ...(context.inputRecord?.data || {}),
+          id: normalizedPathId
+        }
+      }
+    }
+
     context.inputRecord = validateRequestContractOrThrow(
       requestContracts.patch,
       context.inputRecord,
       'PATCH request body is invalid'
     )
-    if (params.id && String(params.id) !== String(context.inputRecord.data.id)) {
+    const normalizedBodyId = requireDocumentResourceId(context.inputRecord.data.id, {
+      scopeOptions,
+      vars
+    })
+
+    if (normalizedPathId && normalizedPathId !== normalizedBodyId) {
       throw new RestApiValidationError(
-        `ID mismatch. URL path ID '${params.id}' does not match request body ID '${context.inputRecord.data.id}'`,
+        `ID mismatch. URL path ID '${normalizedPathId}' does not match request body ID '${normalizedBodyId}'`,
         {
           fields: ['data.id'],
           violations: [{
@@ -77,7 +104,8 @@ export default async function patchMethod ({
         }
       )
     }
-    context.id = params.id || context.inputRecord.data.id
+    context.inputRecord.data.id = normalizedBodyId
+    context.id = normalizedPathId || normalizedBodyId
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access

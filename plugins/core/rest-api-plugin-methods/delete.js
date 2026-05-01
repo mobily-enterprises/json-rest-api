@@ -1,5 +1,6 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { handleWriteMethodError } from './common.js'
+import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
  * DELETE
@@ -26,7 +27,11 @@ export default async function deleteMethod ({
   context.method = 'delete'
 
   // Set the ID in context
-  context.id = params.id
+  context.id = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
 
   // Set scopeName in context (needed for broadcasting)
   context.scopeName = scopeName

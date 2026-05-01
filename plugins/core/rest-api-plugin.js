@@ -27,6 +27,7 @@ import postRelationshipMethod from './rest-api-plugin-methods/post-relationship.
 import getRelationshipMethod from './rest-api-plugin-methods/get-relationship.js'
 import patchRelationshipMethod from './rest-api-plugin-methods/patch-relationship.js'
 import deleteRelationshipMethod from './rest-api-plugin-methods/delete-relationship.js'
+import { defaultNormalizeResourceId } from './lib/querying-writing/resource-id-normalization.js'
 
 export const RestApiPlugin = {
   name: 'rest-api',
@@ -66,6 +67,9 @@ export const RestApiPlugin = {
       : true // Default true for better DX in programmatic API
 
     vars.idProperty = restApiOptions.idProperty || 'id'
+    vars.normalizeId = typeof restApiOptions.normalizeId === 'function'
+      ? restApiOptions.normalizeId
+      : defaultNormalizeResourceId
 
     // Return full record configuration for API and Transport
     // Support values: 'no', 'minimal', 'full'
