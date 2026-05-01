@@ -3,6 +3,7 @@ import { normalizeRecordAttributes } from '../lib/querying-writing/database-valu
 import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
+import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { cascadeConfig } from './common.js'
 
 /**
@@ -62,10 +63,15 @@ export default async function getMethod ({
     includeDepthLimit: vars.includeDepthLimit,
     sortableFields: vars.sortableFields
   })
+  const normalizedId = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
   const validatedRequest = validateRequestContractOrThrow(
     requestContracts.get,
     {
-      id: params.id,
+      id: normalizedId,
       queryParams: context.queryParams
     },
     'GET request parameters are invalid'

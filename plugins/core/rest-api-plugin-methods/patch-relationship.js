@@ -1,3 +1,6 @@
+import { handleWriteMethodError } from './common.js'
+import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
+
 /**
  * PATCH RELATIONSHIP
  * Completely replaces a relationship
@@ -8,9 +11,13 @@
  * @param {object|array} relationshipData - New relationship data
  * @returns {Promise<void>} 204 No Content
  */
-export default async function patchRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api }) {
+export default async function patchRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   context.method = 'patchRelationship'
-  context.id = params.id
+  context.id = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
   context.relationshipName = params.relationshipName
 
   // Transaction handling
@@ -50,6 +57,6 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
 
     // 204 No Content
   } catch (error) {
-    await handleWriteMethodError(error, context, 'PATCH_RELATIONSHIP', scopeName, log)
+    await handleWriteMethodError(error, context, 'PATCH_RELATIONSHIP', scopeName, log, runHooks)
   }
 }

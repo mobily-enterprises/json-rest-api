@@ -1,5 +1,9 @@
 import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
 import { findRelationshipDefinition, handleWriteMethodError } from './common.js'
+import {
+  normalizeRelationshipIdentifiers,
+  requireExistingResourceId
+} from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
  * DELETE RELATIONSHIP
@@ -11,9 +15,13 @@ import { findRelationshipDefinition, handleWriteMethodError } from './common.js'
  * @param {array} relationshipData - Array of resource identifiers to remove
  * @returns {Promise<void>} 204 No Content
  */
-export default async function deleteRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api, log }) {
+export default async function deleteRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   context.method = 'deleteRelationship'
-  context.id = params.id
+  context.id = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
   context.relationshipName = params.relationshipName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
@@ -43,6 +51,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
     if (!Array.isArray(params.relationshipData)) {
       throw new RestApiPayloadError('DELETE from relationship requires array of resource identifiers')
     }
+    params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
 
     // Check permissions
     await runHooks('checkPermissions')

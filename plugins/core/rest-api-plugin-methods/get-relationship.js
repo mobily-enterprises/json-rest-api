@@ -1,6 +1,7 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { findRelationshipDefinition } from './common.js'
 import { buildRelationshipUrl } from '../lib/querying/url-helpers.js'
+import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
  * GET RELATIONSHIP
@@ -11,9 +12,13 @@ import { buildRelationshipUrl } from '../lib/querying/url-helpers.js'
  * @param {string} relationshipName - The name of the relationship
  * @returns {Promise<object>} Relationship linkage with links
  */
-export default async function getRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api }) {
+export default async function getRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
   context.method = 'getRelationship'
-  context.id = params.id
+  context.id = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
   context.relationshipName = params.relationshipName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 

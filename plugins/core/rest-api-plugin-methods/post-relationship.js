@@ -1,6 +1,10 @@
 import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
 import { findRelationshipDefinition, handleWriteMethodError } from './common.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
+import {
+  normalizeRelationshipIdentifiers,
+  requireExistingResourceId
+} from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
    * POST RELATIONSHIP
@@ -12,9 +16,13 @@ import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js
    * @param {array} relationshipData - Array of resource identifiers to add
    * @returns {Promise<void>} 204 No Content
   */
-export default async function postRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api, log }) {
+export default async function postRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   context.method = 'postRelationship'
-  context.id = params.id
+  context.id = requireExistingResourceId(params.id, {
+    scopeOptions,
+    vars,
+    scopeName
+  })
   context.relationshipName = params.relationshipName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
@@ -45,6 +53,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
     if (!Array.isArray(params.relationshipData)) {
       throw new RestApiPayloadError('POST to relationship requires array of resource identifiers')
     }
+    params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
 
     // Check permissions
     await runHooks('checkPermissions')
