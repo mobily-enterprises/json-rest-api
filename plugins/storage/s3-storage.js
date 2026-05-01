@@ -100,13 +100,16 @@ export class S3Storage {
    * @returns {Promise<void>}
    */
   async delete (url) {
-    // Extract key from URL
     const urlObj = new URL(url)
-    const key = urlObj.pathname.substring(1) // Remove leading /
 
     if (this.mockMode) {
       // Mock mode - just simulate deletion
       await new Promise(resolve => setTimeout(resolve, 50))
+      return
+    }
+
+    if (urlObj.pathname.length === 0) {
+      throw new Error('Invalid S3 object URL')
     }
 
     // Real S3 delete would go here

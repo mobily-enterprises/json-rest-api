@@ -9,8 +9,6 @@
  * - Detecting circular dependencies in field definitions
  */
 
-import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
-
 /**
  * Marks all fields in a searchSchema as indexed for database optimization
  *

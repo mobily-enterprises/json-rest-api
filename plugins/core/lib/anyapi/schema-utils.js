@@ -45,23 +45,6 @@ const ensureColumn = async (knex, tableName, columnName, columnBuilder) => {
   }
 }
 
-const ensureIndex = async (knex, tableName, columns, indexName) => {
-  const exists = await knex.schema.hasTable(tableName)
-  if (!exists) return
-  const hasIndex = await knex.schema.withSchema('main').hasIndex?.(tableName, indexName)
-  if (!hasIndex) {
-    try {
-      await knex.schema.table(tableName, (table) => {
-        table.index(columns, indexName)
-      })
-    } catch (error) {
-      if (!String(error?.message || '').includes('already exists')) {
-        throw error
-      }
-    }
-  }
-}
-
 const ensureUniqueIndex = async (knex, tableName, columns, indexName) => {
   const exists = await knex.schema.hasTable(tableName)
   if (!exists) return

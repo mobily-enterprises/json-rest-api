@@ -92,7 +92,7 @@ export class LocalStorage {
     return filename
       // Remove path traversal attempts
       .replace(/\.\./g, '')
-      .replace(/[\/\\]/g, '')
+      .replace(/[/\\]/g, '')
       // Remove control characters and special chars
       .replace(/[^\w\s.-]/g, '_')
       // Remove leading/trailing dots and spaces

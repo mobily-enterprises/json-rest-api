@@ -75,7 +75,6 @@
  */
 
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
-import { getForeignKeyFields } from '../querying-writing/field-utils.js'
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
 import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
 import { unwrapQueryBuilderState } from './query-builder-utils.js'
@@ -491,8 +490,6 @@ export const loadBelongsTo = async (scope, deps) => {
     // Get target table info
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
     const targetIdColumn = getIdColumnForScope(scopes, targetScope)
-    const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
-
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope]
     const storageAdapter = targetScopeObject.vars.storageAdapter
@@ -548,9 +545,9 @@ export const loadBelongsTo = async (scope, deps) => {
 
     // Create lookup map
     const targetById = {}
-      targetRecords.forEach(record => {
-        targetById[getFieldValueForScope(scopes, targetScope, record, 'id')] = record
-      })
+    targetRecords.forEach(record => {
+      targetById[getFieldValueForScope(scopes, targetScope, record, 'id')] = record
+    })
 
     // Set relationships on original records
     const targetRecordsToProcess = []
@@ -695,7 +692,7 @@ export const loadHasMany = async (scope, deps) => {
       const otherKey = relDef.otherKey
 
       if (!foreignKey || !otherKey) {
-        throw new Error(`Missing foreignKey or otherKey in many-to-many relationship '${relName}' for scope '${scopeName}'`)
+        throw new Error(`Missing foreignKey or otherKey in many-to-many relationship '${includeName}' for scope '${scopeName}'`)
       }
 
       // For manyToMany, the target scope is the relationship name itself
@@ -737,12 +734,11 @@ export const loadHasMany = async (scope, deps) => {
       })
 
       // Step 3: Build field selection for sparse fieldsets
-      const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
       const targetScopeObject = scopes[targetScope]
       const storageAdapter = targetScopeObject.vars.storageAdapter
       const targetIdColumn = getIdColumnForScope(scopes, targetScope)
-    const fieldSelectionInfo = fields?.[targetScope]
-      ? await buildFieldSelection(targetScopeObject, {
+      const fieldSelectionInfo = fields?.[targetScope]
+        ? await buildFieldSelection(targetScopeObject, {
           context: {
             ...(requestContext || {}),
             scopeName: targetScope,
@@ -958,7 +954,7 @@ export const loadHasMany = async (scope, deps) => {
       const foreignKey = relDef.foreignKey
 
       if (!foreignKey) {
-        throw new Error(`Missing foreignKey in hasMany relationship '${relName}' for scope '${scopeName}'`)
+        throw new Error(`Missing foreignKey in hasMany relationship '${includeName}' for scope '${scopeName}'`)
       }
 
       log.debug(`[INCLUDE] Loading ${targetScope} records with foreign key ${foreignKey}:`, {
@@ -967,7 +963,6 @@ export const loadHasMany = async (scope, deps) => {
       })
 
       // Build field selection for sparse fieldsets
-      const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
       const targetScopeObject = scopes[targetScope]
       const storageAdapter = targetScopeObject.vars.storageAdapter
       const fieldSelectionInfo = fields?.[targetScope]
@@ -1199,10 +1194,10 @@ export const loadHasOne = async (scope, deps) => {
   const { records, scopeName, includeName, relDef, subIncludes, included, processedPaths, currentPath, fields } = scope
   const { context: { scopes, log, knex, capabilities, requestContext } } = deps
 
-  log = log?.child ? log.child({ method: 'loadHasOne' }) : console
+  const childLog = log?.child ? log.child({ method: 'loadHasOne' }) : console
 
   if (!records || records.length === 0) {
-    log.trace('[INCLUDE] No records to load hasOne for')
+    childLog.trace('[INCLUDE] No records to load hasOne for')
     return
   }
 
@@ -1210,7 +1205,7 @@ export const loadHasOne = async (scope, deps) => {
   const mainIds = [...new Set(records.map(record => getFieldValueForScope(scopes, scopeName, record, 'id')).filter(Boolean))]
 
   if (mainIds.length === 0) {
-    log.trace('[INCLUDE] No parent IDs found, skipping hasOne load')
+    childLog.trace('[INCLUDE] No parent IDs found, skipping hasOne load')
     return
   }
 
@@ -1222,12 +1217,11 @@ export const loadHasOne = async (scope, deps) => {
     throw new Error(`Missing foreignKey in hasOne relationship '${includeName}' for scope '${scopeName}'`)
   }
 
-  log.debug(`[INCLUDE] Loading ${targetScope} records with foreign key ${foreignKey}:`, {
+  childLog.debug(`[INCLUDE] Loading ${targetScope} records with foreign key ${foreignKey}:`, {
     whereIn: mainIds
   })
 
   // Build query for hasOne - expects single result per parent
-  const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
   const targetScopeObject = scopes[targetScope]
   const storageAdapter = targetScopeObject.vars.storageAdapter
 
@@ -1629,7 +1623,6 @@ export const loadReversePolymorphic = async (scope, deps) => {
     })
 
     // Build field selection for sparse fieldsets
-    const targetSchema = scopes[targetScope].vars.schemaInfo.schemaInstance
     const targetScopeObject = scopes[targetScope]
     const storageAdapter = targetScopeObject.vars.storageAdapter
     const targetIdColumn = getIdColumnForScope(scopes, targetScope)

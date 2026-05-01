@@ -70,6 +70,7 @@ const harperResult = await api.resources.publishers.post({
     name: 'HarperCollins'
   }
 })
+console.log('Created second publisher:', inspect(harperResult))
 
 // Method 3: Full JSON:API mode (standards compliant)
 const oxfordResult = await api.resources.publishers.post({

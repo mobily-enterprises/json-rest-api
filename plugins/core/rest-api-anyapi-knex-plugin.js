@@ -14,7 +14,7 @@ import {
   buildCursorMeta,
   parseCursor,
 } from './lib/querying/knex-pagination-helpers.js'
-import { getUrlPrefix, buildResourceUrl } from './lib/querying/url-helpers.js'
+import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './lib/querying/url-helpers.js'
 import {
   normalizeId,
   resolveFieldInfo,
@@ -35,6 +35,8 @@ import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
   basicFiltersHook,
+  resolveSearchOperator,
+  applyWhereForOperator,
 } from './lib/querying/knex-query-helpers.js'
 import {
   createStorageAdapter,
@@ -123,6 +125,28 @@ export const RestApiAnyapiKnexPlugin = {
       return descriptor
     }
 
+    const decorateResourceLinks = ({ resource, scope, scopeName, context }) => {
+      if (!resource || !scope || !scopeName || !context) return
+
+      resource.links = resource.links || {}
+      resource.links.self = buildResourceUrl(context, scope, scopeName, resource.id)
+
+      if (!resource.relationships || typeof resource.relationships !== 'object') {
+        return
+      }
+
+      for (const [relationshipName, relationshipObject] of Object.entries(resource.relationships)) {
+        if (!relationshipObject || typeof relationshipObject !== 'object') {
+          continue
+        }
+
+        relationshipObject.links = {
+          self: buildRelationshipUrl(context, scope, scopeName, resource.id, relationshipName, true),
+          related: buildRelationshipUrl(context, scope, scopeName, resource.id, relationshipName, false),
+        }
+      }
+    }
+
     const getAllowedQueryFieldNames = (scopeName) => (
       Object.keys(api.resources?.[scopeName]?.vars?.queryFields || {})
     )
@@ -132,41 +156,73 @@ export const RestApiAnyapiKnexPlugin = {
     const getLogicalResourceId = (row, descriptor) => getCanonicalResourceId(row, descriptor)
 
     const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
-      // Filtering is handled by the query hooks to keep behavior consistent
-      // (operators, null handling, multi-field, joins, polymorphic, etc.).
-      // Avoid applying filters here to prevent duplicate conditions.
-      if (searchSchema) {
-        return
-      }
-
-      // TODO: Probably delete the rest of the function. searchSchema is always there...!!!
       if (!filters || Object.keys(filters).length === 0) return
 
-      // Fallback: apply minimal safe filtering when no search schema is defined
-      for (const [field, rawValue] of Object.entries(filters)) {
-        const fieldInfo = ensureFilterableField(descriptor, field)
+      const normalizeValue = (field, value) => {
+        if (!adapter?.translateFilterValue) {
+          return value
+        }
+        if (Array.isArray(value)) {
+          return value.map((entry) => adapter.translateFilterValue(field, entry))
+        }
+        return adapter.translateFilterValue(field, value)
+      }
+
+      for (const [filterKey, rawValue] of Object.entries(filters)) {
+        const fieldDef = searchSchema?.[filterKey]
+
+        if (fieldDef?.polymorphicField) {
+          continue
+        }
+
+        if (fieldDef?.actualField?.includes('.')) {
+          continue
+        }
+
+        if (fieldDef?.oneOf?.some((field) => field.includes('.'))) {
+          continue
+        }
+
+        if (fieldDef?.oneOf && Array.isArray(fieldDef.oneOf)) {
+          continue
+        }
+
+        if (fieldDef?.applyFilter && typeof fieldDef.applyFilter === 'function') {
+          continue
+        }
+
+        const actualField = fieldDef?.actualField || filterKey
+        const fieldInfo = ensureFilterableField(descriptor, filterKey)
+        const columnRef = adapter ? adapter.translateColumn(actualField) : fieldInfo.column
+        const operator = resolveSearchOperator(fieldDef || fieldInfo.definition)
         const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
           isRelationship: fieldInfo.isRelationship,
         })
-
-        const nonNullValues = values.filter((value) => value !== null)
-        const hasNull = values.length !== nonNullValues.length
+        const normalizedValues = values.map((value) => normalizeValue(actualField, value))
+        const nonNullValues = normalizedValues.filter((value) => value !== null)
+        const hasNull = normalizedValues.length !== nonNullValues.length
 
         if (nonNullValues.length === 0 && hasNull) {
-          query.whereNull(fieldInfo.column)
+          query.whereNull(columnRef)
           continue
         }
         if (nonNullValues.length === 1 && !hasNull) {
-          query.where(fieldInfo.column, nonNullValues[0])
+          applyWhereForOperator({
+            builder: query,
+            columnRef,
+            operator,
+            value: nonNullValues[0],
+            knex,
+          })
           continue
         }
         if (nonNullValues.length > 1 && !hasNull) {
-          query.whereIn(fieldInfo.column, nonNullValues)
+          query.whereIn(columnRef, nonNullValues)
           continue
         }
         if (nonNullValues.length > 0 && hasNull) {
-          query.where(function filterGroup () {
-            this.whereIn(fieldInfo.column, nonNullValues).orWhereNull(fieldInfo.column)
+          query.where(function anyApiNullFilterGroup () {
+            this.whereIn(columnRef, nonNullValues).orWhereNull(columnRef)
           })
         }
       }
@@ -1080,6 +1136,8 @@ export const RestApiAnyapiKnexPlugin = {
           storageAdapter,
         }
 
+        await applyBuiltInAnyApiQueryFilters(context)
+
         await runHooks('knexQueryFiltering')
 
         if (context.knexQuery) {
@@ -1103,9 +1161,7 @@ export const RestApiAnyapiKnexPlugin = {
         relationships: translated.relationships,
       }
       if (scope) {
-        minimal.links = {
-          self: buildResourceUrl(context, scope, scopeName, minimal.id),
-        }
+        decorateResourceLinks({ resource: minimal, scope, scopeName, context })
       }
       return minimal
     }
@@ -1221,8 +1277,12 @@ export const RestApiAnyapiKnexPlugin = {
 
       const targetScope = api.resources?.[descriptor.resource]
       if (targetScope) {
-        includeResource.links = includeResource.links || {}
-        includeResource.links.self = buildResourceUrl(context, targetScope, descriptor.resource, includeResource.id)
+        decorateResourceLinks({
+          resource: includeResource,
+          scope: targetScope,
+          scopeName: descriptor.resource,
+          context,
+        })
       }
 
       return includeResource
@@ -1693,7 +1753,7 @@ export const RestApiAnyapiKnexPlugin = {
       const db = context.db || context.transaction || api.knex.instance
       const parentIds = resources.map((resource) => resource.id)
 
-      for (const [relName, relInfo] of manyEntries) {
+      for (const [relName] of manyEntries) {
         const info = await getManyToManyInfo(descriptor.resource, relName)
         if (!info) continue
         const rows = await fetchLinksForParents({
@@ -1801,24 +1861,20 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       if (scope) {
-        data.links = data.links || {}
-        data.links.self = buildResourceUrl(context, scope, scopeName, data.id)
-        response.links = {
-          self: data.links.self,
-        }
+        decorateResourceLinks({ resource: data, scope, scopeName, context })
+        response.links = { self: data.links.self }
       }
 
       if (included.length > 0) {
         for (const includeResource of included) {
           const targetScope = api.resources?.[includeResource.type]
           if (!targetScope) continue
-          includeResource.links = includeResource.links || {}
-          includeResource.links.self = buildResourceUrl(
+          decorateResourceLinks({
+            resource: includeResource,
+            scope: targetScope,
+            scopeName: includeResource.type,
             context,
-            targetScope,
-            includeResource.type,
-            includeResource.id
-          )
+          })
         }
       }
 
@@ -1935,32 +1991,14 @@ export const RestApiAnyapiKnexPlugin = {
       return { resourceToTableName, tableNameToResource }
     }
 
-    const scopesProxy = new Proxy({}, {
-      get (_target, prop) {
-        if (typeof prop !== 'string') {
-          return undefined
-        }
-        const resource = api.resources?.[prop]
-        if (resource?.vars?.schemaInfo) {
-          return resource
-        }
-        return scopes?.[prop]
-      },
-    })
+    const queryHookDependencies = { log, scopes: api.resources, knex, getStorageAdapter: getScopeStorageAdapter }
 
-    const queryHookDependencies = { log, scopes: scopesProxy, knex, getStorageAdapter: getScopeStorageAdapter }
-
-    addHook('knexQueryFiltering', 'polymorphicFiltersHook', {}, async (hookParams) =>
-      polymorphicFiltersHook(hookParams, queryHookDependencies)
-    )
-
-    addHook('knexQueryFiltering', 'crossTableFiltersHook', {}, async (hookParams) =>
-      crossTableFiltersHook(hookParams, queryHookDependencies)
-    )
-
-    addHook('knexQueryFiltering', 'basicFiltersHook', {}, async (hookParams) =>
-      basicFiltersHook(hookParams, queryHookDependencies)
-    )
+    const applyBuiltInAnyApiQueryFilters = async (context) => {
+      const hookParams = { context }
+      await polymorphicFiltersHook(hookParams, queryHookDependencies)
+      await crossTableFiltersHook(hookParams, queryHookDependencies)
+      await basicFiltersHook(hookParams, queryHookDependencies)
+    }
 
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
@@ -2017,6 +2055,8 @@ export const RestApiAnyapiKnexPlugin = {
         storageAdapter,
       }
 
+      await applyBuiltInAnyApiQueryFilters(context)
+
       if (runHooks) {
         await runHooks('knexQueryFiltering')
       }
@@ -2025,19 +2065,20 @@ export const RestApiAnyapiKnexPlugin = {
 
       const countQuery = queryBuilder.clone()
 
-      const selectionState = scope && fieldSelectionInfo
-        ? await applyFieldSelectionToQuery({
-            query: queryBuilder,
-            scope,
-            fieldSelectionInfo,
-            tableName: adapter.tableAlias,
-            useTablePrefix: false,
-            storageAdapter,
-            db,
-            context,
-            scopeName
-          })
-        : { query: queryBuilder, queryFieldRuntimeByField: new Map() }
+      let selectionState = { query: queryBuilder, queryFieldRuntimeByField: new Map() }
+      if (scope && fieldSelectionInfo) {
+        selectionState = await applyFieldSelectionToQuery({
+          query: queryBuilder,
+          scope,
+          fieldSelectionInfo,
+          tableName: adapter.tableAlias,
+          useTablePrefix: false,
+          storageAdapter,
+          db,
+          context,
+          scopeName
+        })
+      }
 
       const sortDescriptors = applySortingToQuery({
         query: selectionState.query,
@@ -2046,9 +2087,6 @@ export const RestApiAnyapiKnexPlugin = {
         scope,
         queryFieldRuntimeByField: selectionState.queryFieldRuntimeByField
       })
-
-      if (queryParams?.page?.after) {
-      }
 
       const paginationInfo = applyPaginationToQuery({
         query: queryBuilder,
@@ -2102,8 +2140,7 @@ export const RestApiAnyapiKnexPlugin = {
         }
         const resourceScope = scope
         if (resourceScope) {
-          resource.links = resource.links || {}
-          resource.links.self = buildResourceUrl(context, resourceScope, scopeName, resource.id)
+          decorateResourceLinks({ resource, scope: resourceScope, scopeName, context })
         }
         if (fieldSelectionInfo?.computedDependencies?.length) {
           resource.__$jsonrestapi_computed_deps$__ = fieldSelectionInfo.computedDependencies
@@ -2132,6 +2169,19 @@ export const RestApiAnyapiKnexPlugin = {
       const response = { data }
       if (included.length > 0) {
         response.included = included
+      }
+
+      if (included.length > 0) {
+        for (const includeResource of included) {
+          const targetScope = api.resources?.[includeResource.type]
+          if (!targetScope) continue
+          decorateResourceLinks({
+            resource: includeResource,
+            scope: targetScope,
+            scopeName: includeResource.type,
+            context,
+          })
+        }
       }
 
       context.returnMeta = context.returnMeta || {}

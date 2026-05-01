@@ -1,5 +1,5 @@
 import { createBasicApi } from './tests/fixtures/api-configs.js'
-import { cleanTables, createJsonApiDocument, createRelationship } from './tests/helpers/test-utils.js'
+import { cleanTables, createJsonApiDocument } from './tests/helpers/test-utils.js'
 import knex from 'knex'
 
 const dbConfig = {

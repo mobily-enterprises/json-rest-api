@@ -208,7 +208,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
     let foundRelationship = null
     let relationshipType = null
     let relationshipField = null
-    let relationshipDef = null
 
     if (currentRelationships) {
       for (const [relName, relDef] of Object.entries(currentRelationships)) {
@@ -222,7 +221,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
               foundRelationship = targetScope
               relationshipType = 'hasManyPolymorphic'
               relationshipField = { typeField, idField, via: relDef.via }
-              relationshipDef = relDef
               log.trace('[BUILD-JOIN] Found polymorphic hasMany relationship:', {
                 relName, targetScope, via: relDef.via, typeField, idField
               })
@@ -238,7 +236,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
               foreignKey: relDef.foreignKey,
               otherKey: relDef.otherKey
             }
-            relationshipDef = relDef
             log.trace('[BUILD-JOIN] Found many-to-many relationship:', {
               relName,
               targetScope,
@@ -256,7 +253,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
             log.error('[BUILD-JOIN] Missing foreignKey in hasMany relationship:', { relName, currentScope })
             throw new Error(`Missing foreignKey in hasMany relationship '${relName}' for scope '${currentScope}'`)
           }
-          relationshipDef = relDef
           log.trace('[BUILD-JOIN] Found hasMany relationship:', { relName, targetScope, foreignKey: relationshipField })
           break
         }
@@ -269,7 +265,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
           foundRelationship = targetScope
           relationshipType = 'belongsTo'
           relationshipField = fieldName
-          relationshipDef = fieldDef
           log.trace('[BUILD-JOIN] Found belongsTo relationship:', { fieldName, targetScope })
           break
         }
@@ -282,9 +277,7 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
       )
     }
 
-    const sourceSchema = scopes[currentScope].vars.schemaInfo.schemaInstance
     const sourceTableName = scopes[currentScope].vars.schemaInfo.tableName
-    const targetSchemaInstance = scopes[targetScope].vars.schemaInfo.schemaInstance
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
 
     if (relationshipType === 'manyToMany') {

@@ -191,7 +191,7 @@ export const polymorphicFiltersHook = async (hookParams, dependencies) => {
   // Step 2: Build polymorphic JOINs
   log.trace('[POLYMORPHIC-SEARCH] Building JOINs for polymorphic searches')
 
-  for (const [filterKey, searchInfo] of polymorphicSearches) {
+  for (const [, searchInfo] of polymorphicSearches) {
     const { fieldDef, polymorphicField } = searchInfo
 
     // Get the relationship definition
@@ -485,7 +485,6 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   }
 
   const schemaInfo = scopes[scopeName].vars.schemaInfo
-  const tableName = schemaInfo.tableName
   const tableAlias = adapterUtils.defaultAliasForScope(scopeName)
   const aliasScopeMap = new Map()
   aliasScopeMap.set(tableAlias, scopeName)
@@ -730,7 +729,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
           fieldDef.applyFilter.call(this, this, filterValue)
           break
 
-        default:
+        default: {
           const targetField = fieldDef.actualField || filterKey
           const columnRef = resolveFieldColumn(targetField)
           const operator = resolveSearchOperator(fieldDef)
@@ -738,6 +737,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
           applyWhereForOperator({ builder: this, columnRef, operator, value: normalized, knex })
           break
         }
+      }
     }
   })
 }
@@ -891,8 +891,6 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
   const scopeName = hookParams.context?.knexQuery?.scopeName
   const filters = hookParams.context?.knexQuery?.filters
   const query = hookParams.context?.knexQuery?.query
-  const db = hookParams.context?.knexQuery?.db || knex
-
   if (!scopeName || !filters || !scopes[scopeName]) {
     return
   }
@@ -993,7 +991,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           fieldDef.applyFilter.call(this, this, filterValue)
           break
 
-        default:
+        default: {
           // Standard filtering
           const actualField = fieldDef.actualField || filterKey
           // Always qualify field names
@@ -1005,6 +1003,7 @@ export const basicFiltersHook = async (hookParams, dependencies) => {
           applyWhereForOperator({ builder: this, columnRef: dbField, operator, value: normalized, knex })
           break
         }
+      }
     }
   })
 }

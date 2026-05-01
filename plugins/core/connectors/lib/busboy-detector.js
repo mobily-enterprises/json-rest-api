@@ -101,14 +101,14 @@ export function createBusboyDetector (options = {}) {
           const chunks = []
           let size = 0
 
-          const filePromise = new Promise((fileResolve, fileReject) => {
+          const filePromise = new Promise((resolve, reject) => {
             file.on('data', (chunk) => {
               chunks.push(chunk)
               size += chunk.length
             })
 
             file.on('limit', () => {
-              fileReject(new Error(`File size limit exceeded for field '${fieldname}'`))
+              reject(new Error(`File size limit exceeded for field '${fieldname}'`))
             })
 
             file.on('end', () => {
@@ -119,10 +119,10 @@ export function createBusboyDetector (options = {}) {
                 size,
                 data: Buffer.concat(chunks)
               }
-              fileResolve()
+              resolve()
             })
 
-            file.on('error', fileReject)
+            file.on('error', reject)
           })
 
           filePromises.push(filePromise)

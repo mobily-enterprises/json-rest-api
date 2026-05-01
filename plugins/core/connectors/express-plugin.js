@@ -15,7 +15,6 @@
  */
 
 import { requirePackage } from 'hooked-api'
-import { parseJsonApiQuery } from '../lib/querying-writing/connectors-query-parser.js'
 import { createContext } from './lib/request-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import {
@@ -337,11 +336,6 @@ export const ExpressPlugin = {
           router[method.toLowerCase()](path, ...beforeMiddleware, expressHandler)
 
           // Debug logging for route registration
-
-          // Check if the route was actually added
-          if (router.stack) {
-            const lastRoute = router.stack[router.stack.length - 1]
-          }
         }
       } catch (routeError) {
         log.error('[EXPRESS DEBUG] Error creating route:', {

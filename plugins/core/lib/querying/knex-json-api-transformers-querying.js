@@ -439,7 +439,6 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
     return jsonApiRecord
   })
 
-  const urlPrefix = context.urlPrefix || scope.vars.transport?.mountPath || ''
   const normalizedData = isSingle ? processedRecords[0] : processedRecords
 
   if (normalizedData) {

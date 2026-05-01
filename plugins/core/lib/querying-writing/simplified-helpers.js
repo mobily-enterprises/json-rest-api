@@ -280,22 +280,15 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
         relationshipsData[relName] = {
           data: value.map(relId => ({ type: targetType, id: String(relId) }))
         }
-      }
-      // Handle hasOne relationships
-      else if (relConfig.type === 'hasOne' && value !== undefined) {
+      } else if (relConfig.type === 'hasOne' && value !== undefined) {
         relationshipsData[relName] = {
           data: value ? { type: relConfig.target, id: String(value) } : null
         }
-      }
-      // Handle single belongsTo relationships if they were also defined in 'relationships'
-      // (though typically they are defined in schema.belongsTo)
-      else if (relConfig.belongsTo && value !== undefined) {
+      } else if (relConfig.belongsTo && value !== undefined) {
         relationshipsData[relName] = {
           data: value ? { type: relConfig.belongsTo, id: String(value) } : null
         }
-      }
-      // Handle polymorphic belongsTo relationships with minimal object format
-      else if (relConfig.belongsToPolymorphic && value !== undefined) {
+      } else if (relConfig.belongsToPolymorphic && value !== undefined) {
         if (value === null) {
           relationshipsData[relName] = { data: null }
         } else if (typeof value === 'object' && value !== null && value.id && value._type) {
@@ -780,7 +773,7 @@ export const transformSingleJsonApiToSimplified = (scope, deps) => {
       const schemaEntry = Object.entries(schema).find(([_, def]) => def.as === relName)
 
       if (schemaEntry) {
-        const [fieldName, fieldDef] = schemaEntry
+        const [, fieldDef] = schemaEntry
         if (fieldDef.belongsTo && relData.data) {
           // Create minimal relationship object (no more foreign key field)
           simplified[relName] = { id: relData.data.id }

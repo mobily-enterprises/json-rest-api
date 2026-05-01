@@ -155,7 +155,7 @@ export async function compileSchemas (scope, deps) {
   }
 
   // Default enrichment: Add type to belongsTo fields
-  for (const [fieldName, fieldDef] of Object.entries(enrichedFields)) {
+  for (const [, fieldDef] of Object.entries(enrichedFields)) {
     if (fieldDef.belongsTo && !fieldDef.type) {
       fieldDef.type = 'id'
     }
@@ -174,7 +174,7 @@ export async function compileSchemas (scope, deps) {
 
   if (isProbablyPivot) {
     // Make all belongsTo fields searchable for pivot operations
-    for (const [fieldName, fieldDef] of belongsToFields) {
+    for (const [, fieldDef] of belongsToFields) {
       if (!fieldDef.search) {
         fieldDef.search = true
       }
@@ -206,6 +206,7 @@ export async function compileSchemas (scope, deps) {
     scope.scopeOptions.searchSchema
   )
 
+  let searchSchemaObject
   if (rawSearchFields) {
     // Mark all search fields as indexed for database optimization.
     // This ensures that any field used for filtering will have a database index created,
@@ -224,9 +225,9 @@ export async function compileSchemas (scope, deps) {
     await runHooks('searchSchema:enrich', searchSchemaContext)
 
     // Create searchSchema object
-    var searchSchemaObject = createSchema(rawSearchFields)
+    searchSchemaObject = createSchema(rawSearchFields)
   } else {
-    var searchSchemaObject = createSchema({})
+    searchSchemaObject = createSchema({})
   }
 
   // Build schemaRelationships including polymorphic fields from schema

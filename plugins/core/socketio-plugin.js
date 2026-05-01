@@ -393,7 +393,6 @@ export const SocketIOPlugin = {
     let io
 
     api.startSocketServer = async (server, startOptions = {}) => {
-      const transportConfig = { ...config.transport, ...startOptions.transport }
       const authConfig = { ...config.auth, ...(startOptions.auth || {}) }
       const redisConfig = startOptions.redis ?? pluginOptions.redis ?? null
 

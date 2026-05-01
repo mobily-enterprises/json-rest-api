@@ -1,4 +1,4 @@
-import { RestApiValidationError, RestApiResourceError } from '../../lib/rest-api-errors.js'
+import { RestApiValidationError } from '../../lib/rest-api-errors.js'
 
 export const BulkOperationsPlugin = {
   name: 'bulk-operations',
@@ -353,41 +353,33 @@ export const BulkOperationsPlugin = {
       // Create route handlers
       const createBulkRouteHandler = (method) => {
         return async ({ context, body, query }) => {
-          try {
-            // Parse query params for atomic mode override
-            const atomic = query?.atomic !== undefined
-              ? query.atomic === 'true'
-              : defaultAtomic
+          // Parse query params for atomic mode override
+          const atomic = query?.atomic !== undefined
+            ? query.atomic === 'true'
+            : defaultAtomic
 
-            let params
-            if (method === 'bulkPost') {
-              // For bulk create, expect array in data field (JSON:API style)
-              params = {
-                inputRecords: body?.data || body,
-                atomic
-              }
-            } else if (method === 'bulkPatch') {
-              // For bulk update, expect operations array
-              params = {
-                operations: body?.operations || body,
-                atomic
-              }
-            } else if (method === 'bulkDelete') {
-              // For bulk delete, expect IDs array
-              params = {
-                ids: body?.data || body?.ids || body,
-                atomic
-              }
+          let params
+          if (method === 'bulkPost') {
+            // For bulk create, expect array in data field (JSON:API style)
+            params = {
+              inputRecords: body?.data || body,
+              atomic
             }
-
-            // Call the scope method
-            const result = await api.scopes[scopeName][method](params)
-
-            return result
-          } catch (error) {
-            // Let transport plugin handle error mapping
-            throw error
+          } else if (method === 'bulkPatch') {
+            // For bulk update, expect operations array
+            params = {
+              operations: body?.operations || body,
+              atomic
+            }
+          } else if (method === 'bulkDelete') {
+            // For bulk delete, expect IDs array
+            params = {
+              ids: body?.data || body?.ids || body,
+              atomic
+            }
           }
+
+          return await api.scopes[scopeName][method](params)
         }
       }
 

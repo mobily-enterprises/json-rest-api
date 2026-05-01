@@ -763,7 +763,7 @@ function deriveSqliteColumnNumbers (dataType, args = '') {
 async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
   const quotedTableName = quoteSqliteIdentifier(tableName)
   const tableRows = normalizeRows(await knex.raw(
-    `SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`,
+    'SELECT name, sql FROM sqlite_master WHERE type = \'table\' AND name = ? LIMIT 1',
     [tableName]
   ))
   const firstTableRow = Array.isArray(tableRows) ? tableRows[0] : null

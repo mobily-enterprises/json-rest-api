@@ -1,5 +1,4 @@
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
-import { transformSimplifiedToJsonApi } from '../querying-writing/simplified-helpers.js'
 import { normalizeRelationshipIdentifiers } from '../querying-writing/resource-id-normalization.js'
 
 /**

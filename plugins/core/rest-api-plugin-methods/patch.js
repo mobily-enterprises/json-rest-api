@@ -66,10 +66,10 @@ export default async function patchMethod ({
     const normalizedPathId = params.id === undefined
       ? null
       : requireExistingResourceId(params.id, {
-          scopeOptions,
-          vars,
-          scopeName
-        })
+        scopeOptions,
+        vars,
+        scopeName
+      })
 
     if (normalizedPathId && !context.inputRecord?.data?.id) {
       context.inputRecord = {

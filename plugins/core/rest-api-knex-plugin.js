@@ -8,9 +8,8 @@ import {
   generateKnexMigrationDiff
 } from './lib/dbTablesOperations.js'
 import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
-import { applyFieldSelectionToQuery, buildFieldSelection, isNonDatabaseField } from './lib/querying-writing/knex-field-helpers.js'
-import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
-import { toJsonApiRecord, buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js'
+import { applyFieldSelectionToQuery, buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js'
+import { buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js'
 import { processBelongsToRelationships } from './lib/writing/knex-json-api-transformers-writing.js'
 import { toJsonApiRecordWithBelongsTo } from './lib/querying-writing/knex-json-api-transformers.js'
 import { processIncludes } from './lib/querying/knex-process-includes.js'
@@ -46,9 +45,8 @@ export const RestApiKnexPlugin = {
 
   async install ({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     // Try to import knex dynamically
-    let knexLib
     try {
-      knexLib = await import('knex')
+      await import('knex')
     } catch (e) {
       requirePackage('knex', 'rest-api-knex',
         'Knex.js is required for database operations. This is a peer dependency that allows you to control the version.')
@@ -683,9 +681,7 @@ export const RestApiKnexPlugin = {
           query
             .limit(pageSize)
             .offset((pageNumber - 1) * pageSize)
-        }
-        // Cursor-based pagination
-        else if (queryParams.page.after || queryParams.page.before) {
+        } else if (queryParams.page.after || queryParams.page.before) {
           // Fetch one extra record to determine if there are more
           query.limit(pageSize + 1)
 
@@ -746,9 +742,7 @@ export const RestApiKnexPlugin = {
               }
             )
           }
-        }
-        // Default pagination if only size is specified - treat as cursor-based for "load more"
-        else {
+        } else {
           // Fetch one extra to detect hasMore
           query.limit(pageSize + 1)
         }
@@ -919,7 +913,6 @@ export const RestApiKnexPlugin = {
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName]
       const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
       const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
       const db = context.db || api.knex.instance
@@ -1150,7 +1143,6 @@ export const RestApiKnexPlugin = {
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName]
       const id = context.id
 
       const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName

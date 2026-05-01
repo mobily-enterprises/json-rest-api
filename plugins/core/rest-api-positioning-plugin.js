@@ -1,8 +1,6 @@
 import {
   calculatePosition,
   getInitialPosition,
-  isValidPosition,
-  assignInitialPositions,
 } from './lib/fractional-positioning.js'
 import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 
@@ -167,7 +165,7 @@ export const PositioningPlugin = {
           fieldExists = true
         } else {
           // Check if it's a relationship name (as property)
-          for (const [fieldName, fieldDef] of Object.entries(schema)) {
+          for (const [, fieldDef] of Object.entries(schema)) {
             if (fieldDef.as === filterField) {
               fieldExists = true
               break
@@ -419,7 +417,6 @@ export const PositioningPlugin = {
       log.debug('*** Position filter conditions', { scopeName, filterConditions })
 
       // Query existing items in the same position group
-      const knex = api.knex.instance
       const tableName = adapter.getTableName()
       const idProperty = schemaInfo.idProperty
       const idColumn = adapter.getIdColumn()

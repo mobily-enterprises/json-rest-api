@@ -235,13 +235,13 @@ export const translateAttributesForStorage = (attributes, schemaInfo = {}, optio
       : fieldStorage?.column || fieldName
     const serializedValue = fieldStorage?.serialize
       ? fieldStorage.serialize(value, {
-          fieldName,
-          columnName,
-          definition: fieldStorage.definition,
-          schemaInfo,
-          context,
-          operation
-        })
+        fieldName,
+        columnName,
+        definition: fieldStorage.definition,
+        schemaInfo,
+        context,
+        operation
+      })
       : value
 
     translated[columnName] = serializedValue

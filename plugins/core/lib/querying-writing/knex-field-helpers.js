@@ -257,7 +257,6 @@ export const buildFieldSelection = async (scope, deps) => {
         }
       })
     }
-
   } else {
     // No sparse fieldsets - return all visible fields
     // This is the default behavior when no ?fields parameter is provided
@@ -283,7 +282,7 @@ export const buildFieldSelection = async (scope, deps) => {
     // So we need to include their dependencies even if normallyHidden
     // Example: profit_margin depends on 'cost' which is normallyHidden
     // We fetch 'cost' for calculation but don't return it in response
-    for (const [fieldName, fieldDef] of Object.entries(computedFields)) {
+    for (const [, fieldDef] of Object.entries(computedFields)) {
       if (fieldDef.dependencies) {
         for (const dep of fieldDef.dependencies) {
           const depFieldDef = schemaStructure[dep]
