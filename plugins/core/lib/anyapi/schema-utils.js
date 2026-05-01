@@ -18,6 +18,7 @@ export const DEFAULT_CANONICAL_CONFIG = {
   scopeName: 'anyapi_records',
   tableName: 'any_records',
   type: 'anyapi_records',
+  logicalIdColumn: 'logical_id',
   tenantColumn: 'tenant_id',
   resourceColumn: 'resource',
   relationshipColumn: 'relationship',
@@ -34,20 +35,54 @@ const ensureTable = async (knex, tableName, tableBuilder) => {
   }
 }
 
+const ensureColumn = async (knex, tableName, columnName, columnBuilder) => {
+  const exists = await knex.schema.hasTable(tableName)
+  if (!exists) return
+
+  const hasColumn = await knex.schema.hasColumn(tableName, columnName)
+  if (!hasColumn) {
+    await knex.schema.table(tableName, columnBuilder)
+  }
+}
+
 const ensureIndex = async (knex, tableName, columns, indexName) => {
   const exists = await knex.schema.hasTable(tableName)
   if (!exists) return
   const hasIndex = await knex.schema.withSchema('main').hasIndex?.(tableName, indexName)
   if (!hasIndex) {
-    await knex.schema.table(tableName, (table) => {
-      table.index(columns, indexName)
-    })
+    try {
+      await knex.schema.table(tableName, (table) => {
+        table.index(columns, indexName)
+      })
+    } catch (error) {
+      if (!String(error?.message || '').includes('already exists')) {
+        throw error
+      }
+    }
+  }
+}
+
+const ensureUniqueIndex = async (knex, tableName, columns, indexName) => {
+  const exists = await knex.schema.hasTable(tableName)
+  if (!exists) return
+  const hasIndex = await knex.schema.withSchema('main').hasIndex?.(tableName, indexName)
+  if (!hasIndex) {
+    try {
+      await knex.schema.table(tableName, (table) => {
+        table.unique(columns, indexName)
+      })
+    } catch (error) {
+      if (!String(error?.message || '').includes('already exists')) {
+        throw error
+      }
+    }
   }
 }
 
 export const ensureAnyApiSchema = async (knex) => {
   await ensureTable(knex, 'any_records', (table) => {
     table.increments('id').primary()
+    table.string('logical_id')
     table.string('tenant_id').notNullable()
     table.string('resource').notNullable()
 
@@ -77,8 +112,29 @@ export const ensureAnyApiSchema = async (knex) => {
     table.dateTime('deleted_at')
 
     table.index(['tenant_id', 'resource'])
+    table.unique(['tenant_id', 'resource', 'logical_id'], 'any_records_tenant_resource_logical_id_unique')
     table.index(['resource'])
   })
+
+  await ensureColumn(knex, 'any_records', 'logical_id', (table) => {
+    table.string('logical_id')
+  })
+  await ensureUniqueIndex(
+    knex,
+    'any_records',
+    ['tenant_id', 'resource', 'logical_id'],
+    'any_records_tenant_resource_logical_id_unique'
+  )
+
+  const rowsMissingLogicalId = await knex('any_records')
+    .select('id')
+    .whereNull('logical_id')
+
+  for (const row of rowsMissingLogicalId) {
+    await knex('any_records')
+      .where({ id: row.id })
+      .update({ logical_id: String(row.id) })
+  }
 
   await ensureTable(knex, 'any_links', (table) => {
     table.increments('id').primary()

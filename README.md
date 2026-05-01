@@ -73,3 +73,24 @@ app.listen(3000, () => {
 - [Complete guide](GUIDE/) - Comprehensive guide
 - [API Reference](API.md) - API reference
 - [Why json-rest-api?](docs/COMPARISON.md) - Step-by-step tutorial
+
+## Development
+
+```bash
+# Run the normalizeId contract suites under the default backend and AnyAPI,
+# then rebuild the checked-in docs site
+npm run verify
+
+# Run lint separately
+npm run lint
+
+# Run the focused normalizeId suites directly
+npm run test:id-contracts
+npm run test:id-contracts:anyapi
+
+# Rebuild the checked-in docs site
+npm run docs
+
+# Serve the docs locally with live rebuild
+npm run docs:dev
+```

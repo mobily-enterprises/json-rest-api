@@ -41,6 +41,8 @@ import {
 } from './lib/storage/storage-adapter.js'
 import {
   translateCanonicalAttributesForStorage,
+  getCanonicalResourceId,
+  getCanonicalResourceIdColumn,
   translateCanonicalRecordFromStorage,
 } from './lib/storage/canonical-storage-mapping.js'
 import {
@@ -124,6 +126,10 @@ export const RestApiAnyapiKnexPlugin = {
     const getAllowedQueryFieldNames = (scopeName) => (
       Object.keys(api.resources?.[scopeName]?.vars?.queryFields || {})
     )
+
+    const getLogicalResourceIdColumn = (descriptor) => getCanonicalResourceIdColumn(descriptor)
+
+    const getLogicalResourceId = (row, descriptor) => getCanonicalResourceId(row, descriptor)
 
     const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
       // Filtering is handled by the query hooks to keep behavior consistent
@@ -891,12 +897,13 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
 
       const row = await context.db(canonical.tableName)
         .select('id')
         .where(canonical.tenantColumn, descriptor.tenant)
         .where(canonical.resourceColumn, descriptor.resource)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .first()
 
       return !!row
@@ -909,10 +916,17 @@ export const RestApiAnyapiKnexPlugin = {
       }
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const explicitId = context.inputRecord?.data?.id
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
         ? storageAdapter.toStorageRow(attributes)
         : translateCanonicalAttributesForStorage(attributes, descriptor)
+
+      if (explicitId !== undefined && explicitId !== null) {
+        row[logicalIdColumn] = explicitId
+      }
+
       row[canonical.tenantColumn] = descriptor.tenant
       row[canonical.resourceColumn] = descriptor.resource
 
@@ -921,10 +935,25 @@ export const RestApiAnyapiKnexPlugin = {
         .returning('id')
 
       const inserted = Array.isArray(result) ? result[0] : result
-      if (inserted && typeof inserted === 'object' && 'id' in inserted) {
-        return inserted.id
+      const insertedRowId = inserted && typeof inserted === 'object' && 'id' in inserted
+        ? inserted.id
+        : inserted
+
+      if (explicitId !== undefined && explicitId !== null) {
+        return explicitId
       }
-      return inserted
+
+      if (insertedRowId === undefined || insertedRowId === null) {
+        return insertedRowId
+      }
+
+      const generatedLogicalId = String(insertedRowId)
+
+      await context.db(canonical.tableName)
+        .where({ id: insertedRowId })
+        .update({ [logicalIdColumn]: generatedLogicalId })
+
+      return generatedLogicalId
     }
 
     helpers.dataPut = async ({ scopeName, context }) => {
@@ -935,6 +964,7 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
         ? storageAdapter.toStorageRow(attributes)
@@ -952,7 +982,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       const result = await context.db(canonical.tableName)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
         .update(updateRow)
@@ -968,6 +998,7 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
         ? storageAdapter.toStorageRow(attributes)
@@ -982,7 +1013,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       const result = await context.db(canonical.tableName)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
         .update(updateRow)
@@ -998,9 +1029,10 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
 
       const result = await context.db(canonical.tableName)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
         .delete()
@@ -1016,10 +1048,11 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
       const scope = api.resources?.[scopeName]
 
       let query = context.db(canonical.tableName)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
 
@@ -1062,9 +1095,10 @@ export const RestApiAnyapiKnexPlugin = {
         descriptor,
         { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
       )
+      const resourceId = getLogicalResourceId(row, descriptor)
       const minimal = {
         type: descriptor.resource,
-        id: String(row.id),
+        id: resourceId,
         attributes: translated.attributes,
         relationships: translated.relationships,
       }
@@ -1170,9 +1204,10 @@ export const RestApiAnyapiKnexPlugin = {
         descriptor,
         { allowedExtraFields: getAllowedQueryFieldNames(descriptor.resource) }
       )
+      const resourceId = getLogicalResourceId(row, descriptor)
       const includeResource = {
         type: descriptor.resource,
-        id: String(row.id),
+        id: resourceId,
         attributes: translated.attributes,
       }
 
@@ -1216,7 +1251,7 @@ export const RestApiAnyapiKnexPlugin = {
           let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn('id', ids)
+            .whereIn(getLogicalResourceIdColumn(targetDescriptor), ids)
           const selectionState = await applyIncludeFieldSelection({
             query,
             resourceName: targetDescriptor.resource,
@@ -1228,7 +1263,8 @@ export const RestApiAnyapiKnexPlugin = {
 
           const newResources = []
           for (const row of rows) {
-            const includeKey = `${targetDescriptor.resource}:${row.id}`
+            const includeId = getLogicalResourceId(row, targetDescriptor)
+            const includeKey = `${targetDescriptor.resource}:${includeId}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
             const includeResource = buildIncludedResource({
@@ -1284,7 +1320,7 @@ export const RestApiAnyapiKnexPlugin = {
             let query = db(targetDescriptor.canonical.tableName)
               .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
               .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-              .whereIn('id', [...idSet])
+              .whereIn(getLogicalResourceIdColumn(targetDescriptor), [...idSet])
             const selectionState = await applyIncludeFieldSelection({
               query,
               resourceName: targetDescriptor.resource,
@@ -1295,7 +1331,8 @@ export const RestApiAnyapiKnexPlugin = {
             const rows = await query
 
             for (const row of rows) {
-              const includeKey = `${targetDescriptor.resource}:${row.id}`
+              const includeId = getLogicalResourceId(row, targetDescriptor)
+              const includeKey = `${targetDescriptor.resource}:${includeId}`
               if (seen.has(includeKey)) continue
               seen.add(includeKey)
               const includeResource = buildIncludedResource({
@@ -1432,7 +1469,8 @@ export const RestApiAnyapiKnexPlugin = {
 
           const newResources = []
           for (const row of rows) {
-            const includeKey = `${targetDescriptor.resource}:${row.id}`
+            const includeId = getLogicalResourceId(row, targetDescriptor)
+            const includeKey = `${targetDescriptor.resource}:${includeId}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
             const includeResource = buildIncludedResource({
@@ -1481,7 +1519,7 @@ export const RestApiAnyapiKnexPlugin = {
           let query = db(targetDescriptor.canonical.tableName)
             .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
             .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn('id', childIds)
+            .whereIn(getLogicalResourceIdColumn(targetDescriptor), childIds)
           const selectionState = await applyIncludeFieldSelection({
             query,
             resourceName: targetDescriptor.resource,
@@ -1493,7 +1531,8 @@ export const RestApiAnyapiKnexPlugin = {
 
           const newResources = []
           for (const row of rows) {
-            const includeKey = `${targetDescriptor.resource}:${row.id}`
+            const includeId = getLogicalResourceId(row, targetDescriptor)
+            const includeKey = `${targetDescriptor.resource}:${includeId}`
             if (seen.has(includeKey)) continue
             seen.add(includeKey)
             const includeResource = buildIncludedResource({
@@ -1587,7 +1626,7 @@ export const RestApiAnyapiKnexPlugin = {
             if (parentId == null) return acc
             const key = String(parentId)
             acc[key] = acc[key] || []
-            acc[key].push({ type: targetDescriptor.resource, id: String(row.id) })
+            acc[key].push({ type: targetDescriptor.resource, id: getLogicalResourceId(row, targetDescriptor) })
             return acc
           }, {})
 
@@ -1633,7 +1672,7 @@ export const RestApiAnyapiKnexPlugin = {
             if (parentId == null) return acc
             const key = String(parentId)
             acc[key] = acc[key] || []
-            acc[key].push({ type: targetDescriptor.resource, id: String(row.id) })
+            acc[key].push({ type: targetDescriptor.resource, id: getLogicalResourceId(row, targetDescriptor) })
             return acc
           }, {})
 
@@ -1687,6 +1726,7 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptor = await getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
+      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
       const scope = api.resources?.[scopeName]
 
       let fieldSelectionInfo = null
@@ -1698,7 +1738,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       let query = context.db(canonical.tableName)
-        .where('id', id)
+        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
 
@@ -1726,9 +1766,10 @@ export const RestApiAnyapiKnexPlugin = {
         descriptor,
         { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
       )
+      const resourceId = getLogicalResourceId(row, descriptor)
       const data = {
         type: descriptor.resource,
-        id: String(row.id),
+        id: resourceId,
         attributes: record.attributes,
       }
 
@@ -2027,7 +2068,7 @@ export const RestApiAnyapiKnexPlugin = {
           const record = {}
           for (const descriptorEntry of cursorDescriptors) {
             if (descriptorEntry.field === 'id') {
-              record.id = row.id
+              record.id = getLogicalResourceId(row, descriptor)
             } else if (descriptorEntry.queryFieldRuntime) {
               record[descriptorEntry.field] = row[descriptorEntry.field]
             } else if (descriptorEntry.column) {
@@ -2050,9 +2091,10 @@ export const RestApiAnyapiKnexPlugin = {
           descriptor,
           { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
         )
+        const resourceId = getLogicalResourceId(row, descriptor)
         const resource = {
           type: descriptor.resource,
-          id: String(row.id),
+          id: resourceId,
           attributes: translated.attributes,
         }
         if (translated.relationships && Object.keys(translated.relationships).length > 0) {

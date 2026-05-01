@@ -70,6 +70,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
     assert.equal(result.data.attributes.name, 'Australia')
 
     const stored = await knex('any_records').first()
+    assert.equal(stored.logical_id, result.data.id)
     assert.equal(stored.string_1, 'Australia')
     assert.equal(stored.string_2, 'AU')
 
@@ -83,11 +84,13 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
 
   it('lists records', async () => {
     await knex('any_records').insert([{
+      logical_id: '1',
       tenant_id: 'default',
       resource: 'countries',
       string_1: 'Canada',
       string_2: 'CA',
     }, {
+      logical_id: '2',
       tenant_id: 'default',
       resource: 'countries',
       string_1: 'Brazil',

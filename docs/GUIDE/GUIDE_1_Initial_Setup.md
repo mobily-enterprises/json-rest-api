@@ -780,6 +780,7 @@ Here is a full list of parameters and their respective variables:
 | `simplifiedApi` | `vars.simplifiedApi` | `true` | Use simplified format for programmatic API calls | ✓ |
 | `simplifiedTransport` | `vars.simplifiedTransport` | `false` | Use simplified format for HTTP/REST endpoints | ✓ |
 | `idProperty` | `vars.idProperty` | `'id'` | Name of the ID field in resources | ✓ |
+| `normalizeId` | `vars.normalizeId` | trim strings, stringify finite numbers | Normalize resource identifiers before lookups and writes | ✓ |
 | `returnRecordApi` | `vars.returnRecordApi` | `{ post: 'full', put: 'full', patch: 'full' }` | What to return for programmatic API write operations | ✓ |
 | `returnRecordTransport` | `vars.returnRecordTransport` | `{ post: 'no', put: 'no', patch: 'no' }` | What to return for HTTP/REST write operations | ✓ |
 
@@ -819,6 +820,55 @@ await api.addResource('profiles', {
 ```
 
 For table-backed resources, storage columns default to snake_case, so `displayName` maps to `display_name` and `loginCount` maps to `login_count`. Use `storage.column` for a per-field override, or `storage: { naming: 'exact' }` when physical column names should match logical field names exactly.
+
+## ID normalization
+
+`normalizeId` lets you canonicalize resource identifiers before the library reads, writes, validates, or links records.
+
+The default normalizer already handles the common cases:
+
+- trims surrounding whitespace from strings
+- converts finite numbers and bigints to strings
+- rejects values that normalize to an empty identifier
+
+You only need to provide `normalizeId` when your resource ids need additional canonicalization, such as uppercasing, lowercasing, or removing formatting characters.
+
+```javascript
+await api.use(RestApiPlugin, {
+  normalizeId: (value) => {
+    if (value === null || value === undefined) return null
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toUpperCase() : null
+  }
+})
+
+await api.addResource('countries', {
+  // Override the plugin-wide normalizer for this one resource
+  normalizeId: (value) => {
+    if (value === null || value === undefined) return null
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toLowerCase() : null
+  },
+  schema: {
+    name: { type: 'string', required: true }
+  }
+})
+```
+
+Normalization is applied consistently to:
+
+- `get`, `put`, `patch`, `delete`, `getRelated`, and `getRelationship` parent ids
+- explicit resource ids in `POST`, `PUT`, and `PATCH` documents
+- relationship identifiers supplied to `postRelationship`, `patchRelationship`, and `deleteRelationship`
+
+The resource-level `normalizeId` override also applies to relationship identifiers when that resource appears as the related target.
+
+If an id normalizes to an empty value:
+
+- existing-resource operations behave as `not_found`
+- explicit `POST` document ids are rejected as validation errors on `data.id`
 
 For full examples of table creation, physical column naming, and migration generation, see [Knex Schema and Migrations](GUIDE_X_Knex_Schema_And_Migrations.md).
 

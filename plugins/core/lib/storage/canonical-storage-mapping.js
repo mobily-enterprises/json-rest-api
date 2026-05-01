@@ -23,9 +23,29 @@ export const translateCanonicalAttributesForStorage = (attributes = {}, descript
   return row
 }
 
+export const getCanonicalResourceIdColumn = (descriptor = {}) => (
+  descriptor?.canonical?.logicalIdColumn || 'logical_id'
+)
+
+export const getCanonicalResourceId = (row = {}, descriptor = {}) => {
+  const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
+  const logicalId = row?.[logicalIdColumn]
+
+  if (logicalId !== undefined && logicalId !== null) {
+    return String(logicalId)
+  }
+
+  if (row?.id !== undefined && row?.id !== null) {
+    return String(row.id)
+  }
+
+  return null
+}
+
 export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, options = {}) => {
   const attributes = {}
-  const consumedColumns = new Set(['id'])
+  const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
+  const consumedColumns = new Set(['id', logicalIdColumn])
   const allowedExtraFields = new Set(options.allowedExtraFields || [])
 
   for (const [slot, logical] of Object.entries(descriptor.reverseAttributes || {})) {
@@ -97,7 +117,7 @@ export const getCanonicalFieldValue = (row, descriptor = {}, fieldName) => {
   if (!row || !fieldName) return undefined
 
   if (fieldName === 'id') {
-    return row.id
+    return getCanonicalResourceId(row, descriptor)
   }
 
   const fieldInfo = descriptor.fields?.[fieldName]

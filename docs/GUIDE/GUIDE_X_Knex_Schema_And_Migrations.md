@@ -141,6 +141,49 @@ await api.resources.profiles.post({
 })
 ```
 
+### ID normalization
+
+If your primary keys need canonicalization beyond the default trim-and-stringify behavior, configure `normalizeId`.
+
+```js
+await api.use(RestApiPlugin, {
+  normalizeId: (value) => {
+    if (value === null || value === undefined) return null
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toUpperCase() : null
+  }
+})
+```
+
+You can override that per resource:
+
+```js
+await api.addResource('profiles', {
+  idProperty: 'user_id',
+  normalizeId: (value) => {
+    if (value === null || value === undefined) return null
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toLowerCase() : null
+  },
+  schema: {
+    id: { type: 'id', required: true, storage: { column: 'user_id' } },
+    displayName: { type: 'string', required: true }
+  },
+  tableName: 'profiles'
+})
+```
+
+For table-backed resources, `normalizeId` is applied before:
+
+- reading a record by id
+- replacing, patching, or deleting a record
+- persisting an explicit `POST` resource id
+- validating or writing relationship identifiers that point at the resource
+
+If the normalizer returns an empty value, existing-resource operations fail as `not_found`, while explicit `POST` document ids fail validation on `data.id`.
+
 ## Create Tables
 
 Create the table directly from the resource definition:

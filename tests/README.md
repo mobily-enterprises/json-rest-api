@@ -163,8 +163,15 @@ const result = await api.resources.books.query({
 # Run all tests
 npm test
 
+# Run the focused normalizeId verification path plus docs rebuild
+npm run verify
+
 # Run all tests against the AnyAPI storage backend
 npm run test:anyapi
+
+# Run only the normalizeId contract suites
+npm run test:id-contracts
+npm run test:id-contracts:anyapi
 
 # Windows PowerShell (AnyAPI run)
 $Env:JSON_REST_API_STORAGE = 'anyapi'; npm test

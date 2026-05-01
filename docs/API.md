@@ -293,6 +293,8 @@ const result = await api.resources.[resourceType].get(params, context)
 | `simplified` | Boolean | No | Override simplified mode setting (default: true) |
 | `transaction` | Object | No | Database transaction object |
 
+`id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
+
 #### Return Value
 
 **JSON:API Mode (simplified: false):**
@@ -432,7 +434,9 @@ const result = await api.resources.[resourceType].post(params, context)
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Resource data to create |
+| `inputRecord.id` | String | No (simplified) | Optional explicit logical resource ID |
 | `inputRecord.data` | Object | Yes (JSON:API) | Resource data container |
+| `inputRecord.data.id` | String | No (JSON:API) | Optional explicit logical resource ID |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
 | `inputRecord.data.attributes` | Object | Yes (JSON:API) | Resource attributes |
 | `inputRecord.data.relationships` | Object | No | Related resources |
@@ -440,6 +444,8 @@ const result = await api.resources.[resourceType].post(params, context)
 | `simplified` | Boolean | No | Override simplified mode (default: true) |
 | `transaction` | Object | No | Database transaction object |
 | `returnFullRecord` | String | No | Override return setting ('no', 'minimal', 'full') |
+
+When an explicit resource id is provided, `normalizeId` runs before persistence and before any follow-up record fetch used for the return payload. If the normalized id is empty, the request fails as `REST_API_VALIDATION` on `data.id`.
 
 #### Return Value Behavior
 
@@ -510,6 +516,25 @@ const result = await api.resources.articles.post({
         author: {
           data: { type: 'users', id: '10' }
         }
+      }
+    }
+  },
+  simplified: false
+});
+```
+
+**Create with Explicit ID and Normalization:**
+```javascript
+// With normalizeId configured to trim and uppercase ids,
+// this record is stored as ARTICLE-42
+const result = await api.resources.articles.post({
+  inputRecord: {
+    data: {
+      type: 'articles',
+      id: '  article-42  ',
+      attributes: {
+        title: 'Canonical ID Example',
+        content: 'Stored under the normalized id'
       }
     }
   },
@@ -604,6 +629,8 @@ const result = await api.resources.[resourceType].put(params, context)
 | `returnFullRecord` | String | No | Override return setting |
 
 `inputRecord.id` and `inputRecord.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
+
+If both the URL id and body id are present, both are normalized before the equality check. If either id normalizes to an empty value, the operation fails before storage is touched.
 
 #### Return Value
 
@@ -732,6 +759,8 @@ const result = await api.resources.[resourceType].patch(params, context)
 | `transaction` | Object | No | Database transaction object |
 | `returnFullRecord` | String | No | Override return setting |
 
+If both the URL id and body id are present, both are normalized before the equality check. If either id normalizes to an empty value, the operation fails before storage is touched.
+
 #### Return Value
 
 Updated resource based on `returnFullRecord` setting (defaults: API='full', transport='no').
@@ -853,6 +882,8 @@ const result = await api.resources.[resourceType].delete(params, context)
 | `id` | String\|Number | Yes | ID of resource to delete |
 | `transaction` | Object | No | Database transaction object |
 
+`id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
+
 #### Return Value
 
 Returns `undefined` (204 No Content)
@@ -939,6 +970,8 @@ const result = await api.resources.[resourceType].getRelated(params, context)
 | `queryParams` | Object | No | Standard query parameters for related resources |
 | `transaction` | Object | No | Database transaction object |
 
+`id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
+
 #### Return Value
 
 JSON:API response with related resources (supports all query features like filtering, pagination, etc.)
@@ -1010,6 +1043,8 @@ const result = await api.resources.[resourceType].getRelationship(params, contex
   transaction: Object          // Database transaction object
 }
 ```
+
+`id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
 
 #### Return Value
 
@@ -1085,6 +1120,8 @@ const result = await api.resources.[resourceType].postRelationship(params, conte
 }
 ```
 
+The parent `id` is normalized with the parent resource's normalizer. Each `relationshipData[*].id` is normalized with the related target resource's normalizer before validation and persistence.
+
 #### Return Value
 
 Returns `undefined` (204 No Content)
@@ -1120,6 +1157,8 @@ await api.resources.articles.postRelationship({
 // Existing tags remain, new tags are added
 ```
 
+If `normalizeId` is configured, both the parent id and each relationship identifier are normalized before the relationship is written.
+
 ---
 
 ### patchRelationship - Replace Relationship
@@ -1141,6 +1180,8 @@ const result = await api.resources.[resourceType].patchRelationship(params, cont
   transaction: Object                   // Database transaction object
 }
 ```
+
+The parent `id` is normalized with the parent resource's normalizer. Each relationship identifier inside `relationshipData` is normalized with the related target resource's normalizer before validation and persistence.
 
 #### Return Value
 
@@ -1222,6 +1263,8 @@ const result = await api.resources.[resourceType].deleteRelationship(params, con
   transaction: Object          // Database transaction object
 }
 ```
+
+The parent `id` is normalized with the parent resource's normalizer. Each `relationshipData[*].id` is normalized with the related target resource's normalizer before validation and persistence.
 
 #### Return Value
 
@@ -2079,24 +2122,30 @@ api.resource('articles').hook('afterDataQuery', async (context) => {
 ### Plugin Configuration
 
 ```javascript
-const restApiPlugin = new RestApiPlugin({
+await api.use(RestApiPlugin, {
   // API behavior
   simplifiedApi: true,              // Use simplified mode for programmatic calls (default: true)
   simplifiedTransport: false,       // Use JSON:API for HTTP transport (default: false)
+  normalizeId: (value) => {
+    if (value === null || value === undefined) {
+      return null
+    }
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toUpperCase() : null
+  },
   
   // Return record configuration
   returnRecordApi: {
     post: 'full',                   // Return full record after create (default)
     put: 'full',                    // Return full record after replace (default)
-    patch: 'full',                  // Return full record after update (default)
-    delete: 'no'                    // Return nothing after delete (default)
+    patch: 'full'                   // Return full record after update (default)
   },
   
   returnRecordTransport: {
     post: 'no',                     // Return 204 for HTTP POST (default)
     put: 'no',                      // Return 204 for HTTP PUT (default)
-    patch: 'no',                    // Return 204 for HTTP PATCH (default)
-    delete: 'no'                    // Return 204 for HTTP DELETE (default)
+    patch: 'no'                     // Return 204 for HTTP PATCH (default)
   },
   
   // Query limits
@@ -2107,15 +2156,7 @@ const restApiPlugin = new RestApiPlugin({
   includeDepthLimit: 3,             // Maximum relationship nesting depth
   
   // Performance
-  enablePaginationCounts: true,     // Execute count queries for total pages
-  
-  // Error handling
-  exposeErrors: false,              // Include error details in responses
-  
-  // Custom serializers
-  serializers: {
-    articles: customArticleSerializer
-  }
+  enablePaginationCounts: true      // Execute count queries for total pages
 });
 ```
 
@@ -2290,6 +2331,62 @@ api.addResource({
 ```
 
 `idProperty` names the physical primary-key column for table-backed resources. At the API layer, the resource id remains `id`, so writes use `inputRecord.id` or `inputRecord.data.id`, reads return `id` or `data.id`, and the resource id is not part of `attributes`.
+
+#### Resource ID Normalization
+
+`normalizeId` canonicalizes resource identifiers before the library reads, writes, validates, or links records.
+
+The default normalizer:
+
+- trims surrounding whitespace from strings
+- converts finite numbers and bigints to strings
+- rejects values that normalize to an empty identifier
+
+Provide a custom normalizer when your ids need additional canonicalization:
+
+```javascript
+await api.use(RestApiPlugin, {
+  normalizeId: (value) => {
+    if (value === null || value === undefined) {
+      return null
+    }
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toUpperCase() : null
+  }
+});
+```
+
+Resource-level overrides take precedence over the plugin-level default:
+
+```javascript
+await api.addResource('countries', {
+  normalizeId: (value) => {
+    if (value === null || value === undefined) {
+      return null
+    }
+
+    const normalized = String(value).trim()
+    return normalized ? normalized.toLowerCase() : null
+  },
+  schema: {
+    name: { type: 'string', required: true }
+  }
+});
+```
+
+Normalization is applied to:
+
+- parent ids used by `get`, `put`, `patch`, `delete`, `getRelated`, and `getRelationship`
+- explicit `POST`, `PUT`, and `PATCH` document ids
+- relationship identifiers used by `postRelationship`, `patchRelationship`, and `deleteRelationship`
+
+Relationship identifiers use the normalizer of the related target resource, not the parent resource.
+
+If an id normalizes to an empty value:
+
+- existing-resource operations fail as `REST_API_RESOURCE` with subtype `not_found`
+- explicit `POST` document ids fail as `REST_API_VALIDATION` on `data.id`
 
 #### Storage Column Naming
 

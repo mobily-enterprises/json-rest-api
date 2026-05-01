@@ -6,7 +6,11 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:anyapi": "JSON_REST_API_STORAGE=anyapi node --test tests/*.test.js",
+    "test:id-contracts": "node --test tests/id-normalization.test.js tests/logical-id-write-validation.test.js tests/custom-id-simplified-post.test.js",
+    "test:id-contracts:anyapi": "JSON_REST_API_STORAGE=anyapi node --test tests/id-normalization.test.js",
     "docs": "node scripts/run-docs.js",
+    "docs:dev": "node scripts/run-docs.js --serve",
+    "verify": "npm run test:id-contracts && npm run test:id-contracts:anyapi && npm run docs",
     "sloc": "sloc --exclude \"(_site|node_modules|\\.git|vendor|docs)\" .",
     "slod": "cd docs;echo 'DOC LINES:'; cat `find . -iname \\*md | grep -v _site | grep -v vendor` | wc",
     "lint": "eslint .",

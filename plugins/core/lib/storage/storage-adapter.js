@@ -6,6 +6,7 @@ import {
 } from './storage-mapping.js'
 import {
   getCanonicalFieldValue,
+  getCanonicalResourceIdColumn,
   translateCanonicalAttributesForStorage,
 } from './canonical-storage-mapping.js'
 
@@ -146,7 +147,7 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
 
   const translateColumn = (field) => {
     if (!field) return field
-    if (field === 'id') return 'id'
+    if (field === 'id') return getCanonicalResourceIdColumn(descriptor)
 
     const canonicalEntry = canonicalFieldMap[field]
     if (typeof canonicalEntry === 'string') {
@@ -214,7 +215,7 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
   return baseAdapter({
     knex,
     tableName: canonical.tableName,
-    idColumn: 'id',
+    idColumn: getCanonicalResourceIdColumn(descriptor),
     translateColumn,
     translateFilterValue,
     applyResourceScope,
