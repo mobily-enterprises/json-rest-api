@@ -9,6 +9,7 @@ import {
   getCanonicalResourceIdColumn,
   translateCanonicalAttributesForStorage,
 } from './canonical-storage-mapping.js'
+import { normalizeDateValue } from '../querying-writing/database-value-normalizers.js'
 
 const passthrough = (value) => value
 const identityTranslate = (_field, value) => value
@@ -32,6 +33,54 @@ const normalizeBelongsToValue = (value) => {
     return normalizeArray(value, normalizeBelongsToValue)
   }
   return String(value)
+}
+
+const normalizeBooleanValue = (value) => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1') return true
+    if (normalized === 'false' || normalized === '0') return false
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true
+    if (value === 0) return false
+  }
+  return Boolean(value)
+}
+
+const normalizeFilterValueForDefinition = (value, definition = {}, { isRelationship = false } = {}) => {
+  if (value === null || value === undefined) return value
+  if (Array.isArray(value)) {
+    return normalizeArray(
+      value,
+      (entry) => normalizeFilterValueForDefinition(entry, definition, { isRelationship })
+    )
+  }
+
+  if (isRelationship) {
+    return normalizeBelongsToValue(value)
+  }
+
+  const type = definition?.type || definition?.dataType
+  if (!type) {
+    return value
+  }
+
+  if (['number', 'integer', 'float', 'decimal'].includes(type)) {
+    const numeric = Number(value)
+    return Number.isNaN(numeric) ? value : numeric
+  }
+
+  if (type === 'boolean') {
+    return normalizeBooleanValue(value)
+  }
+
+  if (['date', 'dateTime', 'time'].includes(type)) {
+    return normalizeDateValue(value, type)
+  }
+
+  return value
 }
 
 const translateSourceColumn = (source, adapter) => {
@@ -124,13 +173,24 @@ const createLegacyAdapter = ({ knex, schemaInfo }) => {
   const translateColumn = (field) => getStorageColumn(schemaInfo, field)
   const toStorageRow = (attributes, options = {}) => translateAttributesForStorage(attributes, schemaInfo, options)
   const getFieldValue = (record, fieldName) => getLegacyFieldValue(record, schemaInfo, fieldName)
+  const translateFilterValue = (field, value) => {
+    const searchField = schemaInfo.searchSchemaStructure?.[field]
+    const schemaField = schemaInfo.schemaStructure?.[field]
+    const definition = searchField || schemaField || {}
+    const isRelationship = Boolean(
+      searchField?.isRelationship ||
+      schemaField?.belongsTo ||
+      schemaField?.belongsToPolymorphic
+    )
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship })
+  }
 
   return baseAdapter({
     knex,
     tableName,
     idColumn,
     translateColumn,
-    translateFilterValue: identityTranslate,
+    translateFilterValue,
     applyResourceScope: identityScope,
     toStorageRow,
     getFieldValue,
@@ -183,8 +243,6 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
   }
 
   const translateFilterValue = (field, value) => {
-    if (value === null || value === undefined) return value
-
     const searchField = schemaInfo.searchSchemaStructure?.[field]
     const schemaField = schemaInfo.schemaStructure?.[field]
     const isRelationship = Boolean(
@@ -192,15 +250,9 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
       schemaField?.belongsTo ||
       schemaField?.belongsToPolymorphic
     )
+    const definition = searchField || schemaField || {}
 
-    if (!isRelationship) {
-      if (Array.isArray(value)) {
-        return normalizeArray(value, passthrough)
-      }
-      return value
-    }
-
-    return normalizeBelongsToValue(value)
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship })
   }
 
   const applyResourceScope = (query) => {

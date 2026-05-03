@@ -199,6 +199,59 @@ export async function createBasicApi (knex, pluginOptions = {}) {
 }
 
 /**
+ * Creates a small API that uses logical camelCase belongsTo fields with default snake_case storage mapping.
+ * This reproduces the full JSON:API linkage path where storage column names differ from logical field names.
+ */
+export async function createCamelCaseBelongsToApi (knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'camelcase-belongsto-test-api'
+  const tablePrefix = pluginOptions.tablePrefix || 'camel_fk'
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    returnRecordTransport: {
+      post: 'full',
+      put: 'no',
+      patch: 'full'
+    },
+    ...(pluginOptions['rest-api'] || {})
+  })
+
+  await api.use(RestApiKnexPlugin, { knex })
+
+  await api.addResource('countries', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 100 }
+    },
+    tableName: `${tablePrefix}_countries`
+  })
+  await api.resources.countries.createKnexTable()
+
+  await api.addResource('publishers', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      countryId: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
+    },
+    tableName: `${tablePrefix}_publishers`
+  })
+  await api.resources.publishers.createKnexTable()
+
+  return api
+}
+
+/**
  * Creates a small API focused on resource ID normalization behavior.
  */
 export async function createIdNormalizationApi (knex, pluginOptions = {}) {
@@ -1847,7 +1900,7 @@ export async function createCursorPaginationApi (knex) {
       put: 'full',
       patch: 'minimal'
     },
-    sortableFields: ['id', 'name', 'category', 'brand', 'price', 'sku', 'created_at', 'code', 'status', 'type'],
+    sortableFields: ['id', 'name', 'category', 'brand', 'price', 'sku', 'createdAt', 'code', 'status', 'type'],
     queryDefaultLimit: 20,
     queryMaxLimit: 100,
     returnBasePath: 'https://api.example.com'
@@ -1867,7 +1920,7 @@ export async function createCursorPaginationApi (knex) {
       price: { type: 'number', required: true },
       sku: { type: 'string', required: true, max: 50, unique: true },
       status: { type: 'string', max: 50, default: 'active' },
-      created_at: { type: 'dateTime', default: 'now()' }
+      createdAt: { type: 'dateTime', default: 'now()' }
     },
     tableName: 'cursor_products'
   })

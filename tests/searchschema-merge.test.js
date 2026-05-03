@@ -5,6 +5,7 @@ import {
   cleanTables,
 } from './helpers/test-utils.js'
 import { createSearchSchemaMergeApi } from './fixtures/api-configs.js'
+import { generateSearchSchemaFromSchema } from '../plugins/core/lib/querying-writing/schema-helpers.js'
 
 // Create Knex instance for tests - always use SQLite in-memory
 const knex = knexLib({
@@ -130,5 +131,21 @@ describe('SearchSchema Merge Behavior', () => {
       (error) => error?.code === 'REST_API_VALIDATION',
       'Should reject fields that are not defined in searchSchema'
     )
+  })
+
+  it('should keep canonical belongsTo field keys searchable alongside relationship aliases', () => {
+    const searchSchema = generateSearchSchemaFromSchema({
+      petId: {
+        type: 'id',
+        belongsTo: 'pets',
+        as: 'pet',
+        search: true
+      }
+    }, null)
+
+    assert.ok(searchSchema.pet, 'relationship alias should stay searchable')
+    assert.equal(searchSchema.pet.actualField, 'petId')
+    assert.ok(searchSchema.petId, 'canonical field key should stay searchable for parent filters')
+    assert.equal(searchSchema.petId.actualField, 'petId')
   })
 })

@@ -48,7 +48,7 @@
  * 4. Handles MySQL datetime format (no T separator)
  * 5. Forces UTC interpretation to prevent timezone issues
  */
-function normalizeDateValue (value, type) {
+export function normalizeDateValue (value, type) {
   // Handle null/undefined
   if (value === null || value === undefined) {
     return null
@@ -81,25 +81,34 @@ function normalizeDateValue (value, type) {
 
   // Handle string values
   if (typeof value === 'string') {
+    const trimmed = value.trim()
+
+    if (/^-?\d+$/.test(trimmed)) {
+      const numericDate = new Date(Number(trimmed))
+      if (!isNaN(numericDate.getTime())) {
+        return numericDate
+      }
+    }
+
     // Detect MySQL datetime format: 'YYYY-MM-DD HH:MM:SS'
     // These have no T separator and no timezone indicator
     const isMySQLDateTime = type === 'dateTime' &&
-                           /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value) &&
-                           !value.includes('T') &&
-                           !value.includes('Z') &&
-                           !value.includes('+') &&
-                           !value.includes('-', 10) // Don't match date separators
+                           /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(trimmed) &&
+                           !trimmed.includes('T') &&
+                           !trimmed.includes('Z') &&
+                           !trimmed.includes('+') &&
+                           !trimmed.includes('-', 10) // Don't match date separators
 
     if (isMySQLDateTime) {
       // Convert to ISO format and force UTC interpretation
       // '2024-01-15 10:30:00' becomes '2024-01-15T10:30:00Z'
-      return new Date(value.replace(' ', 'T') + 'Z')
+      return new Date(trimmed.replace(' ', 'T') + 'Z')
     }
 
     // For date-only fields, ensure parsing at UTC midnight
     // This prevents timezone shifts when parsing dates
-    if (type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return new Date(value + 'T00:00:00Z')
+    if (type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return new Date(trimmed + 'T00:00:00Z')
     }
   }
 

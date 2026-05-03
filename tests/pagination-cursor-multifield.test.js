@@ -222,6 +222,76 @@ describe('Multi-field Cursor Pagination', () => {
         'Prices should be non-decreasing across pages')
     })
 
+    it('should advance when sorting by logical camelCase fields backed by snake_case storage columns', async () => {
+      await cleanTables(knex, ['cursor_products'])
+
+      const products = [
+        {
+          name: 'Newest Product',
+          category: 'Catalog',
+          brand: 'Acme',
+          price: 10,
+          sku: 'CAMEL-001',
+          createdAt: '2026-05-03T10:00:00.000Z'
+        },
+        {
+          name: 'Recent Product',
+          category: 'Catalog',
+          brand: 'Acme',
+          price: 20,
+          sku: 'CAMEL-002',
+          createdAt: '2026-05-03T09:00:00.000Z'
+        },
+        {
+          name: 'Older Product',
+          category: 'Catalog',
+          brand: 'Acme',
+          price: 30,
+          sku: 'CAMEL-003',
+          createdAt: '2026-05-03T08:00:00.000Z'
+        }
+      ]
+
+      for (const product of products) {
+        await api.resources.products.post({
+          inputRecord: createJsonApiDocument('products', product),
+          simplified: false
+        })
+      }
+
+      const firstPage = await api.resources.products.query({
+        queryParams: {
+          page: { size: 2 },
+          sort: ['-createdAt']
+        },
+        simplified: false
+      })
+
+      assert.equal(firstPage.data.length, 2)
+      assert.equal(firstPage.meta.pagination.cursor?.next.includes('createdAt:'), true,
+        'Cursor should include the logical createdAt field')
+
+      const secondPage = await api.resources.products.query({
+        queryParams: {
+          page: {
+            size: 2,
+            after: firstPage.meta.pagination.cursor.next
+          },
+          sort: ['-createdAt']
+        },
+        simplified: false
+      })
+
+      assert.deepEqual(
+        firstPage.data.map((record) => record.attributes.name),
+        ['Newest Product', 'Recent Product']
+      )
+      assert.deepEqual(
+        secondPage.data.map((record) => record.attributes.name),
+        ['Older Product']
+      )
+    })
+
     it('should generate correct cursor values for multi-field sorting', async () => {
       const result = await api.resources.products.query({
         queryParams: {

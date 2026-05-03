@@ -379,13 +379,16 @@ export const RestApiAnyapiKnexPlugin = {
 
         predicateChains.forEach((chain) => {
           const chainParts = chain.map(({ descriptor, operator, value }) => {
+            const normalizedValue = adapter?.translateFilterValue
+              ? adapter.translateFilterValue(descriptor.field, value)
+              : value
             if (descriptor.queryFieldRuntime) {
-              predicateBindings.push(...(descriptor.queryFieldRuntime.bindings || []), value)
+              predicateBindings.push(...(descriptor.queryFieldRuntime.bindings || []), normalizedValue)
               return `(${descriptor.queryFieldRuntime.sql}) ${operator} ?`
             }
 
             const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
-            predicateBindings.push(value)
+            predicateBindings.push(normalizedValue)
             return `${columnRef} ${operator} ?`
           })
 
@@ -2215,7 +2218,10 @@ export const RestApiAnyapiKnexPlugin = {
           cursorRecords,
           paginationInfo.pageSize,
           hasMore,
-          cursorFields
+          cursorFields,
+          {
+            schemaInfo
+          }
         )
         context.returnMeta.paginationMeta = paginationMeta
         const urlPrefix = getUrlPrefix(context, scope)
@@ -2226,7 +2232,10 @@ export const RestApiAnyapiKnexPlugin = {
           cursorRecords,
           paginationInfo.pageSize,
           hasMore,
-          cursorFields
+          cursorFields,
+          {
+            schemaInfo
+          }
         )
       }
 

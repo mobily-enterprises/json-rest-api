@@ -42,6 +42,7 @@ describe('Storage mapping', () => {
     await api.use(RestApiPlugin, {
       simplifiedApi: false,
       simplifiedTransport: false,
+      sortableFields: ['id', 'displayName', 'loginCount', 'lastSeenAt', 'countryId', 'externalRef'],
       returnRecordApi: {
         post: 'full',
         put: 'full',

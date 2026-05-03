@@ -708,7 +708,13 @@ export const RestApiKnexPlugin = {
               sortDescriptors,
               cursorData,
               (direction) => (direction === 'DESC' ? '<' : '>'),
-              (builder, descriptor, operator, value) => builder.where(descriptor.column, operator, value),
+              (builder, descriptor, operator, value) => builder.where(
+                descriptor.column,
+                operator,
+                storageAdapter?.translateFilterValue
+                  ? storageAdapter.translateFilterValue(descriptor.field, value)
+                  : value
+              ),
               {
                 onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
               }
@@ -736,7 +742,13 @@ export const RestApiKnexPlugin = {
               sortDescriptors,
               cursorData,
               (direction) => (direction === 'DESC' ? '>' : '<'),
-              (builder, descriptor, operator, value) => builder.where(descriptor.column, operator, value),
+              (builder, descriptor, operator, value) => builder.where(
+                descriptor.column,
+                operator,
+                storageAdapter?.translateFilterValue
+                  ? storageAdapter.translateFilterValue(descriptor.field, value)
+                  : value
+              ),
               {
                 onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
               }
@@ -863,7 +875,9 @@ export const RestApiKnexPlugin = {
 
         const sortFields = sortDescriptors.map((descriptor) => descriptor.field)
 
-        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields)
+        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields, {
+          schemaInfo
+        })
         const urlPrefix = getUrlPrefix(context, scope)
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
@@ -872,7 +886,10 @@ export const RestApiKnexPlugin = {
           records,
           pageSize,
           hasMore,
-          sortFields
+          sortFields,
+          {
+            schemaInfo
+          }
         )
       }
 
