@@ -350,37 +350,42 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
 export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName, context) => {
   const {
     vars: {
-      schemaInfo: { schemaInstance, schemaRelationships: relationships, idProperty }
+      schemaInfo
     }
   } = scope
 
-  const idField = idProperty || 'id'
+  const {
+    schemaInstance,
+    schemaRelationships: relationships
+  } = schemaInfo
 
   const schemaStructure = getSchemaStructure(schemaInstance)
 
   const processedRecords = records.map(record => {
     const { [RELATIONSHIPS_KEY]: _relationships, ...cleanRecord } = record
+    const logicalRecord = translateRecordFromStorage(cleanRecord, schemaInfo)
     const jsonApiRecord = toJsonApiRecord(scope, cleanRecord, scopeName)
+    const resourceId = jsonApiRecord.id
 
     if (_relationships) {
       jsonApiRecord.relationships = _relationships
     }
 
     for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
-      if (fieldDef.belongsTo && fieldDef.as && fieldName in cleanRecord) {
+      if (fieldDef.belongsTo && fieldDef.as && fieldName in logicalRecord) {
         jsonApiRecord.relationships = jsonApiRecord.relationships || {}
         if (!jsonApiRecord.relationships[fieldDef.as]) {
-          if (cleanRecord[fieldName] !== null && cleanRecord[fieldName] !== undefined) {
+          if (logicalRecord[fieldName] !== null && logicalRecord[fieldName] !== undefined) {
             const relationshipObject = {
               data: {
                 type: fieldDef.belongsTo,
-                id: String(cleanRecord[fieldName])
+                id: String(logicalRecord[fieldName])
               }
             }
 
             relationshipObject.links = {
-              self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
-              related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
+              self: buildRelationshipUrl(context, scope, scopeName, resourceId, fieldDef.as, true),
+              related: buildRelationshipUrl(context, scope, scopeName, resourceId, fieldDef.as, false)
             }
 
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject
@@ -390,8 +395,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
             }
 
             relationshipObject.links = {
-              self: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, true),
-              related: buildRelationshipUrl(context, scope, scopeName, record[idField], fieldDef.as, false)
+              self: buildRelationshipUrl(context, scope, scopeName, resourceId, fieldDef.as, true),
+              related: buildRelationshipUrl(context, scope, scopeName, resourceId, fieldDef.as, false)
             }
 
             jsonApiRecord.relationships[fieldDef.as] = relationshipObject
@@ -402,8 +407,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
 
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
-        const typeValue = cleanRecord[relDef.belongsToPolymorphic.typeField]
-        const idValue = cleanRecord[relDef.belongsToPolymorphic.idField]
+        const typeValue = logicalRecord[relDef.belongsToPolymorphic.typeField]
+        const idValue = logicalRecord[relDef.belongsToPolymorphic.idField]
 
         if (typeValue && idValue) {
           jsonApiRecord.relationships = jsonApiRecord.relationships || {}
@@ -415,8 +420,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
           }
 
           relationshipObject.links = {
-            self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
-            related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
+            self: buildRelationshipUrl(context, scope, scopeName, resourceId, relName, true),
+            related: buildRelationshipUrl(context, scope, scopeName, resourceId, relName, false)
           }
 
           jsonApiRecord.relationships[relName] = relationshipObject
@@ -427,8 +432,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
           }
 
           relationshipObject.links = {
-            self: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, true),
-            related: buildRelationshipUrl(context, scope, scopeName, record[idField], relName, false)
+            self: buildRelationshipUrl(context, scope, scopeName, resourceId, relName, true),
+            related: buildRelationshipUrl(context, scope, scopeName, resourceId, relName, false)
           }
 
           jsonApiRecord.relationships[relName] = relationshipObject

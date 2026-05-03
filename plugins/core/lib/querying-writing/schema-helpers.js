@@ -96,6 +96,36 @@ export function ensureSearchFieldsAreIndexed (searchSchema) {
   })
 }
 
+function createRelationshipSearchEntries (fieldName, fieldDef, searchEntry) {
+  if (!fieldDef?.belongsTo || !fieldDef?.as) {
+    return [[fieldName, searchEntry]]
+  }
+
+  const relationshipEntry = {
+    ...searchEntry,
+    actualField: fieldName,
+    isRelationship: true,
+    targetResource: fieldDef.belongsTo
+  }
+
+  return [
+    [fieldDef.as, relationshipEntry],
+    [fieldName, {
+      ...relationshipEntry
+    }]
+  ]
+}
+
+function registerSearchEntries (searchSchema, entries = []) {
+  for (const [searchFieldName, searchEntry] of entries) {
+    if (!searchFieldName || searchSchema[searchFieldName]) {
+      continue
+    }
+
+    searchSchema[searchFieldName] = searchEntry
+  }
+}
+
 /**
  * Generates complete searchSchema by merging schema search definitions with explicit searchSchema
  *
@@ -241,31 +271,12 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
 
     if (effectiveSearch) {
       if (effectiveSearch === true) {
-        // For belongsTo relationships, use the relationship name (as property) instead of the field name
-        const searchFieldName = (fieldDef.belongsTo && fieldDef.as) ? fieldDef.as : fieldName
-
-        // Check if field already exists in explicit searchSchema
-        if (searchSchema[searchFieldName]) {
-          // Skip - explicit searchSchema takes precedence
-          // This allows searchSchema to override fields marked with search:true
-          return
-        }
-
         // Simple boolean - copy entire field definition (except search)
         const { search, ...fieldDefWithoutSearch } = fieldDef
-        const searchEntry = {
+        registerSearchEntries(searchSchema, createRelationshipSearchEntries(fieldName, fieldDef, {
           ...fieldDefWithoutSearch,
           // Do not set filterOperator here; centralized resolver will apply sensible defaults
-        }
-
-        // For belongsTo relationships, add metadata to map back to the actual field
-        if (fieldDef.belongsTo && fieldDef.as) {
-          searchEntry.actualField = fieldName  // Maps to the DB column
-          searchEntry.isRelationship = true
-          searchEntry.targetResource = fieldDef.belongsTo
-        }
-
-        searchSchema[searchFieldName] = searchEntry
+        }))
       } else if (typeof effectiveSearch === 'object') {
         // Check if search defines multiple filter fields
         const hasNestedFilters = Object.values(effectiveSearch).some(
@@ -288,29 +299,11 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
             }
           })
         } else {
-          // For belongsTo relationships, use the relationship name (as property) instead of the field name
-          const searchFieldName = (fieldDef.belongsTo && fieldDef.as) ? fieldDef.as : fieldName
-
-          // Check if field already exists in explicit searchSchema
-          if (searchSchema[searchFieldName]) {
-            // Skip - explicit searchSchema takes precedence
-            return
-          }
-
           // Single filter with config
-          const searchEntry = {
+          registerSearchEntries(searchSchema, createRelationshipSearchEntries(fieldName, fieldDef, {
             type: fieldDef.type,
             ...effectiveSearch
-          }
-
-          // For belongsTo relationships, add metadata to map back to the actual field
-          if (fieldDef.belongsTo && fieldDef.as) {
-            searchEntry.actualField = fieldName  // Maps to the DB column
-            searchEntry.isRelationship = true
-            searchEntry.targetResource = fieldDef.belongsTo
-          }
-
-          searchSchema[searchFieldName] = searchEntry
+          }))
         }
       }
     }
