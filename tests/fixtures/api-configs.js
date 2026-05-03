@@ -1900,7 +1900,7 @@ export async function createCursorPaginationApi (knex) {
       put: 'full',
       patch: 'minimal'
     },
-    sortableFields: ['id', 'name', 'category', 'brand', 'price', 'sku', 'created_at', 'code', 'status', 'type'],
+    sortableFields: ['id', 'name', 'category', 'brand', 'price', 'sku', 'createdAt', 'code', 'status', 'type'],
     queryDefaultLimit: 20,
     queryMaxLimit: 100,
     returnBasePath: 'https://api.example.com'
@@ -1920,7 +1920,7 @@ export async function createCursorPaginationApi (knex) {
       price: { type: 'number', required: true },
       sku: { type: 'string', required: true, max: 50, unique: true },
       status: { type: 'string', max: 50, default: 'active' },
-      created_at: { type: 'dateTime', default: 'now()' }
+      createdAt: { type: 'dateTime', default: 'now()' }
     },
     tableName: 'cursor_products'
   })

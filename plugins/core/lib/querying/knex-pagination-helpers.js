@@ -1,3 +1,5 @@
+import { getFieldValue } from '../storage/storage-mapping.js'
+
 /**
  * Calculates pagination metadata from query results
  *
@@ -257,11 +259,13 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
  * 4. Cursor used in 'next' link for fetching subsequent pages
  * 5. Enables efficient "WHERE (field1, field2) > (val1, val2)" queries
  */
-export const createCursor = (record, sortFields = ['id']) => {
+export const createCursor = (record, sortFields = ['id'], { schemaInfo = null } = {}) => {
   const parts = []
   sortFields.forEach(field => {
-    if (record[field] !== undefined) {
-      const value = record[field]
+    const value = schemaInfo
+      ? getFieldValue(record, schemaInfo, field)
+      : record[field]
+    if (value !== undefined) {
       const stringValue = value instanceof Date ? value.toISOString() : String(value)
       parts.push(`${field}:${encodeURIComponent(stringValue)}`)
     }
@@ -427,7 +431,16 @@ export const parseCursor = (cursor) => {
  * 4. Added to response.links for navigation
  * 5. Client uses next link to fetch subsequent pages
  */
-export const generateCursorPaginationLinks = (urlPrefix, scopeName, queryParams, records, pageSize, hasMore, sortFields = ['id']) => {
+export const generateCursorPaginationLinks = (
+  urlPrefix,
+  scopeName,
+  queryParams,
+  records,
+  pageSize,
+  hasMore,
+  sortFields = ['id'],
+  { schemaInfo = null } = {}
+) => {
   // Allow empty urlPrefix to generate relative links
   if (!records.length) return null
 
@@ -479,7 +492,7 @@ export const generateCursorPaginationLinks = (urlPrefix, scopeName, queryParams,
 
   if (hasMore && records.length > 0) {
     const lastRecord = records[records.length - 1]
-    const nextCursor = createCursor(lastRecord, sortFields)
+    const nextCursor = createCursor(lastRecord, sortFields, { schemaInfo })
     links.next = `${baseUrl}${queryPrefix}page[size]=${pageSize}&page[after]=${nextCursor}`
   }
 
@@ -543,7 +556,7 @@ export const generateCursorPaginationLinks = (urlPrefix, scopeName, queryParams,
  * 3. Added to response.meta.pagination
  * 4. Clients can use cursor directly or use the next link
  */
-export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id']) => {
+export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'], { schemaInfo = null } = {}) => {
   const meta = {
     pageSize,
     hasMore
@@ -552,7 +565,7 @@ export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'])
   if (hasMore && records.length > 0) {
     const lastRecord = records[records.length - 1]
     meta.cursor = {
-      next: createCursor(lastRecord, sortFields)
+      next: createCursor(lastRecord, sortFields, { schemaInfo })
     }
   }
 
