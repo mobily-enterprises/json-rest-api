@@ -400,6 +400,12 @@ describe('Relationship Endpoints Plugin', () => {
     let bookId
     let authorId
 
+    const assertRelationshipIdValidationError = (error) => {
+      assert.equal(error.code, 'REST_API_VALIDATION')
+      assert.match(error.message, /id/i)
+      return true
+    }
+
     beforeEach(async () => {
       await cleanTables(knex, [
         'basic_countries', 'basic_publishers', 'basic_authors', 'basic_books', 'basic_book_authors'
@@ -482,6 +488,39 @@ describe('Relationship Endpoints Plugin', () => {
 
       assert.equal(toManyResponse.status, 422)
       assert.match(toManyResponse.body.errors?.[0]?.detail || '', /array of resource identifiers/)
+    })
+
+    it('rejects malformed relationship identifiers through direct relationship methods', async () => {
+      await assert.rejects(
+        api.resources.books.postRelationship({
+          id: bookId,
+          relationshipName: 'authors',
+          relationshipData: [{ type: 'authors' }]
+        }),
+        assertRelationshipIdValidationError
+      )
+
+      await assert.rejects(
+        api.resources.books.patchRelationship({
+          id: bookId,
+          relationshipName: 'country',
+          relationshipData: { type: 'countries' }
+        }),
+        assertRelationshipIdValidationError
+      )
+    })
+
+    it('rejects malformed relationship identifiers through Express transport', async () => {
+      const response = await request(app)
+        .delete(`/books/${bookId}/relationships/authors`)
+        .set('Content-Type', 'application/vnd.api+json')
+        .set('Accept', 'application/vnd.api+json')
+        .send({
+          data: [{ type: 'authors' }]
+        })
+
+      assert.equal(response.status, 422)
+      assert.match(response.body.errors?.[0]?.detail || '', /id/i)
     })
   })
 

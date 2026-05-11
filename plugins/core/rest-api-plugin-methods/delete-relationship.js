@@ -1,5 +1,10 @@
-import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
-import { commitOwnedTransaction, findRelationshipDefinition, handleWriteMethodError } from './common.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import {
+  commitOwnedTransaction,
+  findRelationshipDefinition,
+  handleWriteMethodError,
+  validateRelationshipRoutePayload
+} from './common.js'
 import {
   normalizeRelationshipIdentifiers,
   requireExistingResourceId
@@ -48,9 +53,13 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
       )
     }
 
-    if (!Array.isArray(params.relationshipData)) {
-      throw new RestApiPayloadError('DELETE from relationship requires array of resource identifiers')
-    }
+    params.relationshipData = validateRelationshipRoutePayload({
+      context,
+      vars,
+      scopeName,
+      operation: 'deleteRelationship',
+      relationshipData: params.relationshipData
+    })
     params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
 
     // Check permissions

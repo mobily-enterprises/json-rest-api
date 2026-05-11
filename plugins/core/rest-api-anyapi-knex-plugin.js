@@ -54,6 +54,7 @@ import {
   parseSortEntry
 } from './lib/querying/query-field-sort-helpers.js'
 import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
+import { serializeJsonApiQuery } from './lib/querying-writing/connectors-query-parser.js'
 
 const DEFAULT_TENANT = 'default'
 const LINKS_TABLE = 'any_links'
@@ -281,34 +282,6 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       return descriptors
-    }
-
-    const buildQueryString = (queryParams = {}) => {
-      const buildParts = (prefix, value) => {
-        const parts = []
-        if (Array.isArray(value)) {
-          if (value.length === 0) return parts
-          parts.push(`${prefix}=${value.map((item) => encodeURIComponent(item)).join(',')}`)
-          return parts
-        }
-        if (value && typeof value === 'object') {
-          for (const [key, subValue] of Object.entries(value)) {
-            if (subValue === undefined || subValue === null) continue
-            const newPrefix = `${prefix}[${key}]`
-            parts.push(...buildParts(newPrefix, subValue))
-          }
-          return parts
-        }
-        if (value === undefined || value === null) return parts
-        parts.push(`${prefix}=${encodeURIComponent(value)}`)
-        return parts
-      }
-
-      const parts = []
-      for (const [key, value] of Object.entries(queryParams)) {
-        parts.push(...buildParts(key, value))
-      }
-      return parts.length > 0 ? `?${parts.join('&')}` : ''
     }
 
     const applyPaginationToQuery = ({
@@ -2205,7 +2178,8 @@ export const RestApiAnyapiKnexPlugin = {
       }
 
       context.returnMeta = context.returnMeta || {}
-      context.returnMeta.queryString = buildQueryString(queryParams)
+      const queryString = serializeJsonApiQuery(queryParams)
+      context.returnMeta.queryString = queryString ? `?${queryString}` : ''
       delete context.returnMeta.paginationMeta
       delete context.returnMeta.paginationLinks
 

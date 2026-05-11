@@ -38,6 +38,7 @@ import {
   parseSortEntry
 } from './lib/querying/query-field-sort-helpers.js'
 import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
+import { serializeJsonApiQuery } from './lib/querying-writing/connectors-query-parser.js'
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
@@ -767,38 +768,10 @@ export const RestApiKnexPlugin = {
       // Execute query
       const records = await query
 
-      // Store query string for response building
-      const queryParts = []
-      Object.entries(queryParams).forEach(([key, value]) => {
-        if (Array.isArray(value)) {
-          // Handle arrays (like sort, include)
-          if (value.length > 0) {
-            queryParts.push(`${key}=${value.map(v => encodeURIComponent(v)).join(',')}`)
-          }
-        } else if (typeof value === 'object' && value !== null) {
-          // Handle nested objects (like filters, fields, page)
-          Object.entries(value).forEach(([subKey, subValue]) => {
-            if (subValue !== undefined && subValue !== null) {
-              if (typeof subValue === 'object' && !Array.isArray(subValue)) {
-                // Handle deeply nested objects (like filters[country][code])
-                Object.entries(subValue).forEach(([subSubKey, subSubValue]) => {
-                  if (subSubValue !== undefined && subSubValue !== null) {
-                    queryParts.push(`${key}[${subKey}][${subSubKey}]=${encodeURIComponent(subSubValue)}`)
-                  }
-                })
-              } else {
-                queryParts.push(`${key}[${subKey}]=${encodeURIComponent(subValue)}`)
-              }
-            }
-          })
-        } else if (value !== undefined && value !== null) {
-          queryParts.push(`${key}=${encodeURIComponent(value)}`)
-        }
-      })
-
       // Initialize returnMeta namespace for thread-safe metadata
       context.returnMeta = context.returnMeta || {}
-      context.returnMeta.queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : ''
+      const queryString = serializeJsonApiQuery(queryParams)
+      context.returnMeta.queryString = queryString ? `?${queryString}` : ''
 
       // Execute count query for pagination if offset-based pagination is used
       if (queryParams.page?.number !== undefined || (queryParams.page?.size !== undefined && !queryParams.page?.after && !queryParams.page?.before)) {
