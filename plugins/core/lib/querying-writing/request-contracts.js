@@ -550,6 +550,22 @@ function buildQueryRequestContract ({ includeDepthLimit, sortableFields, searchS
   }
 }
 
+function buildRelationshipRouteBodyContract (operation) {
+  const isPatch = operation === 'patchRelationship'
+
+  return {
+    schema: createSchema({
+      data: {
+        type: 'jsonApiRelationshipData',
+        required: true,
+        nullable: isPatch,
+        cardinality: isPatch ? null : 'many'
+      }
+    }),
+    mode: 'replace'
+  }
+}
+
 function buildRequestContracts ({ scopeName, schemaInfo, includeDepthLimit, sortableFields }) {
   return {
     post: buildWriteDocumentContract(scopeName, schemaInfo, 'post'),
@@ -560,7 +576,10 @@ function buildRequestContracts ({ scopeName, schemaInfo, includeDepthLimit, sort
       includeDepthLimit,
       sortableFields,
       searchSchemaInstance: schemaInfo.searchSchemaInstance
-    })
+    }),
+    postRelationship: buildRelationshipRouteBodyContract('postRelationship'),
+    patchRelationship: buildRelationshipRouteBodyContract('patchRelationship'),
+    deleteRelationship: buildRelationshipRouteBodyContract('deleteRelationship')
   }
 }
 

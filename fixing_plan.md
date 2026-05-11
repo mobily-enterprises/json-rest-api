@@ -96,9 +96,9 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [ ] If real S3 is not implemented, make README and guide text state that the included adapter is mock/demo only.
   - [ ] If real S3 is implemented, update docs and tests to match the production behavior.
 
-- [ ] Finish relationship validation contract consolidation.
-  - [ ] Move relationship-route schemas into the same request-contract surface as resource routes.
-  - [ ] Do this after the cardinality fix so the centralized contract is correct rather than merely centralized.
+- [x] Finish relationship validation contract consolidation.
+  - [x] Move relationship-route schemas into the same request-contract surface as resource routes.
+  - [x] Do this after the cardinality fix so the centralized contract is correct rather than merely centralized.
 
 ## Verification Checklist
 
