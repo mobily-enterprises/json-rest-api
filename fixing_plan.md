@@ -22,12 +22,12 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Map internal `queryParams.filters` back to public JSON:API `filter[...]`.
   - [x] Add tests that parse generated `links.next` and prove filters, fields, sort, include, and page params survive round trip.
 
-- [ ] Fix relationship PATCH cardinality validation.
-  - [ ] Generate relationship-aware request contracts from relationship metadata.
-  - [ ] Allow to-one relationship PATCH data to be `null` or one resource identifier only.
-  - [ ] Allow to-many relationship data to be arrays only.
-  - [ ] Make `processRelationships()` throw when a belongsTo relationship receives an array.
-  - [ ] Add API and transport tests for invalid to-one arrays and invalid to-many scalars.
+- [x] Fix relationship PATCH cardinality validation.
+  - [x] Generate relationship-aware request contracts from relationship metadata.
+  - [x] Allow to-one relationship PATCH data to be `null` or one resource identifier only.
+  - [x] Allow to-many relationship data to be arrays only.
+  - [x] Make `processRelationships()` throw when a belongsTo relationship receives an array.
+  - [x] Add API and transport tests for invalid to-one arrays and invalid to-many scalars.
 
 - [ ] Run `afterCommit` for relationship routes.
   - [ ] After `postRelationship`, `patchRelationship`, and `deleteRelationship` commit their own transaction, run `afterCommit`.

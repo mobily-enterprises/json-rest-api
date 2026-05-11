@@ -1,5 +1,6 @@
 import { addType, addValidator, createSchema } from 'json-rest-schema'
 import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { getRelationshipCardinality } from './relationship-contracts.js'
 
 function isPlainObject (value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -28,8 +29,19 @@ function buildResourceIdentifierTransportSchema (allowedTypes = null) {
   }
 }
 
-function buildRelationshipDataTransportSchema (allowedTypes = null) {
+function buildRelationshipDataTransportSchema (allowedTypes = null, cardinality = null) {
   const identifierSchema = buildResourceIdentifierTransportSchema(allowedTypes)
+
+  if (cardinality === 'one') {
+    return identifierSchema
+  }
+
+  if (cardinality === 'many') {
+    return {
+      type: 'array',
+      items: identifierSchema
+    }
+  }
 
   return {
     anyOf: [
@@ -156,16 +168,31 @@ function installRequestContractSupport () {
     const allowedTypes = Array.isArray(context.definition.allowedTypes)
       ? context.definition.allowedTypes
       : null
+    const cardinality = context.definition.cardinality || null
 
     if (Array.isArray(context.value)) {
+      if (cardinality === 'one') {
+        context.throwParamError(
+          'INVALID_RELATIONSHIP_CARDINALITY',
+          'Relationship data must be a single resource identifier or null.'
+        )
+      }
       context.value.forEach((entry) => validateResourceIdentifierValue(entry, context, allowedTypes))
       return context.value
+    }
+
+    if (cardinality === 'many') {
+      context.throwParamError(
+        'INVALID_RELATIONSHIP_CARDINALITY',
+        'Relationship data must be an array of resource identifiers.'
+      )
     }
 
     return validateResourceIdentifierValue(context.value, context, allowedTypes)
   }
   jsonApiRelationshipDataType.toJsonSchema = ({ definition }) => buildRelationshipDataTransportSchema(
-    Array.isArray(definition.allowedTypes) ? definition.allowedTypes : null
+    Array.isArray(definition.allowedTypes) ? definition.allowedTypes : null,
+    definition.cardinality || null
   )
   addType('jsonApiRelationshipData', jsonApiRelationshipDataType)
 
@@ -379,6 +406,7 @@ function buildRelationshipStructure (schemaInfo = {}) {
           type: 'jsonApiRelationshipData',
           required: true,
           nullable: true,
+          cardinality: 'one',
           allowedTypes: [fieldDef.belongsTo]
         }
       })
@@ -386,13 +414,15 @@ function buildRelationshipStructure (schemaInfo = {}) {
   }
 
   for (const [relName, relDef] of Object.entries(schemaRelationships)) {
+    const cardinality = getRelationshipCardinality(relDef)
     relationshipStructure[relName] = {
       type: 'object',
       schema: createSchema({
         data: {
           type: 'jsonApiRelationshipData',
           required: true,
-          nullable: true,
+          nullable: cardinality === 'one',
+          cardinality,
           allowedTypes: resolveRelationshipAllowedTypes(relName, relDef)
         }
       })

@@ -1,4 +1,5 @@
 import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { validateRelationshipDataCardinality } from '../querying-writing/relationship-contracts.js'
 
 /**
  * Processes JSON:API relationship data and converts to database operations
@@ -183,6 +184,14 @@ export const processRelationships = (scope, deps) => {
       fieldDef.as === relName
     )
 
+    if (schemaField || relDef) {
+      validateRelationshipDataCardinality({
+        relationshipName: relName,
+        relDef: schemaField ? schemaField[1] : relDef,
+        data: relData?.data
+      })
+    }
+
     if (schemaField) {
       const [fieldName, fieldDef] = schemaField
 
@@ -235,7 +244,7 @@ export const processRelationships = (scope, deps) => {
           foreignKey: relDef.foreignKey,
           otherKey: relDef.otherKey
         },
-        relData: relData.data || []  // null means empty array for many-to-many
+        relData: relData.data
       })
     }
     // Note: hasOne and hasMany don't need processing here as they don't update the current record
