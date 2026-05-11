@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api'
-import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin, QueryProjectionsPlugin, FileHandlingPlugin } from '../../index.js'
+import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin, QueryProjectionsPlugin, FileHandlingPlugin, SocketIOPlugin } from '../../index.js'
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js'
 import express from 'express'
 import { createServer } from 'http'
@@ -848,7 +848,6 @@ export async function createPaginationApi (knex, options = {}) {
  * Creates an API with WebSocket/Socket.IO support for testing
  */
 export async function createWebSocketApi (knex, pluginOptions = {}) {
-  const { SocketIOPlugin } = await import('../../plugins/core/socketio-plugin.js')
   const { jwtVerify } = await import('jose')
 
   const api = await createBasicApi(knex, {

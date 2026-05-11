@@ -30,19 +30,17 @@ The Socket.IO plugin provides real-time notifications when resources change in y
 
 The Socket.IO plugin is included in json-rest-api core plugins. To use it, you need to:
 
-1. Install Socket.IO dependencies:
+1. Install Socket.IO. Redis packages are only needed when you configure the Redis adapter:
 ```bash
-npm install socket.io @socket.io/redis-adapter redis
+npm install socket.io
+npm install @socket.io/redis-adapter redis
 ```
 
 2. Use the plugin and start the Socket.IO server:
 
 ```javascript
-import { Api } from 'json-rest-api';
-import { RestApiPlugin } from 'json-rest-api/plugins/rest-api';
-import { RestApiKnexPlugin } from 'json-rest-api/plugins/rest-api-knex';
-import { SocketIOPlugin } from 'json-rest-api/plugins/socketio';
-import { JWTAuthPlugin } from 'json-rest-api/plugins/jwt-auth';
+import { Api } from 'hooked-api';
+import { RestApiPlugin, RestApiKnexPlugin, SocketIOPlugin } from 'json-rest-api';
 
 // Create your API instance
 const api = new Api({
@@ -52,8 +50,15 @@ const api = new Api({
 // Add required plugins
 await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex: knexInstance });
-await api.use(JWTAuthPlugin, { secret: process.env.JWT_SECRET });
-await api.use(SocketIOPlugin);
+await api.use(SocketIOPlugin, {
+  auth: {
+    requireAuth: true,
+    authenticate: async ({ socket }) => {
+      const token = socket.handshake.auth?.token;
+      return verifyToken(token); // App-defined token verification
+    }
+  }
+});
 
 // Start your HTTP server
 const server = app.listen(3000).on('error', (err) => {
