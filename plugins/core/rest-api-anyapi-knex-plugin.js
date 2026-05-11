@@ -1040,11 +1040,19 @@ export const RestApiAnyapiKnexPlugin = {
       row[canonical.resourceColumn] = descriptor.resource
       row[canonical.tenantColumn] = descriptor.tenant
 
-      const updateRow = Object.fromEntries(
+      const writeRow = Object.fromEntries(
         Object.entries(row).filter(([, value]) => value !== undefined)
       )
 
-      if (Object.keys(updateRow).length === 0) {
+      if (context.isCreate) {
+        await context.db(canonical.tableName).insert({
+          ...writeRow,
+          [logicalIdColumn]: id,
+        })
+        return 1
+      }
+
+      if (Object.keys(writeRow).length === 0) {
         return 0
       }
 
@@ -1052,7 +1060,7 @@ export const RestApiAnyapiKnexPlugin = {
         .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
-        .update(updateRow)
+        .update(writeRow)
 
       return result
     }
