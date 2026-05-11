@@ -73,10 +73,10 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 
 ## Low Priority
 
-- [ ] Make field setter errors fail closed.
-  - [ ] Change setter error handling to throw by default.
-  - [ ] Add an explicit opt-in non-fatal mode only if there is a real use case.
-  - [ ] Add a rollback test where a setter throws and no row is persisted.
+- [x] Make field setter errors fail closed.
+  - [x] Change setter error handling to throw by default.
+  - [x] Do not add an opt-in non-fatal mode without a real use case.
+  - [x] Add a rollback test where a setter throws and no row is persisted.
 
 - [ ] Normalize return-record boolean compatibility.
   - [ ] Create one shared return-record normalizer.

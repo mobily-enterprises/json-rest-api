@@ -570,8 +570,18 @@ export const applyFieldSetters = async (attributes, schemaInfo, context, api, he
         setterContext
       )
     } catch (error) {
-      console.warn(`Setter for field '${fieldName}' failed:`, error)
-      // Keep original value if setter fails
+      const message = error instanceof Error ? error.message : String(error)
+      throw new RestApiValidationError(
+        `Setter for field '${fieldName}' failed: ${message}`,
+        {
+          fields: [`data.attributes.${fieldName}`],
+          violations: [{
+            field: `data.attributes.${fieldName}`,
+            rule: 'setter_failed',
+            message
+          }]
+        }
+      )
     }
   }
 

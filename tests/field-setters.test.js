@@ -176,7 +176,7 @@ describe('Field Setters', () => {
       await cleanTables(knex, ['setter_users'])
     })
 
-    it('should handle setter errors gracefully', async () => {
+    it('should reject setter errors and roll back the write', async () => {
       // Create a resource with a failing setter
       await api.addResource('error_test', {
         schema: {
@@ -196,16 +196,16 @@ describe('Field Setters', () => {
       })
       await api.resources.error_test.createKnexTable()
 
-      const record = await api.resources.error_test.post({
-        good_field: 'HELLO',
-        bad_field: 'world'
-      })
+      await assert.rejects(
+        api.resources.error_test.post({
+          good_field: 'HELLO',
+          bad_field: 'world'
+        }),
+        /Setter for field 'bad_field' failed: Setter failed!/
+      )
 
-      const fetchedRecord = await api.resources.error_test.get({ id: record.id })
-      // Good field should be transformed
-      assert.equal(fetchedRecord.good_field, 'hello')
-      // Bad field should keep validated value (error logged but not thrown)
-      assert.equal(fetchedRecord.bad_field, 'world')
+      const records = await api.resources.error_test.query()
+      assert.equal(records?.length || 0, 0)
 
       await cleanTables(knex, ['setter_errors'])
     })
