@@ -2,316 +2,155 @@
 
 ## Overview
 
-The JSON REST API automatically generates appropriate URLs for all resources in JSON:API responses. URLs are calculated **per-request** based on the incoming request headers, ensuring correct URLs in all deployment scenarios without configuration.
+JSON REST API generates JSON:API links and `Location` headers from explicit library configuration. By default, generated URLs are relative to the configured transport `mountPath`.
 
-## How It Works
+Request headers such as `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` are not trusted for URL generation. This keeps links from reflecting attacker-controlled request headers.
 
-### Automatic URL Detection
+## Default Relative Links
 
-URLs in responses (links, hrefs) are automatically generated based on:
-
-1. **Protocol**: Detected from `X-Forwarded-Proto` header or request protocol
-2. **Host**: Detected from `X-Forwarded-Host` or `Host` header  
-3. **Mount Path**: Where your API routes are mounted (e.g., `/api`)
+For a standard Express or Fastify setup:
 
 ```javascript
-// Example: Simple setup - no URL configuration needed!
 await api.use(RestApiPlugin);
 await api.use(RestApiKnexPlugin, { knex });
 await api.use(ExpressPlugin, { mountPath: '/api' });
 ```
 
-### Different Deployment Scenarios
+Generated links use the mount path:
 
-#### Local Development
-```
-Request: GET http://localhost:3000/api/books
-Response links: http://localhost:3000/api/books/1
-```
-
-#### Production with Domain
-```
-Request: GET https://api.example.com/api/books
-Response links: https://api.example.com/api/books/1
-```
-
-#### Behind Reverse Proxy (Nginx/Apache)
-```nginx
-# Nginx configuration
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-Host $host;
-proxy_pass http://backend:3000;
-```
-
-```
-Request headers:
-  X-Forwarded-Proto: https
-  X-Forwarded-Host: api.example.com
-Response links: https://api.example.com/api/books/1
-```
-
-#### Multi-Tenant SaaS
-Each tenant gets their own domain in responses automatically:
-```
-Tenant A request: GET https://customer-a.api.com/api/books
-Response links: https://customer-a.api.com/api/books/1
-
-Tenant B request: GET https://customer-b.api.com/api/books  
-Response links: https://customer-b.api.com/api/books/1
-```
-
-## Advanced: Custom URL Override
-
-For complex deployments (API gateways, CDNs, etc.), you can override URL generation using hooks.
-
-### Recommended Method: API Hooks (Best Practice)
-
-Define a hook when creating your API to handle URL overrides:
-
-```javascript
-const api = new Api({ 
-  name: 'my-api',
-  
-  // Define hooks at API creation time
-  hooks: {
-    'transport:request': [
-      async (payload) => {
-        const { context, req } = payload;
-        
-        // Example: Override based on custom header
-        if (req?.headers?.['x-public-url']) {
-          context.urlPrefixOverride = req.headers['x-public-url'];
-        }
-        
-        // Example: API versioning
-        if (req?.headers?.['x-api-version'] === 'v2') {
-          context.urlPrefixOverride = 'https://api.example.com/v2';
-        }
-        
-        // Example: Multi-tenant based on host
-        const host = req?.hostname;
-        if (host?.includes('tenant-a')) {
-          context.urlPrefixOverride = 'https://tenant-a.api.com/api';
-        }
-        
-        // Example: Environment-based override
-        if (process.env.PUBLIC_API_URL) {
-          context.urlPrefixOverride = process.env.PUBLIC_API_URL;
-        }
-        
-        return payload;
-      }
-    ]
-  }
-});
-
-// Then use plugins normally
-await api.use(RestApiPlugin);
-await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, { mountPath: '/api' });
-```
-
-### Alternative Method: Express Middleware
-
-If you cannot use hooks, you can use Express middleware before mounting the API:
-
-```javascript
-app.use((req, res, next) => {
-  // Set urlPrefixOverride on the request
-  if (req.headers['x-public-url']) {
-    req.urlPrefixOverride = req.headers['x-public-url'];
-  }
-  next();
-});
-
-// Then mount your API
-app.use(api.http.express.router);
-```
-
-### Common Use Cases for Override
-
-1. **API Gateway with Path Rewriting**
-   ```javascript
-   hooks: {
-     'transport:request': [async (payload) => {
-       if (payload.req?.headers?.['x-forwarded-prefix'] === '/v2') {
-         payload.context.urlPrefixOverride = 'https://api.company.com/v2';
-       }
-       return payload;
-     }]
-   }
-   ```
-
-2. **CDN with Different Public URL**
-   ```javascript
-   hooks: {
-     'transport:request': [async (payload) => {
-       if (payload.req?.headers?.['x-cdn-host']) {
-         payload.context.urlPrefixOverride = `https://${payload.req.headers['x-cdn-host']}/api`;
-       }
-       return payload;
-     }]
-   }
-   ```
-
-3. **Multi-Tenant SaaS**
-   ```javascript
-   hooks: {
-     'transport:request': [async (payload) => {
-       const { context, req } = payload;
-       const tenant = req?.hostname?.split('.')[0];
-       if (tenant && tenant !== 'api') {
-         context.urlPrefixOverride = `https://${tenant}.api.com/api`;
-       }
-       return payload;
-     }]
-   }
-   ```
-
-4. **Environment-Based URLs**
-   ```javascript
-   hooks: {
-     'transport:request': [async (payload) => {
-       // Force production URLs in staging for testing
-       if (process.env.NODE_ENV === 'staging' && process.env.PRODUCTION_URL) {
-         payload.context.urlPrefixOverride = process.env.PRODUCTION_URL;
-       }
-       return payload;
-     }]
-   }
-   ```
-
-## What You DON'T Need to Configure
-
-❌ **No need for:**
-- Static URL configuration
-- Per-environment URL settings
-- Manual protocol detection
-- Proxy configuration in the API
-
-The system automatically handles:
-- HTTP vs HTTPS detection
-- Domain detection from headers
-- Proxy headers (`X-Forwarded-*`)
-- Port numbers
-- Mount paths
-
-## URL Generation Examples
-
-### Resource URLs
-```javascript
-// Generated in responses as:
+```json
 {
-  "type": "books",
-  "id": "123",
-  "attributes": { ... },
-  "links": {
-    "self": "https://api.example.com/api/books/123"  // Automatically generated
-  }
-}
-```
-
-### Relationship URLs
-```javascript
-{
-  "relationships": {
-    "author": {
-      "links": {
-        "self": "https://api.example.com/api/books/123/relationships/author",
-        "related": "https://api.example.com/api/books/123/author"
-      }
+  "data": {
+    "type": "books",
+    "id": "123",
+    "links": {
+      "self": "/api/books/123"
     }
   }
 }
 ```
 
-### Pagination URLs
+This is the recommended default for most deployments. Browsers and HTTP clients resolve the relative links against the origin they already used to call the API.
+
+## Absolute Public Links
+
+When clients require absolute public URLs, configure the connector with `publicBaseUrl`. The value is the complete public URL prefix for generated API links, including any public path prefix such as `/api`.
+
 ```javascript
+await api.use(ExpressPlugin, {
+  mountPath: '/api',
+  publicBaseUrl: 'https://api.example.com/api'
+});
+```
+
+Fastify uses the same option:
+
+```javascript
+await api.use(FastifyPlugin, {
+  app,
+  mountPath: '/api',
+  publicBaseUrl: 'https://api.example.com/api'
+});
+```
+
+Generated links then use the configured public base URL:
+
+```json
 {
   "links": {
-    "self": "https://api.example.com/api/books?page[number]=2",
-    "first": "https://api.example.com/api/books?page[number]=1",
-    "prev": "https://api.example.com/api/books?page[number]=1",
-    "next": "https://api.example.com/api/books?page[number]=3",
-    "last": "https://api.example.com/api/books?page[number]=10"
+    "self": "https://api.example.com/api/books/123"
   }
 }
 ```
 
-## Benefits of Per-Request URL Generation
+Trailing slashes on `publicBaseUrl` are normalized before links are built.
 
-1. **Zero Configuration**: Works correctly out of the box
-2. **Multi-Domain Safe**: Each request gets appropriate URLs
-3. **Proxy Friendly**: Automatically handles reverse proxies
-4. **Flexible**: Override when needed for complex scenarios
-5. **Stateless**: No global state that can be contaminated
+## Per-Request Overrides
+
+For multi-tenant deployments or API gateways with request-specific public URLs, set `context.urlPrefixOverride` in a `transport:request` hook. Only set this from trusted configuration or validated request metadata.
+
+```javascript
+await api.customize({
+  hooks: {
+    'transport:request': {
+      functionName: 'tenant-url-prefix',
+      handler: async ({ context }) => {
+        const tenantId = context.auth?.tenantId;
+        const tenantPublicUrls = {
+          tenant_a: 'https://tenant-a.example.com/api',
+          tenant_b: 'https://tenant-b.example.com/api'
+        };
+
+        if (tenantPublicUrls[tenantId]) {
+          context.urlPrefixOverride = tenantPublicUrls[tenantId];
+        }
+      }
+    }
+  }
+});
+```
+
+Express middleware can also set `req.urlPrefixOverride` before the API router runs:
+
+```javascript
+const allowedPublicUrls = new Set([
+  'https://api.example.com/api',
+  'https://partner.example.com/api'
+]);
+
+app.use((req, res, next) => {
+  const requestedPublicUrl = req.get('x-public-url');
+  if (allowedPublicUrls.has(requestedPublicUrl)) {
+    req.urlPrefixOverride = requestedPublicUrl;
+  }
+  next();
+});
+
+api.http.express.mount(app);
+```
+
+Do not copy arbitrary `Host`, `X-Forwarded-Host`, or custom public URL headers into `urlPrefixOverride`. If a reverse proxy supplies public URL metadata, validate it against trusted configuration first.
+
+## Priority Order
+
+URL prefix resolution uses this order:
+
+1. `context.urlPrefixOverride`
+2. Connector `publicBaseUrl`
+3. Connector `mountPath`
+4. Empty string
+
+The same helper is used for resource links, relationship links, pagination links, and connector `Location` headers.
+
+## Reverse Proxies
+
+A reverse proxy should still forward requests to the Node.js application normally, but URL generation does not require forwarding public host headers.
+
+Use explicit configuration for public links:
+
+```javascript
+await api.use(ExpressPlugin, {
+  mountPath: '/api',
+  publicBaseUrl: process.env.PUBLIC_API_URL
+});
+```
+
+Set `PUBLIC_API_URL` to the externally visible API prefix, for example `https://api.example.com/api`.
 
 ## Troubleshooting
 
-### URLs are showing localhost in production
-- Ensure your reverse proxy is setting `X-Forwarded-Host` and `X-Forwarded-Proto` headers
-- Check that these headers are being passed through to your application
+### Links are relative
 
-### Need different URLs for different environments
-- Use the `urlPrefixOverride` pattern with environment variables
-- Set `PUBLIC_API_URL` environment variable appropriately
+This is the default behavior. Configure `publicBaseUrl` if your clients require absolute URLs.
 
-### API Gateway stripping paths
-- Use middleware to set `req.urlPrefixOverride` with the full public path
-- Include any path prefixes that the gateway strips
+### Links are missing a public path prefix
 
-## Complete Working Example
-
-Here's a full example showing URL override with hooks:
+Include the public path prefix in `publicBaseUrl`.
 
 ```javascript
-import { Api } from 'hooked-api';
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
-import express from 'express';
-
-// Create API with URL override hook
-const api = new Api({ 
-  name: 'my-api',
-  hooks: {
-    'transport:request': [
-      async (payload) => {
-        const { context, req } = payload;
-        
-        // Check for custom public URL header
-        if (req?.headers?.['x-public-url']) {
-          context.urlPrefixOverride = req.headers['x-public-url'];
-        }
-        
-        return payload;
-      }
-    ]
-  }
-});
-
-// Install plugins
-await api.use(RestApiPlugin);
-await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, { mountPath: '/api' });
-
-// Define resources...
-await api.addResource('books', { /* schema */ });
-
-// Create Express app
-const app = express();
-app.use(api.http.express.router);
-app.listen(3000);
+publicBaseUrl: 'https://api.example.com/v2'
 ```
 
-Now your API automatically handles:
-- `curl http://localhost:3000/api/books` → URLs: `http://localhost:3000/api/books/1`
-- `curl -H "X-Public-URL: https://cdn.example.com/api" http://localhost:3000/api/books` → URLs: `https://cdn.example.com/api/books/1`
+### Multi-tenant links need different hosts
 
-## Summary
-
-The JSON REST API's URL management system provides:
-- **Automatic detection** for 99% of use cases
-- **Hook-based override** for complex deployments
-- **Per-request isolation** preventing cross-domain issues
-- **No configuration** required for standard deployments
-
-Just set your `mountPath` in the Express plugin and optionally define hooks for custom scenarios!
+Use `context.urlPrefixOverride` from trusted tenant or auth state. Avoid deriving tenant URLs directly from untrusted request host headers.

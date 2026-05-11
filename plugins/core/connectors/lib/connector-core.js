@@ -43,6 +43,7 @@ export function createConnectorContext ({
   reply,
   source,
   mountPath = '',
+  publicBaseUrl = '',
   requestData,
   createContext,
   urlPrefixOverride
@@ -55,8 +56,7 @@ export function createConnectorContext ({
 
   context.urlPrefix = getUrlPrefix(
     context,
-    { vars: { transport: { mountPath } } },
-    request
+    { vars: { transport: { mountPath, publicBaseUrl } } }
   )
 
   const transportData = buildTransportData(requestData)
@@ -113,7 +113,8 @@ export function getConnectorLocationHeader ({
   context,
   routeMeta,
   helpers,
-  mountPath = ''
+  mountPath = '',
+  publicBaseUrl = ''
 }) {
   if (String(method || '').toUpperCase() !== 'POST') return null
   if (!context?.id || !routeMeta?.scopeName || !helpers?.getLocation) return null
@@ -123,7 +124,9 @@ export function getConnectorLocationHeader ({
     id: context.id
   })
 
-  const baseUrl = context.urlPrefix || mountPath
+  const baseUrl = getUrlPrefix(context, {
+    vars: { transport: { mountPath, publicBaseUrl } }
+  })
   return `${baseUrl}${location}`
 }
 
@@ -139,6 +142,7 @@ export async function executeConnectorRoute ({
   routeMeta,
   helpers,
   mountPath = '',
+  publicBaseUrl = '',
   runHooks
 }) {
   const result = await handler({
@@ -150,6 +154,14 @@ export async function executeConnectorRoute ({
   })
 
   const status = determineResponseStatus(method, result)
+  const location = getConnectorLocationHeader({
+    method,
+    context,
+    routeMeta,
+    helpers,
+    mountPath,
+    publicBaseUrl
+  })
   const transportHeaders = await applyTransportResponseLifecycle({
     context,
     transportData,
@@ -165,13 +177,7 @@ export async function executeConnectorRoute ({
       ...(result?.headers || {}),
       ...transportHeaders
     },
-    location: getConnectorLocationHeader({
-      method,
-      context,
-      routeMeta,
-      helpers,
-      mountPath
-    }),
+    location,
     result
   }
 }

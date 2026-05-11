@@ -66,6 +66,7 @@ export const ExpressPlugin = {
     // Get mountPath from options (this is now a transport concern)
     const mountPath = expressOptions.mountPath || ''
     const basePath = mountPath // Keep basePath for internal use
+    const publicBaseUrl = expressOptions.publicBaseUrl || ''
     const strictContentType = expressOptions.strictContentType !== false
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb'
 
@@ -73,7 +74,8 @@ export const ExpressPlugin = {
     vars.transport = {
       type: 'express',
       matchAll: '*', // Express wildcard pattern for matching all routes
-      mountPath // Transport-specific mount path
+      mountPath, // Transport-specific mount path
+      publicBaseUrl
     }
 
     // Register file detector if enabled
@@ -142,6 +144,7 @@ export const ExpressPlugin = {
         reply: res,
         source: 'express',
         mountPath: basePath,
+        publicBaseUrl,
         requestData,
         createContext,
         urlPrefixOverride: req.urlPrefixOverride
@@ -240,6 +243,7 @@ export const ExpressPlugin = {
                 reply: res,
                 source: 'express',
                 mountPath: basePath,
+                publicBaseUrl,
                 requestData,
                 createContext,
                 urlPrefixOverride: req.urlPrefixOverride
@@ -262,6 +266,7 @@ export const ExpressPlugin = {
               routeMeta,
               helpers,
               mountPath: basePath,
+              publicBaseUrl,
               runHooks
             })
             res.set(outcome.headers)

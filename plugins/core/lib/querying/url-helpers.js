@@ -11,13 +11,12 @@
  * Priority order:
  * 1. context.urlPrefixOverride - Explicit override (from hooks or middleware)
  * 2. context.urlPrefix - Pre-calculated URL prefix
- * 3. Calculate from request if provided
- * 4. scope.vars.transport?.mountPath - Fallback to mount path
+ * 3. scope.vars.transport?.publicBaseUrl - Explicit public URL prefix
+ * 4. scope.vars.transport?.mountPath - Fallback to relative mount path
  * 5. '' - Empty string as final fallback
  *
  * @param {Object} context - Request context (may have urlPrefixOverride or urlPrefix)
  * @param {Object} scope - Scope/resource object with transport vars
- * @param {Object} req - Optional Express request object for auto-calculation
  * @returns {string} The final URL prefix to use
  *
  * @example
@@ -25,10 +24,10 @@
  * const urlPrefix = getUrlPrefix(context, scope);
  *
  * @example
- * // With request object for auto-calculation
- * const urlPrefix = getUrlPrefix({}, api, req);
+ * // With explicit public base URL
+ * const urlPrefix = getUrlPrefix({}, { vars: { transport: { publicBaseUrl: 'https://api.example.com/api' } } });
  */
-export function getUrlPrefix (context, scope, req = null) {
+export function getUrlPrefix (context, scope) {
   // Priority 1: Explicit override
   if (context?.urlPrefixOverride) {
     return context.urlPrefixOverride
@@ -39,21 +38,10 @@ export function getUrlPrefix (context, scope, req = null) {
     return context.urlPrefix
   }
 
-  // Priority 3: Calculate from request if provided
-  if (req) {
-    const protocol = req.get?.('x-forwarded-proto') ||
-      req.headers?.['x-forwarded-proto'] ||
-      req.protocol ||
-      'http'
-    const host = req.get?.('x-forwarded-host') ||
-      req.headers?.['x-forwarded-host'] ||
-      req.get?.('host') ||
-      req.headers?.host
-    const mountPath = scope?.vars?.transport?.mountPath || ''
-
-    if (host) {
-      return `${protocol}://${host}${mountPath}`
-    }
+  // Priority 3: Explicit public URL prefix configured by the transport
+  const publicBaseUrl = scope?.vars?.transport?.publicBaseUrl
+  if (publicBaseUrl) {
+    return String(publicBaseUrl).replace(/\/+$/, '')
   }
 
   // Priority 4: Fallback to mount path
