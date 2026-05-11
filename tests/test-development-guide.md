@@ -64,9 +64,9 @@ Control what methods return:
 ```javascript
 // In API configuration
 returnFullRecord: {
-  post: true,   // Return created record (needed to get ID)
-  put: false,   // Don't return after replacement
-  patch: false  // Don't return after update
+  post: 'full', // Return created record (needed to get ID)
+  put: 'no',    // Don't return after replacement
+  patch: 'no'   // Don't return after update
 }
 
 // Override per call if needed
@@ -74,7 +74,7 @@ const result = await api.resources.books.put({
   id: bookId,
   inputRecord: putDoc,
   simplified: false,
-  returnFullRecord: false  // Override to not return
+  returnFullRecord: 'no' // Override to not return
 });
 ```
 

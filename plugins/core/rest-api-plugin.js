@@ -21,6 +21,7 @@ import addRouteMethod from './rest-api-plugin-methods/add-route.js'
 import releaseMethod from './rest-api-plugin-methods/release.js'
 import { defaultDataHelpers } from './lib/querying-writing/default-data-helpers.js'
 import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT } from './lib/querying-writing/knex-constants.js'
+import { normalizeReturnRecordSetting } from './lib/querying-writing/return-record-settings.js'
 
 import getRelatedMethod from './rest-api-plugin-methods/get-related.js'
 import postRelationshipMethod from './rest-api-plugin-methods/post-relationship.js'
@@ -71,42 +72,11 @@ export const RestApiPlugin = {
       ? restApiOptions.normalizeId
       : defaultNormalizeResourceId
 
-    // Return full record configuration for API and Transport
-    // Support values: 'no', 'minimal', 'full'
-    const normalizeReturnValue = (value, defaultValue) => {
-      if (['no', 'minimal', 'full'].includes(value)) return value
-      return defaultValue
-    }
-
-    const optionConfigs = [
-      {
-        propName: 'returnRecordApi',
-        defaultValue: 'full',
-      },
-      {
-        propName: 'returnRecordTransport',
-        defaultValue: 'no',
-      },
-    ]
-
-    for (const config of optionConfigs) {
-      const optionValue = restApiOptions[config.propName]
-      let processedValue
-
-      if (typeof optionValue === 'object' && optionValue !== null) {
-        processedValue = {
-          post: normalizeReturnValue(optionValue.post, config.defaultValue),
-          put: normalizeReturnValue(optionValue.put, config.defaultValue),
-          patch: normalizeReturnValue(optionValue.patch, config.defaultValue),
-        }
-      } else if (optionValue !== undefined) {
-        const normalized = normalizeReturnValue(optionValue, config.defaultValue)
-        processedValue = { post: normalized, put: normalized, patch: normalized }
-      } else {
-        processedValue = { post: config.defaultValue, put: config.defaultValue, patch: config.defaultValue }
-      }
-      vars[config.propName] = processedValue
-    }
+    // Return record configuration for API and Transport.
+    // Preferred values are 'no', 'minimal', and 'full'; booleans are normalized
+    // for backwards compatibility.
+    vars.returnRecordApi = normalizeReturnRecordSetting(restApiOptions.returnRecordApi, 'full')
+    vars.returnRecordTransport = normalizeReturnRecordSetting(restApiOptions.returnRecordTransport, 'no')
 
     log.debug('returnRecordApi configuration:', vars.returnRecordApi)
     log.debug('returnRecordTransport configuration:', vars.returnRecordTransport)

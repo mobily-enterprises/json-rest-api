@@ -102,7 +102,8 @@ describe('Full JSON:API belongsTo linkage', () => {
       queryParams: {
         include: ['country']
       },
-      simplified: false
+      simplified: false,
+      returnFullRecord: 'full'
     })
 
     assertResourceRelationship(
@@ -131,7 +132,8 @@ describe('Full JSON:API belongsTo linkage', () => {
           }
         }
       },
-      simplified: false
+      simplified: false,
+      returnFullRecord: 'full'
     })
 
     assert.equal(patched.data.relationships?.country?.data, null)

@@ -427,7 +427,7 @@ const result = await api.resources.[resourceType].post(params, context)
   },
   simplified: Boolean,      // Override simplified mode (default: true for API)
   transaction: Object,      // Database transaction object
-  returnFullRecord: String  // Override return setting ('no', 'minimal', 'full')
+  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
 }
 ```
 
@@ -443,7 +443,7 @@ const result = await api.resources.[resourceType].post(params, context)
 | `queryParams` | Object | No | For includes/fields in response |
 | `simplified` | Boolean | No | Override simplified mode (default: true) |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String | No | Override return setting ('no', 'minimal', 'full') |
+| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
 
 When an explicit resource id is provided, `normalizeId` runs before persistence and before any follow-up record fetch used for the return payload. If the normalized id is empty, the request fails as `REST_API_VALIDATION` on `data.id`.
 
@@ -459,6 +459,8 @@ The return value depends on `returnFullRecord` setting and whether it's an API o
 - `'no'`: Returns `undefined` (204 No Content)
 - `'minimal'`: Returns resource with ID only
 - `'full'`: Returns complete resource with all fields
+
+Boolean values are accepted for backward compatibility: `true` is normalized to `'full'` and `false` is normalized to `'no'`. New code should use the string values.
 
 #### HTTP Equivalent
 
@@ -611,7 +613,7 @@ const result = await api.resources.[resourceType].put(params, context)
   },
   simplified: Boolean,      // Override simplified mode (default: true for API)
   transaction: Object,      // Database transaction object
-  returnFullRecord: String  // Override return setting ('no', 'minimal', 'full')
+  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
 }
 ```
 
@@ -626,7 +628,7 @@ const result = await api.resources.[resourceType].put(params, context)
 | `queryParams` | Object | No | For response formatting |
 | `simplified` | Boolean | No | Override simplified mode (default: true) |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String | No | Override return setting |
+| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
 
 `inputRecord.id` and `inputRecord.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
 
@@ -742,7 +744,7 @@ const result = await api.resources.[resourceType].patch(params, context)
   },
   simplified: Boolean,      // Override simplified mode (default: true for API)
   transaction: Object,      // Database transaction object
-  returnFullRecord: String  // Override return setting ('no', 'minimal', 'full')
+  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
 }
 ```
 
@@ -757,7 +759,7 @@ const result = await api.resources.[resourceType].patch(params, context)
 | `queryParams` | Object | No | For response formatting |
 | `simplified` | Boolean | No | Override simplified mode (default: true) |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String | No | Override return setting |
+| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
 
 If both the URL id and body id are present, both are normalized before the equality check. If either id normalizes to an empty value, the operation fails before storage is touched.
 

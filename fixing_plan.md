@@ -78,11 +78,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Do not add an opt-in non-fatal mode without a real use case.
   - [x] Add a rollback test where a setter throws and no row is persisted.
 
-- [ ] Normalize return-record boolean compatibility.
-  - [ ] Create one shared return-record normalizer.
-  - [ ] Normalize `true -> 'full'`, `false -> 'no'`, and keep valid strings unchanged.
-  - [ ] Use the shared normalizer in plugin install and per-call setup.
-  - [ ] Update tests and docs to prefer `'no'`, `'minimal'`, and `'full'` while preserving boolean compatibility.
+- [x] Normalize return-record boolean compatibility.
+  - [x] Create one shared return-record normalizer.
+  - [x] Normalize `true -> 'full'`, `false -> 'no'`, and keep valid strings unchanged.
+  - [x] Use the shared normalizer in plugin install and per-call setup.
+  - [x] Update tests and docs to prefer `'no'`, `'minimal'`, and `'full'` while preserving boolean compatibility.
 
 ## Contract Drift
 
