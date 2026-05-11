@@ -198,6 +198,80 @@ export async function createBasicApi (knex, pluginOptions = {}) {
   }
 }
 
+export async function createReturnRecordApi (knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'return-record-test-api'
+  const tablePrefix = pluginOptions.tablePrefix || 'return'
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry()
+  }
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  const previousTenant = storageMode.currentTenant
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    returnRecordTransport: {
+      post: false,
+      put: true,
+      patch: 'minimal'
+    },
+    sortableFields: ['id', 'name'],
+    ...pluginOptions['rest-api']
+  })
+  await useStoragePlugin(api, knex, { tenantId })
+  await resetAnyApiTables(knex)
+
+  try {
+    await api.addResource('global_items', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true, max: 100 }
+      },
+      tableName: `${tablePrefix}_global_items`
+    })
+    await api.resources.global_items.createKnexTable()
+    mapTable(`${tablePrefix}_global_items`, 'global_items')
+
+    await api.addResource('scope_items', {
+      schema: {
+        id: { type: 'id' },
+        name: { type: 'string', required: true, max: 100 }
+      },
+      tableName: `${tablePrefix}_scope_items`,
+      returnRecordApi: {
+        post: false,
+        put: true,
+        patch: 'minimal'
+      },
+      returnRecordTransport: true
+    })
+    await api.resources.scope_items.createKnexTable()
+    mapTable(`${tablePrefix}_scope_items`, 'scope_items')
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant)
+    }
+  }
+
+  return api
+}
+
 /**
  * Creates a small API that uses logical camelCase belongsTo fields with default snake_case storage mapping.
  * This reproduces the full JSON:API linkage path where storage column names differ from logical field names.

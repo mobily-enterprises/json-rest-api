@@ -1,3 +1,5 @@
+import { normalizeReturnRecordSetting } from '../lib/querying-writing/return-record-settings.js'
+
 export default async function turnScopeInitIntoVars ({ context, scopes, vars: apiVars }) {
   // Refer to the scope's vars
   const scope = scopes[context.scopeName]
@@ -19,8 +21,12 @@ export default async function turnScopeInitIntoVars ({ context, scopes, vars: ap
   if (typeof scopeOptions.simplifiedTransport !== 'undefined') vars.simplifiedTransport = scopeOptions.simplifiedTransport
 
   // Set returnRecord settings as scope vars
-  if (typeof scopeOptions.returnRecordApi !== 'undefined') vars.returnRecordApi = scopeOptions.returnRecordApi
-  if (typeof scopeOptions.returnRecordTransport !== 'undefined') vars.returnRecordTransport = scopeOptions.returnRecordTransport
+  if (typeof scopeOptions.returnRecordApi !== 'undefined') {
+    vars.returnRecordApi = normalizeReturnRecordSetting(scopeOptions.returnRecordApi, vars.returnRecordApi || 'full')
+  }
+  if (typeof scopeOptions.returnRecordTransport !== 'undefined') {
+    vars.returnRecordTransport = normalizeReturnRecordSetting(scopeOptions.returnRecordTransport, vars.returnRecordTransport || 'no')
+  }
 
   // Set idProperty as scope var
   if (typeof scopeOptions.idProperty !== 'undefined') vars.idProperty = scopeOptions.idProperty

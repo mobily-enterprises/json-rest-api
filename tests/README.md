@@ -20,7 +20,7 @@ All tests MUST use `simplified: false` to ensure JSON:API compliance:
 const result = await api.resources.resourceName.method({
   inputRecord: jsonApiDocument,
   simplified: false,
-  returnFullRecord: true/false  // Based on needs
+  returnFullRecord: 'full' // Use 'no', 'minimal', or 'full' based on needs
 });
 ```
 

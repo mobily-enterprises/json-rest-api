@@ -193,11 +193,12 @@ export const BulkOperationsPlugin = {
               transaction
             }, recordContext)
 
-            // If patch doesn't return full record, fetch it
-            let resultData = result.data
-            if (!resultData && result.id) {
+            // If patch doesn't return a full record, fetch the updated record.
+            const resultId = result?.data?.id || result?.id || operation.id
+            let resultData = result?.data
+            if (!resultData && resultId) {
               const fetchedRecord = await scope.get({
-                id: result.id,
+                id: resultId,
                 transaction
               }, recordContext)
               resultData = fetchedRecord.data

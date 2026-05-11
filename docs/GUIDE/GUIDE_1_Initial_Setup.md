@@ -340,10 +340,12 @@ There are TWO separate settings for this:
 
 This separation allows you to have different behaviors for internal API usage versus external HTTP clients. For example, your internal code might want full records for convenience, while HTTP clients might prefer minimal responses for performance.
 
-Both settings accept three string values:
+Both settings prefer three string values:
 - **`'full'`**: Returns the complete record with all attributes, relationships, computed fields, and links
 - **`'minimal'`**: Returns only the resource type and ID
 - **`'no'`**: Returns nothing (undefined in programmatic calls, 204 No Content in HTTP)
+
+Boolean values are accepted for backward compatibility: `true` is normalized to `'full'` and `false` is normalized to `'no'`. New code should use the string values.
 
 Here's how these settings work:
 
@@ -796,6 +798,7 @@ Here is a full list of parameters and their respective variables:
 - `returnRecordApi` and `returnRecordTransport` can be either:
   - A string: `'no'`, `'minimal'`, or `'full'` (applies to all methods)
   - An object: `{ post: 'full', put: 'minimal', patch: 'no' }` (per-method configuration)
+  - Legacy booleans: `true` is treated as `'full'`, `false` as `'no'`
 - All parameters support the cascade: per-call → resource-level → plugin-level default
 
 # Logical IDs and Physical Columns

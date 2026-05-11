@@ -6,6 +6,12 @@ import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified
 import { normalizeRelationshipIdentifiers } from '../lib/querying-writing/resource-id-normalization.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import { unwrapQueryBuilderState } from '../lib/querying/query-builder-utils.js'
+import {
+  normalizeReturnRecordMode,
+  normalizeReturnRecordSetting
+} from '../lib/querying-writing/return-record-settings.js'
+
+export { normalizeReturnRecordMode as normalizeReturnValue }
 
 /**
  * Gets an enhanced logger instance with full error details and stack traces
@@ -28,16 +34,6 @@ export const getEnhancedLogger = (log) => {
  */
 export const cascadeConfig = (settingName, sources, defaultValue) =>
   sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
-
-/**
- * Normalizes return record settings to valid values
- * @param {string|boolean} value - The value to normalize
- * @returns {string} Normalized value: 'no', 'minimal', or 'full'
- */
-export function normalizeReturnValue (value) {
-  if (['no', 'minimal', 'full'].includes(value)) return value
-  return 'no' // default
-}
 
 /**
  * Sets up common request context for REST API methods
@@ -76,7 +72,7 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
     } else {
       context.inputRecord = params
       // Preserve returnFullRecord if specified in params
-      context.params = params.returnFullRecord ? { returnFullRecord: params.returnFullRecord } : {}
+      context.params = params.returnFullRecord !== undefined ? { returnFullRecord: params.returnFullRecord } : {}
     }
   } else {
     context.inputRecord = params.inputRecord
@@ -90,33 +86,10 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
   const defaultReturnFullRecord = isTransport ? vars.returnRecordTransport : vars.returnRecordApi
 
   // Get return record setting - from params only (per-call override) or use default
-  const returnFullRecordRaw = context.params.returnFullRecord !== undefined
-    ? context.params.returnFullRecord
-    : defaultReturnFullRecord
-
-  // Normalize return record setting to always be an object with method keys
-  if (typeof returnFullRecordRaw === 'object' && returnFullRecordRaw !== null) {
-    // It's already an object, normalize the values
-    context.returnRecordSetting = {
-      post: normalizeReturnValue(returnFullRecordRaw.post),
-      put: normalizeReturnValue(returnFullRecordRaw.put),
-      patch: normalizeReturnValue(returnFullRecordRaw.patch)
-    }
-  } else {
-    // It's a single value (string or boolean), apply to all methods
-    const normalized = normalizeReturnValue(returnFullRecordRaw)
-    context.returnRecordSetting = {
-      post: normalized,
-      put: normalized,
-      patch: normalized
-    }
-  }
-
-  // Helper function to normalize return values (same as above)
-  function normalizeReturnValue (value) {
-    if (['no', 'minimal', 'full'].includes(value)) return value
-    return 'no' // default
-  }
+  context.returnRecordSetting = normalizeReturnRecordSetting(
+    context.params.returnFullRecord,
+    defaultReturnFullRecord
+  )
 
   // These only make sense as parameter per query, not in vars etc.
   context.queryParams = params.queryParams || {}
