@@ -70,12 +70,14 @@ export const FastifyPlugin = {
     api.http.fastify = { app }
 
     const mountPath = fastifyOptions.mountPath || ''
+    const publicBaseUrl = fastifyOptions.publicBaseUrl || ''
     const strictContentType = fastifyOptions.strictContentType !== false
 
     vars.transport = {
       type: 'fastify',
       matchAll: '*',
-      mountPath
+      mountPath,
+      publicBaseUrl
     }
 
     registerVendorJsonParser(app)
@@ -140,6 +142,7 @@ export const FastifyPlugin = {
             reply,
             source: 'fastify',
             mountPath,
+            publicBaseUrl,
             requestData,
             createContext
           })
@@ -174,6 +177,7 @@ export const FastifyPlugin = {
             routeMeta,
             helpers,
             mountPath,
+            publicBaseUrl,
             runHooks
           })
 

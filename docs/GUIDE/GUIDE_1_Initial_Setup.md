@@ -242,7 +242,7 @@ console.log('Refetched Country:', inspect(countryUsRefetched));
 // }
 ```
 
-(Note that the full JSON:API record includes links to resources, which are automatically generated based on the request headers.)
+(Note that the full JSON:API record includes links to resources, which are generated from explicit URL configuration such as the connector `mountPath` or `publicBaseUrl`.)
 
 As you can see, when `simplified: false` is used:
 

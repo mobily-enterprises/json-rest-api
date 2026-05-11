@@ -60,11 +60,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Replace `startsWith(resolvedDir)` containment with `path.relative(resolvedDir, resolvedPath)`.
   - [x] Add tests for sibling-prefix traversal such as `../uploads_evil/pwn`.
 
-- [ ] Fix untrusted proxy URL generation. Requires maintainer approval.
-  - [ ] Stop trusting `Host` and `X-Forwarded-*` by default for absolute links.
-  - [ ] Prefer relative links unless `urlPrefixOverride` or an explicit public base URL is configured.
-  - [ ] If forwarded headers remain supported, gate them behind `trustProxy` and allowed host/proto validation.
-  - [ ] Add Express and Fastify tests with hostile `Host` and `X-Forwarded-Host` headers.
+- [x] Fix untrusted proxy URL generation. Requires maintainer approval.
+  - [x] Stop trusting `Host` and `X-Forwarded-*` by default for absolute links.
+  - [x] Prefer relative links unless `urlPrefixOverride` or an explicit public base URL is configured.
+  - [x] If forwarded headers remain supported, gate them behind `trustProxy` and allowed host/proto validation. Resolved by not supporting forwarded headers for URL generation.
+  - [x] Add Express and Fastify tests with hostile `Host` and `X-Forwarded-Host` headers.
 
 - [ ] Fix `S3Storage` non-mock behavior. Dependency/public behavior choice requires maintainer approval.
   - [ ] Smallest safe fix: throw a clear "real S3 storage is not implemented" error when `mockMode: false`.
