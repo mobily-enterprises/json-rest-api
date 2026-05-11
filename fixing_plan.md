@@ -86,11 +86,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 
 ## Contract Drift
 
-- [ ] Fix Socket.IO public exports and docs.
-  - [ ] Export `SocketIOPlugin` from `index.js`.
-  - [ ] Fix docs to import `Api` from `hooked-api`, not `json-rest-api`.
-  - [ ] Remove invalid deep imports such as `json-rest-api/plugins/socketio`, or add formal package subpath exports. Subpath exports require maintainer approval.
-  - [ ] Add a public import smoke test.
+- [x] Fix Socket.IO public exports and docs.
+  - [x] Export `SocketIOPlugin` from `index.js`.
+  - [x] Fix docs to import `Api` from `hooked-api`, not `json-rest-api`.
+  - [x] Remove invalid deep imports such as `json-rest-api/plugins/socketio`, or add formal package subpath exports. Subpath exports require maintainer approval.
+  - [x] Add a public import smoke test.
 
 - [ ] Align S3 documentation with implementation.
   - [ ] If real S3 is not implemented, make README and guide text state that the included adapter is mock/demo only.
@@ -109,4 +109,4 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 - [x] Narrow repro for AnyAPI custom `idProperty`
 - [x] Narrow repro for relationship route `afterCommit`
 - [x] Narrow repro for pagination link round trip
-- [ ] Import smoke test for public exports
+- [x] Import smoke test for public exports

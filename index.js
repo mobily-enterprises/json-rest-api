@@ -15,6 +15,7 @@ export { QueryProjectionsPlugin } from './plugins/core/rest-api-query-projection
 export { FileHandlingPlugin } from './plugins/core/file-handling-plugin.js'
 export { CorsPlugin } from './plugins/core/rest-api-cors-plugin.js'
 export { LabelPlugin } from './plugins/core/rest-api-label-plugin.js'
+export { SocketIOPlugin } from './plugins/core/socketio-plugin.js'
 
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js'
