@@ -116,7 +116,8 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, o
 export const getCanonicalFieldValue = (row, descriptor = {}, fieldName) => {
   if (!row || !fieldName) return undefined
 
-  if (fieldName === 'id') {
+  const idProperty = descriptor.idProperty || 'id'
+  if (fieldName === 'id' || fieldName === idProperty) {
     return getCanonicalResourceId(row, descriptor)
   }
 

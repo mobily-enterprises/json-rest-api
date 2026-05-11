@@ -150,7 +150,8 @@ export const buildFieldSelection = async (scope, deps) => {
   const scopeSchemaInfo = scope?.vars?.schemaInfo || {}
   const {
     schemaInstance,
-    computed: computedFields = {}
+    computed: computedFields = {},
+    idProperty = 'id'
   } = scopeSchemaInfo
   let schemaStructure = scopeSchemaInfo.schemaStructure
   const queryFields = scope?.vars?.queryFields || {}
@@ -196,6 +197,8 @@ export const buildFieldSelection = async (scope, deps) => {
     // Sparse fieldsets requested - only select specified fields
     // Example: ?fields[products]=name,price,profit_margin
     requested.forEach(field => {
+      if (field === 'id' || field === idProperty) return
+
       if (queryFieldNames.has(field)) {
         if (queryFields[field]?.hidden === true) return
         queryFieldsToSelect.add(field)
@@ -261,6 +264,8 @@ export const buildFieldSelection = async (scope, deps) => {
     // No sparse fieldsets - return all visible fields
     // This is the default behavior when no ?fields parameter is provided
     Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
+      if (field === 'id' || field === idProperty) return
+
       // Skip virtual fields - they don't exist in database
       if (fieldDef.virtual === true) return
 

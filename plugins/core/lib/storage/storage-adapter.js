@@ -204,10 +204,15 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
   const canonicalFieldMap = descriptor.canonicalFieldMap || {}
   const fieldsInfo = descriptor.fields || {}
   const belongsToInfo = descriptor.belongsTo || {}
+  const idProperty = schemaInfo.idProperty || descriptor.idProperty || 'id'
+  const isLogicalIdField = (field) => field === 'id' || field === idProperty
+  const descriptorWithIdProperty = descriptor.idProperty === idProperty
+    ? descriptor
+    : { ...descriptor, idProperty }
 
   const translateColumn = (field) => {
     if (!field) return field
-    if (field === 'id') return getCanonicalResourceIdColumn(descriptor)
+    if (isLogicalIdField(field)) return getCanonicalResourceIdColumn(descriptor)
 
     const canonicalEntry = canonicalFieldMap[field]
     if (typeof canonicalEntry === 'string') {
@@ -262,7 +267,11 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
   }
 
   const toStorageRow = (attributes) => translateCanonicalAttributesForStorage(attributes, descriptor)
-  const getFieldValue = (record, fieldName) => getCanonicalFieldValue(record, descriptor, fieldName)
+  const getFieldValue = (record, fieldName) => (
+    isLogicalIdField(fieldName)
+      ? getCanonicalFieldValue(record, descriptorWithIdProperty, fieldName)
+      : getCanonicalFieldValue(record, descriptor, fieldName)
+  )
 
   return baseAdapter({
     knex,
