@@ -22,7 +22,8 @@ export const findSchemaFieldByAlias = (descriptor, alias) => {
 
 export const resolveFieldInfo = (descriptor, field) => {
   if (!descriptor) return null
-  if (field === 'id') {
+  const idProperty = descriptor.idProperty || 'id'
+  if (field === 'id' || field === idProperty) {
     return {
       column: descriptor?.canonical?.logicalIdColumn || 'logical_id',
       definition: { type: 'id' }

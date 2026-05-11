@@ -122,6 +122,14 @@ export const RestApiAnyapiKnexPlugin = {
       if (!descriptor) {
         throw new Error(`Descriptor not found for resource '${scopeName}'`)
       }
+      const scope = api.resources?.[scopeName] || scopes?.[scopeName]
+      const stored = scopeOptionsRegistry.get(scopeName) || {}
+      descriptor.idProperty = stored.idProperty ||
+        scope?.vars?.schemaInfo?.idProperty ||
+        scope?.scopeOptions?.idProperty ||
+        descriptor.idProperty ||
+        vars.idProperty ||
+        'id'
       return descriptor
     }
 
@@ -1946,6 +1954,7 @@ export const RestApiAnyapiKnexPlugin = {
         scope.vars?.idProperty ||
         vars.idProperty ||
         'id'
+      descriptor.idProperty = idProperty
 
       scope.vars.schemaInfo = {
         ...existingInfo,
@@ -2337,6 +2346,7 @@ export const RestApiAnyapiKnexPlugin = {
         schema,
         relationships,
         canonicalFieldMap: canonicalFieldsMap,
+        idProperty,
       })
 
       const updatedStored = scopeOptionsRegistry.get(scopeName) || {}
@@ -2407,6 +2417,7 @@ export const RestApiAnyapiKnexPlugin = {
         canonicalFieldMap: scopeOptions?.canonicalFieldsMap ||
           scope?.scopeOptions?.canonicalFieldsMap ||
           null,
+        idProperty,
       })
       if (scope) {
         scope.scopeOptions = {

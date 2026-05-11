@@ -9,6 +9,21 @@ const clone = (value) => {
 
 const SUPPORTED_TYPES = new Set([...TYPE_TO_POOL.keys(), 'id'])
 
+const resolveIdProperty = (schema = {}, explicitIdProperty = null) => {
+  if (explicitIdProperty) return explicitIdProperty
+  if (schema.id) return 'id'
+
+  const idFields = Object.entries(schema)
+    .filter(([, fieldDef]) => (
+      fieldDef?.type === 'id' &&
+      !fieldDef.belongsTo &&
+      !fieldDef.belongsToPolymorphic
+    ))
+    .map(([fieldName]) => fieldName)
+
+  return idFields.length === 1 ? idFields[0] : 'id'
+}
+
 const BELONGS_TO_ALIAS = (fieldName, fieldDef) => {
   if (fieldDef.as) return fieldDef.as
   if (fieldName.endsWith('_id')) {
@@ -305,6 +320,7 @@ export class AnyapiRegistry {
 
   async #register (definition, externalTrx) {
     const { tenant, resource, schema, relationships = {}, canonicalFieldMap = null } = definition
+    const idProperty = resolveIdProperty(schema, definition.idProperty)
     const trx = externalTrx || await this.knex.transaction()
     const managed = !externalTrx
 
@@ -520,7 +536,7 @@ export class AnyapiRegistry {
         await trx('any_relationship_configs').insert(relationshipInserts)
       }
 
-      const descriptor = await this.#loadDescriptor(tenant, resource, trx)
+      const descriptor = await this.#loadDescriptor(tenant, resource, trx, { idProperty })
 
       if (managed) {
         await trx.commit()
@@ -535,7 +551,7 @@ export class AnyapiRegistry {
     }
   }
 
-  async #loadDescriptor (tenant, resource, trx) {
+  async #loadDescriptor (tenant, resource, trx, options = {}) {
     const query = (trx || this.knex)('any_resource_configs')
       .where({ tenant_id: tenant, resource })
       .first()
@@ -568,6 +584,7 @@ export class AnyapiRegistry {
       slotState,
       fieldRows,
       relationshipRows,
+      idProperty: options.idProperty,
     })
 
     const canonicalFieldMap = {}
@@ -589,7 +606,7 @@ export class AnyapiRegistry {
     return descriptor
   }
 
-  #buildDescriptor ({ tenant, resource, schema, relationships, slotState, fieldRows, relationshipRows }) {
+  #buildDescriptor ({ tenant, resource, schema, relationships, slotState, fieldRows, relationshipRows, idProperty }) {
     const fields = {}
     const reverseAttributes = {}
     const belongsTo = {}
@@ -671,6 +688,7 @@ export class AnyapiRegistry {
     return {
       tenant,
       resource,
+      idProperty: resolveIdProperty(schema, idProperty),
       schema,
       relationships,
       canonical: DEFAULT_CANONICAL_CONFIG,
