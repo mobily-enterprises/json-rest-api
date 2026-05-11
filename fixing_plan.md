@@ -29,11 +29,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Make `processRelationships()` throw when a belongsTo relationship receives an array.
   - [x] Add API and transport tests for invalid to-one arrays and invalid to-many scalars.
 
-- [ ] Run `afterCommit` for relationship routes.
-  - [ ] After `postRelationship`, `patchRelationship`, and `deleteRelationship` commit their own transaction, run `afterCommit`.
-  - [ ] Preserve rollback behavior through `afterRollback`.
-  - [ ] Verify Socket.IO deferred relationship broadcasts work, or define a separate relationship notification policy.
-  - [ ] Add tests with an `afterCommit` hook counter and Socket.IO relationship-write subscription behavior.
+- [x] Run `afterCommit` for relationship routes.
+  - [x] After `postRelationship`, `patchRelationship`, and `deleteRelationship` commit their own transaction, run `afterCommit`.
+  - [x] Preserve rollback behavior through `afterRollback`.
+  - [x] Verify Socket.IO deferred relationship broadcasts work, or define a separate relationship notification policy.
+  - [x] Add tests with an `afterCommit` hook counter and Socket.IO relationship-write subscription behavior.
 
 - [ ] Decide and fix post-commit hook failure semantics. Requires maintainer approval.
   - [ ] Split transaction work from post-commit side effects.
@@ -107,6 +107,6 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 - [ ] `npm run test:anyapi`
 - [ ] `npm run verify`
 - [x] Narrow repro for AnyAPI custom `idProperty`
-- [ ] Narrow repro for relationship route `afterCommit`
+- [x] Narrow repro for relationship route `afterCommit`
 - [x] Narrow repro for pagination link round trip
 - [ ] Import smoke test for public exports

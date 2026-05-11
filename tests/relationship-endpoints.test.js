@@ -26,6 +26,8 @@ const knex = knexLib({
 // API instance that persists across tests
 let api
 let app
+const relationshipCommitEvents = []
+const relationshipRollbackEvents = []
 
 describe('Relationship Endpoints Plugin', () => {
   before(async () => {
@@ -38,6 +40,35 @@ describe('Relationship Endpoints Plugin', () => {
       includeExpress: true
     })
     api.http.express.mount(app)
+
+    await api.customize({
+      hooks: {
+        afterCommit: {
+          functionName: 'relationship-after-commit-test-tracker',
+          handler: async ({ context }) => {
+            if (context.method?.endsWith('Relationship')) {
+              relationshipCommitEvents.push({
+                method: context.method,
+                shouldCommit: context.shouldCommit,
+                hasTransaction: !!context.transaction
+              })
+            }
+          }
+        },
+        afterRollback: {
+          functionName: 'relationship-after-rollback-test-tracker',
+          handler: async ({ context }) => {
+            if (context.method?.endsWith('Relationship')) {
+              relationshipRollbackEvents.push({
+                method: context.method,
+                shouldCommit: context.shouldCommit,
+                hasTransaction: !!context.transaction
+              })
+            }
+          }
+        }
+      }
+    })
   })
 
   after(async () => {
@@ -451,6 +482,100 @@ describe('Relationship Endpoints Plugin', () => {
 
       assert.equal(toManyResponse.status, 422)
       assert.match(toManyResponse.body.errors?.[0]?.detail || '', /array of resource identifiers/)
+    })
+  })
+
+  describe('Relationship Transaction Hooks', () => {
+    let countryId
+    let secondCountryId
+    let bookId
+    let authorId
+
+    beforeEach(async () => {
+      relationshipCommitEvents.length = 0
+      relationshipRollbackEvents.length = 0
+
+      await cleanTables(knex, [
+        'basic_countries', 'basic_publishers', 'basic_authors', 'basic_books', 'basic_book_authors'
+      ])
+
+      const country = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
+        simplified: false
+      })
+      countryId = country.data.id
+
+      const secondCountry = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', { name: 'Canada', code: 'CA' }),
+        simplified: false
+      })
+      secondCountryId = secondCountry.data.id
+
+      const book = await api.resources.books.post({
+        inputRecord: createJsonApiDocument(
+          'books',
+          { title: 'Hook Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryId)) }
+        ),
+        simplified: false
+      })
+      bookId = book.data.id
+
+      const author = await api.resources.authors.post({
+        inputRecord: createJsonApiDocument('authors', { name: 'Hook Author' }),
+        simplified: false
+      })
+      authorId = author.data.id
+
+      relationshipCommitEvents.length = 0
+      relationshipRollbackEvents.length = 0
+    })
+
+    it('runs afterCommit for relationship methods that own their transaction', async () => {
+      await api.resources.books.postRelationship({
+        id: bookId,
+        relationshipName: 'authors',
+        relationshipData: [resourceIdentifier('authors', authorId)]
+      })
+
+      await api.resources.books.patchRelationship({
+        id: bookId,
+        relationshipName: 'country',
+        relationshipData: resourceIdentifier('countries', secondCountryId)
+      })
+
+      await api.resources.books.deleteRelationship({
+        id: bookId,
+        relationshipName: 'authors',
+        relationshipData: [resourceIdentifier('authors', authorId)]
+      })
+
+      assert.deepEqual(
+        relationshipCommitEvents.map((event) => event.method),
+        ['postRelationship', 'patchRelationship', 'deleteRelationship']
+      )
+      assert(relationshipCommitEvents.every((event) => event.shouldCommit))
+      assert(relationshipCommitEvents.every((event) => event.hasTransaction))
+      assert.equal(relationshipRollbackEvents.length, 0)
+    })
+
+    it('preserves afterRollback for failed relationship methods that own their transaction', async () => {
+      await assert.rejects(
+        api.resources.books.postRelationship({
+          id: bookId,
+          relationshipName: 'missing',
+          relationshipData: []
+        }),
+        /Relationship 'missing' not found/
+      )
+
+      assert.deepEqual(
+        relationshipRollbackEvents.map((event) => event.method),
+        ['postRelationship']
+      )
+      assert(relationshipRollbackEvents[0].shouldCommit)
+      assert(relationshipRollbackEvents[0].hasTransaction)
+      assert.equal(relationshipCommitEvents.length, 0)
     })
   })
 })

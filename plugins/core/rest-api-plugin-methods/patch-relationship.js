@@ -53,6 +53,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
 
     if (context.shouldCommit) {
       await context.transaction.commit()
+      await runHooks('afterCommit')
     }
 
     // 204 No Content

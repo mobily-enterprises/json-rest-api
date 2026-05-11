@@ -453,6 +453,68 @@ describe('WebSocket/Socket.IO Plugin', () => {
         socket.close()
       }
     })
+
+    it('should broadcast deferred patch notifications from relationship PATCH', async () => {
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key')
+
+      const socket = ioClient(`http://localhost:${server.address().port}`, {
+        path: '/api/socket.io',
+        auth: { token }
+      })
+
+      try {
+        await new Promise((resolve, reject) => {
+          socket.on('connect', resolve)
+          socket.on('connect_error', reject)
+          setTimeout(() => reject(new Error('Connection timeout')), 5000)
+        })
+
+        const country = await api.resources.countries.post({
+          inputRecord: createJsonApiDocument('countries', {
+            name: 'Original Country',
+            code: 'OC'
+          }),
+          simplified: false
+        })
+
+        const nextCountry = await api.resources.countries.post({
+          inputRecord: createJsonApiDocument('countries', {
+            name: 'Next Country',
+            code: 'NC'
+          }),
+          simplified: false
+        })
+
+        const book = await api.resources.books.post({
+          inputRecord: createJsonApiDocument(
+            'books',
+            { title: 'Relationship Patch Broadcast' },
+            { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
+          ),
+          simplified: false
+        })
+
+        await new Promise((resolve) => {
+          socket.emit('subscribe', { resource: 'books' }, resolve)
+        })
+
+        const updatePromise = waitForSocketEvent(socket, 'subscription.update', 1000)
+
+        await api.resources.books.patchRelationship({
+          id: book.data.id,
+          relationshipName: 'country',
+          relationshipData: resourceIdentifier('countries', nextCountry.data.id)
+        })
+
+        const notification = await updatePromise
+        assert.equal(notification.type, 'resource.patchd')
+        assert.equal(notification.resource, 'books')
+        assert.equal(String(notification.id), String(book.data.id))
+        assert.equal(notification.action, 'patch')
+      } finally {
+        socket.close()
+      }
+    })
   })
 
   describe('Multiple Subscriptions', () => {
