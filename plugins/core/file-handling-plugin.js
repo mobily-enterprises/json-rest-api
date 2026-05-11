@@ -65,6 +65,43 @@ export const FileHandlingPlugin = {
     // Store detectors array for inspection
     api.rest.fileDetectors = detectorRegistry
 
+    const trackUploadedFile = (context, upload) => {
+      if (!context.fileHandlingUploads) {
+        context.fileHandlingUploads = []
+      }
+      context.fileHandlingUploads.push(upload)
+    }
+
+    const cleanupParsedFiles = async (files = {}) => {
+      for (const file of Object.values(files)) {
+        if (!file?.cleanup) continue
+
+        try {
+          await file.cleanup()
+        } catch (error) {
+          log.warn('Failed to cleanup temp file:', error)
+        }
+      }
+    }
+
+    const cleanupUploadedFiles = async (context) => {
+      const uploads = context.fileHandlingUploads
+      if (!uploads || uploads.length === 0) return
+
+      context.fileHandlingUploads = []
+      for (const upload of uploads) {
+        if (!upload?.url || typeof upload.storage?.delete !== 'function') {
+          continue
+        }
+
+        try {
+          await upload.storage.delete(upload.url)
+        } catch (error) {
+          log.warn(`Failed to cleanup uploaded file '${upload.url}' after rollback:`, error)
+        }
+      }
+    }
+
     /**
      * Analyze a scope's schema to find file fields
      */
@@ -152,125 +189,114 @@ export const FileHandlingPlugin = {
       }
 
       log.debug(`Processing files with detector '${detectorUsed}'`)
-      const { fields, files } = parsed
+      const { fields = {}, files = {} } = parsed
 
-      // Process each file field defined in schema
-      for (const fieldConfig of fileFields) {
-        const file = files[fieldConfig.field]
+      try {
+        // Process each file field defined in schema
+        for (const fieldConfig of fileFields) {
+          const file = files[fieldConfig.field]
 
-        if (!file) {
-          if (fieldConfig.required) {
-            throw new RestApiValidationError(
-              `Required file field '${fieldConfig.field}' is missing`,
-              {
-                fields: [fieldConfig.field],
-                violations: [{
-                  field: fieldConfig.field,
-                  message: 'This field is required'
-                }]
-              }
-            )
-          }
-          continue
-        }
-
-        // Validate mime type
-        if (fieldConfig.accepts[0] !== '*') {
-          const acceptable = fieldConfig.accepts.some(pattern => {
-            if (pattern.endsWith('/*')) {
-              // e.g., 'image/*'
-              const prefix = pattern.slice(0, -2)
-              return file.mimetype.startsWith(prefix + '/')
+          if (!file) {
+            if (fieldConfig.required) {
+              throw new RestApiValidationError(
+                `Required file field '${fieldConfig.field}' is missing`,
+                {
+                  fields: [fieldConfig.field],
+                  violations: [{
+                    field: fieldConfig.field,
+                    message: 'This field is required'
+                  }]
+                }
+              )
             }
-            return file.mimetype === pattern
-          })
-
-          if (!acceptable) {
-            throw new RestApiValidationError(
-              `Invalid file type for field '${fieldConfig.field}'`,
-              {
-                fields: [fieldConfig.field],
-                violations: [{
-                  field: fieldConfig.field,
-                  message: `Expected ${fieldConfig.accepts.join(' or ')}, got ${file.mimetype}`
-                }]
-              }
-            )
+            continue
           }
-        }
 
-        // Validate file size
-        if (fieldConfig.maxSize) {
-          const maxBytes = parseSize(fieldConfig.maxSize)
-          if (file.size > maxBytes) {
-            throw new RestApiValidationError(
-              `File too large for field '${fieldConfig.field}'`,
-              {
-                fields: [fieldConfig.field],
-                violations: [{
-                  field: fieldConfig.field,
-                  message: `Maximum size is ${fieldConfig.maxSize}, got ${formatSize(file.size)}`
-                }]
+          // Validate mime type
+          if (fieldConfig.accepts[0] !== '*') {
+            const acceptable = fieldConfig.accepts.some(pattern => {
+              if (pattern.endsWith('/*')) {
+                // e.g., 'image/*'
+                const prefix = pattern.slice(0, -2)
+                return file.mimetype.startsWith(prefix + '/')
               }
-            )
-          }
-        }
+              return file.mimetype === pattern
+            })
 
-        // Upload to storage
-        if (!fieldConfig.storage) {
-          throw new Error(`No storage configured for file field '${fieldConfig.field}'`)
-        }
-
-        try {
-          const storedUrl = await fieldConfig.storage.upload(file)
-          fields[fieldConfig.field] = storedUrl
-          log.debug(`Uploaded file for field '${fieldConfig.field}' to: ${storedUrl}`)
-        } catch (error) {
-          // Cleanup if file has cleanup function
-          if (file.cleanup) {
-            try {
-              await file.cleanup()
-            } catch (cleanupError) {
-              log.warn('Failed to cleanup file after upload error:', cleanupError)
+            if (!acceptable) {
+              throw new RestApiValidationError(
+                `Invalid file type for field '${fieldConfig.field}'`,
+                {
+                  fields: [fieldConfig.field],
+                  violations: [{
+                    field: fieldConfig.field,
+                    message: `Expected ${fieldConfig.accepts.join(' or ')}, got ${file.mimetype}`
+                  }]
+                }
+              )
             }
           }
 
-          throw new RestApiValidationError(
-            `Failed to upload file for field '${fieldConfig.field}': ${error.message}`,
-            {
-              fields: [fieldConfig.field],
-              violations: [{
-                field: fieldConfig.field,
-                message: error.message
-              }]
+          // Validate file size
+          if (fieldConfig.maxSize) {
+            const maxBytes = parseSize(fieldConfig.maxSize)
+            if (file.size > maxBytes) {
+              throw new RestApiValidationError(
+                `File too large for field '${fieldConfig.field}'`,
+                {
+                  fields: [fieldConfig.field],
+                  violations: [{
+                    field: fieldConfig.field,
+                    message: `Maximum size is ${fieldConfig.maxSize}, got ${formatSize(file.size)}`
+                  }]
+                }
+              )
             }
-          )
-        }
-      }
+          }
 
-      // Replace inputRecord with processed data
-      if (!params.inputRecord) {
-        params.inputRecord = { data: { attributes: {} } }
-      }
-      if (!params.inputRecord.data) {
-        params.inputRecord.data = { attributes: {} }
-      }
-      if (!params.inputRecord.data.attributes) {
-        params.inputRecord.data.attributes = {}
-      }
+          // Upload to storage
+          if (!fieldConfig.storage) {
+            throw new Error(`No storage configured for file field '${fieldConfig.field}'`)
+          }
 
-      // Merge fields into attributes
-      Object.assign(params.inputRecord.data.attributes, fields)
-
-      // Cleanup any remaining temp files
-      for (const file of Object.values(files)) {
-        if (file.cleanup) {
           try {
-            await file.cleanup()
+            const storedUrl = await fieldConfig.storage.upload(file)
+            fields[fieldConfig.field] = storedUrl
+            trackUploadedFile(context, {
+              field: fieldConfig.field,
+              storage: fieldConfig.storage,
+              url: storedUrl
+            })
+            log.debug(`Uploaded file for field '${fieldConfig.field}' to: ${storedUrl}`)
           } catch (error) {
-            log.warn('Failed to cleanup temp file:', error)
+            throw new RestApiValidationError(
+              `Failed to upload file for field '${fieldConfig.field}': ${error.message}`,
+              {
+                fields: [fieldConfig.field],
+                violations: [{
+                  field: fieldConfig.field,
+                  message: error.message
+                }]
+              }
+            )
           }
         }
+
+        // Replace inputRecord with processed data
+        if (!params.inputRecord) {
+          params.inputRecord = { data: { attributes: {} } }
+        }
+        if (!params.inputRecord.data) {
+          params.inputRecord.data = { attributes: {} }
+        }
+        if (!params.inputRecord.data.attributes) {
+          params.inputRecord.data.attributes = {}
+        }
+
+        // Merge fields into attributes
+        Object.assign(params.inputRecord.data.attributes, fields)
+      } finally {
+        await cleanupParsedFiles(files)
       }
     }
 
@@ -289,6 +315,10 @@ export const FileHandlingPlugin = {
 
       // Process files if this scope has file fields
       await processFiles(scopeName, params, context)
+    })
+
+    addHook('afterRollback', 'cleanupUploadedFiles', {}, async ({ context }) => {
+      await cleanupUploadedFiles(context)
     })
 
     log.info('File handling plugin initialized successfully')

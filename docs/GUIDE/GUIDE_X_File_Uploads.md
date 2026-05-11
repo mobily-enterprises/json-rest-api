@@ -218,11 +218,14 @@ class MyCustomStorage {
   }
   
   async delete(url) {
-    // Optional: implement file deletion
+    // Optional but recommended: FileHandlingPlugin calls this after
+    // an uploaded file's write transaction rolls back.
     await deleteFileSomewhere(url);
   }
 }
 ```
+
+`FileHandlingPlugin` always calls detector-provided `file.cleanup()` after parsing, including validation failures. If a file has already been uploaded and the later resource write rolls back, the plugin calls `storage.delete(url)` when the adapter implements it. Storage adapters that need rollback cleanup should make `delete(url)` idempotent for URLs returned by `upload(file)`.
 
 ## Protocol Configuration
 

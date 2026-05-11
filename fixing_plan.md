@@ -48,12 +48,12 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Add a focused cleanup test proving `cleanTables(knex, ['cursor_products'])` deletes matching `any_records`.
   - [x] Keep metadata-derived cleanup mappings as a later refactor if a broader helper change is approved.
 
-- [ ] Fix file temp and orphan cleanup.
-  - [ ] Wrap file processing in `try/finally` so detector temp files are cleaned after validation failures.
-  - [ ] Track successfully uploaded URLs on `context`.
-  - [ ] On rollback or later write error, call storage `delete(url)` where available.
-  - [ ] Document `delete(url)` as the rollback-capable storage contract.
-  - [ ] Add tests for invalid MIME cleanup and post-upload DB/validation rollback cleanup.
+- [x] Fix file temp and orphan cleanup.
+  - [x] Wrap file processing in `try/finally` so detector temp files are cleaned after validation failures.
+  - [x] Track successfully uploaded URLs on `context`.
+  - [x] On rollback or later write error, call storage `delete(url)` where available.
+  - [x] Document `delete(url)` as the rollback-capable storage contract.
+  - [x] Add tests for invalid MIME cleanup and post-upload DB/validation rollback cleanup.
 
 - [ ] Harden `LocalStorage` path containment.
   - [ ] Sanitize or reject custom basenames containing `/`, `\`, drive prefixes, or empty names.
@@ -105,7 +105,7 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 - [x] `npm test`
 - [x] `npm run lint`
 - [x] `npm run test:anyapi`
-- [ ] `npm run verify`
+- [x] `npm run verify`
 - [x] Narrow repro for AnyAPI custom `idProperty`
 - [x] Narrow repro for relationship route `afterCommit`
 - [x] Narrow repro for pagination link round trip
