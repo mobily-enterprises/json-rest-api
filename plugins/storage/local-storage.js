@@ -19,6 +19,45 @@ export class LocalStorage {
     this.maxFilenameLength = options.maxFilenameLength || 255
   }
 
+  hasPathSegments (filename) {
+    return filename.includes('/') ||
+      filename.includes('\\') ||
+      path.isAbsolute(filename) ||
+      path.win32.isAbsolute(filename) ||
+      /^[A-Za-z]:/.test(filename)
+  }
+
+  validateCustomBasename (basename) {
+    if (typeof basename !== 'string') {
+      throw new Error('Custom nameGenerator must return a string')
+    }
+    if (basename.trim().length === 0) {
+      throw new Error('Custom nameGenerator must return a non-empty basename')
+    }
+    if (this.hasPathSegments(basename)) {
+      throw new Error('Custom nameGenerator must return a basename, not a path')
+    }
+    return basename
+  }
+
+  resolveStoragePath (filename) {
+    if (typeof filename !== 'string' || filename.trim().length === 0) {
+      throw new Error('Invalid file name')
+    }
+    if (this.hasPathSegments(filename)) {
+      throw new Error('Invalid file path')
+    }
+
+    const resolvedDir = path.resolve(this.directory)
+    const resolvedPath = path.resolve(resolvedDir, filename)
+    const relative = path.relative(resolvedDir, resolvedPath)
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Invalid file path')
+    }
+
+    return resolvedPath
+  }
+
   /**
    * Generate a safe filename
    */
@@ -61,7 +100,7 @@ export class LocalStorage {
         if (!this.nameGenerator) {
           throw new Error('nameGenerator function required for custom strategy')
         }
-        basename = await this.nameGenerator(file)
+        basename = this.validateCustomBasename(await this.nameGenerator(file))
         break
 
       default:
@@ -107,7 +146,7 @@ export class LocalStorage {
    * Ensure filename is unique
    */
   async ensureUnique (filename) {
-    const filepath = path.join(this.directory, filename)
+    const filepath = this.resolveStoragePath(filename)
 
     try {
       await fs.access(filepath)
@@ -120,7 +159,7 @@ export class LocalStorage {
       do {
         newFilename = `${base}_${counter}${ext}`
         counter++
-      } while (await this.fileExists(path.join(this.directory, newFilename)))
+      } while (await this.fileExists(this.resolveStoragePath(newFilename)))
 
       return newFilename
     } catch (error) {
@@ -171,14 +210,7 @@ export class LocalStorage {
 
     // Generate secure filename
     const filename = await this.generateFilename(file)
-    const filepath = path.join(this.directory, filename)
-
-    // Ensure we're not writing outside our directory (defense in depth)
-    const resolvedPath = path.resolve(filepath)
-    const resolvedDir = path.resolve(this.directory)
-    if (!resolvedPath.startsWith(resolvedDir)) {
-      throw new Error('Invalid file path')
-    }
+    const filepath = this.resolveStoragePath(filename)
 
     // Write file
     if (file.data) {
@@ -198,14 +230,7 @@ export class LocalStorage {
    */
   async delete (url) {
     const filename = path.basename(url)
-    const filepath = path.join(this.directory, filename)
-
-    // Security check
-    const resolvedPath = path.resolve(filepath)
-    const resolvedDir = path.resolve(this.directory)
-    if (!resolvedPath.startsWith(resolvedDir)) {
-      throw new Error('Invalid file path')
-    }
+    const filepath = this.resolveStoragePath(filename)
 
     try {
       await fs.unlink(filepath)
