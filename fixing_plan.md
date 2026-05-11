@@ -10,11 +10,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Ensure cursor, sort, projection, sparse fieldset, and include paths translate both `id` and `idProperty` to `logical_id`.
   - [x] Add AnyAPI tests for custom-id `post`, `get`, `query`, sparse fields, and cursor pagination.
 
-- [ ] Fix AnyAPI PUT create parity.
-  - [ ] Branch `helpers.dataPut` on `context.isCreate`.
-  - [ ] In create mode, insert into `any_records` with tenant, resource, logical id, and translated attributes.
-  - [ ] Keep the current update path for update mode.
-  - [ ] Add legacy Knex and AnyAPI parity tests for `PUT /resource/:id` create, including custom IDs.
+- [x] Fix AnyAPI PUT create parity.
+  - [x] Branch `helpers.dataPut` on `context.isCreate`.
+  - [x] In create mode, insert into `any_records` with tenant, resource, logical id, and translated attributes.
+  - [x] Keep the current update path for update mode.
+  - [x] Add legacy Knex and AnyAPI parity tests for `PUT /resource/:id` create, including custom IDs.
 
 - [ ] Fix pagination link query-string round trips.
   - [ ] Replace manual query-string concatenation with one serializer that is the inverse of `parseJsonApiQuery`.
