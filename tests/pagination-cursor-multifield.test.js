@@ -7,6 +7,7 @@ import {
   createJsonApiDocument
 } from './helpers/test-utils.js'
 import { createCursorPaginationApi } from './fixtures/api-configs.js'
+import { storageMode } from './helpers/storage-mode.js'
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -19,6 +20,19 @@ const knex = knexLib({
 
 // API instance that persists across tests
 let api
+const anyapiIt = storageMode.isAnyApi() ? it : it.skip
+
+async function countAnyRecords (resource) {
+  const result = await knex('any_records')
+    .where({
+      tenant_id: api.anyapi.tenantId,
+      resource
+    })
+    .count('* as count')
+    .first()
+
+  return Number(result?.count ?? 0)
+}
 
 describe('Multi-field Cursor Pagination', () => {
   before(async () => {
@@ -29,6 +43,43 @@ describe('Multi-field Cursor Pagination', () => {
   after(async () => {
     // Close database connection
     await knex.destroy()
+  })
+
+  anyapiIt('cleans cursor fixture records from AnyAPI canonical storage', async () => {
+    await cleanTables(knex, ['cursor_products', 'cursor_items'])
+
+    await api.resources.products.post({
+      inputRecord: createJsonApiDocument('products', {
+        name: 'Cleanup Product',
+        category: 'Cleanup',
+        brand: 'Fixture',
+        price: 10,
+        sku: 'CLEAN-001'
+      }),
+      simplified: false
+    })
+
+    await api.resources.items.post({
+      inputRecord: createJsonApiDocument('items', {
+        code: 'CLEAN',
+        name: 'Cleanup Item',
+        category: 'Cleanup',
+        type: 'fixture'
+      }),
+      simplified: false
+    })
+
+    assert.equal(await countAnyRecords('products'), 1)
+    assert.equal(await countAnyRecords('items'), 1)
+
+    await cleanTables(knex, ['cursor_products'])
+
+    assert.equal(await countAnyRecords('products'), 0)
+    assert.equal(await countAnyRecords('items'), 1)
+
+    await cleanTables(knex, ['cursor_items'])
+
+    assert.equal(await countAnyRecords('items'), 0)
   })
 
   describe('Basic Multi-field Cursor Pagination', () => {

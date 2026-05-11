@@ -1925,6 +1925,7 @@ export async function createCursorPaginationApi (knex) {
     tableName: 'cursor_products'
   })
   await api.resources.products.createKnexTable()
+  mapTable('cursor_products', 'products')
 
   // Create items table with custom ID property
   await api.addResource('items', {
@@ -1939,6 +1940,7 @@ export async function createCursorPaginationApi (knex) {
     tableName: 'cursor_items'
   })
   await api.resources.items.createKnexTable()
+  mapTable('cursor_items', 'items')
 
   return api
 }

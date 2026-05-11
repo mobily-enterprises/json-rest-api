@@ -43,10 +43,10 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 
 ## Medium Priority
 
-- [ ] Fix AnyAPI pagination fixture cleanup.
-  - [ ] Register `cursor_products` and `cursor_items` with `storageMode.registerTable()` in `createCursorPaginationApi`.
-  - [ ] Add a focused cleanup test proving `cleanTables(knex, ['cursor_products'])` deletes matching `any_records`.
-  - [ ] Consider deriving AnyAPI cleanup mappings from API metadata later if a broader helper refactor is approved.
+- [x] Fix AnyAPI pagination fixture cleanup.
+  - [x] Register `cursor_products` and `cursor_items` with `storageMode.registerTable()` in `createCursorPaginationApi`.
+  - [x] Add a focused cleanup test proving `cleanTables(knex, ['cursor_products'])` deletes matching `any_records`.
+  - [x] Keep metadata-derived cleanup mappings as a later refactor if a broader helper change is approved.
 
 - [ ] Fix file temp and orphan cleanup.
   - [ ] Wrap file processing in `try/finally` so detector temp files are cleaned after validation failures.
@@ -102,9 +102,9 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 
 ## Verification Checklist
 
-- [ ] `npm test`
-- [ ] `npm run lint`
-- [ ] `npm run test:anyapi`
+- [x] `npm test`
+- [x] `npm run lint`
+- [x] `npm run test:anyapi`
 - [ ] `npm run verify`
 - [x] Narrow repro for AnyAPI custom `idProperty`
 - [x] Narrow repro for relationship route `afterCommit`
