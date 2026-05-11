@@ -134,7 +134,7 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
  */
 export const handleWriteMethodError = async (error, context, method, scopeName, log, runHooks) => {
   // Rollback transaction if we created it
-  if (context.shouldCommit) {
+  if (context.shouldCommit && !context.transactionCommitted) {
     await context.transaction.rollback()
     await runHooks('afterRollback')
   }
@@ -150,6 +150,16 @@ export const handleWriteMethodError = async (error, context, method, scopeName, 
   })
 
   throw error
+}
+
+export const commitOwnedTransaction = async (context, runHooks) => {
+  if (!context.shouldCommit) {
+    return
+  }
+
+  await context.transaction.commit()
+  context.transactionCommitted = true
+  await runHooks('afterCommit')
 }
 
 /**

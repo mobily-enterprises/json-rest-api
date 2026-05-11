@@ -1,5 +1,5 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { handleWriteMethodError } from './common.js'
+import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
@@ -96,11 +96,7 @@ export default async function deleteMethod ({
     await runHooks('finish')
     await runHooks('finishDelete')
 
-    // Commit transaction if we created it
-    if (context.shouldCommit) {
-      await context.transaction.commit()
-      await runHooks('afterCommit')
-    }
+    await commitOwnedTransaction(context, runHooks)
 
     // DELETE typically returns void/undefined (204 No Content)
   } catch (error) {

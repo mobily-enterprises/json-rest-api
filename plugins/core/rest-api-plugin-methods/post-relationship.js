@@ -1,5 +1,5 @@
 import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
-import { findRelationshipDefinition, handleWriteMethodError } from './common.js'
+import { commitOwnedTransaction, findRelationshipDefinition, handleWriteMethodError } from './common.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import {
   normalizeRelationshipIdentifiers,
@@ -108,10 +108,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
     await runHooks('finish')
     await runHooks('finishPostRelationship')
 
-    if (context.shouldCommit) {
-      await context.transaction.commit()
-      await runHooks('afterCommit')
-    }
+    await commitOwnedTransaction(context, runHooks)
 
     // 204 No Content
   } catch (error) {
