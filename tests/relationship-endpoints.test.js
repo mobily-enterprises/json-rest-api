@@ -1,5 +1,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import express from 'express'
+import request from 'supertest'
 import knexLib from 'knex'
 import {
   validateJsonApiStructure,
@@ -23,16 +25,19 @@ const knex = knexLib({
 
 // API instance that persists across tests
 let api
+let app
 
 describe('Relationship Endpoints Plugin', () => {
   before(async () => {
     // Initialize API with the relationships plugin
+    app = express()
     api = await createBasicApi(knex, {
       express: {
         mountPath: ''  // No mount path for this test
       },
       includeExpress: true
     })
+    api.http.express.mount(app)
   })
 
   after(async () => {
@@ -357,5 +362,95 @@ describe('Relationship Endpoints Plugin', () => {
 
     // Note: belongsTo relationships (like 'publisher') are not accessible via relationship endpoints
     // They are foreign key fields, not true JSON:API relationships
+  })
+
+  describe('Relationship Cardinality Validation', () => {
+    let countryId
+    let bookId
+    let authorId
+
+    beforeEach(async () => {
+      await cleanTables(knex, [
+        'basic_countries', 'basic_publishers', 'basic_authors', 'basic_books', 'basic_book_authors'
+      ])
+
+      const country = await api.resources.countries.post({
+        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
+        simplified: false
+      })
+      countryId = country.data.id
+
+      const book = await api.resources.books.post({
+        inputRecord: createJsonApiDocument(
+          'books',
+          { title: 'Cardinality Book' },
+          { country: createRelationship(resourceIdentifier('countries', countryId)) }
+        ),
+        simplified: false
+      })
+      bookId = book.data.id
+
+      const author = await api.resources.authors.post({
+        inputRecord: createJsonApiDocument('authors', { name: 'Author One' }),
+        simplified: false
+      })
+      authorId = author.data.id
+    })
+
+    it('rejects arrays for to-one relationship PATCH calls', async () => {
+      await assert.rejects(
+        api.resources.books.patchRelationship({
+          id: bookId,
+          relationshipName: 'country',
+          relationshipData: [resourceIdentifier('countries', countryId)]
+        }),
+        (error) => {
+          assert.equal(error.code, 'REST_API_VALIDATION')
+          assert.match(error.message, /single resource identifier or null/)
+          assert(error.details.fields.includes('data.relationships.country.data'))
+          return true
+        }
+      )
+    })
+
+    it('rejects scalars for to-many relationship PATCH calls', async () => {
+      await assert.rejects(
+        api.resources.books.patchRelationship({
+          id: bookId,
+          relationshipName: 'authors',
+          relationshipData: resourceIdentifier('authors', authorId)
+        }),
+        (error) => {
+          assert.equal(error.code, 'REST_API_VALIDATION')
+          assert.match(error.message, /array of resource identifiers/)
+          assert(error.details.fields.includes('data.relationships.authors.data'))
+          return true
+        }
+      )
+    })
+
+    it('rejects invalid relationship cardinality through Express transport', async () => {
+      const toOneResponse = await request(app)
+        .patch(`/books/${bookId}/relationships/country`)
+        .set('Content-Type', 'application/vnd.api+json')
+        .set('Accept', 'application/vnd.api+json')
+        .send({
+          data: [resourceIdentifier('countries', countryId)]
+        })
+
+      assert.equal(toOneResponse.status, 422)
+      assert.match(toOneResponse.body.errors?.[0]?.detail || '', /single resource identifier or null/)
+
+      const toManyResponse = await request(app)
+        .patch(`/books/${bookId}/relationships/authors`)
+        .set('Content-Type', 'application/vnd.api+json')
+        .set('Accept', 'application/vnd.api+json')
+        .send({
+          data: resourceIdentifier('authors', authorId)
+        })
+
+      assert.equal(toManyResponse.status, 422)
+      assert.match(toManyResponse.body.errors?.[0]?.detail || '', /array of resource identifiers/)
+    })
   })
 })
