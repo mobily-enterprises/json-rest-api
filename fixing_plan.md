@@ -55,10 +55,10 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Document `delete(url)` as the rollback-capable storage contract.
   - [x] Add tests for invalid MIME cleanup and post-upload DB/validation rollback cleanup.
 
-- [ ] Harden `LocalStorage` path containment.
-  - [ ] Sanitize or reject custom basenames containing `/`, `\`, drive prefixes, or empty names.
-  - [ ] Replace `startsWith(resolvedDir)` containment with `path.relative(resolvedDir, resolvedPath)`.
-  - [ ] Add tests for sibling-prefix traversal such as `../uploads_evil/pwn`.
+- [x] Harden `LocalStorage` path containment.
+  - [x] Sanitize or reject custom basenames containing `/`, `\`, drive prefixes, or empty names.
+  - [x] Replace `startsWith(resolvedDir)` containment with `path.relative(resolvedDir, resolvedPath)`.
+  - [x] Add tests for sibling-prefix traversal such as `../uploads_evil/pwn`.
 
 - [ ] Fix untrusted proxy URL generation. Requires maintainer approval.
   - [ ] Stop trusting `Host` and `X-Forwarded-*` by default for absolute links.

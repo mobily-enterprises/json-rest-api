@@ -187,9 +187,11 @@ const localStorage = new LocalStorage({
    }
    // Result: "user_12345_1672531200000.jpg"
    ```
+   Custom generators must return a basename only, not a path. Values containing `/`, `\`, drive prefixes, or only whitespace are rejected.
 
 **Security Features:**
-- Path traversal protection (removes `..` and `/`)
+- Path traversal protection (sanitizes original names and rejects path-like custom names)
+- Custom generated names are restricted to basenames
 - Control character filtering
 - Extension validation against whitelist
 - Automatic duplicate handling
@@ -539,11 +541,11 @@ const organizedStorage = new LocalStorage({
   nameStrategy: 'custom',
   nameGenerator: async (file) => {
     const date = new Date();
-    const dateDir = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
-    return `${dateDir}/${crypto.randomBytes(16).toString('hex')}`;
+    const datePrefix = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return `${datePrefix}-${crypto.randomBytes(16).toString('hex')}`;
   }
 });
-// Saves as: "2024/01/a7f8d9e2b4c6e1f3.jpg"
+// Saves as: "2024-01-a7f8d9e2b4c6e1f3.jpg"
 ```
 
 ### Using cURL
