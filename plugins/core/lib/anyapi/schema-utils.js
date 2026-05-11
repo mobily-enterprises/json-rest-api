@@ -210,6 +210,7 @@ export const TYPE_TO_POOL = new Map([
   ['text', 'string'],
   ['uuid', 'string'],
   ['email', 'string'],
+  ['file', 'string'],
   ['number', 'number'],
   ['integer', 'number'],
   ['float', 'number'],

@@ -1,5 +1,5 @@
 import { Api } from 'hooked-api'
-import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin, QueryProjectionsPlugin } from '../../index.js'
+import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin, QueryProjectionsPlugin, FileHandlingPlugin } from '../../index.js'
 import { ExpressPlugin } from '../../plugins/core/connectors/express-plugin.js'
 import express from 'express'
 import { createServer } from 'http'
@@ -2102,4 +2102,84 @@ export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
   mapTable('searchmerge_orders', 'orders')
 
   return api
+}
+
+export async function createFileUploadApi (knex, pluginOptions = {}) {
+  const apiName = pluginOptions.apiName || 'file-upload-test-api'
+  const tableName = pluginOptions.tableName || 'file_documents'
+  const tablePrefix = pluginOptions.tablePrefix || 'file'
+  const storage = pluginOptions.storage
+  const detectorState = pluginOptions.detectorState || { payload: null }
+
+  if (!storage) {
+    throw new Error('createFileUploadApi requires a storage adapter')
+  }
+
+  if (storageMode.isAnyApi()) {
+    storageMode.clearRegistry()
+  }
+
+  const api = new Api({
+    name: apiName,
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  const previousTenant = storageMode.currentTenant
+  const tenantId = storageMode.isAnyApi()
+    ? (pluginOptions.tenantId || `${tablePrefix}_tenant`)
+    : storageMode.defaultTenant
+
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  try {
+    await api.use(RestApiPlugin, {
+      simplifiedApi: false,
+      simplifiedTransport: false,
+      returnRecordApi: {
+        post: true,
+        put: false,
+        patch: false
+      },
+      returnRecordTransport: {
+        post: 'full',
+        put: 'no',
+        patch: 'minimal'
+      },
+      sortableFields: ['id', 'title'],
+      ...pluginOptions['rest-api']
+    })
+    await useStoragePlugin(api, knex, { tenantId })
+    await resetAnyApiTables(knex)
+    await api.use(FileHandlingPlugin)
+
+    api.rest.registerFileDetector({
+      name: 'test-file-detector',
+      detect: () => Boolean(detectorState.payload),
+      parse: async () => detectorState.payload
+    })
+
+    await api.addResource('documents', {
+      schema: {
+        id: { type: 'id' },
+        title: { type: 'string', required: true },
+        attachment: {
+          type: 'file',
+          storage,
+          accepts: ['image/png'],
+          maxSize: '1mb'
+        }
+      },
+      tableName
+    })
+    await api.resources.documents.createKnexTable()
+    mapTable(tableName, 'documents')
+
+    return api
+  } finally {
+    if (storageMode.isAnyApi()) {
+      storageMode.setCurrentTenant(previousTenant)
+    }
+  }
 }
