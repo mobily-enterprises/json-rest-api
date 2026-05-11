@@ -1,5 +1,10 @@
-import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
-import { commitOwnedTransaction, findRelationshipDefinition, handleWriteMethodError } from './common.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import {
+  commitOwnedTransaction,
+  findRelationshipDefinition,
+  handleWriteMethodError,
+  validateRelationshipRoutePayload
+} from './common.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import {
   normalizeRelationshipIdentifiers,
@@ -50,9 +55,13 @@ export default async function postRelationshipMethod ({ params, context, vars, h
       )
     }
 
-    if (!Array.isArray(params.relationshipData)) {
-      throw new RestApiPayloadError('POST to relationship requires array of resource identifiers')
-    }
+    params.relationshipData = validateRelationshipRoutePayload({
+      context,
+      vars,
+      scopeName,
+      operation: 'postRelationship',
+      relationshipData: params.relationshipData
+    })
     params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
 
     // Check permissions

@@ -10,6 +10,10 @@ import {
   normalizeReturnRecordMode,
   normalizeReturnRecordSetting
 } from '../lib/querying-writing/return-record-settings.js'
+import {
+  getRequestContracts,
+  validateRequestContractOrThrow
+} from '../lib/querying-writing/request-contracts.js'
 
 export { normalizeReturnRecordMode as normalizeReturnValue }
 
@@ -160,6 +164,29 @@ export const commitOwnedTransaction = async (context, runHooks) => {
   await context.transaction.commit()
   context.transactionCommitted = true
   await runHooks('afterCommit')
+}
+
+export const validateRelationshipRoutePayload = ({
+  context,
+  vars,
+  scopeName,
+  operation,
+  relationshipData
+}) => {
+  const contracts = getRequestContracts({
+    scopeName,
+    schemaInfo: context.schemaInfo,
+    includeDepthLimit: vars.includeDepthLimit,
+    sortableFields: vars.sortableFields
+  })
+
+  const validated = validateRequestContractOrThrow(
+    contracts[operation],
+    { data: relationshipData },
+    `${operation} relationship request body is invalid`
+  )
+
+  return validated.data
 }
 
 /**

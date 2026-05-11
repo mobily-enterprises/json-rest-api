@@ -40,6 +40,8 @@ describe('Enhanced Pagination Features', () => {
   })
 
   describe('Self Links', () => {
+    let countryId
+
     beforeEach(async () => {
       await cleanTables(knex, [
         'pagination_countries', 'pagination_publishers', 'pagination_books'
@@ -51,6 +53,7 @@ describe('Enhanced Pagination Features', () => {
         inputRecord: countryDoc,
         simplified: false
       })
+      countryId = countryResult.data.id
 
       // Create some books
       for (let i = 1; i <= 3; i++) {
@@ -136,6 +139,38 @@ describe('Enhanced Pagination Features', () => {
       })
       assert(result.links, 'Response should have top-level links')
       assert(result.links.self.startsWith('/books'), 'Top-level self link should be relative')
+    })
+
+    it('should serialize collection self-link query parameters in JSON:API form', async () => {
+      const result = await api.resources.books.query({
+        queryParams: {
+          filters: {
+            country: countryId
+          },
+          fields: {
+            books: 'title,country_id',
+            countries: 'name,code'
+          },
+          include: ['country'],
+          sort: ['title']
+        },
+        simplified: false
+      })
+
+      validateJsonApiStructure(result, true)
+
+      const selfUrl = new URL(result.links.self, 'https://example.test')
+      const selfQuery = parseLinkQuery(result.links.self)
+
+      assert.equal(selfUrl.searchParams.get('filter[country]'), countryId)
+      assert.equal(selfUrl.searchParams.has('filters[country]'), false)
+      assert.deepEqual(selfQuery.filters, { country: countryId })
+      assert.deepEqual(selfQuery.include, ['country'])
+      assert.deepEqual(selfQuery.sort, ['title'])
+      assert.deepEqual(selfQuery.fields, {
+        books: 'title,country_id',
+        countries: 'name,code'
+      })
     })
   })
 

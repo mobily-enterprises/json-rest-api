@@ -1,4 +1,8 @@
-import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
+import {
+  commitOwnedTransaction,
+  handleWriteMethodError,
+  validateRelationshipRoutePayload
+} from './common.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
@@ -19,6 +23,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
     scopeName
   })
   context.relationshipName = params.relationshipName
+  context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
   // Transaction handling
   context.transaction = params.transaction ||
@@ -31,6 +36,14 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
     await runHooks('checkPermissions')
     await runHooks('checkPermissionsPatchRelationship')
 
+    const relationshipData = validateRelationshipRoutePayload({
+      context,
+      vars,
+      scopeName,
+      operation: 'patchRelationship',
+      relationshipData: params.relationshipData
+    })
+
     // Reuse existing patch with relationship data
     await scope.patch({
       id: context.id,
@@ -39,7 +52,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
           type: scopeName,
           id: context.id,
           relationships: {
-            [params.relationshipName]: { data: params.relationshipData }
+            [params.relationshipName]: { data: relationshipData }
           }
         }
       },
