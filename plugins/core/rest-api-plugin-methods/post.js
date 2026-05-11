@@ -9,7 +9,8 @@ import {
   applyFieldSetters,
   validatePivotResource,
   handleRecordReturnAfterWrite,
-  handleWriteMethodError
+  handleWriteMethodError,
+  commitOwnedTransaction
 } from './common.js'
 
 /**
@@ -168,11 +169,7 @@ export default async function postMethod ({
       log
     })
 
-    // Commit transaction if we created it
-    if (context.shouldCommit) {
-      await context.transaction.commit()
-      await runHooks('afterCommit')
-    }
+    await commitOwnedTransaction(context, runHooks)
 
     return ret
   } catch (error) {

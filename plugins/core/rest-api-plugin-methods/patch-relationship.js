@@ -1,4 +1,4 @@
-import { handleWriteMethodError } from './common.js'
+import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
@@ -51,10 +51,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
     await runHooks('finish')
     await runHooks('finishPatchRelationship')
 
-    if (context.shouldCommit) {
-      await context.transaction.commit()
-      await runHooks('afterCommit')
-    }
+    await commitOwnedTransaction(context, runHooks)
 
     // 204 No Content
   } catch (error) {

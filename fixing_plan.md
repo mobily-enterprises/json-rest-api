@@ -35,11 +35,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Verify Socket.IO deferred relationship broadcasts work, or define a separate relationship notification policy.
   - [x] Add tests with an `afterCommit` hook counter and Socket.IO relationship-write subscription behavior.
 
-- [ ] Decide and fix post-commit hook failure semantics. Requires maintainer approval.
-  - [ ] Split transaction work from post-commit side effects.
-  - [ ] Once `commit()` succeeds, do not call rollback handling.
-  - [ ] Decide whether post-commit hook errors are surfaced distinctly or logged/collected while returning success.
-  - [ ] Add tests proving the row remains committed and the response/error semantics are intentional.
+- [x] Decide and fix post-commit hook failure semantics.
+  - [x] Split transaction work from post-commit side effects.
+  - [x] Once `commit()` succeeds, do not call rollback handling.
+  - [x] Surface post-commit hook errors while preserving already-committed data.
+  - [x] Add tests proving the row remains committed and the response/error semantics are intentional.
 
 ## Medium Priority
 

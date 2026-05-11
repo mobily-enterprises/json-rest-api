@@ -1,5 +1,5 @@
 import { RestApiResourceError, RestApiValidationError, RestApiPayloadError } from '../../../lib/rest-api-errors.js'
-import { findRelationshipDefinition, handleWriteMethodError } from './common.js'
+import { commitOwnedTransaction, findRelationshipDefinition, handleWriteMethodError } from './common.js'
 import {
   normalizeRelationshipIdentifiers,
   requireExistingResourceId
@@ -115,10 +115,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
     await runHooks('finish')
     await runHooks('finishDeleteRelationship')
 
-    if (context.shouldCommit) {
-      await context.transaction.commit()
-      await runHooks('afterCommit')
-    }
+    await commitOwnedTransaction(context, runHooks)
 
     // 204 No Content
   } catch (error) {
