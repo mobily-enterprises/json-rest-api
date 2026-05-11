@@ -19,7 +19,7 @@ The file handling system consists of three main components:
 
 1. **FileHandlingPlugin** - Orchestrates file detection and processing
 2. **Protocol Detectors** - Parse files from different protocols (HTTP, Express)
-3. **Storage Adapters** - Save files to different backends (local, S3, etc.)
+3. **Storage Adapters** - Save files to local storage or generate mock S3-style URLs for demos
 
 ### How It Works
 
@@ -115,11 +115,11 @@ Storage adapters handle where and how files are saved. The library includes two 
 | **Extension Whitelist** | ✅ Yes | ❌ No |
 | **Duplicate Handling** | ✅ Yes | ✅ Automatic |
 | **Custom Naming** | ✅ Yes | ❌ No |
-| **Best For** | Local file storage | Cloud storage |
+| **Best For** | Local file storage | Tests, examples, S3-style URL demos |
 
-### S3Storage
+### S3Storage (Mock/Demo)
 
-Saves files to Amazon S3 or S3-compatible storage:
+Generates S3-style URLs without uploading files to Amazon S3:
 
 ```javascript
 import { S3Storage } from 'json-rest-api/plugins/storage/s3-storage.js';
@@ -129,7 +129,7 @@ const s3Storage = new S3Storage({
   region: 'us-east-1',                 // AWS region (default: 'us-east-1')
   prefix: 'uploads/',                  // Path prefix in bucket (default: '')
   acl: 'public-read',                  // Access control (default: 'public-read')
-  mockMode: false                      // Use mock mode? (default: true)
+  mockMode: true                       // Only supported mode
 });
 ```
 
@@ -137,7 +137,7 @@ const s3Storage = new S3Storage({
 - Always generates random hash + extension (e.g., `uploads/a7f8d9e2b4c6e1f3.jpg`)
 - Original filenames are never used for security
 
-**Note**: The included S3Storage is a mock implementation for demonstration. For production use, you'll need to implement the actual AWS SDK calls.
+**Note**: The included S3Storage is a mock implementation for demonstration. `mockMode: false` throws a clear error because real S3 uploads are not implemented. For production use, provide your own storage adapter or add an AWS SDK-backed implementation.
 
 ### LocalStorage
 
