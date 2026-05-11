@@ -163,3 +163,54 @@ export function parseJsonApiQuery (queryString) {
 
   return result
 }
+
+const hasSerializableValue = (value) => (
+  value !== undefined &&
+  value !== null &&
+  !(Array.isArray(value) && value.length === 0)
+)
+
+const stringifyQueryValue = (value) => {
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) return value.map(stringifyQueryValue).join(',')
+  return String(value)
+}
+
+const appendCommaList = (params, key, value) => {
+  if (!hasSerializableValue(value)) return
+  const serialized = Array.isArray(value)
+    ? value.map(stringifyQueryValue).filter((entry) => entry.length > 0).join(',')
+    : stringifyQueryValue(value)
+
+  if (serialized) {
+    params.set(key, serialized)
+  }
+}
+
+const appendScopedParams = (params, publicName, values) => {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return
+
+  for (const [key, value] of Object.entries(values)) {
+    if (!key || !hasSerializableValue(value)) continue
+    params.set(`${publicName}[${key}]`, stringifyQueryValue(value))
+  }
+}
+
+/**
+ * Serializes internal REST API query parameters to public JSON:API query string form.
+ *
+ * This is intentionally the inverse of parseJsonApiQuery for the supported transport
+ * contract: include, sort, filter[...], fields[...], and page[...].
+ */
+export function serializeJsonApiQuery (queryParams = {}, { page } = {}) {
+  const params = new URLSearchParams()
+  const effectivePage = page === undefined ? queryParams.page : page
+
+  appendCommaList(params, 'include', queryParams.include)
+  appendCommaList(params, 'sort', queryParams.sort)
+  appendScopedParams(params, 'filter', queryParams.filters || queryParams.filter)
+  appendScopedParams(params, 'fields', queryParams.fields)
+  appendScopedParams(params, 'page', effectivePage)
+
+  return params.toString()
+}

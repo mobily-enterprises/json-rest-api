@@ -1,4 +1,10 @@
 import { getFieldValue } from '../storage/storage-mapping.js'
+import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
+
+const buildJsonApiLink = (baseUrl, queryParams, page) => {
+  const queryString = serializeJsonApiQuery(queryParams, { page })
+  return queryString ? `${baseUrl}?${queryString}` : baseUrl
+}
 
 /**
  * Calculates pagination metadata from query results
@@ -129,7 +135,7 @@ export const calculatePaginationMeta = (total, page, pageSize) => {
  * Purpose:
  * - JSON:API spec requires pagination links for easy navigation
  * - Preserves all other query parameters (filters, sorts, includes)
- * - Handles complex nested parameters like filter[author][name]=John
+ * - Uses the shared JSON:API query serializer for transport-supported params
  * - Only includes prev/next when applicable
  *
  * Data flow:
@@ -145,52 +151,20 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
   const { page, pageCount, pageSize } = paginationMeta
   const links = {}
 
-  const otherParams = Object.entries(queryParams)
-    .filter(([key]) => key !== 'page')
-    .flatMap(([key, value]) => {
-      if (Array.isArray(value)) {
-        return value.length === 0
-          ? []
-          : value.map((v) => `${key}=${encodeURIComponent(v)}`)
-      }
-      if (typeof value === 'object' && value !== null) {
-        const parts = []
-        const processObject = (obj, prefix) => {
-          Object.entries(obj).forEach(([k, v]) => {
-            const newKey = prefix ? `${prefix}[${k}]` : `${key}[${k}]`
-            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-              processObject(v, newKey)
-            } else if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0)) {
-              parts.push(`${newKey}=${encodeURIComponent(v)}`)
-            }
-          })
-        }
-        processObject(value, key)
-        return parts
-      }
-      if (value === undefined || value === null) {
-        return []
-      }
-      return [`${key}=${encodeURIComponent(value)}`]
-    })
-    .filter(Boolean)
-    .join('&')
-
   const baseUrl = `${urlPrefix}/${scopeName}`
-  const queryPrefix = otherParams ? `?${otherParams}&` : '?'
 
-  links.self = `${baseUrl}${queryPrefix}page[number]=${page}&page[size]=${pageSize}`
+  links.self = buildJsonApiLink(baseUrl, queryParams, { number: page, size: pageSize })
 
   if (pageCount !== undefined) {
-    links.first = `${baseUrl}${queryPrefix}page[number]=1&page[size]=${pageSize}`
-    links.last = `${baseUrl}${queryPrefix}page[number]=${pageCount}&page[size]=${pageSize}`
+    links.first = buildJsonApiLink(baseUrl, queryParams, { number: 1, size: pageSize })
+    links.last = buildJsonApiLink(baseUrl, queryParams, { number: pageCount, size: pageSize })
 
     if (page > 1) {
-      links.prev = `${baseUrl}${queryPrefix}page[number]=${page - 1}&page[size]=${pageSize}`
+      links.prev = buildJsonApiLink(baseUrl, queryParams, { number: page - 1, size: pageSize })
     }
 
     if (page < pageCount) {
-      links.next = `${baseUrl}${queryPrefix}page[number]=${page + 1}&page[size]=${pageSize}`
+      links.next = buildJsonApiLink(baseUrl, queryParams, { number: page + 1, size: pageSize })
     }
   }
 
@@ -446,54 +420,21 @@ export const generateCursorPaginationLinks = (
 
   const links = {}
   const baseUrl = `${urlPrefix}/${scopeName}`
-
-  const otherParams = Object.entries(queryParams)
-    .filter(([key]) => key !== 'page')
-    .flatMap(([key, value]) => {
-      if (Array.isArray(value)) {
-        return value.length === 0
-          ? []
-          : value.map((v) => `${key}=${encodeURIComponent(v)}`)
-      }
-      if (typeof value === 'object' && value !== null) {
-        const parts = []
-        const processObject = (obj, prefix) => {
-          Object.entries(obj).forEach(([k, v]) => {
-            const newKey = prefix ? `${prefix}[${k}]` : `${key}[${k}]`
-            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-              processObject(v, newKey)
-            } else if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0)) {
-              parts.push(`${newKey}=${encodeURIComponent(v)}`)
-            }
-          })
-        }
-        processObject(value, key)
-        return parts
-      }
-      if (value === undefined || value === null) {
-        return []
-      }
-      return [`${key}=${encodeURIComponent(value)}`]
-    })
-    .filter(Boolean)
-    .join('&')
-
-  const queryPrefix = otherParams ? `?${otherParams}&` : '?'
+  const selfPage = { size: pageSize }
 
   if (queryParams.page?.after) {
-    links.self = `${baseUrl}${queryPrefix}page[size]=${pageSize}&page[after]=${queryParams.page.after}`
+    selfPage.after = queryParams.page.after
   } else if (queryParams.page?.before) {
-    links.self = `${baseUrl}${queryPrefix}page[size]=${pageSize}&page[before]=${queryParams.page.before}`
-  } else {
-    links.self = `${baseUrl}${queryPrefix}page[size]=${pageSize}`
+    selfPage.before = queryParams.page.before
   }
 
-  links.first = `${baseUrl}${queryPrefix}page[size]=${pageSize}`
+  links.self = buildJsonApiLink(baseUrl, queryParams, selfPage)
+  links.first = buildJsonApiLink(baseUrl, queryParams, { size: pageSize })
 
   if (hasMore && records.length > 0) {
     const lastRecord = records[records.length - 1]
     const nextCursor = createCursor(lastRecord, sortFields, { schemaInfo })
-    links.next = `${baseUrl}${queryPrefix}page[size]=${pageSize}&page[after]=${nextCursor}`
+    links.next = buildJsonApiLink(baseUrl, queryParams, { size: pageSize, after: nextCursor })
   }
 
   return links

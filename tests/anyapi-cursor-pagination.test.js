@@ -9,10 +9,16 @@ import {
   resourceIdentifier,
 } from './helpers/test-utils.js'
 import { storageMode } from './helpers/storage-mode.js'
+import { parseJsonApiQuery } from '../plugins/core/lib/querying-writing/connectors-query-parser.js'
 
 const isAnyApi = storageMode.isAnyApi()
 
 const maybeDescribe = isAnyApi ? describe : describe.skip
+
+const parseLinkQuery = (link) => {
+  const url = new URL(link, 'https://example.test')
+  return parseJsonApiQuery(url.search.slice(1))
+}
 
 maybeDescribe('AnyAPI Cursor Pagination', () => {
   const knex = knexLib({
@@ -78,7 +84,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
 
     assert.equal(result.data.length, 2)
     assert(result.meta?.pagination?.cursor?.next, 'Should include next cursor')
-    assert(result.links?.next?.includes('page[after]='), 'Next link should include cursor parameter')
+    assert(parseLinkQuery(result.links?.next).page.after, 'Next link should include cursor parameter')
   })
 
   it('paginates forward using page[after]', async () => {

@@ -16,11 +16,11 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Keep the current update path for update mode.
   - [x] Add legacy Knex and AnyAPI parity tests for `PUT /resource/:id` create, including custom IDs.
 
-- [ ] Fix pagination link query-string round trips.
-  - [ ] Replace manual query-string concatenation with one serializer that is the inverse of `parseJsonApiQuery`.
-  - [ ] Use `URLSearchParams` for keys and values.
-  - [ ] Map internal `queryParams.filters` back to public JSON:API `filter[...]`.
-  - [ ] Add tests that parse generated `links.next` and prove filters, fields, sort, include, and page params survive round trip.
+- [x] Fix pagination link query-string round trips.
+  - [x] Replace manual query-string concatenation with one serializer that is the inverse of `parseJsonApiQuery`.
+  - [x] Use `URLSearchParams` for keys and values.
+  - [x] Map internal `queryParams.filters` back to public JSON:API `filter[...]`.
+  - [x] Add tests that parse generated `links.next` and prove filters, fields, sort, include, and page params survive round trip.
 
 - [ ] Fix relationship PATCH cardinality validation.
   - [ ] Generate relationship-aware request contracts from relationship metadata.
@@ -108,5 +108,5 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
 - [ ] `npm run verify`
 - [x] Narrow repro for AnyAPI custom `idProperty`
 - [ ] Narrow repro for relationship route `afterCommit`
-- [ ] Narrow repro for pagination link round trip
+- [x] Narrow repro for pagination link round trip
 - [ ] Import smoke test for public exports

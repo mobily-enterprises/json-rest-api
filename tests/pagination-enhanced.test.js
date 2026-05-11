@@ -9,6 +9,7 @@ import {
   resourceIdentifier
 } from './helpers/test-utils.js'
 import { createPaginationApi } from './fixtures/api-configs.js'
+import { parseJsonApiQuery } from '../plugins/core/lib/querying-writing/connectors-query-parser.js'
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -21,6 +22,11 @@ const knex = knexLib({
 
 // API instance that persists across tests
 let api
+
+const parseLinkQuery = (link) => {
+  const url = new URL(link, 'https://example.test')
+  return parseJsonApiQuery(url.search.slice(1))
+}
 
 describe('Enhanced Pagination Features', () => {
   before(async () => {
@@ -207,13 +213,11 @@ describe('Enhanced Pagination Features', () => {
       assert(result.links.prev, 'Should have prev link')
       assert(result.links.next, 'Should have next link')
 
-      // Verify link structure
-      assert(result.links.self.includes('page[number]=2'))
-      assert(result.links.self.includes('page[size]=3'))
-      assert(result.links.first.includes('page[number]=1'))
-      assert(result.links.last.includes('page[number]=4'))
-      assert(result.links.prev.includes('page[number]=1'))
-      assert(result.links.next.includes('page[number]=3'))
+      assert.deepEqual(parseLinkQuery(result.links.self).page, { number: 2, size: 3 })
+      assert.deepEqual(parseLinkQuery(result.links.first).page, { number: 1, size: 3 })
+      assert.deepEqual(parseLinkQuery(result.links.last).page, { number: 4, size: 3 })
+      assert.deepEqual(parseLinkQuery(result.links.prev).page, { number: 1, size: 3 })
+      assert.deepEqual(parseLinkQuery(result.links.next).page, { number: 3, size: 3 })
     })
 
     it('should not include prev link on first page', async () => {
@@ -253,9 +257,9 @@ describe('Enhanced Pagination Features', () => {
 
       assert(result.links, 'Should have links')
       assert(result.links.next, 'Should have next link since page 2 of 4')
-      assert(result.links.next.includes('sort=-title'))
-      assert(result.links.next.includes('page[number]=3'))
-      assert(result.links.next.includes('page[size]=3'))
+      const nextQuery = parseLinkQuery(result.links.next)
+      assert.deepEqual(nextQuery.sort, ['-title'])
+      assert.deepEqual(nextQuery.page, { number: 3, size: 3 })
     })
   })
 
@@ -335,7 +339,7 @@ describe('Enhanced Pagination Features', () => {
       assert(result.links.self)
       assert(result.links.first)
       assert(result.links.next)
-      assert(result.links.next.includes('page[after]='), 'Next link should include cursor parameter')
+      assert(parseLinkQuery(result.links.next).page.after, 'Next link should include cursor parameter')
     })
 
     it('should handle last page with cursor pagination', async () => {
@@ -476,6 +480,10 @@ describe('Enhanced Pagination Features', () => {
           filters: {
             country: parseInt(usCountryId)
           },
+          fields: {
+            books: 'title,country_id',
+            countries: 'name,code'
+          },
           include: ['country'],
           sort: ['title']
         },
@@ -503,10 +511,18 @@ describe('Enhanced Pagination Features', () => {
         assert(book.links.self)
       })
 
-      // Check pagination links include all parameters
-      assert(result.links.next.includes(`filters[country]=${usCountryId}`))
-      assert(result.links.next.includes('include=country'))
-      assert(result.links.next.includes('sort=title'))
+      const nextUrl = new URL(result.links.next, 'https://example.test')
+      const nextQuery = parseJsonApiQuery(nextUrl.search.slice(1))
+      assert.equal(nextUrl.searchParams.get('filter[country]'), usCountryId)
+      assert.equal(nextUrl.searchParams.has('filters[country]'), false)
+      assert.deepEqual(nextQuery.filters, { country: usCountryId })
+      assert.deepEqual(nextQuery.include, ['country'])
+      assert.deepEqual(nextQuery.sort, ['title'])
+      assert.deepEqual(nextQuery.fields, {
+        books: 'title,country_id',
+        countries: 'name,code'
+      })
+      assert.deepEqual(nextQuery.page, { number: 2, size: 5 })
     })
   })
 })
