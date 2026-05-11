@@ -66,10 +66,10 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] If forwarded headers remain supported, gate them behind `trustProxy` and allowed host/proto validation. Resolved by not supporting forwarded headers for URL generation.
   - [x] Add Express and Fastify tests with hostile `Host` and `X-Forwarded-Host` headers.
 
-- [ ] Fix `S3Storage` non-mock behavior. Dependency/public behavior choice requires maintainer approval.
-  - [ ] Smallest safe fix: throw a clear "real S3 storage is not implemented" error when `mockMode: false`.
-  - [ ] Full fix option: add AWS SDK support and real upload/delete implementation.
-  - [ ] Add tests for mock mode and the chosen non-mock behavior.
+- [x] Fix `S3Storage` non-mock behavior. Dependency/public behavior choice requires maintainer approval.
+  - [x] Smallest safe fix: throw a clear "real S3 storage is not implemented" error when `mockMode: false`.
+  - [x] Reject full AWS SDK support for this pass because it adds dependency, credential, and public behavior scope.
+  - [x] Add tests for mock mode and the chosen non-mock behavior.
 
 ## Low Priority
 
@@ -92,9 +92,9 @@ Checklist-style plan for addressing the audit findings. Items marked as requirin
   - [x] Remove invalid deep imports such as `json-rest-api/plugins/socketio`, or add formal package subpath exports. Subpath exports require maintainer approval.
   - [x] Add a public import smoke test.
 
-- [ ] Align S3 documentation with implementation.
-  - [ ] If real S3 is not implemented, make README and guide text state that the included adapter is mock/demo only.
-  - [ ] If real S3 is implemented, update docs and tests to match the production behavior.
+- [x] Align S3 documentation with implementation.
+  - [x] Since real S3 is not implemented, make README and guide text state that the included adapter is mock/demo only.
+  - [x] Leave production S3 as a future approved dependency/API design rather than documenting unsupported behavior.
 
 - [x] Finish relationship validation contract consolidation.
   - [x] Move relationship-route schemas into the same request-contract surface as resource routes.

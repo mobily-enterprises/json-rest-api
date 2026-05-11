@@ -9,7 +9,7 @@ A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprise
 * **JSON:API Compliant** - Full support for the JSON:API specification
 * **Relationship Support** - `belongsTo`, `hasMany`, and many-to-many relationships, including polymorphic
 * **Advanced Querying** - Filtering, sorting, pagination, and field selection (sparse fieldsets)
-* **File Uploads** - Built-in support for file handling with multiple storage adapters (local, S3)
+* **File Uploads** - Built-in support for file handling with local storage and a mock S3-style demo adapter
 * **Framework Agnostic** - Works with raw Node.js HTTP, Express, and other Node.js frameworks via flexible connectors
 * **Validation** - Schema-based validation with detailed error messages and custom rules
 * **Simplified Mode** - A developer-friendly option to work with plain JavaScript objects instead of verbose JSON:API structure

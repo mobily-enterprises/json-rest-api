@@ -28,7 +28,7 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 ### Additional Topics
 
 - **[File Uploads](GUIDE_X_File_Uploads.md)**  
-  Handle file uploads with multiple backends (file system, S3).
+  Handle file uploads with local storage and a mock S3-style demo adapter.
 
 - **[Bulk Operations](GUIDE_X_Bulk_Operations.md)**  
   Handle multiple records efficiently with bulk create, update, and delete operations.
