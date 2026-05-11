@@ -132,6 +132,8 @@ await api.addResource('users', {
 });
 ```
 
+If a setter throws or rejects, the write fails with a validation error and the transaction rolls back instead of storing the untransformed value.
+
 ### Getters - Transform After Retrieval
 
 ```javascript
