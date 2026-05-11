@@ -117,6 +117,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
 
     if (context.shouldCommit) {
       await context.transaction.commit()
+      await runHooks('afterCommit')
     }
 
     // 204 No Content

@@ -110,6 +110,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
 
     if (context.shouldCommit) {
       await context.transaction.commit()
+      await runHooks('afterCommit')
     }
 
     // 204 No Content
