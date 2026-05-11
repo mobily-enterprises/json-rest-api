@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { Api } from 'hooked-api'
 import { RestApiPlugin, FastifyPlugin } from '../index.js'
+import { getRequestContracts } from '../plugins/core/lib/querying-writing/request-contracts.js'
 import {
   FakeFastifyApp,
   FakeReply,
@@ -75,6 +76,12 @@ describe('Fastify Plugin', () => {
     const postRelationshipRoute = findFastifyRoute(app, 'POST', '/api/articles/:id/relationships/:relationshipName')
     const patchRelationshipRoute = findFastifyRoute(app, 'PATCH', '/api/articles/:id/relationships/:relationshipName')
     const deleteRelationshipRoute = findFastifyRoute(app, 'DELETE', '/api/articles/:id/relationships/:relationshipName')
+    const relationshipContracts = getRequestContracts({
+      scopeName: 'articles',
+      schemaInfo: api.resources.articles.vars.schemaInfo,
+      includeDepthLimit: api.resources.articles.vars.includeDepthLimit,
+      sortableFields: api.resources.articles.vars.sortableFields
+    })
 
     assert.ok(postRoute?.schema?.body, 'POST route should have a body schema')
     assert.ok(putRoute?.schema?.body, 'PUT route should have a body schema')
@@ -108,6 +115,27 @@ describe('Fastify Plugin', () => {
     assert.equal(postRelationshipRoute.schema.body.properties.data.type, 'array')
     assert.ok(Array.isArray(patchRelationshipRoute.schema.body.properties.data.anyOf))
     assert.equal(deleteRelationshipRoute.schema.body.properties.data.type, 'array')
+    assert.deepEqual(
+      postRelationshipRoute.schema.body,
+      relationshipContracts.postRelationship.schema.toJsonSchema({
+        mode: relationshipContracts.postRelationship.mode,
+        additionalProperties: false
+      })
+    )
+    assert.deepEqual(
+      patchRelationshipRoute.schema.body,
+      relationshipContracts.patchRelationship.schema.toJsonSchema({
+        mode: relationshipContracts.patchRelationship.mode,
+        additionalProperties: false
+      })
+    )
+    assert.deepEqual(
+      deleteRelationshipRoute.schema.body,
+      relationshipContracts.deleteRelationship.schema.toJsonSchema({
+        mode: relationshipContracts.deleteRelationship.mode,
+        additionalProperties: false
+      })
+    )
   })
 
   it('registers the JSON:API content-type parser and rejects unsupported write content types before the route handler', async () => {
