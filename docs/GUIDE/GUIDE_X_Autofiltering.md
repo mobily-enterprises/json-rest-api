@@ -77,6 +77,69 @@ await api.use(AutoFilterPlugin, {
 })
 ```
 
+## Storage Backends
+
+`AutoFilterPlugin` works with either database storage plugin:
+
+- `RestApiKnexPlugin` for resources backed by normal database tables
+- `RestApiAnyapiKnexPlugin` for logical resources backed by AnyAPI canonical storage
+
+An `Api` instance has one storage engine. Install either storage plugin, then install `AutoFilterPlugin`. If an application keeps core resources in normal tables and user-defined resources in AnyAPI, create one `Api` instance for each storage engine. Each instance owns its resources and autofilter configuration.
+
+Autofilter definitions always use logical schema field names. The selected storage plugin translates those fields to normal table columns or AnyAPI canonical slots.
+
+### Workspace Scoping with AnyAPI
+
+AnyAPI's `tenantId` is fixed when `RestApiAnyapiKnexPlugin` is installed. It identifies the metadata and canonical-storage namespace; it is not a per-request workspace value. For one AnyAPI instance serving multiple application workspaces, use a stable internal `tenantId` and persist `workspace_id` on every workspace-scoped resource:
+
+```js
+import { Api } from 'hooked-api'
+import {
+  RestApiPlugin,
+  RestApiAnyapiKnexPlugin,
+  AutoFilterPlugin
+} from 'json-rest-api'
+
+const api = new Api({ name: 'form-data-api' })
+
+await api.use(RestApiPlugin)
+await api.use(RestApiAnyapiKnexPlugin, {
+  knex,
+  tenantId: 'application'
+})
+
+await api.use(AutoFilterPlugin, {
+  resolvers: {
+    workspace: ({ context }) => context.session?.workspaceId
+  },
+  presets: {
+    workspace: {
+      filters: [
+        { field: 'workspace_id', resolver: 'workspace' }
+      ]
+    }
+  }
+})
+
+await api.addResource('form_123', {
+  schema: {
+    id: { type: 'id' },
+    workspace_id: { type: 'string', required: true },
+    customer_name: { type: 'string', required: true },
+    subscribed: { type: 'boolean' }
+  },
+  autofilter: 'workspace'
+})
+```
+
+In this arrangement:
+
+- `tenantId: 'application'` selects one fixed AnyAPI metadata and canonical-storage namespace. Do not derive it from request context.
+- `workspace_id` isolates application workspaces. `AutoFilterPlugin` stamps it on writes and filters by it on reads.
+- A trusted resolver supplies the current workspace. Do not resolve it directly from an unverified request field.
+- User-defined forms with different schemas need distinct resource names within the AnyAPI namespace, such as `form_123` and `form_456`. Put the workspace autofilter on each resource.
+- Workspaces may use the same logical resource when they share its schema; `workspace_id` still keeps their records separate.
+
 ## Resource Configuration
 
 Apply a preset by name:
