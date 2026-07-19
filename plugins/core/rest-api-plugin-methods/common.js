@@ -5,7 +5,6 @@ import {
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
 import { normalizeRelationshipIdentifiers } from '../lib/querying-writing/resource-id-normalization.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
-import { unwrapQueryBuilderState } from '../lib/querying/query-builder-utils.js'
 import {
   normalizeReturnRecordMode,
   normalizeReturnRecordSetting
@@ -483,32 +482,18 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
         isUpdate: false
       }
 
-      const targetScope = api.resources?.[item.type]
-      const applyQueryFilters = targetScope?.applyQueryFilters
-        ? async ({ query, filters, tableName, db, scopeName, storageAdapter, isAnyApi }) => {
-          const queryState = await targetScope.applyQueryFilters({
-            query,
-            filters,
-            schemaInfo: getContext.schemaInfo,
-            scopeName,
-            tableName,
-            db,
-            isAnyApi,
-            queryPurpose: 'relationship-validation',
-            storageAdapter
-          }, getContext)
-
-          return {
-            query: unwrapQueryBuilderState(queryState, query)
-          }
-        }
-        : undefined
-
       // Get the minimal record
       const record = await helpers.dataGetMinimal({
         scopeName: item.type,
         context: getContext,
-        applyQueryFilters
+        applyQueryFilters: relatedScope.applyQueryFilters
+          ? (filterParams) => relatedScope.applyQueryFilters({
+              ...filterParams,
+              schemaInfo: getContext.schemaInfo
+            }, getContext)
+          : undefined,
+        filters: {},
+        queryPurpose: 'relationship-validation'
       })
 
       if (!record) {
@@ -541,28 +526,14 @@ export const getVisibleRelationshipParent = async ({
   scopeName,
   runHooks
 }) => {
-  const previousQueryParams = context.queryParams
-  const previousRowPolicyQueryPurpose = context.rowPolicyQueryPurpose
-
-  // Related-route query parameters belong to the target resource, not its parent.
-  context.queryParams = {}
-  context.rowPolicyQueryPurpose = 'relationship-parent'
-
-  try {
-    return await helpers.dataGetMinimal({ scopeName, context, runHooks })
-  } finally {
-    if (previousQueryParams === undefined) {
-      delete context.queryParams
-    } else {
-      context.queryParams = previousQueryParams
-    }
-
-    if (previousRowPolicyQueryPurpose === undefined) {
-      delete context.rowPolicyQueryPurpose
-    } else {
-      context.rowPolicyQueryPurpose = previousRowPolicyQueryPurpose
-    }
-  }
+  // Related-route filters belong to the target resource, not its parent.
+  return helpers.dataGetMinimal({
+    scopeName,
+    context,
+    runHooks,
+    filters: {},
+    queryPurpose: 'relationship-parent'
+  })
 }
 
 /**

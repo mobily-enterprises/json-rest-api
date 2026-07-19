@@ -78,7 +78,6 @@ import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-wri
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
 import {
   buildWindowedIncludeSubquery,
-  wrapWindowedIncludeSubquery,
   applyStandardIncludeConfig,
   buildOrderByClause
 } from './knex-window-queries.js'
@@ -988,46 +987,38 @@ export const loadHasMany = async (scope, deps) => {
 
       // Check if we should use window functions
       if (relDef.include?.strategy === 'window') {
-        try {
-        // Try to build window function query
-          if (fieldSelectionInfo?.queryFieldsToSelect?.length) {
-            throw new Error('Query projection fields require the standard include query path.')
-          }
+        let windowedQuery
 
-          const selectFields = fieldSelectionInfo?.fieldsToSelect || null
-
-          const { subquery, effectiveLimit } = buildWindowedIncludeSubquery(
+        if (fieldSelectionInfo?.queryFieldsToSelect?.length) {
+          log.debug('[INCLUDE] Query projection fields require the standard include query path')
+        } else {
+          windowedQuery = buildWindowedIncludeSubquery(
             knex,
             targetTable,
             foreignKey,
             mainIds,
-            selectFields,
+            fieldSelectionInfo?.fieldsToSelect || null,
             relDef.include || {},
             capabilities,
-            targetScopeObject.vars  // Pass target scope vars
+            targetScopeObject.vars
           )
+        }
+
+        if (windowedQuery) {
           const scopedQueryState = await applyScopeFiltersToIncludeQuery({
-            query: subquery,
+            query: windowedQuery.subquery,
             scopes,
             scopeName: targetScope,
             requestContext,
             db: knex,
             tableName: targetTable
           })
-          query = wrapWindowedIncludeSubquery(knex, scopedQueryState.query, effectiveLimit)
+          query = knex
+            .select('*')
+            .from(scopedQueryState.query.as('_windowed'))
+            .where(ROW_NUMBER_KEY, '<=', windowedQuery.effectiveLimit)
           usingWindowFunction = true
           log.debug('[INCLUDE] Using window function strategy with limits')
-        } catch (error) {
-        // If window functions not supported, this will throw a clear error
-          if (error.details?.requiredFeature === 'window_functions') {
-            throw error // Re-throw the descriptive error
-          }
-          // For other errors, fall back to standard query
-          log.warn('[INCLUDE] Window function query failed, falling back to standard query:', {
-            error: error.message,
-            stack: error.stack
-          })
-          usingWindowFunction = false
         }
       }
 

@@ -194,8 +194,7 @@ A policy receives one object:
 | `column(field, options?)` | Translate and qualify a logical field. |
 | `value(field, rawValue, options?)` | Translate a value for a logical field. |
 | `storageAdapter` | The current resource's storage adapter. Prefer `column()` and `value()` for normal policy code. |
-| `queryAdapter` | The active query adapter when one exists. This is primarily for advanced adapter-aware integrations. |
-| `api`, `helpers`, `scopes`, `vars`, `log` | Normal plugin/runtime capabilities. |
+| `api` | The API instance. This is mainly useful for AnyAPI descriptor lookup in storage-specific subqueries. |
 
 `column()` accepts an optional object:
 
@@ -285,6 +284,8 @@ Policies are reused for the resource selections that define externally visible d
 
 The important invariant is not the label. It is that the predicate is attached before any limit, offset, cursor boundary, per-parent include limit, or count is evaluated.
 
+Treat `queryPurpose` as diagnostic context, not as permission to weaken a policy. A policy should normally add the same visibility predicate for every purpose. If an advanced policy uses a purpose-specific SQL shape, each branch must enforce equivalent visibility and must be tested independently; never skip a predicate for counts, includes, identifiers, or relationship validation.
+
 ### Collections and counts
 
 Offset pagination applies the same mandatory policy to the data query and its count. This remains true when the caller supplies no `filters` object.
@@ -336,7 +337,8 @@ function organisationUnitVisibilityPolicy ({
   column,
   value,
   isAnyApi,
-  api
+  api,
+  storageAdapter
 }) {
   const rootUnitId = context.subject?.managedOrganisationUnitId
   if (!rootUnitId) return false
@@ -348,7 +350,8 @@ function organisationUnitVisibilityPolicy ({
       db,
       column,
       value,
-      api
+      api,
+      storageAdapter
     })
   }
 
@@ -388,7 +391,8 @@ async function applyAnyApiOrganisationUnitPolicy ({
   db,
   column,
   value,
-  api
+  api,
+  storageAdapter
 }) {
   const rootUnitId = context.subject?.managedOrganisationUnitId
   if (!rootUnitId) return false
@@ -399,7 +403,6 @@ async function applyAnyApiOrganisationUnitPolicy ({
   )
   if (!descriptor) return false
 
-  const storageAdapter = api.knex.helpers.getStorageAdapter('organisation_units')
   const table = descriptor.canonical.tableName
   const tenantColumn = descriptor.canonical.tenantColumn
   const resourceColumn = descriptor.canonical.resourceColumn
@@ -431,7 +434,7 @@ async function applyAnyApiOrganisationUnitPolicy ({
 }
 ```
 
-Pass `api` from the outer policy call if you split the implementation into helpers. Do not reuse normal-table names or assume a particular AnyAPI slot. Descriptor and adapter lookup is the compatibility boundary.
+Pass `api` and `storageAdapter` from the outer policy call if you split the implementation into helpers. Do not reuse normal-table names or assume a particular AnyAPI slot. Resolve AnyAPI's physical table and slot names from its descriptor and storage adapter at query construction time.
 
 For very large or frequently queried trees, a closure table can be a better model. A closure table stores ancestor/descendant pairs explicitly, turning traversal into an indexed `EXISTS` or join at the cost of more complex writes.
 
@@ -445,7 +448,7 @@ Inspect the query plan on the production database; recursive queries that are fa
 
 ## Composing visibility without package cycles
 
-`RowPolicyPlugin` deliberately owns query timing and storage compatibility. It does not know which domain package grants access.
+`RowPolicyPlugin` deliberately owns query timing and logical-field translation. It does not know which domain package grants access.
 
 When several packages can grant visibility, the package that owns the resource can own a small contributor registry:
 
@@ -466,9 +469,17 @@ export function organisationUnitVisibilityPolicy (policyContext) {
   if (contributors.size === 0) return false
 
   policyContext.query.where(function visibilityContributors () {
-    for (const apply of contributors.values()) {
+    for (const [id, apply] of contributors) {
       this.orWhere(function oneVisibilityGrant () {
-        apply({ ...policyContext, query: this })
+        const result = apply({ ...policyContext, query: this })
+
+        if (result === false) {
+          this.whereRaw('1 = 0')
+        } else if (result !== true) {
+          throw new Error(
+            `Visibility contributor '${id}' must return true or false`
+          )
+        }
       })
     }
   })
@@ -477,7 +488,7 @@ export function organisationUnitVisibilityPolicy (policyContext) {
 }
 ```
 
-Contributor functions in this pattern synchronously add one grouped SQL grant. Resolve request identity before query construction; do not return promises from inside Knex's grouping callbacks.
+Each contributor synchronously adds one grouped SQL grant and returns `true`, or returns `false` when it grants nothing for this request. A `false` contributor becomes an always-false branch; an omitted return fails the request. Do not return a promise from a Knex grouping callback.
 
 The package ownership is then:
 
@@ -501,6 +512,7 @@ registerOrganisationUnitVisibility({
   id: 'safety-manager-descendants',
   apply: ({ query, context, db, column }) => {
     const subjectId = context.subject?.id
+    if (!subjectId) return false
 
     query.whereExists(function safetyManagerGrant () {
       this
@@ -509,6 +521,8 @@ registerOrganisationUnitVisibility({
         .where('visible.user_id', subjectId)
         .whereColumn('visible.organisation_unit_id', column('id'))
     })
+
+    return true
   }
 })
 ```

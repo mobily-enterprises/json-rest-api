@@ -457,7 +457,14 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
-    helpers.dataGetMinimal = async ({ scopeName, context, runHooks, applyQueryFilters }) => {
+    helpers.dataGetMinimal = async ({
+      scopeName,
+      context,
+      runHooks,
+      applyQueryFilters,
+      filters = context.queryParams?.filters,
+      queryPurpose = 'single'
+    }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
@@ -483,31 +490,37 @@ export const RestApiKnexPlugin = {
       if (typeof applyQueryFilters === 'function') {
         const scopedQueryState = await applyQueryFilters({
           query,
-          filters: context.queryParams?.filters,
+          filters,
           tableName,
           db,
           scopeName,
-          queryPurpose: context.rowPolicyQueryPurpose || 'single',
+          queryPurpose,
           storageAdapter
         })
         query = unwrapQueryBuilderState(scopedQueryState, query)
       } else if (runHooks) {
+        const previousKnexQuery = context.knexQuery
         context.knexQuery = {
           query,
-          filters: context.queryParams?.filters,
+          filters,
           schemaInfo: context.schemaInfo,
           scopeName,
           tableName,
           db,
-          queryPurpose: context.rowPolicyQueryPurpose || 'single',
+          queryPurpose,
           adapter: storageAdapter,
           storageAdapter,
         }
 
-        await runHooks('knexQueryFiltering')
-
-        if (context.knexQuery) {
-          delete context.knexQuery
+        try {
+          await runHooks('knexQueryFiltering')
+          query = context.knexQuery?.query || query
+        } finally {
+          if (previousKnexQuery === undefined) {
+            delete context.knexQuery
+          } else {
+            context.knexQuery = previousKnexQuery
+          }
         }
       }
 
@@ -785,28 +798,32 @@ export const RestApiKnexPlugin = {
         // Only execute count query if enabled
         if (scope.vars.enablePaginationCounts) {
           // Build count query with same filters as main query
-          const countQuery = db(tableName)
+          let countQuery = db(tableName)
 
           // Mandatory server-side filters must also run when the client supplied no filters.
           // Otherwise pagination metadata can disclose or count rows excluded from the page.
-          if (context) {
-            context.knexQuery = {
-              query: countQuery,
-              filters: queryParams.filters,
-              scopeName,
-              tableName,
-              schemaInfo,
-              db,
-              queryPurpose: 'count',
-              adapter: storageAdapter,
-              storageAdapter
-            }
+          const previousKnexQuery = context.knexQuery
+          context.knexQuery = {
+            query: countQuery,
+            filters: queryParams.filters,
+            scopeName,
+            tableName,
+            schemaInfo,
+            db,
+            queryPurpose: 'count',
+            adapter: storageAdapter,
+            storageAdapter
           }
 
-          await runHooks('knexQueryFiltering')
-
-          if (context && context.knexQuery) {
-            delete context.knexQuery
+          try {
+            await runHooks('knexQueryFiltering')
+            countQuery = context.knexQuery?.query || countQuery
+          } finally {
+            if (previousKnexQuery === undefined) {
+              delete context.knexQuery
+            } else {
+              context.knexQuery = previousKnexQuery
+            }
           }
 
           // Get total count

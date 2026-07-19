@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import {
   cleanTables,
+  countRecords,
   createJsonApiDocument,
   createRelationship,
   resourceIdentifier,
@@ -65,6 +66,7 @@ describe('RowPolicy Plugin', () => {
   beforeEach(async () => {
     policyEvents.length = 0
     await cleanTables(knex, [
+      'row_policy_project_tasks',
       'row_policy_projects',
       'row_policy_tasks',
       'row_policy_broken'
@@ -259,7 +261,7 @@ describe('RowPolicy Plugin', () => {
     assert.deepEqual(relationship.data, [
       resourceIdentifier('policy_tasks', visibleTask.data.id)
     ])
-    assert(policyEvents.some((event) => event.queryPurpose === 'relationship-parent'))
+    assert(policyEvents.some((event) => event.queryPurpose === 'single'))
   })
 
   it('filters a belongs-to include through the target resource policy', async () => {
@@ -293,6 +295,31 @@ describe('RowPolicy Plugin', () => {
     )
 
     assert(policyEvents.some((event) => event.queryPurpose === 'relationship-validation'))
+  })
+
+  it('uses target row policies when adding many-to-many relationships', async () => {
+    const project = await postProject('Visible project', 'group-a')
+    const visibleTask = await postTask({ title: 'Visible task', accessGroup: 'group-a' })
+    const hiddenTask = await postTask({ title: 'Hidden task', accessGroup: 'group-b' })
+
+    await api.resources.policy_projects.postRelationship({
+      id: project.data.id,
+      relationshipName: 'shared_tasks',
+      relationshipData: [resourceIdentifier('policy_tasks', visibleTask.data.id)],
+      simplified: false
+    }, groupContext('group-a'))
+
+    await assert.rejects(
+      api.resources.policy_projects.postRelationship({
+        id: project.data.id,
+        relationshipName: 'shared_tasks',
+        relationshipData: [resourceIdentifier('policy_tasks', hiddenTask.data.id)],
+        simplified: false
+      }, groupContext('group-a')),
+      (error) => error.code === 'REST_API_RESOURCE'
+    )
+
+    assert.equal(await countRecords(knex, 'row_policy_project_tasks'), 1)
   })
 
   it('does not expose relationship routes for a hidden parent', async () => {

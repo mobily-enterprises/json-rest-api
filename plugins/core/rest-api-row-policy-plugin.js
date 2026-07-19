@@ -8,19 +8,6 @@ function createRowPolicyError (message, code = 'REST_API_ROW_POLICY_CONTRACT') {
   return error
 }
 
-function normalizePolicyRegistry (policies = {}) {
-  const normalized = {}
-
-  for (const [name, policy] of Object.entries(policies)) {
-    if (typeof policy !== 'function') {
-      throw createRowPolicyError(`Row policy '${name}' must be a function.`)
-    }
-    normalized[name] = policy
-  }
-
-  return normalized
-}
-
 function compileRowPolicy ({ scopeName, scopeOptions = {}, policies }) {
   const definition = scopeOptions.rowPolicy
 
@@ -58,19 +45,6 @@ function compileRowPolicy ({ scopeName, scopeOptions = {}, policies }) {
   )
 }
 
-function normalizePolicyResult ({ result, scopeName, policyName, query }) {
-  if (result === true) return
-
-  if (result === false) {
-    query.whereRaw('1 = 0')
-    return
-  }
-
-  throw createRowPolicyError(
-    `Row policy '${policyName}' on resource '${scopeName}' must return true after applying its predicate, or false to deny all rows.`
-  )
-}
-
 export const RowPolicyPlugin = {
   name: 'row-policy',
   dependencies: ['rest-api', 'rest-api-knex|rest-api-anyapi-knex'],
@@ -80,7 +54,12 @@ export const RowPolicyPlugin = {
       throw new Error('RowPolicyPlugin requires a storage plugin with knex support (rest-api-knex or rest-api-anyapi-knex).')
     }
 
-    const policies = normalizePolicyRegistry(pluginOptions.policies || {})
+    const policies = { ...(pluginOptions.policies || {}) }
+    for (const [name, policy] of Object.entries(policies)) {
+      if (typeof policy !== 'function') {
+        throw createRowPolicyError(`Row policy '${name}' must be a function.`)
+      }
+    }
 
     vars.rowPolicy = {
       policies: Object.keys(policies)
@@ -106,7 +85,6 @@ export const RowPolicyPlugin = {
         db,
         queryPurpose = 'unspecified',
         isAnyApi = false,
-        adapter: queryAdapter,
         storageAdapter: hookStorageAdapter
       } = context.knexQuery || {}
 
@@ -141,23 +119,19 @@ export const RowPolicyPlugin = {
         queryPurpose,
         db,
         isAnyApi,
-        queryAdapter,
         storageAdapter,
         column,
         value,
-        api,
-        helpers,
-        scopes,
-        vars,
-        log
+        api
       })
 
-      normalizePolicyResult({
-        result,
-        scopeName,
-        policyName: compiledPolicy.name,
-        query
-      })
+      if (result === false) {
+        query.whereRaw('1 = 0')
+      } else if (result !== true) {
+        throw createRowPolicyError(
+          `Row policy '${compiledPolicy.name}' on resource '${scopeName}' must return true after applying its predicate, or false to deny all rows.`
+        )
+      }
     })
 
     api.rowPolicies = {

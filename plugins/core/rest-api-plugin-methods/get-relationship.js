@@ -46,10 +46,7 @@ export default async function getRelationshipMethod ({ params, context, vars, he
     transaction: context.transaction,
     simplified: false,
     isTransport: params.isTransport
-  }, {
-    ...context,
-    rowPolicyQueryPurpose: 'relationship-parent'
-  })
+  }, { ...context })
 
   if (!fullRecord || !fullRecord.data) {
     throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })

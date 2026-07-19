@@ -63,7 +63,7 @@ const parseVersion = (versionString) => {
  *
  * @description
  * Used by:
- * - buildWindowedIncludeQuery to validate before using window functions
+ * - buildWindowedIncludeSubquery to validate before using window functions
  * - rest-api-knex-plugin to determine query strategies
  *
  * Purpose:
