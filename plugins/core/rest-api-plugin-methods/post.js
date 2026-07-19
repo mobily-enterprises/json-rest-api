@@ -152,7 +152,7 @@ export default async function postMethod ({
 
       // Validate pivot resource exists
       validatePivotResource(scopes, relDef, relName)
-      await createPivotRecords(api, context.id, relDef, relData, context.transaction)
+      await createPivotRecords(api, context.id, relDef, relData, context.transaction, context)
     }
 
     const ret = await handleRecordReturnAfterWrite({

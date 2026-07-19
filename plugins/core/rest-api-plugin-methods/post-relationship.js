@@ -2,6 +2,7 @@ import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-
 import {
   commitOwnedTransaction,
   findRelationshipDefinition,
+  getVisibleRelationshipParent,
   handleWriteMethodError,
   validateRelationshipRoutePayload
 } from './common.js'
@@ -68,13 +69,15 @@ export default async function postRelationshipMethod ({ params, context, vars, h
     await runHooks('checkPermissions')
     await runHooks('checkPermissionsPostRelationship')
 
-    // Verify parent exists
-    const exists = await helpers.dataExists({
+    // Verify the parent exists in the caller's visible dataset.
+    const parentRecord = await getVisibleRelationshipParent({
+      context,
+      helpers,
       scopeName,
-      context: { db: context.db, id: context.id, schemaInfo: context.schemaInfo },
+      runHooks
     })
 
-    if (!exists) {
+    if (!parentRecord) {
       throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
     }
 
@@ -93,7 +96,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
           through: relDef.through,
           foreignKey: relDef.foreignKey,
           otherKey: relDef.otherKey
-        }, params.relationshipData, context.transaction)
+        }, params.relationshipData, context.transaction, context)
       }
     } else if (relDef.type === 'hasMany') {
       // Update foreign keys for hasMany
@@ -110,7 +113,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
           },
           transaction: context.transaction,
           simplified: false
-        })
+        }, { ...context })
       }
     }
 

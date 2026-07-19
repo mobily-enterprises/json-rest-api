@@ -76,7 +76,12 @@
 
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
-import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
+import {
+  buildWindowedIncludeSubquery,
+  wrapWindowedIncludeSubquery,
+  applyStandardIncludeConfig,
+  buildOrderByClause
+} from './knex-window-queries.js'
 import { unwrapQueryBuilderState } from './query-builder-utils.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
@@ -149,7 +154,8 @@ const applyScopeFiltersToIncludeQuery = async ({
   scopeName,
   requestContext,
   db,
-  tableName
+  tableName,
+  queryPurpose = 'include'
 }) => {
   const scopeObject = scopes[scopeName]
   if (!scopeObject?.applyQueryFilters) {
@@ -165,6 +171,7 @@ const applyScopeFiltersToIncludeQuery = async ({
     tableName: tableName || scopeObject.vars.schemaInfo.tableName,
     db,
     schemaInfo: scopeObject.vars.schemaInfo,
+    queryPurpose,
     storageAdapter
   }, buildScopedIncludeContext({
     requestContext,
@@ -989,7 +996,7 @@ export const loadHasMany = async (scope, deps) => {
 
           const selectFields = fieldSelectionInfo?.fieldsToSelect || null
 
-          query = buildWindowedIncludeQuery(
+          const { subquery, effectiveLimit } = buildWindowedIncludeSubquery(
             knex,
             targetTable,
             foreignKey,
@@ -1000,14 +1007,14 @@ export const loadHasMany = async (scope, deps) => {
             targetScopeObject.vars  // Pass target scope vars
           )
           const scopedQueryState = await applyScopeFiltersToIncludeQuery({
-            query,
+            query: subquery,
             scopes,
             scopeName: targetScope,
             requestContext,
             db: knex,
             tableName: targetTable
           })
-          query = scopedQueryState.query
+          query = wrapWindowedIncludeSubquery(knex, scopedQueryState.query, effectiveLimit)
           usingWindowFunction = true
           log.debug('[INCLUDE] Using window function strategy with limits')
         } catch (error) {
@@ -2114,7 +2121,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         scopeName: relDef.target,
         requestContext,
         db: knex,
-        tableName: targetTable
+        tableName: targetTable,
+        queryPurpose: 'relationship-identifiers'
       })
       query = scopedQueryState.query
 
@@ -2159,7 +2167,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         scopeName: targetScopeName,
         requestContext,
         db: knex,
-        tableName: targetTable
+        tableName: targetTable,
+        queryPurpose: 'relationship-identifiers'
       })
       query = scopedQueryState.query
 
@@ -2198,7 +2207,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
           scopeName: targetScope,
           requestContext,
           db: knex,
-          tableName: targetTable
+          tableName: targetTable,
+          queryPurpose: 'relationship-identifiers'
         })
         query = scopedQueryState.query
 

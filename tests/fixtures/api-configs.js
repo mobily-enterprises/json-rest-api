@@ -1684,6 +1684,111 @@ export async function createAutoFilterApi (knex, pluginOptions = {}) {
   return api
 }
 
+export async function createRowPolicyApi (knex, pluginOptions = {}) {
+  const { RowPolicyPlugin } = await import('../../plugins/core/rest-api-row-policy-plugin.js')
+
+  const api = new Api({
+    name: 'row-policy-test-api',
+  })
+
+  const tenantId = storageMode.isAnyApi() ? 'row_policy_tenant' : storageMode.defaultTenant
+  const previousTenant = storageMode.currentTenant
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(tenantId)
+  }
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: {
+      post: true,
+      put: false,
+      patch: false
+    },
+    sortableFields: ['id', 'name', 'title', 'access_group', 'project_id']
+  })
+
+  await useStoragePlugin(api, knex, { tenantId })
+  await resetAnyApiTables(knex)
+
+  const rowPolicyOptions = pluginOptions.rowPolicy || {}
+  await api.use(RowPolicyPlugin, {
+    ...rowPolicyOptions,
+    policies: {
+      groupVisibility: ({ query, context, column, value, scopeName, queryPurpose }) => {
+        pluginOptions.onPolicy?.({ scopeName, queryPurpose })
+
+        if (context.visibility?.all === true) {
+          return true
+        }
+
+        const groups = context.visibility?.groups
+        if (!Array.isArray(groups) || groups.length === 0) {
+          return false
+        }
+
+        query.whereIn(
+          column('access_group'),
+          groups.map((group) => value('access_group', group))
+        )
+        return true
+      },
+      ...(rowPolicyOptions.policies || {})
+    }
+  })
+
+  await api.addResource('policy_projects', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 200 },
+      access_group: { type: 'string', required: true }
+    },
+    relationships: {
+      tasks: { type: 'hasMany', target: 'policy_tasks', foreignKey: 'project_id' }
+    },
+    rowPolicy: 'groupVisibility',
+    tableName: 'row_policy_projects'
+  })
+  await api.resources.policy_projects.createKnexTable()
+  mapTable('row_policy_projects', 'policy_projects')
+
+  await api.addResource('policy_tasks', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', required: true, max: 200, search: true },
+      access_group: { type: 'string', required: true },
+      project_id: {
+        type: 'number',
+        nullable: true,
+        belongsTo: 'policy_projects',
+        as: 'project',
+        search: true
+      }
+    },
+    rowPolicy: 'groupVisibility',
+    tableName: 'row_policy_tasks'
+  })
+  await api.resources.policy_tasks.createKnexTable()
+  mapTable('row_policy_tasks', 'policy_tasks')
+
+  await api.addResource('policy_broken', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true }
+    },
+    rowPolicy: () => undefined,
+    tableName: 'row_policy_broken'
+  })
+  await api.resources.policy_broken.createKnexTable()
+  mapTable('row_policy_broken', 'policy_broken')
+
+  if (storageMode.isAnyApi()) {
+    storageMode.setCurrentTenant(previousTenant)
+  }
+
+  return api
+}
+
 /**
  * Creates an API with positioning support for testing
  */

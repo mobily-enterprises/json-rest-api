@@ -1317,7 +1317,7 @@ Each API method has its own specific hook execution order. Here's the exact sequ
 ```
 1. beforeData
 2. beforeDataQuery
-3. knexQueryFiltering (multiple times for different filter types)
+3. knexQueryFiltering (multiple handlers for built-in filters and optional server-side policies)
    - polymorphicFiltersHook
    - crossTableFiltersHook
    - basicFiltersHook
@@ -1452,7 +1452,7 @@ Each API method has its own specific hook execution order. Here's the exact sequ
 1. **Processing Hooks**: Only POST, PUT, and PATCH have `beforeProcessing` hooks
 2. **Schema Validation**: Only POST, PUT, and PATCH have schema validation hooks
 3. **Permission Hooks**: GET uses `checkDataPermissions`, while relationship methods use `checkPermissions`
-4. **Query Filtering**: Only QUERY method triggers `knexQueryFiltering` hooks
+4. **Query Filtering**: Collection queries and storage-backed scoped lookups trigger `knexQueryFiltering`; use `RowPolicyPlugin` for mandatory visibility rather than relying on method-specific hook assumptions
 5. **Enrichment**: Only GET and QUERY have `enrichRecord` hooks
 6. **Relationships**: Only GET has `enrichRecordWithRelationships`
 7. **Transactions**: All write methods (POST, PUT, PATCH, DELETE) can trigger `afterCommit`/`afterRollback`
@@ -2294,7 +2294,8 @@ api.addResource({
     
     // No built-in permissions option exists here.
     // Use permission hooks for access decisions, and optional plugins
-    // such as AutoFilterPlugin for dataset scoping.
+    // such as AutoFilterPlugin for equality-based dataset scoping or
+    // RowPolicyPlugin for mandatory SQL visibility predicates.
     
     // Soft delete configuration
     softDelete: {

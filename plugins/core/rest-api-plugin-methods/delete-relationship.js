@@ -2,6 +2,7 @@ import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-
 import {
   commitOwnedTransaction,
   findRelationshipDefinition,
+  getVisibleRelationshipParent,
   handleWriteMethodError,
   validateRelationshipRoutePayload
 } from './common.js'
@@ -66,13 +67,15 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
     await runHooks('checkPermissions')
     await runHooks('checkPermissionsDeleteRelationship')
 
-    // Verify parent exists
-    const exists = await helpers.dataExists({
+    // Verify the parent exists in the caller's visible dataset.
+    const parentRecord = await getVisibleRelationshipParent({
+      context,
+      helpers,
       scopeName,
-      context: { db: context.db, id: context.id, schemaInfo: context.schemaInfo }
+      runHooks
     })
 
-    if (!exists) {
+    if (!parentRecord) {
       throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
     }
 
@@ -117,7 +120,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
           },
           transaction: context.transaction,
           simplified: false
-        })
+        }, { ...context })
       }
     }
 

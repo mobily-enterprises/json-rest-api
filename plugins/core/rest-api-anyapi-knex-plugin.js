@@ -808,13 +808,18 @@ export const RestApiAnyapiKnexPlugin = {
         }
         const db = context.transaction || context.db || api.knex.instance
         const leftId = normalizeId(context.id)
-        return listLinks({
+        const identifiers = await listLinks({
           descriptor: info.descriptor,
           relInfo: info.relInfo,
           relationshipKey: info.relationshipKey,
           inverseRelationshipKey: info.inverseRelationshipKey,
           leftId,
           db,
+        })
+        return filterVisibleIdentifiers({
+          identifiers,
+          context,
+          queryPurpose: 'relationship-identifiers'
         })
       },
       fetchManyToManyRows: async ({ scopeName, relName, parentIds, context }) => {
@@ -1111,6 +1116,7 @@ export const RestApiAnyapiKnexPlugin = {
           tableName: canonical.tableName,
           db: context.db,
           scopeName,
+          queryPurpose: context.rowPolicyQueryPurpose || 'single',
           storageAdapter,
           isAnyApi: true
         })
@@ -1123,6 +1129,7 @@ export const RestApiAnyapiKnexPlugin = {
           scopeName,
           tableName: canonical.tableName,
           db: context.db,
+          queryPurpose: context.rowPolicyQueryPurpose || 'single',
           isAnyApi: true,
           adapter: storageAdapter,
           storageAdapter,
@@ -1218,7 +1225,14 @@ export const RestApiAnyapiKnexPlugin = {
       }
     }
 
-    const applyTargetScopeFilters = async ({ query, resourceName, tableName, context, filters }) => {
+    const applyTargetScopeFilters = async ({
+      query,
+      resourceName,
+      tableName,
+      context,
+      filters,
+      queryPurpose = 'include'
+    }) => {
       const targetScope = api.resources?.[resourceName]
       if (!targetScope?.applyQueryFilters) {
         return { query }
@@ -1233,6 +1247,7 @@ export const RestApiAnyapiKnexPlugin = {
         tableName,
         db: context.db || context.transaction || api.knex.instance,
         isAnyApi: true,
+        queryPurpose,
         storageAdapter
       }, {
         ...context,
@@ -1244,6 +1259,61 @@ export const RestApiAnyapiKnexPlugin = {
       return {
         query: unwrapQueryBuilderState(queryState, query)
       }
+    }
+
+    const filterVisibleIdentifiers = async ({
+      identifiers,
+      context,
+      queryPurpose = 'relationship-identifiers'
+    }) => {
+      if (!identifiers || identifiers.length === 0) return []
+
+      const db = context.db || context.transaction || api.knex.instance
+      const identifiersByType = new Map()
+
+      for (const identifier of identifiers) {
+        if (!identifier?.type || identifier.id === undefined || identifier.id === null) continue
+        if (!identifiersByType.has(identifier.type)) {
+          identifiersByType.set(identifier.type, new Set())
+        }
+        identifiersByType.get(identifier.type).add(normalizeId(identifier.id))
+      }
+
+      const visibleKeys = new Set()
+
+      for (const [resourceName, idSet] of identifiersByType.entries()) {
+        let descriptor
+        try {
+          descriptor = await getDescriptor(resourceName)
+        } catch (error) {
+          continue
+        }
+
+        const idColumn = getLogicalResourceIdColumn(descriptor)
+        let query = db(descriptor.canonical.tableName)
+          .where(descriptor.canonical.tenantColumn, descriptor.tenant)
+          .where(descriptor.canonical.resourceColumn, descriptor.resource)
+          .whereIn(idColumn, [...idSet])
+          .select(idColumn)
+
+        const scopedQueryState = await applyTargetScopeFilters({
+          query,
+          resourceName,
+          tableName: descriptor.canonical.tableName,
+          context,
+          queryPurpose
+        })
+        query = scopedQueryState.query
+
+        const rows = await query
+        for (const row of rows) {
+          visibleKeys.add(`${resourceName}:${String(getLogicalResourceId(row, descriptor))}`)
+        }
+      }
+
+      return identifiers.filter((identifier) => (
+        visibleKeys.has(`${identifier.type}:${String(identifier.id)}`)
+      ))
     }
 
     const buildIncludedResource = ({ row, descriptor, context, fieldSelectionInfo = null }) => {
@@ -1311,6 +1381,13 @@ export const RestApiAnyapiKnexPlugin = {
             context
           })
           query = selectionState.query
+          const scopedQueryState = await applyTargetScopeFilters({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = scopedQueryState.query
           const rows = await query
 
           const newResources = []
@@ -1380,6 +1457,13 @@ export const RestApiAnyapiKnexPlugin = {
               context
             })
             query = selectionState.query
+            const scopedQueryState = await applyTargetScopeFilters({
+              query,
+              resourceName: targetDescriptor.resource,
+              tableName: targetDescriptor.canonical.tableName,
+              context
+            })
+            query = scopedQueryState.query
             const rows = await query
 
             for (const row of rows) {
@@ -1579,6 +1663,13 @@ export const RestApiAnyapiKnexPlugin = {
             context
           })
           query = selectionState.query
+          const scopedQueryState = await applyTargetScopeFilters({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = scopedQueryState.query
           const rows = await query
 
           const newResources = []
@@ -1668,7 +1759,8 @@ export const RestApiAnyapiKnexPlugin = {
             query,
             resourceName: targetDescriptor.resource,
             tableName: targetDescriptor.canonical.tableName,
-            context
+            context,
+            queryPurpose: 'relationship-identifiers'
           })
           query = scopedQueryState.query
           const rows = await query
@@ -1714,7 +1806,8 @@ export const RestApiAnyapiKnexPlugin = {
             query,
             resourceName: targetDescriptor.resource,
             tableName: targetDescriptor.canonical.tableName,
-            context
+            context,
+            queryPurpose: 'relationship-identifiers'
           })
           query = scopedQueryState.query
           const rows = await query
@@ -1748,12 +1841,22 @@ export const RestApiAnyapiKnexPlugin = {
       for (const [relName] of manyEntries) {
         const info = await getManyToManyInfo(descriptor.resource, relName)
         if (!info) continue
-        const rows = await fetchLinksForParents({
+        let rows = await fetchLinksForParents({
           descriptor: info.descriptor,
           relationshipKey: info.relationshipKey,
           parentIds,
           db,
         })
+
+        const visibleIdentifiers = await filterVisibleIdentifiers({
+          identifiers: rows.map((row) => ({ type: row.childType, id: row.childId })),
+          context,
+          queryPurpose: 'relationship-identifiers'
+        })
+        const visibleKeys = new Set(
+          visibleIdentifiers.map((identifier) => `${identifier.type}:${String(identifier.id)}`)
+        )
+        rows = rows.filter((row) => visibleKeys.has(`${row.childType}:${String(row.childId)}`))
 
         const grouped = rows.reduce((acc, row) => {
           const key = String(row.parentId)
@@ -2043,6 +2146,7 @@ export const RestApiAnyapiKnexPlugin = {
         scopeName,
         tableName: tableNameForHooks,
         db,
+        queryPurpose: 'collection',
         isAnyApi: true,
         adapter,
         storageAdapter,
@@ -2272,25 +2376,33 @@ export const RestApiAnyapiKnexPlugin = {
       const schemaInfo = scope?.vars?.schemaInfo
       const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias
 
-      const hookParams = {
-        context: {
-          knexQuery: {
-            query: adapter.query,
-            filters: context.queryParams?.filters,
-            schemaInfo,
-            scopeName,
-            tableName: tableNameForHooks,
-            db,
-            isAnyApi: true,
-            adapter,
-            storageAdapter,
-          },
-        },
+      const previousKnexQuery = context.knexQuery
+      context.knexQuery = {
+        query: adapter.query,
+        filters: context.queryParams?.filters,
+        schemaInfo,
+        scopeName,
+        tableName: tableNameForHooks,
+        db,
+        queryPurpose: 'count',
+        isAnyApi: true,
+        adapter,
+        storageAdapter,
       }
 
-      await polymorphicFiltersHook(hookParams, queryHookDependencies)
-      await crossTableFiltersHook(hookParams, queryHookDependencies)
-      await basicFiltersHook(hookParams, queryHookDependencies)
+      try {
+        const hookParams = { context }
+        await polymorphicFiltersHook(hookParams, queryHookDependencies)
+        await crossTableFiltersHook(hookParams, queryHookDependencies)
+        await basicFiltersHook(hookParams, queryHookDependencies)
+        await api.runHooks('knexQueryFiltering', context)
+      } finally {
+        if (previousKnexQuery === undefined) {
+          delete context.knexQuery
+        } else {
+          context.knexQuery = previousKnexQuery
+        }
+      }
 
       const [{ count }] = await adapter.query.count({ count: '*' })
       return Number(count)

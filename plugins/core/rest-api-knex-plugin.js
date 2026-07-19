@@ -487,6 +487,7 @@ export const RestApiKnexPlugin = {
           tableName,
           db,
           scopeName,
+          queryPurpose: context.rowPolicyQueryPurpose || 'single',
           storageAdapter
         })
         query = unwrapQueryBuilderState(scopedQueryState, query)
@@ -498,6 +499,7 @@ export const RestApiKnexPlugin = {
           scopeName,
           tableName,
           db,
+          queryPurpose: context.rowPolicyQueryPurpose || 'single',
           adapter: storageAdapter,
           storageAdapter,
         }
@@ -621,7 +623,9 @@ export const RestApiKnexPlugin = {
           scopeName,
           tableName,
           db,
+          queryPurpose: 'collection',
           adapter: storageAdapter,
+          storageAdapter,
         }
 
         log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters })
@@ -783,27 +787,26 @@ export const RestApiKnexPlugin = {
           // Build count query with same filters as main query
           const countQuery = db(tableName)
 
-          // Apply filters through hooks (same as main query)
-          if (queryParams.filters && Object.keys(queryParams.filters).length > 0) {
-            // Store query data in context for hooks
-            if (context) {
-              context.knexQuery = {
-                query: countQuery,
-                filters: queryParams.filters,
-                scopeName,
-                tableName,
-                schemaInfo,
-                db
-              }
+          // Mandatory server-side filters must also run when the client supplied no filters.
+          // Otherwise pagination metadata can disclose or count rows excluded from the page.
+          if (context) {
+            context.knexQuery = {
+              query: countQuery,
+              filters: queryParams.filters,
+              scopeName,
+              tableName,
+              schemaInfo,
+              db,
+              queryPurpose: 'count',
+              adapter: storageAdapter,
+              storageAdapter
             }
+          }
 
-            // Run the same filtering hooks
-            await runHooks('knexQueryFiltering')
+          await runHooks('knexQueryFiltering')
 
-            // Clean up
-            if (context && context.knexQuery) {
-              delete context.knexQuery
-            }
+          if (context && context.knexQuery) {
+            delete context.knexQuery
           }
 
           // Get total count

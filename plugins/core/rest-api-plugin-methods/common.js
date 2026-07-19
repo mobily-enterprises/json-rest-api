@@ -494,6 +494,7 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
             tableName,
             db,
             isAnyApi,
+            queryPurpose: 'relationship-validation',
             storageAdapter
           }, getContext)
 
@@ -530,6 +531,36 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
           minimalRecord: record
         }
       })
+    }
+  }
+}
+
+export const getVisibleRelationshipParent = async ({
+  context,
+  helpers,
+  scopeName,
+  runHooks
+}) => {
+  const previousQueryParams = context.queryParams
+  const previousRowPolicyQueryPurpose = context.rowPolicyQueryPurpose
+
+  // Related-route query parameters belong to the target resource, not its parent.
+  context.queryParams = {}
+  context.rowPolicyQueryPurpose = 'relationship-parent'
+
+  try {
+    return await helpers.dataGetMinimal({ scopeName, context, runHooks })
+  } finally {
+    if (previousQueryParams === undefined) {
+      delete context.queryParams
+    } else {
+      context.queryParams = previousQueryParams
+    }
+
+    if (previousRowPolicyQueryPurpose === undefined) {
+      delete context.rowPolicyQueryPurpose
+    } else {
+      context.rowPolicyQueryPurpose = previousRowPolicyQueryPurpose
     }
   }
 }

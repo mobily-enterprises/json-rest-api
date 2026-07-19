@@ -106,6 +106,8 @@ addHook('knexQueryFiltering', 'scope-by-workspace', {}, async ({ context }) => {
 
 `knexQueryFiltering` is the right seam for filtering. It is **not** the right seam for turning ad hoc SQL aliases into first-class fields.
 
+For mandatory resource visibility, prefer the supported [`RowPolicyPlugin`](GUIDE_X_Row_Policies.md) contract over registering a raw filtering hook. It validates resource configuration, requires an explicit allow/deny decision, provides logical field translation, exposes query-purpose metadata, and is exercised across pagination counts, single-record preflights, includes, and relationship loading.
+
 ### `addScopeMethod`
 
 Use this when a plugin needs a reusable method on every resource or selected resources.

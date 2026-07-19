@@ -275,7 +275,7 @@ export default async function putMethod ({
           }
         })
       } else if (relData.length > 0) {
-        await createPivotRecords(api, context.id, relDef, relData, context.transaction)
+        await createPivotRecords(api, context.id, relDef, relData, context.transaction, context)
       }
     }
 

@@ -77,7 +77,7 @@ import { ROW_NUMBER_KEY, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_M
  * 4. Returns query ready for execution
  * 5. Caller removes the ROW_NUMBER column from results
  */
-export const buildWindowedIncludeQuery = (
+export const buildWindowedIncludeSubquery = (
   knex,
   tableName,
   foreignKey,
@@ -137,13 +137,21 @@ export const buildWindowedIncludeQuery = (
     subquery.select(fieldsWithFK)
   }
 
-  // Wrap in outer query to filter by row number
-  const query = knex
+  return { subquery, effectiveLimit }
+}
+
+export const wrapWindowedIncludeSubquery = (knex, subquery, effectiveLimit) => {
+  return knex
     .select('*')
     .from(subquery.as('_windowed'))
     .where(ROW_NUMBER_KEY, '<=', effectiveLimit)
+}
 
-  return query
+export const buildWindowedIncludeQuery = (...args) => {
+  const knex = args[0]
+  const { subquery, effectiveLimit } = buildWindowedIncludeSubquery(...args)
+
+  return wrapWindowedIncludeSubquery(knex, subquery, effectiveLimit)
 }
 
 /**

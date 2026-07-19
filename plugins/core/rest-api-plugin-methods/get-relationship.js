@@ -46,6 +46,9 @@ export default async function getRelationshipMethod ({ params, context, vars, he
     transaction: context.transaction,
     simplified: false,
     isTransport: params.isTransport
+  }, {
+    ...context,
+    rowPolicyQueryPurpose: 'relationship-parent'
   })
 
   if (!fullRecord || !fullRecord.data) {
