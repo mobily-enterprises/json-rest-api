@@ -39,6 +39,9 @@ Welcome to the comprehensive guide for JSON REST API. This guide will walk you t
 - **[Autofiltering](GUIDE_X_Autofiltering.md)**  
   Scope datasets automatically using configured context values, without baking in auth semantics.
 
+- **[Row Policies](GUIDE_X_Row_Policies.md)**
+  Apply mandatory server-side visibility predicates before pagination, counts, includes, and relationship loading.
+
 - **[Knex Schema and Migrations](GUIDE_X_Knex_Schema_And_Migrations.md)**  
   Create tables, inspect live table snapshots, and generate create or additive diff migrations from table-backed resource scopes.
 

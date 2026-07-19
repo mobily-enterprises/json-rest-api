@@ -136,7 +136,7 @@ export const updateManyToManyRelationship = async (scope, deps) => {
         await api.resources[related.type].get({
           id: related.id,
           transaction: trx
-        })
+        }, { ...context })
       } catch (error) {
         throw new RestApiResourceError(
           `Related ${related.type} with id ${related.id} not found`,
@@ -184,6 +184,7 @@ export const updateManyToManyRelationship = async (scope, deps) => {
  * @param {Object} relDef - The relationship definition
  * @param {Array} relData - Array of related resources to link
  * @param {Object} trx - Database transaction object
+ * @param {Object} [context] - Caller context forwarded to relationship validation
  * @returns {Promise<void>}
  *
  * @example
@@ -257,7 +258,7 @@ export const updateManyToManyRelationship = async (scope, deps) => {
  * 5. Performs single INSERT with all records
  * 6. Returns (no data returned, throws on error)
  */
-export const createPivotRecords = async (api, resourceId, relDef, relData, trx) => {
+export const createPivotRecords = async (api, resourceId, relDef, relData, trx, context = {}) => {
   relData = normalizeRelationshipIdentifiers(relData, { api })
   if (relData.length === 0) return // Early exit if nothing to create
 
@@ -277,7 +278,7 @@ export const createPivotRecords = async (api, resourceId, relDef, relData, trx) 
         await api.resources[related.type].get({
           id: related.id,
           transaction: trx
-        })
+        }, { ...context })
       } catch (error) {
         throw new RestApiResourceError(
           `Related ${related.type} with id ${related.id} not found`,

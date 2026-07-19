@@ -1186,7 +1186,7 @@ api.addScope('articles', {}, {
 
 ### knexQueryFiltering
 
-The `knexQueryFiltering` hook is called during QUERY operations to apply filter conditions. This is a special hook that allows complex query modifications.
+The `knexQueryFiltering` hook is called while storage-backed resource selections are being built. Collection queries run it before sorting and pagination; scoped lookup and relationship paths can also run it. This is a special hook that allows complex query modifications. Use the supported [Row Policies](GUIDE_X_Row_Policies.md) contract for mandatory resource visibility.
 
 **When**: During `dataQuery` execution, before sorting and pagination  
 **Purpose**: Apply filters, add JOINs, modify query conditions

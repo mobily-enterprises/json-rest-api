@@ -2,82 +2,21 @@ import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { ROW_NUMBER_KEY, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_MAX_INCLUDE_LIMIT } from '../querying-writing/knex-constants.js'
 
 /**
- * Builds a window function query for limited includes per parent record
+ * Builds the inner window-function query used to limit included children per
+ * parent. Mandatory target filters must be applied to this inner query before
+ * the caller wraps it and filters by ROW_NUMBER.
  *
  * @param {Object} knex - Knex instance
  * @param {string} tableName - Target table name
  * @param {string} foreignKey - Foreign key field
  * @param {Array} parentIds - Parent record IDs
- * @param {Array} fieldsToSelect - Fields to select
- * @param {Object} includeConfig - Include configuration (limit, orderBy)
+ * @param {Array|string} fieldsToSelect - Fields to select, or '*'
+ * @param {Object} includeConfig - Include limit and ordering
  * @param {Object} capabilities - Database capabilities
- * @param {Object} scopeVars - Scope variables for defaults and limits
- * @returns {Object} Knex query
- *
- * @example
- * // Input: Load max 3 comments per article, ordered by newest first
- * const query = buildWindowedIncludeQuery(
- *   knex,
- *   'comments',
- *   'article_id',
- *   [1, 2, 3],  // Article IDs
- *   ['id', 'text', 'created_at'],
- *   { limit: 3, orderBy: ['-created_at'] },
- *   { windowFunctions: true },
- *   { queryDefaultLimit: 10 }
- * );
- *
- * // Generated SQL:
- * // WITH _windowed AS (
- * //   SELECT id, text, created_at, article_id,
- * //          ROW_NUMBER() OVER (
- * //            PARTITION BY article_id
- * //            ORDER BY created_at DESC
- * //          ) as __$jsonrestapi_rn$__
- * //   FROM comments
- * //   WHERE article_id IN (1, 2, 3)
- * // )
- * // SELECT * FROM _windowed
- * // WHERE __$jsonrestapi_rn$__ <= 3
- *
- * // Result: Each article gets max 3 comments, not 3 total
- *
- * @example
- * // Input: Database doesn't support window functions
- * const query = buildWindowedIncludeQuery(
- *   knex,
- *   'comments',
- *   'article_id',
- *   [1, 2, 3],
- *   '*',
- *   { limit: 5 },
- *   { windowFunctions: false, dbInfo: { client: 'mysql', version: '5.7' } }
- * );
- *
- * // Throws RestApiResourceError:
- * // "Include limits require window function support. Your database (mysql 5.7)
- * //  does not support this feature. Window functions are supported in:
- * //  PostgreSQL 8.4+, MySQL 8.0+, MariaDB 10.2+, SQLite 3.25+, SQL Server 2005+"
- *
- * @description
- * Used by:
- * - loadHasMany when strategy: 'window' and database supports window functions
- * - Enables per-parent limits for one-to-many relationships
- *
- * Purpose:
- * - Solves the "N+1 limit" problem where you want X records per parent
- * - Without window functions, LIMIT 10 gives 10 total across all parents
- * - With window functions, each parent gets up to 10 related records
- * - Critical for consistent API responses with includes
- *
- * Data flow:
- * 1. Creates subquery with ROW_NUMBER() partitioned by foreign key
- * 2. Numbers rows within each partition based on orderBy
- * 3. Outer query filters to keep only rows within limit
- * 4. Returns query ready for execution
- * 5. Caller removes the ROW_NUMBER column from results
+ * @param {Object} scopeVars - Resource query limits
+ * @returns {{ subquery: Object, effectiveLimit: number }} Inner query and validated limit
  */
-export const buildWindowedIncludeQuery = (
+export const buildWindowedIncludeSubquery = (
   knex,
   tableName,
   foreignKey,
@@ -137,13 +76,7 @@ export const buildWindowedIncludeQuery = (
     subquery.select(fieldsWithFK)
   }
 
-  // Wrap in outer query to filter by row number
-  const query = knex
-    .select('*')
-    .from(subquery.as('_windowed'))
-    .where(ROW_NUMBER_KEY, '<=', effectiveLimit)
-
-  return query
+  return { subquery, effectiveLimit }
 }
 
 /**
@@ -175,7 +108,7 @@ export const buildWindowedIncludeQuery = (
  *
  * @description
  * Used by:
- * - buildWindowedIncludeQuery for PARTITION BY ordering
+ * - buildWindowedIncludeSubquery for PARTITION BY ordering
  * - applyStandardIncludeConfig for regular ORDER BY
  * - Query builders that need consistent sort syntax
  *

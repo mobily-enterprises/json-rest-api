@@ -1,5 +1,5 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { findRelationshipDefinition } from './common.js'
+import { findRelationshipDefinition, getVisibleRelationshipParent } from './common.js'
 import { buildRelationshipUrl } from '../lib/querying/url-helpers.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
@@ -57,13 +57,15 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
   await runHooks('checkPermissions')
   await runHooks('checkPermissionsGetRelated')
 
-  // Verify parent exists
-  const exists = await helpers.dataExists({
+  // Verify the parent exists in the caller's visible dataset.
+  const parentRecord = await getVisibleRelationshipParent({
+    context,
+    helpers,
     scopeName,
-    context: { db: context.db, id: context.id, schemaInfo: context.schemaInfo }
+    runHooks
   })
 
-  if (!exists) {
+  if (!parentRecord) {
     throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
   }
 
@@ -102,7 +104,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         transaction: context.transaction,
         simplified: false,
         isTransport: params.isTransport
-      })
+      }, { ...context })
 
       const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
       if (!relatedId) {
@@ -119,7 +121,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         transaction: context.transaction,
         simplified: false,
         isTransport: params.isTransport
-      })
+      }, { ...context })
 
       return {
         links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
@@ -140,7 +142,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         transaction: context.transaction,
         simplified: false,
         isTransport: params.isTransport
-      })
+      }, { ...context })
 
       // Extract the related resource from the parent's relationships
       const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
@@ -194,7 +196,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         transaction: context.transaction,
         simplified: false,
         isTransport: params.isTransport
-      })
+      }, { ...context })
 
       if (!result.links) {
         result.links = {}
@@ -228,7 +230,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
         transaction: context.transaction,
         simplified: false,
         isTransport: params.isTransport
-      })
+      }, { ...context })
 
       if (!result.links) {
         result.links = {}
@@ -256,7 +258,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
           transaction: context.transaction,
           simplified: false,
           isTransport: params.isTransport,
-        })
+        }, { ...context })
         if (related?.data) {
           results.push(related.data)
         }
@@ -307,7 +309,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
       transaction: context.transaction,
       simplified: false,
       isTransport: params.isTransport
-    })
+    }, { ...context })
     let includedResources = pivotResult.included?.filter((r) => r.type === targetType) || []
 
     if (includedResources.length === 0) {
@@ -339,7 +341,7 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
             transaction: context.transaction,
             simplified: false,
             isTransport: params.isTransport,
-          })
+          }, { ...context })
           if (related?.data) {
             includedResources.push(related.data)
           }

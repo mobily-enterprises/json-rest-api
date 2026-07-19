@@ -76,7 +76,11 @@
 
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { toJsonApiRecord } from './knex-json-api-transformers-querying.js'
-import { buildWindowedIncludeQuery, applyStandardIncludeConfig, buildOrderByClause } from './knex-window-queries.js'
+import {
+  buildWindowedIncludeSubquery,
+  applyStandardIncludeConfig,
+  buildOrderByClause
+} from './knex-window-queries.js'
 import { unwrapQueryBuilderState } from './query-builder-utils.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
@@ -149,7 +153,8 @@ const applyScopeFiltersToIncludeQuery = async ({
   scopeName,
   requestContext,
   db,
-  tableName
+  tableName,
+  queryPurpose = 'include'
 }) => {
   const scopeObject = scopes[scopeName]
   if (!scopeObject?.applyQueryFilters) {
@@ -165,6 +170,7 @@ const applyScopeFiltersToIncludeQuery = async ({
     tableName: tableName || scopeObject.vars.schemaInfo.tableName,
     db,
     schemaInfo: scopeObject.vars.schemaInfo,
+    queryPurpose,
     storageAdapter
   }, buildScopedIncludeContext({
     requestContext,
@@ -981,46 +987,38 @@ export const loadHasMany = async (scope, deps) => {
 
       // Check if we should use window functions
       if (relDef.include?.strategy === 'window') {
-        try {
-        // Try to build window function query
-          if (fieldSelectionInfo?.queryFieldsToSelect?.length) {
-            throw new Error('Query projection fields require the standard include query path.')
-          }
+        let windowedQuery
 
-          const selectFields = fieldSelectionInfo?.fieldsToSelect || null
-
-          query = buildWindowedIncludeQuery(
+        if (fieldSelectionInfo?.queryFieldsToSelect?.length) {
+          log.debug('[INCLUDE] Query projection fields require the standard include query path')
+        } else {
+          windowedQuery = buildWindowedIncludeSubquery(
             knex,
             targetTable,
             foreignKey,
             mainIds,
-            selectFields,
+            fieldSelectionInfo?.fieldsToSelect || null,
             relDef.include || {},
             capabilities,
-            targetScopeObject.vars  // Pass target scope vars
+            targetScopeObject.vars
           )
+        }
+
+        if (windowedQuery) {
           const scopedQueryState = await applyScopeFiltersToIncludeQuery({
-            query,
+            query: windowedQuery.subquery,
             scopes,
             scopeName: targetScope,
             requestContext,
             db: knex,
             tableName: targetTable
           })
-          query = scopedQueryState.query
+          query = knex
+            .select('*')
+            .from(scopedQueryState.query.as('_windowed'))
+            .where(ROW_NUMBER_KEY, '<=', windowedQuery.effectiveLimit)
           usingWindowFunction = true
           log.debug('[INCLUDE] Using window function strategy with limits')
-        } catch (error) {
-        // If window functions not supported, this will throw a clear error
-          if (error.details?.requiredFeature === 'window_functions') {
-            throw error // Re-throw the descriptive error
-          }
-          // For other errors, fall back to standard query
-          log.warn('[INCLUDE] Window function query failed, falling back to standard query:', {
-            error: error.message,
-            stack: error.stack
-          })
-          usingWindowFunction = false
         }
       }
 
@@ -2114,7 +2112,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         scopeName: relDef.target,
         requestContext,
         db: knex,
-        tableName: targetTable
+        tableName: targetTable,
+        queryPurpose: 'relationship-identifiers'
       })
       query = scopedQueryState.query
 
@@ -2159,7 +2158,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
         scopeName: targetScopeName,
         requestContext,
         db: knex,
-        tableName: targetTable
+        tableName: targetTable,
+        queryPurpose: 'relationship-identifiers'
       })
       query = scopedQueryState.query
 
@@ -2198,7 +2198,8 @@ export const loadRelationshipIdentifiers = async (records, scopeName, scopes, kn
           scopeName: targetScope,
           requestContext,
           db: knex,
-          tableName: targetTable
+          tableName: targetTable,
+          queryPurpose: 'relationship-identifiers'
         })
         query = scopedQueryState.query
 

@@ -59,7 +59,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
       transaction: context.transaction,
       simplified: false,
       isTransport: params.isTransport
-    })
+    }, { ...context })
 
     await runHooks('finish')
     await runHooks('finishPatchRelationship')
