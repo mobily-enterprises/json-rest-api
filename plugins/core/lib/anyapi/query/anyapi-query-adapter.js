@@ -71,14 +71,6 @@ const SELECT_METHODS = new Set(['select', 'columns', 'distinct'])
 
 const AGGREGATE_METHODS = new Set(['count', 'min', 'max', 'sum', 'avg'])
 
-const CALLBACK_FIRST_METHODS = new Set([
-  'where',
-  'andWhere',
-  'orWhere',
-  'having',
-  'orHaving',
-])
-
 const isFunction = (value) => typeof value === 'function'
 const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value)
 
@@ -147,13 +139,6 @@ const translateJoinObject = (adapter, obj) => {
     result[translatedKey] = translatedValue
   }
   return result
-}
-
-const maybeWrapCallback = (adapter, callback) => {
-  if (!isFunction(callback)) return callback
-  return function wrappedCallback (...args) {
-    return callback.apply(adapter.proxy, args)
-  }
 }
 
 const isRaw = (value) => Boolean(value && typeof value === 'object' && typeof value.toSQL === 'function' && value.toSQL().method)
@@ -317,12 +302,39 @@ export class AnyapiQueryAdapter {
     this.aliasActualNames.set(alias, alias)
   }
 
-  #translateWhereArgs (method, args) {
+  #wrapQueryCallback (callback) {
+    if (!isFunction(callback)) return callback
+    const adapter = this
+
+    return function wrappedCallback (...args) {
+      const callbackTarget = this
+      const callbackProxy = adapter.#createProxy(callbackTarget)
+      const callbackArgs = args.map((arg) => arg === callbackTarget ? callbackProxy : arg)
+      return callback.apply(callbackProxy, callbackArgs)
+    }
+  }
+
+  #wrapJoinCallback (callback) {
+    if (!isFunction(callback)) return callback
+    const adapter = this
+
+    return function wrappedCallback (...args) {
+      const callbackTarget = this
+      const callbackProxy = adapter.#createJoinProxy(callbackTarget)
+      const callbackArgs = args.map((arg) => arg === callbackTarget ? callbackProxy : arg)
+      return callback.apply(callbackProxy, callbackArgs)
+    }
+  }
+
+  #translateWhereArgs (args, { joinClause = false } = {}) {
     if (args.length === 0) return args
     const [first, ...rest] = args
 
     if (isFunction(first)) {
-      return [maybeWrapCallback(this, first), ...rest]
+      const wrappedGroup = joinClause
+        ? this.#wrapJoinCallback(first)
+        : this.#wrapQueryCallback(first)
+      return [wrappedGroup, ...rest]
     }
 
     if (isObject(first) && !isRaw(first)) {
@@ -337,7 +349,7 @@ export class AnyapiQueryAdapter {
 
     if (rest.length > 0 && isFunction(rest[rest.length - 1])) {
       const newRest = [...rest]
-      newRest[newRest.length - 1] = maybeWrapCallback(this, rest[rest.length - 1])
+      newRest[newRest.length - 1] = this.#wrapQueryCallback(rest[rest.length - 1])
       return [translatedFirst, ...newRest]
     }
 
@@ -350,7 +362,7 @@ export class AnyapiQueryAdapter {
     const translatedColumn = this.translateColumn(column)
 
     if (isFunction(values)) {
-      return [translatedColumn, maybeWrapCallback(this, values), ...rest]
+      return [translatedColumn, this.#wrapQueryCallback(values), ...rest]
     }
 
     return [translatedColumn, values, ...rest]
@@ -439,7 +451,7 @@ export class AnyapiQueryAdapter {
     const [first, ...rest] = args
 
     if (isFunction(first)) {
-      return [maybeWrapCallback(this, first), ...rest]
+      return [this.#wrapJoinCallback(first), ...rest]
     }
 
     if (isObject(first) && !isRaw(first)) {
@@ -454,7 +466,7 @@ export class AnyapiQueryAdapter {
 
     const translatedRest = rest.map((value, index) => {
       if (isFunction(value)) {
-        return maybeWrapCallback(this, value)
+        return this.#wrapJoinCallback(value)
       }
       if (typeof value !== 'string') {
         return value
@@ -475,7 +487,7 @@ export class AnyapiQueryAdapter {
     const translatedColumn = typeof column === 'string' ? this.translateColumn(column) : column
 
     if (isFunction(values)) {
-      return [translatedColumn, maybeWrapCallback(this, values), ...rest]
+      return [translatedColumn, this.#wrapQueryCallback(values), ...rest]
     }
 
     return [translatedColumn, values, ...rest]
@@ -510,7 +522,7 @@ export class AnyapiQueryAdapter {
           let translatedArgs = args
 
           if (WHERE_METHODS.has(prop)) {
-            translatedArgs = adapter.#translateWhereArgs(prop, args)
+            translatedArgs = adapter.#translateWhereArgs(args, { joinClause: true })
           } else if (WHERE_IN_METHODS.has(prop)) {
             translatedArgs = adapter.#translateWhereInArgs(args)
           } else if (BETWEEN_METHODS.has(prop)) {
@@ -607,7 +619,7 @@ export class AnyapiQueryAdapter {
           let translatedArgs = args
 
           if (WHERE_METHODS.has(prop)) {
-            translatedArgs = adapter.#translateWhereArgs(prop, args)
+            translatedArgs = adapter.#translateWhereArgs(args)
           } else if (WHERE_IN_METHODS.has(prop)) {
             translatedArgs = adapter.#translateWhereInArgs(args)
           } else if (BETWEEN_METHODS.has(prop)) {
@@ -630,8 +642,6 @@ export class AnyapiQueryAdapter {
             translatedArgs = adapter.#translateSelectArgs(args)
           } else if (AGGREGATE_METHODS.has(prop)) {
             translatedArgs = adapter.#translateAggregateArgs(args)
-          } else if (CALLBACK_FIRST_METHODS.has(prop) && args.length && isFunction(args[0])) {
-            translatedArgs = [maybeWrapCallback(adapter, args[0]), ...args.slice(1)]
           }
 
           const result = value.apply(target, translatedArgs)

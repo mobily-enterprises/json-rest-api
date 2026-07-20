@@ -1,5 +1,9 @@
 export const createStorageAdapterUtilities = (hookParams, { getStorageAdapter } = {}) => {
   const context = hookParams?.context || {}
+  const activeQuery = context.knexQuery || {}
+  const activeScopeName = activeQuery.scopeName
+  const activeTableName = activeQuery.tableName
+  const activeStorageAdapter = activeQuery.storageAdapter || context.storageAdapter
   const storageCache = new Map()
 
   const fetchStorageAdapter = (scopeName) => {
@@ -7,13 +11,9 @@ export const createStorageAdapterUtilities = (hookParams, { getStorageAdapter } 
     if (storageCache.has(scopeName)) return storageCache.get(scopeName)
 
     let adapter = null
-    if (scopeName === context?.knexQuery?.scopeName) {
-      adapter = context.storageAdapter ||
-        context.knexQuery?.storageAdapter ||
+    if (scopeName === activeScopeName) {
+      adapter = activeStorageAdapter ||
         (typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null)
-      if (adapter && !context.storageAdapter) {
-        context.storageAdapter = adapter
-      }
     } else {
       adapter = typeof getStorageAdapter === 'function' ? getStorageAdapter(scopeName) : null
     }
@@ -23,8 +23,8 @@ export const createStorageAdapterUtilities = (hookParams, { getStorageAdapter } 
   }
 
   const defaultAliasForScope = (scopeName) => {
-    if (scopeName === context?.knexQuery?.scopeName) {
-      return context.knexQuery?.tableName || scopeName
+    if (scopeName === activeScopeName) {
+      return activeTableName || scopeName
     }
     return scopeName
   }
