@@ -1,5 +1,6 @@
 import { Api } from 'hooked-api'
 import {
+  AutoFilterPlugin,
   FileHandlingPlugin,
   QueryProjectionsPlugin,
   RestApiAnyapiKnexPlugin,
@@ -1733,13 +1734,29 @@ export async function createRowPolicyApi (knex, pluginOptions = {}) {
           return false
         }
 
-        query.whereIn(
-          column('access_group'),
-          groups.map((group) => value('access_group', group))
-        )
+        query.where(function visibilityGrants () {
+          this.whereRaw('1 = 0')
+          this.orWhere(function groupVisibilityGrant () {
+            this.whereIn(
+              column('access_group'),
+              groups.map((group) => value('access_group', group))
+            )
+          })
+        })
         return true
       },
       ...(rowPolicyOptions.policies || {})
+    }
+  })
+
+  await api.use(AutoFilterPlugin, {
+    resolvers: {
+      workspace: ({ context }) => context.scopeValues?.workspaceId
+    },
+    presets: {
+      workspace: {
+        filters: [{ field: 'workspace_id', resolver: 'workspace' }]
+      }
     }
   })
 
@@ -1747,7 +1764,8 @@ export async function createRowPolicyApi (knex, pluginOptions = {}) {
     schema: {
       id: { type: 'id' },
       name: { type: 'string', required: true, max: 200 },
-      access_group: { type: 'string', required: true }
+      access_group: { type: 'string', required: true },
+      workspace_id: { type: 'string', required: true }
     },
     relationships: {
       tasks: { type: 'hasMany', target: 'policy_tasks', foreignKey: 'project_id' },
@@ -1759,6 +1777,7 @@ export async function createRowPolicyApi (knex, pluginOptions = {}) {
         otherKey: 'task_id'
       }
     },
+    autofilter: 'workspace',
     rowPolicy: 'groupVisibility',
     tableName: 'row_policy_projects'
   })
@@ -1770,6 +1789,7 @@ export async function createRowPolicyApi (knex, pluginOptions = {}) {
       id: { type: 'id' },
       title: { type: 'string', required: true, max: 200, search: true },
       access_group: { type: 'string', required: true },
+      workspace_id: { type: 'string', required: true },
       project_id: {
         type: 'number',
         nullable: true,
@@ -1787,6 +1807,7 @@ export async function createRowPolicyApi (knex, pluginOptions = {}) {
         otherKey: 'project_id'
       }
     },
+    autofilter: 'workspace',
     rowPolicy: 'groupVisibility',
     tableName: 'row_policy_tasks'
   })

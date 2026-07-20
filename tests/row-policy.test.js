@@ -11,6 +11,7 @@ import {
 } from './helpers/test-utils.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { createRowPolicyApi } from './fixtures/api-configs.js'
+import { createStorageAdapterUtilities } from '../plugins/core/lib/querying/storage-adapter-utils.js'
 
 const knex = knexLib({
   client: 'better-sqlite3',
@@ -23,17 +24,23 @@ const knex = knexLib({
 let api
 const policyEvents = []
 
-const adminContext = () => ({ visibility: { all: true } })
-const groupContext = (...groups) => ({ visibility: { groups } })
+const adminContext = (workspaceId = 'workspace-a') => ({
+  visibility: { all: true },
+  scopeValues: { workspaceId }
+})
+const groupContext = (...groups) => ({
+  visibility: { groups },
+  scopeValues: { workspaceId: 'workspace-a' }
+})
 
-const postProject = async (name, accessGroup) => {
+const postProject = async (name, accessGroup, context = adminContext()) => {
   return api.resources.policy_projects.post({
     inputRecord: createJsonApiDocument('policy_projects', {
       name,
       access_group: accessGroup
     }),
     simplified: false
-  }, adminContext())
+  }, context)
 }
 
 const postTask = async ({ title, accessGroup, projectId, context = adminContext() }) => {
@@ -53,6 +60,39 @@ const postTask = async ({ title, accessGroup, projectId, context = adminContext(
 }
 
 describe('RowPolicy Plugin', () => {
+  it('keeps active query translation stable after the hook context is restored', () => {
+    const queryStorageAdapter = {
+      translateColumn: (field) => field === 'id' ? 'record_id' : field
+    }
+    const ambientStorageAdapter = {
+      translateColumn: (field) => field === 'id' ? 'wrong_id' : field
+    }
+    const context = {
+      knexQuery: {
+        scopeName: 'organisationUnits',
+        tableName: 'organisation_units',
+        storageAdapter: queryStorageAdapter
+      },
+      storageAdapter: ambientStorageAdapter
+    }
+    const utilities = createStorageAdapterUtilities({ context })
+
+    delete context.knexQuery
+    delete context.storageAdapter
+
+    assert.equal(
+      utilities.translateColumn('organisationUnits', 'id'),
+      'organisation_units.record_id'
+    )
+    assert.equal(
+      utilities.translateColumn('organisationUnits', 'id', 'visible_units'),
+      'visible_units.record_id'
+    )
+    assert.equal(utilities.defaultAliasForScope('users'), 'users')
+    assert.equal(Object.hasOwn(context, 'knexQuery'), false)
+    assert.equal(Object.hasOwn(context, 'storageAdapter'), false)
+  })
+
   before(async () => {
     api = await createRowPolicyApi(knex, {
       onPolicy: (event) => policyEvents.push(event)
@@ -73,7 +113,7 @@ describe('RowPolicy Plugin', () => {
     ])
   })
 
-  it('applies visibility before offset pagination and counts the same dataset', async () => {
+  it('applies deferred grouped visibility before offset pagination and counts the same dataset', async () => {
     await postProject('Allowed 1', 'group-a')
     await postProject('Hidden 1', 'group-b')
     await postProject('Allowed 2', 'group-a')
@@ -109,6 +149,22 @@ describe('RowPolicy Plugin', () => {
     assert.deepEqual(
       secondPage.data.map((record) => record.attributes.name),
       ['Allowed 3']
+    )
+  })
+
+  it('combines row policy visibility with the resource autofilter', async () => {
+    await postProject('Visible', 'group-a')
+    await postProject('Wrong group', 'group-b')
+    await postProject('Wrong workspace', 'group-a', adminContext('workspace-b'))
+
+    const result = await api.resources.policy_projects.query({
+      queryParams: { sort: ['id'] },
+      simplified: false
+    }, groupContext('group-a'))
+
+    assert.deepEqual(
+      result.data.map((record) => record.attributes.name),
+      ['Visible']
     )
   })
 
@@ -404,7 +460,7 @@ describe('RowPolicy Plugin', () => {
     const result = await api.resources.policy_projects.query({
       queryParams: { page: { number: 1, size: 10 } },
       simplified: false
-    })
+    }, { scopeValues: { workspaceId: 'workspace-a' } })
 
     assert.deepEqual(result.data, [])
     assert.equal(result.meta.pagination.total, 0)

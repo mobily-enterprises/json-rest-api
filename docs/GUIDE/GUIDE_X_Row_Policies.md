@@ -204,6 +204,8 @@ column('id', { scopeName: 'users', alias: 'visible_users' })
 column('status', { alias: null }) // translated but deliberately unqualified
 ```
 
+The active resource's default qualifier and storage adapter are fixed when the policy hook begins. Calling `column()` later from a Knex grouping callback therefore still targets the table or alias of that query, even after the surrounding hook has returned. This applies to normal Knex and AnyAPI queries. A `scopeName` option resolves that target resource through the storage registry; use the explicit `alias` option only when the policy itself introduces another query alias.
+
 `value()` accepts the same `scopeName` option:
 
 ```js
