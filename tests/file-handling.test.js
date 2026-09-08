@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import { cleanTables } from './helpers/test-utils.js'
 import { createFileUploadApi } from './fixtures/api-configs.js'
+import { RestApiPayloadError, RestApiResourceError } from '../lib/rest-api-errors.js'
 
 const knex = knexLib({
   client: 'better-sqlite3',
@@ -114,5 +115,41 @@ describe('File handling cleanup', () => {
     assert.equal(cleanupCalls, 1)
     assert.deepEqual(storage.uploaded, ['/uploads/valid.png'])
     assert.deepEqual(storage.deleted, ['/uploads/valid.png'])
+  })
+
+  it('preserves typed errors from file detectors', async () => {
+    const detector = api.rest.fileDetectors[0]
+    const originalParse = detector.parse
+    const error = new RestApiPayloadError('Malformed upload', { path: 'attachment' })
+    detectorState.payload = { fields: { title: 'Upload' }, files: {} }
+    detector.parse = async () => { throw error }
+    try {
+      await assert.rejects(api.resources.documents.post({
+        inputRecord: { data: { type: 'documents', attributes: { title: 'Upload' } } }, simplified: false
+      }), actual => actual === error)
+      assert.equal((await api.resources.documents.query({ simplified: false })).data.length, 0)
+    } finally {
+      detector.parse = originalParse
+    }
+  })
+
+  it('preserves typed upload errors and still cleans temporary files', async () => {
+    const originalUpload = storage.upload
+    const error = new RestApiResourceError('Upload forbidden', { subtype: 'forbidden' })
+    let cleanupCalls = 0
+    detectorState.payload = {
+      fields: { title: 'Upload' },
+      files: { attachment: createTestFile({ cleanup: async () => { cleanupCalls++ } }) }
+    }
+    storage.upload = async () => { throw error }
+    try {
+      await assert.rejects(api.resources.documents.post({
+        inputRecord: { data: { type: 'documents', attributes: {} } }, simplified: false
+      }), actual => actual === error)
+      assert.equal(cleanupCalls, 1)
+      assert.equal((await api.resources.documents.query({ simplified: false })).data.length, 0)
+    } finally {
+      storage.upload = originalUpload
+    }
   })
 })

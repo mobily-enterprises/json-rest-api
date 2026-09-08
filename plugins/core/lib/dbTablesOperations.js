@@ -300,7 +300,8 @@ function normalizeColumnShape (definition = {}) {
       return 'datetime'
     case 'time':
       return 'time'
-    case 'timestamp':
+    case 'epochMilliseconds':
+    case 'epochSeconds':
       return 'integer'
     case 'array':
     case 'object':
@@ -344,7 +345,8 @@ function normalizeDesiredTypeKind (definition = {}) {
     case 'blob':
     case 'file':
       return 'binary'
-    case 'timestamp':
+    case 'epochMilliseconds':
+    case 'epochSeconds':
       return 'integer'
     case 'string':
     case 'none':
@@ -361,6 +363,10 @@ function normalizeComparableDefault (value) {
   return String(value)
 }
 
+const hasStaticDefault = (definition = {}) => (
+  definition.defaultTo !== undefined && typeof definition.defaultTo !== 'function'
+)
+
 function normalizeDesiredColumn (tableContext, fieldName, definition, options = {}) {
   const nullable = definition.nullable === true
     ? true
@@ -375,8 +381,10 @@ function normalizeDesiredColumn (tableContext, fieldName, definition, options = 
     typeKind: normalizeDesiredTypeKind(definition),
     nullable,
     required: definition.required === true,
-    hasDefault: definition.defaultTo !== undefined,
-    defaultValue: normalizeComparableDefault(definition.defaultTo),
+    hasDefault: hasStaticDefault(definition),
+    defaultValue: hasStaticDefault(definition)
+      ? normalizeComparableDefault(definition.defaultTo)
+      : undefined,
     unsigned: definition.type === 'id' ? definition.unsigned !== false : definition.unsigned === true,
     maxLength: definition.maxLength ?? null,
     numericPrecision: definition.precision ?? null,
@@ -499,8 +507,9 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
         ? table.time(columnName, { precision: temporalPrecision })
         : table.time(columnName)
 
-    case 'timestamp':
-      return table.integer(columnName)
+    case 'epochMilliseconds':
+    case 'epochSeconds':
+      return table.bigInteger(columnName)
 
     case 'array':
     case 'object':
@@ -524,7 +533,7 @@ function applyColumnConstraints (column, definition) {
     column.notNullable()
   }
 
-  if (definition.defaultTo !== undefined) {
+  if (hasStaticDefault(definition)) {
     column.defaultTo(definition.defaultTo)
   }
 
@@ -631,8 +640,9 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
         }
         break
 
-      case 'timestamp':
-        line = `table.integer(${quoteJsString(columnName)})`
+      case 'epochMilliseconds':
+      case 'epochSeconds':
+        line = `table.bigInteger(${quoteJsString(columnName)})`
         break
 
       case 'array':
@@ -658,7 +668,7 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
     line += '.notNullable()'
   }
 
-  if (definition.defaultTo !== undefined) {
+  if (hasStaticDefault(definition)) {
     line += `.defaultTo(${formatCodeLiteral(definition.defaultTo)})`
   }
 

@@ -2052,6 +2052,11 @@ const result = await api.resources.articles.query({
 // GET /articles?fields[articles]=title,summary&fields[users]=name,avatar
 ```
 
+An unknown field raises `RestApiFieldsetError` with the stable code
+`REST_API_FIELDSET_INVALID` and HTTP status `400`. The same error is preserved
+for primary resources and included relationships, so transports can classify it
+without parsing error messages.
+
 ### Including Related Resources
 
 Load related resources in a single request:
@@ -2543,6 +2548,8 @@ The library uses standard JSON:API error format:
 ```
 
 ### Custom Error Handling
+
+Typed API errors thrown by getters, setters, computed fields, file detectors, or upload adapters retain their original code and details. For example, throwing `new RestApiResourceError('Upload forbidden', { subtype: 'forbidden' })` from an upload adapter produces a 403 response and still runs temporary-file cleanup.
 
 ```javascript
 // In hooks

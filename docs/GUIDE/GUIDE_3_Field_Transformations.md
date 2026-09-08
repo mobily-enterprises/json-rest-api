@@ -132,7 +132,7 @@ await api.addResource('users', {
 });
 ```
 
-If a setter throws or rejects, the write fails with a validation error and the transaction rolls back instead of storing the untransformed value.
+If a setter throws or rejects, the write fails and the transaction rolls back. Typed API errors retain their code and details; other setter failures become validation errors. Getters and computed fields also propagate typed API errors, including `RestApiTemporalDataError`, so invalid output cannot be silently accepted.
 
 ### Getters - Transform After Retrieval
 
@@ -970,7 +970,7 @@ await api.addResource('posts', {
     title: { type: 'string', required: true },
     content: { type: 'string', required: true },
     author_id: { type: 'number', belongsTo: 'authors', as: 'author' },
-    published_at: { type: 'dateTime', default: 'now()' }
+    published_at: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() }
   },
   tableName: 'posts'
 });
@@ -1064,7 +1064,7 @@ await api.addResource('posts', {
       getter: (value) => value?.trim()
     },
     author_id: { type: 'number', belongsTo: 'authors', as: 'author' },
-    published_at: { type: 'dateTime', default: 'now()' }
+    published_at: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() }
   },
   tableName: 'posts'
 });

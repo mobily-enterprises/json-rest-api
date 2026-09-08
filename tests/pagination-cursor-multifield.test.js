@@ -338,6 +338,10 @@ describe('Multi-field Cursor Pagination', () => {
         ['Newest Product', 'Recent Product']
       )
       assert.deepEqual(
+        firstPage.data.map((record) => record.attributes.createdAt),
+        ['2026-05-03T10:00:00.000Z', '2026-05-03T09:00:00.000Z']
+      )
+      assert.deepEqual(
         secondPage.data.map((record) => record.attributes.name),
         ['Older Product']
       )
@@ -391,9 +395,7 @@ describe('Multi-field Cursor Pagination', () => {
         queryParams: {
           page: {
             size: 4,
-            before: secondPage.meta.pagination.cursor?.next ||
-                    // If no next cursor, create one from the last record
-                    `category:${encodeURIComponent(secondPage.data[0].attributes.category)},name:${encodeURIComponent(secondPage.data[0].attributes.name)},id:${encodeURIComponent(secondPage.data[0].id)}`
+            before: `category:${encodeURIComponent(secondPage.data[0].attributes.category)},name:${encodeURIComponent(secondPage.data[0].attributes.name)},id:${encodeURIComponent(secondPage.data[0].id)}`
           },
           sort: ['category', 'name']
         },

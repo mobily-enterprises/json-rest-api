@@ -13,6 +13,8 @@ import {
   getRequestContracts,
   validateRequestContractOrThrow
 } from '../lib/querying-writing/request-contracts.js'
+import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
+import { isRestApiError } from '../../../lib/error-context.js'
 
 export { normalizeReturnRecordMode as normalizeReturnValue }
 
@@ -582,6 +584,7 @@ export const applyFieldSetters = async (attributes, schemaInfo, context, api, he
         setterContext
       )
     } catch (error) {
+      if (isRestApiError(error)) throw error
       const message = error instanceof Error ? error.message : String(error)
       throw new RestApiValidationError(
         `Setter for field '${fieldName}' failed: ${message}`,
@@ -639,6 +642,7 @@ export async function handleRecordReturnAfterWrite ({
       })
       context.minimalRecord = currentRecord
     } catch (error) {
+      if (isRestApiError(error)) throw error
       enhancedLog.warn(`Could not fetch minimal record after ${context.method} operation`, { error, id: context.id })
     }
   }
@@ -671,6 +675,11 @@ export async function handleRecordReturnAfterWrite ({
     }
     await runHooks('finish')
     await runHooks(`finish${methodSpecificHookSuffix}`)
+    context.responseRecord = normalizeRecordAttributes(context.responseRecord, scopes, {
+      source: 'response',
+      simplified: context.simplified,
+      resourceType: scopeName
+    })
     return context.responseRecord
   }
 
@@ -689,6 +698,12 @@ export async function handleRecordReturnAfterWrite ({
     // Run finish hooks
     await runHooks('finish')
     await runHooks(`finish${methodSpecificHookSuffix}`)
+
+    context.responseRecord = normalizeRecordAttributes(context.responseRecord, scopes, {
+      source: 'response',
+      simplified: context.simplified,
+      resourceType: scopeName
+    })
 
     // No transformation needed - GET already returns the correct format
     // based on context.simplified

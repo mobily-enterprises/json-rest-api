@@ -1,4 +1,5 @@
 import { buildIncludedResources } from './knex-relationship-includes.js'
+import { isRestApiError, wrapUnexpectedError } from '../../../../lib/error-context.js'
 
 /**
  * Processes the ?include= parameter to load related resources efficiently
@@ -143,6 +144,8 @@ export const processIncludes = async (scope, records, deps) => {
 
     return includeResult.included
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     const { log, context } = deps || {}
 
     if (log) {
@@ -157,10 +160,13 @@ export const processIncludes = async (scope, records, deps) => {
       console.error('[PROCESS-INCLUDES] Error processing includes:', error)
     }
 
-    const enhancedError = new Error(
-      `Failed to process includes${context?.scopeName ? ` for scope '${context.scopeName}'` : ''}: ${error.message}`
-    )
-    enhancedError.originalError = error
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to process includes${context?.scopeName ? ` for scope '${context.scopeName}'` : ''}`,
+      context: {
+        scopeName: context?.scopeName,
+        includeParam: context?.queryParams?.include,
+        recordCount: records?.length || 0
+      }
+    })
   }
 }

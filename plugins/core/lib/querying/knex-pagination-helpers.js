@@ -1,5 +1,6 @@
 import { getFieldValue } from '../storage/storage-mapping.js'
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
+import { normalizeDateValue } from '../querying-writing/database-value-normalizers.js'
 
 const buildJsonApiLink = (baseUrl, queryParams, page) => {
   const queryString = serializeJsonApiQuery(queryParams, { page })
@@ -157,7 +158,7 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
 
   if (pageCount !== undefined) {
     links.first = buildJsonApiLink(baseUrl, queryParams, { number: 1, size: pageSize })
-    links.last = buildJsonApiLink(baseUrl, queryParams, { number: pageCount, size: pageSize })
+    links.last = buildJsonApiLink(baseUrl, queryParams, { number: Math.max(1, pageCount), size: pageSize })
 
     if (page > 1) {
       links.prev = buildJsonApiLink(baseUrl, queryParams, { number: page - 1, size: pageSize })
@@ -233,15 +234,28 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
  * 4. Cursor used in 'next' link for fetching subsequent pages
  * 5. Enables efficient "WHERE (field1, field2) > (val1, val2)" queries
  */
-export const createCursor = (record, sortFields = ['id'], { schemaInfo = null } = {}) => {
+export const createCursor = (record, sortFields = ['id'], { schemaInfo = null, definitions = {} } = {}) => {
   const parts = []
   sortFields.forEach(field => {
-    const value = schemaInfo
+    let value = schemaInfo
       ? getFieldValue(record, schemaInfo, field)
       : record[field]
+    const definition = definitions[field] || schemaInfo?.schemaStructure?.[field]
+    if (value === null) {
+      parts.push(`${field}:~null`)
+      return
+    }
+    if (['date', 'dateTime', 'time'].includes(definition?.type) && value != null) {
+      value = normalizeDateValue(value, definition.type, {
+        temporalPrecision: definition.temporalPrecision,
+        fieldName: field,
+        resourceType: schemaInfo?.scopeName || schemaInfo?.tableName,
+        source: 'cursor'
+      })
+    }
     if (value !== undefined) {
       const stringValue = value instanceof Date ? value.toISOString() : String(value)
-      parts.push(`${field}:${encodeURIComponent(stringValue)}`)
+      parts.push(`${field}:${encodeURIComponent(stringValue).replace(/^~/, '%7E')}`)
     }
   })
   return parts.join(',')
@@ -301,7 +315,7 @@ export const createCursor = (record, sortFields = ['id'], { schemaInfo = null } 
  */
 export const parseCursor = (cursor) => {
   try {
-    const data = {}
+    const data = Object.create(null)
     if (!cursor || cursor.trim() === '') {
       throw new Error('Empty cursor')
     }
@@ -321,7 +335,8 @@ export const parseCursor = (cursor) => {
         throw new Error('Invalid cursor format: empty field name')
       }
 
-      data[field] = decodeURIComponent(encodedValue)
+      if (Object.hasOwn(data, field)) throw new Error(`Duplicate cursor field '${field}'`)
+      data[field] = encodedValue === '~null' ? null : decodeURIComponent(encodedValue)
     }
 
     return data
@@ -413,7 +428,7 @@ export const generateCursorPaginationLinks = (
   pageSize,
   hasMore,
   sortFields = ['id'],
-  { schemaInfo = null } = {}
+  { schemaInfo = null, definitions = {} } = {}
 ) => {
   // Allow empty urlPrefix to generate relative links
   if (!records.length) return null
@@ -432,9 +447,10 @@ export const generateCursorPaginationLinks = (
   links.first = buildJsonApiLink(baseUrl, queryParams, { size: pageSize })
 
   if (hasMore && records.length > 0) {
-    const lastRecord = records[records.length - 1]
-    const nextCursor = createCursor(lastRecord, sortFields, { schemaInfo })
-    links.next = buildJsonApiLink(baseUrl, queryParams, { size: pageSize, after: nextCursor })
+    const direction = queryParams.page?.before ? 'before' : 'after'
+    const boundary = direction === 'before' ? records[0] : records[records.length - 1]
+    const nextCursor = createCursor(boundary, sortFields, { schemaInfo, definitions })
+    links.next = buildJsonApiLink(baseUrl, queryParams, { size: pageSize, [direction]: nextCursor })
   }
 
   return links
@@ -497,16 +513,16 @@ export const generateCursorPaginationLinks = (
  * 3. Added to response.meta.pagination
  * 4. Clients can use cursor directly or use the next link
  */
-export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'], { schemaInfo = null } = {}) => {
+export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'], { schemaInfo = null, definitions = {}, before = false } = {}) => {
   const meta = {
     pageSize,
     hasMore
   }
 
   if (hasMore && records.length > 0) {
-    const lastRecord = records[records.length - 1]
+    const lastRecord = before ? records[0] : records[records.length - 1]
     meta.cursor = {
-      next: createCursor(lastRecord, sortFields, { schemaInfo })
+      next: createCursor(lastRecord, sortFields, { schemaInfo, definitions })
     }
   }
 

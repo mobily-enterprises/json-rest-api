@@ -76,12 +76,12 @@ function buildFieldMapJsonSchemaFragment () {
 
 function buildKnownPageSchema () {
   return createSchema({
-    number: { type: 'number' },
-    size: { type: 'number' },
-    limit: { type: 'number' },
-    offset: { type: 'number' },
-    after: { type: 'string' },
-    before: { type: 'string' },
+    number: { type: 'integer', min: 1 },
+    size: { type: 'integer', min: 1 },
+    limit: { type: 'integer', min: 1 },
+    offset: { type: 'integer', min: 0 },
+    after: { type: 'string', min: 1 },
+    before: { type: 'string', min: 1 },
     cursor: { type: 'string' }
   })
 }
@@ -312,6 +312,16 @@ function installRequestContractSupport () {
     if (Object.keys(errors).length > 0) {
       const firstError = pickFirstError(errors)
       context.throwParamError(firstError?.code || 'INVALID_PAGE', firstError?.message || 'Invalid page parameters.')
+    }
+    for (const direction of ['after', 'before']) {
+      if (Object.hasOwn(knownPageParams, direction) && !validatedObject[direction]?.trim()) {
+        context.throwParamError('INVALID_PAGE', `page[${direction}] must contain a cursor.`)
+      }
+    }
+
+    if ((validatedObject.after !== undefined && validatedObject.before !== undefined) ||
+        (validatedObject.number !== undefined && (validatedObject.after !== undefined || validatedObject.before !== undefined))) {
+      context.throwParamError('INVALID_PAGE', 'Use either page[number], page[after], or page[before].')
     }
 
     return {

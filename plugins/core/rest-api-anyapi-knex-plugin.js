@@ -18,7 +18,6 @@ import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './lib/quer
 import {
   normalizeId,
   resolveFieldInfo,
-  coerceValueForDefinition,
   normalizeFilterValues,
   ensureFilterableField,
 } from './lib/anyapi/utils/descriptor-helpers.js'
@@ -48,13 +47,15 @@ import {
   translateCanonicalRecordFromStorage,
 } from './lib/storage/canonical-storage-mapping.js'
 import {
-  buildCursorPredicateChains,
+  applyCursorPredicate,
+  validateCursorValues,
   applyQueryFieldOrder,
   buildEffectiveSortList,
   parseSortEntry
 } from './lib/querying/query-field-sort-helpers.js'
 import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
 import { serializeJsonApiQuery } from './lib/querying-writing/connectors-query-parser.js'
+import { normalizeValueForDatabaseStorage } from './lib/querying-writing/database-value-normalizers.js'
 
 const DEFAULT_TENANT = 'default'
 const LINKS_TABLE = 'any_links'
@@ -237,7 +238,7 @@ export const RestApiAnyapiKnexPlugin = {
       }
     }
 
-    const applySortingToQuery = ({ query, sort, descriptor, scope, queryFieldRuntimeByField = new Map() }) => {
+    const applySortingToQuery = ({ query, sort, descriptor, scope, adapter, before = false, queryFieldRuntimeByField = new Map() }) => {
       const effectiveSort = buildEffectiveSortList(sort, {
         defaultSort: scope?.vars?.defaultSort,
         idField: 'id'
@@ -245,10 +246,11 @@ export const RestApiAnyapiKnexPlugin = {
       const descriptors = []
 
       for (const entry of effectiveSort) {
-        const { field, direction, sqlDirection } = parseSortEntry(entry)
+        const { field, direction } = parseSortEntry(entry)
+        const queryDirection = before ? (direction === 'asc' ? 'desc' : 'asc') : direction
         const queryFieldRuntime = queryFieldRuntimeByField.get(field)
         if (queryFieldRuntime) {
-          applyQueryFieldOrder(query, queryFieldRuntime, sqlDirection)
+          applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), before ? 'first' : 'last')
           descriptors.push({
             field,
             direction,
@@ -261,7 +263,8 @@ export const RestApiAnyapiKnexPlugin = {
 
         const fieldInfo = resolveFieldInfo(descriptor, field)
         if (!fieldInfo?.column) continue
-        query.orderBy(fieldInfo.column, direction)
+        query.orderByRaw(`?? IS NULL ${before ? 'DESC' : 'ASC'}`, [adapter.translateColumn(fieldInfo.column)])
+        query.orderBy(fieldInfo.column, queryDirection)
         descriptors.push({
           field,
           column: fieldInfo.column,
@@ -328,55 +331,21 @@ export const RestApiAnyapiKnexPlugin = {
         }
       }
 
-      const coerceCursorValues = (cursorMap) => {
-        const typed = {}
-        for (const descriptor of descriptors) {
-          if (descriptor.field === undefined) continue
-          const raw = cursorMap[descriptor.field]
-          if (raw === undefined) continue
-          typed[descriptor.field] = coerceValueForDefinition(
-            raw,
-            descriptor.definition,
-            { isRelationship: descriptor.isRelationship }
-          )
-        }
-        return typed
-      }
-
       const applyRawCursorPredicate = (cursorValues, operatorSelector) => {
-        const predicateChains = buildCursorPredicateChains(
+        applyCursorPredicate(
+          query,
           descriptors,
           cursorValues,
           operatorSelector,
-          { onMissingValue: () => {} }
+          (builder, descriptor, operator, value) => builder.where(
+            descriptor.column,
+            operator,
+            normalizeValueForDatabaseStorage(
+              value, descriptor.isRelationship ? null : descriptor.definition?.type,
+              { temporalPrecision: descriptor.definition?.temporalPrecision }
+            )
+          )
         )
-
-        if (predicateChains.length === 0) {
-          return
-        }
-
-        const predicateParts = []
-        const predicateBindings = []
-
-        predicateChains.forEach((chain) => {
-          const chainParts = chain.map(({ descriptor, operator, value }) => {
-            const normalizedValue = adapter?.translateFilterValue
-              ? adapter.translateFilterValue(descriptor.field, value)
-              : value
-            if (descriptor.queryFieldRuntime) {
-              predicateBindings.push(...(descriptor.queryFieldRuntime.bindings || []), normalizedValue)
-              return `(${descriptor.queryFieldRuntime.sql}) ${operator} ?`
-            }
-
-            const columnRef = adapter ? adapter.translateColumn(descriptor.column) : descriptor.column
-            predicateBindings.push(normalizedValue)
-            return `${columnRef} ${operator} ?`
-          })
-
-          predicateParts.push(`(${chainParts.join(' AND ')})`)
-        })
-
-        query.whereRaw(`(${predicateParts.join(' OR ')})`, predicateBindings)
       }
 
       const ensurePageSize = () => {
@@ -414,11 +383,11 @@ export const RestApiAnyapiKnexPlugin = {
 
         if (pageParams.after) {
           const cursorMap = parseCursorOrThrow(pageParams.after, 'after')
-          const cursorValues = coerceCursorValues(cursorMap)
+          const cursorValues = validateCursorValues(descriptors, cursorMap, 'after')
           applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'))
         } else if (pageParams.before) {
           const cursorMap = parseCursorOrThrow(pageParams.before, 'before')
-          const cursorValues = coerceCursorValues(cursorMap)
+          const cursorValues = validateCursorValues(descriptors, cursorMap, 'before')
           applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'))
         }
 
@@ -445,11 +414,11 @@ export const RestApiAnyapiKnexPlugin = {
         }
       }
 
-      query.limit(defaultLimit)
+      query.limit(Math.min(defaultLimit, maxLimit))
       return {
         mode: 'default',
         page: 1,
-        pageSize: defaultLimit,
+        pageSize: Math.min(defaultLimit, maxLimit),
         sortDescriptors: descriptors,
       }
     }
@@ -2186,6 +2155,8 @@ export const RestApiAnyapiKnexPlugin = {
         sort: queryParams.sort,
         descriptor,
         scope,
+        adapter,
+        before: Boolean(queryParams.page?.before),
         queryFieldRuntimeByField: selectionState.queryFieldRuntimeByField
       })
 
@@ -2221,6 +2192,10 @@ export const RestApiAnyapiKnexPlugin = {
           hasMore = true
           rows = rows.slice(0, pageSize)
           cursorRecords = cursorRecords.slice(0, pageSize)
+        }
+        if (queryParams.page?.before) {
+          rows.reverse()
+          cursorRecords.reverse()
         }
       }
 
@@ -2313,14 +2288,17 @@ export const RestApiAnyapiKnexPlugin = {
         )
       } else if (paginationInfo.mode === 'cursor' && cursorRecords) {
         const cursorFields = paginationInfo.sortDescriptors.map((descriptorEntry) => descriptorEntry.field)
+        const cursorOptions = {
+          schemaInfo,
+          definitions: Object.fromEntries(paginationInfo.sortDescriptors.map(({ field, definition }) => [field, definition])),
+          before: Boolean(queryParams.page?.before)
+        }
         const paginationMeta = buildCursorMeta(
           cursorRecords,
           paginationInfo.pageSize,
           hasMore,
           cursorFields,
-          {
-            schemaInfo
-          }
+          cursorOptions
         )
         context.returnMeta.paginationMeta = paginationMeta
         const urlPrefix = getUrlPrefix(context, scope)
@@ -2332,9 +2310,7 @@ export const RestApiAnyapiKnexPlugin = {
           paginationInfo.pageSize,
           hasMore,
           cursorFields,
-          {
-            schemaInfo
-          }
+          cursorOptions
         )
       }
 

@@ -13,7 +13,7 @@ await api.addResource('posts', {
     content: { type: 'string', required: true },
     view_count: { type: 'number', default: 0, indexed: true },
     published_at: { type: 'dateTime', indexed: true },
-    created_at: { type: 'dateTime', defaultTo: Date.now, indexed: true }
+    created_at: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString(), indexed: true }
   },
   relationships: {
     comments: { 
@@ -54,7 +54,7 @@ await api.addResource('comments', {
   schema: {
     content: { type: 'string', required: true },
     author_name: { type: 'string', required: true, max: 100 },
-    created_at: { type: 'dateTime', defaultTo: Date.now, indexed: true },
+    created_at: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString(), indexed: true },
     likes: { type: 'number', default: 0, indexed: true },
     post_id: { type: 'id', belongsTo: 'posts', as: 'post', required: true }
   },
@@ -95,6 +95,8 @@ await api.resources.post_tags.createKnexTable();
 ```
 
 **Basic Pagination**
+
+When `sortableFields` is omitted or empty, visible stored schema fields and relationship aliases can be sorted. Query fields marked `sortable: true` are added to that set. Unknown fields and ordinary computed fields are rejected with 422. If a sort field is repeated, its first occurrence determines the direction.
 
 The API supports two types of pagination:
 
@@ -671,6 +673,13 @@ Next multiField page: {
 
 **Cursor Pagination Notes:**
 - Cursors are simple strings containing the sort field values (format: `field:value,field2:value2`)
+- Sparse fieldsets may omit sort fields from the response; the Knex query still fetches those values internally to construct a complete cursor.
+- A cursor missing any active sort field is rejected with a validation error. Keep the same sort order when following a cursor.
+- Cursor values are validated against the sort field types. Invalid dates, numbers, or duplicate cursor fields produce HTTP 422.
+- `page[size]` and `page[number]` must be positive integers. Choose one of `page[number]`, `page[after]`, or `page[before]`; these cannot be combined.
+- Null sort values appear last in either sort direction. Generated cursors distinguish null from the literal string `"null"`; treat cursor strings as opaque values.
+- `page[before]` returns the adjacent preceding records in the requested sort order. Use a cursor for the first record of the current page to step back. When a backward response has more preceding records, its `links.next` and `meta.pagination.cursor.next` continue in the `before` direction.
+- Requested page sizes above `queryMaxLimit` are capped consistently for returned records, pagination metadata, and links.
 - The API automatically generates appropriate WHERE clauses based on sort direction
 - Cursor pagination is more efficient for large datasets as it doesn't need to count all records
 - Works seamlessly with any sort field, not just timestamps

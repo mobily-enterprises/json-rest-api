@@ -1,3 +1,8 @@
+import {
+  REST_API_FIELDSET_ERROR_CODE,
+  REST_API_TEMPORAL_DATA_ERROR_CODE
+} from '../../../../lib/rest-api-errors.js'
+
 const JSON_API_WRITE_CONTENT_TYPES = [
   'application/vnd.api+json',
   'application/json'
@@ -63,6 +68,22 @@ export function mapRestApiErrorToHttp (error) {
       detail: issue.message,
       ...(issue.instancePath ? { source: { pointer: issue.instancePath } } : {})
     }))
+  } else if (error.code === REST_API_FIELDSET_ERROR_CODE) {
+    status = 400
+    errors = [{
+      status: '400',
+      code: error.code,
+      title: 'Invalid Sparse Fieldset',
+      detail: error.message
+    }]
+  } else if (error.code === REST_API_TEMPORAL_DATA_ERROR_CODE) {
+    status = 500
+    errors = [{
+      status: '500',
+      code: error.code,
+      title: 'Invalid Temporal Data',
+      detail: error.message
+    }]
   } else if (error.code === 'REST_API_VALIDATION') {
     status = 422
     if (error.details?.violations?.length) {

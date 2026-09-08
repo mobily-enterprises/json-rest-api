@@ -127,9 +127,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
       simplified: false,
     })
 
-    const beforeCursor =
-      secondPage.meta.pagination.cursor?.next ||
-      `id:${encodeURIComponent(secondPage.data[0].id)}`
+    const beforeCursor = `id:${encodeURIComponent(secondPage.data[0].id)}`
 
     const previousPage = await api.resources.books.query({
       queryParams: {

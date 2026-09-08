@@ -1,3 +1,5 @@
+import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+
 export const translateCanonicalAttributesForStorage = (attributes = {}, descriptor = {}) => {
   const row = {}
 
@@ -8,7 +10,15 @@ export const translateCanonicalAttributesForStorage = (attributes = {}, descript
     if (slot.slotType === 'belongsTo') {
       row[slot.slot] = value == null ? null : String(value)
     } else {
-      row[slot.slot] = value
+      row[slot.slot] = normalizeValueForDatabaseStorage(
+        value,
+        descriptor.schema?.[fieldName]?.type,
+        {
+          temporalPrecision: descriptor.schema?.[fieldName]?.temporalPrecision,
+          fieldName,
+          resourceType: descriptor.resource
+        }
+      )
     }
 
     if (slot.slotType === 'belongsTo') {

@@ -58,6 +58,63 @@ async function withTenantContext (tenantId, fn) {
   }
 }
 
+export async function createTemporalBoundaryApi (knex) {
+  const api = new Api({ name: 'temporal-boundaries', log: { level: 'error' } })
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false,
+    returnRecordApi: { post: 'full', put: 'full', patch: 'full' },
+    queryDefaultLimit: 2,
+    queryMaxLimit: 3
+  })
+  await api.use(QueryProjectionsPlugin)
+  await useStoragePlugin(api, knex)
+  const producedAt = {
+    type: 'dateTime', temporalPrecision: 0, computed: true,
+    compute: () => new Date('2026-09-08T01:02:03.456Z')
+  }
+  await api.addResource('people', {
+    schema: { id: { type: 'id' }, name: { type: 'string' }, producedAt },
+    relationships: { events: { type: 'hasMany', target: 'events', foreignKey: 'personId' } },
+    tableName: 'temporal_people'
+  })
+  await api.resources.people.createKnexTable()
+  mapTable('temporal_people', 'people')
+  await api.addResource('events', {
+    sortableFields: ['id', 'name', 'occurredAt', 'day', 'atTime', 'observedAtMs'],
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true },
+      occurredAt: { type: 'dateTime', temporalPrecision: 6, nullable: true, search: true },
+      day: { type: 'date', nullable: true, search: true },
+      atTime: { type: 'time', temporalPrecision: 3, nullable: true, search: true },
+      observedAtMs: { type: 'epochMilliseconds', nullable: true, search: true },
+      observedAtSeconds: { type: 'epochSeconds', nullable: true, search: true },
+      serializedAt: {
+        type: 'dateTime', temporalPrecision: 6, nullable: true, search: true,
+        storage: { serialize: value => value == null ? null : value.replace('T', ' ').replace(/Z$/, '') }
+      },
+      personId: { type: 'id', belongsTo: 'people', as: 'person', nullable: true },
+      subjectId: { type: 'number', nullable: true },
+      subjectType: { type: 'string', nullable: true },
+      producedAt
+    },
+    queryFields: {
+      projectedAt: {
+        type: 'dateTime', temporalPrecision: 3, sortable: true,
+        select: ({ knex, column }) => knex.raw('??', [column('occurredAt')])
+      }
+    },
+    relationships: {
+      subject: { belongsToPolymorphic: { types: ['people'], typeField: 'subjectType', idField: 'subjectId' } }
+    },
+    tableName: 'temporal_events'
+  })
+  await api.resources.events.createKnexTable()
+  mapTable('temporal_events', 'events')
+  return api
+}
+
 /**
  * Creates a basic API configuration with Countries, Publishers, Authors, Books
  */
@@ -332,6 +389,68 @@ export async function createCamelCaseBelongsToApi (knex, pluginOptions = {}) {
   await api.resources.publishers.createKnexTable()
 
   return api
+}
+
+export async function createRelationshipIncludeStorageAdapterApi (knex) {
+  const api = new Api({
+    name: 'relationship-include-storage-adapter-test',
+    log: { level: process.env.LOG_LEVEL || 'info' }
+  })
+
+  await api.use(RestApiPlugin, {
+    simplifiedApi: false,
+    simplifiedTransport: false
+  })
+  await api.use(RestApiKnexPlugin, { knex })
+
+  await knex.schema.createTable('uninitialized_pets', table => {
+    table.increments('id').primary()
+    table.string('first_name').notNullable()
+    table.string('last_name').notNullable()
+  })
+  await knex.schema.createTable('uninitialized_bookings', table => {
+    table.increments('id').primary()
+    table.string('reference').notNullable()
+    table.integer('pet_id').notNullable()
+  })
+
+  await api.addResource('pets', {
+    schema: {
+      id: { type: 'id' },
+      firstName: { type: 'string', required: true },
+      lastName: { type: 'string', required: true }
+    },
+    tableName: 'uninitialized_pets'
+  })
+
+  await api.addResource('bookings', {
+    schema: {
+      id: { type: 'id' },
+      reference: { type: 'string', required: true },
+      petId: {
+        type: 'id',
+        required: true,
+        belongsTo: 'pets',
+        as: 'pet'
+      }
+    },
+    tableName: 'uninitialized_bookings'
+  })
+
+  return api
+}
+
+export async function seedRelationshipIncludeStorageAdapterApi (knex) {
+  await knex('uninitialized_pets').insert({
+    id: 7,
+    first_name: 'Coco',
+    last_name: 'Spaniel'
+  })
+  await knex('uninitialized_bookings').insert({
+    id: 41,
+    reference: 'BOOK-41',
+    pet_id: 7
+  })
 }
 
 /**
@@ -641,7 +760,7 @@ export async function createExtendedApi (knex) {
         title: { type: 'string', max: 200 },
         content: { type: 'string', required: true, max: 5000 },
         reviewer_name: { type: 'string', required: true, max: 100 },
-        review_date: { type: 'dateTime', default: 'now()' },
+        review_date: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
         helpful_count: { type: 'number', default: 0 },
         reviewable_type: { type: 'string', required: true },
         reviewable_id: { type: 'number', required: true }
@@ -976,6 +1095,18 @@ export async function createComputedFieldsApi (knex, pluginOptions = {}) {
           compute: ({ attributes }) => {
             return Number((attributes.price - attributes.cost).toFixed(2))
           }
+        },
+        calculated_at: {
+          type: 'dateTime',
+          temporalPrecision: 0,
+          computed: true,
+          compute: () => new Date('2026-08-25T23:45:01.987Z')
+        },
+        calculated_time: {
+          type: 'time',
+          temporalPrecision: 3,
+          computed: true,
+          compute: () => new Date('2026-08-25T23:45:01.987Z')
         }
       },
       relationships: {
@@ -1016,6 +1147,12 @@ export async function createComputedFieldsApi (knex, pluginOptions = {}) {
             const helpfulnessScore = (attributes.helpful_votes / attributes.total_votes) * 100
             return helpfulnessScore > 70 && attributes.spam_score < 0.5
           }
+        },
+        calculated_at: {
+          type: 'dateTime',
+          temporalPrecision: 0,
+          computed: true,
+          compute: () => new Date('2026-08-25T23:46:02.654Z')
         }
       },
       tableName: 'test_reviews'
@@ -2090,7 +2227,7 @@ export async function createCustomIdPropertyApi (knex, pluginOptions = {}) {
       title: { type: 'string', max: 200 },
       content: { type: 'string', required: true, max: 5000 },
       reviewer_name: { type: 'string', required: true, max: 100 },
-      review_date: { type: 'dateTime', default: 'now()' },
+      review_date: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
       reviewable_type: { type: 'string', required: true, search: true },
       reviewable_id: { type: 'number', required: true },
       // Define the polymorphic field in schema
@@ -2164,7 +2301,7 @@ export async function createCursorPaginationApi (knex) {
       price: { type: 'number', required: true },
       sku: { type: 'string', required: true, max: 50, unique: true },
       status: { type: 'string', max: 50, default: 'active' },
-      createdAt: { type: 'dateTime', default: 'now()' }
+      createdAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() }
     },
     tableName: 'cursor_products'
   })

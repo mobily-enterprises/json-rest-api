@@ -1,6 +1,7 @@
 import {
   getFieldValue as getLegacyFieldValue,
   getIdColumn,
+  getStorageInfo,
   getStorageColumn,
   translateAttributesForStorage,
 } from './storage-mapping.js'
@@ -9,7 +10,7 @@ import {
   getCanonicalResourceIdColumn,
   translateCanonicalAttributesForStorage,
 } from './canonical-storage-mapping.js'
-import { normalizeDateValue } from '../querying-writing/database-value-normalizers.js'
+import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
 
 const passthrough = (value) => value
 const identityTranslate = (_field, value) => value
@@ -77,7 +78,9 @@ const normalizeFilterValueForDefinition = (value, definition = {}, { isRelations
   }
 
   if (['date', 'dateTime', 'time'].includes(type)) {
-    return normalizeDateValue(value, type)
+    return normalizeValueForDatabaseStorage(value, type, {
+      temporalPrecision: definition?.temporalPrecision
+    })
   }
 
   return value
@@ -175,7 +178,20 @@ const createLegacyAdapter = ({ knex, schemaInfo }) => {
   const getFieldValue = (record, fieldName) => getLegacyFieldValue(record, schemaInfo, fieldName)
   const translateFilterValue = (field, value) => {
     const searchField = schemaInfo.searchSchemaStructure?.[field]
-    const schemaField = schemaInfo.schemaStructure?.[field]
+    const fieldName = searchField?.actualField || field
+    const schemaField = schemaInfo.schemaStructure?.[fieldName]
+    const fieldStorage = getStorageInfo(schemaInfo).fields[fieldName]
+    if (fieldStorage?.serialize) {
+      const serialize = (entry) => fieldStorage.serialize(entry, {
+        fieldName,
+        columnName: fieldStorage.column,
+        definition: fieldStorage.definition,
+        schemaInfo,
+        context: null,
+        operation: 'filter'
+      })
+      return Array.isArray(value) ? value.map(serialize) : serialize(value)
+    }
     const definition = searchField || schemaField || {}
     const isRelationship = Boolean(
       searchField?.isRelationship ||

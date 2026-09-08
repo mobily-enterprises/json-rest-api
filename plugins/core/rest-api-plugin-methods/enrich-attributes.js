@@ -1,4 +1,5 @@
 import { filterHiddenFields } from '../lib/querying-writing/field-utils.js'
+import { isRestApiError } from '../../../lib/error-context.js'
 
 /**
  * enrichAttributes
@@ -64,6 +65,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
           getterContext
         )
       } catch (error) {
+        if (isRestApiError(error)) throw error
         console.error(`Error in getter for field '${fieldName}' in ${scopeName}:`, error)
         // Keep current value on error (don't break the whole request)
       }
@@ -144,6 +146,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
         // and returns: ((100 - 60) / 100 * 100) = "40.00"
         filteredAttributes[fieldName] = await fieldDef.compute(computeContext)
       } catch (error) {
+        if (isRestApiError(error)) throw error
         // Log error but don't fail the request - computed fields shouldn't break API
         console.error(`Error computing field '${fieldName}' for ${scopeName}:`, error)
         filteredAttributes[fieldName] = null

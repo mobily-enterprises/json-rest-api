@@ -1,6 +1,6 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
-import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
+import { getRequestedComputedFields, validateRequestedFieldsets } from '../lib/querying-writing/knex-field-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
@@ -106,6 +106,7 @@ export default async function getMethod ({
     originalContext: context,
   })
 
+  await validateRequestedFieldsets(context, scopes)
   await runHooks('beforeData')
   await runHooks('beforeDataGet')
 
@@ -180,6 +181,12 @@ export default async function getMethod ({
   // The called hooks should NOT change context.record
   await runHooks('finish')
   await runHooks('finishGet')
+
+  // Enrichers and finish hooks run after the database pass and may introduce
+  // native values. Reassert the public temporal contract at the return boundary.
+  context.record = normalizeRecordAttributes(context.record, scopes, {
+    source: 'response'
+  })
 
   // Get schema info for transformation
   context.schemaInfo = scopes[scopeName].vars.schemaInfo

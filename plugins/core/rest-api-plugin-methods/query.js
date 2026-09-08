@@ -1,5 +1,5 @@
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
-import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
+import { getRequestedComputedFields, validateRequestedFieldsets } from '../lib/querying-writing/knex-field-helpers.js'
 import { getEffectiveSortableFields } from '../lib/querying/query-field-sort-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
@@ -90,6 +90,7 @@ export default async function queryMethod ({
     originalContext: context,
   })
 
+  await validateRequestedFieldsets(context, scopes)
   await runHooks('beforeData')
   await runHooks('beforeDataQuery')
   context.record = await helpers.dataQuery({
@@ -153,6 +154,12 @@ export default async function queryMethod ({
   // The called hooks should NOT change context.record
   await runHooks('finish')
   await runHooks('finishQuery')
+
+  // Enrichers and finish hooks run after the database pass and may introduce
+  // native values. Reassert the public temporal contract at the return boundary.
+  context.record = normalizeRecordAttributes(context.record, scopes, {
+    source: 'response'
+  })
 
   // Transform output if in simplified mode
   if (context.simplified) {

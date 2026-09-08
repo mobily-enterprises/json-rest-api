@@ -4,6 +4,23 @@ import knexLib from 'knex'
 import { cleanTables } from './helpers/test-utils.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { createComputedFieldsApi } from './fixtures/api-configs.js'
+import {
+  REST_API_FIELDSET_ERROR_CODE,
+  RestApiFieldsetError
+} from '../index.js'
+import { mapRestApiErrorToHttp } from '../plugins/core/connectors/lib/transport-http-helpers.js'
+
+function assertFieldsetError (error, { field, resourceType }) {
+  assert(error instanceof RestApiFieldsetError)
+  assert.equal(error.code, REST_API_FIELDSET_ERROR_CODE)
+  assert.equal(error.statusCode, 400)
+  assert.deepEqual(error.details, { field, resourceType })
+  assert.equal(
+    error.message,
+    `Unknown sparse field '${field}' requested for '${resourceType}'`
+  )
+  return true
+}
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -69,10 +86,29 @@ describe('Computed Fields and Sparse Fieldsets', () => {
       assert.equal(product.price, 99.99)
       assert.equal(product.profit_margin, 55.00)
       assert.equal(product.profit_amount, 54.99)
+      assert.equal(product.calculated_at, '2026-08-25T23:45:01Z')
+      assert.equal(product.calculated_time, '23:45:01.987')
 
       // normallyHidden fields should not be included
       assert.equal(product.cost, undefined)
       assert.equal(product.internal_notes, undefined)
+    })
+
+    it('should normalize computed temporal values at the final return boundary', async () => {
+      const product = await api.resources.products.get({
+        id: testData.product.id,
+        queryParams: { include: ['reviews'] }
+      })
+      assert.equal(product.calculated_at, '2026-08-25T23:45:01Z')
+      assert.equal(product.calculated_time, '23:45:01.987')
+      assert.equal(product.reviews.length, 2)
+      for (const review of product.reviews) {
+        assert.equal(review.calculated_at, '2026-08-25T23:46:02Z')
+      }
+
+      const products = await api.resources.products.query()
+      assert.equal(products.data[0].calculated_at, '2026-08-25T23:45:01Z')
+      assert.equal(products.data[0].calculated_time, '23:45:01.987')
     })
 
     it('should handle division by zero in computed fields', async () => {
@@ -115,6 +151,8 @@ describe('Computed Fields and Sparse Fieldsets', () => {
       assert.equal(product.id, testData.product.id)
       assert.equal(product.name, 'Premium Widget')
       assert.equal(product.profit_margin, 55.00)
+      assert.equal(product.calculated_at, undefined)
+      assert.equal(product.calculated_time, undefined)
 
       // Other fields should not be included
       assert.equal(product.price, undefined)
@@ -365,7 +403,10 @@ describe('Computed Fields and Sparse Fieldsets', () => {
             fields: { products: 'name,unknown_field' }
           }
         }),
-        /Unknown sparse field 'unknown_field'/
+        (error) => assertFieldsetError(error, {
+          field: 'unknown_field',
+          resourceType: 'products'
+        })
       )
     })
 
@@ -377,8 +418,55 @@ describe('Computed Fields and Sparse Fieldsets', () => {
             fields: { products: 'name,reviews_ids' }
           }
         }),
-        /Unknown sparse field 'reviews_ids'/
+        (error) => assertFieldsetError(error, {
+          field: 'reviews_ids',
+          resourceType: 'products'
+        })
       )
+    })
+
+    it('should preserve fieldset errors from empty included relationships', async () => {
+      const productWithoutReviews = await api.resources.products.post({
+        name: 'No Reviews',
+        price: 25,
+        cost: 10
+      })
+
+      await assert.rejects(
+        api.resources.products.get({
+          id: productWithoutReviews.id,
+          queryParams: {
+            include: ['reviews'],
+            fields: {
+              products: 'name',
+              reviews: 'definitelyHidden'
+            }
+          }
+        }),
+        (error) => assertFieldsetError(error, {
+          field: 'definitelyHidden',
+          resourceType: 'reviews'
+        })
+      )
+    })
+
+    it('should map fieldset errors to an HTTP 400 response', () => {
+      const error = new RestApiFieldsetError({
+        field: 'definitelyHidden',
+        resourceType: 'reviews'
+      })
+
+      assert.deepEqual(mapRestApiErrorToHttp(error), {
+        status: 400,
+        body: {
+          errors: [{
+            status: '400',
+            code: REST_API_FIELDSET_ERROR_CODE,
+            title: 'Invalid Sparse Fieldset',
+            detail: "Unknown sparse field 'definitelyHidden' requested for 'reviews'"
+          }]
+        }
+      })
     })
   })
 

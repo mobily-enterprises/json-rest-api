@@ -219,8 +219,9 @@ export const TYPE_TO_POOL = new Map([
   ['date', 'date'],
   ['datetime', 'date'],
   ['dateTime', 'date'],
-  ['timestamp', 'date'],
   ['time', 'date'],
+  ['epochMilliseconds', 'number'],
+  ['epochSeconds', 'number'],
   ['json', 'json'],
   ['object', 'json'],
 ])

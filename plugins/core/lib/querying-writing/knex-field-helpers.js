@@ -1,6 +1,16 @@
 import { buildQuerySelection } from '../querying/knex-query-helpers-base.js'
 import { createSelectTranslator } from '../storage/storage-adapter.js'
 import { buildQueryFieldRuntimes } from './query-field-helpers.js'
+import { RestApiFieldsetError } from '../../../../lib/rest-api-errors.js'
+
+export const validateRequestedFieldsets = async (context, scopes) => {
+  for (const scopeName of Object.keys(context.queryParams?.fields || {})) {
+    if (!scopes[scopeName]?.vars?.schemaInfo) continue
+    await buildFieldSelection(scopes[scopeName], {
+      context: { scopeName, queryParams: { fields: context.queryParams.fields } }
+    })
+  }
+}
 
 /**
  * Checks if a field exists only in code, not in the database
@@ -211,7 +221,12 @@ export const buildFieldSelection = async (scope, deps) => {
       if (nonDatabaseFields.has(field)) return
 
       const fieldDef = schemaStructure[field]
-      if (!fieldDef) throw new Error(`Unknown sparse field '${field}' requested for '${scopeName}'`)
+      if (!Object.hasOwn(schemaStructure, field) || !fieldDef) {
+        throw new RestApiFieldsetError({
+          field,
+          resourceType: scopeName
+        })
+      }
 
       if (fieldDef.belongsToPolymorphic) {
         return
@@ -319,6 +334,11 @@ export const buildFieldSelection = async (scope, deps) => {
 
     if (queryFieldNames.has(normalizedField)) {
       queryFieldsToSelect.add(normalizedField)
+    } else if (schemaStructure[normalizedField] &&
+               schemaStructure[normalizedField].hidden !== true &&
+               !nonDatabaseFields.has(normalizedField)) {
+      // Cursor generation needs sort values even when the response omits them.
+      fieldsToSelect.add(normalizedField)
     }
   }
 

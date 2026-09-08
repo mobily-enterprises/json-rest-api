@@ -1,132 +1,231 @@
-/**
- * Normalizes a date value to appropriate format based on field type
- *
- * @param {*} value - The date value from the database
- * @param {string} type - The field type ('date', 'dateTime', or 'time')
- * @returns {Date|string|null} Date object for date/dateTime, string for time, or null
- *
- * @example
- * // Input: Already a Date object
- * normalizeDateValue(new Date('2024-01-15T10:30:00Z'), 'dateTime');
- * // Output: Date object (unchanged)
- *
- * @example
- * // Input: MySQL datetime string without timezone
- * normalizeDateValue('2024-01-15 10:30:00', 'dateTime');
- * // Output: Date object parsed as UTC (2024-01-15T10:30:00Z)
- *
- * @example
- * // Input: Date-only string
- * normalizeDateValue('2024-01-15', 'date');
- * // Output: Date object at UTC midnight (2024-01-15T00:00:00Z)
- *
- * @example
- * // Input: Time field (always returns string)
- * normalizeDateValue('14:30:45', 'time');
- * // Output: "14:30:45" (string)
- *
- * @example
- * // Input: Date object for time field
- * normalizeDateValue(new Date('2024-01-15T14:30:45Z'), 'time');
- * // Output: "14:30:45" (extracts time portion)
- *
- * @description
- * Used by:
- * - normalizeAttributes to process individual field values
- * - Applied to all date/time fields fetched from database
- *
- * Purpose:
- * - Handles database-specific date formats (especially MySQL)
- * - Prevents timezone shifts for date-only fields
- * - Ensures consistent Date objects across databases
- * - Keeps time fields as HH:MM:SS strings
- *
- * Data flow:
- * 1. Checks for null/undefined (returns null)
- * 2. For time fields: ensures HH:MM:SS string format
- * 3. For date/dateTime: converts to Date objects
- * 4. Handles MySQL datetime format (no T separator)
- * 5. Forces UTC interpretation to prevent timezone issues
- */
-export function normalizeDateValue (value, type) {
-  // Handle null/undefined
-  if (value === null || value === undefined) {
-    return null
-  }
+import { createSchema } from 'json-rest-schema'
+import { RestApiTemporalDataError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
-  // Handle time type specially - always return as string
-  if (type === 'time') {
-    // If it's already a properly formatted time string, return as-is
-    if (typeof value === 'string' && /^\d{2}:\d{2}:\d{2}/.test(value)) {
-      return value
+const DATE_VALUE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const RFC3339_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/
+const SQL_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2}) ((?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?)$/
+const INTEGER_VALUE_PATTERN = /^-?\d+$/
+const temporalContractCache = new Map()
+
+const limitFractionalSecondPrecision = (value, temporalPrecision) => {
+  if (!Number.isInteger(temporalPrecision)) return value
+
+  return value.replace(
+    /(\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z)?$/,
+    (_match, wholeSeconds, fraction = '', utcSuffix = '') => {
+      const limitedFraction = fraction.slice(0, temporalPrecision)
+      return `${wholeSeconds}${limitedFraction ? `.${limitedFraction}` : ''}${utcSuffix}`
     }
-    // If we got a Date object for a time field, extract the time portion
-    if (value instanceof Date) {
-      return value.toISOString().slice(11, 19) // Extract HH:MM:SS
-    }
-    // Try to parse and extract time
-    if (typeof value === 'string' || typeof value === 'number') {
-      const d = new Date(value)
-      if (!isNaN(d.getTime())) {
-        return d.toISOString().slice(11, 19)
+  )
+}
+
+const getTemporalContract = (type, temporalPrecision) => {
+  const cacheKey = `${type}:${Number.isInteger(temporalPrecision) ? temporalPrecision : 'default'}`
+  if (!temporalContractCache.has(cacheKey)) {
+    temporalContractCache.set(cacheKey, createSchema({
+      value: {
+        type,
+        ...(Number.isInteger(temporalPrecision) ? { temporalPrecision } : {})
       }
-    }
-    return null
+    }))
+  }
+  return temporalContractCache.get(cacheKey)
+}
+
+const throwTemporalDataError = ({ fieldName, resourceType, type, source }) => {
+  throw new RestApiTemporalDataError({
+    field: fieldName,
+    resourceType,
+    fieldType: type,
+    source
+  })
+}
+
+const validateTemporalJsonValue = (value, type, {
+  temporalPrecision,
+  fieldName,
+  resourceType,
+  source
+} = {}) => {
+  const { validatedObject, errors } = getTemporalContract(type, temporalPrecision).patch({ value })
+  if (Object.keys(errors).length > 0) {
+    throwTemporalDataError({ fieldName, resourceType, type, source })
+  }
+  return validatedObject.value
+}
+
+const parseEpochDatabaseValue = (value) => {
+  let epochValue = null
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    epochValue = value
+  } else if (typeof value === 'bigint') {
+    epochValue = Number(value)
+  } else if (typeof value === 'string' && INTEGER_VALUE_PATTERN.test(value.trim())) {
+    epochValue = Number(value.trim())
   }
 
-  // For date and dateTime: Already a Date object? Return as-is
+  if (!Number.isSafeInteger(epochValue)) return null
+  const parsed = new Date(epochValue)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+const parseKnownDatabaseDate = (value, { fieldName, resourceType, type, source }) => {
   if (value instanceof Date) {
-    return value
+    if (!Number.isNaN(value.getTime())) return value.toISOString()
+    throwTemporalDataError({ fieldName, resourceType, type, source })
   }
 
-  // Handle string values
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
+  const epochDate = parseEpochDatabaseValue(value)
+  if (epochDate) return epochDate.toISOString()
 
-    if (/^-?\d+$/.test(trimmed)) {
-      const numericDate = new Date(Number(trimmed))
-      if (!isNaN(numericDate.getTime())) {
-        return numericDate
-      }
+  if (typeof value !== 'string') {
+    throwTemporalDataError({ fieldName, resourceType, type, source })
+  }
+
+  const trimmed = value.trim()
+  const sqlMatch = SQL_DATETIME_PATTERN.exec(trimmed)
+  const rfc3339Match = RFC3339_DATETIME_PATTERN.exec(trimmed)
+  let dateTimeValue = null
+
+  if (sqlMatch) {
+    dateTimeValue = `${sqlMatch[1]}T${sqlMatch[2]}Z`
+  } else if (rfc3339Match) {
+    dateTimeValue = trimmed
+  }
+
+  if (!dateTimeValue) {
+    throwTemporalDataError({ fieldName, resourceType, type, source })
+  }
+
+  validateTemporalJsonValue(dateTimeValue, 'dateTime', {
+    fieldName,
+    resourceType,
+    source
+  })
+  const parsed = new Date(dateTimeValue)
+  if (Number.isNaN(parsed.getTime())) {
+    throwTemporalDataError({ fieldName, resourceType, type, source })
+  }
+  // Date handles the offset, but cannot retain digits beyond milliseconds.
+  const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/.exec(dateTimeValue)?.[1]
+  return fraction
+    ? parsed.toISOString().replace(/\.\d{3}Z$/, `.${fraction}Z`)
+    : parsed.toISOString()
+}
+
+/**
+ * Converts a database temporal value to the public JSON representation used by
+ * json-rest-schema: YYYY-MM-DD for date, RFC 3339 for dateTime, and an
+ * offset-free string for time.
+ */
+export function normalizeDateValue (value, type, {
+  temporalPrecision,
+  fieldName,
+  resourceType,
+  source = 'database'
+} = {}) {
+  if (value === null || value === undefined) return null
+
+  if (type === 'time') {
+    let timeValue = null
+    if (typeof value === 'string') {
+      timeValue = limitFractionalSecondPrecision(value.trim(), temporalPrecision)
     }
-
-    // Detect MySQL datetime format: 'YYYY-MM-DD HH:MM:SS'
-    // These have no T separator and no timezone indicator
-    const isMySQLDateTime = type === 'dateTime' &&
-                           /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(trimmed) &&
-                           !trimmed.includes('T') &&
-                           !trimmed.includes('Z') &&
-                           !trimmed.includes('+') &&
-                           !trimmed.includes('-', 10) // Don't match date separators
-
-    if (isMySQLDateTime) {
-      // Convert to ISO format and force UTC interpretation
-      // '2024-01-15 10:30:00' becomes '2024-01-15T10:30:00Z'
-      return new Date(trimmed.replace(' ', 'T') + 'Z')
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      timeValue = limitFractionalSecondPrecision(value.toISOString().slice(11, -1), temporalPrecision)
     }
+    return validateTemporalJsonValue(timeValue, type, {
+      temporalPrecision,
+      fieldName,
+      resourceType,
+      source
+    })
+  }
 
-    // For date-only fields, ensure parsing at UTC midnight
-    // This prevents timezone shifts when parsing dates
-    if (type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      return new Date(trimmed + 'T00:00:00Z')
+  if (type === 'date' && typeof value === 'string' && DATE_VALUE_PATTERN.test(value.trim())) {
+    return validateTemporalJsonValue(value.trim(), type, {
+      fieldName,
+      resourceType,
+      source
+    })
+  }
+
+  const isoValue = parseKnownDatabaseDate(value, { fieldName, resourceType, type, source })
+  const normalized = type === 'date'
+    ? isoValue.slice(0, 10)
+    : limitFractionalSecondPrecision(isoValue, temporalPrecision)
+  return validateTemporalJsonValue(normalized, type, {
+    temporalPrecision,
+    fieldName,
+    resourceType,
+    source
+  })
+}
+
+/**
+ * Converts validated JSON temporal values to the native values expected by
+ * database drivers. JSON schema validation keeps date and dateTime values as
+ * strings; database writes and comparisons must normalize them consistently.
+ * Time values remain strings because database drivers accept their wire shape.
+ */
+export function normalizeValueForDatabaseStorage (value, type, {
+  temporalPrecision,
+  fieldName,
+  resourceType,
+  source = 'storage'
+} = {}) {
+  if (!['date', 'dateTime', 'time'].includes(type)) return value
+  if (value === null || value === undefined) return null
+
+  if (type === 'time') {
+    if (typeof value !== 'string') {
+      throwTemporalDataError({ fieldName, resourceType, type, source })
     }
+    return validateTemporalJsonValue(value, type, {
+      temporalPrecision,
+      fieldName,
+      resourceType,
+      source
+    })
   }
 
-  // Handle numeric values (Unix timestamps)
-  if (typeof value === 'number') {
-    return new Date(value)
+  let publicValue = value
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throwTemporalDataError({ fieldName, resourceType, type, source })
+    }
+    publicValue = type === 'date'
+      ? value.toISOString().slice(0, 10)
+      : limitFractionalSecondPrecision(value.toISOString(), temporalPrecision)
   }
 
-  // Try to parse any other format
-  const dateObj = new Date(value)
-
-  // Check if date is valid
-  if (isNaN(dateObj.getTime())) {
-    console.warn(`Invalid date value for field type '${type}': ${value}`)
-    return null // Return null for invalid dates
+  const validatedValue = validateTemporalJsonValue(publicValue, type, {
+    temporalPrecision,
+    fieldName,
+    resourceType,
+    source
+  })
+  const fraction = type === 'dateTime'
+    ? /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/.exec(validatedValue)?.[1]
+    : null
+  if (fraction && /[1-9]/.test(fraction.slice(3))) {
+    const field = fieldName ? `data.attributes.${fieldName}` : 'value'
+    throw new RestApiValidationError('Built-in dateTime storage supports millisecond precision.', {
+      fields: [field],
+      violations: [{
+        field,
+        rule: 'storage_precision',
+        message: 'Submillisecond values require a custom storage serializer.'
+      }]
+    })
   }
-
-  return dateObj
+  const databaseValue = new Date(
+    type === 'date' ? `${validatedValue}T00:00:00Z` : validatedValue
+  )
+  if (Number.isNaN(databaseValue.getTime())) {
+    throwTemporalDataError({ fieldName, resourceType, type, source })
+  }
+  return databaseValue
 }
 
 /**
@@ -155,13 +254,13 @@ export function normalizeDateValue (value, type) {
  *
  * const normalized = normalizeAttributes(attributes, schema);
  *
- * // Output: Properly typed values
+ * // Output: JSON-safe values
  * // {
  * //   id: 1,
  * //   is_active: true,                    // 1 → true
- * //   created_at: Date('2024-01-15T10:30:00Z'),  // Date object
- * //   birth_date: Date('1990-05-20T00:00:00Z'),  // Date at midnight UTC
- * //   shift_time: '09:00:00'                     // String unchanged
+ * //   created_at: '2024-01-15T10:30:00.000Z',
+ * //   birth_date: '1990-05-20',
+ * //   shift_time: '09:00:00'
  * // }
  *
  * @example
@@ -206,7 +305,10 @@ export function normalizeDateValue (value, type) {
  * 4. Normalizes dates using normalizeDateValue
  * 5. Returns new object with normalized values
  */
-export function normalizeAttributes (attributes, schemaStructure) {
+export function normalizeAttributes (attributes, schemaStructure, {
+  resourceType,
+  source = 'database'
+} = {}) {
   if (!attributes || !schemaStructure) {
     return attributes
   }
@@ -232,7 +334,18 @@ export function normalizeAttributes (attributes, schemaStructure) {
 
     // Normalize date/dateTime/time values
     if (fieldDef.type === 'date' || fieldDef.type === 'dateTime' || fieldDef.type === 'time') {
-      normalized[fieldName] = normalizeDateValue(value, fieldDef.type)
+      normalized[fieldName] = normalizeDateValue(value, fieldDef.type, {
+        temporalPrecision: fieldDef.temporalPrecision,
+        fieldName,
+        resourceType,
+        source
+      })
+    } else if (['epochMilliseconds', 'epochSeconds'].includes(fieldDef.type) && value != null) {
+      normalized[fieldName] = validateTemporalJsonValue(
+        typeof value === 'bigint' ? String(value) : value,
+        fieldDef.type,
+        { fieldName, resourceType, source }
+      )
     }
   }
 
@@ -278,8 +391,8 @@ export function normalizeAttributes (attributes, schemaStructure) {
  * //     id: '1',
  * //     attributes: {
  * //       title: 'My Article',
- * //       is_published: true,                        // 1 → true
- * //       published_at: Date('2024-01-15T10:00:00Z') // Date object
+ * //       is_published: true,
+ * //       published_at: '2024-01-15T10:00:00.000Z'
  * //     }
  * //   },
  * //   included: [{
@@ -287,8 +400,8 @@ export function normalizeAttributes (attributes, schemaStructure) {
  * //     id: '10',
  * //     attributes: {
  * //       name: 'John',
- * //       is_admin: false,                          // 0 → false
- * //       last_login: Date('2024-01-14T15:30:00Z')  // Date object
+ * //       is_admin: false,
+ * //       last_login: '2024-01-14T15:30:00.000Z'
  * //     }
  * //   }]
  * // }
@@ -330,9 +443,35 @@ export function normalizeAttributes (attributes, schemaStructure) {
  * 4. Processes included array the same way
  * 5. Returns complete response with normalized values
  */
-export function normalizeRecordAttributes (record, scopes) {
+export function normalizeRecordAttributes (record, scopes, {
+  source = 'database',
+  simplified = false,
+  resourceType
+} = {}) {
   if (!record || !scopes) {
     return record
+  }
+
+  if (simplified) {
+    return normalizeSimplifiedRecord(record, resourceType, scopes, { source })
+  }
+
+  const normalizeEntry = (entry) => {
+    const schemaInfo = scopes[entry?.type]?.vars?.schemaInfo
+    if (!schemaInfo || !entry?.attributes) return
+
+    entry.attributes = normalizeAttributes(
+      entry.attributes,
+      {
+        ...(schemaInfo.schemaStructure || {}),
+        ...(schemaInfo.computed || {}),
+        ...(scopes[entry.type]?.vars?.queryFields || {})
+      },
+      {
+        resourceType: entry.type,
+        source
+      }
+    )
   }
 
   // Normalize main data records
@@ -340,39 +479,54 @@ export function normalizeRecordAttributes (record, scopes) {
     if (Array.isArray(record.data)) {
       // Handle array of records (query result)
       for (const entry of record.data) {
-        const scope = scopes[entry.type]
-        if (scope?.vars?.schemaInfo?.schemaStructure && entry.attributes) {
-          entry.attributes = normalizeAttributes(
-            entry.attributes,
-            scope.vars.schemaInfo.schemaStructure
-          )
-        }
+        normalizeEntry(entry)
       }
     } else {
       // Handle single record (get result)
-      const entry = record.data
-      const scope = scopes[entry.type]
-      if (scope?.vars?.schemaInfo?.schemaStructure && entry.attributes) {
-        entry.attributes = normalizeAttributes(
-          entry.attributes,
-          scope.vars.schemaInfo.schemaStructure
-        )
-      }
+      normalizeEntry(record.data)
     }
   }
 
   // Normalize included records
   if (record.included && Array.isArray(record.included)) {
     for (const entry of record.included) {
-      const scope = scopes[entry.type]
-      if (scope?.vars?.schemaInfo?.schemaStructure && entry.attributes) {
-        entry.attributes = normalizeAttributes(
-          entry.attributes,
-          scope.vars.schemaInfo.schemaStructure
-        )
-      }
+      normalizeEntry(entry)
     }
   }
 
   return record
+}
+
+function normalizeSimplifiedRecord (record, resourceType, scopes, options, visited = new WeakMap()) {
+  if (!record || typeof record !== 'object') return record
+  if (visited.has(record)) return visited.get(record)
+  const schemaInfo = scopes[resourceType]?.vars?.schemaInfo
+  if (!schemaInfo) return record
+
+  const schema = { ...schemaInfo.schemaStructure, ...schemaInfo.computed, ...scopes[resourceType]?.vars?.queryFields }
+  const normalized = normalizeAttributes(record, schema, { ...options, resourceType })
+  visited.set(record, normalized)
+  const relationships = { ...schemaInfo.schemaRelationships }
+  for (const definition of Object.values(schema)) {
+    if (definition.as && (definition.belongsTo || definition.belongsToPolymorphic)) {
+      relationships[definition.as] = definition
+    }
+  }
+  for (const [name, definition] of Object.entries(relationships)) {
+    const normalizeRelated = (entry) => normalizeSimplifiedRecord(
+      entry,
+      definition.belongsToPolymorphic
+        ? entry?._type
+        : definition.belongsTo || definition.target || name,
+      scopes,
+      options,
+      visited
+    )
+    if (Object.hasOwn(normalized, name)) {
+      normalized[name] = Array.isArray(normalized[name])
+        ? normalized[name].map(normalizeRelated)
+        : normalizeRelated(normalized[name])
+    }
+  }
+  return normalized
 }

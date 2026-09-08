@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import { createBasicApi, createExtendedApi } from './fixtures/api-configs.js'
 import {
+  REST_API_FIELDSET_ERROR_CODE,
+  RestApiFieldsetError
+} from '../index.js'
+import {
   validateJsonApiStructure,
   resourceIdentifier,
   cleanTables,
@@ -164,6 +168,51 @@ describe('Include/Sideloading Operations', () => {
       const includedTypes = result.included.map(r => r.type)
       assert(includedTypes.includes('publishers'))
       assert(includedTypes.includes('countries'))
+    })
+
+    it('should preserve typed fieldset errors across included relationships', async () => {
+      const requests = [
+        {
+          resource: basicApi.resources.countries,
+          id: testData.country.id,
+          include: 'books',
+          primaryType: 'countries',
+          includedType: 'books'
+        },
+        {
+          resource: basicApi.resources.books,
+          id: testData.book.id,
+          include: 'publisher',
+          primaryType: 'books',
+          includedType: 'publishers'
+        }
+      ]
+
+      for (const request of requests) {
+        await assert.rejects(
+          request.resource.get({
+            id: request.id,
+            queryParams: {
+              include: [request.include],
+              fields: {
+                [request.primaryType]: 'id',
+                [request.includedType]: 'definitelyHidden'
+              }
+            },
+            simplified: false
+          }),
+          (error) => {
+            assert(error instanceof RestApiFieldsetError)
+            assert.equal(error.code, REST_API_FIELDSET_ERROR_CODE)
+            assert.equal(error.statusCode, 400)
+            assert.deepEqual(error.details, {
+              field: 'definitelyHidden',
+              resourceType: request.includedType
+            })
+            return true
+          }
+        )
+      }
     })
   })
 

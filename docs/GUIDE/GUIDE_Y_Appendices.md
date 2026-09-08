@@ -6,7 +6,7 @@ This document explains how the JSON REST API handles date and time values throug
 
 ## Supported Date/Time Types
 
-The API supports three temporal data types in schemas:
+The API supports three string temporal types and two numeric epoch types in schemas:
 
 ### 1. `date`
 - **Format**: `YYYY-MM-DD`
@@ -16,8 +16,8 @@ The API supports three temporal data types in schemas:
 - **JSON Output**: ISO 8601 date string
 
 ### 2. `dateTime`
-- **Format**: `YYYY-MM-DD HH:MM:SS` (input) / ISO 8601 (output)
-- **Example Input**: `2024-01-15 14:30:00`
+- **Format**: RFC 3339 with seconds and an explicit `Z` or `±HH:MM` offset
+- **Example Input**: `2024-01-15T14:30:00Z`
 - **Example Output**: `2024-01-15T14:30:00.000Z`
 - **Usage**: Timestamps, created/updated times, or any date with time
 - **Database Storage**: DATETIME (MySQL) or TIMESTAMP (PostgreSQL)
@@ -30,6 +30,13 @@ The API supports three temporal data types in schemas:
 - **Database Storage**: TIME column type
 - **JSON Output**: ISO 8601 time string
 
+### 4. `epochMilliseconds` and `epochSeconds`
+- **Format**: An integer number or canonical base-10 integer string
+- **Example**: `1767323045000` (`epochMilliseconds`) or `1767323045` (`epochSeconds`)
+- **Usage**: Systems whose temporal contract is explicitly a Unix epoch value
+- **Database Storage**: BIGINT for table-backed resources
+- **JSON Output**: Integer number in the same unit declared by the schema type
+
 ## Schema Definition
 
 Define date/time fields in your schema like this:
@@ -37,11 +44,17 @@ Define date/time fields in your schema like this:
 ```javascript
 const articleSchema = {
   publishedDate: { type: 'date', required: true },
-  createdAt: { type: 'dateTime', defaultTo: 'now()' },
-  updatedAt: { type: 'dateTime', defaultTo: 'now()' },
+  createdAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
+  updatedAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
   dailyPostTime: { type: 'time', nullable: true }
 };
 ```
+
+`Date.prototype.toISOString()` always emits three fractional-second digits, so
+use it directly with unspecified precision or `temporalPrecision: 3` (or
+higher). A lower precision requires a producer that returns no more than the
+configured number of digits. Validation rejects excess input precision rather
+than silently truncating it.
 
 ## Input Validation
 
@@ -64,21 +77,28 @@ The API validates and normalizes date/time inputs:
 ```
 
 **Accepted Input Formats:**
-- **date**: 
-  - `YYYY-MM-DD` (parsed at UTC midnight)
-  - ISO 8601 date strings
-  - Any JavaScript Date parseable string
-- **dateTime**: 
-  - ISO 8601 strings (`2024-01-15T14:30:00Z`) - recommended
-  - `YYYY-MM-DD HH:MM:SS` (assumed UTC)
-  - JavaScript Date parseable strings
-  - Unix timestamps (as numbers)
-- **time**: 
-  - `HH:MM:SS` or `HH:MM`
-  - Extracted from datetime strings
+- **date**: a real calendar date in `YYYY-MM-DD` form
+- **dateTime**: an RFC 3339 string with seconds and an explicit timezone, such as `2024-01-15T14:30:00Z` or `2024-01-15T22:30:00+08:00`
+- **time**: an offset-free `HH:MM[:SS[.fraction]]` string
+
+JavaScript `Date` objects, SQL datetime strings, Unix timestamps, locale text, and other values accepted by `Date.parse()` are not valid JSON temporal inputs. Use `epochMilliseconds` or `epochSeconds` schema fields for Unix timestamps.
 
 **Storage Format:**
-All date/time values are converted to JavaScript Date objects before storage, allowing the database driver to handle the appropriate formatting for each database system.
+Schema validation preserves valid JSON temporal strings exactly. The built-in storage adapters convert `date` and `dateTime` strings to database-native `Date` values at the database boundary, while `time` remains a string. A custom field-level `storage.serialize` function receives the validated string and owns any custom database conversion.
+
+The built-in `dateTime` conversion supports millisecond precision. A value such
+as `2026-09-01T10:20:30.123456Z` fails with HTTP 422 before the write, because
+converting it to `Date` would lose information. Trailing zeroes beyond three
+digits are accepted (`.123000Z` represents exactly `.123Z`). To retain finer
+precision in table-backed storage, use a custom `storage.serialize` function
+and a database column and driver that preserve it. The same serializer is used
+for filters and cursor comparisons, with `operation: 'filter'` and `context: null`.
+
+Response normalization preserves fractional digits returned as strings by
+storage, up to the field's declared precision, including during conversion of
+timezone offsets to UTC. It also converts valid epoch strings and `bigint`
+values from database drivers to JSON numbers, rejecting invalid or out-of-range
+epoch data.
 
 ## Output Normalization
 
@@ -105,8 +125,15 @@ All date/time values are normalized when returned from the API:
 ### Key Normalization Behaviors:
 
 1. **Boolean Normalization**: Database values of `1`/`0` are converted to `true`/`false`
-2. **Date Objects**: All date/time values are returned as JavaScript Date objects internally, then serialized to ISO 8601 strings in JSON responses
+2. **JSON Temporal Values**: `date`, `dateTime`, and `time` attributes are returned as strings that match the same public schema contract accepted on input
 3. **UTC Assumption**: MySQL DATETIME values (which lack timezone info) are assumed to be UTC
+
+Normalization runs once after the database read and again at the final response
+boundary. The final pass covers getters, computed fields, query projections,
+and finishing hooks that produce native `Date` values, including nested
+relationships in simplified write responses. A malformed non-null temporal value is not
+reported as `null`; it fails with `REST_API_TEMPORAL_DATA_INVALID` and HTTP 500
+so stored-data or enrichment defects remain visible.
 
 ## Database-Specific Handling
 
@@ -164,7 +191,7 @@ If migrating from a system that stores dates differently:
 
 1. **Local Time Storage**: Convert all dates to UTC before importing
 2. **String Storage**: Ensure strings match expected formats
-3. **Numeric Timestamps**: Use `timestamp` type for Unix timestamps
+3. **Numeric Timestamps**: Use `epochMilliseconds` or `epochSeconds`, matching the producer's actual unit
 
 ### Database Configuration
 
@@ -206,23 +233,24 @@ For optimal date handling, configure your database connection:
 
 ### Issue 3: Time Values Need Date Context
 **Symptom**: Can't perform date arithmetic on time-only values  
-**Cause**: Time values lack date context  
-**Solution**: The API attaches times to epoch date (1970-01-01) in UTC
+**Cause**: Time values intentionally have no date or timezone context
+**Solution**: Keep recurring wall-clock values as `time`; use `dateTime` when an instant is required
 
 ## Technical Implementation Details
 
 The date/time handling is implemented in two key areas:
 
 1. **Input Validation** (`json-rest-schema`):
-   - Validates format on write operations
-   - Converts all date inputs to JavaScript Date objects
-   - Ensures date-only values parse at UTC midnight
-   - Returns Date objects for storage (Knex handles DB-specific formatting)
+   - Validates strict JSON temporal strings on write operations
+   - Preserves accepted strings exactly
+   - Rejects JavaScript `Date` objects and permissive legacy date formats
 
-2. **Output Normalization** (`database-value-normalizers.js`):
+2. **Storage and Output Normalization** (`storage` adapters and `database-value-normalizers.js`):
+   - Converts validated `date` and `dateTime` strings at the database boundary
+   - Uses the same database-native representation for writes and query comparisons
    - Handles database-specific quirks (MySQL timezone issues)
-   - Ensures Date objects are properly created from database values
+   - Parses database date values before emitting schema-valid JSON strings
    - Fixes MySQL datetime strings by assuming UTC
    - Maintains consistency across different database engines
 
-This two-stage approach ensures data integrity on input and consistent formatting on output, regardless of the underlying database system. The key insight is that JavaScript Date objects are used as the common format throughout the pipeline, with database drivers handling the conversion to/from their native formats.
+This separation keeps the public JSON contract strict and serializable while still giving database drivers native values at the storage boundary.

@@ -1,5 +1,5 @@
 import { RestApiValidationError } from '../../../../../lib/rest-api-errors.js'
-import { normalizeDateValue } from '../../querying-writing/database-value-normalizers.js'
+import { normalizeValueForDatabaseStorage } from '../../querying-writing/database-value-normalizers.js'
 
 export const normalizeId = (value) => (value === null || value === undefined ? null : String(value))
 
@@ -93,7 +93,9 @@ export const coerceValueForDefinition = (value, definition, { isRelationship } =
   }
 
   if (['date', 'dateTime', 'time'].includes(type)) {
-    return normalizeDateValue(value, type)
+    return normalizeValueForDatabaseStorage(value, type, {
+      temporalPrecision: definition?.temporalPrecision
+    })
   }
 
   return value

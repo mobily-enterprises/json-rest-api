@@ -33,6 +33,8 @@ export { S3Storage } from './plugins/storage/s3-storage.js'
 
 // Error classes for consumers who need them
 export {
+  RestApiFieldsetError,
+  RestApiTemporalDataError,
   RestApiValidationError,
   RestApiResourceError,
   RestApiPayloadError

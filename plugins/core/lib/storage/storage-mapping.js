@@ -1,3 +1,5 @@
+import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+
 const EMPTY_STORAGE_INFO = Object.freeze({
   idColumn: 'id',
   storage: Object.freeze({
@@ -242,7 +244,11 @@ export const translateAttributesForStorage = (attributes, schemaInfo = {}, optio
         context,
         operation
       })
-      : value
+      : normalizeValueForDatabaseStorage(value, fieldStorage?.definition?.type, {
+        temporalPrecision: fieldStorage?.definition?.temporalPrecision,
+        fieldName,
+        resourceType: context?.scopeName || schemaInfo.tableName
+      })
 
     translated[columnName] = serializedValue
     return translated

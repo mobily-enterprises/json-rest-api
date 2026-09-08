@@ -84,13 +84,25 @@ import {
 import { unwrapQueryBuilderState } from './query-builder-utils.js'
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY, DEFAULT_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
+import { isRestApiError, wrapUnexpectedError } from '../../../../lib/error-context.js'
 import {
   getFieldValue as getStorageFieldValue,
   getIdColumn as getStorageIdColumn,
   getStorageColumn as getMappedStorageColumn,
 } from '../storage/storage-mapping.js'
+import { createStorageAdapter } from '../storage/storage-adapter.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
+
+const resolveScopeStorageAdapter = (scopes, scopeName, knex) => {
+  const configuredAdapter = getScopeStorageAdapter(scopes, scopeName)
+  if (configuredAdapter) return configuredAdapter
+
+  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo
+  if (!schemaInfo) return null
+
+  return createStorageAdapter({ knex, schemaInfo })
+}
 
 const getIdColumnForScope = (scopes, scopeName) => {
   const adapter = getScopeStorageAdapter(scopes, scopeName)
@@ -161,7 +173,7 @@ const applyScopeFiltersToIncludeQuery = async ({
     return { query }
   }
 
-  const storageAdapter = scopeObject.vars.storageAdapter
+  const storageAdapter = resolveScopeStorageAdapter(scopes, scopeName, db)
 
   const queryState = await scopeObject.applyQueryFilters({
     query,
@@ -415,14 +427,18 @@ const loadRelationshipMetadata = async (scopes, records, scopeName) => {
       }
     })
   } catch (error) {
-    // Log error with context and re-throw
+    if (isRestApiError(error)) throw error
+
     const errorContext = {
       scopeName,
       recordCount: records?.length || 0,
       error: error.message
     }
     console.error('[loadRelationshipMetadata] Error loading relationship metadata:', errorContext)
-    throw new Error(`Failed to load relationship metadata for scope '${scopeName}': ${error.message}`)
+    throw wrapUnexpectedError(error, {
+      message: `Failed to load relationship metadata for scope '${scopeName}'`,
+      context: errorContext
+    })
   }
 }
 
@@ -498,7 +514,7 @@ export const loadBelongsTo = async (scope, deps) => {
     const targetIdColumn = getIdColumnForScope(scopes, targetScope)
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope]
-    const storageAdapter = targetScopeObject.vars.storageAdapter
+    const storageAdapter = resolveScopeStorageAdapter(scopes, targetScope, knex)
     const fieldSelectionInfo = fields?.[targetScope]
       ? await buildFieldSelection(targetScopeObject, {
         context: {
@@ -626,6 +642,8 @@ export const loadBelongsTo = async (scope, deps) => {
       }
     }
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log error with detailed context
     log.error('[INCLUDE] Error loading belongsTo relationship:', {
       fieldName,
@@ -636,13 +654,10 @@ export const loadBelongsTo = async (scope, deps) => {
       stack: error.stack
     })
 
-    // Re-throw with enhanced error message
-    const enhancedError = new Error(
-      `Failed to load belongsTo relationship '${includeName}' for field '${fieldName}': ${error.message}`
-    )
-    enhancedError.originalError = error
-    enhancedError.context = { fieldName, includeName, targetScope: fieldDef.belongsTo }
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to load belongsTo relationship '${includeName}' for field '${fieldName}'`,
+      context: { fieldName, includeName, targetScope: fieldDef.belongsTo }
+    })
   }
 }
 
@@ -741,7 +756,7 @@ export const loadHasMany = async (scope, deps) => {
 
       // Step 3: Build field selection for sparse fieldsets
       const targetScopeObject = scopes[targetScope]
-      const storageAdapter = targetScopeObject.vars.storageAdapter
+      const storageAdapter = resolveScopeStorageAdapter(scopes, targetScope, knex)
       const targetIdColumn = getIdColumnForScope(scopes, targetScope)
       const fieldSelectionInfo = fields?.[targetScope]
         ? await buildFieldSelection(targetScopeObject, {
@@ -970,7 +985,7 @@ export const loadHasMany = async (scope, deps) => {
 
       // Build field selection for sparse fieldsets
       const targetScopeObject = scopes[targetScope]
-      const storageAdapter = targetScopeObject.vars.storageAdapter
+      const storageAdapter = resolveScopeStorageAdapter(scopes, targetScope, knex)
       const fieldSelectionInfo = fields?.[targetScope]
         ? await buildFieldSelection(targetScopeObject, {
           context: {
@@ -1159,6 +1174,8 @@ export const loadHasMany = async (scope, deps) => {
       }
     }
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log error with detailed context
     log.error('[INCLUDE] Error loading hasMany relationship:', {
       scopeName,
@@ -1169,13 +1186,10 @@ export const loadHasMany = async (scope, deps) => {
       stack: error.stack
     })
 
-    // Re-throw with enhanced error message
-    const enhancedError = new Error(
-      `Failed to load hasMany relationship '${includeName}' for scope '${scopeName}': ${error.message}`
-    )
-    enhancedError.originalError = error
-    enhancedError.context = { scopeName, includeName, hasThrough: !!relDef.through }
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to load hasMany relationship '${includeName}' for scope '${scopeName}'`,
+      context: { scopeName, includeName, hasThrough: !!relDef.through }
+    })
   }
 }
 
@@ -1221,7 +1235,7 @@ export const loadHasOne = async (scope, deps) => {
 
   // Build query for hasOne - expects single result per parent
   const targetScopeObject = scopes[targetScope]
-  const storageAdapter = targetScopeObject.vars.storageAdapter
+  const storageAdapter = resolveScopeStorageAdapter(scopes, targetScope, knex)
 
   // Build field selection for sparse fieldsets
   const fieldSelectionInfo = fields?.[targetScope]
@@ -1393,7 +1407,7 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
 
       // Build field selection for sparse fieldsets
       const targetScopeObject = scopes[targetType]
-      const storageAdapter = targetScopeObject.vars.storageAdapter
+      const storageAdapter = resolveScopeStorageAdapter(scopes, targetType, knex)
       const fieldSelectionInfo = fields?.[targetType]
         ? await buildFieldSelection(targetScopeObject, {
           context: {
@@ -1539,6 +1553,8 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       }
     })
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log error with detailed context
     log.error('[INCLUDE] Error loading polymorphic belongsTo relationship:', {
       relName,
@@ -1548,13 +1564,10 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       stack: error.stack
     })
 
-    // Re-throw with enhanced error message
-    const enhancedError = new Error(
-      `Failed to load polymorphic belongsTo relationship '${relName}': ${error.message}`
-    )
-    enhancedError.originalError = error
-    enhancedError.context = { relName, types: relDef?.belongsToPolymorphic?.types }
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to load polymorphic belongsTo relationship '${relName}'`,
+      context: { relName, types: relDef?.belongsToPolymorphic?.types }
+    })
   }
 }
 
@@ -1622,7 +1635,7 @@ export const loadReversePolymorphic = async (scope, deps) => {
 
     // Build field selection for sparse fieldsets
     const targetScopeObject = scopes[targetScope]
-    const storageAdapter = targetScopeObject.vars.storageAdapter
+    const storageAdapter = resolveScopeStorageAdapter(scopes, targetScope, knex)
     const targetIdColumn = getIdColumnForScope(scopes, targetScope)
     const fieldSelectionInfo = fields?.[targetScope]
       ? await buildFieldSelection(targetScopeObject, {
@@ -1759,6 +1772,8 @@ export const loadReversePolymorphic = async (scope, deps) => {
       }
     }
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log error with detailed context
     log.error('[INCLUDE] Error loading reverse polymorphic relationship:', {
       scopeName,
@@ -1770,13 +1785,10 @@ export const loadReversePolymorphic = async (scope, deps) => {
       stack: error.stack
     })
 
-    // Re-throw with enhanced error message
-    const enhancedError = new Error(
-      `Failed to load reverse polymorphic relationship '${includeName}' via '${relDef?.via}' for scope '${scopeName}': ${error.message}`
-    )
-    enhancedError.originalError = error
-    enhancedError.context = { scopeName, includeName, via: relDef?.via, targetScope: relDef?.target }
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to load reverse polymorphic relationship '${includeName}' via '${relDef?.via}' for scope '${scopeName}'`,
+      context: { scopeName, includeName, via: relDef?.via, targetScope: relDef?.target }
+    })
   }
 }
 
@@ -1897,6 +1909,8 @@ export const processIncludes = async (scope, deps) => {
           }
         }
       } catch (includeError) {
+        if (isRestApiError(includeError)) throw includeError
+
         // Log specific include error and continue with other includes
         log.error('[INCLUDE] Error processing include:', {
           scopeName,
@@ -1918,6 +1932,8 @@ export const processIncludes = async (scope, deps) => {
       }
     }
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log error with full context
     log.error('[INCLUDE] Error in processIncludes:', {
       scopeName,
@@ -2019,6 +2035,8 @@ export const buildIncludedResources = async (scope, deps) => {
       recordsWithRelationships: records
     }
   } catch (error) {
+    if (isRestApiError(error)) throw error
+
     // Log comprehensive error information
     log.error('[INCLUDE] Failed to build included resources:', {
       scopeName,
@@ -2028,15 +2046,14 @@ export const buildIncludedResources = async (scope, deps) => {
       stack: error.stack
     })
 
-    // Re-throw with additional context
-    const enhancedError = new Error(`Failed to build included resources for scope '${scopeName}': ${error.message}`)
-    enhancedError.originalError = error
-    enhancedError.context = {
-      scopeName,
-      includeParam,
-      recordCount: records?.length || 0
-    }
-    throw enhancedError
+    throw wrapUnexpectedError(error, {
+      message: `Failed to build included resources for scope '${scopeName}'`,
+      context: {
+        scopeName,
+        includeParam,
+        recordCount: records?.length || 0
+      }
+    })
   }
 }
 

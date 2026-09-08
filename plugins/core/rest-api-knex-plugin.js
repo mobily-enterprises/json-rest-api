@@ -33,6 +33,7 @@ import { getUrlPrefix } from './lib/querying/url-helpers.js'
 import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 import {
   applyCursorPredicate,
+  validateCursorValues,
   applyQueryFieldOrder,
   buildEffectiveSortList,
   parseSortEntry
@@ -113,6 +114,7 @@ export const RestApiKnexPlugin = {
       sortableFields,
       storageAdapter,
       defaultSort,
+      before = false,
       queryFieldRuntimeByField = new Map()
     }) => {
       const effectiveSort = buildEffectiveSortList(sort, { defaultSort, idField: 'id' })
@@ -120,6 +122,7 @@ export const RestApiKnexPlugin = {
 
       for (const sortEntry of effectiveSort) {
         const { field, direction, sqlDirection } = parseSortEntry(sortEntry)
+        const queryDirection = before ? (direction === 'asc' ? 'desc' : 'asc') : direction
 
         if (field !== 'id' && sortableFields?.length > 0 && !sortableFields.includes(field)) {
           log.warn(`Ignoring non-sortable field: ${field}`)
@@ -128,7 +131,7 @@ export const RestApiKnexPlugin = {
 
         const queryFieldRuntime = queryFieldRuntimeByField.get(field)
         if (queryFieldRuntime) {
-          applyQueryFieldOrder(query, queryFieldRuntime, sqlDirection)
+          applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), before ? 'first' : 'last')
           descriptors.push({
             field,
             direction: sqlDirection,
@@ -145,11 +148,15 @@ export const RestApiKnexPlugin = {
           dbField = searchField.actualField
         }
 
-        const translatedField = storageAdapter?.translateColumn
+        const storageColumn = storageAdapter?.translateColumn
           ? storageAdapter.translateColumn(dbField)
           : dbField
+        const translatedField = storageColumn.includes('.')
+          ? storageColumn
+          : `${storageAdapter?.getTableName?.() || schemaInfo.tableName}.${storageColumn}`
 
-        query.orderBy(translatedField, direction)
+        query.orderByRaw(`?? IS NULL ${before ? 'DESC' : 'ASC'}`, [translatedField])
+        query.orderBy(translatedField, queryDirection)
         descriptors.push({
           field,
           direction: sqlDirection,
@@ -659,6 +666,7 @@ export const RestApiKnexPlugin = {
         schemaInfo,
         sortableFields,
         defaultSort: scope.vars.defaultSort,
+        before: Boolean(queryParams.page?.before),
         storageAdapter,
         queryFieldRuntimeByField
       })
@@ -671,13 +679,13 @@ export const RestApiKnexPlugin = {
          queryParams.page.after !== undefined ||
          queryParams.page.before !== undefined)
 
-      if (hasPageParams) {
-        const requestedSize = queryParams.page.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
-        const pageSize = Math.min(
-          requestedSize,
-          scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-        )
+      const requestedSize = queryParams.page?.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
+      const pageSize = Math.min(
+        requestedSize,
+        scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
+      )
 
+      if (hasPageParams) {
         // Validate page size
         if (requestedSize <= 0) {
           throw new RestApiValidationError(
@@ -721,6 +729,7 @@ export const RestApiKnexPlugin = {
               )
             }
 
+            cursorData = validateCursorValues(sortDescriptors, cursorData, 'after')
             applyCursorPredicate(
               query,
               sortDescriptors,
@@ -755,6 +764,7 @@ export const RestApiKnexPlugin = {
               )
             }
 
+            cursorData = validateCursorValues(sortDescriptors, cursorData, 'before')
             applyCursorPredicate(
               query,
               sortDescriptors,
@@ -778,8 +788,7 @@ export const RestApiKnexPlugin = {
         }
       } else {
         // No pagination params provided - apply default limit
-        const defaultLimit = scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
-        query.limit(defaultLimit)
+        query.limit(pageSize)
       }
 
       // Execute query
@@ -793,7 +802,6 @@ export const RestApiKnexPlugin = {
       // Execute count query for pagination if offset-based pagination is used
       if (queryParams.page?.number !== undefined || (queryParams.page?.size !== undefined && !queryParams.page?.after && !queryParams.page?.before)) {
         const page = parseInt(queryParams.page?.number) || 1
-        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
 
         // Only execute count query if enabled
         if (scope.vars.enablePaginationCounts) {
@@ -855,8 +863,6 @@ export const RestApiKnexPlugin = {
       // Generate cursor metadata when using cursor parameters OR when only size is specified (no page number)
       if (queryParams.page?.after || queryParams.page?.before ||
           (queryParams.page?.size && queryParams.page?.number === undefined)) {
-        const pageSize = parseInt(queryParams.page?.size) || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
-
         // Check if there are more records
         // We fetched pageSize + 1 records to detect if there are more
         const hasMore = records.length > pageSize
@@ -865,12 +871,16 @@ export const RestApiKnexPlugin = {
         if (hasMore) {
           records.pop()
         }
+        if (queryParams.page?.before) records.reverse()
 
         const sortFields = sortDescriptors.map((descriptor) => descriptor.field)
+        const cursorOptions = {
+          schemaInfo,
+          definitions: Object.fromEntries(sortDescriptors.map(({ field, definition }) => [field, definition])),
+          before: Boolean(queryParams.page?.before)
+        }
 
-        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields, {
-          schemaInfo
-        })
+        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields, cursorOptions)
         const urlPrefix = getUrlPrefix(context, scope)
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
@@ -880,9 +890,7 @@ export const RestApiKnexPlugin = {
           pageSize,
           hasMore,
           sortFields,
-          {
-            schemaInfo
-          }
+          cursorOptions
         )
       }
 

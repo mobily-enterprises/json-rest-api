@@ -176,7 +176,9 @@ describe('dbTablesOperations.createKnexTable', () => {
   it('defaults storage columns to snake_case and keeps per-field overrides', async () => {
     const schema = makeTableSchema({
       displayName: { type: 'string', required: true },
-      lastSeenAt: { type: 'dateTime' },
+      lastSeenAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
+      observedAtMs: { type: 'epochMilliseconds' },
+      observedAtSeconds: { type: 'epochSeconds' },
       externalRef: { type: 'string', storage: { column: 'legacy_ref' } }
     })
 
@@ -186,6 +188,9 @@ describe('dbTablesOperations.createKnexTable', () => {
     assert.ok(info.id)
     assert.ok(info.display_name)
     assert.ok(info.last_seen_at)
+    assert.equal(info.last_seen_at.defaultValue, null)
+    assert.ok(info.observed_at_ms)
+    assert.ok(info.observed_at_seconds)
     assert.ok(info.legacy_ref)
     assert.equal(info.displayName, undefined)
     assert.equal(info.external_ref, undefined)
@@ -363,6 +368,9 @@ describe('dbTablesOperations.generateKnexMigration', () => {
     const schema = makeTableSchema({
       displayName: { type: 'string', required: true },
       loginCount: { type: 'number', defaultTo: 0 },
+      createdAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
+      observedAtMs: { type: 'epochMilliseconds' },
+      observedAtSeconds: { type: 'epochSeconds' },
       externalRef: { type: 'string', storage: { column: 'legacy_ref' } }
     })
 
@@ -370,6 +378,10 @@ describe('dbTablesOperations.generateKnexMigration', () => {
 
     assert.ok(migration.includes("table.string('display_name').notNullable()"))
     assert.ok(migration.includes("table.float('login_count').defaultTo(0)"))
+    assert.ok(migration.includes("table.datetime('created_at', { precision: 3 })"))
+    assert.equal(migration.includes("table.datetime('created_at', { precision: 3 }).defaultTo"), false)
+    assert.ok(migration.includes("table.bigInteger('observed_at_ms')"))
+    assert.ok(migration.includes("table.bigInteger('observed_at_seconds')"))
     assert.ok(migration.includes("table.string('legacy_ref')"))
     assert.ok(!migration.includes("table.string('displayName')"))
   })

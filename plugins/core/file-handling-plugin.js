@@ -33,6 +33,7 @@
  */
 
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { isRestApiError } from '../../lib/error-context.js'
 
 export const FileHandlingPlugin = {
   name: 'file-handling',
@@ -165,6 +166,7 @@ export const FileHandlingPlugin = {
             break
           }
         } catch (error) {
+          if (isRestApiError(error)) throw error
           log.warn(`Detector '${detector.name}' failed:`, error)
         }
       }
@@ -269,6 +271,7 @@ export const FileHandlingPlugin = {
             })
             log.debug(`Uploaded file for field '${fieldConfig.field}' to: ${storedUrl}`)
           } catch (error) {
+            if (isRestApiError(error)) throw error
             throw new RestApiValidationError(
               `Failed to upload file for field '${fieldConfig.field}': ${error.message}`,
               {
