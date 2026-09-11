@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { JsonRestApi } from '../index.js'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin } from '../index.js'
 import knexLib from 'knex'
-import { RestApiPlugin, RestApiKnexPlugin } from '../index.js'
 
 const source = await readFile(new URL('../docs/GUIDE/01-getting-started.md', import.meta.url), 'utf8')
 const blocks = [...source.matchAll(/```javascript\n([\s\S]*?)\n```/g)].map(match => match[1])

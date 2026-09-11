@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { JsonRestApi } from '../index.js'
 
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '')
 const require = createRequire(`${root}/package.json`)
-import { JsonRestApi } from '../index.js'
 const { default: knexFactory } = await import(pathToFileURL(require.resolve('knex')))
 const library = await import(pathToFileURL(`${root}/index.js`))
 const { ensureAnyApiSchema } = await import(pathToFileURL(`${root}/plugins/core/lib/anyapi/schema-utils.js`))

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { JsonRestApi } from '../index.js'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import knexLib from 'knex'
-import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor

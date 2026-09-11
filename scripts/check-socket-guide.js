@@ -2,11 +2,10 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { JsonRestApi } from '../index.js'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin } from '../index.js'
 import express from 'express'
 import knex from 'knex'
 import { io } from 'socket.io-client'
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin } from '../index.js'
 import { waitForSocketEvent, installSocketBarrier, drainSocketEvents } from '../tests/helpers/socketio.js'
 
 const source = await readFile(new URL('../docs/GUIDE/28-socketio.md', import.meta.url), 'utf8')

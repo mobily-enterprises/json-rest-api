@@ -10,6 +10,12 @@ import knexLib from 'knex'
 const exec = promisify(execFile)
 const [selected = 'all', ...requestedFiles] = process.argv.slice(2)
 const clients = selected === 'all' ? ['better-sqlite3', 'pg', 'mysql2'] : [selected]
+const storageModes = process.env.JSON_REST_API_RUNNER_STORAGE
+  ? [process.env.JSON_REST_API_RUNNER_STORAGE]
+  : ['knex', 'anyapi']
+if (storageModes.some(storage => !['knex', 'anyapi'].includes(storage))) {
+  throw new Error('JSON_REST_API_RUNNER_STORAGE must be knex or anyapi')
+}
 if (clients.some(client => !['better-sqlite3', 'pg', 'mysql2', 'redis'].includes(client))) {
   throw new Error('Usage: node scripts/test-databases.js [all|better-sqlite3|pg|mysql2|redis] [test files...]')
 }
@@ -166,7 +172,7 @@ try {
     let database
     try {
       if (client !== 'better-sqlite3') database = await startDatabase(client, path.join(temporaryRoot, client))
-      for (const storage of ['knex', 'anyapi']) {
+      for (const storage of storageModes) {
         console.log(`Running ${client} / ${storage}`)
         const testEnv = {
           ...process.env,
@@ -178,7 +184,7 @@ try {
         delete testEnv.NODE_TEST_CONTEXT
         await run(process.execPath, ['--test', `--test-concurrency=${client === 'redis' ? 1 : 2}`, ...files], {
           env: testEnv
-        }, 900000)
+        }, requestedFiles.length ? 900000 : 1800000)
       }
     } finally {
       if (database) await stop(database.server, client === 'pg' ? 'SIGINT' : 'SIGTERM')

@@ -541,8 +541,8 @@ The unused deep helpers `buildWindowedIncludeSubquery`, `buildOrderByClause` and
 `applyStandardIncludeConfig` were removed from
 `plugins/core/lib/querying/knex-window-queries.js`. Configure relationships through
 their `include` settings instead of importing storage query builders. No forwarding
-exports or compatibility implementation remain. Consumer reconciliation is still
-on hold; this library change does not claim their imports have been migrated.
+exports or compatibility implementation remain. Check application extensions
+for imports of the removed helpers.
 
 AnyAPI also allocates string slots for non-primary scalar fields declared
 `type: 'id'`, including polymorphic backing IDs. Such fields previously lacked
@@ -680,7 +680,7 @@ attempts. Let `api.transaction` roll back, then retry the complete callback in a
 new unit only when its side effects can safely repeat. SQLite permits one active
 writer and can reject a stale read snapshot's write upgrade. The library does
 not automatically retry or change the caller's isolation level. The core managed
-helper is implemented; remaining integration and consumer migration stay open.
+helper owns completion; migrate application transaction wrappers accordingly.
 
 Existing duplicate pivot/link rows are not automatically removed. Inspect any
 previously concurrent relationship workloads and reconcile duplicates while
@@ -2111,10 +2111,10 @@ queued notices eligible for delivery. The draining operation's context records
 `socketioBroadcast` cleanup diagnostics with a zero-based `broadcastIndex`;
 the call retains its committed outcome and first failure. Failed notices are
 not automatically replayed. See the Socket.IO guide for partial-delivery limits.
-Explicit managed callback delivery and repeated changes to the same resource now pass B2 integration checks. In-memory notices
-do not guarantee exactly-once delivery or recovery after process failure.
-The earlier consumer inventory found no in-scope source use of this plugin;
-consumer checkouts remain on hold and were not inspected or changed in this batch.
+Managed callbacks defer repeated changes to the same resource until completion.
+In-memory notices do not guarantee exactly-once delivery or recovery after
+process failure. Verify subscription and notification handling in each application
+that uses this plugin.
 
 ## Bulk writes
 
@@ -3268,8 +3268,8 @@ change HTTP error responses or the errors thrown by resource methods.
 The shared basic-filter trace messages no longer print filter values, entire
 filter objects or field definitions. They retain scope, table, field and operator
 information. Filtering behavior and SQL bindings are unchanged. This is a
-specific trace-output change; comprehensive diagnostic redaction is still being
-implemented.
+specific trace-output change. See [field-aware diagnostics](#field-aware-write-diagnostics)
+for structured redaction and its limits.
 
 
 Ordinary storage operation messages also omit query parameters, POST bodies and

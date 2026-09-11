@@ -3,10 +3,9 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { JsonRestApi } from '../index.js'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin } from '../index.js'
 import express from 'express'
 import knex from 'knex'
-import { RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin } from '../index.js'
 import { LocalStorage } from '../plugins/storage/local-storage.js'
 
 const directory = await mkdtemp(path.join(tmpdir(), 'json-rest-file-guide-'))

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { JsonRestApi } from '../index.js'
-import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import { createTestDatabase, databaseClient } from '../tests/helpers/test-database.js'
 import { storageMode } from '../tests/helpers/storage-mode.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'

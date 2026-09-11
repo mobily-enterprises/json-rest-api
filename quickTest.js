@@ -1,5 +1,4 @@
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from './index.js'
-import { JsonRestApi } from './index.js'
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, JsonRestApi } from './index.js'
 import knexLib from 'knex'
 import util from 'util'
 import express from 'express'

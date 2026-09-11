@@ -1,6 +1,7 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -65,3 +66,31 @@ for (const missingBinary of ['pg', 'mysql2', 'redis']) {
 }
 it(`database runner fails and cleans up when a selected test file is missing (${client})`, () => checkFailure({ missingTest: true }))
 it(`database runner rejects a fixture that selects a different driver (${client})`, () => checkFailure({ wrongDriver: true }))
+
+const run = promisify(execFile)
+for (const storage of ['knex', 'anyapi']) {
+  it(`database runner selects only explicit ${storage} storage and cleans up`, async () => {
+    const { stdout } = await run(process.execPath, [
+      'scripts/test-databases.js', 'better-sqlite3', 'tests/fixtures/database-runner-child.js'
+    ], {
+      env: { ...process.env, JSON_REST_API_RUNNER_STORAGE: storage, JSON_REST_API_RUNNER_CASE: 'success' },
+      timeout: 90000
+    })
+    assert.deepEqual([...stdout.matchAll(/Running better-sqlite3 \/ (knex|anyapi)/g)].map(match => match[1]), [storage])
+    assert.equal((stdout.match(/DATABASE_RUNNER_CHILD_READY/g) || []).length, 1)
+    const directory = stdout.match(/Disposable database directory: (.+)/)?.[1]
+    assert.ok(directory, stdout)
+    await assert.rejects(access(directory), { code: 'ENOENT' })
+  })
+}
+it('database runner rejects invalid storage selection before creating its environment', async () => {
+  await assert.rejects(run(process.execPath, ['scripts/test-databases.js', 'better-sqlite3'], {
+    env: { ...process.env, JSON_REST_API_RUNNER_STORAGE: 'unknown' },
+    timeout: 10000
+  }), error => {
+    assert.equal(error.code, 1)
+    assert.match(error.stderr, /JSON_REST_API_RUNNER_STORAGE must be knex or anyapi/)
+    assert.doesNotMatch(error.stdout, /Disposable database directory/)
+    return true
+  })
+})

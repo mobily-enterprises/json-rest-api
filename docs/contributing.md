@@ -86,6 +86,17 @@ For an affected subset, pass test paths directly:
 node scripts/test-databases.js pg tests/conformance-managed-transactions.test.js
 ```
 
+The runner checks both storage modes by default. Select one explicitly when
+rechecking a backend-specific failure:
+
+```sh
+JSON_REST_API_RUNNER_STORAGE=anyapi npm run test:databases:pg
+```
+
+A complete backend/storage selection has a 30-minute limit; explicitly selected
+test files retain a 15-minute limit. Both limits terminate the owned process group
+and dispose of the database. They do not retry tests or relax assertions.
+
 See [backend capabilities](GUIDE/30-backend-capabilities.md) for supported semantics.
 The CI workflow documents its disposable binary setup and database matrix.
 
