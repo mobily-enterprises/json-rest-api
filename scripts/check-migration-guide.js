@@ -6,7 +6,7 @@ import { createTestDatabase, databaseClient } from '../tests/helpers/test-databa
 import { storageMode } from '../tests/helpers/storage-mode.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
 
-const source = await readFile(new URL('../docs/GUIDE/MIGRATING_API_V2.md', import.meta.url), 'utf8')
+const source = await readFile(new URL('../docs/GUIDE/33-migrating-to-v2.md', import.meta.url), 'utf8')
 function blocks (heading) {
   const start = source.indexOf(`## ${heading}\n`)
   assert.notEqual(start, -1, heading)
@@ -83,7 +83,7 @@ for (const mode of modes) {
 
 // The table-schema guide describes ordinary tables, independently of canonical storage.
 {
-  const schemaGuide = await readFile(new URL('../docs/GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md', import.meta.url), 'utf8')
+  const schemaGuide = await readFile(new URL('../docs/GUIDE/21-schema-and-migrations.md', import.meta.url), 'utf8')
   const section = schemaGuide.split('## Logical IDs and `idProperty`\n')[1]?.split('### ID normalization')[0]
   assert.ok(section, 'Logical ID guide section exists')
   const examples = [...section.matchAll(/```js\n([\s\S]*?)\n```/g)].map(match => match[1])

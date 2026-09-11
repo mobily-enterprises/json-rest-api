@@ -12,7 +12,7 @@ try {
   const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary], {
     cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024
   }))[0]
-  const expectedFiles = new Set(['package.json', 'index.js', 'index.d.ts', 'LICENSE', 'README.md', 'docs/API.md', 'docs/QUICKSTART.md'])
+  const expectedFiles = new Set(['package.json', 'index.js', 'index.d.ts', 'LICENSE', 'README.md', 'docs/API.md', 'docs/QUICKSTART.md', 'docs/architecture.md', 'docs/contributing.md'])
   for await (const file of glob(['lib/**/*.js', 'lib/**/*.d.ts', 'plugins/**/*.js', 'plugins/**/*.d.ts', 'types/**/*.d.ts', 'docs/GUIDE/**/*.md'], { cwd: root })) {
     expectedFiles.add(file.split(path.sep).join('/'))
   }

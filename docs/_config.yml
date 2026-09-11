@@ -1,5 +1,5 @@
 title: JSON REST API
-description: A lightweight, plugin-based REST API framework for Node.js
+description: A JSON:API library and mini-ORM for Node.js 24+
 baseurl: "/json-rest-api"
 url: "https://mobily-enterprises.github.io"
 
@@ -11,11 +11,9 @@ relative_links:
   enabled: true
   collections: true
 
-include:
-  - README.md
-
 exclude:
   - vendor/
+  - .bundle/
   - Gemfile
   - Gemfile.lock
 

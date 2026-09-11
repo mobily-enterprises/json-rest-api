@@ -10,73 +10,73 @@ import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
 
 const guides = {
   policies: {
-    filename: 'GUIDE_X_Row_Policies.md',
+    filename: '17-row-policies.md',
     names: 'acmePage, otherPage, deniedPage',
     blockCount: 3
   },
   projections: {
-    filename: 'GUIDE_X_Query_Projections.md',
+    filename: '15-query-projections.md',
     names: 'jane, sparse, firstPage, nextPage, included',
     blockCount: 6
   },
   fastify: {
-    filename: 'GUIDE_X_Fastify.md',
+    filename: '23-fastify.md',
     names: 'createdResponse, listResponse, invalidResponse, malformedResponse',
     blockCount: 3
   },
   bulk: {
-    filename: 'GUIDE_X_Bulk_Operations.md',
+    filename: '27-bulk-operations.md',
     names: 'created, updated, partial, atomicError, afterAtomicFailure, managedError, afterManagedRollback, deleted, remaining',
     blockCount: 7
   },
   temporal: {
-    filename: 'GUIDE_Y_Appendices.md',
+    filename: '32-date-and-time.md',
     names: 'januaryArticle, onDate, inJanuary',
     blockCount: 3
   },
   service: {
-    filename: 'GUIDE_5_Non-Db_Resources.md',
+    filename: '14-custom-resource-methods.md',
     names: 'serviceApi, availability',
     blockCount: 3,
     modes: ['none']
   },
   updates: {
-    filename: 'GUIDE_2_8_Effects_of_PUT_and_PATCH.md',
+    filename: '10-put-and-patch.md',
     names: 'publisher, book, patched, incompletePutError, afterRejectedPut, replaced, retainedBooks, clearedBooks, detachedBook, reattachedBooks, unchangedPublisher',
     blockCount: 6
   },
   search: {
-    filename: 'GUIDE_2_2_Manipulating_And_Searching_Tables.md',
+    filename: '04-creating-and-querying.md',
     names: 'patched, replaced, exact, byCode, contains, range, allWords, custom, page',
     blockCount: 5
   },
   pagination: {
-    filename: 'GUIDE_2_7_Pagination_And_Ordering.md',
+    filename: '09-pagination-and-sorting.md',
     names: 'defaultPage, numbered, emptyPage, firstCursorPage, secondCursorPage, sparse, nextSparse',
     blockCount: 4
   },
   'relationship-urls': {
-    filename: 'GUIDE_2_9_Relationships_Urls.md',
+    filename: '11-relationship-endpoints.md',
     names: 'linkage, related, replaced, empty, peterPublisher, cleared',
     blockCount: 4
   },
   transformations: {
-    filename: 'GUIDE_3_Field_Transformations.md',
+    filename: '12-field-transformations.md',
     names: 'created, fetched, marginOnly, selectedCost, included, minimal, afterPriceChange',
     blockCount: 5
   },
   hooks: {
-    filename: 'GUIDE_7_Hooks_Data_Management_And_Plugins.md',
+    filename: '13-hooks-and-lifecycle.md',
     names: 'fullNote, minimalNote, fullEvents, minimalEvents',
     blockCount: 3
   },
   autofilter: {
-    filename: 'GUIDE_X_Autofiltering.md',
+    filename: '16-autofiltering.md',
     names: 'acmeProject, acmePage, replacedProject, otherPage',
     blockCount: 3
   },
   plugins: {
-    filename: 'GUIDE_X_Writing_Plugins.md',
+    filename: '29-writing-plugins.md',
     names: 'authorDescription, publisherDescription, createdAuthor',
     blockCount: 3
   }

@@ -16,7 +16,9 @@
     "README.md",
     "docs/API.md",
     "docs/QUICKSTART.md",
-    "docs/GUIDE/**/*.md"
+    "docs/GUIDE/**/*.md",
+    "docs/architecture.md",
+    "docs/contributing.md"
   ],
   "scripts": {
     "test": "node --test tests/*.test.js",
@@ -56,8 +58,6 @@
     "docs": "node scripts/run-docs.js",
     "docs:dev": "node scripts/run-docs.js --serve",
     "verify": "npm run typecheck && npm run test:public-types && npm run test:query-budgets && npm test && npm run test:anyapi && npm run test:connectors:express4 && npm run lint && npm run docs",
-    "sloc": "sloc --exclude \"(_site|node_modules|\\.git|vendor|docs)\" .",
-    "slod": "cd docs;echo 'DOC LINES:'; cat `find . -iname \\*md | grep -v _site | grep -v vendor` | wc",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:socketio": "npm run test:socketio:knex && npm run test:socketio:anyapi",
@@ -81,12 +81,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mobily-enterprises/jsonrestapi.git"
+    "url": "git+https://github.com/mobily-enterprises/json-rest-api.git"
   },
   "author": "Tony Mobily",
   "license": "GPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/mobily-enterprises/jsonrestapi/issues"
+    "url": "https://github.com/mobily-enterprises/json-rest-api/issues"
   },
   "homepage": "https://mobily-enterprises.github.io/json-rest-api",
   "description": "JSON:API mini-ORM with resource hooks and pluggable storage",

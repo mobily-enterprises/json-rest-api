@@ -28,8 +28,7 @@ npm install json-rest-api knex better-sqlite3 express
 ## Quick Start
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
-import { JsonRestApi } from 'json-rest-api';
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
 import knexLib from 'knex';
 import express from 'express';
 
@@ -74,43 +73,28 @@ app.listen(3000, () => {
 
 ## Documentation
 
-The [API migration guide](docs/GUIDE/MIGRATING_API_V2.md) describes the breaking
-response-option changes being implemented in this worktree and their release status.
+The [API migration guide](docs/GUIDE/33-migrating-to-v2.md) describes the breaking
+v2 API changes and the steps for upgrading applications.
 
 
 - [Quick Start](docs/QUICKSTART.md) - Quick start
 - [Complete guide](docs/GUIDE/index.md) - Comprehensive guide
 - [API Reference](docs/API.md) - API reference
-- [Backend capabilities and limits](docs/GUIDE/BACKEND_CAPABILITIES.md) - Databases, precision, migrations, transactions and storage gaps
+- [Backend capabilities and limits](docs/GUIDE/30-backend-capabilities.md) - Databases, precision, migrations, transactions and storage gaps
 
 ## Development
 
-Contributor references below require a source checkout; they are excluded from
-the npm package. The repository also contains `docs/COMPARISON.md`.
+See [contributing](docs/contributing.md) for setup, focused checks, native database
+verification and releases. [Architecture](docs/architecture.md) maps the main
+execution paths. Test fixture conventions live in `tests/README.md` in a source checkout.
 
-See Testing json-rest-api (source checkout: `tests/README.md`) for contributor fixture rules,
-current request examples and the verification command matrix.
-
-Use the Node version in `.nvmrc` and install dependencies with `npm ci`.
-See the clean-checkout verification guide (source checkout: `docs/development/verification.md`)
-for Ruby/Bundler setup, supported development runtimes and current coverage.
-The real-database guide (source checkout: `docs/development/real-databases.md`) explains disposable
-PostgreSQL/MySQL setup and the separate integration commands.
-
-```bash
-# Run types, query budgets, both SQLite suites, Express 4, lint and documentation
+```sh
+nvm use
+npm ci
 npm run verify
-
-# Run lint separately
-npm run lint
-
-# Run the focused normalizeId suites directly
-npm run test:id-contracts
-npm run test:id-contracts:anyapi
-
-# Build the docs site in docs/_site
-npm run docs
-
-# Serve the docs locally with live rebuild
-npm run docs:dev
 ```
+
+The full gate includes types, package contracts, query budgets, both SQLite
+storage suites, Express 4, lint and the documentation build. Native database,
+Redis and fresh-install checks are separate commands described in contributing.
+Use `npm run docs:dev -- --no-open` to serve the documentation locally.

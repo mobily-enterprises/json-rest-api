@@ -2,7 +2,7 @@
 
 Use Node 24 (`nvm use`); the library requires Node 24+, and the development/CI
 matrix tests Node 24 only. Install with `npm ci`. The
-[verification guide](../docs/development/verification.md) covers clean-checkout
+[contributing guide](../docs/contributing.md) covers clean-checkout
 prerequisites, including Ruby/Bundler for documentation.
 
 ## Choosing checks
@@ -12,7 +12,7 @@ prerequisites, including Ruby/Bundler for documentation.
 | `npm test` | Complete default SQLite test invocation |
 | `npm run test:anyapi` | Complete suite with canonical storage selected; some historical fixtures explicitly use one backend |
 | `npm run verify` | Internal and packed public types, query budgets in both modes, both full SQLite invocations, Express 4 in both modes, lint and documentation |
-| `npm run typecheck` | Incremental checked JavaScript and type-contract fixtures; see [checked scope](../docs/development/typechecking.md) |
+| `npm run typecheck` | Incremental checked JavaScript and type-contract fixtures; see `tsconfig.json` |
 | `npm run test:public-types` | Strict consumer compilation against an extracted npm tarball, runtime/type export agreement, and negative public-import checks; shares installed dependency files |
 | `npm run test:clean-package` | Installs the actual tarball into a fresh temporary consumer without shared dependencies; checks optional-peer-free imports, missing Express diagnostics and SQLite CRUD in both storage modes |
 | `npm run test:api-reference` | Executes selected literal API-reference schema/hook examples and checks their CRUD, computed-field, filter, pagination and error behavior in both SQLite storage modes |
@@ -36,8 +36,7 @@ prerequisites, including Ruby/Bundler for documentation.
 `npm run verify` does not run the native database or Redis jobs, package-install
 checks, or downstream application checks. Run the relevant additional jobs for
 the changed boundary. Native services require local binaries; use the
-[database setup](../docs/development/real-databases.md) and
-[Redis setup](../docs/development/real-redis.md) instructions.
+[database and Redis setup](../docs/contributing.md#real-databases-and-redis) instructions.
 
 Run a focused file directly; adding a filename to `npm test` does not replace
 its existing `tests/*.test.js` argument:
@@ -68,8 +67,7 @@ physical tables owned by a custom fixture in its `tables` mapping. Suites using
 `createTestDatabase` also honor the selected database. A test that constructs
 SQLite directly remains a SQLite test when launched by the native runner.
 
-[TEST_TEMPLATE.test.js](TEST_TEMPLATE.test.js) is the existing ordinary SQLite
-example. For a shared driver-aware example, see
+For a shared driver-aware example, see
 [conformance-write-diagnostics.test.js](conformance-write-diagnostics.test.js).
 Use the assertion and document helpers in
 [helpers/test-utils.js](helpers/test-utils.js) for consistent JSON:API checks.
@@ -117,8 +115,8 @@ temporary services in teardown, including setup-failure paths.
 
 Run `npm test` before each push and the full gate plus affected integrations for
 changes spanning shared boundaries. Record commands, Node/driver versions and
-source state in the [verification ledger](../docs/development/verification-progress.md).
+source state in the pull request or release notes.
 Consumer verification is separately scoped: the package-check script requires
 an explicit consumer path and command, and passing library tests does not prove
-an application migration. See the [master plan](../library-improvement-plan.md)
-for current migration scope; jskit-ai, vibe64 and seeds remain paused.
+an application migration. Follow the [migration guide](../docs/GUIDE/33-migrating-to-v2.md)
+when adapting application code.

@@ -12,7 +12,6 @@ export default async ({ params, context, runHooks }) => {
     throw new RestApiValidationError('Route requires method, path, and handler')
   }
 
-  // debugger
   // Create context for enrichAttributes hooks
   Object.assign(context, params)
 

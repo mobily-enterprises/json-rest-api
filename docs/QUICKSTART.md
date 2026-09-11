@@ -1,3 +1,7 @@
+---
+title: "Quickstart"
+---
+
 # Quickstart
 
 Use Node 24 or newer. Development verification runs on Node 24. This example
@@ -14,7 +18,7 @@ npm install json-rest-api knex better-sqlite3 express
 ```
 
 These examples use the revised API described in the
-[migration guide](GUIDE/MIGRATING_API_V2.md). Until that release is published,
+[migration guide](GUIDE/33-migrating-to-v2.md). Until that release is published,
 install the intended library tarball in place of the registry package.
 
 ## Define resources
@@ -23,8 +27,7 @@ Create `index.js` with the following code. Install the HTTP connector before
 registering resources so it can register their routes.
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'
-import { JsonRestApi } from 'json-rest-api'
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'
 import knexLib from 'knex'
 import express from 'express'
 
@@ -61,8 +64,8 @@ await api.resources.authors.createKnexTable()
 ```
 
 `searchSchema` declares accepted public filters; `actualField` maps a filter to
-a resource field. See [searching](GUIDE/GUIDE_2_2_Manipulating_And_Searching_Tables.md)
-for more complex filters and [schema migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md)
+a resource field. See [searching](GUIDE/04-creating-and-querying.md)
+for more complex filters and [schema migrations](GUIDE/21-schema-and-migrations.md)
 for persistent databases.
 
 ## Call the API programmatically
@@ -170,4 +173,4 @@ For an API without an HTTP server, omit the connector/server setup and call
 `await knex.destroy()` after the programmatic operations finish.
 
 Continue with the [full guide](GUIDE/index.md),
-[API reference](API.md), and [verified backend capabilities](GUIDE/BACKEND_CAPABILITIES.md).
+[API reference](API.md), and [verified backend capabilities](GUIDE/30-backend-capabilities.md).

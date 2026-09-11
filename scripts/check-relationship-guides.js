@@ -8,7 +8,7 @@ import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const examples = [
   {
-    file: 'GUIDE_2_6_Many_To_Many.md',
+    file: '08-many-to-many.md',
     modes: ['knex'],
     names: 'neil, terry, goodOmens, americanGods, includedBook, includedDocument, booksByNeil, authorsOfGods, contribution, updatedPivots, remainingMembers, remainingPivots, terryStillExists',
     check (result) {
@@ -27,7 +27,7 @@ const examples = [
     }
   },
   {
-    file: 'GUIDE_2_5_HasMany_Polymorphic.md',
+    file: '07-polymorphic-relationships.md',
     names: 'publisher, author, publisherReview, authorReviewDocument, publisherWithReviews, authorWithReviews, reviewsWithTargets, reviewDocument, reviewsOfVictor, reliablePublishers, reliableAuthors, publisherLinkage, authorLinkage',
     check (result) {
       assert.equal(result.publisher.id, result.author.id)
@@ -46,7 +46,7 @@ const examples = [
     }
   },
   {
-    file: 'GUIDE_2_3_BelongsTo_Relationships.md',
+    file: '05-belongs-to.md',
     names: 'france, frenchPublisher, includedPublisher, plainCollection, jsonapiCollection, sparsePublisher, fromFrance, fromUK, unassigned, cleared',
     check (result) {
       assert.deepEqual(result.frenchPublisher.country, { id: result.france.id })
@@ -63,7 +63,7 @@ const examples = [
     }
   },
   {
-    file: 'GUIDE_2_4_HasMany_Records.md',
+    file: '06-has-many.md',
     names: 'victor, emile, identifiers, embedded, document, empty, firstAuthorPage, sparse, matchingPublishers, matchingAuthors, finalLinkage, detachedVictor',
     check (result) {
       assert.deepEqual(result.identifiers.authors.map(record => record.id).sort(), [result.victor.id, result.emile.id].sort())

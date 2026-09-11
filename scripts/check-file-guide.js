@@ -10,7 +10,7 @@ import { RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin } f
 import { LocalStorage } from '../plugins/storage/local-storage.js'
 
 const directory = await mkdtemp(path.join(tmpdir(), 'json-rest-file-guide-'))
-const source = await readFile(new URL('../docs/GUIDE/GUIDE_X_File_Uploads.md', import.meta.url), 'utf8')
+const source = await readFile(new URL('../docs/GUIDE/26-file-uploads.md', import.meta.url), 'utf8')
 const blocks = [...source.matchAll(/```js\n([\s\S]*?)\n```/g)]
 const setup = blocks.find(match => match[1].includes("name: 'uploads'"))?.[1]
 assert.ok(setup, 'The guide must retain an identifiable complete setup example')

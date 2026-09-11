@@ -103,7 +103,7 @@ export const ensureAnyApiSchema = async (knex) => {
       .where('table_name', 'any_records')
       .whereIn('column_name', Array.from({ length: DATE_SLOT_COUNT }, (_, index) => `date_${index + 1}`))
     if (columns.length !== DATE_SLOT_COUNT || columns.some(column => Number(column.precision) !== 6)) {
-      throw new Error('AnyAPI temporal storage migration required: any_records.date_1 through date_5 must use timestamp/datetime precision 6. See MIGRATING_API_V2.md.')
+      throw new Error('AnyAPI temporal storage migration required: any_records.date_1 through date_5 must use timestamp/datetime precision 6. See 33-migrating-to-v2.md.')
     }
   }
 

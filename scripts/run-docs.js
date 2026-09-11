@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const projectRoot = path.join(__dirname, '..')
 const docsRoot = path.join(projectRoot, 'docs')
+const bundlerEnv = { ...process.env, BUNDLE_PATH: process.env.BUNDLE_PATH || path.join(docsRoot, 'vendor/bundle') }
 const LOCAL_URL = 'http://localhost:4000/json-rest-api/'
 const BROWSER_DELAY_MS = 3000
 
@@ -23,6 +24,7 @@ async function runCommand (command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       stdio: 'inherit',
+      env: bundlerEnv,
       shell: process.platform === 'win32',
       timeout: 600000,
       killSignal: 'SIGKILL',
@@ -77,6 +79,7 @@ async function serveDocs () {
   const jekyll = spawn('bundle', ['exec', 'jekyll', 'serve', '--watch'], {
     cwd: docsRoot,
     stdio: 'pipe',
+    env: bundlerEnv,
     shell: process.platform === 'win32'
   })
 

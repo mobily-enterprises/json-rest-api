@@ -1,0 +1,480 @@
+---
+title: "Autofiltering"
+chapter: 16
+chapter_label: "16"
+---
+
+# 16. Autofiltering
+
+The `AutoFilterPlugin` provides declarative dataset scoping for `json-rest-api`.
+
+It does one job:
+
+- resolve scope values from request/runtime context
+- apply those values as automatic filters
+- stamp scoped fields on create
+- preserve scoped fields on replace
+- reject inconsistent scoped-field updates
+
+It does **not** define authentication, roles, or permissions.
+
+## Overview
+
+Autofiltering is useful whenever a resource should be constrained by one or more persisted fields:
+
+- `workspace_id`
+- `user_id`
+- `workspace_id + user_id`
+- any other application-defined scope field
+
+The plugin is generic. It does not assume:
+
+- `context.auth`
+- `authenticated`
+- `admin`
+- JWTs
+- sessions
+
+Your application decides where scope values come from. The plugin only consumes configured resolver functions.
+
+## Runnable workspace example
+
+Insert these three blocks into the [starting script](03-running-example.md)
+after installing storage and before starting the server, on a fresh database.
+They also work with canonical storage after its normal initialization. The
+remaining examples below are configuration alternatives and fragments.
+
+```javascript
+import { AutoFilterPlugin } from 'json-rest-api'
+
+await api.use(AutoFilterPlugin, {
+  resolvers: { workspace: ({ context }) => context.session?.workspaceId },
+  presets: { workspace: { filters: [{ field: 'workspace_id', resolver: 'workspace' }] } }
+})
+await api.addResource('projects', {
+  schema: {
+    name: { type: 'string', required: true },
+    workspace_id: { type: 'string', required: true }
+  },
+  autofilter: 'workspace'
+})
+await api.resources.projects.createKnexTable()
+const workspaceContext = workspaceId => ({ session: { workspaceId } })
+```
+
+Supply trusted application context as the second argument. Here the workspace
+values are illustrative; a server should derive them from its authenticated
+request context.
+
+```javascript
+const acmeProject = await api.resources.projects.post({
+  inputRecord: { name: 'Roadmap' }, format: 'plain'
+}, workspaceContext('acme'))
+await api.resources.projects.post({
+  inputRecord: { name: 'Other workspace' }, format: 'plain'
+}, workspaceContext('other'))
+const acmePage = await api.resources.projects.query({
+  format: 'jsonapi', queryParams: { page: { number: 1, size: 10 } }
+}, workspaceContext('acme'))
+console.log(acmeProject.workspace_id, acmePage.data, acmePage.meta.pagination.total)
+```
+
+The created record has `workspace_id: 'acme'`. The page contains only Roadmap
+and its total is 1, even though another workspace has a stored project.
+
+```javascript
+const replacedProject = await api.resources.projects.put({
+  id: acmeProject.id, inputRecord: { name: 'Updated roadmap' }, format: 'plain'
+}, workspaceContext('acme'))
+const otherPage = await api.resources.projects.query({ format: 'plain' }, workspaceContext('other'))
+console.log(replacedProject.workspace_id, otherPage.data.map(project => project.name))
+```
+
+PUT supplies the complete writable record, with the scoped workspace field
+injected by the plugin. The record remains in acme, and the other workspace
+still sees only its own project. Explicitly submitting a different workspace
+value rejects; omitting required application scope context also rejects.
+
+## Installation
+
+```js
+import { JsonRestApi } from 'json-rest-api'
+import {
+  RestApiPlugin,
+  RestApiKnexPlugin,
+  AutoFilterPlugin
+} from 'json-rest-api'
+
+const api = new JsonRestApi({ name: 'scoped-api' })
+
+await api.use(RestApiPlugin)
+await api.use(RestApiKnexPlugin, { knex })
+
+await api.use(AutoFilterPlugin, {
+  resolvers: {
+    workspace: ({ context }) => context.session?.workspaceId,
+    user: ({ context }) => context.subject?.id,
+  },
+
+  presets: {
+    public: { filters: [] },
+
+    workspace: {
+      filters: [
+        { field: 'workspace_id', resolver: 'workspace' }
+      ]
+    },
+
+    user: {
+      filters: [
+        { field: 'user_id', resolver: 'user' }
+      ]
+    },
+
+    workspace_user: {
+      filters: [
+        { field: 'workspace_id', resolver: 'workspace' },
+        { field: 'user_id', resolver: 'user' }
+      ]
+    }
+  }
+})
+```
+
+## Storage Backends
+
+`AutoFilterPlugin` works with either database storage plugin:
+
+- `RestApiKnexPlugin` for resources backed by normal database tables
+- `RestApiAnyapiKnexPlugin` for logical resources backed by AnyAPI canonical storage
+
+A `JsonRestApi` instance has one storage engine. Install either storage plugin, then install `AutoFilterPlugin`. If an application keeps core resources in normal tables and user-defined resources in AnyAPI, create one `JsonRestApi` instance for each storage engine. Each instance owns its resources and autofilter configuration.
+
+Autofilter definitions always use logical schema field names. The selected storage plugin translates those fields to normal table columns or AnyAPI canonical slots.
+
+### Workspace Scoping with AnyAPI
+
+AnyAPI's `tenantId` is fixed when `RestApiAnyapiKnexPlugin` is installed. It identifies the metadata and canonical-storage namespace; it is not a per-request workspace value. For one AnyAPI instance serving multiple application workspaces, use a stable internal `tenantId` and persist `workspace_id` on every workspace-scoped resource:
+
+```js
+import { JsonRestApi } from 'json-rest-api'
+import {
+  RestApiPlugin,
+  RestApiAnyapiKnexPlugin,
+  AutoFilterPlugin
+} from 'json-rest-api'
+
+const api = new JsonRestApi({ name: 'form-data-api' })
+
+await api.use(RestApiPlugin)
+await api.use(RestApiAnyapiKnexPlugin, {
+  knex,
+  tenantId: 'application'
+})
+
+await api.use(AutoFilterPlugin, {
+  resolvers: {
+    workspace: ({ context }) => context.session?.workspaceId
+  },
+  presets: {
+    workspace: {
+      filters: [
+        { field: 'workspace_id', resolver: 'workspace' }
+      ]
+    }
+  }
+})
+
+await api.addResource('form_123', {
+  schema: {
+    id: { type: 'id' },
+    workspace_id: { type: 'string', required: true },
+    customer_name: { type: 'string', required: true },
+    subscribed: { type: 'boolean' }
+  },
+  autofilter: 'workspace'
+})
+```
+
+In this arrangement:
+
+- `tenantId: 'application'` selects one fixed AnyAPI metadata and canonical-storage namespace. Do not derive it from request context.
+- `workspace_id` isolates application workspaces. `AutoFilterPlugin` stamps it on writes and filters by it on reads.
+- A trusted resolver supplies the current workspace. Do not resolve it directly from an unverified request field.
+- User-defined forms with different schemas need distinct resource names within the AnyAPI namespace, such as `form_123` and `form_456`. Put the workspace autofilter on each resource.
+- Workspaces may use the same logical resource when they share its schema; `workspace_id` still keeps their records separate.
+
+## Resource Configuration
+
+Apply a preset by name:
+
+```js
+await api.addResource('projects', {
+  schema: {
+    id: { type: 'id' },
+    name: { type: 'string', required: true },
+    workspace_id: { type: 'string', required: true },
+    user_id: { type: 'number', required: true }
+  },
+  autofilter: 'workspace_user'
+})
+```
+
+Use a preset with extra filters:
+
+```js
+await api.addResource('documents', {
+  schema: {
+    id: { type: 'id' },
+    workspace_id: { type: 'string', required: true },
+    user_id: { type: 'number', required: true },
+    locale: { type: 'string', required: true }
+  },
+  autofilter: {
+    preset: 'workspace_user',
+    filters: [
+      {
+        field: 'locale',
+        resolve: ({ context }) => context.requestState?.locale
+      }
+    ]
+  }
+})
+```
+
+Use inline filters with no preset:
+
+```js
+await api.addResource('reports', {
+  schema: {
+    id: { type: 'id' },
+    account_id: { type: 'string', required: true }
+  },
+  autofilter: {
+    filters: [
+      {
+        field: 'account_id',
+        resolve: ({ context }) => context.scopeValues?.accountId
+      }
+    ]
+  }
+})
+```
+
+Declare a public resource explicitly:
+
+```js
+await api.addResource('system_settings', {
+  schema: {
+    id: { type: 'id' },
+    key: { type: 'string', required: true },
+    value: { type: 'string', required: true }
+  },
+  autofilter: 'public'
+})
+```
+
+If a resource has no `autofilter` setting, the plugin does nothing for that resource.
+
+## Runtime Behavior
+
+### Query Scoping
+
+Collection queries automatically receive all configured filters.
+
+For a `workspace_user` resource:
+
+```js
+await api.resources.projects.query(
+  { format: 'jsonapi' },
+  {
+    session: { workspaceId: 'acme' },
+    subject: { id: 101 }
+  }
+)
+```
+
+behaves like:
+
+```sql
+SELECT * FROM projects
+WHERE workspace_id = 'acme'
+  AND user_id = 101
+```
+
+### Single-Record Scoping
+
+`get`, `put`, `patch`, and `delete` operate on the already-scoped dataset.
+
+If a record is outside the current scope, it behaves as not found.
+
+### Create-Time Stamping
+
+On `POST`, scoped fields are injected automatically when missing.
+
+Example:
+
+```js
+await api.resources.projects.post({
+  inputRecord: {
+    data: {
+      type: 'projects',
+      attributes: {
+        name: 'Roadmap'
+      }
+    }
+  },
+  format: 'jsonapi'
+}, {
+  session: { workspaceId: 'acme' },
+  subject: { id: 101 }
+})
+```
+
+Stored attributes:
+
+```js
+{
+  name: 'Roadmap',
+  workspace_id: 'acme',
+  user_id: 101
+}
+```
+
+### Replace/Update Consistency
+
+On `PUT`:
+
+- missing scoped fields are injected so replacement stays consistent
+- mismatched scoped fields are rejected
+
+On `PATCH`:
+
+- omitted scoped fields stay omitted
+- explicitly provided mismatched scoped fields are rejected
+
+## Relationship-Aware Scoping
+
+Autofiltering also affects relationship validation because scoped single-record lookups are used when checking related resources.
+
+So this will fail if the referenced project is outside scope:
+
+```js
+await api.resources.tasks.post({
+  inputRecord: {
+    data: {
+      type: 'tasks',
+      attributes: { title: 'Cross-scope task' },
+      relationships: {
+        project: {
+          data: { type: 'projects', id: '123' }
+        }
+      }
+    }
+  },
+  format: 'jsonapi'
+}, {
+  session: { workspaceId: 'workspace-a' },
+  subject: { id: 101 }
+})
+```
+
+## Missing Scope Values
+
+By default, each filter is required.
+
+If a resolver returns `undefined`, the plugin throws:
+
+```text
+Missing autofilter value for resolver 'workspace' on resource 'projects'
+```
+
+To make a filter optional, set `required: false`:
+
+```js
+{
+  field: 'workspace_id',
+  resolver: 'workspace',
+  required: false
+}
+```
+
+When `required: false` and the resolver returns `undefined`, that filter is skipped.
+
+## BelongsTo Foreign Keys
+
+If the scoped field is a `belongsTo` foreign key with an alias, the plugin works through the JSON:API relationship shape.
+
+Example:
+
+```js
+user_id: {
+  type: 'number',
+  belongsTo: 'users',
+  as: 'user'
+}
+```
+
+The plugin will stamp or validate:
+
+```js
+data.relationships.user.data.id
+```
+
+instead of treating it as a direct client-owned attribute.
+
+## Storage Mapping
+
+Autofiltering uses the compiled storage adapter automatically.
+
+So this works correctly:
+
+```js
+workspace_id: {
+  type: 'string',
+  storage: { column: 'workspace_key' }
+}
+```
+
+The plugin scopes using the logical field name, while Knex filtering uses the mapped storage column.
+
+## Introspection Helpers
+
+The plugin exposes light runtime inspection helpers:
+
+```js
+api.autofilter.getConfig()
+api.autofilter.getScopeConfig('projects')
+```
+
+Example:
+
+```js
+api.autofilter.getScopeConfig('projects')
+// {
+//   preset: 'workspace_user',
+//   filters: [
+//     { field: 'workspace_id', resolver: 'workspace', required: true },
+//     { field: 'user_id', resolver: 'user', required: true }
+//   ]
+// }
+```
+
+## Design Boundary
+
+`AutoFilterPlugin` is intentionally narrower than an auth plugin.
+
+It owns:
+
+- dataset scoping
+- scoped-field stamping
+- scoped-field consistency
+
+It does **not** own:
+
+- authentication meaning
+- role policy
+- admission checks
+- permissions like `authenticated` or `owns`
+
+That logic belongs in higher layers or custom `checkPermissions` hooks.

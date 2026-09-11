@@ -4,7 +4,7 @@ import { JsonRestApi } from '../index.js'
 import knexLib from 'knex'
 import { RestApiPlugin, RestApiKnexPlugin } from '../index.js'
 
-const source = await readFile(new URL('../docs/GUIDE/GUIDE_1_Initial_Setup.md', import.meta.url), 'utf8')
+const source = await readFile(new URL('../docs/GUIDE/01-getting-started.md', import.meta.url), 'utf8')
 const blocks = [...source.matchAll(/```javascript\n([\s\S]*?)\n```/g)].map(match => match[1])
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const output = new Map()

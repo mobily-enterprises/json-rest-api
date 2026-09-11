@@ -1,12 +1,15 @@
+---
+title: "API reference"
+---
+
 # JSON REST API - Complete API Reference
 
 This reference provides comprehensive documentation for all methods, parameters, and features available in the json-rest-api library.
 
 ## Current contract
 
-This reference targets the current working tree, not a coordinated released
-consumer upgrade. See the [migration guide](GUIDE/MIGRATING_API_V2.md) and
-[backend limits](GUIDE/BACKEND_CAPABILITIES.md) before upgrading.
+This reference describes the v2 API. See the [migration guide](GUIDE/33-migrating-to-v2.md) and
+[backend limits](GUIDE/30-backend-capabilities.md) before upgrading.
 
 Pass method controls in the first `params` object and application-owned
 identity/authentication data in the optional second context object. Write data
@@ -22,7 +25,7 @@ Boolean representation/return aliases are removed and rejected.
 
 On a resource configured with `versionField`, PUT/PATCH/DELETE and relationship
 writes accept an `expectedVersion` string; unconditional writes may omit it.
-POST does not accept that condition. See [optimistic concurrency](GUIDE/MIGRATING_API_V2.md)
+POST does not accept that condition. See [optimistic concurrency](GUIDE/33-migrating-to-v2.md)
 for version-field configuration, bulk version arrays and the separate opt-in
 HTTP validator contract.
 
@@ -33,34 +36,76 @@ a separate context for each enlisted operation. See [transaction support](#trans
 
 ## Table of Contents
 
-1. [Core API Methods](#core-api-methods)
+1. [API setup and runtime](#api-setup-and-runtime)
+2. [Core API Methods](#core-api-methods)
    - [QUERY - Retrieve Collections](#query---retrieve-collections)
    - [GET - Retrieve Single Resource](#get---retrieve-single-resource)
    - [POST - Create Resource](#post---create-resource)
    - [PUT - Replace Resource](#put---replace-resource)
    - [PATCH - Update Resource](#patch---update-resource)
    - [DELETE - Remove Resource](#delete---remove-resource)
-2. [Relationship Methods](#relationship-methods)
+3. [Relationship Methods](#relationship-methods)
    - [getRelated - Retrieve Related Resources](#getrelated---retrieve-related-resources)
    - [getRelationship - Retrieve Relationship Identifiers](#getrelationship---retrieve-relationship-identifiers)
    - [postRelationship - Add to Relationship](#postrelationship---add-to-relationship)
    - [patchRelationship - Replace Relationship](#patchrelationship---replace-relationship)
    - [deleteRelationship - Remove from Relationship](#deleterelationship---remove-from-relationships)
-3. [Hook System](#hook-system)
+4. [Hook System](#hook-system)
    - [Complete Hook Execution Order](#complete-hook-execution-order)
    - [Hook Context Objects](#hook-context-objects)
-4. [Query Features](#query-features)
+5. [Query Features](#query-features)
    - [Filtering](#filtering)
    - [Sorting](#sorting)
    - [Pagination](#pagination)
    - [Sparse Fieldsets](#sparse-fieldsets)
    - [Including Related Resources](#including-related-resources)
-5. [Configuration Options](#configuration-options)
-6. [Schema Configuration](#schema-configuration)
-7. [Error Handling](#error-handling)
-8. [Advanced Features](#advanced-features)
+6. [Configuration Options](#configuration-options)
+7. [Schema Configuration](#schema-configuration)
+8. [Error Handling](#error-handling)
+9. [Advanced Features](#advanced-features)
 
 ---
+
+## API setup and runtime
+
+Import `JsonRestApi` from `json-rest-api`. Create an instance, await each plugin
+installation, then register resources before accepting requests.
+
+```js
+const api = new JsonRestApi({ name: 'catalog', logger: applicationLogger })
+await api.use(RestApiPlugin)
+await api.use(RestApiKnexPlugin, { knex })
+await api.addResource('books', bookOptions)
+```
+
+The [quickstart](QUICKSTART.md) supplies a complete setup with imports and schemas.
+`name` and `logger` are optional. The logger accepts `trace`, `debug`, `info`,
+`warn`, `error` and `fatal` methods; omitted methods are silent. Configure log
+formatting and filtering in your logger. Old `log` and `logging` options reject.
+
+| Member | Contract |
+| --- | --- |
+| `api.use(plugin, options?)` | Installs a named plugin after checking dependencies; resolves to the API |
+| `api.addResource(name, options?)` | Registers a unique resource, runs setup hooks and resolves to that resource |
+| `api.resources[name]` | The registered resource object and its methods |
+| `api.customize({ hooks, methods, vars, helpers })` | Adds global hooks, shared resource methods and API defaults; resolves to the API |
+| `api.runHooks(event, context?)` | Runs global handlers sequentially; resolves to `false` if one stops the list, otherwise `true` |
+| `api.vars`, `api.helpers` | Defaults inherited by resource vars and helpers |
+
+Resource options include schemas and plugin configuration, plus local `hooks`,
+`methods`, `vars` and `helpers`. Resource methods receive the runtime argument
+object, not positional data arguments; see [writing plugins](GUIDE/29-writing-plugins.md).
+Global setup hooks run before resource-local operation hooks are registered.
+
+Shared resource methods require their resource as the receiver. Keep calls such
+as `api.resources.books.get(params, context)` intact, or bind the resource when
+passing a method as a callback. Local vars/helpers override inherited defaults;
+`Object.keys` lists local entries only. Shared method replacements apply to
+resources without their own local override.
+
+Await setup sequentially. Setup failure is not rolled back; discard that instance
+and correct its configuration before starting again. Registration and
+`customize()` do not migrate stored data or rebuild arbitrary schema mutations.
 
 ## Core API Methods
 
@@ -613,7 +658,7 @@ const result = await api.resources.articles.post({
 
 Creates a missing target at the supplied ID or replaces a visible existing
 resource. Replacement applies schema required/default/nullability rules and the
-method's relationship-omission semantics. See [PUT and PATCH](GUIDE/GUIDE_2_8_Effects_of_PUT_and_PATCH.md).
+method's relationship-omission semantics. See [PUT and PATCH](GUIDE/10-put-and-patch.md).
 Target visibility checks still apply.
 
 #### Method Signature
@@ -1377,7 +1422,7 @@ GET and QUERY run `beforeData` and their method-specific hook before reading.
 They run enrichment and finish hooks over the internal JSON:API record before
 final output conversion. GET additionally runs data-permission checks and
 `enrichRecordWithRelationships`. DELETE and relationship writes have their own
-sequences; use the [hook and lifecycle guide](GUIDE/GUIDE_7_Hooks_Data_Management_And_Plugins.md)
+sequences; use the [hook and lifecycle guide](GUIDE/13-hooks-and-lifecycle.md)
 for those contracts rather than extrapolating POST's stages.
 
 ### Hook Context Objects
@@ -1395,7 +1440,7 @@ Context availability is stage-specific:
 
 Application authentication is not defined by the library. Pass trusted
 application context from the caller/transport; do not infer it from payload data.
-Use [row policies](GUIDE/GUIDE_X_Row_Policies.md) for mandatory row visibility.
+Use [row policies](GUIDE/17-row-policies.md) for mandatory row visibility.
 Do not treat a single GET permission hook as a universal query/relationship guard.
 
 An ordinary failure stops later stages. A post-commit failure cannot undo the
@@ -1405,7 +1450,7 @@ remain subject to the [transaction/error contract](#transaction-support).
 #### knexQueryFiltering
 
 Query customization operates on native builders with explicit storage mapping.
-Use the [query hook migration contract](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation)
+Use the [query hook migration contract](GUIDE/33-migrating-to-v2.md#native-query-builders-and-explicit-custom-filter-translation)
 for aliases, logical/physical fields and canonical tenant/resource scoping.
 Keep mandatory predicates in the supported policy/filtering mechanisms. A raw
 query fragment is not automatically translated or made tenant-safe.
@@ -1464,7 +1509,7 @@ const result = await api.resources.articles.query({
 });
 ```
 
-Use the [structured-query transport contract](GUIDE/MIGRATING_API_V2.md) when
+Use the [structured-query transport contract](GUIDE/33-migrating-to-v2.md) when
 encoding non-scalar filter values for HTTP. Declared field equality/search
 capabilities and mandatory row policies still apply.
 
@@ -1488,7 +1533,7 @@ Here `rank` must be a declared stored field. Mapping helpers resolve the active
 alias and storage representation in either storage mode. Callbacks run
 synchronously and must mutate the supplied builder. Raw SQL and extra joins
 remain responsible for their own physical columns and visibility semantics.
-See [custom-filter migration](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation).
+See [custom-filter migration](GUIDE/33-migrating-to-v2.md#native-query-builders-and-explicit-custom-filter-translation).
 
 ### Sorting
 
@@ -1582,7 +1627,7 @@ const firstPage = await api.resources.articles.query({
 ```
 
 Cursor pages use an extra row for `hasMore`; they never issue an offset count
-query. See [pagination and ordering](GUIDE/GUIDE_2_7_Pagination_And_Ordering.md)
+query. See [pagination and ordering](GUIDE/09-pagination-and-sorting.md)
 for cursor metadata, link traversal and ordering guarantees.
 
 #### Pagination Configuration
@@ -1682,8 +1727,8 @@ Use target-resource policies and supported query/filter configuration to control
 which related records are visible. Filtering `included` after fetching does not
 remove corresponding linkage, authorize the target rows, or establish correct
 per-parent limits. The library does not provide an `afterDataQuery` hook for that
-purpose. See [row policies](GUIDE/GUIDE_X_Row_Policies.md),
-[include configuration](GUIDE/MIGRATING_API_V2.md#include-configuration-is-validated-before-publication)
+purpose. See [row policies](GUIDE/17-row-policies.md),
+[include configuration](GUIDE/33-migrating-to-v2.md#include-configuration-is-validated-before-publication)
 and the query hook contract above.
 
 ## Configuration Options
@@ -1744,13 +1789,13 @@ schema field. Reverse and many-to-many relationships live in the sibling
 `relationships` map, for example `{ type: 'hasMany', target: 'comments',
 foreignKey: 'article_id' }`. A many-to-many definition specifies `target`,
 `through`, `foreignKey` and `otherKey`; register its target and pivot resources.
-Use the [relationship guides](GUIDE/GUIDE_2_Data_And_Relations.md) for complete
+Use the [relationship guides](GUIDE/02-resources-and-relationships.md) for complete
 related declarations, nullability and cardinality rules.
 
 Schema compilation snapshots declarations. Install enrichment hooks before
 registration; changing an earlier declaration object does not recompile a live
-resource. See [schema compilation](GUIDE/MIGRATING_API_V2.md#schema-compilation-snapshots-declarations)
-and [table/schema helper contracts](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
+resource. See [schema compilation](GUIDE/33-migrating-to-v2.md#schema-compilation-snapshots-declarations)
+and [table/schema helper contracts](GUIDE/21-schema-and-migrations.md).
 
 ### Important Schema Features
 
@@ -1849,7 +1894,7 @@ Mark an individual schema field with `virtual: true`, for example
 `preview: { type: 'boolean', virtual: true }`. It is validated but omitted from
 database writes; it is not a persisted UI-state field. Use a setter when a
 virtual input needs to prepare other stored attributes. A `virtualFields` array
-is not the resource declaration contract. See [virtual-field behavior](GUIDE/GUIDE_3_Field_Transformations.md).
+is not the resource declaration contract. See [virtual-field behavior](GUIDE/12-field-transformations.md).
 
 #### Field Transformations
 
@@ -1873,8 +1918,8 @@ JSON.stringify/JSON.parse callbacks solely to duplicate that conversion.
 Use a synchronous `storage.serialize` when writes and filter comparisons need
 a custom storage representation. Getters/setters may be asynchronous; their
 failures propagate under the documented error contract. See
-[field transformations](GUIDE/GUIDE_3_Field_Transformations.md) and
-[serializer migration](GUIDE/MIGRATING_API_V2.md#temporal-values-and-storage-serializers).
+[field transformations](GUIDE/12-field-transformations.md) and
+[serializer migration](GUIDE/33-migrating-to-v2.md#temporal-values-and-storage-serializers).
 
 ## Error Handling
 
@@ -1924,7 +1969,7 @@ return 500. Getters no longer retain an untransformed value after failure, and
 computed fields no longer substitute null. Use `RestApiValidationError` for
 intentional validation rejection (422). Full write-response enrichment fails
 before owned commit; borrowed transactions remain the owner's responsibility.
-See the [callback migration guide](GUIDE/MIGRATING_API_V2.md#setter-getter-and-computed-field-failures)
+See the [callback migration guide](GUIDE/33-migrating-to-v2.md#setter-getter-and-computed-field-failures)
 for examples and intentional fallback handling.
 
 Resource, relationship, bulk and canonical registry write failures use the root
@@ -1938,10 +1983,10 @@ HTTP JSON:API write errors include `meta.transactionOutcome`; non-atomic bulk
 entries include `error.transactionOutcome`. A failed call can represent a
 committed write when a later hook rejects. Retrying that call can duplicate its
 effects; neither an HTTP status nor an unknown outcome authorizes automatic
-replay. See the [transaction migration guide](GUIDE/MIGRATING_API_V2.md#transactions-and-errors)
+replay. See the [transaction migration guide](GUIDE/33-migrating-to-v2.md#transactions-and-errors)
 for all five meanings and cause-chain handling. If acknowledgement is lost,
 `unknown` requires application reconciliation before replay or file deletion;
-see [commit uncertainty](GUIDE/transaction-outcomes.md#when-commit-acknowledgement-is-lost).
+see [commit uncertainty](GUIDE/20-transaction-outcomes.md#when-commit-acknowledgement-is-lost).
 Consumer migration remains separate.
 
 ```javascript
@@ -2022,9 +2067,8 @@ inside the callback. Another `api.transaction()` call creates an independent
 top-level unit; compose work by forwarding the existing handle. Raw Knex
 transactions remain available for direct SQL and read-only API calls.
 
-The core helper is implemented in the working tree; final integration and
-consumer migration remain in progress. See the [managed contract](GUIDE/managed-transactions.md)
-and [migration guide](GUIDE/MIGRATING_API_V2.md#transactions-and-errors).
+See the [managed contract](GUIDE/19-managed-transactions.md)
+and [migration guide](GUIDE/33-migrating-to-v2.md#transactions-and-errors).
 
 ### Knex Schema Helpers
 
@@ -2063,7 +2107,7 @@ Important boundaries:
 - `addKnexFields()` and `alterKnexFields()` are field-only helpers
 - indexes, foreign keys, and check constraints belong on the full table schema surface
 
-For full examples and dialect notes, see [Knex Schema and Migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
+For full examples and dialect notes, see [Knex Schema and Migrations](GUIDE/21-schema-and-migrations.md).
 
 ### Batch Operations
 
@@ -2115,7 +2159,7 @@ read preparation/order, not a persistent reactive cache.
 
 The resource schema example above declares `word_count`. Request it through
 `queryParams.fields`, for example `{ articles: 'title,word_count' }`. See
-[field transformations](GUIDE/GUIDE_3_Field_Transformations.md) for hidden
+[field transformations](GUIDE/12-field-transformations.md) for hidden
 dependencies, getter ordering and callback context.
 
 ### Polymorphic Relationships
@@ -2139,7 +2183,7 @@ For a JSON:API write, send the selected target as relationship linkage,
 for example `relationships: { commentable: { data: { type: 'articles', id: '1' } } }`
 inside the document's `data`. The target type must be declared and the referenced
 record must satisfy visibility/validation rules. Reverse polymorphic relationships
-use their declared `via` relationship. See the [polymorphic guide](GUIDE/GUIDE_2_5_HasMany_Polymorphic.md)
+use their declared `via` relationship. See the [polymorphic guide](GUIDE/07-polymorphic-relationships.md)
 for complete schemas and reverse declarations.
 
 ### Soft Deletes
@@ -2149,7 +2193,7 @@ option. Declare a nullable timestamp/marker and explicitly PATCH it when archivi
 Changing `context.method` during DELETE does not change the executing method into
 PATCH. Apply a row policy for normal visibility and design a separate authorized
 restore path; an arbitrary `include_deleted` filter does not enable bypassing that
-policy. See [row policies](GUIDE/GUIDE_X_Row_Policies.md) and the transaction
+policy. See [row policies](GUIDE/17-row-policies.md) and the transaction
 contract when archiving must update related records.
 
 ### Field-Level Permissions
@@ -2161,8 +2205,8 @@ attribute changes before storage. Global customizations must restrict themselves
 to the intended `context.scopeName`; write attributes at schema-validation stages
 are in `context.inputRecord.data.attributes`.
 
-See [field transformations and visibility](GUIDE/GUIDE_3_Field_Transformations.md)
-and [row policies](GUIDE/GUIDE_X_Row_Policies.md). Computed values must obey the
+See [field transformations and visibility](GUIDE/12-field-transformations.md)
+and [row policies](GUIDE/17-row-policies.md). Computed values must obey the
 selected fieldset and the application's authorization rules too.
 
 ### Cross-Table Search
@@ -2171,8 +2215,8 @@ Prefer declared cross-resource search paths so the library can prepare aliases
 and apply target-resource visibility. A native join in a custom filtering hook
 does not automatically gain those permission checks. Custom SQL must use the
 active `context.knexQuery` builder/alias and explicit storage mappings, with
-bindings for values. See [native query builders](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation)
-and [query projections](GUIDE/GUIDE_X_Query_Projections.md).
+bindings for values. See [native query builders](GUIDE/33-migrating-to-v2.md#native-query-builders-and-explicit-custom-filter-translation)
+and [query projections](GUIDE/15-query-projections.md).
 
 ### Database-Specific Features
 
@@ -2185,7 +2229,7 @@ provide `supportsWindowFunctions` or `supportsJsonb` flags.
 Use declared scalar JSON-key query fields for structured-value filtering,
 sorting and cursors. Whole object/array fields are not generic query keys;
 custom raw SQL remains specific to its actual driver and physical storage.
-See the [query projection guide](GUIDE/GUIDE_X_Query_Projections.md) and
-executed capability map (source checkout: `docs/development/conformance.md`) for supported
+See the [query projection guide](GUIDE/15-query-projections.md) and
+[backend capabilities](GUIDE/30-backend-capabilities.md) for supported
 operations, tests and limitations. A dialect branch in a helper is not evidence
 that every server version or storage combination has been verified.

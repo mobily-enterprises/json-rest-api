@@ -12,7 +12,6 @@
 - Run affected native checks separately with `npm run test:databases` and `npm run test:redis`; `npm run test:connectors` selects the full connector matrix. See `tests/README.md` for scope and prerequisites.
 - `node quickTest.js` spins up an in-memory API instance for experimenting with endpoints during development.
 - `npm run docs` rebuilds the static docs via `scripts/run-docs.js` whenever reference prose changes.
-- `npm run sloc` prints a line-count summary to gauge change size before opening a PR.
 
 ## Coding Style & Naming Conventions
 - Stay with ESM (`"type": "module"`) and export named symbols only; avoid `default` exports for predictable tree-shaking.
@@ -21,7 +20,7 @@
 - Keep comments brief and reserved for decisions that are not obvious from the code.
 
 ## Testing Guidelines
-- Instantiate the API once per suite following `tests/TEST_TEMPLATE.test.js`, and call `cleanTables()` in `beforeEach` to reset state.
+- Instantiate the API once per suite using the shared conformance fixtures in `tests/fixtures/conformance.js`, and call `cleanTables()` in `beforeEach` to reset state.
 - Seed data through helpers in `tests/fixtures/api-configs.js`; never invoke `api.addResource` directly in test code.
 - Run suites with `format: 'jsonapi'` unless testing `format: 'plain'`; use `returning` for write responses. Removed options belong only in rejection/migration tests.
 - Use `createConformanceFixture` for driver-aware suites; its `reset()` calls `cleanTables()`. Historical direct SQLite fixtures do not establish native-driver coverage.

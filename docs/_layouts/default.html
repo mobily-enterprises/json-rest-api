@@ -3,121 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% if page.title %}{{ page.title }} - {% endif %}{{ site.title }}</title>
-  <meta name="description" content="{{ page.description | default: site.description }}">
   <link rel="icon" type="image/svg+xml" href="{{ '/favicon.svg' | relative_url }}">
   <link rel="apple-touch-icon" href="{{ '/apple-touch-icon.svg' | relative_url }}">
   <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  <script src="{{ '/assets/js/docs.js' | relative_url }}" defer></script>
   {% seo %}
-  <style>
-    .highlight {
-      position: relative;
-    }
-    pre {
-      position: relative;
-    }
-    .copy-button {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: 500;
-      background: rgba(255, 255, 255, 0.9);
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-      color: #333;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    .copy-button:hover {
-      background: rgba(255, 255, 255, 1);
-      border-color: rgba(0, 0, 0, 0.2);
-      transform: translateY(-1px);
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    .copy-button:active {
-      transform: translateY(0);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-    }
-    .copy-button.copied {
-      background: #10b981;
-      color: white;
-      border-color: #10b981;
-    }
-  </style>
 </head>
 <body>
-  <header>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header">
     <div class="wrapper">
-      <h1><a href="{{ '/' | relative_url }}">{{ site.title }}</a></h1>
-      <nav>
-        <a href="{{ '/QUICKSTART.html' | relative_url }}">Quick Start</a>
-        <a href="{{ '/GUIDE' | relative_url }}">Guide</a>
-        <a href="{{ '/API.html' | relative_url }}">API Reference</a>
-        <a href="{{ '/ONBOARDING.html' | relative_url }}">Contribute</a>
-        <a href="{{ '/COMPARISON.html' | relative_url }}">Why json-rest-api</a>
+      <a class="site-name" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="{{ '/QUICKSTART.html' | relative_url }}">Quickstart</a>
+        <a href="{{ '/GUIDE/' | relative_url }}">Guide</a>
+        <a href="{{ '/API.html' | relative_url }}">API reference</a>
+        <a href="{{ '/GUIDE/33-migrating-to-v2.html' | relative_url }}">Migration</a>
+        <a href="{{ '/contributing.html' | relative_url }}">Contributing</a>
       </nav>
     </div>
   </header>
 
-  <main>
-    <div class="page-content">
-      {{ content }}
-    </div>
-  </main>
+  {% assign chapters = site.pages | where_exp: 'item', 'item.chapter' | sort: 'chapter' %}
+  <div class="docs-layout{% unless page.chapter %} standalone{% endunless %}">
+    {% if page.chapter %}
+    <aside class="chapter-sidebar">
+      <details class="chapter-menu" open>
+        <summary>Guide chapters</summary>
+        <nav aria-label="Guide chapters">
+          <ol>
+            {% for chapter in chapters %}
+            <li><a href="{{ chapter.url | relative_url }}"{% if chapter.url == page.url %} aria-current="page"{% endif %}><span class="chapter-number">{{ chapter.chapter_label }}</span> {{ chapter.title | escape }}</a></li>
+            {% endfor %}
+          </ol>
+        </nav>
+      </details>
+    </aside>
+    {% endif %}
 
-  <footer>
+    <main id="main-content" tabindex="-1">
+      {% if page.chapter %}
+      <nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{ '/GUIDE/' | relative_url }}">Guide</a> <span aria-hidden="true">/</span> Chapter {{ page.chapter_label }}</nav>
+      {% endif %}
+      <article class="page-content">
+        {{ content }}
+      </article>
+      {% if page.chapter %}
+      <nav class="chapter-pagination" aria-label="Previous and next chapters">
+        {% assign previous_number = page.chapter | minus: 1 %}
+        {% assign next_number = page.chapter | plus: 1 %}
+        {% for chapter in chapters %}
+          {% if chapter.chapter == previous_number %}
+          <a class="previous" href="{{ chapter.url | relative_url }}"><span>← Previous</span>{{ chapter.chapter_label }}. {{ chapter.title | escape }}</a>
+          {% endif %}
+          {% if chapter.chapter == next_number %}
+          <a class="next" href="{{ chapter.url | relative_url }}"><span>Next →</span>{{ chapter.chapter_label }}. {{ chapter.title | escape }}</a>
+          {% endif %}
+        {% endfor %}
+      </nav>
+      {% endif %}
+    </main>
+  </div>
+
+  <footer class="site-footer">
     <div class="wrapper">
-      <p>{{ site.title }} &copy; {{ 'now' | date: '%Y' }} - MIT License</p>
+      <p>JSON REST API · Node.js 24+ · GPL-3.0-or-later</p>
+      <nav aria-label="Project links">
+        <a href="{{ '/architecture.html' | relative_url }}">Architecture</a>
+        <a href="https://github.com/mobily-enterprises/json-rest-api">Source</a>
+        <a href="https://github.com/mobily-enterprises/json-rest-api/issues">Issues</a>
+      </nav>
     </div>
   </footer>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      // Add copy buttons to all code blocks
-      document.querySelectorAll('pre').forEach(function(pre) {
-        // Skip if button already exists
-        if (pre.querySelector('.copy-button')) return;
-        
-        const button = document.createElement('button');
-        button.className = 'copy-button';
-        button.textContent = 'Copy';
-        button.addEventListener('click', function() {
-          const code = pre.querySelector('code') ? 
-            pre.querySelector('code').textContent : 
-            pre.textContent;
-          
-          navigator.clipboard.writeText(code).then(function() {
-            button.textContent = '✓ Copied!';
-            button.classList.add('copied');
-            setTimeout(() => {
-              button.textContent = 'Copy';
-              button.classList.remove('copied');
-            }, 2000);
-          }).catch(function() {
-            // Fallback for older browsers
-            const textarea = document.createElement('textarea');
-            textarea.value = code;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            
-            button.textContent = '✓ Copied!';
-            button.classList.add('copied');
-            setTimeout(() => {
-              button.textContent = 'Copy';
-              button.classList.remove('copied');
-            }, 2000);
-          });
-        });
-        pre.appendChild(button);
-      });
-    });
-  </script>
 </body>
 </html>

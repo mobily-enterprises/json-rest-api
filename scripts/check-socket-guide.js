@@ -9,7 +9,7 @@ import { io } from 'socket.io-client'
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin } from '../index.js'
 import { waitForSocketEvent, installSocketBarrier, drainSocketEvents } from '../tests/helpers/socketio.js'
 
-const source = await readFile(new URL('../docs/GUIDE/GUIDE_X_SocketIO.md', import.meta.url), 'utf8')
+const source = await readFile(new URL('../docs/GUIDE/28-socketio.md', import.meta.url), 'utf8')
 const setup = [...source.matchAll(/```js\n([\s\S]*?)\n```/g)].find(match => match[1].includes("name: 'socket-example'"))?.[1]
 assert.ok(setup, 'The guide must retain its complete public setup example')
 const code = setup.replace(/^import .*\n/gm, '').replace('server.listen(3000)', "server.listen(0, '127.0.0.1')")

@@ -659,7 +659,7 @@ export class AnyapiRegistry {
       assertFieldName(row.field_name, `stored field in '${resource}'`)
       assertFieldName(row.alias, `stored relationship alias in '${resource}'`)
       if (['date', 'time'].includes(schema?.[row.field_name]?.type) && row.slot_type !== 'string') {
-        throw new Error(`AnyAPI temporal storage migration required for '${resource}.${row.field_name}': calendar dates and times must use string slots. See MIGRATING_API_V2.md.`)
+        throw new Error(`AnyAPI temporal storage migration required for '${resource}.${row.field_name}': calendar dates and times must use string slots. See 33-migrating-to-v2.md.`)
       }
       fields[row.field_name] = {
         slot: row.slot_column,
