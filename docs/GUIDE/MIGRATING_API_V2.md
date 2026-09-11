@@ -5,11 +5,69 @@ jskit-ai/json-rest-api dependencies together, after verifying the matching
 package set. Old option spellings are rejected; there is no compatibility mode.
 Consumer repositories and seeds have not yet been migrated.
 
+## Replace the API host
+
+Remove the direct `hooked-api` dependency from the application:
+
+```sh
+npm uninstall hooked-api
+```
+
+Import the constructor from this package:
+
+```js
+import { JsonRestApi, RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api'
+
+const api = new JsonRestApi({ name: 'app', logger: applicationLogger })
+await api.use(RestApiPlugin, { format: 'jsonapi' })
+await api.use(RestApiKnexPlugin, { knex })
+await api.addResource('books', bookOptions)
+```
+
+`api.resources.books.get(...)`, the other resource methods and `api.transaction(...)`
+keep their documented call shapes. Update the setup and extension code:
+
+| Previous API | Replacement |
+| --- | --- |
+| `Api` imported from `hooked-api` | `JsonRestApi` imported from `json-rest-api` |
+| `api.scopes` | `api.resources` |
+| `api.addScope(...)` | `api.addResource(...)` |
+| Injected `addScopeMethod` | Injected `addResourceMethod` |
+| Setup hook `scope:added` | `resource:added` |
+| Resource option `scopeMethods` | Resource option `methods` |
+| `customize({ scopeMethods })` | `customize({ methods })` |
+| Dependency alternative `'a\|b'` | `dependencies: [['a', 'b']]` |
+| Constructor `log` / `logging` options | Injected `logger` object |
+| `HookedApiError` base class | `RestApiError` from `json-rest-api` |
+
+Logging is silent by default. Supply the logger's level methods directly; configure
+formatting and filtering in that logger. Plugin installation preserves the original
+error, so stop matching hooked-api's wrapping message. There is no compatibility mode.
+Generic scope aliases, `customize({ apiMethods })` and method-registration lifecycle
+hooks have been removed. Install API methods through a plugin's `addApiMethod` instead.
+
+Hooks support named `beforeFunction` or `afterFunction` placement, with one placement
+per handler. Numeric ordering and per-plugin placement are unsupported. Returning
+`false` stops that hook list; throw an appropriate error to reject a request.
+
+Resources are ordinary objects. Call shared methods with their resource receiver;
+use `api.resources.books.get.bind(api.resources.books)` if you need a detached callback.
+Resource vars and helpers inherit live API defaults. Local writes override them;
+deleting an override reveals the default again. `Object.keys(resource.vars)` lists
+local values only, rather than combining inherited defaults.
+
+Await plugin and resource setup sequentially. Discard an instance after a setup failure;
+plugin installation is not transactional. Finish setup before serving requests.
+
+TypeScript applications can give `JsonRestApi` an explicit resource map, using the
+existing `ResourceCoreMethods`, relationship and bulk method interfaces. The runtime
+does not infer TypeScript fields from resource schemas.
+
 ## Start with the common changes
 
 For an ordinary repository/app migration, work through these first:
 
-1. [Update Node](#runtime-requirement) and [rename the two response options](#rename-the-two-response-options).
+1. [Replace the API host](#replace-the-api-host), then [update Node](#runtime-requirement) and [rename the two response options](#rename-the-two-response-options).
 2. [Keep write data inside `inputRecord`](#keep-data-inside-inputrecord) and
    [port calls that mixed input and output formats](#port-calls-that-mixed-jsonapi-input-with-plain-output).
 3. [Update configuration and consumers together](#update-configuration-and-consumers-together),
@@ -890,7 +948,7 @@ imports for option and resource interfaces. No runtime files live under the
 declaration `types/` directory. TypeScript consumers need Node and Knex types for
 the current declaration surface. Framework peers are still optional at runtime.
 
-These interfaces do not yet infer resources from `hooked-api` registration or
+These interfaces do not infer resources from runtime registration or
 automatically validate its plugin options. Apply `satisfies` to option objects
 and type resource boundaries explicitly. Match the interface's format/returning
 defaults to the resource's actual configuration. Existing JavaScript setup and
@@ -1517,7 +1575,7 @@ input belongs to the written type/ID and is no longer copied onto included or
 unrelated records. Update calculations that expected raw virtual input after a
 getter, and remove any reliance on a parent's input appearing on its includes.
 
-For custom plugins, replace writes to `scope.vars.queryFields` in `scope:added`
+For custom plugins, replace writes to `scope.vars.queryFields` in `resource:added`
 with declarations in `context.queryFields` during `schema:enrich`. Read the final
 map from `scope.vars.schemaInfo.queryFields`. There is no compatibility copy at
 the former path. Core normalizes the declarations and checks collisions against
@@ -1724,7 +1782,7 @@ input; this does not make mutation or replacement of the inspection map a
 supported relationship declaration API. Move such declarations into the
 resource configuration when migrating.
 
-Resource **names** follow the existing `hooked-api` contract: JavaScript
+Resource **names** must be JavaScript
 identifiers starting with a letter, `_` or `$`, excluding `__proto__`,
 `constructor` and `prototype`. Other inherited names such as `toString`,
 `valueOf` and `hasOwnProperty` now work with omitted or explicit fieldsets.
@@ -2663,7 +2721,7 @@ API documentation.
 
 Plugins that derive computed fields from schema metadata should use
 `computedSchema:enrich` instead of adding fields to `vars.schemaInfo.computed`
-in `scope:added`. The compiler awaits this hook after attribute and search
+in `resource:added`. The compiler awaits this hook after attribute and search
 enrichment, including during canonical field additions. Edit or replace
 `context.fields`; each definition must have `computed: true` and a `type`,
 and any supplied `compute` callback must be a function. Computed names cannot
@@ -2815,8 +2873,7 @@ Coordinate dependency versions, consumer repositories, generated code and seeds
 before upgrading applications. Run their actual workflows against the intended
 package set. Library-side verification does not establish consumer compatibility.
 
-The installed `hooked-api` dispatcher still has limitations for null/undefined
-throws and diagnostic failures; see [transaction outcomes](transaction-outcomes.md).
+The local dispatcher preserves null/undefined throws; see [transaction outcomes](transaction-outcomes.md).
 The positioning plugin's concurrency work and its old plain-JSON HTTP example
 remain deferred. This guide does not imply either limitation has been resolved.
 

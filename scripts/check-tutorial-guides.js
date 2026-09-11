@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import { createTestDatabase, databaseClient } from '../tests/helpers/test-database.js'
 import { storageMode } from '../tests/helpers/storage-mode.js'
 import fastify from 'fastify'
@@ -96,13 +96,13 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
     const database = mode === 'none' ? null : await createTestDatabase()
     const knex = database?.knex
     try {
-      const api = new Api({ name: `guide-${guide}-${mode}`, logging: { level: 'error' } })
+      const api = new JsonRestApi({ name: `guide-${guide}-${mode}` })
       await api.use(library.RestApiPlugin)
       if (mode === 'anyapi') {
         await ensureAnyApiSchema(knex)
         await api.use(library.RestApiAnyapiKnexPlugin, { knex, tenantId: 'guide' })
       } else if (knex) await api.use(library.RestApiKnexPlugin, { knex })
-      const result = await new AsyncFunction('api', 'console', 'RestApiValidationError', 'AutoFilterPlugin', 'Api', 'RestApiPlugin', 'BulkOperationsPlugin', 'fastify', 'FastifyPlugin', 'QueryProjectionsPlugin', 'RowPolicyPlugin', `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`)(api, { log () {} }, library.RestApiValidationError, library.AutoFilterPlugin, Api, library.RestApiPlugin, BulkOperationsPlugin, fastify, library.FastifyPlugin, library.QueryProjectionsPlugin, library.RowPolicyPlugin)
+      const result = await new AsyncFunction('api', 'console', 'RestApiValidationError', 'AutoFilterPlugin', 'JsonRestApi', 'RestApiPlugin', 'BulkOperationsPlugin', 'fastify', 'FastifyPlugin', 'QueryProjectionsPlugin', 'RowPolicyPlugin', `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`)(api, { log () {} }, library.RestApiValidationError, library.AutoFilterPlugin, JsonRestApi, library.RestApiPlugin, BulkOperationsPlugin, fastify, library.FastifyPlugin, library.QueryProjectionsPlugin, library.RowPolicyPlugin)
       const namesOf = collection => collection.data.map(record => record.name)
       if (guide === 'policies') {
         assert.deepEqual(result.acmePage.data.map(record => record.attributes.title), ['Alpha'])

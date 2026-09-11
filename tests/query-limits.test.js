@@ -1,7 +1,7 @@
 import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js'
 import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js'
 import {
@@ -24,7 +24,7 @@ describe('Query Limits and Include Limits', () => {
 
   before(async () => {
     // Create API with specific limits for testing
-    api = new Api({
+    api = new JsonRestApi({
       name: 'test-api-limits'
     })
 
@@ -387,7 +387,7 @@ describe('Query Limits and Include Limits', () => {
   describe('Include Limit Validation', () => {
     it('should throw error when include limit exceeds queryMaxLimit at resource definition', async () => {
       // Create a new API instance with stricter limits
-      const strictApi = new Api({ name: 'strict-api' })
+      const strictApi = new JsonRestApi({ name: 'strict-api' })
 
       await strictApi.use(RestApiPlugin, {
         queryDefaultLimit: 5,

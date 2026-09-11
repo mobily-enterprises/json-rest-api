@@ -10,7 +10,7 @@ This example deliberately exposes a public countries resource. It uses a local
 in-memory database and accepts anonymous subscriptions.
 
 ```js
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin } from 'json-rest-api'
 import { createServer } from 'node:http'
 import express from 'express'
@@ -21,7 +21,7 @@ const db = knex({
   connection: { filename: ':memory:' },
   useNullAsDefault: true
 })
-const api = new Api({ name: 'socket-example' })
+const api = new JsonRestApi({ name: 'socket-example' })
 const app = express()
 await api.use(RestApiPlugin)
 await api.use(RestApiKnexPlugin, { knex: db })

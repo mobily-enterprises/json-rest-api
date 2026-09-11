@@ -9,7 +9,7 @@ import { loadHasMany, loadReversePolymorphic } from './include-to-many.js'
  * This is the main recursive function that processes the include tree. It examines
  * the schema to determine relationship types and calls the appropriate loader function.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - Records to process includes for
  *   - scopeName: string - The scope name of the records
  *   - includeTree: Object - Parsed include tree from parseIncludeTree
@@ -18,7 +18,7 @@ import { loadHasMany, loadReversePolymorphic } from './include-to-many.js'
  *   - currentPath: string - Current path in the include tree (default '')
  *   - fields: Object - Sparse fieldsets configuration (default {})
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
@@ -153,13 +153,13 @@ export const processIncludes = async (scope, deps) => {
  * Takes a set of records and an include parameter, loads all requested relationships,
  * and returns both the included resources and the records with relationship data attached.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - The main records to process
  *   - scopeName: string - The scope name of the main resources
  *   - includeParam: string - The include parameter value (e.g., "author,comments.author")
  *   - fields: Object - Sparse fieldsets configuration
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<Object>} Object with included array and records with relationships

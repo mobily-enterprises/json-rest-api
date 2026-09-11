@@ -15,7 +15,7 @@ registry package.
 ```bash
 npm init -y
 npm pkg set type=module
-npm install json-rest-api hooked-api knex better-sqlite3
+npm install json-rest-api knex better-sqlite3
 ```
 
 Save this as `index.js`. The database is in memory, so records disappear when
@@ -24,7 +24,7 @@ not declared in this first example because their definitions come later.
 
 ```javascript
 import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import knexLib from 'knex'
 
 const knex = knexLib({
@@ -32,9 +32,8 @@ const knex = knexLib({
   connection: { filename: ':memory:' },
   useNullAsDefault: true
 })
-const api = new Api({
+const api = new JsonRestApi({
   name: 'book-catalog-api',
-  logging: { level: 'warn' }
 })
 
 try {
@@ -90,11 +89,20 @@ When adapting later examples to this script, insert their operations inside the
 
 ## Logging
 
-Configure logging on `new Api({ logging: { level: 'warn' } })`. Levels are
-`trace`, `debug`, `info`, `warn`, `error` and `silent`; the default is `info`.
-The logger belongs to hooked-api. Resource and connector diagnostics also use
-the library's bounded error formatting; see the [API reference](../API.md)
-for diagnostic and error contracts.
+Logging is silent unless you supply a logger. For example:
+
+```javascript
+const api = new JsonRestApi({
+  name: 'app',
+  logger: { warn: console.warn, error: console.error }
+})
+```
+
+The logger can supply `trace`, `debug`, `info`, `warn`, `error` and `fatal` methods.
+Missing methods are silent. Your logger controls formatting and filtering.
+Resource and connector diagnostics use the library's bounded error formatting;
+see the [API reference](../API.md) for diagnostic and error contracts.
+The old `log` and `logging` constructor options are rejected.
 
 ## Database configuration
 

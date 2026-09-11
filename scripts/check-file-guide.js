@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import express from 'express'
 import knex from 'knex'
 import { RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin } from '../index.js'
@@ -19,8 +19,8 @@ const code = setup.replace(/^import .*\n/gm, '').replaceAll("'./uploads'", JSON.
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 let state, database
 try {
-  state = await new AsyncFunction('Api', 'express', 'knex', 'RestApiPlugin', 'RestApiKnexPlugin', 'FileHandlingPlugin', 'ExpressPlugin', 'LocalStorage', `${code}\nreturn { server, api }`)(
-    Api, express, config => { database = knex(config); return database }, RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin, LocalStorage
+  state = await new AsyncFunction('JsonRestApi', 'express', 'knex', 'RestApiPlugin', 'RestApiKnexPlugin', 'FileHandlingPlugin', 'ExpressPlugin', 'LocalStorage', `${code}\nreturn { server, api }`)(
+    JsonRestApi, express, config => { database = knex(config); return database }, RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin, LocalStorage
   )
   if (!state.server.listening) await once(state.server, 'listening')
   const base = `http://127.0.0.1:${state.server.address().port}`

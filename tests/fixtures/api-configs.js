@@ -1,4 +1,4 @@
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../../lib/runtime/json-rest-api.js'
 import {
   AutoFilterPlugin,
   FastifyPlugin,
@@ -42,7 +42,7 @@ function mapTable (knex, api, tableName, resourceName) {
 }
 
 export async function createConformanceApi (knex, { storage = storageMode.mode, itemOptions = {}, groupOptions = {}, groupFieldOptions = {}, itemNameOptions = {}, queryProjections = false, labelOptions, includeExpress = false, ...options } = {}) {
-  const api = new Api({ name: 'conformance', log: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'conformance' })
   await api.use(RestApiPlugin, {
     format: 'jsonapi',
     returning: 'full',
@@ -257,7 +257,7 @@ export async function createQueryConformanceApi (knex, { storage = storageMode.m
 }
 
 export async function createSearchPolicyApi (knex, { storage = storageMode.mode, app, connector, referenceSortDefaults = false, referenceSortCollisions = false } = {}) {
-  const api = new Api({ name: 'search-policy', log: { level: 'silent' } })
+  const api = new JsonRestApi({ name: 'search-policy' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', sortableFields: ['id', 'name'], enablePaginationCounts: true })
   await useStoragePlugin(api, knex, { storage, tenantId: 'search_policy' })
   if (referenceSortCollisions) await api.use(QueryProjectionsPlugin)
@@ -368,7 +368,7 @@ export async function createManagedTransactionApi (knex, options = {}) {
 }
 
 export async function createIdConformanceApi (knex, { storage = storageMode.mode, idType = 'integer', idColumnType, generatedIds = false, mappedIds = true, idCaseInsensitive = false, app, connector, bulk = false, membershipPolicy, manyToManyInclude, referenceCollation, collectionInclude, reversePolymorphicInclude = collectionInclude, polymorphicTargets = ['groups'], resourcePolicy, includeProjection = false, projectionSelect, inverseMembership = false, pivotCaseInsensitive = false, fieldCallback, relationshipSetter, computedDependencies = ['name'], queryMaxLimit } = {}) {
-  const api = new Api({ name: 'id-conformance', log: { level: 'silent' } })
+  const api = new JsonRestApi({ name: 'id-conformance' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', sortableFields: ['id', 'name'], ...(queryMaxLimit === undefined ? {} : { queryMaxLimit }) })
   await useStoragePlugin(api, knex, { storage, tenantId: 'conformance' })
   let referenceColumnType
@@ -492,7 +492,7 @@ export async function createIdConformanceApi (knex, { storage = storageMode.mode
 }
 
 export async function createFastifySchemaApi (app) {
-  const api = new Api({ name: 'fastify-schema-test', log: { level: 'silent' } })
+  const api = new JsonRestApi({ name: 'fastify-schema-test' })
   await api.use(RestApiPlugin, { format: 'jsonapi' })
   await api.use(FastifyPlugin, { app, mountPath: '/api' })
   await api.addResource('users', {
@@ -512,7 +512,7 @@ export async function createFastifySchemaApi (app) {
 }
 
 export async function createConnectorParityApi (knex, { app, connector, returning = 'none', publicBaseUrl = '', transportHooks = true, logging }) {
-  const api = new Api({ name: `connector-${connector}-${returning}`, log: { level: 'silent' }, ...(logging ? { logging } : {}) })
+  const api = new JsonRestApi({ name: `connector-${connector}-${returning}`, logger: logging?.logger })
   await api.use(RestApiPlugin, {
     format: 'plain', returning, sortableFields: ['id', 'name', 'rank'], queryDefaultLimit: 2, queryMaxLimit: 5
   })
@@ -590,7 +590,7 @@ async function withTenantContext (tenantId, fn) {
 }
 
 export async function createRegularSchemaApi (knex, resourceOptions = {}) {
-  const api = new Api({ name: 'regular-schema', log: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'regular-schema' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full' })
   await useStoragePlugin(api, knex, { storage: 'knex' })
   await api.addResource('items', { tableName: 'schema_records', idProperty: 'record_key', ...resourceOptions })
@@ -598,7 +598,7 @@ export async function createRegularSchemaApi (knex, resourceOptions = {}) {
 }
 
 export async function createAnyApiFieldEvolutionApi (knex, { fields = {}, canonicalFieldsMap, searchSchema, createTable = true, tenantId = 'field_evolution' } = {}) {
-  const api = new Api({ name: 'field-evolution', log: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'field-evolution' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full' })
   await useStoragePlugin(api, knex, { storage: 'anyapi', tenantId })
   await api.addResource('groups', { schema: { id: { type: 'id' }, name: { type: 'string', required: true } } })
@@ -616,7 +616,7 @@ export async function createSchemaEnrichmentApi (knex, {
   app, connector = 'express', label = false, projections = false, resourceName = 'items',
   autofilterOptions, rowPolicyOptions, logging, bulk = false, createTable = true, connectorOptions = {}
 } = {}) {
-  const api = new Api({ name: 'schema-enrichment', log: { level: 'error' }, ...(logging ? { logging } : {}) })
+  const api = new JsonRestApi({ name: 'schema-enrichment', logger: logging?.logger })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full' })
   await useStoragePlugin(api, knex, { storage, tenantId: 'schema_enrichment' })
   if (autofilterOptions !== undefined) await api.use(AutoFilterPlugin, autofilterOptions)
@@ -652,7 +652,7 @@ export async function createSchemaEnrichmentApi (knex, {
 }
 
 export async function createAnyApiTemporalMigrationApi (knex, { tenantId = 'migration_a' } = {}) {
-  const api = new Api({ name: 'temporal-migration', log: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'temporal-migration' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', queryDefaultLimit: 2, queryMaxLimit: 5 })
   await useStoragePlugin(api, knex, { storage: 'anyapi', tenantId })
   await api.addResource('people', {
@@ -721,7 +721,7 @@ export async function createTemporalBoundaryApi (knex, { storage = storageMode.m
     if (knex.client.config.client === 'pg') return value
     return value == null ? null : value.replace('T', ' ').replace(/Z$/, '')
   }
-  const api = new Api({ name: 'temporal-boundaries', log: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'temporal-boundaries' })
   await api.use(RestApiPlugin, {
     format: 'jsonapi',
     returning: 'full',
@@ -831,10 +831,9 @@ export async function createTemporalBoundaryApi (knex, { storage = storageMode.m
 export async function createBasicApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'basic-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'basic'
-  const api = new Api({
-    ...(pluginOptions.logging ? { logging: pluginOptions.logging } : {}),
+  const api = new JsonRestApi({
+    logger: pluginOptions.logging?.logger,
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const previousTenant = storageMode.currentTenant
@@ -967,9 +966,8 @@ export async function createReturnRecordApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'return-record-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'return'
 
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const previousTenant = storageMode.currentTenant
@@ -1056,9 +1054,8 @@ export async function createCamelCaseBelongsToApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'camelcase-belongsto-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'camel_fk'
 
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   await api.use(RestApiPlugin, {
@@ -1128,9 +1125,8 @@ export async function seedUnqueriedIdConformanceApi (knex, api, ids = ['0', '1']
 }
 
 export async function createRelationshipIncludeStorageAdapterApi (knex) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'relationship-include-storage-adapter-test',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   await api.use(RestApiPlugin, {
@@ -1190,7 +1186,7 @@ export async function seedRelationshipIncludeStorageAdapterApi (knex) {
 }
 
 export async function createIncludeTraversalApi (knex) {
-  const api = new Api({ name: 'include-traversal' })
+  const api = new JsonRestApi({ name: 'include-traversal' })
   await api.use(RestApiPlugin, { format: 'jsonapi', includeDepthLimit: 5 })
   await useStoragePlugin(api, knex)
   const definitions = {
@@ -1259,7 +1255,7 @@ export async function seedIncludeTraversalApi (api) {
 }
 
 export async function createReverseRelationshipApi (knex, { childIdProperty = 'id' } = {}) {
-  const api = new Api({ name: 'reverse-relationships' })
+  const api = new JsonRestApi({ name: 'reverse-relationships' })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', queryDefaultLimit: 2, queryMaxLimit: 3 })
   await useStoragePlugin(api, knex)
   const parentField = { type: 'id', belongsTo: 'parents', as: 'parent', nullable: true, storage: { column: 'parent_key' } }
@@ -1309,9 +1305,8 @@ export async function createIdNormalizationApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'id-normalization-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'id_norm'
 
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const previousTenant = storageMode.currentTenant
@@ -1446,7 +1441,7 @@ export async function createBulkOperationsApi (knex, pluginOptions = {}) {
  * Creates an extended API with additional fields for more complex testing
  */
 export async function createExtendedApi (knex) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'extended-test-api',
   })
 
@@ -1608,7 +1603,7 @@ export async function createExtendedApi (knex) {
  * Uses 'limited_' prefix for all tables to avoid conflicts
  */
 export async function createLimitedDepthApi (knex) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'limited-depth-api',
   })
 
@@ -1709,7 +1704,7 @@ export async function createLimitedDepthApi (knex) {
  * Creates an API configuration for pagination testing
  */
 export async function createPaginationApi (knex, options = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'pagination-test-api',
   })
 
@@ -1893,9 +1888,8 @@ export async function closeWebSocketApi (api, server) {
  * Creates an API with computed fields for testing
  */
 export async function createComputedFieldsApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'computed-fields-test-api',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const tenantId = storageMode.isAnyApi() ? 'computed_fields_tenant' : storageMode.defaultTenant
@@ -2022,9 +2016,8 @@ export async function createComputedFieldsApi (knex, pluginOptions = {}) {
  * Creates an API with field getters for testing
  */
 export async function createFieldGettersApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'field-getters-test-api',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const tenantId = storageMode.isAnyApi() ? 'field_getters_tenant' : storageMode.defaultTenant
@@ -2235,9 +2228,8 @@ export async function createFieldGettersApi (knex, pluginOptions = {}) {
 }
 
 export async function createProjectedFieldsApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'projected-fields-test-api',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const tenantId = storageMode.isAnyApi() ? 'projected_fields_tenant' : storageMode.defaultTenant
@@ -2313,9 +2305,8 @@ export async function createProjectedFieldsApi (knex, pluginOptions = {}) {
  * Creates an API with field setters for testing
  */
 export async function createFieldSettersApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'field-setters-test-api',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const tenantId = storageMode.isAnyApi() ? 'field_setters_tenant' : storageMode.defaultTenant
@@ -2543,7 +2534,7 @@ export async function createFieldSettersApi (knex, pluginOptions = {}) {
 export async function createAutoFilterApi (knex, pluginOptions = {}) {
   const { AutoFilterPlugin } = await import('../../plugins/core/rest-api-autofilter-plugin.js')
 
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'autofilter-test-api',
   })
 
@@ -2687,7 +2678,7 @@ export async function createAutoFilterApi (knex, pluginOptions = {}) {
 }
 
 export async function createRowPolicyApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'row-policy-test-api',
   })
 
@@ -2949,7 +2940,7 @@ export async function seedPolicyConformanceApi (api, { hiddenBy = 'policy' } = {
 export async function createPositioningApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'positioning-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'positioning'
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
   })
 
@@ -3028,9 +3019,8 @@ export async function createPositioningApi (knex, pluginOptions = {}) {
 export async function createCustomIdPropertyApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'custom-id-test-api'
   const tablePrefix = pluginOptions.tablePrefix || 'custom_id'
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const restApiOptions = {
@@ -3188,7 +3178,7 @@ export async function createCustomIdPropertyApi (knex, pluginOptions = {}) {
  * Uses 'cursor_' prefix for all tables to avoid conflicts
  */
 export async function createCursorPaginationApi (knex) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'cursor-pagination-test-api',
   })
 
@@ -3248,9 +3238,8 @@ export async function createCursorPaginationApi (knex) {
  */
 export async function createVirtualFieldsApi (knex, pluginOptions = {}) {
   const apiName = pluginOptions.apiName || 'virtual-fields-test-api'
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const restApiOptions = {
@@ -3293,9 +3282,8 @@ export async function createVirtualFieldsApi (knex, pluginOptions = {}) {
  * backend-specific execution cases live in storage-specific tests.
  */
 export async function createSearchSchemaMergeApi (knex, pluginOptions = {}) {
-  const api = new Api({
+  const api = new JsonRestApi({
     name: 'searchschema-merge-test-api',
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   await api.use(RestApiPlugin, {
@@ -3401,9 +3389,8 @@ export async function createFileUploadApi (knex, pluginOptions = {}) {
     throw new Error('createFileUploadApi requires a storage adapter')
   }
 
-  const api = new Api({
+  const api = new JsonRestApi({
     name: apiName,
-    log: { level: process.env.LOG_LEVEL || 'info' }
   })
 
   const previousTenant = storageMode.currentTenant
@@ -3490,4 +3477,15 @@ export async function createFileUploadApi (knex, pluginOptions = {}) {
       storageMode.setCurrentTenant(previousTenant)
     }
   }
+}
+
+export async function createCorsBaseUrlApi (knex, app) {
+  const api = new JsonRestApi({ name: 'cors-baseurl-test-api' })
+  await api.use(RestApiPlugin, { format: 'jsonapi' })
+  await useStoragePlugin(api, knex)
+  await api.use(ExpressPlugin, { app, mountPath: '/api' })
+  await api.addResource('countries', {
+    schema: { name: { type: 'string', required: true }, code: { type: 'string', required: true } }
+  })
+  return api
 }

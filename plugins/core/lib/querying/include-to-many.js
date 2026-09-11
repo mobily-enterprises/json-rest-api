@@ -24,7 +24,7 @@ import {
  * have many comments, this loads all comments for a set of articles. It also handles
  * many-to-many relationships through a pivot table.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - Parent records to load relationships for
  *   - scopeName: string - The parent scope name
  *   - includeName: string - The relationship name to include
@@ -35,7 +35,7 @@ import {
  *   - currentPath: string - Current include path for tracking
  *   - fields: Object - Sparse fieldsets configuration
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
@@ -290,7 +290,7 @@ export const loadHasMany = async (scope, deps) => {
  * Handles loading "child" records that have a polymorphic relationship back to the parent.
  * For example, loading all comments (which can belong to articles or videos) for a specific article.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - Parent records
  *   - scopeName: string - The parent scope name
  *   - includeName: string - The relationship name
@@ -301,7 +301,7 @@ export const loadHasMany = async (scope, deps) => {
  *   - currentPath: string - Current include path for tracking
  *   - fields: Object - Sparse fieldsets configuration
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}

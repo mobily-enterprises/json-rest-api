@@ -17,13 +17,13 @@ separate binary representation. This correction requires no schema migration.
 Install the chosen optional parser along with the connector and storage driver:
 
 ```sh
-npm install json-rest-api hooked-api express knex better-sqlite3 busboy
+npm install json-rest-api express knex better-sqlite3 busboy
 ```
 
 The following example uses an in-memory database and a local upload directory:
 
 ```js
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import express from 'express'
 import knex from 'knex'
 import { RestApiPlugin, RestApiKnexPlugin, FileHandlingPlugin, ExpressPlugin } from 'json-rest-api'
@@ -32,7 +32,7 @@ import { LocalStorage } from 'json-rest-api/plugins/storage/local-storage.js'
 const app = express()
 const db = knex({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
 const storage = new LocalStorage({ directory: './uploads', fileBaseUrl: '/uploads' })
-const api = new Api({ name: 'uploads' })
+const api = new JsonRestApi({ name: 'uploads' })
 
 await api.use(RestApiPlugin, { format: 'plain', returning: 'full' })
 await api.use(RestApiKnexPlugin, { knex: db })

@@ -1,6 +1,6 @@
 import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 import knexLib from 'knex'
 import { LabelPlugin, QueryProjectionsPlugin, RestApiKnexPlugin, RestApiPlugin } from '../index.js'
 import {
@@ -80,9 +80,8 @@ describe('Query Projections', () => {
   })
 
   async function createEphemeralProjectionApi (resourceName, resourceOptions) {
-    const api = new Api({
+    const api = new JsonRestApi({
       name: `${resourceName}-projection-test-api`,
-      log: { level: process.env.LOG_LEVEL || 'info' }
     })
 
     await api.use(RestApiPlugin, {
@@ -281,9 +280,8 @@ describe('Query Projections', () => {
   })
 
   it('should reject query projection names that conflict with computed fields injected by plugins', async () => {
-    const labeledApi = new Api({
+    const labeledApi = new JsonRestApi({
       name: 'label-projection-conflict-api',
-      log: { level: process.env.LOG_LEVEL || 'info' }
     })
 
     await labeledApi.use(RestApiPlugin, {

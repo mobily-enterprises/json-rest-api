@@ -32,16 +32,16 @@ fixed result so the example is executable without an external service.
 Replace that loader with application-owned service access when integrating.
 
 ```javascript
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import { RestApiPlugin } from 'json-rest-api'
 
-const serviceApi = new Api({ name: 'service-example', logging: { level: 'error' } })
+const serviceApi = new JsonRestApi({ name: 'service-example' })
 await serviceApi.use(RestApiPlugin)
 const AvailabilityPlugin = {
   name: 'availability-service',
   dependencies: ['rest-api'],
-  install ({ addScopeMethod, pluginOptions }) {
-    addScopeMethod('lookupAvailability', async ({ params, context }) => {
+  install ({ addResourceMethod, pluginOptions }) {
+    addResourceMethod('lookupAvailability', async ({ params, context }) => {
       if (context.auth?.canCheckAvailability !== true) throw new Error('Availability access denied')
       if (typeof params.sku !== 'string' || !params.sku.trim()) throw new Error('sku is required')
       return pluginOptions.loadAvailability(params.sku)

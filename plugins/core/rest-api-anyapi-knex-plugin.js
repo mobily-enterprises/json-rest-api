@@ -52,7 +52,7 @@ export const RestApiAnyapiKnexPlugin = {
   name: 'rest-api-anyapi-knex',
   dependencies: ['rest-api'],
 
-  async install ({ helpers, pluginOptions, api, log, addHook, addScopeMethod, scopes }) {
+  async install ({ helpers, pluginOptions, api, log, addHook, addResourceMethod, scopes }) {
     const options = pluginOptions || {}
     const knex = options.knex
     const tenantId = options.tenantId || DEFAULT_TENANT
@@ -852,7 +852,7 @@ export const RestApiAnyapiKnexPlugin = {
       return Number(count)
     }
 
-    addHook('scope:added', 'anyapi-register-resource', { sequence: 50 }, async ({ context }) => {
+    addHook('resource:added', 'anyapi-register-resource', {}, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context
       const scope = api.resources[scopeName]
       const { schemaStructure, computed, schemaRelationships, idProperty } = scope.vars.schemaInfo
@@ -872,12 +872,12 @@ export const RestApiAnyapiKnexPlugin = {
       await refreshStorageDescriptor(scopeName)
     })
 
-    addScopeMethod('createKnexTable', async ({ scopeName }) => {
+    addResourceMethod('createKnexTable', async ({ scopeName }) => {
       await ensureAnyApiSchema(knex)
       await refreshStorageDescriptor(scopeName)
     })
 
-    addScopeMethod('addKnexFields', async ({ scopeName, params }) => {
+    addResourceMethod('addKnexFields', async ({ scopeName, params }) => {
       if (!params?.fields || typeof params.fields !== 'object' || Array.isArray(params.fields)) {
         throw new Error('fields parameter is required for addKnexFields')
       }
@@ -913,7 +913,7 @@ export const RestApiAnyapiKnexPlugin = {
       await refreshStorageDescriptor(scopeName, compiled.vars.schemaInfo)
     })
 
-    addScopeMethod('alterKnexFields', async () => {
+    addResourceMethod('alterKnexFields', async () => {
       throw new Error('alterKnexFields is not supported by AnyAPI Knex plugin yet')
     })
   },

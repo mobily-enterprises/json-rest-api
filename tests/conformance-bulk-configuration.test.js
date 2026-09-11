@@ -24,7 +24,8 @@ describe(`Bulk configuration (${storageMode.mode})`, () => {
         let fixture
         try {
           await assert.rejects(async () => { fixture = await create({ [name]: value }) }, error => {
-            assert.match(error.message, /bulk-operations/)
+            assert.equal(error.code, 'REST_API_VALIDATION')
+            assert.deepEqual(error.details.fields, [name])
             assert.ok(error.message.includes(name), error.message)
             return true
           })

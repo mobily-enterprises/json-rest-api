@@ -35,16 +35,13 @@ import { buildResourceUrl } from './lib/querying/url-helpers.js'
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install ({ helpers, addScopeMethod, addApiMethod, vars, addHook, pluginOptions, api, setScopeAlias }) {
+  install ({ helpers, addResourceMethod, addApiMethod, vars, addHook, pluginOptions, api }) {
     // **************
     // Initial setup
     // **************
 
     // Initialize the rest namespace for REST API functionality
     api.rest = {}
-
-    // Set up REST-friendly aliases
-    setScopeAlias('resources', 'addResource')
 
     // **********
     // Variables
@@ -54,7 +51,7 @@ export const RestApiPlugin = {
     const restApiOptions = pluginOptions || {}
     rejectRemovedOptions(restApiOptions)
 
-    // These will be used as default fallbacks by the vars proxy if
+    // These will be used as default fallbacks by resource vars if
     // they are not set in the scope options
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
@@ -77,10 +74,10 @@ export const RestApiPlugin = {
     // Scope (resources) added hooks
     // ******************************
 
-    addHook('scope:added', 'validateRelationships', {}, validateRelationships)
-    addHook('scope:added', 'compileResourceSchemas', {}, compileResourceSchemas)
+    addHook('resource:added', 'validateRelationships', {}, validateRelationships)
+    addHook('resource:added', 'compileResourceSchemas', {}, compileResourceSchemas)
     addHook('schema:compiled', 'validateIncludeConfigurations', {}, validateIncludeConfigurations)
-    addHook('scope:added', 'turnScopeInitIntoVars', {}, turnScopeInitIntoVars)
+    addHook('resource:added', 'turnScopeInitIntoVars', {}, turnScopeInitIntoVars)
 
     // *********
     // Methods
@@ -92,27 +89,27 @@ export const RestApiPlugin = {
     addApiMethod('transaction', withWriteOutcome(transactionMethod))
 
     // Main REST methods
-    addScopeMethod('query', withAvailableContext(queryMethod))
-    addScopeMethod('get', withAvailableContext(getMethod))
-    addScopeMethod('post', withWriteOutcome(postMethod))
-    addScopeMethod('put', withWriteOutcome(putMethod))
-    addScopeMethod('patch', withWriteOutcome(patchMethod))
-    addScopeMethod('delete', withWriteOutcome(deleteMethod))
+    addResourceMethod('query', withAvailableContext(queryMethod))
+    addResourceMethod('get', withAvailableContext(getMethod))
+    addResourceMethod('post', withWriteOutcome(postMethod))
+    addResourceMethod('put', withWriteOutcome(putMethod))
+    addResourceMethod('patch', withWriteOutcome(patchMethod))
+    addResourceMethod('delete', withWriteOutcome(deleteMethod))
 
     // Relationship methods
-    addScopeMethod('getRelationship', withAvailableContext(getRelationshipMethod))
-    addScopeMethod('getRelated', withAvailableContext(getRelatedMethod))
-    addScopeMethod('postRelationship', withWriteOutcome(postRelationshipMethod))
-    addScopeMethod('patchRelationship', withWriteOutcome(patchRelationshipMethod))
-    addScopeMethod('deleteRelationship', withWriteOutcome(deleteRelationshipMethod))
+    addResourceMethod('getRelationship', withAvailableContext(getRelationshipMethod))
+    addResourceMethod('getRelated', withAvailableContext(getRelatedMethod))
+    addResourceMethod('postRelationship', withWriteOutcome(postRelationshipMethod))
+    addResourceMethod('patchRelationship', withWriteOutcome(patchRelationshipMethod))
+    addResourceMethod('deleteRelationship', withWriteOutcome(deleteRelationshipMethod))
 
-    addHook('scope:added', 'registerRelationshipRoutes', {}, registerRelationshipRoutes)
-    addHook('scope:added', 'registerScopeRoutes', {}, registerScopeRoutes)
+    addHook('resource:added', 'registerRelationshipRoutes', {}, registerRelationshipRoutes)
+    addHook('resource:added', 'registerScopeRoutes', {}, registerScopeRoutes)
 
     // Non-URL methods
-    addScopeMethod('enrichAttributes', enrichAttributesMethod)
-    addScopeMethod('checkPermissions', checkPermissionsMethod)
-    addScopeMethod('applyQueryFilters', applyQueryFiltersMethod)
+    addResourceMethod('enrichAttributes', enrichAttributesMethod)
+    addResourceMethod('checkPermissions', checkPermissionsMethod)
+    addResourceMethod('applyQueryFilters', applyQueryFiltersMethod)
 
     // *********
     // Helpers

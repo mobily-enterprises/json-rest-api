@@ -5,7 +5,7 @@ import { assertScalarQueryField } from '../querying-writing/field-utils.js'
  * Validates that a field exists and is indexed for cross-table search
  *
  * @async
- * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} scopes - All registered resources containing schema and relationship definitions
  * @param {Object} log - Logger instance for debug and trace output
  * @param {string} targetScopeName - The scope containing the field to validate
  * @param {string} fieldName - The field name to check
@@ -55,7 +55,7 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
  * Builds a chain of SQL JOINs to reach a field in a related table
  *
  * @async
- * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} scopes - All registered resources containing schema and relationship definitions
  * @param {Object} log - Logger instance for debug and trace output
  * @param {string} fromScopeName - Starting scope (e.g., 'articles')
  * @param {string} targetPath - Dot-separated path to target field (e.g., 'author.company.name')
@@ -279,7 +279,7 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
 /**
  * Analyzes a search schema to identify which fields need database indexes
  *
- * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} scopes - All registered resources containing schema and relationship definitions
  * @param {Object} log - Logger instance for debug and trace output
  * @param {string} scopeName - The scope being analyzed
  * @param {Object} searchSchema - Search schema definition with filter fields
@@ -321,7 +321,7 @@ export const analyzeRequiredIndexes = (scopes, log, scopeName, schemaInfo) => {
  * Creates database indexes for fields identified by analyzeRequiredIndexes
  *
  * @async
- * @param {Object} scopes - All registered hooked-api scopes containing schema and relationship definitions
+ * @param {Object} scopes - All registered resources containing schema and relationship definitions
  * @param {Object} log - Logger instance for debug and trace output
  * @param {Array<Object>} requiredIndexes - Index requirements from analyzeRequiredIndexes
  * @param {Object} knex - Knex database connection instance

@@ -11,12 +11,9 @@ export type * from './types/fastify-options.js'
 export type * from './types/row-policy.js'
 export type * from './types/autofilter.js'
 
-// Installation is invoked by hooked-api; its dynamic injection API is not declared here.
-export interface LibraryPlugin<Name extends string = string> {
-  name: Name
-  dependencies?: string[]
-  install: (...args: never[]) => unknown
-}
+export { JsonRestApi } from './types/runtime.js'
+export type * from './types/runtime.js'
+import type { LibraryPlugin } from './types/runtime.js'
 
 export const RestApiPlugin: LibraryPlugin<'rest-api'>
 export const AutoFilterPlugin: LibraryPlugin<'autofilter'>

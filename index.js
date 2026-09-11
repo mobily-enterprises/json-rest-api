@@ -1,8 +1,10 @@
+export { JsonRestApi } from './lib/runtime/json-rest-api.js'
+
 /**
- * JSON REST API - REST API plugin for hooked-api with JSON:API compliance
+ * JSON REST API - JSON:API resources and storage plugins
  *
  * This package provides:
- * - REST API plugin that adds query, get, post, put, patch, delete methods to scopes
+ * - REST API plugin that adds query, get, post, put, patch, delete methods to resources
  * - Connector plugins for various HTTP frameworks (Express, etc.)
  * - JSON:API compliant request/response handling
  * - Comprehensive error handling and validation

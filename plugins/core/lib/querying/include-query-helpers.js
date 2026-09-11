@@ -301,7 +301,7 @@ export const parseIncludeTree = (includeParam) => {
  * Loads relationship metadata for included resources
  * This ensures included resources have complete JSON:API representation
  *
- * @param {Object} scopes - The hooked-api scopes object
+ * @param {Object} scopes - The resources object
  * @param {Array<Object>} records - Records to add relationships to
  * @param {string} scopeName - The scope/resource type name
  */

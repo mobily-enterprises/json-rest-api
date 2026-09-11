@@ -1,7 +1,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js'
 import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js'
 import {
@@ -21,7 +21,7 @@ let api
 
 describe('Logical resource ids in write validation', () => {
   before(async () => {
-    api = new Api({
+    api = new JsonRestApi({
       name: 'logical-id-write-validation-test'
     })
 

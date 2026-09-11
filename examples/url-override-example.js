@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from '../index.js'
 import knexLib from 'knex'
 import express from 'express'
@@ -10,7 +10,7 @@ const knex = knexLib({
   connection: { filename: ':memory:' },
   useNullAsDefault: true
 })
-const api = new Api({ name: 'url-override-demo', logging: { level: 'error' } })
+const api = new JsonRestApi({ name: 'url-override-demo' })
 const publicUrls = new Set(['https://cdn.example.com/api', 'https://public.api.com/api'])
 api.customize({
   hooks: {

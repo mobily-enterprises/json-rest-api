@@ -6,23 +6,13 @@ import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 
 export const PositioningPlugin = {
   name: 'positioning',
-  dependencies: ['rest-api', 'rest-api-knex|rest-api-anyapi-knex'],
+  dependencies: ['rest-api', ['rest-api-knex', 'rest-api-anyapi-knex']],
 
   install ({ api, addHook, vars, helpers, log, scopes, pluginOptions }) {
-    const installedPlugins = Array.from(api._installedPlugins || [])
-    const legacyStorageInstalled = installedPlugins.includes('rest-api-knex')
-    const canonicalStorageInstalled = installedPlugins.includes('rest-api-anyapi-knex')
-    if (!legacyStorageInstalled && !canonicalStorageInstalled) {
-      throw new Error(
-        "Positioning plugin requires either 'rest-api-knex' or 'rest-api-anyapi-knex' to be installed before it."
-      )
-    }
-
     if (!api.knex?.instance) {
       throw new Error('Positioning plugin requires a storage plugin with knex support (rest-api-knex or rest-api-anyapi-knex)')
     }
 
-    // Get configuration - hooked-api namespaces options by plugin name
     const positioningOptions = pluginOptions || {}
 
     // Store configuration in vars (data only) so hooks can use it without re-reading plugin options.
@@ -138,7 +128,7 @@ export const PositioningPlugin = {
     }
 
     // Validate that resources have position field when added
-    addHook('scope:added', 'validate-position-field', {}, ({ context, vars }) => {
+    addHook('resource:added', 'validate-position-field', {}, ({ context, vars }) => {
       const { scopeName, scopeOptions } = context
 
       // Skip excluded resources
@@ -182,7 +172,7 @@ export const PositioningPlugin = {
     })
 
     // Add index for position field if autoIndex is enabled
-    addHook('scope:added', 'add-position-index', { afterFunction: 'validate-position-field' }, async ({ context, vars, scopes }) => {
+    addHook('resource:added', 'add-position-index', { afterFunction: 'validate-position-field' }, async ({ context, vars, scopes }) => {
       const { scopeName } = context
 
       if (!shouldHavePositioning(scopeName) || !vars.positioning.autoIndex) {

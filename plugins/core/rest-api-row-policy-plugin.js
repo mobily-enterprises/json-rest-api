@@ -47,7 +47,7 @@ function compileRowPolicy ({ scopeName, scopeOptions = {}, policies }) {
 
 export const RowPolicyPlugin = {
   name: 'row-policy',
-  dependencies: ['rest-api', 'rest-api-knex|rest-api-anyapi-knex'],
+  dependencies: ['rest-api', ['rest-api-knex', 'rest-api-anyapi-knex']],
 
   install ({ api, addHook, vars, helpers, log, scopes, pluginOptions = {} }) {
     if (!api.knex?.instance) {
@@ -65,7 +65,7 @@ export const RowPolicyPlugin = {
       policies: Object.keys(policies)
     }
 
-    addHook('scope:added', 'compile-row-policy', {}, ({ context }) => {
+    addHook('resource:added', 'compile-row-policy', {}, ({ context }) => {
       const { scopeName, scopeOptions = {} } = context
       const scope = scopes[scopeName]
 

@@ -1,5 +1,5 @@
 import {
-  RestApiPlugin, RestApiKnexPlugin, AutoFilterPlugin, FastifyPlugin,
+  JsonRestApi, RestApiError, RestApiPlugin, RestApiKnexPlugin, AutoFilterPlugin, FastifyPlugin,
   LocalStorage, S3Storage, RestApiWriteError, RestApiVersionConflictError,
   getUrlPrefix, REST_API_INCLUDE_ERROR_CODE
 } from 'json-rest-api'
@@ -71,3 +71,17 @@ const invalidValidators: HttpConnectorOptions = { httpValidators: 'true' }
 // @ts-expect-error CORS exposed header names are an array.
 const invalidCors: CorsPluginOptions = { exposedHeaders: 'ETag' }
 void [invalidVersioning, invalidValidators, invalidCors]
+
+const host = new JsonRestApi<{ books: ResourceCoreMethods<Book> }>({ name: 'typed-host' })
+await host.use(RestApiPlugin, { format: 'plain' })
+await host.addResource('books', { schema: { title: { type: 'string' } } })
+const typedBook = await host.resources.books.get({ id: 1 })
+const typedTitle: string | undefined = typedBook.title
+const baseError: RestApiError = new RestApiWriteError('Failed', { transactionOutcome: 'none' })
+void [typedTitle, baseError]
+// @ts-expect-error Hooked-api logging options are no longer constructor options.
+new JsonRestApi({ logging: { level: 'error' } })
+// @ts-expect-error Resource names follow the explicitly supplied resource interfaces.
+await host.resources.authors.get({ id: 1 })
+// @ts-expect-error Method customization uses methods, not scopeMethods.
+await host.customize({ scopeMethods: {} })

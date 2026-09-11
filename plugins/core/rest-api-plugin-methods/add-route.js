@@ -1,4 +1,4 @@
-import { ValidationError } from 'hooked-api'
+import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
 
 /**
  * addRoute
@@ -9,7 +9,7 @@ export default async ({ params, context, runHooks }) => {
 
   // Validate route configuration
   if (!method || !path || !handler) {
-    throw new ValidationError('Route requires method, path, and handler')
+    throw new RestApiValidationError('Route requires method, path, and handler')
   }
 
   // debugger

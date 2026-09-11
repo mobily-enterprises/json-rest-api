@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import knexLib from 'knex'
 import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
@@ -90,7 +90,7 @@ for (const example of examples) {
   for (const mode of example.modes || ['knex', 'anyapi']) {
     const knex = knexLib({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
     try {
-      const api = new Api({ name: `relationship-guide-${mode}`, logging: { level: 'error' } })
+      const api = new JsonRestApi({ name: `relationship-guide-${mode}` })
       await api.use(RestApiPlugin)
       if (mode === 'anyapi') {
         await ensureAnyApiSchema(knex)

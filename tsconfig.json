@@ -17,7 +17,6 @@
     "lib/enhanced-logger.js",
     "lib/error-formatter.js",
     "lib/transaction-types.d.ts",
-    "lib/hooked-api-error.d.ts",
     "plugins/core/connectors/lib/http-validators.js",
     "plugins/core/lib/storage/**/*.js",
     "plugins/core/lib/storage/**/*.d.ts",

@@ -1,3 +1,8 @@
+export class RestApiError extends Error {
+  constructor(message: string, code?: unknown)
+  code: unknown
+}
+
 export type TransactionOutcome = 'none' | 'pending' | 'committed' | 'rolledBack' | 'unknown'
 export interface ResourceErrorOptions {
   resourceType?: string
@@ -19,11 +24,11 @@ export const REST_API_FIELDSET_ERROR_CODE: 'REST_API_FIELDSET_INVALID'
 export const REST_API_INCLUDE_ERROR_CODE: 'REST_API_INCLUDE_INVALID'
 export const REST_API_TEMPORAL_DATA_ERROR_CODE: 'REST_API_TEMPORAL_DATA_INVALID'
 
-export class RestApiWriteError extends Error {
+export class RestApiWriteError extends RestApiError {
   constructor(message: string, options: { cause?: unknown; transactionOutcome: TransactionOutcome })
   cause?: unknown
   readonly transactionOutcome: TransactionOutcome
-  code?: unknown
+  code: unknown
   type?: unknown
   subtype?: unknown
   details?: unknown
@@ -35,7 +40,7 @@ export class RestApiWriteError extends Error {
   toJSON(): SerializedError & { transactionOutcome: TransactionOutcome }
 }
 
-export class RestApiValidationError extends Error {
+export class RestApiValidationError extends RestApiError {
   constructor(message: string, options?: { fields?: string[]; violations?: ValidationViolation[] })
   code: 'REST_API_VALIDATION'
   type: 'rest_api_validation'
@@ -43,7 +48,7 @@ export class RestApiValidationError extends Error {
   toJSON(): SerializedError & Pick<RestApiValidationError, 'code' | 'type' | 'details'>
 }
 
-export class RestApiResourceError extends Error {
+export class RestApiResourceError extends RestApiError {
   constructor(message: string, options?: ResourceErrorOptions & { subtype?: string })
   code: string
   type: string
@@ -66,7 +71,7 @@ export class RestApiPreconditionFailedError extends RestApiResourceError {
   subtype: 'precondition_failed'
 }
 
-export class RestApiPayloadError extends Error {
+export class RestApiPayloadError extends RestApiError {
   constructor(message: string, options?: {
     path?: string
     parameter?: string
@@ -85,7 +90,7 @@ export class RestApiPayloadError extends Error {
   toJSON(): SerializedError & Pick<RestApiPayloadError, 'code' | 'type' | 'statusCode' | 'path' | 'parameter' | 'details'>
 }
 
-export class RestApiFieldsetError extends Error {
+export class RestApiFieldsetError extends RestApiError {
   constructor(options?: { field?: string; resourceType?: string })
   code: typeof REST_API_FIELDSET_ERROR_CODE
   type: 'rest_api_fieldset'
@@ -94,7 +99,7 @@ export class RestApiFieldsetError extends Error {
   toJSON(): SerializedError & Pick<RestApiFieldsetError, 'code' | 'type' | 'statusCode' | 'details'>
 }
 
-export class RestApiIncludeError extends Error {
+export class RestApiIncludeError extends RestApiError {
   constructor(options?: { path?: string; resourceType?: string })
   code: typeof REST_API_INCLUDE_ERROR_CODE
   type: 'rest_api_include'
@@ -103,7 +108,7 @@ export class RestApiIncludeError extends Error {
   toJSON(): SerializedError & Pick<RestApiIncludeError, 'code' | 'type' | 'statusCode' | 'details'>
 }
 
-export class RestApiTemporalDataError extends Error {
+export class RestApiTemporalDataError extends RestApiError {
   constructor(options?: { field?: string; resourceType?: string; fieldType?: string; source?: string })
   code: typeof REST_API_TEMPORAL_DATA_ERROR_CODE
   type: 'rest_api_temporal_data'

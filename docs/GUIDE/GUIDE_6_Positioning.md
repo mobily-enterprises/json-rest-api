@@ -54,12 +54,12 @@ npm install fractional-indexing
 Then, use the plugin in your API:
 
 ```javascript
-import { Api } from 'hooked-api';
+import { JsonRestApi } from 'json-rest-api';
 import { RestApiPlugin } from './plugins/core/rest-api-plugin.js';
 import { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js';
 import { PositioningPlugin } from './plugins/core/rest-api-positioning-plugin.js';
 
-const api = new Api({
+const api = new JsonRestApi({
   name: 'my-api'
 });
 
@@ -654,9 +654,8 @@ Fractional keys can grow longer with many insertions in the same spot:
 Enable debug logging to see position calculations:
 
 ```javascript
-const api = new Api({
+const api = new JsonRestApi({
   name: 'my-api',
-  logging: { level: 'debug' }
 });
 ```
 

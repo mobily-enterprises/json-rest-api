@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { once } from 'node:events'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import knexLib from 'knex'
 import express from 'express'
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from '../index.js'
@@ -15,8 +15,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 let database
 let state
 try {
-  state = await new AsyncFunction('Api', 'knexLib', 'express', 'RestApiPlugin', 'RestApiKnexPlugin', 'ExpressPlugin', `${code}\nreturn { server, shutdown, publisher, author, found, withAuthors, updated, document }`)(
-    Api, options => { database = knexLib(options); return database }, express, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin
+  state = await new AsyncFunction('JsonRestApi', 'knexLib', 'express', 'RestApiPlugin', 'RestApiKnexPlugin', 'ExpressPlugin', `${code}\nreturn { server, shutdown, publisher, author, found, withAuthors, updated, document }`)(
+    JsonRestApi, options => { database = knexLib(options); return database }, express, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin
   )
   assert.equal(state.found.data.length, 1)
   assert.equal(state.found.data[0].name, 'George')

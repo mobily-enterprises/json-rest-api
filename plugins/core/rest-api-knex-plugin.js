@@ -1,5 +1,5 @@
 import { createKnexTransaction } from '../../lib/knex-transaction.js'
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../lib/missing-package.js'
 import { createSchema } from 'json-rest-schema'
 import { deletePivotReferences, invalidateDeletedPivotTargets } from './lib/writing/many-to-many-manipulations.js'
 import {
@@ -50,12 +50,12 @@ export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install ({ helpers, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
+  async install ({ helpers, pluginOptions, api, log, scopes, addHook, addResourceMethod }) {
     // Try to import knex dynamically
     try {
       await import('knex')
     } catch (e) {
-      requirePackage('knex', 'rest-api-knex',
+      throwMissingPackage('knex', 'rest-api-knex',
         'Knex.js is required for database operations. This is a peer dependency that allows you to control the version.')
     }
 
@@ -77,7 +77,7 @@ export const RestApiKnexPlugin = {
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
     helpers.getStorageAdapter = getScopeStorageAdapter
 
-    addHook('scope:added', 'validate-knex-storage-columns', { afterFunction: 'compileResourceSchemas' }, ({ context }) => {
+    addHook('resource:added', 'validate-knex-storage-columns', { afterFunction: 'compileResourceSchemas' }, ({ context }) => {
       assertWritableKnexColumns(context.vars.schemaInfo.storageInfo)
     })
 
@@ -261,19 +261,19 @@ export const RestApiKnexPlugin = {
     )
 
     // Helper scope method to get all schema-related information
-    addScopeMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
+    addResourceMethod('createKnexTable', async ({ vars, scope, scopeName, scopeOptions, runHooks }) => {
       const tableSchemaInstance = buildScopeTableSchema(vars)
       await createKnexTable(api.knex.instance, vars.schemaInfo, tableSchemaInstance, scopeOptions)
     })
 
-    addScopeMethod('introspectKnexTableSnapshot', async ({ vars }) => {
+    addResourceMethod('introspectKnexTableSnapshot', async ({ vars }) => {
       return introspectKnexTableSnapshot(api.knex.instance, {
         tableName: vars.schemaInfo.tableName,
         idColumn: vars.schemaInfo.idProperty
       })
     })
 
-    addScopeMethod('generateKnexMigration', async ({ vars, scopeOptions }) => {
+    addResourceMethod('generateKnexMigration', async ({ vars, scopeOptions }) => {
       return generateKnexMigration(
         vars.schemaInfo.tableName,
         buildScopeTableSchema(vars),
@@ -285,7 +285,7 @@ export const RestApiKnexPlugin = {
       )
     })
 
-    addScopeMethod('generateKnexMigrationDiff', async ({ vars, params }) => {
+    addResourceMethod('generateKnexMigrationDiff', async ({ vars, params }) => {
       const snapshot = await introspectKnexTableSnapshot(api.knex.instance, {
         tableName: vars.schemaInfo.tableName,
         idColumn: vars.schemaInfo.idProperty
@@ -304,7 +304,7 @@ export const RestApiKnexPlugin = {
     })
 
     // Helper scope method to alter existing fields in a table
-    addScopeMethod('alterKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
+    addResourceMethod('alterKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
     // Validate required parameters
       if (!params.fields || typeof params.fields !== 'object') {
         throw new Error('fields parameter is required for alterKnexFields')
@@ -319,7 +319,7 @@ export const RestApiKnexPlugin = {
     })
 
     // Helper scope method to add a field to an existing table
-    addScopeMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
+    addResourceMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
       assertFieldNameMap(params.fields, `added fields in '${scopeName}'`)
       // Create schema object from filtered fields
       const partialTableSchema = createSchema(params.fields)

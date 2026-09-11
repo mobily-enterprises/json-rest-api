@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import { RestApiPlugin, RestApiKnexPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import { createTestDatabase, databaseClient } from '../tests/helpers/test-database.js'
 import { storageMode } from '../tests/helpers/storage-mode.js'
@@ -24,7 +24,7 @@ for (const mode of modes) {
   const database = await createTestDatabase()
   const knex = database.knex
   try {
-    const api = new Api({ name: `migration-guide-${mode}`, logging: { level: 'error' } })
+    const api = new JsonRestApi({ name: `migration-guide-${mode}` })
     await api.use(RestApiPlugin)
     if (mode === 'anyapi') {
       await ensureAnyApiSchema(knex)
@@ -91,7 +91,7 @@ for (const mode of modes) {
   const database = await createTestDatabase()
   const knex = database.knex
   try {
-    const api = new Api({ name: 'schema-guide', logging: { level: 'error' } })
+    const api = new JsonRestApi({ name: 'schema-guide' })
     await api.use(RestApiPlugin)
     await api.use(RestApiKnexPlugin, { knex })
     await new AsyncFunction('api', examples[0])(api)

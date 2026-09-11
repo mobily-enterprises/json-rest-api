@@ -1,7 +1,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 import { RestApiPlugin, RestApiKnexPlugin } from '../index.js'
 import {
   createKnexTable,
@@ -772,9 +772,8 @@ describe('RestApiKnexPlugin migration scope methods', () => {
       useNullAsDefault: true
     })
 
-    api = new Api({
+    api = new JsonRestApi({
       name: 'migration-scope-test-api',
-      log: { level: 'warn' }
     })
 
     await api.use(RestApiPlugin, {

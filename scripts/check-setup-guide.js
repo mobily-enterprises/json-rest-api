@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import knexLib from 'knex'
 import { RestApiPlugin, RestApiKnexPlugin } from '../index.js'
 
@@ -10,8 +10,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const output = new Map()
 const basic = blocks.find(code => code.includes("name: 'book-catalog-api'"))
 assert.ok(basic)
-await new AsyncFunction('Api', 'knexLib', 'RestApiPlugin', 'RestApiKnexPlugin', 'console', basic.replace(/^import .*\n/gm, ''))(
-  Api, knexLib, RestApiPlugin, RestApiKnexPlugin, { log: (label, value) => output.set(label, value) }
+await new AsyncFunction('JsonRestApi', 'knexLib', 'RestApiPlugin', 'RestApiKnexPlugin', 'console', basic.replace(/^import .*\n/gm, ''))(
+  JsonRestApi, knexLib, RestApiPlugin, RestApiKnexPlugin, { log: (label, value) => output.set(label, value) }
 )
 assert.equal(output.get('Country:').name, 'United States')
 assert.equal(output.get('Country:').code, 'US')
@@ -24,7 +24,7 @@ const defaults = blocks.find(code => code.startsWith('await api.use(RestApiPlugi
 assert.ok(defaults)
 const database = knexLib({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
 try {
-  const api = new Api({ name: 'setup-defaults', logging: { level: 'error' } })
+  const api = new JsonRestApi({ name: 'setup-defaults' })
   // Install storage and create the declared table between registration and use.
   const executable = defaults
     .replace("await api.addResource('countries'", "await api.use(RestApiKnexPlugin, { knex })\nawait api.addResource('countries'")

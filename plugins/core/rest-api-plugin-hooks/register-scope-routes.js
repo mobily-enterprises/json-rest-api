@@ -9,7 +9,7 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
   // Helper to create route handlers
   const createRouteHandler = (scopeName, methodName) => {
     return async ({ queryString, headers, params, body, context, transaction, precondition }) => {
-      const scope = api.scopes[scopeName]
+      const scope = api.resources[scopeName]
       if (!scope) {
         throw new RestApiResourceError(
           `Scope '${scopeName}' not found`,

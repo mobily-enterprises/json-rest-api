@@ -1,6 +1,6 @@
 # JSON REST API
 
-A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprises/hooked-api) that provides JSON:API-compliant endpoints with minimal configuration. This library makes it easy to create fully-featured REST APIs with support for relationships, filtering, sorting, pagination, and file uploads.
+A JSON:API library and mini-ORM for Node.js 24+. Define resources once, call them directly from application code, or expose them through HTTP connectors. It supports relationships, filtering, sorting, pagination, managed transactions and file uploads.
 
 [Official Website](https://mobily-enterprises.github.io/json-rest-api/)
 
@@ -14,7 +14,7 @@ A powerful REST API plugin for [hooked-api](https://github.com/mobily-enterprise
 * **Framework Agnostic** - Includes Express and Fastify connectors
 * **Validation** - Schema-based validation with detailed error messages and custom rules
 * **Plain Records** - Programmatic calls use plain objects; choose `format: 'jsonapi'` for documents
-* **Extensible** - Built on `hooked-api`'s powerful plugin and hook system for deep customization
+* **Extensible** - Resource methods, sequential hooks and explicit plugin installation
 
 ## Installation
 
@@ -29,7 +29,7 @@ npm install json-rest-api knex better-sqlite3 express
 
 ```javascript
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
-import { Api } from 'hooked-api';
+import { JsonRestApi } from 'json-rest-api';
 import knexLib from 'knex';
 import express from 'express';
 
@@ -40,7 +40,7 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api', logging: { level: 'trace' } });
+const api = new JsonRestApi({ name: 'book-catalog-api' });
 
 // Install plugins
 await api.use(RestApiPlugin);

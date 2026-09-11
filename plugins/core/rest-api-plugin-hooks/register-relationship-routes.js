@@ -2,13 +2,13 @@ import { parseJsonApiQuery } from '../lib/querying-writing/connectors-query-pars
 
 export default async function registerRelationshipRoutes ({ context, api, log }) {
   const { scopeName } = context
-  const basePath = api.scopes[scopeName].vars.transport?.mountPath || ''
+  const basePath = api.resources[scopeName].vars.transport?.mountPath || ''
   const scopePath = `${basePath}/${scopeName}`
 
   // Helper to create route handlers
   const createRouteHandler = (methodName) => {
     return async ({ params, body, queryString, context }) => {
-      const scope = api.scopes[scopeName]
+      const scope = api.resources[scopeName]
 
       const methodParams = {
         id: params.id,

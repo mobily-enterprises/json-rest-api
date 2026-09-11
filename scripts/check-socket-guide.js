@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../index.js'
 import express from 'express'
 import knex from 'knex'
 import { io } from 'socket.io-client'
@@ -16,8 +16,8 @@ const code = setup.replace(/^import .*\n/gm, '').replace('server.listen(3000)', 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 let state, database, socket
 try {
-  state = await new AsyncFunction('Api', 'express', 'knex', 'createServer', 'RestApiPlugin', 'RestApiKnexPlugin', 'ExpressPlugin', 'SocketIOPlugin', `${code}\nreturn { api, server }`)(
-    Api, express, config => { database = knex(config); return database }, createServer, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin
+  state = await new AsyncFunction('JsonRestApi', 'express', 'knex', 'createServer', 'RestApiPlugin', 'RestApiKnexPlugin', 'ExpressPlugin', 'SocketIOPlugin', `${code}\nreturn { api, server }`)(
+    JsonRestApi, express, config => { database = knex(config); return database }, createServer, RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, SocketIOPlugin
   )
   if (!state.server.listening) await once(state.server, 'listening')
   installSocketBarrier(state.api.io)

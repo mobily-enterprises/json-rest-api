@@ -22,16 +22,16 @@ for a plugin's `install` function.
 const MyPlugin = {
   name: 'my-plugin',
   dependencies: ['rest-api'],
-  install ({ addHook, addScopeMethod }) {
+  install ({ addHook, addResourceMethod }) {
     addHook('beforeSchemaValidate', 'trim-example-name', {}, ({ context }) => {
       const attributes = context.inputRecord?.data?.attributes
       if (typeof attributes?.name === 'string') attributes.name = attributes.name.trim()
     })
-    addHook('scope:added', 'compile-my-plugin', {}, ({ context, scopes }) => {
+    addHook('resource:added', 'compile-my-plugin', {}, ({ context, scopes }) => {
       const scope = scopes[context.scopeName]
       scope.vars.myPlugin = { enabled: context.scopeOptions.exampleFlag === true }
     })
-    addScopeMethod('describeExample', async ({ scopeName, scope }) => ({
+    addResourceMethod('describeExample', async ({ scopeName, scope }) => ({
       scopeName, enabled: scope.vars.myPlugin.enabled
     }))
   }
@@ -73,13 +73,13 @@ export when moving the declaration into its own module.
 
 The usual pattern is:
 
-1. compile resource metadata during `scope:added`
+1. compile resource metadata during `resource:added`
 2. store normalized state in `scope.vars`
 3. use hooks or scope methods to apply behavior at runtime
 
 ## The stable extension points
 
-### `scope:added`
+### `resource:added`
 
 Use this to inspect `scopeOptions`, validate configuration, and compile resource-specific runtime state into `scope.vars`.
 
@@ -95,7 +95,7 @@ as autofilter configuration; do not add fields after compilation.
 Example:
 
 ```js
-addHook('scope:added', 'compile-example', {}, ({ context, scopes }) => {
+addHook('resource:added', 'compile-example', {}, ({ context, scopes }) => {
   const scope = scopes[context.scopeName]
   const options = context.scopeOptions || {}
 
@@ -150,14 +150,14 @@ These mechanisms avoid duplicating storage translation in application hooks.
 A filtering hook does not turn an ad hoc SQL alias into a declared field;
 use the query-field contract below for selected or sortable derived values.
 
-### `addScopeMethod`
+### `addResourceMethod`
 
 Use this when a plugin needs a reusable method on every resource or selected resources.
 
 Example:
 
 ```js
-addScopeMethod('introspect', async ({ vars }) => {
+addResourceMethod('introspect', async ({ vars }) => {
   return {
     tableName: vars.schemaInfo?.tableName,
     fields: Object.keys(vars.schemaInfo?.schemaStructure || {})
@@ -228,7 +228,7 @@ For the concrete projection example, see [Query Projections](GUIDE_X_Query_Proje
 When you add a new plugin feature, prefer this flow:
 
 1. read plugin options at install time
-2. declare schema metadata during its enrichment stage; use `scope:added` for other registration work
+2. declare schema metadata during its enrichment stage; use `resource:added` for other registration work
 3. store only normalized runtime state in `scope.vars`
 4. use hooks or scope methods to apply behavior
 

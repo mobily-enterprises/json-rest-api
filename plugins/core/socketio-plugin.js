@@ -1,4 +1,4 @@
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../lib/missing-package.js'
 import { randomUUID } from 'node:crypto'
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 import { errorMessage } from '../../lib/error-context.js'
@@ -292,7 +292,7 @@ export const SocketIOPlugin = {
     try {
       ({ Server } = await import('socket.io'))
     } catch (error) {
-      requirePackage('socket.io', 'socketio', 'Socket.IO is required for WebSocket support. This is a peer dependency.')
+      throwMissingPackage('socket.io', 'socketio', 'Socket.IO is required for WebSocket support. This is a peer dependency.')
       throw error
     }
 
@@ -317,14 +317,14 @@ export const SocketIOPlugin = {
           try {
             ({ createClient } = await import('redis'))
           } catch (error) {
-            requirePackage('redis', 'socketio', 'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.')
+            throwMissingPackage('redis', 'socketio', 'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.')
             throw error
           }
 
           try {
             ({ createAdapter } = await import('@socket.io/redis-adapter'))
           } catch (error) {
-            requirePackage('@socket.io/redis-adapter', 'socketio',
+            throwMissingPackage('@socket.io/redis-adapter', 'socketio',
               'Socket.IO Redis adapter is required for horizontal scaling. This is a peer dependency.')
             throw error
           }

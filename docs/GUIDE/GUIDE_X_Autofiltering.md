@@ -92,14 +92,14 @@ value rejects; omitting required application scope context also rejects.
 ## Installation
 
 ```js
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import {
   RestApiPlugin,
   RestApiKnexPlugin,
   AutoFilterPlugin
 } from 'json-rest-api'
 
-const api = new Api({ name: 'scoped-api' })
+const api = new JsonRestApi({ name: 'scoped-api' })
 
 await api.use(RestApiPlugin)
 await api.use(RestApiKnexPlugin, { knex })
@@ -142,7 +142,7 @@ await api.use(AutoFilterPlugin, {
 - `RestApiKnexPlugin` for resources backed by normal database tables
 - `RestApiAnyapiKnexPlugin` for logical resources backed by AnyAPI canonical storage
 
-An `Api` instance has one storage engine. Install either storage plugin, then install `AutoFilterPlugin`. If an application keeps core resources in normal tables and user-defined resources in AnyAPI, create one `Api` instance for each storage engine. Each instance owns its resources and autofilter configuration.
+An `JsonRestApi` instance has one storage engine. Install either storage plugin, then install `AutoFilterPlugin`. If an application keeps core resources in normal tables and user-defined resources in AnyAPI, create one `JsonRestApi` instance for each storage engine. Each instance owns its resources and autofilter configuration.
 
 Autofilter definitions always use logical schema field names. The selected storage plugin translates those fields to normal table columns or AnyAPI canonical slots.
 
@@ -151,14 +151,14 @@ Autofilter definitions always use logical schema field names. The selected stora
 AnyAPI's `tenantId` is fixed when `RestApiAnyapiKnexPlugin` is installed. It identifies the metadata and canonical-storage namespace; it is not a per-request workspace value. For one AnyAPI instance serving multiple application workspaces, use a stable internal `tenantId` and persist `workspace_id` on every workspace-scoped resource:
 
 ```js
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import {
   RestApiPlugin,
   RestApiAnyapiKnexPlugin,
   AutoFilterPlugin
 } from 'json-rest-api'
 
-const api = new Api({ name: 'form-data-api' })
+const api = new JsonRestApi({ name: 'form-data-api' })
 
 await api.use(RestApiPlugin)
 await api.use(RestApiAnyapiKnexPlugin, {

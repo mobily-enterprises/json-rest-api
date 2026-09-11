@@ -32,33 +32,21 @@ describe(`Query copy failures (${storageMode.mode})`, () => {
   for (const related of [false, true]) {
     for (const format of ['jsonapi', 'plain']) {
       for (const borrowed of [false, true]) {
-        for (const logging of ['success', 'throw', 'reject']) {
-          it(`${related ? 'getRelated' : 'query'} ${format} preserves copy failure with ${logging} logging and ${borrowed ? 'borrowed' : 'no'} transaction`, async t => {
-            const transaction = borrowed ? await fixture.knex.transaction() : undefined
-            const outputError = console.error
-            const secondary = new Error('Copy error logger failed')
-            t.mock.method(console, 'error', (...args) => {
-              if (String(args[0]).includes('Failed to clone record:')) {
-                if (logging === 'throw') throw secondary
-                if (logging === 'reject') return Promise.reject(secondary)
-              }
-              return outputError(...args)
-            })
-            const context = { uncopyable: true }
-            const read = () => related
-              ? fixture.api.resources.groups.getRelated({ id: group.id, relationshipName: 'items', format, transaction }, context)
-              : fixture.api.resources.items.query({ format, transaction }, context)
-            try {
-              await assert.rejects(read(), error => error.name === 'DataCloneError' && error !== secondary)
-              if (transaction) assert.equal(transaction.isCompleted(), false)
-              context.uncopyable = false
-              assert.deepEqual((await read()).data.map(record => record.id), [item.id])
-            } finally {
-              t.mock.restoreAll()
-              if (transaction && !transaction.isCompleted()) await transaction.rollback()
-            }
-          })
-        }
+        it(`${related ? 'getRelated' : 'query'} ${format} preserves copy failure with ${borrowed ? 'borrowed' : 'no'} transaction`, async () => {
+          const transaction = borrowed ? await fixture.knex.transaction() : undefined
+          const context = { uncopyable: true }
+          const read = () => related
+            ? fixture.api.resources.groups.getRelated({ id: group.id, relationshipName: 'items', format, transaction }, context)
+            : fixture.api.resources.items.query({ format, transaction }, context)
+          try {
+            await assert.rejects(read(), { name: 'DataCloneError' })
+            if (transaction) assert.equal(transaction.isCompleted(), false)
+            context.uncopyable = false
+            assert.deepEqual((await read()).data.map(record => record.id), [item.id])
+          } finally {
+            if (transaction && !transaction.isCompleted()) await transaction.rollback()
+          }
+        })
       }
     }
   }

@@ -1,4 +1,4 @@
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../../../lib/missing-package.js'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
@@ -8,7 +8,7 @@ import { addMultipartField, multipartLimits } from './multipart-helpers.js'
 
 let formidable
 try { formidable = (await import('formidable')).default } catch {
-  requirePackage('formidable', 'express-connector', 'Formidable is required for multipart uploads. Install the optional formidable peer.')
+  throwMissingPackage('formidable', 'express-connector', 'Formidable is required for multipart uploads. Install the optional formidable peer.')
 }
 
 /** Buffer completed uploads, then remove this request's temporary directory. */

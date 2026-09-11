@@ -1,7 +1,7 @@
 import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 
 import { RestApiPlugin, RestApiAnyapiKnexPlugin } from '../index.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
@@ -19,7 +19,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
     try {
       await ensureAnyApiSchema(knex)
 
-      api = new Api({ name: 'anyapi-test', log: { level: 'warn' } })
+      api = new JsonRestApi({ name: 'anyapi-test' })
       await api.use(RestApiPlugin, { format: 'jsonapi', })
       await api.use(RestApiAnyapiKnexPlugin, { knex })
 

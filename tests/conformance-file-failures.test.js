@@ -138,7 +138,7 @@ describe(`File cleanup diagnostic previews (${storageMode.mode})`, () => {
     for (const failed of [false, true]) {
       it(`${format} bounds and redacts cleanup warnings after a ${failed ? 'failed' : 'successful'} write`, async t => {
         const calls = []
-        t.mock.method(console, 'warn', (...args) => { calls.push(args) })
+        t.mock.method(fixture.api.log, 'warn', (...args) => { calls.push(args) })
         const context = {}
         writeFailure = failed
         const operation = fixture.api.resources.documents.post({
@@ -274,8 +274,8 @@ describe(`File cleanup failure boundaries (${storageMode.mode})`, () => {
     inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }, format, transaction
   }, context)
   const failWarnings = t => {
-    const warn = console.warn
-    t.mock.method(console, 'warn', (...args) => {
+    const warn = fixture.api.log.warn
+    t.mock.method(fixture.api.log, 'warn', (...args) => {
       if (probe.loggingFailure) throw loggingError
       return warn(...args)
     })
@@ -827,7 +827,7 @@ describe(`Bulk file cleanup (${storageMode.mode})`, () => {
       for (const scenario of ['warnings', 'rollback', 'failed-cleanup', 'post-commit']) {
         it(`${method} retains ${format} file diagnostics and tracking for ${scenario}`, async t => {
           probe = { failure: scenario === 'post-commit' ? 'afterCommit' : scenario === 'warnings' ? undefined : 'finish', deleteFailure: scenario === 'failed-cleanup' }
-          if (probe.deleteFailure) t.mock.method(console, 'warn', () => { throw loggingError })
+          if (probe.deleteFailure) t.mock.method(fixture.api.log, 'warn', () => { throw loggingError })
           await prepare()
           const ids = method === 'bulkPost' ? ['91', '92', '93'] : originalIds
           const records = ids.map((id, index) => format === 'plain' ? { id, title: `Changed ${index}` } : { type: 'documents', id, attributes: { title: `Changed ${index}` } })

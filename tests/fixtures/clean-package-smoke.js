@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import * as library from 'json-rest-api'
 
 const require = createRequire(import.meta.url)
 for (const peer of ['express', 'socket.io', 'redis', 'formidable', 'busboy', 'fractional-indexing']) {
   assert.throws(() => require.resolve(peer), { code: 'MODULE_NOT_FOUND' })
 }
-assert.equal(Object.keys(library).length, 27)
+assert.equal(Object.keys(library).length, 29)
 assert.equal((await import('json-rest-api/plugins/core/connectors/express-plugin.js')).ExpressPlugin, library.ExpressPlugin)
 assert.equal((await import('json-rest-api/plugins/storage/local-storage.js')).LocalStorage, library.LocalStorage)
 
 if (process.argv[2] === 'core') {
   assert.throws(() => require.resolve('knex'), { code: 'MODULE_NOT_FOUND' })
-  const api = new Api({ name: 'clean-core', logging: { level: 'silent' } })
+  const api = new JsonRestApi({ name: 'clean-core' })
   await api.use(library.RestApiPlugin)
   await assert.rejects(api.use(library.ExpressPlugin), /express/i)
   console.log('Clean core import and missing optional Express checks passed')
@@ -22,7 +22,7 @@ if (process.argv[2] === 'core') {
   for (const mode of ['knex', 'anyapi']) {
     const knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
     try {
-      const api = new Api({ name: `clean-${mode}`, logging: { level: 'silent' } })
+      const api = new JsonRestApi({ name: `clean-${mode}` })
       await api.use(library.RestApiPlugin, { format: 'jsonapi', returning: 'full' })
       if (mode === 'anyapi') {
         const { ensureAnyApiSchema } = await import('json-rest-api/plugins/core/lib/anyapi/schema-utils.js')

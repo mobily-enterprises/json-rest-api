@@ -1,11 +1,11 @@
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../../../lib/missing-package.js'
 import { RestApiPayloadError } from '../../../../lib/rest-api-errors.js'
 import { isMultipartContentType } from './transport-http-helpers.js'
 import { addMultipartField, multipartLimits } from './multipart-helpers.js'
 
 let busboyFactory
 try { busboyFactory = (await import('busboy')).default } catch {
-  requirePackage('busboy', 'express-connector', 'Busboy is required for multipart uploads. Install the optional busboy peer.')
+  throwMissingPackage('busboy', 'express-connector', 'Busboy is required for multipart uploads. Install the optional busboy peer.')
 }
 
 /** Parse a streamed multipart request into buffered files and text fields. */

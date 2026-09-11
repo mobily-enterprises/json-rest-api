@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '')
 const require = createRequire(`${root}/package.json`)
-const { Api } = await import(pathToFileURL(require.resolve('hooked-api')))
+import { JsonRestApi } from '../index.js'
 const { default: knexFactory } = await import(pathToFileURL(require.resolve('knex')))
 const library = await import(pathToFileURL(`${root}/index.js`))
 const { ensureAnyApiSchema } = await import(pathToFileURL(`${root}/plugins/core/lib/anyapi/schema-utils.js`))
@@ -20,7 +20,7 @@ const evaluate = (code, api) => new AsyncFunction('api', 'RestApiValidationError
 for (const mode of ['knex', 'anyapi']) {
   const knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
   try {
-    const api = new Api({ name: `reference-${mode}`, logging: { level: 'error' } })
+    const api = new JsonRestApi({ name: `reference-${mode}` })
     await api.use(library.RestApiPlugin, { format: 'plain', returning: 'full' })
     if (mode === 'anyapi') {
       await ensureAnyApiSchema(knex)

@@ -2,7 +2,7 @@
 
 ```javascript
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
-import { Api } from 'hooked-api';
+import { JsonRestApi } from 'json-rest-api';
 import knexLib from 'knex';
 import util from 'util';
 import express from 'express';
@@ -20,7 +20,7 @@ const knex = knexLib({
 });
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api' });
+const api = new JsonRestApi({ name: 'book-catalog-api' });
 
 // Install plugins
 await api.use(RestApiPlugin);

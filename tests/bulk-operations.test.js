@@ -48,7 +48,7 @@ describe('Bulk Operations', () => {
         createJsonApiDocument('authors', { name: 'Author Three' })
       ]
 
-      const result = await api.scopes.authors.bulkPost({
+      const result = await api.resources.authors.bulkPost({
         inputRecords: records,
         atomic: true
       })
@@ -85,7 +85,7 @@ describe('Bulk Operations', () => {
       ]
 
       try {
-        await api.scopes.authors.bulkPost({
+        await api.resources.authors.bulkPost({
           inputRecords: records,
           atomic: true
         })
@@ -107,7 +107,7 @@ describe('Bulk Operations', () => {
         createJsonApiDocument('authors', { name: 'Valid Author 3' })
       ]
 
-      const result = await api.scopes.authors.bulkPost({
+      const result = await api.resources.authors.bulkPost({
         inputRecords: records,
         atomic: false
       })
@@ -148,7 +148,7 @@ describe('Bulk Operations', () => {
         )
       ]
 
-      const result = await api.scopes.publishers.bulkPost({
+      const result = await api.resources.publishers.bulkPost({
         inputRecords: records
       })
 
@@ -164,7 +164,7 @@ describe('Bulk Operations', () => {
       )
 
       try {
-        await api.scopes.authors.bulkPost({
+        await api.resources.authors.bulkPost({
           inputRecords: tooManyRecords
         })
         assert.fail('Should have thrown error')
@@ -180,7 +180,7 @@ describe('Bulk Operations', () => {
       ]
 
       // Override default atomic mode
-      const result = await api.scopes.authors.bulkPost({
+      const result = await api.resources.authors.bulkPost({
         inputRecords: records,
         atomic: false // Override to non-atomic
       })
@@ -238,7 +238,7 @@ describe('Bulk Operations', () => {
         }
       ]
 
-      const result = await api.scopes.authors.bulkPatch({
+      const result = await api.resources.authors.bulkPatch({
         operations,
         atomic: true
       })
@@ -287,7 +287,7 @@ describe('Bulk Operations', () => {
         }
       ]
 
-      const result = await api.scopes.authors.bulkPatch({
+      const result = await api.resources.authors.bulkPatch({
         operations,
         atomic: false
       })
@@ -312,7 +312,7 @@ describe('Bulk Operations', () => {
         }
       ]
 
-      const result = await api.scopes.authors.bulkPatch({
+      const result = await api.resources.authors.bulkPatch({
         operations: invalidOperations,
         atomic: false
       })
@@ -350,7 +350,7 @@ describe('Bulk Operations', () => {
       ]
 
       try {
-        await api.scopes.authors.bulkPatch({
+        await api.resources.authors.bulkPatch({
           operations,
           atomic: true
         })
@@ -392,7 +392,7 @@ describe('Bulk Operations', () => {
     it('should delete multiple records atomically', async () => {
       const idsToDelete = [testData.authorIds[0], testData.authorIds[2], testData.authorIds[4]]
 
-      const result = await api.scopes.authors.bulkDelete({
+      const result = await api.resources.authors.bulkDelete({
         ids: idsToDelete,
         atomic: true
       })
@@ -422,7 +422,7 @@ describe('Bulk Operations', () => {
         testData.authorIds[4]
       ]
 
-      const result = await api.scopes.authors.bulkDelete({
+      const result = await api.resources.authors.bulkDelete({
         ids: idsToDelete,
         atomic: false
       })
@@ -449,7 +449,7 @@ describe('Bulk Operations', () => {
       ]
 
       try {
-        await api.scopes.authors.bulkDelete({
+        await api.resources.authors.bulkDelete({
           ids: idsToDelete,
           atomic: true
         })
@@ -465,7 +465,7 @@ describe('Bulk Operations', () => {
 
     it('should handle empty ID array', async () => {
       try {
-        await api.scopes.authors.bulkDelete({
+        await api.resources.authors.bulkDelete({
           ids: []
         })
         assert.fail('Should have thrown error')
@@ -513,7 +513,7 @@ describe('Bulk Operations', () => {
       // Try to delete publisher that has books
       const publisherIds = publishers.map(p => p.data.id)
 
-      const result = await api.scopes.publishers.bulkDelete({
+      const result = await api.resources.publishers.bulkDelete({
         ids: publisherIds,
         atomic: false
       })
@@ -536,7 +536,7 @@ describe('Bulk Operations', () => {
         createJsonApiDocument('authors', { name: `Batch Author ${i + 1}` })
       )
 
-      const result = await api.scopes.authors.bulkPost({
+      const result = await api.resources.authors.bulkPost({
         inputRecords: records,
         atomic: true
       })
@@ -567,7 +567,7 @@ describe('Bulk Operations', () => {
         createJsonApiDocument('authors', { name: `Author ${i + 1}` })
       )
 
-      const createResult = await api.scopes.authors.bulkPost({
+      const createResult = await api.resources.authors.bulkPost({
         inputRecords: authorRecords
       })
 
@@ -593,14 +593,14 @@ describe('Bulk Operations', () => {
         }
       ]
 
-      const updateResult = await api.scopes.authors.bulkPatch({
+      const updateResult = await api.resources.authors.bulkPatch({
         operations: updateOperations
       })
 
       assert.equal(updateResult.meta.succeeded, 2)
 
       // Step 3: Bulk delete some others
-      const deleteResult = await api.scopes.authors.bulkDelete({
+      const deleteResult = await api.resources.authors.bulkDelete({
         ids: [authorIds[3], authorIds[4]]
       })
 
@@ -617,7 +617,7 @@ describe('Bulk Operations', () => {
 
     it('should maintain data integrity with relationships', async () => {
       // Create countries
-      const countryResult = await api.scopes.countries.bulkPost({
+      const countryResult = await api.resources.countries.bulkPost({
         inputRecords: [
           createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
           createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
@@ -638,7 +638,7 @@ describe('Bulk Operations', () => {
         )
       ]
 
-      const publisherResult = await api.scopes.publishers.bulkPost({
+      const publisherResult = await api.resources.publishers.bulkPost({
         inputRecords: publisherRecords
       })
 

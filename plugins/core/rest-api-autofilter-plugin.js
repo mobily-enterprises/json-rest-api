@@ -275,7 +275,7 @@ async function enforceScopedInput ({ compiledConfig, context, scopeName, injectM
 
 export const AutoFilterPlugin = {
   name: 'autofilter',
-  dependencies: ['rest-api', 'rest-api-knex|rest-api-anyapi-knex'],
+  dependencies: ['rest-api', ['rest-api-knex', 'rest-api-anyapi-knex']],
 
   install ({ api, addHook, vars, helpers, log, scopes, pluginOptions = {} }) {
     if (!api.knex?.instance) {

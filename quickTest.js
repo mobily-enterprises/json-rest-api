@@ -1,5 +1,5 @@
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from './index.js'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from './index.js'
 import knexLib from 'knex'
 import util from 'util'
 import express from 'express'
@@ -17,7 +17,7 @@ const knex = knexLib({
 })
 
 // Create API instance
-const api = new Api({ name: 'book-catalog-api', logging: { level: 'trace' } })
+const api = new JsonRestApi({ name: 'book-catalog-api' })
 
 // Install plugins
 await api.use(RestApiPlugin, { format: 'plain', returning: 'full' })

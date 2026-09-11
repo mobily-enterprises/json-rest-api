@@ -7,7 +7,7 @@ import {
   createJsonApiDocument,
   assertResourceAttributes
 } from './helpers/test-utils.js'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js'
 import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js'
 
@@ -27,7 +27,7 @@ describe('Virtual Fields Tests', () => {
   // IMPORTANT: before() runs ONCE for the entire test suite
   before(async () => {
     // Create a custom API with virtual fields
-    api = new Api({
+    api = new JsonRestApi({
       name: 'virtual-fields-test',
     })
 

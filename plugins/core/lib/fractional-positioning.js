@@ -1,10 +1,10 @@
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../../lib/missing-package.js'
 
 let generateKeyBetween
 try {
   ({ generateKeyBetween } = await import('fractional-indexing'))
 } catch (e) {
-  requirePackage('fractional-indexing', 'positioning',
+  throwMissingPackage('fractional-indexing', 'positioning',
     'Fractional indexing is required for the positioning plugin to generate sortable position keys. This is a peer dependency.')
 }
 

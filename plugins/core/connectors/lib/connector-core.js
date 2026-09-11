@@ -210,7 +210,7 @@ export async function executeConnectorRoute ({
         preconditionPassed = false
         let representation
         try {
-          representation = await api.scopes[routeMeta.scopeName].get({
+          representation = await api.resources[routeMeta.scopeName].get({
             id: params.id,
             format: 'jsonapi',
             transaction,

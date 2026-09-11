@@ -16,7 +16,7 @@ This runnable example uses an in-memory database. The response is visible to
 `https://app.example.com`, including when a request returns an error.
 
 ```js
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin, CorsPlugin } from 'json-rest-api'
 import express from 'express'
 import knex from 'knex'
@@ -27,7 +27,7 @@ const db = knex({
   useNullAsDefault: true
 })
 const app = express()
-const api = new Api({ name: 'cors-example' })
+const api = new JsonRestApi({ name: 'cors-example' })
 await api.use(RestApiPlugin)
 await api.use(RestApiKnexPlugin, { knex: db })
 await api.use(ExpressPlugin, { mountPath: '/api' })

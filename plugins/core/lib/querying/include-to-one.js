@@ -26,7 +26,7 @@ import {
  * This function loads the "parent" side of a relationship. For example, if comments
  * belong to articles, this loads the articles for a set of comments.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - Records to load relationships for
  *   - fieldName: string - The foreign key field name (e.g., 'author_id')
  *   - fieldDef: Object - The field definition from the schema
@@ -37,7 +37,7 @@ import {
  *   - currentPath: string - Current include path for tracking
  *   - fields: Object - Sparse fieldsets configuration
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}
@@ -225,7 +225,7 @@ export const loadBelongsTo = async (scope, deps) => {
  * Similar to hasMany but expects a single related record.
  * For example, a user that has one profile.
  *
- * @param {Object} scope - The hooked-api scope object
+ * @param {Object} scope - The resource object
  * @param {Object} deps - Dependencies object
  */
 export const loadHasOne = async (scope, deps) => {
@@ -374,7 +374,7 @@ export const loadHasOne = async (scope, deps) => {
  * Handles relationships where a record can belong to different types of parent records.
  * For example, comments that can belong to either articles or videos.
  *
- * @param {Object} scope - The hooked-api scope object containing:
+ * @param {Object} scope - The resource object containing:
  *   - records: Array<Object> - Records with polymorphic relationships
  *   - relName: string - The relationship name
  *   - relDef: Object - The relationship definition with belongsToPolymorphic
@@ -384,7 +384,7 @@ export const loadHasOne = async (scope, deps) => {
  *   - currentPath: string - Current include path for tracking
  *   - fields: Object - Sparse fieldsets configuration
  * @param {Object} deps - Dependencies object containing:
- *   - context.scopes: Object - The hooked-api scopes object
+ *   - context.scopes: Object - The resources object
  *   - context.log: Object - Logger instance
  *   - context.knex: Object - Knex instance
  * @returns {Promise<void>}

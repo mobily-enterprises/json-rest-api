@@ -49,7 +49,7 @@ export const BulkOperationsPlugin = {
   name: 'bulk-operations',
   dependencies: ['rest-api'],
 
-  async install ({ api, log, addHook, addScopeMethod, helpers, pluginOptions }) {
+  async install ({ api, log, addHook, addResourceMethod, helpers, pluginOptions }) {
     const bulkOptions = pluginOptions || {}
     const {
       maxBulkOperations = 100,
@@ -67,7 +67,7 @@ export const BulkOperationsPlugin = {
     log.info('Installing Bulk Operations plugin', { maxBulkOperations, defaultAtomic })
 
     // Add bulk methods to each scope
-    addScopeMethod('bulkPost', withWriteOutcome(async ({ scope, vars, params, context }) => {
+    addResourceMethod('bulkPost', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { inputRecords, atomic = defaultAtomic } = params
       rejectRemovedOptions(params)
       validateAtomic(atomic)
@@ -169,7 +169,7 @@ export const BulkOperationsPlugin = {
       }
     }))
 
-    addScopeMethod('bulkPatch', withWriteOutcome(async ({ scope, vars, params, context }) => {
+    addResourceMethod('bulkPatch', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { operations, atomic = defaultAtomic } = params
       rejectRemovedOptions(params)
       validateAtomic(atomic)
@@ -297,7 +297,7 @@ export const BulkOperationsPlugin = {
       }
     }))
 
-    addScopeMethod('bulkDelete', withWriteOutcome(async ({ scope, vars, params, context }) => {
+    addResourceMethod('bulkDelete', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { ids, atomic = defaultAtomic } = params
       rejectRemovedOptions(params)
       validateAtomic(atomic)
@@ -397,7 +397,7 @@ export const BulkOperationsPlugin = {
     }))
 
     // Hook into scope creation to add bulk routes
-    addHook('scope:added', 'bulkOperationsRoutes', { beforeFunction: 'registerScopeRoutes' }, async ({ context: { scopeName } }) => {
+    addHook('resource:added', 'bulkOperationsRoutes', { beforeFunction: 'registerScopeRoutes' }, async ({ context: { scopeName } }) => {
       const urlPrefix = api.vars.transport?.mountPath || ''
       const scopePath = `${urlPrefix}/${scopeName}`
 

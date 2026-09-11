@@ -1,4 +1,4 @@
-import { requirePackage } from 'hooked-api'
+import { throwMissingPackage } from '../../../lib/missing-package.js'
 import onHeaders from 'on-headers'
 import { getOperationDiagnosticContext } from '../../../lib/error-context.js'
 import { createContext } from './lib/request-helpers.js'
@@ -35,7 +35,7 @@ export const ExpressPlugin = {
     try {
       express = (await import('express')).default
     } catch (e) {
-      requirePackage('express', 'express',
+      throwMissingPackage('express', 'express',
         'Express.js is required for HTTP server functionality. This is a peer dependency.')
     }
     // Initialize express namespace

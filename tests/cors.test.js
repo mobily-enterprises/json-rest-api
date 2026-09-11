@@ -8,7 +8,7 @@ import {
   cleanTables,
   createJsonApiDocument
 } from './helpers/test-utils.js'
-import { createBasicApi } from './fixtures/api-configs.js'
+import { createBasicApi, createCorsBaseUrlApi } from './fixtures/api-configs.js'
 import { CorsPlugin } from '../plugins/core/rest-api-cors-plugin.js'
 
 function assertCorsVary (response) {
@@ -36,34 +36,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
     before(async () => {
       // Create a new API instance with Express configured with a baseUrl
       baseUrlApp = express()
-      // Create API with different name to avoid registry conflict
-      const Api = (await import('hooked-api')).Api
-      baseUrlApi = new Api({
-        name: 'cors-baseurl-test-api',
-        log: { level: 'info' }
-      })
-
-      // Install plugins
-      await baseUrlApi.use((await import('../plugins/core/rest-api-plugin.js')).RestApiPlugin, {
-        format: 'jsonapi'
-      })
-      await baseUrlApi.use((await import('../plugins/core/rest-api-knex-plugin.js')).RestApiKnexPlugin, { knex })
-      await baseUrlApi.use((await import('../plugins/core/connectors/express-plugin.js')).ExpressPlugin, {
-        app: baseUrlApp,
-        mountPath: '/api'
-      })
-
-      // Add basic scope
-      await baseUrlApi.addScope('countries', {
-        restApi: {
-          schema: {
-            attributes: {
-              name: { type: 'string', required: true },
-              code: { type: 'string', required: true }
-            }
-          }
-        }
-      })
+      baseUrlApi = await createCorsBaseUrlApi(knex, baseUrlApp)
 
       // Install CORS plugin
       console.log('[TEST] vars.transport before CORS install:', baseUrlApi.vars.transport)

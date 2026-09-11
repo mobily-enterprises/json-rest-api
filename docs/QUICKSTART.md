@@ -10,7 +10,7 @@ mkdir quickstart-api
 cd quickstart-api
 npm init -y
 npm pkg set type=module
-npm install json-rest-api hooked-api knex better-sqlite3 express
+npm install json-rest-api knex better-sqlite3 express
 ```
 
 These examples use the revised API described in the
@@ -24,7 +24,7 @@ registering resources so it can register their routes.
 
 ```javascript
 import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from 'json-rest-api'
 import knexLib from 'knex'
 import express from 'express'
 
@@ -33,7 +33,7 @@ const knex = knexLib({
   connection: { filename: ':memory:' },
   useNullAsDefault: true
 })
-const api = new Api({ name: 'book-catalog-api' })
+const api = new JsonRestApi({ name: 'book-catalog-api' })
 await api.use(RestApiPlugin)
 await api.use(RestApiKnexPlugin, { knex })
 await api.use(ExpressPlugin, { mountPath: '/api' })

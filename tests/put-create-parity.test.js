@@ -1,7 +1,7 @@
 import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { Api } from 'hooked-api'
+import { JsonRestApi } from '../lib/runtime/json-rest-api.js'
 
 import {
   RestApiAnyapiKnexPlugin,
@@ -79,9 +79,8 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
       await ensureAnyApiSchema(knex)
     }
 
-    api = new Api({
+    api = new JsonRestApi({
       name: 'put-create-parity-test',
-      log: { level: 'warn' }
     })
 
     await api.use(RestApiPlugin, {

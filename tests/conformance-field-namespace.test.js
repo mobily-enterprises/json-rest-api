@@ -284,12 +284,12 @@ describe(`Field additions and table declaration maps (${storageMode.mode})`, () 
 
 describe(`Resource-name contract (${storageMode.mode})`, () => {
   for (const resourceName of ['__proto__', 'constructor', 'prototype']) {
-    it(`retains the upstream rejection of resource ${resourceName}`, async () => {
+    it(`rejects reserved resource ${resourceName}`, async () => {
       let fixture
       try {
         await assert.rejects(async () => {
           fixture = await createConformanceFixture({ createApi: createSchemaEnrichmentApi, tables, apiOptions: { resourceName } })
-        }, /Scope name.*reserved/)
+        }, { name: 'TypeError', message: `Invalid name '${resourceName}'` })
       } finally { await fixture?.close() }
     })
   }

@@ -203,13 +203,9 @@ confirmed rollback cannot undo an email, upload, external API call or other
 effect outside the database transaction. No automatic replay of arbitrary hooks
 or setters is part of this contract.
 
-### Known dispatcher limitation under repair
+### Dispatcher failures
 
-The installed hooked-api diagnostic logger can replace a post-commit hook failure
-with its own error if logging also throws. That error can lack `transactionOutcome`
-even though the caller's context retains `committed` and the row is stored. The
-pending dispatcher patch (source checkout: `docs/development/pending-hooked-api/README.md`) addresses rejected-handler
-logging but has not been installed/released. The master plan therefore keeps the
-whole-API post-commit evidence and error-preservation items open; the guarantees
-above describe the library's owned transaction handling, not a completed fix for
-this external dispatch failure.
+Resource dispatch and hook execution preserve the original thrown value, including
+null and undefined. The runtime does not add automatic failure logging or wrap plugin
+installation errors. The transaction layer attaches write outcomes and records failed
+cleanup diagnostics without replacing the primary cause.
