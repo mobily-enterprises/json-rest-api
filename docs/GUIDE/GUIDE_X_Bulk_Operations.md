@@ -1,732 +1,269 @@
-# Bulk Operations Guide
+# Bulk operations
 
-The **Bulk Operations Plugin** enables efficient processing of multiple records in a single request, supporting atomic transactions, batch processing, and error handling. This guide demonstrates how to create, update, and delete multiple records efficiently.
+`BulkOperationsPlugin` provides `bulkPost`, `bulkPatch` and `bulkDelete`. Entries
+run through their normal resource lifecycle, sequentially. A bulk request can
+reduce network overhead; it does not turn resource writes into one batched SQL
+statement or skip permissions, validation, setters and hooks.
 
-## Overview
+POST/PATCH use the same `format` and `returning` options as individual writes.
+Results contain `meta`, optional indexed `errors`, and `data` for full/minimal
+responses. `returning: 'none'` omits data. DELETE returns its summary and deleted
+IDs in `meta.deleted`.
 
-Bulk operations are essential for:
-- **Data Import/Export**: Processing large datasets efficiently
-- **Batch Updates**: Modifying multiple records with consistent rules
-- **Transactional Safety**: Ensuring all-or-nothing operations
-- **Performance**: Reducing network overhead and database round-trips
+## Runnable example
 
-The plugin provides three main operations:
-- **bulkPost**: Create multiple records
-- **bulkPatch**: Update multiple records
-- **bulkDelete**: Delete multiple records
-
-## Installation and Setup
-
-First, install the Bulk Operations plugin alongside the standard REST API plugins:
+Insert the following seven JavaScript blocks into the
+[starting script](GUIDE_2_1_The_Starting_Point.md), after installing storage and
+before declaring resources or starting the server, on a fresh database. Later
+snippets in this guide are fragments illustrating existing application state.
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
-import { BulkOperationsPlugin } from 'json-rest-api/plugins/core/bulk-operations-plugin.js';
-import { Api } from 'hooked-api';
-import knexLib from 'knex';
-import util from 'util';
+import { BulkOperationsPlugin } from 'json-rest-api/plugins/core/bulk-operations-plugin.js'
 
-// Utility for displaying results
-const inspect = (obj) => util.inspect(obj, { depth: 5 });
-
-// Create database connection
-const knex = knexLib({
-  client: 'sqlite3',
-  connection: { filename: ':memory:' },
-  useNullAsDefault: true
-});
-
-// Create API instance
-const api = new Api({
-  name: 'book-catalog-api',
-});
-
-// Install plugins in order
-await api.use(RestApiPlugin);
-await api.use(RestApiKnexPlugin, { knex });
-
-// Install Bulk Operations plugin with configuration
-await api.use(BulkOperationsPlugin, {
-  'bulk-operations': {
-    maxBulkOperations: 100,     // Maximum records per request
-    defaultAtomic: true,        // Default transaction mode
-    batchSize: 10,             // Internal batch processing size
-    enableOptimizations: true   // Enable database-specific optimizations
-  }
-});
+await api.use(BulkOperationsPlugin, { maxBulkOperations: 100, defaultAtomic: true })
+await api.addResource('books', {
+  schema: { title: { type: 'string', required: true } }
+})
+await api.resources.books.createKnexTable()
 ```
+
+```javascript
+const created = await api.resources.books.bulkPost({
+  inputRecords: [{ title: 'Alpha' }, { title: 'Beta' }], format: 'plain'
+})
+console.log(created.data, created.meta)
+```
+
+The two records are returned in input order. The summary is
+`{ total: 2, succeeded: 2, failed: 0, atomic: true }`.
+For JSON:API bulk creation, each input may be a resource object
+`{ type, attributes, relationships }` or a document `{ data: ... }`.
+Individual resource POST still requires a document when selecting JSON:API.
+
+```javascript
+const updated = await api.resources.books.bulkPatch({
+  operations: created.data.map(book => ({ id: book.id, data: { title: `${book.title} revised` } })),
+  format: 'plain', returning: 'minimal'
+})
+console.log(updated.data, updated.meta)
+```
+
+PATCH entries are `{ id, data }`; `data` is the plain input record in this
+example. For `format: 'jsonapi'`, it is the JSON:API resource object, including
+its type/ID and attributes/relationships. Minimal output contains identifiers.
+
+```javascript
+const partial = await api.resources.books.bulkPost({
+  inputRecords: [{ title: 'Gamma' }, {}], format: 'plain', atomic: false
+})
+console.log(partial.data, partial.errors, partial.meta)
+```
+
+Gamma is stored, while the second entry fails required-title validation. The
+summary reports one success and one failure; `errors[0].index` is 1. Successful
+data entries are compacted, so their array positions do not represent failed
+input slots. Use the indexed errors to identify rejected inputs.
+
+```javascript
+let atomicError
+try {
+  await api.resources.books.bulkPost({
+    inputRecords: [{ title: 'Not retained' }, {}], format: 'plain', atomic: true
+  })
+} catch (error) { atomicError = error }
+const afterAtomicFailure = await api.resources.books.query({ format: 'plain' })
+console.log(atomicError?.transactionOutcome, afterAtomicFailure.data.map(book => book.title))
+```
+
+The owned batch rejects with rolled-back outcome, and Not retained is absent.
+The earlier, separately completed calls remain stored.
+
+```javascript
+const gamma = partial.data[0]
+let managedError
+try {
+  await api.transaction(async transaction => {
+    await api.resources.books.bulkPatch({
+      operations: [{ id: gamma.id, data: { title: 'Pending title' } }],
+      format: 'plain', returning: 'none', atomic: true, transaction
+    })
+    throw new Error('Cancel this unit')
+  })
+} catch (error) { managedError = error }
+const afterManagedRollback = await api.resources.books.get({ id: gamma.id, format: 'plain' })
+console.log(managedError?.message, afterManagedRollback.title)
+```
+
+The outer callback rejection restores Gamma. The batch borrows the managed
+transaction and cannot independently commit its changes.
+
+```javascript
+const deleted = await api.resources.books.bulkDelete({ ids: created.data.map(book => book.id), atomic: true })
+const remaining = await api.resources.books.query({ format: 'plain' })
+console.log(deleted.meta, remaining.data)
+```
+
+The delete summary names the two deleted IDs. Gamma remains.
 
 ## Configuration Options
 
-The Bulk Operations plugin supports several configuration options:
+Pass these options directly to `api.use(BulkOperationsPlugin, options)`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `maxBulkOperations` | number | 100 | Maximum number of records that can be processed in a single request |
+| `maxBulkOperations` | positive safe integer | 100 | Maximum number of records that can be processed in a single request |
 | `defaultAtomic` | boolean | true | Whether operations are atomic (all-or-nothing) by default |
-| `batchSize` | number | 100 | Number of records to process in each internal batch |
-| `enableOptimizations` | boolean | true | Enable database-specific bulk optimizations when available |
 
-## Using the Book Catalog Schema
+Invalid values and unknown option names fail during installation. Remove
+`batchSize` and `enableOptimizations`: they did not provide SQL batching, and the
+disconnected optimization handler has been removed. Do not wrap options inside
+a `'bulk-operations'` key. See [the migration steps](MIGRATING_API_V2.md#bulk-writes).
 
-Let's use the standard book catalog schema for all examples:
+## Failures and diagnostics
 
-```javascript
-// Define the book catalog schema
-await api.addResource('countries', {
-  schema: {
-    id: { type: 'id' },
-    name: { type: 'string', required: true, max: 100 },
-    code: { type: 'string', max: 2, unique: true }
-  },
-  relationships: {
-    publishers: { type: 'hasMany', target: 'publishers', foreignKey: 'country_id' },
-    books: { type: 'hasMany', target: 'books', foreignKey: 'country_id' }
-  }
-});
+Atomic failures preserve the original error if rollback also rejects. The
+outer batch attempts rollback once for an unfinished transaction it owns and stores
+secondary rollback errors in the supplied context's `cleanupErrors` array;
+`context.error` retains the original failure. Both diagnostic fields reset on
+the next bulk call. A rejected rollback does not confirm that data was restored.
+Managed completion follows the [transaction contract](managed-transactions.md).
 
-await api.addResource('publishers', {
-  schema: {
-    id: { type: 'id' },
-    name: { type: 'string', required: true, max: 200 },
-    country_id: { type: 'number', nullable: true, belongsTo: 'countries', as: 'country' }
-  },
-  relationships: {
-    books: { type: 'hasMany', target: 'books', foreignKey: 'publisher_id' }
-  }
-});
+Child cleanup diagnostics are now available on the batch context, including
+warnings from successful entries. Each has a zero-based `bulkIndex` alongside
+its `phase`, original `error` and any file information. For example:
 
-await api.addResource('authors', {
-  schema: {
-    id: { type: 'id' },
-    name: { type: 'string', required: true, max: 200 }
-  },
-  relationships: {
-    books: { 
-      type: 'manyToMany',
-      through: 'book_authors',
-      foreignKey: 'author_id',
-      otherKey: 'book_id'
-    }
-  }
-});
+```js
+const context = {};
+const result = await api.resources.books.bulkPatch({
+  operations: [{ id: '42', data: { title: 'Updated title' } }],
+  format: 'plain',
+  atomic: false
+}, context);
 
-await api.addResource('books', {
-  schema: {
-    id: { type: 'id' },
-    title: { type: 'string', required: true, max: 300 },
-    country_id: { type: 'number', required: true, belongsTo: 'countries', as: 'country' },
-    publisher_id: { type: 'number', nullable: true, belongsTo: 'publishers', as: 'publisher' }
-  },
-  relationships: {
-    authors: { 
-      type: 'manyToMany',
-      through: 'book_authors',
-      foreignKey: 'book_id',
-      otherKey: 'author_id'
-    }
-  }
-});
-
-await api.addResource('book_authors', {
-  schema: {
-    id: { type: 'id' },
-    book_id: { type: 'number', required: true, belongsTo: 'books', as: 'book' },
-    author_id: { type: 'number', required: true, belongsTo: 'authors', as: 'author' }
-  }
-});
-
-// Create tables
-await api.resources.countries.createKnexTable();
-await api.resources.publishers.createKnexTable();
-await api.resources.authors.createKnexTable();
-await api.resources.books.createKnexTable();
-await api.resources.book_authors.createKnexTable();
-```
-
-## Bulk Create (bulkPost)
-
-Create multiple records in a single operation. The `bulkPost` method accepts an array of JSON:API documents.
-
-### Basic Bulk Create
-
-```javascript
-// Create multiple authors at once
-const bulkCreateResult = await api.scopes.authors.bulkPost({
-  inputRecords: [
-    { type: 'authors', attributes: { name: 'J.K. Rowling' } },
-    { type: 'authors', attributes: { name: 'George R.R. Martin' } },
-    { type: 'authors', attributes: { name: 'Brandon Sanderson' } }
-  ],
-  atomic: true  // All succeed or all fail
-});
-
-console.log(inspect(bulkCreateResult));
-// Output:
-// {
-//   data: [
-//     { type: 'authors', id: '1', attributes: { name: 'J.K. Rowling' } },
-//     { type: 'authors', id: '2', attributes: { name: 'George R.R. Martin' } },
-//     { type: 'authors', id: '3', attributes: { name: 'Brandon Sanderson' } }
-//   ],
-//   meta: {
-//     total: 3,
-//     succeeded: 3,
-//     failed: 0,
-//     atomic: true
-//   }
-// }
-```
-
-### Bulk Create with Relationships
-
-Create records with relationships to existing data:
-
-```javascript
-// First, create some countries and publishers
-await api.resources.countries.post({
-  inputRecord: { type: 'countries', attributes: { name: 'United States', code: 'US' } }
-});
-await api.resources.countries.post({
-  inputRecord: { type: 'countries', attributes: { name: 'United Kingdom', code: 'UK' } }
-});
-
-// Create publishers with country relationships
-const publisherResult = await api.scopes.publishers.bulkPost({
-  inputRecords: [
-    { 
-      type: 'publishers', 
-      attributes: { name: 'Penguin Random House' },
-      relationships: {
-        country: { data: { type: 'countries', id: '1' } }  // US
-      }
-    },
-    { 
-      type: 'publishers', 
-      attributes: { name: 'Bloomsbury Publishing' },
-      relationships: {
-        country: { data: { type: 'countries', id: '2' } }  // UK
-      }
-    }
-  ]
-});
-
-console.log('Created publishers:', publisherResult.meta.succeeded);
-```
-
-### Non-Atomic Mode (Partial Success)
-
-Allow some records to fail while others succeed:
-
-```javascript
-const partialResult = await api.scopes.authors.bulkPost({
-  inputRecords: [
-    { type: 'authors', attributes: { name: 'Valid Author' } },
-    { type: 'authors', attributes: {} },  // Invalid - missing required name
-    { type: 'authors', attributes: { name: 'Another Valid Author' } }
-  ],
-  atomic: false  // Allow partial success
-});
-
-console.log(inspect(partialResult));
-// Output:
-// {
-//   data: [
-//     { type: 'authors', id: '4', attributes: { name: 'Valid Author' } },
-//     { type: 'authors', id: '5', attributes: { name: 'Another Valid Author' } }
-//   ],
-//   errors: [{
-//     index: 1,
-//     status: 'error',
-//     error: {
-//       code: 'REST_API_VALIDATION',
-//       message: 'Schema validation failed for resource attributes',
-//       details: { fields: ['data.attributes.name'], violations: [...] }
-//     }
-//   }],
-//   meta: {
-//     total: 3,
-//     succeeded: 2,
-//     failed: 1,
-//     atomic: false
-//   }
-// }
-```
-
-## Bulk Update (bulkPatch)
-
-Update multiple records with different values in a single operation.
-
-### Basic Bulk Update
-
-```javascript
-// Update multiple authors
-const bulkUpdateResult = await api.scopes.authors.bulkPatch({
-  operations: [
-    { 
-      id: '1', 
-      data: { 
-        type: 'authors', 
-        id: '1', 
-        attributes: { name: 'J.K. Rowling (Harry Potter)' } 
-      }
-    },
-    { 
-      id: '2', 
-      data: { 
-        type: 'authors', 
-        id: '2', 
-        attributes: { name: 'George R.R. Martin (Game of Thrones)' } 
-      }
-    }
-  ],
-  atomic: true
-});
-
-console.log('Updated authors:', bulkUpdateResult.meta.succeeded);
-```
-
-### Updating Relationships
-
-Bulk update relationships between resources:
-
-```javascript
-// Create some books first
-const bookResults = await api.scopes.books.bulkPost({
-  inputRecords: [
-    { 
-      type: 'books', 
-      attributes: { title: 'Harry Potter and the Philosopher\'s Stone' },
-      relationships: { 
-        country: { data: { type: 'countries', id: '2' } }  // UK
-      }
-    },
-    { 
-      type: 'books', 
-      attributes: { title: 'A Game of Thrones' },
-      relationships: { 
-        country: { data: { type: 'countries', id: '1' } }  // US
-      }
-    }
-  ]
-});
-
-// Now update the books to assign publishers
-const bookIds = bookResults.data.map(book => book.id);
-const updateOps = await api.scopes.books.bulkPatch({
-  operations: [
-    {
-      id: bookIds[0],
-      data: {
-        type: 'books',
-        id: bookIds[0],
-        attributes: {},
-        relationships: {
-          publisher: { data: { type: 'publishers', id: '2' } }  // Bloomsbury
-        }
-      }
-    },
-    {
-      id: bookIds[1],
-      data: {
-        type: 'books',
-        id: bookIds[1],
-        attributes: {},
-        relationships: {
-          publisher: { data: { type: 'publishers', id: '1' } }  // Penguin
-        }
-      }
-    }
-  ]
-});
-
-console.log('Updated book relationships:', updateOps.meta.succeeded);
-```
-
-### Handling Update Errors
-
-When updating non-existent records or with invalid data:
-
-```javascript
-const errorResult = await api.scopes.authors.bulkPatch({
-  operations: [
-    { id: '1', data: { type: 'authors', id: '1', attributes: { name: 'Updated Name' } } },
-    { id: '999', data: { type: 'authors', id: '999', attributes: { name: 'Non-existent' } } },
-    { id: '2', data: { type: 'authors', id: '2', attributes: { name: '' } } }  // Empty name
-  ],
-  atomic: false  // Allow partial success
-});
-
-console.log(inspect(errorResult));
-// Shows successful updates and errors for failed operations
-```
-
-## Bulk Delete (bulkDelete)
-
-Delete multiple records by their IDs.
-
-### Basic Bulk Delete
-
-```javascript
-// Delete multiple authors
-const bulkDeleteResult = await api.scopes.authors.bulkDelete({
-  ids: ['4', '5', '6'],
-  atomic: true
-});
-
-console.log(inspect(bulkDeleteResult));
-// Output:
-// {
-//   meta: {
-//     total: 3,
-//     succeeded: 3,
-//     failed: 0,
-//     deleted: ['4', '5', '6'],
-//     atomic: true
-//   }
-// }
-```
-
-### Handling Referential Integrity
-
-When deleting records with relationships:
-
-```javascript
-// Try to delete a country that has books
-try {
-  await api.scopes.countries.bulkDelete({
-    ids: ['1', '2'],  // Countries with related books
-    atomic: true
-  });
-} catch (error) {
-  console.log('Cannot delete:', error.message);
-  // Will fail due to foreign key constraints
+for (const diagnostic of context.cleanupErrors || []) {
+  console.error(diagnostic.bulkIndex, diagnostic.phase, diagnostic.error);
 }
-
-// First delete the related records
-await api.scopes.books.bulkDelete({
-  ids: bookIds,  // Delete books first
-  atomic: true
-});
-
-// Now can delete the countries
-await api.scopes.countries.bulkDelete({
-  ids: ['1', '2'],
-  atomic: true
-});
 ```
 
-### Mixed Success Scenarios
+The batch response keeps its existing indexed primary errors; secondary cleanup
+errors are retained on the context. `meta.failed` counts rejected calls, not
+rolled-back writes: an `afterCommit` hook can fail after its data is stored.
 
-Handle cases where some deletes succeed and others fail:
+Remaining child uploads are retained in `context.fileHandlingUploads`, also
+tagged with `bulkIndex` and retaining their storage and transaction references.
+They can include a failed deletion or committed files whose tracking-release
+hook did not run. Do not delete or retry them solely because they are tracked.
+Reusing the batch context clears old error diagnostics and keeps unresolved
+upload tracking without copying it into new children. Write errors expose
+`transactionOutcome`; managed completion-chain diagnostics also identify
+`operationIndex`, `scopeName` and `method`. Broader integration remains in progress.
 
-```javascript
-const mixedResult = await api.scopes.authors.bulkDelete({
-  ids: ['1', '999', '2', '888'],  // Mix of valid and invalid IDs
-  atomic: false  // Allow partial success
-});
+## Version conditions
 
-console.log(inspect(mixedResult));
-// Output:
-// {
-//   meta: {
-//     total: 4,
-//     succeeded: 2,
-//     failed: 2,
-//     deleted: ['1', '2'],
-//     atomic: false
-//   },
-//   errors: [
-//     { index: 1, id: '999', status: 'error', error: { code: 'REST_API_RESOURCE', message: 'Resource not found' } },
-//     { index: 3, id: '888', status: 'error', error: { code: 'REST_API_RESOURCE', message: 'Resource not found' } }
-//   ]
-// }
+For a resource with an explicit stored `versionField`, bulk PATCH and DELETE
+accept `expectedVersions`: one revision token for each entry, in the same order
+as `operations` or `ids`. Omit the entire array for unconditional writes. Each
+token must be a non-empty string of at most 128 characters; null entries and
+partially conditional arrays are not supported. The library validates the
+array before starting any child operation, including in non-atomic mode.
+
+```js
+const current = await api.resources.books.get({ id: '42', format: 'plain' })
+await api.resources.books.bulkPatch({
+  operations: [{ id: current.id, data: { title: 'Updated title' } }],
+  expectedVersions: [current.revision],
+  format: 'plain'
+})
 ```
+
+Use the revision field selected by your resource configuration. It belongs in
+`expectedVersions`, not in the submitted attributes. Successful updates rotate
+the revision even when no conditions were supplied. Read full responses or
+fetch the record again to obtain its new revision.
+
+A stale condition raises `REST_API_VERSION_CONFLICT`. An owned atomic batch
+rolls back all its changes. A non-atomic batch retains successful children and
+reports the failed child's index and transaction outcome in `errors`. Caller
+transactions retain their normal ownership rules below. Missing or inaccessible
+rows retain the single-write not-found behavior.
+
+HTTP bulk PATCH/DELETE use the same `expectedVersions` property in the request
+body, alongside `operations` or `ids`. Atomic version conflicts map to HTTP 409;
+malformed condition arrays map to 422. These are body conditions, not HTTP
+`If-Match` validators. Bulk creation rejects revision conditions, and all bulk
+methods reject the singular `expectedVersion` option.
+
+## Transaction ownership
+
+Pass `transaction` in the first argument to bulkPost, bulkPatch or bulkDelete,
+with `atomic: true`. Each entry uses that same transaction, including its
+relationship changes and full-response reads. The bulk call neither commits nor
+rolls it back. Other calls and raw SQL can join the same transaction.
+
+```js
+await api.transaction(async transaction => {
+  return api.resources.books.bulkPatch({
+    operations: [{ id: '42', data: { title: 'Updated title' } }],
+    format: 'plain',
+    returning: 'minimal',
+    atomic: true,
+    transaction
+  })
+})
+```
+
+The managed helper rolls back the whole unit after callback rejection or a
+participating write/observed SQL failure, even when caught. A rejected batch can
+leave changes pending until the helper finishes; its individual operations do
+not complete the transaction or create savepoints. Raw transactions and child
+savepoints cannot be passed to library writes. Raw SQL can join the managed
+callback through its actual Knex handle.
+
+Without a supplied transaction, an atomic batch owns one transaction for all
+entries; a non-atomic batch lets each entry own its transaction. Passing a
+transaction with `atomic: false` rejects before any child or SQL runs. This also
+applies when `defaultAtomic` is false: explicitly select `atomic: true` to join
+an outer transaction. A completed transaction rejects through the normal write
+path and is never silently replaced with a new one.
+
+Managed completion defers enlisted completion chains to the owner. See
+[managed transactions](managed-transactions.md) and
+[transaction outcomes](transaction-outcomes.md) for file/event integration,
+completion failures and uncertain outcomes.
 
 ## HTTP API Usage
 
-When using the Express plugin, bulk operations are available via HTTP endpoints:
+Express and Fastify expose bulk endpoints. Install the connector and bulk
+plugin **before declaring resources**, then mount/start the application.
+Authenticated transport context reaches every ordinary resource write and its
+permission checks. HTTP always selects JSON:API/full responses: POST returns
+201, PATCH and DELETE return 200 with the batch summary. `atomic` query values
+must be exactly `true` or `false`; malformed values produce 422 without writes.
+The optional plugin reserves `/RESOURCE/bulk` for these methods, including when
+the resource accepts opaque IDs. This bulk protocol is not an implementation of
+the JSON:API Atomic Operations extension.
 
-```javascript
-import { ExpressPlugin } from 'json-rest-api/plugins/core/connectors/express-plugin.js';
-import express from 'express';
 
-// Add Express plugin
-await api.use(ExpressPlugin);
+The bulk HTTP request bodies are:
 
-// Create and mount Express app
-const app = express();
-app.use(express.json());
-api.http.express.mount(app);
+| Method and path | Body fields |
+| --- | --- |
+| `POST /api/books/bulk` | `data`: array of JSON:API resource objects |
+| `PATCH /api/books/bulk` | `operations`: array of `{ id, data }`, where `data` is a resource object |
+| `DELETE /api/books/bulk` | `ids`: array of resource IDs |
 
-app.listen(3000, () => {
-  console.log('API with bulk operations running on http://localhost:3000');
-}).on('error', (err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1)
-});
-```
+For example:
 
-### HTTP Bulk Create
-
-```bash
-POST /api/authors/bulk
-Content-Type: application/json
-
-{
-  "data": [
-    { "type": "authors", "attributes": { "name": "Author One" } },
-    { "type": "authors", "attributes": { "name": "Author Two" } }
-  ]
-}
-
-# With query parameter for non-atomic mode
-POST /api/authors/bulk?atomic=false
-```
-
-### HTTP Bulk Update
-
-```bash
-PATCH /api/authors/bulk
-Content-Type: application/json
-
+```json
 {
   "operations": [
-    { "id": "1", "data": { "type": "authors", "id": "1", "attributes": { "name": "Updated Name" } } },
-    { "id": "2", "data": { "type": "authors", "id": "2", "attributes": { "name": "Another Update" } } }
+    { "id": "1", "data": { "type": "books", "id": "1", "attributes": { "title": "Revised" } } }
   ]
 }
 ```
 
-### HTTP Bulk Delete
-
-```bash
-DELETE /api/authors/bulk
-Content-Type: application/json
-
-{
-  "data": ["1", "2", "3"]
-}
-
-# Alternative format
-{
-  "ids": ["1", "2", "3"]
-}
-```
-
-## Advanced Features
-
-### Batch Processing
-
-The plugin processes records in configurable batches to manage memory usage:
-
-```javascript
-// Configure smaller batches for memory-constrained environments
-await api.use(BulkOperationsPlugin, {
-  'bulk-operations': {
-    batchSize: 5,  // Process 5 records at a time internally
-    maxBulkOperations: 1000  // But allow up to 1000 total
-  }
-});
-
-// Create 100 records - processed in batches of 5
-const largeDataset = Array.from({ length: 100 }, (_, i) => ({
-  type: 'authors',
-  attributes: { name: `Author ${i + 1}` }
-}));
-
-const result = await api.scopes.authors.bulkPost({
-  inputRecords: largeDataset,
-  atomic: true
-});
-
-console.log(`Created ${result.meta.succeeded} authors in batches`);
-```
-
-### Transaction Context
-
-Bulk operations provide context information to hooks and plugins:
-
-```javascript
-// Add a hook that runs for each bulk operation
-api.addHook('beforePost', 'bulkTracking', {}, async ({ context, params }) => {
-  if (context.bulkOperation) {
-    console.log(`Processing bulk item ${context.bulkIndex + 1}`);
-  }
-});
-```
-
-### Error Handling Patterns
-
-Implement robust error handling for bulk operations:
-
-```javascript
-async function importAuthors(authorData) {
-  try {
-    const result = await api.scopes.authors.bulkPost({
-      inputRecords: authorData,
-      atomic: false  // Continue on errors
-    });
-    
-    // Log successful imports
-    console.log(`Imported ${result.meta.succeeded} of ${result.meta.total} authors`);
-    
-    // Handle errors if any
-    if (result.errors && result.errors.length > 0) {
-      console.error('Import errors:');
-      result.errors.forEach(error => {
-        console.error(`  Row ${error.index}: ${error.error.message}`);
-      });
-      
-      // Return failed records for retry
-      return authorData.filter((_, index) => 
-        result.errors.some(e => e.index === index)
-      );
-    }
-    
-    return [];  // All succeeded
-  } catch (error) {
-    // Handle complete failure (e.g., database connection error)
-    console.error('Bulk import failed completely:', error.message);
-    throw error;
-  }
-}
-```
-
-### Performance Considerations
-
-1. **Use Atomic Mode Wisely**: Atomic operations provide consistency but may be slower for large datasets
-2. **Adjust Batch Sizes**: Larger batches improve performance but use more memory
-3. **Enable Optimizations**: The plugin uses database-specific bulk insert optimizations when available
-4. **Monitor Limits**: Set appropriate `maxBulkOperations` to prevent resource exhaustion
-
-## Complete Example: Book Import System
-
-Here's a complete example showing how to import a book catalog with all relationships:
-
-```javascript
-async function importBookCatalog(catalogData) {
-  // Step 1: Import countries
-  console.log('Importing countries...');
-  const countryResult = await api.scopes.countries.bulkPost({
-    inputRecords: catalogData.countries,
-    atomic: true
-  });
-  
-  // Step 2: Import publishers with country relationships
-  console.log('Importing publishers...');
-  const publisherResult = await api.scopes.publishers.bulkPost({
-    inputRecords: catalogData.publishers,
-    atomic: true
-  });
-  
-  // Step 3: Import authors
-  console.log('Importing authors...');
-  const authorResult = await api.scopes.authors.bulkPost({
-    inputRecords: catalogData.authors,
-    atomic: true
-  });
-  
-  // Step 4: Import books with country and publisher relationships
-  console.log('Importing books...');
-  const bookResult = await api.scopes.books.bulkPost({
-    inputRecords: catalogData.books,
-    atomic: false  // Allow partial success for books
-  });
-  
-  // Step 5: Create author-book relationships
-  console.log('Creating author-book relationships...');
-  const relationshipData = [];
-  
-  for (const book of bookResult.data) {
-    const bookAuthors = catalogData.bookAuthors[book.attributes.title] || [];
-    for (const authorName of bookAuthors) {
-      const author = authorResult.data.find(a => a.attributes.name === authorName);
-      if (author) {
-        relationshipData.push({
-          type: 'book_authors',
-          attributes: {
-            book_id: parseInt(book.id),
-            author_id: parseInt(author.id)
-          }
-        });
-      }
-    }
-  }
-  
-  const relationshipResult = await api.scopes.book_authors.bulkPost({
-    inputRecords: relationshipData,
-    atomic: false
-  });
-  
-  // Summary
-  console.log('\nImport Summary:');
-  console.log(`- Countries: ${countryResult.meta.succeeded}`);
-  console.log(`- Publishers: ${publisherResult.meta.succeeded}`);
-  console.log(`- Authors: ${authorResult.meta.succeeded}`);
-  console.log(`- Books: ${bookResult.meta.succeeded} (${bookResult.meta.failed} failed)`);
-  console.log(`- Relationships: ${relationshipResult.meta.succeeded}`);
-  
-  return {
-    countries: countryResult.meta.succeeded,
-    publishers: publisherResult.meta.succeeded,
-    authors: authorResult.meta.succeeded,
-    books: bookResult.meta.succeeded,
-    relationships: relationshipResult.meta.succeeded,
-    errors: bookResult.errors || []
-  };
-}
-
-// Example usage
-const catalogData = {
-  countries: [
-    { type: 'countries', attributes: { name: 'United States', code: 'US' } },
-    { type: 'countries', attributes: { name: 'United Kingdom', code: 'UK' } }
-  ],
-  publishers: [
-    { 
-      type: 'publishers', 
-      attributes: { name: 'Penguin Random House' },
-      relationships: { country: { data: { type: 'countries', id: '1' } } }
-    }
-  ],
-  authors: [
-    { type: 'authors', attributes: { name: 'Stephen King' } },
-    { type: 'authors', attributes: { name: 'J.K. Rowling' } }
-  ],
-  books: [
-    {
-      type: 'books',
-      attributes: { title: 'The Shining' },
-      relationships: {
-        country: { data: { type: 'countries', id: '1' } },
-        publisher: { data: { type: 'publishers', id: '1' } }
-      }
-    }
-  ],
-  bookAuthors: {
-    'The Shining': ['Stephen King']
-  }
-};
-
-const importResults = await importBookCatalog(catalogData);
-```
-
-## Summary
-
-The Bulk Operations plugin provides powerful capabilities for processing multiple records efficiently:
-
-- **Three Core Operations**: bulkPost, bulkPatch, and bulkDelete
-- **Atomic Transactions**: All-or-nothing processing for data consistency
-- **Partial Success Mode**: Continue processing despite individual failures
-- **Batch Processing**: Efficient handling of large datasets
-- **Full JSON:API Support**: Maintains compatibility with standard format
-- **HTTP Endpoints**: RESTful API for bulk operations
-
-Use bulk operations when you need to:
-- Import or export large datasets
-- Apply consistent updates across multiple records
-- Delete multiple records safely
-- Optimize performance by reducing API calls
-
-Remember to consider transaction modes, error handling, and performance implications when designing your bulk operation workflows.
+Select `?atomic=false` for independent child transactions, or omit it for the
+configured default. Non-atomic error summaries require application handling;
+a successful HTTP status does not mean every child call succeeded. In
+particular, inspect each error's transaction outcome before retrying a mutation
+that may already have committed. See [transaction outcomes](transaction-outcomes.md).

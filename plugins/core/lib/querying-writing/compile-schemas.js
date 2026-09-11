@@ -1,152 +1,52 @@
 import { createSchema } from 'json-rest-schema'
-import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema, sortFieldsByDependencies } from './schema-helpers.js'
+import { ensureSearchFieldsAreIndexed, generateSearchSchemaFromSchema, compileFieldDependencies, snapshotResourceConfiguration } from './schema-helpers.js'
 import { buildStorageInfo, normalizeStorageConfig } from '../storage/storage-mapping.js'
+import { compileQueryFields } from './query-field-helpers.js'
+import { buildEffectiveSortList } from '../querying/query-field-sort-helpers.js'
+import { assertScalarQueryField, assertFieldNameMap } from './field-utils.js'
+import { validateRelationshipFieldNames, validateSchemaFieldNames } from './scope-validations.js'
 
 /**
- * Compiles and enriches schemas for a resource scope
+ * Compile one resource and publish its completed metadata in vars.schemaInfo.
+ * Raw configuration is snapshotted; computed fields are kept out of the
+ * writable schema. Plugins enrich attribute, search and computed definitions
+ * before callback dependencies, output membership and storage mappings compile.
+ * schema:compiled runs before the completed metadata snapshot is published.
  *
- * @param {Object} scope - Scope containing raw schema options
- * @param {Object} deps - Dependencies with context and hooks
- * @returns {Promise<void>} Resolves when compilation complete
- *
+ * @param {Object} scope
+ * @param {Object} scope.scopeOptions - Resource configuration
+ * @param {Object} scope.vars - Receives the compiled schemaInfo
+ * @param {Object} deps
+ * @param {Object} deps.context
+ * @param {string} deps.context.scopeName - Resource name
+ * @param {Function} deps.runHooks - Awaited schema enrichment/publication hooks
+ * @returns {Promise<void>}
  * @example
- * // Input: Raw schema with computed field
- * const rawFields = {
- *   title: { type: 'string', required: true },
- *   content: { type: 'string' },
- *   author_id: { belongsTo: 'users', as: 'author' },  // Missing type
- *   word_count: {
- *     type: 'number',
- *     computed: true,
- *     compute: (record) => record.content.split(' ').length
- *   }
- * };
- *
- * await compileSchemas(scope, deps);
- *
- * // Output in scope.vars.schemaInfo:
- * // {
- * //   schema: Schema {},           // json-rest-schema instance
- * //   schemaStructure: {
- * //     title: { type: 'string', required: true },
- * //     content: { type: 'string' },
- * //     author_id: { type: 'id', belongsTo: 'users', as: 'author' }  // Type added!
- * //     // Note: word_count removed (it's computed)
- * //   },
- * //   computed: {
- * //     word_count: { type: 'number', computed: true, compute: [Function] }
- * //   }
- * // }
- *
- * @example
- * // Input: Schema with search fields
- * const rawFields = {
- *   title: { type: 'string', search: true },    // Searchable
- *   status: { type: 'string' },                 // Not searchable
- *   author_id: { belongsTo: 'users', as: 'author' }
- * };
- *
- * // Output: Auto-generated searchSchema
- * // searchSchemaObject contains:
- * // {
- * //   title: {
- * //     type: 'string',
- * //     indexed: true,        // Added for DB optimization
- * //     filterOperator: '='   // Default operator
- * //   }
- * // }
- *
- * @example
- * // Input: Pivot table auto-detection
- * const pivotSchema = {
- *   article_id: { belongsTo: 'articles', as: 'article' },
- *   tag_id: { belongsTo: 'tags', as: 'tag' },
- *   display_order: { type: 'number' }
- * };
- *
- * // Output: Both foreign keys become searchable
- * // schemaStructure will have:
- * // {
- * //   article_id: { type: 'id', belongsTo: 'articles', as: 'article', search: true },
- * //   tag_id: { type: 'id', belongsTo: 'tags', as: 'tag', search: true },
- * //   display_order: { type: 'number' }
- * // }
- * // This enables efficient many-to-many filtering!
- *
- * @example
- * // Input: Schema with dependent getters
- * const schema = {
- *   first_name: { type: 'string' },
- *   last_name: { type: 'string' },
- *   full_name: {
- *     type: 'string',
- *     getter: (record) => `${record.first_name} ${record.last_name}`,
- *     runGetterAfter: ['first_name', 'last_name']  // Dependencies
- *   },
- *   email: {
- *     type: 'string',
- *     setter: (value) => value.toLowerCase().trim()
- *   }
- * };
- *
- * // Output includes dependency-sorted fields:
- * // {
- * //   fieldGetters: { full_name: { getter: [Function], runGetterAfter: [...] } },
- * //   sortedGetterFields: ['full_name'],    // Topologically sorted
- * //   fieldSetters: { email: { setter: [Function], runSetterAfter: [] } },
- * //   sortedSetterFields: ['email']
- * // }
- *
- * @description
- * Used by:
- * - Every REST method calls this before any operations
- * - Compilation happens once per scope (cached)
- *
- * Purpose:
- * - Separates computed fields from database fields
- * - Adds missing types to belongsTo relationships
- * - Auto-detects pivot tables for many-to-many
- * - Generates search schemas from field markers
- * - Validates getter/setter dependencies
- * - Provides hooks for schema enrichment
- * - Caches everything for performance
- *
- * Data flow:
- * 1. Extracts computed fields to separate object
- * 2. Adds type:'id' to belongsTo fields
- * 3. Detects pivot tables (2+ foreign keys, 40%+ of fields)
- * 4. Runs schema:enrich hook for plugins
- * 5. Creates json-rest-schema validation instance
- * 6. Generates searchSchema from search:true fields
- * 7. Runs searchSchema:enrich hook
- * 8. Extracts and topologically sorts getters/setters
- * 9. Caches all results in scope.vars.schemaInfo
+ * // A title field remains in schemaInfo.schemaStructure and is validated by
+ * // schemaInfo.schemaInstance. A computed wordCount instead lives in
+ * // schemaInfo.computed; schemaInfo.outputFields contains both definitions.
+ * // The search schema, dependency orders and storageInfo share this publication.
  */
 export async function compileSchemas (scope, deps) {
   // Extract scopeName from context
   const { context, runHooks } = deps
   const scopeName = context.scopeName
 
+  const scopeOptions = snapshotResourceConfiguration(scope.scopeOptions || {})
+
   // Get raw schema
-  const rawFields = scope.scopeOptions?.schema || {}
+  const rawFields = scopeOptions.schema || {}
+  validateSchemaFieldNames(rawFields, scopeName)
+  validateRelationshipFieldNames(scopeOptions.relationships, scopeName)
 
   // Extract computed fields from schema and build enriched schema
   const computedFields = {}
   const enrichedFields = {}
 
-  for (const [fieldName, fieldDef] of Object.entries(rawFields)) {
+  for (const [fieldName, fieldDef] of Object.entries(snapshotResourceConfiguration(rawFields))) {
     if (fieldDef.computed === true) {
       // Extract computed field - copy entire definition
       computedFields[fieldName] = { ...fieldDef }
-
-      // Validate computed field
-      if (!fieldDef.type) {
-        throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' must have a type`)
-      }
-
-      if (fieldDef.compute && typeof fieldDef.compute !== 'function') {
-        throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' has invalid compute function`)
-      }
 
       // Don't include computed fields in the validation schema
     } else {
@@ -161,34 +61,17 @@ export async function compileSchemas (scope, deps) {
     }
   }
 
-  // ADD LOGIC TO MAKE FIELDS SEARCHABLE HERE
-  // Auto-detect pivot tables and make their foreign key fields searchable
-  // This is critical for many-to-many relationship operations which need to filter pivot records
-  const fields = Object.entries(enrichedFields)
-  const belongsToFields = fields.filter(([_, def]) => def.belongsTo)
-
-  // If 2+ belongsTo fields and they make up 40%+ of non-id fields, likely a pivot table
-  const nonIdFields = fields.filter(([name, _]) => name !== 'id')
-  const isProbablyPivot = belongsToFields.length >= 2 &&
-    (nonIdFields.length === 0 || belongsToFields.length / nonIdFields.length >= 0.4)
-
-  if (isProbablyPivot) {
-    // Make all belongsTo fields searchable for pivot operations
-    for (const [, fieldDef] of belongsToFields) {
-      if (!fieldDef.search) {
-        fieldDef.search = true
-      }
-    }
-  }
-
   // Hook: schema:enrich
   const schemaContext = {
     fields: enrichedFields,    // Mutable
     originalFields: rawFields,  // Read-only
+    queryFields: {},
     scopeName,
-    scopeOptions: scope.scopeOptions || {}
+    scopeOptions
   }
   await runHooks('schema:enrich', schemaContext)
+  validateSchemaFieldNames(schemaContext.fields, scopeName)
+  assertFieldNameMap(schemaContext.queryFields, `query fields in '${scopeName}'`)
 
   // Create schema object
   const schemaObject = createSchema(schemaContext.fields)
@@ -203,38 +86,62 @@ export async function compileSchemas (scope, deps) {
   // while searchSchema can specify filterOperator: 'contains' or complex join configurations.
   const rawSearchFields = generateSearchSchemaFromSchema(
     schemaContext.fields,
-    scope.scopeOptions.searchSchema
-  )
+    scopeOptions.searchSchema
+  ) || {}
 
-  let searchSchemaObject
-  if (rawSearchFields) {
-    // Mark all search fields as indexed for database optimization.
-    // This ensures that any field used for filtering will have a database index created,
-    // dramatically improving query performance. Without indexes, filtering large tables
-    // would require full table scans. The storage plugin uses these hints to create indexes.
-    // Example: A status field marked for search gets indexed: true, enabling efficient
-    // WHERE status = 'published' queries that can use index lookups instead of scanning all rows.
-    ensureSearchFieldsAreIndexed(rawSearchFields)
+  const searchSchemaContext = {
+    fields: snapshotResourceConfiguration(Object.fromEntries(Object.entries(rawSearchFields).map(([name, definition]) => [name, { ...definition }]))),
+    originalFields: rawSearchFields,
+    scopeName
+  }
+  await runHooks('searchSchema:enrich', searchSchemaContext)
+  assertFieldNameMap(searchSchemaContext.fields, `search schema in '${scopeName}'`)
+  ensureSearchFieldsAreIndexed(searchSchemaContext.fields)
+  const searchSchemaObject = createSchema(searchSchemaContext.fields)
 
-    // Hook: searchSchema:enrich
-    const searchSchemaContext = {
-      fields: schemaContext.fields,       // Mutable
-      originalFields: rawSearchFields,    // Read-only enriched schema
-      scopeName
+  // Derived fields must be rebuilt from the current candidate before publication.
+  const idProperty = scopeOptions.idProperty || scope.vars.idProperty || 'id'
+  const schemaRelationships = { ...(scopeOptions.relationships || {}) }
+  const computedSchemaContext = {
+    fields: snapshotResourceConfiguration(Object.fromEntries(Object.entries(computedFields).map(([name, definition]) => [name, { ...definition }]))),
+    originalFields: computedFields,
+    schemaStructure: schemaObject.structure,
+    searchSchemaStructure: searchSchemaObject.structure,
+    schemaRelationships,
+    idProperty,
+    scopeName,
+    scopeOptions
+  }
+  await runHooks('computedSchema:enrich', computedSchemaContext)
+  assertFieldNameMap(computedSchemaContext.fields, `computed fields in '${scopeName}'`)
+  validateRelationshipFieldNames(schemaRelationships, scopeName)
+  for (const [fieldName, fieldDef] of Object.entries(computedSchemaContext.fields)) {
+    if (fieldDef?.computed !== true) {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' must set computed: true`)
     }
-    await runHooks('searchSchema:enrich', searchSchemaContext)
-
-    // Create searchSchema object
-    searchSchemaObject = createSchema(rawSearchFields)
-  } else {
-    searchSchemaObject = createSchema({})
+    if (!fieldDef.type) {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' must have a type`)
+    }
+    if (fieldDef.compute !== undefined && typeof fieldDef.compute !== 'function') {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' has invalid compute function`)
+    }
+    if (Object.hasOwn(schemaObject.structure, fieldName)) {
+      throw new Error(`Computed field '${fieldName}' in scope '${scopeName}' conflicts with an attribute field`)
+    }
   }
 
-  // Build schemaRelationships including polymorphic fields from schema
-  const schemaRelationships = { ...(scope.scopeOptions.relationships || {}) }
-
-  // Validate belongsTo fields
+  // Each public relationship name has one declaration.
+  const relationshipNames = new Set(Object.keys(schemaRelationships))
   for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
+    if (fieldDef.belongsToPolymorphic !== undefined) {
+      throw new Error(`Field '${fieldName}' in resource '${scopeName}' cannot declare belongsToPolymorphic; declare it in relationships`)
+    }
+    if (fieldDef.belongsTo && fieldDef.as) {
+      if (relationshipNames.has(fieldDef.as)) {
+        throw new Error(`Relationship name '${fieldDef.as}' in resource '${scopeName}' is declared more than once`)
+      }
+      relationshipNames.add(fieldDef.as)
+    }
     // Validate that belongsTo fields have 'as' property
     if (fieldDef.belongsTo && !fieldDef.as) {
       throw new Error(
@@ -245,88 +152,77 @@ export async function compileSchemas (scope, deps) {
     }
   }
 
-  // Extract and validate getter definitions
-  const fieldGetters = {}
-  const getterFields = []
-
-  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
-    if (fieldDef.getter && typeof fieldDef.getter === 'function') {
-      fieldGetters[fieldName] = {
-        getter: fieldDef.getter,
-        runGetterAfter: fieldDef.runGetterAfter || [],
-        fieldDef
-      }
-      getterFields.push(fieldName)
-
-      // Validate dependencies exist
-      if (fieldDef.runGetterAfter && Array.isArray(fieldDef.runGetterAfter)) {
-        for (const dep of fieldDef.runGetterAfter) {
-          if (!schemaContext.fields[dep]) {
-            throw new Error(
-              `Field '${fieldName}' in resource '${scopeName}' has getter dependency '${dep}' that does not exist in schema`
-            )
-          }
-        }
+  const queryFields = compileQueryFields(schemaContext.queryFields, {
+    scopeName,
+    schemaStructure: schemaObject.structure,
+    computed: computedSchemaContext.fields,
+    schemaRelationships,
+    idProperty
+  })
+  for (const [kind, definitions] of [['Computed', computedSchemaContext.fields], ['Query', queryFields]]) {
+    for (const [name, definition] of Object.entries(definitions)) {
+      if (definition.belongsTo !== undefined || definition.belongsToPolymorphic !== undefined) {
+        throw new Error(`${kind} field '${name}' in scope '${scopeName}' cannot declare relationships; use a stored backing field or the resource relationships map`)
       }
     }
   }
+  const fieldDependencies = compileFieldDependencies({
+    schemaStructure: schemaObject.structure,
+    computedFields: computedSchemaContext.fields,
+    queryFields,
+    schemaRelationships,
+    idProperty,
+    scopeName
+  })
 
-  // Sort getters by dependencies
-  let sortedGetterFields = []
-  if (Object.keys(fieldGetters).length > 0) {
-    try {
-      sortedGetterFields = sortFieldsByDependencies(fieldGetters, 'runGetterAfter')
-    } catch (error) {
-      throw new Error(`Invalid getter dependencies in ${scopeName}: ${error.message}`)
+  const identityFields = new Set([...fieldDependencies.foreignKeyFields, 'id', idProperty])
+  for (const fieldName of identityFields) {
+    if (schemaObject.structure[fieldName]?.storage?.serialize !== undefined) {
+      throw new Error(`Field '${fieldName}' in scope '${scopeName}' cannot use storage.serialize: identity fields must preserve resource IDs and relationship types. Use normalizeId for resource ID canonicalization.`)
     }
   }
 
-  // Extract and validate setter definitions
-  const fieldSetters = {}
-  const setterFields = []
-
-  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
-    if (fieldDef.setter && typeof fieldDef.setter === 'function') {
-      fieldSetters[fieldName] = {
-        setter: fieldDef.setter,
-        runSetterAfter: fieldDef.runSetterAfter || [],
-        fieldDef
-      }
-      setterFields.push(fieldName)
-
-      // Validate dependencies exist
-      if (fieldDef.runSetterAfter && Array.isArray(fieldDef.runSetterAfter)) {
-        for (const dep of fieldDef.runSetterAfter) {
-          if (!schemaContext.fields[dep]) {
-            throw new Error(
-              `Field '${fieldName}' in resource '${scopeName}' has setter dependency '${dep}' that does not exist in schema`
-            )
-          }
-        }
-      }
+  const querySchema = { schemaStructure: schemaObject.structure, searchSchemaStructure: searchSchemaObject.structure, queryFields }
+  for (const [filterName, definition] of Object.entries(searchSchemaObject.structure)) {
+    if (typeof definition.applyFilter === 'function' && !definition.oneOf) continue
+    for (const target of definition.oneOf || [definition.actualField || filterName]) {
+      assertScalarQueryField(schemaObject.structure[target] || queryFields[target], target, 'filter')
     }
   }
-
-  // Sort setters by dependencies
-  let sortedSetterFields = []
-  if (Object.keys(fieldSetters).length > 0) {
-    try {
-      sortedSetterFields = sortFieldsByDependencies(fieldSetters, 'runSetterAfter')
-    } catch (error) {
-      throw new Error(`Invalid setter dependencies in ${scopeName}: ${error.message}`)
-    }
+  buildEffectiveSortList(scopeOptions.sortableFields, { schemaInfo: querySchema })
+  buildEffectiveSortList([], { defaultSort: scopeOptions.defaultSort, schemaInfo: querySchema })
+  for (const [fieldName, definition] of Object.entries(queryFields)) {
+    if (definition.sortable) buildEffectiveSortList([fieldName], { schemaInfo: querySchema })
   }
 
-  const idProperty = scope.scopeOptions.idProperty || scope.vars.idProperty || 'id'
-  const storage = normalizeStorageConfig(scope.scopeOptions.storage)
+  const storage = normalizeStorageConfig(scopeOptions.storage)
   const storageInfo = buildStorageInfo({
     schemaStructure: schemaObject.structure,
     idProperty,
     storage
   })
 
+  const outputFields = { ...schemaObject.structure, ...computedSchemaContext.fields, ...queryFields }
+  const outputRelationships = { ...schemaRelationships }
+  for (const definition of Object.values(schemaObject.structure)) {
+    if (definition.as && definition.belongsTo) {
+      outputRelationships[definition.as] = definition
+    }
+  }
+
+  const versionField = scopeOptions.versionField
+  if (versionField !== undefined) {
+    const definition = typeof versionField === 'string' && Object.hasOwn(schemaObject.structure, versionField)
+      ? schemaObject.structure[versionField]
+      : undefined
+    if (!versionField || versionField === idProperty || !definition || definition.type !== 'string' ||
+      definition.computed || definition.virtual || definition.belongsTo || definition.getter || definition.setter || definition.storage?.serialize) {
+      throw new Error(`versionField in '${scopeName}' must name a stored string attribute without getters, setters, serializers or relationships, distinct from the primary ID`)
+    }
+  }
+
   // Cache everything
-  scope.vars.schemaInfo = {
+  const schemaInfo = {
 
     schemaInstance: schemaObject,
     schemaStructure: schemaObject.structure,
@@ -334,18 +230,21 @@ export async function compileSchemas (scope, deps) {
     searchSchemaInstance: searchSchemaObject,
     searchSchemaStructure: searchSchemaObject.structure,
 
-    computed: computedFields,
+    computed: computedSchemaContext.fields,
+    queryFields,
     schemaRelationships,
-    tableName: scope.scopeOptions.tableName || scopeName,
+    outputFields,
+    outputRelationships,
+    ...(versionField === undefined ? {} : { versionField }),
+    tableName: scopeOptions.tableName || scopeName,
     idProperty,
     storage,
     storageInfo,
-    indexes: Array.isArray(scope.scopeOptions.indexes) ? [...scope.scopeOptions.indexes] : [],
-    foreignKeys: Array.isArray(scope.scopeOptions.foreignKeys) ? [...scope.scopeOptions.foreignKeys] : [],
-    checkConstraints: Array.isArray(scope.scopeOptions.checkConstraints) ? [...scope.scopeOptions.checkConstraints] : [],
-    fieldGetters,
-    sortedGetterFields,
-    fieldSetters,
-    sortedSetterFields
+    indexes: Array.isArray(scopeOptions.indexes) ? [...scopeOptions.indexes] : [],
+    foreignKeys: Array.isArray(scopeOptions.foreignKeys) ? [...scopeOptions.foreignKeys] : [],
+    checkConstraints: Array.isArray(scopeOptions.checkConstraints) ? [...scopeOptions.checkConstraints] : [],
+    ...fieldDependencies
   }
+  await runHooks('schema:compiled', { scopeName, scopeOptions, schemaInfo })
+  scope.vars.schemaInfo = snapshotResourceConfiguration(schemaInfo)
 }

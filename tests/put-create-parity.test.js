@@ -31,7 +31,7 @@ let api
 
 const registerTable = (tableName, resourceName) => {
   if (storageMode.isAnyApi()) {
-    storageMode.registerTable(tableName, resourceName, tenantId)
+    storageMode.registerTable(knex, tableName, resourceName, tenantId)
   }
 }
 
@@ -74,7 +74,7 @@ const countStoredRows = async (tableName, resourceName, idColumn, id) => {
 describe(`PUT create parity (${storageMode.mode})`, () => {
   before(async () => {
     if (storageMode.isAnyApi()) {
-      storageMode.clearRegistry()
+      storageMode.clearRegistry(knex)
       storageMode.setCurrentTenant(tenantId)
       await ensureAnyApiSchema(knex)
     }
@@ -85,18 +85,8 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
     })
 
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false,
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      },
-      returnRecordTransport: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      },
+      format: 'jsonapi',
+      returning: 'full',
       sortableFields: ['id', 'account_id', 'name', 'code']
     })
 
@@ -133,7 +123,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
     await api?.release()
     await knex.destroy()
     if (storageMode.isAnyApi()) {
-      storageMode.clearRegistry()
+      storageMode.clearRegistry(knex)
     }
   })
 
@@ -154,7 +144,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
           }
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(created)
@@ -178,7 +168,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
           }
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(created)
@@ -198,7 +188,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
           }
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     assert.equal(replaced.data.id, '501')
@@ -207,7 +197,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
 
     const fetched = await api.resources.accounts.get({
       id: '501',
-      simplified: false
+      format: 'jsonapi'
     })
     assert.equal(fetched.data.attributes.name, 'Replaced Account')
     assert.equal(fetched.data.attributes.code, 'RA')

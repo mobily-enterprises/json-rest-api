@@ -1,0 +1,116 @@
+{
+  "status": "parked; removed from active jskit-ai checkout",
+  "capturedAt": "2026-09-08T23:20:09.814130+00:00",
+  "sourceRepository": "/home/merc/Development/current/jskit-ai",
+  "sourceBranch": "main",
+  "sourceHead": "70163546304ee1fed80cbf1c6ec67517294db855",
+  "libraryHead": "51302ce52ed9d8c72d31860de4f5c5ee69dcbfa3",
+  "patch": "migration.patch",
+  "patchSha256": "81c454022208ba2c1bc8d2a893a4e3eb9d7d5c8b09d8e86a4bf435ea9b6e2d3e",
+  "files": [
+    {
+      "path": "packages/crud-core/src/server/jsonApiModule/repository.js",
+      "baseBlob": "10a0a7fdfd47fc78a09b64b8750edd8ba909b670",
+      "baseSha256": "d566773a93213d7deba567d94eaee6a53f694166f3514646a811c6bc3f98c72a",
+      "migratedSha256": "5584dd4e31e4347d3d3ba02c5f26621da96d0593cfc5955c7d6998cf9f6eadce"
+    },
+    {
+      "path": "packages/json-rest-api-core/src/server/jsonRestApiHost.js",
+      "baseBlob": "5cafc95518f02cfa504b62d80dfbcad8555a15f9",
+      "baseSha256": "bb9fd438d393e838ccfde1bbaba21d3f43a781efb87eea4bb5c1d5fa894537a2",
+      "migratedSha256": "5d33e695c0e8cd83a4a025d9e4fda960bdcf9c35bc6427bb1d88cc538358b2b2"
+    },
+    {
+      "path": "packages/users-core/src/server/common/repositories/userProfilesRepository.js",
+      "baseBlob": "97b0c128e559a9aa12c564fb01721c436f25b712",
+      "baseSha256": "abf3fea688825637893289ef5e4f188764ddfec5b251d06b54ec1acae5fdf32b",
+      "migratedSha256": "593b5abd0b0647ee22ca085fa392bd0e6b89ecdd2f9f25f686e516b69a83afd1"
+    },
+    {
+      "path": "packages/users-core/src/server/common/repositories/userSettingsRepository.js",
+      "baseBlob": "a57a7114b8645e1a80c0c66f6c06f8ec5da1499a",
+      "baseSha256": "be71c8c69644fdb4f4bb0d3f405ec0d34ba06741793b855c48ba547d99650916",
+      "migratedSha256": "9c0e808ce4f7c97126c4f69e9d4e8a9c4e566ac23cba86d6f009e9aa7811cf98"
+    },
+    {
+      "path": "packages/users-core/test/repositoryContracts.test.js",
+      "baseBlob": "05d42754eeacdd160d4d531bc576d20be74fff80",
+      "baseSha256": "ada41cc6d545db184412b9cede68821e3624055447d6804e5adcd37b3651c9c1",
+      "migratedSha256": "258bb5fb87cd999e25b4f44485e4fd61d229627b3d2d9d53b61e251b25580610"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js",
+      "baseBlob": "92086e10a2bc501aba96cbb71291a0f8574ef578",
+      "baseSha256": "795052d91060ec2b240269ca6ac6f5f88628e25a23fe45efc7386850e228586c",
+      "migratedSha256": "b472a0ff8d0e3cb7ec97467e226515903e6518ef6a04655f9ec1834465b77080"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js",
+      "baseBlob": "fcfe2aae099837b0a96aa1bc0dc30a14400cec6d",
+      "baseSha256": "ece3e97177652ad2f605b36364400ba018d12c77aaa79e4c9be341195382de67",
+      "migratedSha256": "76c635736b2ed47bad9d9f981215ce54a2fa8e7db6b19802de38ad99ea77a3f4"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspacesRepository.js",
+      "baseBlob": "d380573532600dff28149ab417f056669eb71114",
+      "baseSha256": "e986a176ceef14d0691dfdf5e140bcf4d752dbfe0136b7e7a9bc4b2b6d3d1799",
+      "migratedSha256": "168a0773e69901a63ec3b0a13605407615a7690a9db75013a6177ad5cba23d60"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js",
+      "baseBlob": "bda112c2cf945f8efcaf048492d8c9575ad41f22",
+      "baseSha256": "7a349a38f4ebb2acccb8de86db51fb08a0a198178292982f1c93994a6ea1bb79",
+      "migratedSha256": "336bd415c00d872468b20b93ea06edccd1c4ebc984c38a01a6bb94f6fd528a3d"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceInvitesRepository.test.js",
+      "baseBlob": "b6fe2e1c64fda14267fe10fb70b3c63c52397ad4",
+      "baseSha256": "547fcd21c582e4873dc1a4627352c2299ae2647e85fd7b45b6cf00c7294fe462",
+      "migratedSha256": "42a442a880d42f47a2ad01503c3f20cb96a50804d14f02dcb12eacabe757e26b"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceMembershipsRepository.test.js",
+      "baseBlob": "92d9cc44b03848ea32c45f9f5df05279018948f7",
+      "baseSha256": "f64813106132b34ffb07eb5a22bfdbc3f762e72213b7dca373078f5a438a628a",
+      "migratedSha256": "527333aa4c3c9c9f598a35ee4e560c1a0a5b3e9cf54633cb4bc0f70b8eb7d39d"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceSettingsRepository.test.js",
+      "baseBlob": "ab329f024c2e0bb53090d83567529bc5ea63a339",
+      "baseSha256": "618174904cb764921e604d8de9315c83da495586610168c4458276497a460ea6",
+      "migratedSha256": "39deaf8f3e747c590b41c8947e073a11c85c72a9b45ddcf0a6a8c51a8a3e1997"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspacesRepository.test.js",
+      "baseBlob": "dded997e811a32f1edfa4cb15a4d0a2ae54ec9b2",
+      "baseSha256": "16b05d4b2028451ddfdb65447cd2922f1f61d80422976acfe2848dd2ffee4c93",
+      "migratedSha256": "040574519caf9fd7b65f7438b1fcbdb36651140296b47b6b72bd87a2c1f0acad"
+    }
+  ],
+  "verification": {
+    "forwardRecreatesAllMigratedFiles": true,
+    "reverseRecreatesAllBaseFiles": true,
+    "all13SourceFilesMatchRecordedBase": true,
+    "forwardApplyCheckAfterRemoval": true,
+    "gitHeadUnchanged": true,
+    "gitIndexUnchanged": true,
+    "nonTargetFilesCompared": 2008,
+    "nonTargetFilesUnchanged": true
+  },
+  "lastMigratedConsumerVerification": {
+    "testsPassed": 353,
+    "libraryTarballSha256": "bfc82d9e55f5e619012c262db1a83e02d260c3a7082b2d169cb70949739b6e26",
+    "log": "/tmp/library-bulk-auth-consumer.log"
+  },
+  "removedAt": "2026-09-08T23:23:01.076509+00:00",
+  "restoredSourceVerification": {
+    "node": "26.5.0",
+    "command": "node --test packages/users-core/test/repositoryContracts.test.js packages/workspaces-core/test/workspaceInvitesRepository.test.js packages/workspaces-core/test/workspaceMembershipsRepository.test.js packages/workspaces-core/test/workspaceSettingsRepository.test.js packages/workspaces-core/test/workspacesRepository.test.js",
+    "tests": 29,
+    "passed": 29,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 407.568087,
+    "log": "/tmp/jskit-parked-migration-restored-tests.log"
+  }
+}

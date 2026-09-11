@@ -1,3 +1,4 @@
+import { assertScalarQueryField } from '../querying-writing/field-utils.js'
 // Cross-table search helper functions that enable filtering across related database tables
 
 /**
@@ -11,38 +12,6 @@
  * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
  * @returns {Promise<void>}
  * @throws {Error} If scope not found, field not found, field not indexed, or circular reference detected
-   *
-   * @example
-   * // Input: Validate indexed field
-   * // Schema has: companies.name with indexed: true
-   * await validateCrossTableField(scopes, log, 'companies', 'name');
-   *
-   * // Output: Validation succeeds (no error thrown)
-   *
-   * @example
-   * // Input: Non-indexed field
-   * // Schema has: companies.internal_code without indexed property
-   * try {
-   *   await validateCrossTableField('companies', 'internal_code');
-   * } catch (error) {
-   *   console.log(error.message);
-   *   // "Field 'companies.internal_code' is not indexed. Add 'indexed: true' to allow cross-table search"
-   * }
-   *
-   * @description
-   * Used by:
-   * - buildJoinChain calls this to ensure target fields are properly indexed
-   * - analyzeRequiredIndexes uses this to identify missing indexes
-   *
-   * Purpose:
-   * - Cross-table searches can be slow without proper indexes
-   * - Forces developers to explicitly mark searchable fields with indexed: true
-   * - Provides clear error messages when configuration is missing
-   *
-   * Data flow:
-   * - Called during query building to validate field configuration
-   * - Ensures performance by requiring indexes on searchable fields
-   * - Part of the validation phase before expensive JOIN operations
    */
 export const validateCrossTableField = async (scopes, log, targetScopeName, fieldName, searchedScopes = new Set()) => {
   log.trace('[VALIDATE] Starting validateCrossTableField:', { targetScopeName, fieldName, searchedScopes: Array.from(searchedScopes) })
@@ -72,6 +41,8 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
     throw new Error(`Field '${fieldName}' not found in scope '${targetScopeName}'`)
   }
 
+  assertScalarQueryField(fieldDef, `${targetScopeName}.${fieldName}`, 'filter')
+
   log.trace('[VALIDATE] Checking indexed status:', { fieldName, indexed: fieldDef.indexed })
   if (!fieldDef.indexed) {
     throw new Error(`Field '${targetScopeName}.${fieldName}' is not indexed. Add 'indexed: true' to allow cross-table search`)
@@ -91,89 +62,6 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
  * @param {Set<string>} [searchedScopes=new Set()] - Internal parameter to prevent circular references
  * @returns {Promise<Object>} JOIN information for query builder
  * @throws {Error} If path is invalid or relationships not properly configured
-   *
-   * @example
-   * // Input: Simple belongsTo relationship
-   * // articles table has author_id field, authors schema defines belongsTo relationship
-   * const joinInfo = await buildJoinChain('articles', 'author.name');
-   *
-   * // Output: Single JOIN configuration
-   * // {
-   * //   joinAlias: 'articles_to_authors_authors',
-   * //   targetTableName: 'authors',
-   * //   sourceField: 'author_id',
-   * //   targetField: 'name',
-   * //   joinCondition: 'articles.author_id = articles_to_authors_authors.id',
-   * //   isOneToMany: false,
-   * //   isPolymorphic: false
-   * // }
-   *
-   * @example
-   * // Input: Multi-level path through relationships
-   * // articles → authors → companies
-   * const joinInfo = await buildJoinChain('articles', 'author.company.name');
-   *
-   * // Output: Multi-level JOIN chain
-   * // {
-   * //   targetTableName: 'companies',
-   * //   joinAlias: 'authors_to_companies_companies',
-   * //   joinCondition: 'articles.author_id = articles_to_authors_authors.id AND articles_to_authors_authors.company_id = authors_to_companies_companies.id',
-   * //   targetField: 'name',
-   * //   isOneToMany: false,
-   * //   isMultiLevel: true,
-   * //   joinChain: [
-   * //     {
-   * //       targetTableName: 'authors',
-   * //       joinAlias: 'articles_to_authors_authors',
-   * //       joinCondition: 'articles.author_id = articles_to_authors_authors.id',
-   * //       isOneToMany: false,
-   * //       relationshipField: 'author_id',
-   * //       relationshipType: 'belongsTo'
-   * //     },
-   * //     {
-   * //       targetTableName: 'companies',
-   * //       joinAlias: 'authors_to_companies_companies',
-   * //       joinCondition: 'articles_to_authors_authors.company_id = authors_to_companies_companies.id',
-   * //       isOneToMany: false,
-   * //       relationshipField: 'company_id',
-   * //       relationshipType: 'belongsTo'
-   * //     }
-   * //   ]
-   * // }
-   *
-   * @example
-   * // Input: One-to-many relationship (hasMany)
-   * // authors have many articles
-   * const joinInfo = await buildJoinChain('authors', 'articles.title');
-   *
-   * // Output: JOIN with isOneToMany flag
-   * // {
-   * //   joinAlias: 'authors_to_articles_articles',
-   * //   targetTableName: 'articles',
-   * //   sourceField: 'author_id',
-   * //   targetField: 'title',
-   * //   joinCondition: 'authors.id = authors_to_articles_articles.author_id',
-   * //   isOneToMany: true,
-   * //   isPolymorphic: false
-   * // }
-   *
-   * @description
-   * Used by:
-   * - rest-api-knex-plugin's dataQuery method when processing cross-table filters
-   * - Called for each filter that references a related table field
-   *
-   * Purpose:
-   * - Automatically constructs complex SQL JOINs from simple dot notation
-   * - Supports many-to-one (belongsTo), one-to-many (hasMany), and many-to-many relationships
-   * - Handles polymorphic relationships and multi-level paths
-   *
-   * Data flow:
-   * 1. Filter parser identifies cross-table reference (contains dots)
-   * 2. buildJoinChain analyzes relationship path segment by segment
-   * 3. For each segment, finds the appropriate relationship definition
-   * 4. Constructs JOIN conditions based on foreign keys
-   * 5. Returns complete JOIN information for SQL query builder
-   * 6. Query builder adds these JOINs to enable filtering on related data
    */
 export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, searchedScopes = new Set()) => {
   log.trace('[BUILD-JOIN] Starting buildJoinChain:', { fromScopeName, targetPath })
@@ -209,9 +97,15 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
     let relationshipType = null
     let relationshipField = null
 
+    const hasEstablishedPath = Object.values(currentRelationships || {}).some(rel => rel.type === 'hasMany' && rel.target === targetScope) ||
+      Object.values(currentSchema.structure).some(field => field.belongsTo === targetScope)
+
     if (currentRelationships) {
       for (const [relName, relDef] of Object.entries(currentRelationships)) {
-        if (relDef.type === 'hasMany' && relDef.target === targetScope) {
+        const matchesHasMany = relDef.type === 'hasMany' && relDef.target === targetScope
+        const matchesManyToMany = relDef.type === 'manyToMany' && (relDef.target || relName) === targetScope &&
+          !hasEstablishedPath
+        if (matchesHasMany || matchesManyToMany) {
           if (relDef.via) {
             const targetRelationships = scopes[targetScope].vars.schemaInfo.schemaRelationships
             const viaRel = targetRelationships?.[relDef.via]
@@ -232,6 +126,7 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
             foundRelationship = targetScope
             relationshipType = 'manyToMany'
             relationshipField = {
+              relationshipName: relName,
               through: relDef.through,
               foreignKey: relDef.foreignKey,
               otherKey: relDef.otherKey
@@ -281,9 +176,9 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
     const targetTableName = scopes[targetScope].vars.schemaInfo.tableName
 
     if (relationshipType === 'manyToMany') {
-      const { through, foreignKey, otherKey } = relationshipField
+      const { relationshipName, through, foreignKey, otherKey } = relationshipField
       const pivotTableName = scopes[through].vars.schemaInfo.tableName || through
-      const previousAlias = i === 0 ? sourceTableName : joinChain[i - 1].joinAlias
+      const previousAlias = i === 0 ? sourceTableName : joinChain.at(-1).joinAlias
 
       const pivotAlias = `${currentScope}_to_${through}_${through}`
       const pivotJoinCondition = `${previousAlias}.id = ${pivotAlias}.${foreignKey}`
@@ -296,6 +191,10 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
         isPolymorphic: false,
         relationshipField: foreignKey,
         relationshipType: 'manyToMany_pivot',
+        sourceScopeName: currentScope,
+        relationshipName,
+        foreignKey,
+        otherKey,
         targetScopeName: through
       })
 
@@ -318,13 +217,13 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
       let joinCondition
       if (relationshipType === 'hasManyPolymorphic') {
         const { typeField, idField } = relationshipField
-        const previousAlias = i === 0 ? sourceTableName : joinChain[i - 1].joinAlias
+        const previousAlias = i === 0 ? sourceTableName : joinChain.at(-1).joinAlias
         joinCondition = `${joinAlias}.${typeField} = '${currentScope}' AND ${joinAlias}.${idField} = ${previousAlias}.id`
       } else if (relationshipType === 'hasMany') {
-        const previousAlias = i === 0 ? sourceTableName : joinChain[i - 1].joinAlias
+        const previousAlias = i === 0 ? sourceTableName : joinChain.at(-1).joinAlias
         joinCondition = `${previousAlias}.id = ${joinAlias}.${relationshipField}`
       } else {
-        const previousAlias = i === 0 ? sourceTableName : joinChain[i - 1].joinAlias
+        const previousAlias = i === 0 ? sourceTableName : joinChain.at(-1).joinAlias
         joinCondition = `${previousAlias}.${relationshipField} = ${joinAlias}.id`
       }
 
@@ -385,62 +284,6 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
  * @param {string} scopeName - The scope being analyzed
  * @param {Object} searchSchema - Search schema definition with filter fields
  * @returns {Array<Object>} Array of required indexes with scope, field, and reason
-   *
-   * @example
-   * // Input: Search schema with cross-table references
-   * const searchSchema = {
-   *   authorName: {
-   *     type: 'string',
-   *     actualField: 'authors.name',
-   *     filterOperator: 'like'
-   *   },
-   *   companyName: {
-   *     type: 'string',
-   *     actualField: 'authors.company.name'
-   *   },
-   *   search: {
-   *     type: 'string',
-   *     oneOf: ['title', 'authors.name', 'authors.company.name']
-   *   }
-   * };
-   *
-   * const requiredIndexes = analyzeRequiredIndexes('articles', searchSchema);
-   *
-   * // Output: List of fields that need indexes
-   * // [
-   * //   { scope: 'authors', field: 'name', reason: 'Cross-table search from articles.authorName' },
-   * //   { scope: 'authors', field: 'company', reason: 'Cross-table search from articles.companyName' },
-   * //   { scope: 'authors', field: 'name', reason: 'Cross-table oneOf search from articles.search' },
-   * //   { scope: 'authors', field: 'company', reason: 'Cross-table oneOf search from articles.search' }
-   * // ]
-   *
-   * @example
-   * // Input: No cross-table references
-   * const searchSchema = {
-   *   title: { type: 'string' },
-   *   status: { type: 'string' }
-   * };
-   *
-   * const requiredIndexes = analyzeRequiredIndexes('articles', searchSchema);
-   *
-   * // Output: Empty array - no cross-table indexes needed
-   * // []
-   *
-   * @description
-   * Used by:
-   * - Called during API initialization to identify missing indexes
-   * - Used by developers to understand performance requirements
-   *
-   * Purpose:
-   * - Cross-table searches require indexes for acceptable performance
-   * - Helps identify configuration issues before they cause slow queries
-   * - Provides clear documentation of index requirements
-   *
-   * Data flow:
-   * - Runs during schema compilation phase
-   * - Analyzes search schemas to find cross-table references
-   * - Output can be used to create indexes manually or automatically
-   * - Prevents performance issues before queries are executed
    */
 export const analyzeRequiredIndexes = (scopes, log, scopeName, schemaInfo) => {
   const requiredIndexes = []
@@ -483,54 +326,6 @@ export const analyzeRequiredIndexes = (scopes, log, scopeName, schemaInfo) => {
  * @param {Array<Object>} requiredIndexes - Index requirements from analyzeRequiredIndexes
  * @param {Object} knex - Knex database connection instance
  * @returns {Promise<Array<Object>>} Array of successfully created indexes
-   *
-   * @example
-   * // Input: Required indexes from analysis
-   * const requiredIndexes = [
-   *   { scope: 'authors', field: 'name', reason: 'Cross-table search' },
-   *   { scope: 'companies', field: 'name', reason: 'Cross-table search' }
-   * ];
-   *
-   * const createdIndexes = await createRequiredIndexes(requiredIndexes, knex);
-   *
-   * // Output: Successfully created indexes
-   * // [
-   * //   { tableName: 'authors', field: 'name', indexName: 'idx_authors_name_search' },
-   * //   { tableName: 'companies', field: 'name', indexName: 'idx_companies_name_search' }
-   * // ]
-   *
-   * // Database effect: CREATE INDEX idx_authors_name_search ON authors(name);
-   * // Database effect: CREATE INDEX idx_companies_name_search ON companies(name);
-   *
-   * @example
-   * // Input: Some indexes already exist
-   * const requiredIndexes = [
-   *   { scope: 'authors', field: 'name', reason: 'Cross-table search' },  // Already exists
-   *   { scope: 'authors', field: 'email', reason: 'Cross-table search' }  // New
-   * ];
-   *
-   * const createdIndexes = await createRequiredIndexes(requiredIndexes, knex);
-   *
-   * // Output: Only newly created indexes
-   * // [
-   * //   { tableName: 'authors', field: 'email', indexName: 'idx_authors_email_search' }
-   * // ]
-   *
-   * @description
-   * Used by:
-   * - Can be called during database migration or setup
-   * - Used by developers to automatically create performance indexes
-   *
-   * Purpose:
-   * - Automates index creation based on search schema requirements
-   * - Ensures consistent index naming across the application
-   * - Safely handles cases where indexes already exist
-   *
-   * Data flow:
-   * - Typically runs during database setup or migration
-   * - Creates indexes identified by analyzeRequiredIndexes
-   * - Improves query performance for cross-table searches
-   * - Part of the database optimization phase
    */
 export const createRequiredIndexes = async (scopes, log, requiredIndexes, knex) => {
   const createdIndexes = []

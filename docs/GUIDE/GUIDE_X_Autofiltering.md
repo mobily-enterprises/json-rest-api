@@ -31,6 +31,64 @@ The plugin is generic. It does not assume:
 
 Your application decides where scope values come from. The plugin only consumes configured resolver functions.
 
+## Runnable workspace example
+
+Insert these three blocks into the [starting script](GUIDE_2_1_The_Starting_Point.md)
+after installing storage and before starting the server, on a fresh database.
+They also work with canonical storage after its normal initialization. The
+remaining examples below are configuration alternatives and fragments.
+
+```javascript
+import { AutoFilterPlugin } from 'json-rest-api'
+
+await api.use(AutoFilterPlugin, {
+  resolvers: { workspace: ({ context }) => context.session?.workspaceId },
+  presets: { workspace: { filters: [{ field: 'workspace_id', resolver: 'workspace' }] } }
+})
+await api.addResource('projects', {
+  schema: {
+    name: { type: 'string', required: true },
+    workspace_id: { type: 'string', required: true }
+  },
+  autofilter: 'workspace'
+})
+await api.resources.projects.createKnexTable()
+const workspaceContext = workspaceId => ({ session: { workspaceId } })
+```
+
+Supply trusted application context as the second argument. Here the workspace
+values are illustrative; a server should derive them from its authenticated
+request context.
+
+```javascript
+const acmeProject = await api.resources.projects.post({
+  inputRecord: { name: 'Roadmap' }, format: 'plain'
+}, workspaceContext('acme'))
+await api.resources.projects.post({
+  inputRecord: { name: 'Other workspace' }, format: 'plain'
+}, workspaceContext('other'))
+const acmePage = await api.resources.projects.query({
+  format: 'jsonapi', queryParams: { page: { number: 1, size: 10 } }
+}, workspaceContext('acme'))
+console.log(acmeProject.workspace_id, acmePage.data, acmePage.meta.pagination.total)
+```
+
+The created record has `workspace_id: 'acme'`. The page contains only Roadmap
+and its total is 1, even though another workspace has a stored project.
+
+```javascript
+const replacedProject = await api.resources.projects.put({
+  id: acmeProject.id, inputRecord: { name: 'Updated roadmap' }, format: 'plain'
+}, workspaceContext('acme'))
+const otherPage = await api.resources.projects.query({ format: 'plain' }, workspaceContext('other'))
+console.log(replacedProject.workspace_id, otherPage.data.map(project => project.name))
+```
+
+PUT supplies the complete writable record, with the scoped workspace field
+injected by the plugin. The record remains in acme, and the other workspace
+still sees only its own project. Explicitly submitting a different workspace
+value rejects; omitting required application scope context also rejects.
+
 ## Installation
 
 ```js
@@ -222,7 +280,7 @@ For a `workspace_user` resource:
 
 ```js
 await api.resources.projects.query(
-  { simplified: false },
+  { format: 'jsonapi' },
   {
     session: { workspaceId: 'acme' },
     subject: { id: 101 }
@@ -260,7 +318,7 @@ await api.resources.projects.post({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 }, {
   session: { workspaceId: 'acme' },
   subject: { id: 101 }
@@ -308,12 +366,10 @@ await api.resources.tasks.post({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 }, {
-  scopeValues: {
-    workspaceId: 'workspace-a',
-    userId: 101
-  }
+  session: { workspaceId: 'workspace-a' },
+  subject: { id: 101 }
 })
 ```
 

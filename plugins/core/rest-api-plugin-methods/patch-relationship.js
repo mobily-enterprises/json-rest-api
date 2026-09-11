@@ -1,3 +1,5 @@
+import { beginWriteTransaction } from '../../../lib/error-context.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import {
   commitOwnedTransaction,
   handleWriteMethodError,
@@ -6,17 +8,16 @@ import {
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
- * PATCH RELATIONSHIP
- * Completely replaces a relationship
- * PATCH /api/articles/1/relationships/author
- *
- * @param {string} id - The ID of the resource
- * @param {string} relationshipName - The name of the relationship
- * @param {object|array} relationshipData - New relationship data
- * @returns {Promise<void>} 204 No Content
+ * Replace the selected relationship with params.relationshipData.
+ * Validate relationship permission/cardinality, then delegate the data mutation
+ * and version handling to PATCH using the same transaction. This outer method
+ * runs its own finish hooks and completes the transaction only when it owns it.
  */
 export default async function patchRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+  rejectRemovedOptions(params)
+  if (params.format !== undefined) resolveFormat(params.format)
   context.method = 'patchRelationship'
+  context.scopeName = scopeName
   context.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
@@ -26,9 +27,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
   // Transaction handling
-  context.transaction = params.transaction ||
-    (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null)
-  context.shouldCommit = !params.transaction && !!context.transaction
+  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction || api.knex.instance
 
   try {
@@ -57,17 +56,18 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
         }
       },
       transaction: context.transaction,
-      simplified: false,
-      isTransport: params.isTransport
+      expectedVersion: params.expectedVersion,
+      format: 'jsonapi',
+      returning: 'none',
     }, { ...context })
 
     await runHooks('finish')
     await runHooks('finishPatchRelationship')
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     // 204 No Content
   } catch (error) {
-    await handleWriteMethodError(error, context, 'PATCH_RELATIONSHIP', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'PATCH_RELATIONSHIP', scopeName, log)
   }
 }

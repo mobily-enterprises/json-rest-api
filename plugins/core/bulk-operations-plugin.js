@@ -1,4 +1,49 @@
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { beginWriteTransaction, commitTransaction, onTransactionFinished, rollbackAfterError, withWriteOutcome } from '../../lib/error-context.js'
+import { rejectRemovedOptions, resolveFormat, resolveReturning } from './lib/querying-writing/response-options.js'
+
+function validateAtomic (atomic, field = 'atomic') {
+  if (typeof atomic !== 'boolean') {
+    throw new RestApiValidationError(`${field} must be a boolean`, { fields: [field] })
+  }
+}
+
+function validateTransactionMode (atomic, transaction) {
+  if (!atomic && transaction) {
+    throw new RestApiValidationError('A caller transaction requires atomic bulk operations', { fields: ['transaction'] })
+  }
+}
+
+function resolveBulkVersions (params, records, schemaInfo) {
+  if (params.expectedVersion !== undefined) {
+    throw new RestApiValidationError('Bulk writes require expectedVersions aligned with the batch', { fields: ['expectedVersion'] })
+  }
+  const versions = params.expectedVersions
+  if (versions === undefined) return undefined
+  if (!records || !schemaInfo?.versionField || !Array.isArray(versions) || versions.length !== records.length ||
+    Array.from(versions).some(token => typeof token !== 'string' || !token.length || token.length > 128)) {
+    throw new RestApiValidationError('expectedVersions requires a versioned update/delete batch with one non-empty token of at most 128 characters per item', { fields: ['expectedVersions'] })
+  }
+  return versions.slice()
+}
+
+function retainChildCleanup (context, recordContext, bulkIndex) {
+  let copiedErrors = 0
+  let copiedUploads = []
+  const collect = () => {
+    const errors = recordContext.cleanupErrors || []
+    if (errors.length > copiedErrors) {
+      const entries = context.cleanupErrors ||= []
+      for (const entry of errors.slice(copiedErrors)) entries.push({ ...entry, bulkIndex })
+      copiedErrors = errors.length
+    }
+    if (copiedUploads.length) context.fileHandlingUploads = context.fileHandlingUploads.filter(entry => !copiedUploads.includes(entry))
+    copiedUploads = (recordContext.fileHandlingUploads || []).map(entry => ({ ...entry, bulkIndex }))
+    if (copiedUploads.length) (context.fileHandlingUploads ||= []).push(...copiedUploads)
+  }
+  collect()
+  onTransactionFinished(recordContext.transaction, collect)
+}
 
 export const BulkOperationsPlugin = {
   name: 'bulk-operations',
@@ -8,16 +53,28 @@ export const BulkOperationsPlugin = {
     const bulkOptions = pluginOptions || {}
     const {
       maxBulkOperations = 100,
-      defaultAtomic = true,
-      batchSize = 100,
-      enableOptimizations = true
+      defaultAtomic = true
     } = bulkOptions
+    const unknown = Object.keys(bulkOptions).filter(name => !['maxBulkOperations', 'defaultAtomic'].includes(name))
+    if (unknown.length) {
+      throw new RestApiValidationError(`Unsupported bulk options: ${unknown.join(', ')}. Pass maxBulkOperations and defaultAtomic directly.`, { fields: unknown })
+    }
+    if (!Number.isSafeInteger(maxBulkOperations) || maxBulkOperations < 1) {
+      throw new RestApiValidationError('maxBulkOperations must be a positive safe integer', { fields: ['maxBulkOperations'] })
+    }
+    validateAtomic(defaultAtomic, 'defaultAtomic')
 
     log.info('Installing Bulk Operations plugin', { maxBulkOperations, defaultAtomic })
 
     // Add bulk methods to each scope
-    addScopeMethod('bulkPost', async ({ scope, scopeName, params, context, runHooks }) => {
+    addScopeMethod('bulkPost', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { inputRecords, atomic = defaultAtomic } = params
+      rejectRemovedOptions(params)
+      validateAtomic(atomic)
+      validateTransactionMode(atomic, params.transaction)
+      resolveBulkVersions(params)
+      const format = resolveFormat(params.format, vars.format)
+      const returning = resolveReturning(params.returning, vars.returning)
 
       // Validate bulk size
       if (!Array.isArray(inputRecords) || inputRecords.length === 0) {
@@ -41,69 +98,63 @@ export const BulkOperationsPlugin = {
       const results = []
       const errors = []
       let transaction = null
+      const ownsTransaction = !params.transaction
 
       try {
         // Start transaction if atomic mode
-        if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction()
+        if (atomic) {
+          transaction = await beginWriteTransaction(context, params.transaction, helpers.newTransaction)
         }
 
-        // Process records in batches
-        for (let i = 0; i < inputRecords.length; i += batchSize) {
-          const batch = inputRecords.slice(i, i + batchSize)
-
-          for (let j = 0; j < batch.length; j++) {
-            const recordIndex = i + j
-            const inputRecord = batch[j]
-
-            try {
-              // Create individual context for each record
-              const recordContext = {
-                ...context,
-                bulkOperation: true,
-                bulkIndex: recordIndex
-              }
-
-              // Use the existing post method with transaction
-              const result = await scope.post({
-                inputRecord: inputRecord.data ? inputRecord : { data: inputRecord },
-                transaction
-              }, recordContext)
-
-              results.push({
-                index: recordIndex,
-                status: 'success',
-                data: result.data
-              })
-            } catch (error) {
-              if (atomic) {
-                // In atomic mode, rollback and throw
-                if (transaction) await transaction.rollback()
-                throw error
-              } else {
-                // In non-atomic mode, collect errors
-                errors.push({
-                  index: recordIndex,
-                  status: 'error',
-                  error: {
-                    code: error.code || 'UNKNOWN_ERROR',
-                    message: error.message,
-                    details: error.details
-                  }
-                })
-              }
-            }
+        for (const [recordIndex, inputRecord] of inputRecords.entries()) {
+          const recordContext = {
+            ...context,
+            cleanupErrors: undefined,
+            fileHandlingUploads: undefined,
+            bulkOperation: true,
+            bulkIndex: recordIndex
           }
+          try {
+            // Use the existing post method with transaction
+            const result = await scope.post({
+              inputRecord: format === 'jsonapi' && inputRecord && !Object.hasOwn(inputRecord, 'data') ? { data: inputRecord } : inputRecord,
+              transaction,
+              format,
+              returning
+            }, recordContext)
+
+            results.push({
+              index: recordIndex,
+              status: 'success',
+              data: format === 'jsonapi' ? result?.data : result
+            })
+          } catch (error) {
+            if (atomic) {
+              throw error
+            } else {
+              // In non-atomic mode, collect errors
+              errors.push({
+                index: recordIndex,
+                status: 'error',
+                error: {
+                  code: error.code || 'UNKNOWN_ERROR',
+                  message: error.message,
+                  details: error.details,
+                  transactionOutcome: error.transactionOutcome
+                }
+              })
+            }
+          } finally { retainChildCleanup(context, recordContext, recordIndex) }
         }
 
         // Commit transaction if atomic
-        if (transaction) {
-          await transaction.commit()
+        if (transaction && ownsTransaction) {
+          await commitTransaction(transaction, context)
         }
 
         // Build response
         return {
-          data: results.filter(r => r.status === 'success').map(r => r.data),
+          ...(returning === 'none' ? {} : { data: results.map(r => r.data) }),
           errors: errors.length > 0 ? errors : undefined,
           meta: {
             total: inputRecords.length,
@@ -113,16 +164,18 @@ export const BulkOperationsPlugin = {
           }
         }
       } catch (error) {
-        // Ensure rollback on error
-        if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback()
-        }
+        await rollbackAfterError(error, context, ownsTransaction ? transaction : null)
         throw error
       }
-    })
+    }))
 
-    addScopeMethod('bulkPatch', async ({ scope, scopeName, params, context, runHooks }) => {
+    addScopeMethod('bulkPatch', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { operations, atomic = defaultAtomic } = params
+      rejectRemovedOptions(params)
+      validateAtomic(atomic)
+      validateTransactionMode(atomic, params.transaction)
+      const format = resolveFormat(params.format, vars.format)
+      const returning = resolveReturning(params.returning, vars.returning)
 
       // Validate operations
       if (!Array.isArray(operations) || operations.length === 0) {
@@ -143,31 +196,33 @@ export const BulkOperationsPlugin = {
         })
       }
 
+      const expectedVersions = resolveBulkVersions(params, operations, vars.schemaInfo)
       const results = []
       const errors = []
       let transaction = null
+      const ownsTransaction = !params.transaction
 
       try {
-        if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction()
+        if (atomic) {
+          transaction = await beginWriteTransaction(context, params.transaction, helpers.newTransaction)
         }
 
         for (let i = 0; i < operations.length; i++) {
           const operation = operations[i]
 
           // Validate operation structure
-          if (!operation.id || !operation.data) {
+          if (!operation || operation.id === undefined || operation.id === null || !operation.data) {
             errors.push({
               index: i,
               status: 'error',
               error: {
                 code: 'INVALID_OPERATION',
                 message: 'Operation must include id and data',
-                details: { operation }
+                details: { operation },
+                transactionOutcome: 'none'
               }
             })
             if (atomic) {
-              if (transaction) await transaction.rollback()
               throw new RestApiValidationError('Invalid operation structure', {
                 fields: [`operations[${i}]`],
                 violations: [{
@@ -180,39 +235,31 @@ export const BulkOperationsPlugin = {
             continue
           }
 
+          const recordContext = {
+            ...context,
+            cleanupErrors: undefined,
+            fileHandlingUploads: undefined,
+            bulkOperation: true,
+            bulkIndex: i
+          }
           try {
-            const recordContext = {
-              ...context,
-              bulkOperation: true,
-              bulkIndex: i
-            }
-
             const result = await scope.patch({
               id: operation.id,
-              inputRecord: { data: operation.data },
-              transaction
+              expectedVersion: expectedVersions?.[i],
+              inputRecord: format === 'jsonapi' ? { data: operation.data } : operation.data,
+              transaction,
+              format,
+              returning
             }, recordContext)
-
-            // If patch doesn't return a full record, fetch the updated record.
-            const resultId = result?.data?.id || result?.id || operation.id
-            let resultData = result?.data
-            if (!resultData && resultId) {
-              const fetchedRecord = await scope.get({
-                id: resultId,
-                transaction
-              }, recordContext)
-              resultData = fetchedRecord.data
-            }
 
             results.push({
               index: i,
               id: operation.id,
               status: 'success',
-              data: resultData
+              data: format === 'jsonapi' ? result?.data : result
             })
           } catch (error) {
             if (atomic) {
-              if (transaction) await transaction.rollback()
               throw error
             } else {
               errors.push({
@@ -222,19 +269,20 @@ export const BulkOperationsPlugin = {
                 error: {
                   code: error.code || 'UNKNOWN_ERROR',
                   message: error.message,
-                  details: error.details
+                  details: error.details,
+                  transactionOutcome: error.transactionOutcome
                 }
               })
             }
-          }
+          } finally { retainChildCleanup(context, recordContext, i) }
         }
 
-        if (transaction) {
-          await transaction.commit()
+        if (transaction && ownsTransaction) {
+          await commitTransaction(transaction, context)
         }
 
         return {
-          data: results.filter(r => r.status === 'success').map(r => r.data),
+          ...(returning === 'none' ? {} : { data: results.map(r => r.data) }),
           errors: errors.length > 0 ? errors : undefined,
           meta: {
             total: operations.length,
@@ -244,15 +292,17 @@ export const BulkOperationsPlugin = {
           }
         }
       } catch (error) {
-        if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback()
-        }
+        await rollbackAfterError(error, context, ownsTransaction ? transaction : null)
         throw error
       }
-    })
+    }))
 
-    addScopeMethod('bulkDelete', async ({ scope, scopeName, params, context, runHooks }) => {
+    addScopeMethod('bulkDelete', withWriteOutcome(async ({ scope, vars, params, context }) => {
       const { ids, atomic = defaultAtomic } = params
+      rejectRemovedOptions(params)
+      validateAtomic(atomic)
+      validateTransactionMode(atomic, params.transaction)
+      if (params.format !== undefined) resolveFormat(params.format)
 
       // Validate IDs
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -273,28 +323,32 @@ export const BulkOperationsPlugin = {
         })
       }
 
+      const expectedVersions = resolveBulkVersions(params, ids, vars.schemaInfo)
       const results = []
       const errors = []
       let transaction = null
+      const ownsTransaction = !params.transaction
 
       try {
-        if (atomic && helpers.newTransaction) {
-          transaction = await helpers.newTransaction()
+        if (atomic) {
+          transaction = await beginWriteTransaction(context, params.transaction, helpers.newTransaction)
         }
 
         // Process deletes
         for (let i = 0; i < ids.length; i++) {
           const id = ids[i]
 
+          const recordContext = {
+            ...context,
+            cleanupErrors: undefined,
+            fileHandlingUploads: undefined,
+            bulkOperation: true,
+            bulkIndex: i
+          }
           try {
-            const recordContext = {
-              ...context,
-              bulkOperation: true,
-              bulkIndex: i
-            }
-
             await scope.delete({
               id,
+              expectedVersion: expectedVersions?.[i],
               transaction
             }, recordContext)
 
@@ -305,7 +359,6 @@ export const BulkOperationsPlugin = {
             })
           } catch (error) {
             if (atomic) {
-              if (transaction) await transaction.rollback()
               throw error
             } else {
               errors.push({
@@ -315,15 +368,16 @@ export const BulkOperationsPlugin = {
                 error: {
                   code: error.code || 'UNKNOWN_ERROR',
                   message: error.message,
-                  details: error.details
+                  details: error.details,
+                  transactionOutcome: error.transactionOutcome
                 }
               })
             }
-          }
+          } finally { retainChildCleanup(context, recordContext, i) }
         }
 
-        if (transaction) {
-          await transaction.commit()
+        if (transaction && ownsTransaction) {
+          await commitTransaction(transaction, context)
         }
 
         return {
@@ -337,23 +391,24 @@ export const BulkOperationsPlugin = {
           errors: errors.length > 0 ? errors : undefined
         }
       } catch (error) {
-        if (transaction && !transaction.isCompleted()) {
-          await transaction.rollback()
-        }
+        await rollbackAfterError(error, context, ownsTransaction ? transaction : null)
         throw error
       }
-    })
+    }))
 
     // Hook into scope creation to add bulk routes
-    addHook('afterAddScope', 'bulkOperationsRoutes', {}, async ({ scopeName }) => {
-      // Note: context is not available here during route registration
-      // The urlPrefix will be calculated per-request in the handler
+    addHook('scope:added', 'bulkOperationsRoutes', { beforeFunction: 'registerScopeRoutes' }, async ({ context: { scopeName } }) => {
       const urlPrefix = api.vars.transport?.mountPath || ''
       const scopePath = `${urlPrefix}/${scopeName}`
 
       // Create route handlers
       const createBulkRouteHandler = (method) => {
-        return async ({ context, body, query }) => {
+        return async ({ context, body, queryString }) => {
+          const query = Object.fromEntries(new URLSearchParams(queryString))
+          rejectRemovedOptions(query)
+          if (query.atomic !== undefined && query.atomic !== 'true' && query.atomic !== 'false') {
+            throw new RestApiValidationError('atomic must be true or false', { fields: ['atomic'] })
+          }
           // Parse query params for atomic mode override
           const atomic = query?.atomic !== undefined
             ? query.atomic === 'true'
@@ -380,7 +435,14 @@ export const BulkOperationsPlugin = {
             }
           }
 
-          return await api.scopes[scopeName][method](params)
+          const result = await api.resources[scopeName][method]({
+            ...params,
+            expectedVersion: body?.expectedVersion,
+            expectedVersions: body?.expectedVersions,
+            format: 'jsonapi',
+            returning: 'full'
+          }, context)
+          return { statusCode: method === 'bulkPost' ? 201 : 200, body: result }
         }
       }
 
@@ -405,68 +467,6 @@ export const BulkOperationsPlugin = {
 
       log.debug(`Added bulk operation routes for scope: ${scopeName}`)
     })
-
-    // Add optimized bulk insert for Knex if available
-    if (enableOptimizations) {
-      addHook('beforeBulkPost', 'optimizedBulkInsert', {}, async ({ scope, params, context }) => {
-        // Check if we can use optimized path
-        if (params.atomic && api.knex?.instance && context.bulkOperation === undefined) {
-          // This is the main bulk operation, not individual records
-          const { inputRecords } = params
-
-          // Transform records for direct insertion
-          const recordsToInsert = []
-          for (const inputRecord of inputRecords) {
-            // Run validation
-            const validated = await scope.validateInput({
-              inputRecord,
-              operation: 'create'
-            })
-
-            // Transform to database format
-            const dbRecord = await scope.transformForDatabase({
-              record: validated,
-              operation: 'create'
-            })
-
-            recordsToInsert.push(dbRecord)
-          }
-
-          // Perform bulk insert
-          const knex = api.knex.instance
-          const tableName = scope.vars.schemaInfo.tableName
-
-          try {
-            const inserted = await knex(tableName)
-              .insert(recordsToInsert)
-              .returning('*')
-
-            // Transform back to API format
-            const results = []
-            for (const record of inserted) {
-              const apiRecord = await scope.transformFromDatabase({ record })
-              results.push(apiRecord)
-            }
-
-            // Return optimized result
-            return {
-              data: results,
-              meta: {
-                total: inputRecords.length,
-                succeeded: results.length,
-                failed: 0,
-                atomic: true,
-                optimized: true
-              },
-              skipDefault: true // Tell the default handler to skip
-            }
-          } catch (error) {
-            // Fall back to default handling
-            log.warn('Optimized bulk insert failed, falling back to default', { error: error.message })
-          }
-        }
-      })
-    }
 
     log.info('Bulk Operations plugin installed successfully')
   }

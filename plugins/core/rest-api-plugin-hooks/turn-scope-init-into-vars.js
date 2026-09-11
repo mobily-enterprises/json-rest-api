@@ -1,4 +1,5 @@
-import { normalizeReturnRecordSetting } from '../lib/querying-writing/return-record-settings.js'
+import { snapshotResourceConfiguration } from '../lib/querying-writing/schema-helpers.js'
+import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 
 export default async function turnScopeInitIntoVars ({ context, scopes, vars: apiVars }) {
   // Refer to the scope's vars
@@ -7,8 +8,8 @@ export default async function turnScopeInitIntoVars ({ context, scopes, vars: ap
   const vars = scope?.vars || apiVars
 
   // The scope-specific ones
-  vars.sortableFields = scopeOptions.sortableFields || []
-  vars.defaultSort = scopeOptions.defaultSort || null
+  vars.sortableFields = snapshotResourceConfiguration(scopeOptions.sortableFields || [])
+  vars.defaultSort = snapshotResourceConfiguration(scopeOptions.defaultSort || null)
 
   // The general ones that are also set at api level, but overrideable
   if (typeof scopeOptions.queryDefaultLimit !== 'undefined') vars.queryDefaultLimit = scopeOptions.queryDefaultLimit
@@ -16,17 +17,9 @@ export default async function turnScopeInitIntoVars ({ context, scopes, vars: ap
   if (typeof scopeOptions.includeDepthLimit !== 'undefined') vars.includeDepthLimit = scopeOptions.includeDepthLimit
   if (typeof scopeOptions.enablePaginationCounts !== 'undefined') vars.enablePaginationCounts = scopeOptions.enablePaginationCounts
 
-  // Set simplified settings as scope vars
-  if (typeof scopeOptions.simplifiedApi !== 'undefined') vars.simplifiedApi = scopeOptions.simplifiedApi
-  if (typeof scopeOptions.simplifiedTransport !== 'undefined') vars.simplifiedTransport = scopeOptions.simplifiedTransport
-
-  // Set returnRecord settings as scope vars
-  if (typeof scopeOptions.returnRecordApi !== 'undefined') {
-    vars.returnRecordApi = normalizeReturnRecordSetting(scopeOptions.returnRecordApi, vars.returnRecordApi || 'full')
-  }
-  if (typeof scopeOptions.returnRecordTransport !== 'undefined') {
-    vars.returnRecordTransport = normalizeReturnRecordSetting(scopeOptions.returnRecordTransport, vars.returnRecordTransport || 'no')
-  }
+  rejectRemovedOptions(scopeOptions)
+  if (scopeOptions.format !== undefined) vars.format = resolveFormat(scopeOptions.format)
+  if (scopeOptions.returning !== undefined) vars.returning = resolveReturning(scopeOptions.returning)
 
   // Set idProperty as scope var
   if (typeof scopeOptions.idProperty !== 'undefined') vars.idProperty = scopeOptions.idProperty
@@ -41,16 +34,4 @@ export default async function turnScopeInitIntoVars ({ context, scopes, vars: ap
       )
     }
   }
-
-  // Validate relationship include limits at scope creation time
-  Object.entries(scopeOptions.relationships || {}).forEach(([relName, relDef]) => {
-    if (relDef.include?.limit && vars.queryMaxLimit) {
-      if (relDef.include.limit > vars.queryMaxLimit) {
-        throw new Error(
-          `Invalid relationship '${context.scopeName}.${relName}' configuration: ` +
-          `include.limit (${relDef.include.limit}) cannot exceed queryMaxLimit (${vars.queryMaxLimit})`
-        )
-      }
-    }
-  })
 }

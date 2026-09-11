@@ -9,7 +9,6 @@ import {
   countRecords,
   createJsonApiDocument,
   createRelationship,
-  createToManyRelationship,
   assertResourceAttributes,
   assertResourceRelationship
 } from './helpers/test-utils.js'
@@ -25,13 +24,12 @@ const knex = knexLib({
 
 // API instances that persist across tests
 let basicApi
-let extendedApi
 
 describe('REST API Tests', () => {
   before(async () => {
     // Initialize APIs once
     basicApi = await createBasicApi(knex)
-    extendedApi = await createExtendedApi(knex)
+    await createExtendedApi(knex)
   })
 
   after(async () => {
@@ -56,7 +54,7 @@ describe('REST API Tests', () => {
 
         const result = await basicApi.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Verify response structure
@@ -75,7 +73,7 @@ describe('REST API Tests', () => {
         // Verify data through API GET
         const getResult = await basicApi.resources.countries.get({
           id: result.data.id,
-          simplified: false
+          format: 'jsonapi'
         })
 
         validateJsonApiStructure(getResult, false)
@@ -96,7 +94,7 @@ describe('REST API Tests', () => {
 
         const countryResult = await basicApi.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Create publisher with country relationship
@@ -111,7 +109,7 @@ describe('REST API Tests', () => {
 
         const publisherResult = await basicApi.resources.publishers.post({
           inputRecord: publisherDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Verify response
@@ -129,7 +127,7 @@ describe('REST API Tests', () => {
           queryParams: {
             include: ['country']
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         validateJsonApiStructure(getResult, false)
@@ -156,8 +154,8 @@ describe('REST API Tests', () => {
           async () => {
             await basicApi.resources.countries.post({
               inputRecord: invalidDoc,
-              simplified: false,
-              returnFullRecord: false
+              format: 'jsonapi',
+              returning: 'none'
             })
           },
           (err) => {
@@ -182,13 +180,13 @@ describe('REST API Tests', () => {
 
         const createResult = await basicApi.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Get the resource
         const getResult = await basicApi.resources.countries.get({
           id: createResult.data.id,
-          simplified: false
+          format: 'jsonapi'
         })
 
         validateJsonApiStructure(getResult, false)
@@ -205,7 +203,7 @@ describe('REST API Tests', () => {
           async () => {
             await basicApi.resources.countries.get({
               id: 99999,
-              simplified: false
+              format: 'jsonapi'
             })
           },
           (err) => {
@@ -227,13 +225,13 @@ describe('REST API Tests', () => {
           const doc = createJsonApiDocument('countries', country)
           await basicApi.resources.countries.post({
             inputRecord: doc,
-            simplified: false
+            format: 'jsonapi'
           })
         }
 
         // Query all countries
         const queryResult = await basicApi.resources.countries.query({
-          simplified: false
+          format: 'jsonapi'
         })
 
         validateJsonApiStructure(queryResult, true)
@@ -255,7 +253,7 @@ describe('REST API Tests', () => {
 
         const createResult = await basicApi.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Update only the name
@@ -272,13 +270,13 @@ describe('REST API Tests', () => {
         await basicApi.resources.countries.patch({
           id: createResult.data.id,
           inputRecord: updateDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Verify the update
         const getResult = await basicApi.resources.countries.get({
           id: createResult.data.id,
-          simplified: false
+          format: 'jsonapi'
         })
 
         assertResourceAttributes(getResult.data, {
@@ -298,7 +296,7 @@ describe('REST API Tests', () => {
 
         const createResult = await basicApi.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Verify it exists
@@ -308,7 +306,7 @@ describe('REST API Tests', () => {
         // Delete the resource
         const deleteResult = await basicApi.resources.countries.delete({
           id: createResult.data.id,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // DELETE returns undefined (204 No Content)
@@ -323,7 +321,7 @@ describe('REST API Tests', () => {
           async () => {
             await basicApi.resources.countries.get({
               id: createResult.data.id,
-              simplified: false
+              format: 'jsonapi'
             })
           },
           (err) => {

@@ -2,6 +2,7 @@ import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import { spawn } from 'child_process'
+import { once } from 'node:events'
 import { createBasicApi } from './fixtures/api-configs.js'
 import {
   validateJsonApiStructure,
@@ -27,7 +28,7 @@ const knex = knexLib({
 let basicApi
 let app
 let server
-const TEST_PORT = 3456
+let baseUrl
 
 /**
  * Execute a CURL command and return the response
@@ -36,8 +37,10 @@ const TEST_PORT = 3456
  */
 async function executeCurl (args) {
   return new Promise((resolve, reject) => {
-    const curl = spawn('curl', args, {
-      shell: false
+    const curl = spawn('curl', ['--connect-timeout', '5', '--max-time', '15', ...args], {
+      shell: false,
+      timeout: 20000,
+      killSignal: 'SIGKILL'
     })
 
     let stdout = ''
@@ -51,7 +54,11 @@ async function executeCurl (args) {
       stderr += data.toString()
     })
 
-    curl.on('close', (code) => {
+    curl.on('close', (code, signal) => {
+      if (signal) {
+        reject(new Error(`curl terminated by ${signal}: ${stderr}`))
+        return
+      }
       resolve({
         stdout,
         stderr,
@@ -78,25 +85,24 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
 
     // Start server
     server = http.createServer(app)
-    await new Promise((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server started on port ${TEST_PORT}`)
-        resolve()
-      })
-    })
+    const listening = once(server, 'listening')
+    server.listen(0, '127.0.0.1')
+    await listening
+    baseUrl = `http://127.0.0.1:${server.address().port}`
   })
 
   after(async () => {
-    // Close server
-    await new Promise((resolve) => {
-      server.close(() => {
-        console.log('Test server closed')
-        resolve()
-      })
-    })
-
-    // Close database connection
-    await knex.destroy()
+    try {
+      if (server?.listening) {
+        const closing = new Promise((resolve, reject) => {
+          server.close(error => error ? reject(error) : resolve())
+        })
+        server.closeAllConnections()
+        await closing
+      }
+    } finally {
+      await knex.destroy()
+    }
   })
 
   describe('Basic CURL Operations', () => {
@@ -112,13 +118,13 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'CURL Test Country', code: 'CT' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.country = countryResult.data
     })
 
     it('should GET a resource using CURL', async () => {
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/countries/${testData.country.id}`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/countries/${testData.country.id}`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -132,7 +138,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
     })
 
     it('should GET collection using CURL', async () => {
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/countries`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/countries`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -149,7 +155,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const newCountryDoc = createJsonApiDocument('countries', { name: 'New CURL Country', code: 'NC' })
       const jsonPayload = JSON.stringify(newCountryDoc)
 
-      const result = await executeCurl(['-s', '-X', 'POST', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `http://localhost:${TEST_PORT}/api/countries`])
+      const result = await executeCurl(['-s', '-X', 'POST', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `${baseUrl}/api/countries`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -174,7 +180,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       }
       const jsonPayload = JSON.stringify(patchDoc)
 
-      const result = await executeCurl(['-s', '-X', 'PATCH', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `http://localhost:${TEST_PORT}/api/countries/${testData.country.id}`])
+      const result = await executeCurl(['-s', '-X', 'PATCH', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `${baseUrl}/api/countries/${testData.country.id}`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -188,14 +194,14 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       // Verify the update by fetching the record
       const verifyResult = await basicApi.resources.countries.get({
         id: testData.country.id,
-        simplified: false
+        format: 'jsonapi'
       })
       assert.equal(verifyResult.data.attributes.name, 'Updated CURL Country')
       assert.equal(verifyResult.data.attributes.code, 'CT', 'Code should remain unchanged')
     })
 
     it('should DELETE a resource using CURL', async () => {
-      const result = await executeCurl(['-s', '-X', 'DELETE', '-w', '%{http_code}', '-o', '/dev/null', `http://localhost:${TEST_PORT}/api/countries/${testData.country.id}`])
+      const result = await executeCurl(['-s', '-X', 'DELETE', '-w', '%{http_code}', '-o', '/dev/null', `${baseUrl}/api/countries/${testData.country.id}`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
       assert.equal(result.stdout.trim(), '204', 'Should return 204 No Content')
@@ -204,7 +210,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       try {
         await basicApi.resources.countries.get({
           id: testData.country.id,
-          simplified: false
+          format: 'jsonapi'
         })
         assert.fail('Should have thrown not found error')
       } catch (error) {
@@ -217,15 +223,15 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       // Create additional countries
       await basicApi.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'Another Country', code: 'AC' }),
-        simplified: false
+        format: 'jsonapi'
       })
       await basicApi.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'Third Country', code: 'TC2' }),
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Test with filter (URL encode the space and square brackets)
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/countries?filter%5Bname%5D=Another%20Country`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/countries?filter%5Bname%5D=Another%20Country`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -244,10 +250,10 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       )
       const publisherResult = await basicApi.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/publishers/${publisherResult.data.id}?include=country`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/publishers/${publisherResult.data.id}?include=country`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -263,7 +269,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
 
     it('should handle errors using CURL', async () => {
       // Test 404 error
-      const result404 = await executeCurl(['-s', '-w', '\\n%{http_code}', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/countries/999999`])
+      const result404 = await executeCurl(['-s', '-w', '\\n%{http_code}', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/countries/999999`])
 
       assert.equal(result404.exitCode, 0, 'CURL should exit successfully')
 
@@ -282,7 +288,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const invalidDoc = createJsonApiDocument('countries', { code: 'XX' }) // Missing required name
       const jsonPayload = JSON.stringify(invalidDoc)
 
-      const resultValidation = await executeCurl(['-s', '-w', '\n%{http_code}', '-X', 'POST', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `http://localhost:${TEST_PORT}/api/countries`])
+      const resultValidation = await executeCurl(['-s', '-w', '\n%{http_code}', '-X', 'POST', '-H', 'Content-Type: application/vnd.api+json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `${baseUrl}/api/countries`])
 
       const validationLines = resultValidation.stdout.trim().split('\n')
       const validationCode = validationLines[validationLines.length - 1]
@@ -300,7 +306,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const newCountryDoc = createJsonApiDocument('countries', { name: 'JSON Country', code: 'JC' })
       const jsonPayload = JSON.stringify(newCountryDoc)
 
-      const resultJson = await executeCurl(['-s', '-X', 'POST', '-H', 'Content-Type: application/json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `http://localhost:${TEST_PORT}/api/countries`])
+      const resultJson = await executeCurl(['-s', '-X', 'POST', '-H', 'Content-Type: application/json', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `${baseUrl}/api/countries`])
 
       assert.equal(resultJson.exitCode, 0, 'CURL should exit successfully with application/json')
 
@@ -309,7 +315,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       assert.equal(responseJson.data.attributes.name, 'JSON Country')
 
       // Test with unsupported content type (should fail if strictContentType is enabled)
-      const resultXml = await executeCurl(['-s', '-w', '\n%{http_code}', '-X', 'POST', '-H', 'Content-Type: application/xml', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `http://localhost:${TEST_PORT}/api/countries`])
+      const resultXml = await executeCurl(['-s', '-w', '\n%{http_code}', '-X', 'POST', '-H', 'Content-Type: application/xml', '-H', 'Accept: application/vnd.api+json', '-d', jsonPayload, `${baseUrl}/api/countries`])
 
       const xmlLines = resultXml.stdout.trim().split('\n')
       const xmlCode = xmlLines[xmlLines.length - 1]
@@ -319,7 +325,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
 
     it('should handle headers correctly using CURL', async () => {
       // Test with custom headers (-v outputs to stderr)
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', '-H', 'X-Custom-Header: test-value', '-H', 'User-Agent: CURL-Test/1.0', '-v', `http://localhost:${TEST_PORT}/api/countries/${testData.country.id}`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', '-H', 'X-Custom-Header: test-value', '-H', 'User-Agent: CURL-Test/1.0', '-v', `${baseUrl}/api/countries/${testData.country.id}`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -341,7 +347,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Complex Country', code: 'CC' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.country = countryResult.data
 
@@ -351,7 +357,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       )
       const publisherResult = await basicApi.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
 
@@ -359,11 +365,11 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const author2Doc = createJsonApiDocument('authors', { name: 'Complex Author Two' })
       const author1Result = await basicApi.resources.authors.post({
         inputRecord: author1Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       const author2Result = await basicApi.resources.authors.post({
         inputRecord: author2Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.authors = [author1Result.data, author2Result.data]
 
@@ -380,13 +386,13 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       )
       const bookResult = await basicApi.resources.books.post({
         inputRecord: bookDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.book = bookResult.data
     })
 
     it('should handle nested includes using CURL', async () => {
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/books/${testData.book.id}?include=publisher.country,authors`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/books/${testData.book.id}?include=publisher.country,authors`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -416,12 +422,12 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
               publisher: createRelationship(resourceIdentifier('publishers', testData.publisher.id))
             }
           ),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
       // Test pagination (URL encode square brackets)
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/books?page%5Bsize%5D=3&page%5Bnumber%5D=1`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/books?page%5Bsize%5D=3&page%5Bnumber%5D=1`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -433,7 +439,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
     })
 
     it('should handle sorting using CURL', async () => {
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/books?sort=-title`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/books?sort=-title`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 
@@ -447,7 +453,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
     })
 
     it('should handle sparse fieldsets using CURL', async () => {
-      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `http://localhost:${TEST_PORT}/api/books/${testData.book.id}?fields%5Bbooks%5D=title&fields%5Bpublishers%5D=name&include=publisher`])
+      const result = await executeCurl(['-s', '-H', 'Accept: application/vnd.api+json', `${baseUrl}/api/books/${testData.book.id}?fields%5Bbooks%5D=title&fields%5Bpublishers%5D=name&include=publisher`])
 
       assert.equal(result.exitCode, 0, 'CURL should exit successfully')
 

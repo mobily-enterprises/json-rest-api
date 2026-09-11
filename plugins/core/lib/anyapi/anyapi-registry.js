@@ -1,4 +1,10 @@
+import { createKnexTransaction } from '../../../../lib/knex-transaction.js'
+import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { DEFAULT_CANONICAL_CONFIG, SLOT_LIMITS, SLOT_POOLS, TYPE_TO_POOL } from './schema-utils.js'
+import { beginWriteTransaction, commitTransaction, endWriteOperation, getOperationDiagnosticContext, rollbackAfterError, wrapUnexpectedError, wrapWriteError } from '../../../../lib/error-context.js'
+import { createEnhancedLogger } from '../../../../lib/enhanced-logger.js'
+import { assertFieldName, assertFieldNameMap } from '../querying-writing/field-utils.js'
+import { validateRelationshipFieldNames, validateSchemaFieldNames } from '../querying-writing/scope-validations.js'
 
 const clone = (value) => {
   if (typeof structuredClone === 'function') {
@@ -8,6 +14,7 @@ const clone = (value) => {
 }
 
 const SUPPORTED_TYPES = new Set([...TYPE_TO_POOL.keys(), 'id'])
+const MAX_CACHED_DESCRIPTORS = 100
 
 const resolveIdProperty = (schema = {}, explicitIdProperty = null) => {
   if (explicitIdProperty) return explicitIdProperty
@@ -41,12 +48,14 @@ const SLOT_PATTERNS = {
 }
 
 const BELONGS_TO_ID_PATTERN = /^rel_(\d+)_id$/
-const BELONGS_TO_TYPE_PATTERN = /^rel_(\d+)_type$/
 
 const parseSimpleSlotColumn = (column) => {
   for (const [type, pattern] of Object.entries(SLOT_PATTERNS)) {
     const match = pattern.exec(column)
     if (match) {
+      if (!SLOT_POOLS[type].includes(column)) {
+        throw new Error(`Canonical slot '${column}' is out of range`)
+      }
       return { slotType: type, slotIndex: Number(match[1]) }
     }
   }
@@ -62,10 +71,12 @@ const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
     throw new Error(`Invalid belongsTo id slot '${idSlot}'`)
   }
   const index = Number(idMatch[1])
+  if (index < 1 || index > SLOT_LIMITS.belongsTo || idSlot !== `rel_${index}_id`) {
+    throw new Error(`BelongsTo slot '${idSlot}' is out of range`)
+  }
   const expectedTypeSlot = `rel_${index}_type`
   const actualTypeSlot = typeSlot || expectedTypeSlot
-  const typeMatch = BELONGS_TO_TYPE_PATTERN.exec(actualTypeSlot)
-  if (!typeMatch || Number(typeMatch[1]) !== index) {
+  if (actualTypeSlot !== expectedTypeSlot) {
     throw new Error(`BelongsTo type slot '${actualTypeSlot}' must correspond to id slot '${idSlot}'`)
   }
   return { slotType: 'belongsTo', slotIndex: index, idColumn: idSlot, typeColumn: actualTypeSlot }
@@ -82,49 +93,56 @@ export class AnyapiRegistry {
   }
 
   #key (tenant, resource) {
-    return `${tenant}::${resource}`
+    return JSON.stringify([tenant, resource])
+  }
+
+  #rememberDescriptor (descriptor) {
+    const key = this.#key(descriptor.tenant, descriptor.resource)
+    this.cache.delete(key)
+    this.cache.set(key, descriptor)
+    if (this.cache.size > MAX_CACHED_DESCRIPTORS) this.cache.delete(this.cache.keys().next().value)
   }
 
   async registerResource (definition, options = {}) {
-    this.#validateDefinition(definition)
-    const descriptor = await this.#register(definition, options.transaction)
-    const key = this.#key(descriptor.tenant, descriptor.resource)
-    this.cache.set(key, descriptor)
-    return clone(descriptor)
+    const context = { method: 'registerResource', tenant: definition?.tenant, resource: definition?.resource }
+    try {
+      this.#validateDefinition(definition)
+      const descriptor = await this.#register(definition, options.transaction, context)
+      if (!options.transaction) this.#rememberDescriptor(descriptor)
+      return clone(descriptor)
+    } catch (error) {
+      throw wrapWriteError(error, context, context.transaction || options.transaction)
+    } finally {
+      endWriteOperation(context)
+    }
   }
 
-  async allocateField ({ tenant, resource, fieldName, definition, canonicalField }, options = {}) {
-    if (!tenant || !resource || !fieldName || !definition) {
-      throw new Error('allocateField requires tenant, resource, fieldName, and definition')
-    }
-
-    const descriptor = await this.getDescriptor(tenant, resource, { bypassCache: true })
-    if (!descriptor) {
-      throw new Error(`Resource '${resource}' not registered for tenant '${tenant}'`)
-    }
-
-    const trx = options.transaction || await this.knex.transaction()
-    const managed = !options.transaction
-
-    descriptor.belongsTo = descriptor.belongsTo || {}
-    descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {}
-
-    const usedSlots = new Set()
-    Object.values(descriptor.fields || {}).forEach((info) => {
-      if (info?.slot) {
-        usedSlots.add(info.slot)
+  async allocateField (params, options = {}) {
+    const context = { method: 'allocateField' }
+    let trx; let managed = false
+    try {
+      const { tenant, resource, fieldName, definition, canonicalField } = params || {}
+      Object.assign(context, { tenant, resource })
+      if (!tenant || !resource || !fieldName || !definition) {
+        throw new Error('allocateField requires tenant, resource, fieldName, and definition')
       }
-    })
-    Object.values(descriptor.belongsTo || {}).forEach((info) => {
-      if (info?.typeColumn) {
+      validateSchemaFieldNames({ [fieldName]: definition }, resource)
+
+      managed = !options.transaction
+      trx = await beginWriteTransaction(context, options.transaction, ownerContext => createKnexTransaction(this.knex, ownerContext))
+      const descriptor = await this.#loadDescriptor(tenant, resource, trx)
+      if (!descriptor) throw new Error(`Resource '${resource}' not registered for tenant '${tenant}'`)
+      if (fieldName === descriptor.idProperty || Object.hasOwn(descriptor.schema, fieldName)) {
+        throw new Error(`Field '${resource}.${fieldName}' already exists`)
+      }
+      if (canonicalField && (definition.belongsToPolymorphic || definition.computed || definition.virtual)) {
+        throw new Error(`canonicalFieldsMap should not include non-stored field '${fieldName}'`)
+      }
+      const usedSlots = new Set(Object.values(descriptor.fields).map(info => info.slot))
+      for (const info of Object.values(descriptor.belongsTo)) {
+        usedSlots.add(info.idColumn)
         usedSlots.add(info.typeColumn)
       }
-      if (info?.idColumn) {
-        usedSlots.add(info.idColumn)
-      }
-    })
-
-    try {
       const resourceRow = await trx('any_resource_configs')
         .where({ tenant_id: tenant, resource })
         .first()
@@ -152,144 +170,116 @@ export class AnyapiRegistry {
           alias,
           meta_json: JSON.stringify({ types }),
         })
-
-        if (managed) {
-          await trx.commit()
+      } else if (!definition.computed && !definition.virtual) {
+        let override = null
+        if (canonicalField) {
+          if (definition.belongsTo) {
+            const normalized = typeof canonicalField === 'string'
+              ? { idSlot: canonicalField }
+              : canonicalField
+            if (!normalized || !normalized.idSlot) {
+              throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
+            }
+            const parsed = parseBelongsToSlots(normalized)
+            if (usedSlots.has(parsed.idColumn) || usedSlots.has(parsed.typeColumn)) {
+              throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`)
+            }
+            usedSlots.add(parsed.idColumn)
+            usedSlots.add(parsed.typeColumn)
+            override = normalized
+          } else {
+            const slotColumn = typeof canonicalField === 'string'
+              ? canonicalField
+              : canonicalField?.slot || canonicalField?.slotColumn
+            if (!slotColumn) {
+              throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
+            }
+            if (usedSlots.has(slotColumn)) {
+              throw new Error(`Canonical slot '${slotColumn}' already in use`)
+            }
+            usedSlots.add(slotColumn)
+            override = { slotColumn }
+          }
         }
+        const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState, override)
+        if (!fieldSlot) throw new Error(`Field '${resource}.${fieldName}' requires a supported type`)
+        const meta = definition.meta ? JSON.stringify(definition.meta) : null
 
-        descriptor.polymorphicBelongsTo = descriptor.polymorphicBelongsTo || {}
-        descriptor.polymorphicBelongsTo[alias] = {
-          alias,
-          typeField,
-          idField,
-          types,
-          typeColumn: descriptor.fields?.[typeField]?.slot || null,
-          idColumn: descriptor.fields?.[idField]?.slot || null,
-        }
-        this.cache.set(this.#key(tenant, resource), descriptor)
-        return clone(descriptor)
-      }
-
-      let override = null
-      if (canonicalField) {
-        if (definition.belongsTo) {
-          const normalized = typeof canonicalField === 'string'
-            ? { idSlot: canonicalField }
-            : canonicalField
-          if (!normalized || !normalized.idSlot) {
-            throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
-          }
-          const parsed = parseBelongsToSlots(normalized)
-          if (usedSlots.has(parsed.idColumn) || usedSlots.has(parsed.typeColumn)) {
-            throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`)
-          }
-          usedSlots.add(parsed.idColumn)
-          usedSlots.add(parsed.typeColumn)
-          override = normalized
-        } else {
-          const slotColumn = typeof canonicalField === 'string'
-            ? canonicalField
-            : canonicalField?.slot || canonicalField?.slotColumn
-          if (!slotColumn) {
-            throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
-          }
-          if (usedSlots.has(slotColumn)) {
-            throw new Error(`Canonical slot '${slotColumn}' already in use`)
-          }
-          usedSlots.add(slotColumn)
-          override = { slotColumn }
-        }
-      }
-
-      const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState, override)
-      const meta = definition.meta ? JSON.stringify(definition.meta) : null
-
-      await trx('any_field_configs').insert({
-        resource_config_id: resourceRow.id,
-        field_name: fieldName,
-        slot_type: fieldSlot.slotType,
-        slot_index: fieldSlot.slotIndex,
-        slot_column: fieldSlot.slotColumn,
-        nullable: definition.nullable === true,
-        required: definition.required === true,
-        target_resource: definition.belongsTo || null,
-        alias: definition.as || null,
-        meta_json: meta,
-      })
-
-      if (fieldSlot.relationshipRow) {
-        const relationshipRow = {
+        await trx('any_field_configs').insert({
           resource_config_id: resourceRow.id,
-          relationship_name: fieldSlot.relationshipRow.name,
-          relationship_type: fieldSlot.relationshipRow.type,
-          target_resource: fieldSlot.relationshipRow.target,
-          slot_index: fieldSlot.relationshipRow.slotIndex,
-          id_column: fieldSlot.relationshipRow.idColumn,
-          type_column: fieldSlot.relationshipRow.typeColumn,
-          relationship_key: fieldSlot.relationshipRow.relationshipKey,
-          through: fieldSlot.relationshipRow.through,
-          foreign_key: fieldSlot.relationshipRow.foreignKey,
-          other_key: fieldSlot.relationshipRow.otherKey,
-          alias: fieldSlot.relationshipRow.alias,
-          meta_json: fieldSlot.relationshipRow.meta ? JSON.stringify(fieldSlot.relationshipRow.meta) : null,
-        }
-        await trx('any_relationship_configs').insert(relationshipRow)
-      }
+          field_name: fieldName,
+          slot_type: fieldSlot.slotType,
+          slot_index: fieldSlot.slotIndex,
+          slot_column: fieldSlot.slotColumn,
+          nullable: definition.nullable === true,
+          required: definition.required === true,
+          target_resource: definition.belongsTo || null,
+          alias: definition.as || null,
+          meta_json: meta,
+        })
 
+        if (fieldSlot.relationshipRow) {
+          const relationshipRow = {
+            resource_config_id: resourceRow.id,
+            relationship_name: fieldSlot.relationshipRow.name,
+            relationship_type: fieldSlot.relationshipRow.type,
+            target_resource: fieldSlot.relationshipRow.target,
+            slot_index: fieldSlot.relationshipRow.slotIndex,
+            id_column: fieldSlot.relationshipRow.idColumn,
+            type_column: fieldSlot.relationshipRow.typeColumn,
+            relationship_key: fieldSlot.relationshipRow.relationshipKey,
+            through: fieldSlot.relationshipRow.through,
+            foreign_key: fieldSlot.relationshipRow.foreignKey,
+            other_key: fieldSlot.relationshipRow.otherKey,
+            alias: fieldSlot.relationshipRow.alias,
+            meta_json: fieldSlot.relationshipRow.meta ? JSON.stringify(fieldSlot.relationshipRow.meta) : null,
+          }
+          await trx('any_relationship_configs').insert(relationshipRow)
+        }
+      }
+      await trx('any_resource_configs').where({ id: resourceRow.id }).update({
+        schema_json: JSON.stringify({ ...descriptor.schema, [fieldName]: definition })
+      })
+      const updated = await this.#loadDescriptor(tenant, resource, trx)
       if (managed) {
-        await trx.commit()
+        await commitTransaction(trx, context)
+        this.#rememberDescriptor(updated)
       }
-
-      descriptor.fields[fieldName] = {
-        slot: fieldSlot.slotColumn,
-        slotType: fieldSlot.slotType,
-        slotIndex: fieldSlot.slotIndex,
-        nullable: definition.nullable === true,
-        required: definition.required === true,
-        target: definition.belongsTo || null,
-        alias: definition.as || null,
-      }
-
-      if (fieldSlot.belongsToInfo) {
-        descriptor.belongsTo[fieldSlot.belongsToInfo.alias] = fieldSlot.belongsToInfo
-        descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {}
-        descriptor.canonicalFieldMap[fieldName] = {
-          idSlot: fieldSlot.slotColumn,
-          typeSlot: fieldSlot.belongsToInfo.typeColumn,
-        }
-      } else {
-        descriptor.canonicalFieldMap = descriptor.canonicalFieldMap || {}
-        descriptor.canonicalFieldMap[fieldName] = fieldSlot.slotColumn
-      }
-
-      usedSlots.add(fieldSlot.slotColumn)
-      if (fieldSlot.relationshipRow?.typeColumn) {
-        usedSlots.add(fieldSlot.relationshipRow.typeColumn)
-      }
-
-      descriptor.slotState = fieldSlot.updatedState
-      this.cache.set(this.#key(tenant, resource), descriptor)
-      return clone(descriptor)
+      return clone(updated)
     } catch (error) {
       if (managed) {
-        await trx.rollback()
+        await this.#handleWriteFailure(error, trx || context.transaction, context)
       }
-      throw error
+      throw wrapWriteError(error, context, context.transaction || options.transaction)
+    } finally {
+      endWriteOperation(context)
     }
   }
 
   async getDescriptor (tenant, resource, options = {}) {
     if (!tenant || !resource) return null
-    const key = this.#key(tenant, resource)
-    if (!options.bypassCache && this.cache.has(key)) {
-      return clone(this.cache.get(key))
+    try {
+      const key = this.#key(tenant, resource)
+      if (!options.transaction && !options.bypassCache && this.cache.has(key)) {
+        const descriptor = this.cache.get(key)
+        this.#rememberDescriptor(descriptor)
+        return clone(descriptor)
+      }
+
+      const descriptor = await this.#loadDescriptor(tenant, resource, options.transaction)
+      if (!descriptor) {
+        if (!options.transaction) this.cache.delete(key)
+        return null
+      }
+
+      if (!options.transaction) this.#rememberDescriptor(descriptor)
+      return clone(descriptor)
+    } catch (error) {
+      throw wrapUnexpectedError(error, {
+        message: `Failed to load descriptor for resource '${resource}'`,
+        context: { tenant, scopeName: resource, phase: 'descriptor' }
+      })
     }
-
-    const descriptor = await this.#loadDescriptor(tenant, resource, options.transaction)
-    if (!descriptor) return null
-
-    this.cache.set(key, descriptor)
-    return clone(descriptor)
   }
 
   async listResources (tenant) {
@@ -305,6 +295,28 @@ export class AnyapiRegistry {
     this.cache.delete(this.#key(tenant, resource))
   }
 
+  async #handleWriteFailure (error, transaction, context) {
+    // A rejected commit can still have changed persisted metadata.
+    this.invalidateDescriptor(context.tenant, context.resource)
+    await rollbackAfterError(error, context, transaction)
+    if (context.cleanupErrors.length) {
+      try {
+        await createEnhancedLogger(this.log).error('AnyAPI registry rollback failed', {
+          ...getOperationDiagnosticContext(context, {
+            phase: 'registryRollback',
+            scopeName: context.resource,
+            backend: this.knex.client.config.client
+          }),
+          tenant: context.tenant,
+          error: context.error,
+          cleanupErrors: context.cleanupErrors
+        })
+      } catch (error) {
+        context.cleanupErrors.push({ phase: 'logging', error })
+      }
+    }
+  }
+
   #validateDefinition (definition) {
     const { tenant, resource, schema } = definition || {}
     if (!tenant || typeof tenant !== 'string') {
@@ -316,15 +328,19 @@ export class AnyapiRegistry {
     if (!schema || typeof schema !== 'object') {
       throw new Error('AnyapiRegistry.registerResource requires a schema object')
     }
+    validateSchemaFieldNames(schema, resource)
+    validateRelationshipFieldNames(definition.relationships, resource)
+    assertFieldNameMap(definition.canonicalFieldMap, `canonical fields in '${resource}'`)
   }
 
-  async #register (definition, externalTrx) {
+  async #register (definition, externalTrx, context) {
     const { tenant, resource, schema, relationships = {}, canonicalFieldMap = null } = definition
     const idProperty = resolveIdProperty(schema, definition.idProperty)
-    const trx = externalTrx || await this.knex.transaction()
+    let trx
     const managed = !externalTrx
 
     try {
+      trx = await beginWriteTransaction(context, externalTrx, ownerContext => createKnexTransaction(this.knex, ownerContext))
       const now = this.knex.fn.now()
       let resourceRow = await trx('any_resource_configs')
         .where({ tenant_id: tenant, resource })
@@ -332,8 +348,11 @@ export class AnyapiRegistry {
 
       const schemaJson = JSON.stringify(schema)
       const relationshipsJson = JSON.stringify(relationships || {})
+      let previousDescriptor
 
       if (resourceRow) {
+        // Validate persisted mappings before registration can replace migration evidence.
+        previousDescriptor = await this.#loadDescriptor(tenant, resource, trx, { idProperty })
         await trx('any_resource_configs')
           .where({ id: resourceRow.id })
           .update({
@@ -342,17 +361,17 @@ export class AnyapiRegistry {
             updated_at: now,
           })
       } else {
-        const [insertedId] = await trx('any_resource_configs').insert({
+        const [inserted] = await applyInsertReturning(trx('any_resource_configs').insert({
           tenant_id: tenant,
           resource,
           schema_json: schemaJson,
           relationships_json: relationshipsJson,
           created_at: now,
           updated_at: now,
-        })
+        }), 'id')
 
         resourceRow = {
-          id: insertedId,
+          id: inserted && typeof inserted === 'object' ? inserted.id : inserted,
           tenant_id: tenant,
           resource,
           schema_json: schemaJson,
@@ -372,8 +391,12 @@ export class AnyapiRegistry {
       const fieldInserts = []
       const relationshipInserts = []
 
-      for (const [fieldName, fieldDef] of Object.entries(schema)) {
-        if (fieldName === 'id') {
+      // ID attributes previously had no slot; append them without moving existing slots.
+      const fields = Object.entries(schema).sort(([, left], [, right]) =>
+        Number(left?.type === 'id' && !left.belongsTo) - Number(right?.type === 'id' && !right.belongsTo)
+      )
+      for (const [fieldName, fieldDef] of fields) {
+        if (fieldName === 'id' || (fieldName === idProperty && fieldDef?.type === 'id')) {
           if (canonicalOverrides) {
             canonicalOverrides.delete(fieldName)
           }
@@ -537,15 +560,32 @@ export class AnyapiRegistry {
       }
 
       const descriptor = await this.#loadDescriptor(tenant, resource, trx, { idProperty })
+      const changedField = Object.keys(previousDescriptor?.fields || {}).find(fieldName => {
+        const previous = previousDescriptor.fields[fieldName]
+        const current = descriptor.fields[fieldName]
+        if (!current || previous.slot !== current.slot || previous.slotType !== current.slotType) return true
+        return previous.slotType === 'belongsTo' &&
+          previousDescriptor.belongsTo[previous.alias]?.typeColumn !== descriptor.belongsTo[current.alias]?.typeColumn
+      })
+      if (changedField) {
+        const { canonical } = previousDescriptor
+        const storedRecord = await trx(canonical.tableName)
+          .where(canonical.tenantColumn, tenant)
+          .where(canonical.resourceColumn, resource)
+          .first()
+        if (storedRecord) {
+          throw new Error(`Canonical storage migration required for '${resource}.${changedField}': registration cannot remove or remap stored fields while records exist. Preserve canonicalFieldsMap or migrate the stored data before changing the schema.`)
+        }
+      }
 
       if (managed) {
-        await trx.commit()
+        await commitTransaction(trx, context)
       }
 
       return descriptor
     } catch (error) {
       if (managed) {
-        await trx.rollback()
+        await this.#handleWriteFailure(error, trx || context.transaction, context)
       }
       throw error
     }
@@ -607,6 +647,8 @@ export class AnyapiRegistry {
   }
 
   #buildDescriptor ({ tenant, resource, schema, relationships, slotState, fieldRows, relationshipRows, idProperty }) {
+    validateSchemaFieldNames(schema, resource)
+    validateRelationshipFieldNames(relationships, resource)
     const fields = {}
     const reverseAttributes = {}
     const belongsTo = {}
@@ -614,6 +656,11 @@ export class AnyapiRegistry {
     const polymorphicBelongsTo = {}
 
     for (const row of fieldRows) {
+      assertFieldName(row.field_name, `stored field in '${resource}'`)
+      assertFieldName(row.alias, `stored relationship alias in '${resource}'`)
+      if (['date', 'time'].includes(schema?.[row.field_name]?.type) && row.slot_type !== 'string') {
+        throw new Error(`AnyAPI temporal storage migration required for '${resource}.${row.field_name}': calendar dates and times must use string slots. See MIGRATING_API_V2.md.`)
+      }
       fields[row.field_name] = {
         slot: row.slot_column,
         slotType: row.slot_type,
@@ -629,6 +676,8 @@ export class AnyapiRegistry {
     }
 
     for (const row of relationshipRows) {
+      assertFieldName(row.relationship_name, `stored relationship in '${resource}'`)
+      assertFieldName(row.alias, `stored relationship alias in '${resource}'`)
       if (row.relationship_type === 'belongsTo') {
         const alias = row.alias || row.relationship_name
         belongsTo[alias] = {
@@ -718,14 +767,14 @@ export class AnyapiRegistry {
     }
 
     const { type } = fieldDef
-    if (!type || type === 'id') {
+    if (!type) {
       return null
     }
     if (!SUPPORTED_TYPES.has(type)) {
       throw new Error(`Unsupported field type '${type}'`)
     }
 
-    const pool = TYPE_TO_POOL.get(type)
+    const pool = type === 'id' ? 'string' : TYPE_TO_POOL.get(type)
     if (!pool) {
       throw new Error(`No slot pool defined for type '${type}'`)
     }

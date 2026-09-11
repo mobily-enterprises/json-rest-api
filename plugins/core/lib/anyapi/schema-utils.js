@@ -1,3 +1,5 @@
+import { hasKnexTableIndex } from '../dbIntrospection.js'
+
 const STRING_SLOT_COUNT = 10
 const NUMBER_SLOT_COUNT = 10
 const BOOLEAN_SLOT_COUNT = 5
@@ -48,17 +50,11 @@ const ensureColumn = async (knex, tableName, columnName, columnBuilder) => {
 const ensureUniqueIndex = async (knex, tableName, columns, indexName) => {
   const exists = await knex.schema.hasTable(tableName)
   if (!exists) return
-  const hasIndex = await knex.schema.withSchema('main').hasIndex?.(tableName, indexName)
+  const hasIndex = await hasKnexTableIndex(knex, tableName, indexName)
   if (!hasIndex) {
-    try {
-      await knex.schema.table(tableName, (table) => {
-        table.unique(columns, indexName)
-      })
-    } catch (error) {
-      if (!String(error?.message || '').includes('already exists')) {
-        throw error
-      }
-    }
+    await knex.schema.table(tableName, (table) => {
+      table.unique(columns, indexName)
+    })
   }
 }
 
@@ -79,7 +75,7 @@ export const ensureAnyApiSchema = async (knex) => {
       table.boolean(`boolean_${index}`)
     }
     for (let index = 1; index <= DATE_SLOT_COUNT; index += 1) {
-      table.dateTime(`date_${index}`)
+      table.dateTime(`date_${index}`, { precision: 6 })
     }
     for (let index = 1; index <= JSON_SLOT_COUNT; index += 1) {
       table.text(`json_${index}`)
@@ -98,6 +94,18 @@ export const ensureAnyApiSchema = async (knex) => {
     table.unique(['tenant_id', 'resource', 'logical_id'], 'any_records_tenant_resource_logical_id_unique')
     table.index(['resource'])
   })
+
+  const client = knex.client.config.client
+  if (['pg', 'postgresql', 'mysql', 'mysql2'].includes(client)) {
+    const columns = await knex('information_schema.columns')
+      .select({ column: 'column_name', precision: 'datetime_precision' })
+      .where('table_schema', knex.raw(client === 'pg' || client === 'postgresql' ? 'current_schema()' : 'DATABASE()'))
+      .where('table_name', 'any_records')
+      .whereIn('column_name', Array.from({ length: DATE_SLOT_COUNT }, (_, index) => `date_${index + 1}`))
+    if (columns.length !== DATE_SLOT_COUNT || columns.some(column => Number(column.precision) !== 6)) {
+      throw new Error('AnyAPI temporal storage migration required: any_records.date_1 through date_5 must use timestamp/datetime precision 6. See MIGRATING_API_V2.md.')
+    }
+  }
 
   await ensureColumn(knex, 'any_records', 'logical_id', (table) => {
     table.string('logical_id')
@@ -154,7 +162,7 @@ export const ensureAnyApiSchema = async (knex) => {
 
   await ensureTable(knex, 'any_field_configs', (table) => {
     table.increments('id').primary()
-    table.integer('resource_config_id').notNullable()
+    table.integer('resource_config_id').unsigned().notNullable()
       .references('id').inTable('any_resource_configs').onDelete('CASCADE')
     table.string('field_name').notNullable()
     table.string('slot_type').notNullable()
@@ -174,7 +182,7 @@ export const ensureAnyApiSchema = async (knex) => {
 
   await ensureTable(knex, 'any_relationship_configs', (table) => {
     table.increments('id').primary()
-    table.integer('resource_config_id').notNullable()
+    table.integer('resource_config_id').unsigned().notNullable()
       .references('id').inTable('any_resource_configs').onDelete('CASCADE')
     table.string('relationship_name').notNullable()
     table.string('relationship_type').notNullable()
@@ -191,7 +199,7 @@ export const ensureAnyApiSchema = async (knex) => {
     table.dateTime('created_at').defaultTo(knex.fn.now()).notNullable()
     table.dateTime('updated_at').defaultTo(knex.fn.now()).notNullable()
 
-    table.unique(['resource_config_id', 'relationship_name'])
+    table.unique(['resource_config_id', 'relationship_name'], 'any_relationship_configs_resource_relationship_unique')
     table.index(['resource_config_id'])
   })
 }
@@ -216,12 +224,13 @@ export const TYPE_TO_POOL = new Map([
   ['float', 'number'],
   ['decimal', 'number'],
   ['boolean', 'boolean'],
-  ['date', 'date'],
+  ['date', 'string'],
   ['datetime', 'date'],
   ['dateTime', 'date'],
-  ['time', 'date'],
+  ['time', 'string'],
   ['epochMilliseconds', 'number'],
   ['epochSeconds', 'number'],
   ['json', 'json'],
   ['object', 'json'],
+  ['array', 'json'],
 ])

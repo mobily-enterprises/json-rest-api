@@ -23,18 +23,20 @@ async function runCommand (command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       stdio: 'inherit',
-      shell: true,
+      shell: process.platform === 'win32',
+      timeout: 600000,
+      killSignal: 'SIGKILL',
       ...options
     })
 
     proc.on('error', reject)
-    proc.on('exit', (code) => {
+    proc.on('close', (code, signal) => {
       if (code === 0) {
         resolve()
         return
       }
 
-      reject(new Error(`Command failed with code ${code}`))
+      reject(new Error(`Command failed ${signal ? `with signal ${signal}` : `with code ${code}`}`))
     })
   })
 }
@@ -57,7 +59,7 @@ async function openBrowser (url) {
       : 'xdg-open'
 
   try {
-    await runCommand(command, [url])
+    await runCommand(command, [url], { timeout: 15000 })
     console.log(`Opened browser at ${url}`)
   } catch {
     console.log(`Visit ${url} in your browser`)
@@ -75,15 +77,24 @@ async function serveDocs () {
   const jekyll = spawn('bundle', ['exec', 'jekyll', 'serve', '--watch'], {
     cwd: docsRoot,
     stdio: 'pipe',
-    shell: true
+    shell: process.platform === 'win32'
   })
+
+  let shuttingDown = false
+  let browserOpened = false
+  const launchBrowser = () => {
+    if (browserOpened || shuttingDown) return
+    browserOpened = true
+    clearTimeout(browserTimer)
+    if (!process.argv.includes('--no-open')) openBrowser(LOCAL_URL)
+  }
 
   jekyll.stdout.on('data', (data) => {
     const output = data.toString()
     process.stdout.write(output)
 
     if (output.includes('Server running') || output.includes('Server address:')) {
-      setTimeout(() => openBrowser(LOCAL_URL), 1000)
+      launchBrowser()
     }
   })
 
@@ -91,25 +102,33 @@ async function serveDocs () {
     process.stderr.write(data)
   })
 
-  process.on('SIGINT', () => {
+  const shutdown = () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    clearTimeout(browserTimer)
     console.log('\nShutting down Jekyll server...')
     jekyll.kill()
-    process.exit(0)
-  })
+  }
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
 
   jekyll.on('error', (err) => {
     console.error('Jekyll server error:', err)
-    process.exit(1)
+    clearTimeout(browserTimer)
+    process.exitCode = 1
   })
 
-  jekyll.on('exit', (code) => {
-    if (code !== 0 && code !== null) {
+  jekyll.on('close', (code) => {
+    clearTimeout(browserTimer)
+    process.off('SIGINT', shutdown)
+    process.off('SIGTERM', shutdown)
+    if (!shuttingDown && code !== 0) {
       console.error(`Jekyll server exited with code ${code}`)
-      process.exit(code)
+      process.exitCode = code || 1
     }
   })
 
-  setTimeout(() => openBrowser(LOCAL_URL), BROWSER_DELAY_MS)
+  const browserTimer = setTimeout(launchBrowser, BROWSER_DELAY_MS)
 }
 
 async function main () {

@@ -1,7 +1,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { cleanTables } from './helpers/test-utils.js'
+import { assertWriteFailure, cleanTables } from './helpers/test-utils.js'
 import { createFileUploadApi } from './fixtures/api-configs.js'
 import { RestApiPayloadError, RestApiResourceError } from '../lib/rest-api-errors.js'
 
@@ -80,7 +80,7 @@ describe('File handling cleanup', () => {
     await assert.rejects(
       api.resources.documents.post({
         inputRecord: { data: { type: 'documents', attributes: {} } },
-        simplified: false
+        format: 'jsonapi'
       }),
       /Invalid file type for field 'attachment'/
     )
@@ -107,7 +107,7 @@ describe('File handling cleanup', () => {
     await assert.rejects(
       api.resources.documents.post({
         inputRecord: { data: { type: 'documents', attributes: {} } },
-        simplified: false
+        format: 'jsonapi'
       }),
       /Schema validation failed for resource attributes/
     )
@@ -125,11 +125,42 @@ describe('File handling cleanup', () => {
     detector.parse = async () => { throw error }
     try {
       await assert.rejects(api.resources.documents.post({
-        inputRecord: { data: { type: 'documents', attributes: { title: 'Upload' } } }, simplified: false
-      }), actual => actual === error)
-      assert.equal((await api.resources.documents.query({ simplified: false })).data.length, 0)
+        inputRecord: { data: { type: 'documents', attributes: { title: 'Upload' } } }, format: 'jsonapi'
+      }), actual => assertWriteFailure(actual, { cause: error, outcome: 'rolledBack' }))
+      assert.equal((await api.resources.documents.query({ format: 'jsonapi' })).data.length, 0)
     } finally {
       detector.parse = originalParse
+    }
+  })
+
+  it('does not swallow unexpected errors from a matched detector', async () => {
+    const detector = api.rest.fileDetectors[0]
+    const originalParse = detector.parse
+    const error = new Error('Detector failed')
+    detectorState.payload = { fields: {}, files: {} }
+    detector.parse = async () => { throw error }
+    try {
+      await assert.rejects(api.resources.documents.post({ inputRecord: { title: 'Document' }, format: 'plain' }), actual => assertWriteFailure(actual, { outcome: 'rolledBack' }) && actual.cause.cause === error)
+      assert.equal((await api.resources.documents.query()).data.length, 0)
+    } finally { detector.parse = originalParse }
+  })
+
+  it('merges uploaded files and text fields into the canonical plain-format input', async () => {
+    detectorState.payload = { fields: { title: 'Parsed title' }, files: { attachment: createTestFile() } }
+    const result = await api.resources.documents.post({ inputRecord: {}, format: 'plain' })
+    assert.equal(result.title, 'Parsed title')
+    assert.equal(result.attachment, '/uploads/upload.png')
+    assert.equal((await api.resources.documents.get({ id: result.id })).data.attributes.attachment, result.attachment)
+  })
+
+  it('preserves unknown prototype-like attributes for validation in both formats', async () => {
+    for (const format of ['plain', 'jsonapi']) {
+      for (const name of ['__proto__', 'constructor', 'toString']) {
+        const attributes = { title: 'Rejected', [name]: 'unknown' }
+        const inputRecord = format === 'plain' ? attributes : { data: { type: 'documents', attributes } }
+        await assert.rejects(api.resources.documents.post({ inputRecord, format }), { code: 'REST_API_VALIDATION' })
+        assert.equal((await api.resources.documents.query()).data.length, 0)
+      }
     }
   })
 
@@ -144,10 +175,10 @@ describe('File handling cleanup', () => {
     storage.upload = async () => { throw error }
     try {
       await assert.rejects(api.resources.documents.post({
-        inputRecord: { data: { type: 'documents', attributes: {} } }, simplified: false
-      }), actual => actual === error)
+        inputRecord: { data: { type: 'documents', attributes: {} } }, format: 'jsonapi'
+      }), actual => assertWriteFailure(actual, { cause: error, outcome: 'rolledBack' }))
       assert.equal(cleanupCalls, 1)
-      assert.equal((await api.resources.documents.query({ simplified: false })).data.length, 0)
+      assert.equal((await api.resources.documents.query({ format: 'jsonapi' })).data.length, 0)
     } finally {
       storage.upload = originalUpload
     }

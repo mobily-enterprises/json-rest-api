@@ -25,7 +25,7 @@ function compileRowPolicy ({ scopeName, scopeOptions = {}, policies }) {
 
   if (typeof definition === 'string') {
     const name = definition.trim()
-    const applyQuery = policies[name]
+    const applyQuery = Object.hasOwn(policies, name) ? policies[name] : undefined
 
     if (!name || !applyQuery) {
       throw createRowPolicyError(

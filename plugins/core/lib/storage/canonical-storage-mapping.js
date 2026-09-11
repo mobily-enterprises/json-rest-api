@@ -1,24 +1,39 @@
-import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+// @ts-check
+import { serializeFieldValueForStorage } from './storage-mapping.js'
+import { getPolymorphicLinkage } from '../querying-writing/relationship-contracts.js'
 
-export const translateCanonicalAttributesForStorage = (attributes = {}, descriptor = {}) => {
+/** @import { CanonicalDescriptor, StorageRow, StorageSchemaInfo, StorageWriteOptions } from './storage-types.js' */
+
+/**
+ * @param {StorageRow} [attributes]
+ * @param {Partial<CanonicalDescriptor>} [descriptor]
+ * @param {StorageWriteOptions & { schemaInfo?: Partial<StorageSchemaInfo> }} [options]
+ * @returns {StorageRow}
+ */
+export const translateCanonicalAttributesForStorage = (attributes = {}, descriptor = {}, { schemaInfo, context = null, operation = null, databaseClient } = {}) => {
+  /** @type {StorageRow} */
   const row = {}
 
   for (const [fieldName, value] of Object.entries(attributes)) {
+    if (!descriptor.fields || !Object.hasOwn(descriptor.fields, fieldName)) continue
     const slot = descriptor.fields?.[fieldName]
     if (!slot) continue
 
     if (slot.slotType === 'belongsTo') {
       row[slot.slot] = value == null ? null : String(value)
     } else {
-      row[slot.slot] = normalizeValueForDatabaseStorage(
-        value,
-        descriptor.schema?.[fieldName]?.type,
-        {
-          temporalPrecision: descriptor.schema?.[fieldName]?.temporalPrecision,
-          fieldName,
-          resourceType: descriptor.resource
-        }
-      )
+      const definition = schemaInfo?.schemaStructure?.[fieldName] || descriptor.schema?.[fieldName]
+      const serialized = serializeFieldValueForStorage(value, {
+        fieldName,
+        columnName: slot.slot,
+        definition,
+        schemaInfo,
+        context: context || { scopeName: descriptor.resource },
+        operation,
+        databaseClient,
+        textStorage: slot.slotType === 'string'
+      })
+      row[slot.slot] = definition?.type === 'id' && serialized != null ? String(serialized) : serialized
     }
 
     if (slot.slotType === 'belongsTo') {
@@ -33,10 +48,12 @@ export const translateCanonicalAttributesForStorage = (attributes = {}, descript
   return row
 }
 
+/** @param {Partial<CanonicalDescriptor>} [descriptor] @returns {string} */
 export const getCanonicalResourceIdColumn = (descriptor = {}) => (
   descriptor?.canonical?.logicalIdColumn || 'logical_id'
 )
 
+/** @param {StorageRow | null} [row] @param {Partial<CanonicalDescriptor>} [descriptor] @returns {string | null} */
 export const getCanonicalResourceId = (row = {}, descriptor = {}) => {
   const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
   const logicalId = row?.[logicalIdColumn]
@@ -52,7 +69,14 @@ export const getCanonicalResourceId = (row = {}, descriptor = {}) => {
   return null
 }
 
+/**
+ * @param {StorageRow} [row]
+ * @param {Partial<CanonicalDescriptor>} [descriptor]
+ * @param {{ allowedExtraFields?: string[] }} [options]
+ * @returns {{ attributes: StorageRow, relationships: Record<string, { data: { type: string, id: string } | null }> }}
+ */
 export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, options = {}) => {
+  /** @type {StorageRow} */
   const attributes = {}
   const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
   const consumedColumns = new Set(['id', logicalIdColumn])
@@ -65,9 +89,12 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, o
     }
   }
 
+  /** @type {Record<string, { data: { type: string, id: string } | null }>} */
   const relationships = {}
 
   for (const [alias, info] of Object.entries(descriptor.belongsTo || {})) {
+    const backingField = descriptor.reverseAttributes?.[info.idColumn]
+    if (backingField !== undefined) delete attributes[backingField]
     const idValue = row[info.idColumn]
     consumedColumns.add(info.idColumn)
     if (info.typeColumn) {
@@ -81,6 +108,8 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, o
   }
 
   for (const [alias, info] of Object.entries(descriptor.polymorphicBelongsTo || {})) {
+    delete attributes[info.typeField]
+    delete attributes[info.idField]
     const typeValue = info.typeColumn ? row[info.typeColumn] : null
     const idValue = info.idColumn ? row[info.idColumn] : null
     if (info.typeColumn) {
@@ -90,17 +119,18 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, o
       consumedColumns.add(info.idColumn)
     }
 
-    let relationshipData = null
-    if (typeValue != null && idValue != null) {
-      relationshipData = {
-        type: String(typeValue),
-        id: String(idValue),
-      }
+    relationships[alias] = {
+      data: getPolymorphicLinkage({
+        type: typeValue,
+        id: idValue,
+        types: info.types,
+        scopeName: descriptor.resource,
+        relationshipName: alias
+      })
     }
-
-    relationships[alias] = { data: relationshipData }
   }
 
+  /** @type {Partial<CanonicalDescriptor['canonical']>} */
   const canonical = descriptor.canonical || {}
   const internalColumns = new Set([
     canonical.tenantColumn,
@@ -123,6 +153,7 @@ export const translateCanonicalRecordFromStorage = (row = {}, descriptor = {}, o
   return { attributes, relationships }
 }
 
+/** @param {StorageRow | null | undefined} row @param {Partial<CanonicalDescriptor>} descriptor @param {string} fieldName @returns {unknown} */
 export const getCanonicalFieldValue = (row, descriptor = {}, fieldName) => {
   if (!row || !fieldName) return undefined
 

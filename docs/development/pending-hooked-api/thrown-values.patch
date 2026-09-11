@@ -1,0 +1,112 @@
+--- a/index.js
++++ b/index.js
+@@ -88,6 +88,23 @@
+  * Maps log levels to their display colors
+  * ERROR=red, WARN=yellow, etc. for quick visual identification
+  */
++function logFailure (logger, message, error, details, context) {
++  try {
++    logger.error(message, { ...details, error: errorMessage(error) })
++  } catch (loggingError) {
++    (context.cleanupErrors ||= []).push({ phase: 'logging', error: loggingError })
++  }
++}
++
++function errorMessage (error) {
++  try {
++    const message = error?.message
++    return typeof message === 'string' ? message : String(error)
++  } catch {
++    return 'Non-Error value thrown'
++  }
++}
++
+ const LOG_COLORS = {
+   ERROR: COLORS.red,
+   WARN: COLORS.yellow,
+@@ -596,7 +613,7 @@
+                   return result
+                 } catch (error) {
+                   const duration = Date.now() - startTime
+-                  this._logger.error(`Scope method '${prop}' on '${scopeName}' failed`, { error: error.message, duration: `${duration}ms` })
++                  logFailure(this._logger, `Scope method '${prop}' on '${scopeName}' failed`, error, { duration: `${duration}ms` }, context)
+                   throw error
+                 }
+               }
+@@ -735,7 +752,7 @@
+               return result
+             } catch (error) {
+               const duration = Date.now() - startTime
+-              target._logger.error(`API method '${prop}' failed`, { error: error.message, duration: `${duration}ms` })
++              logFailure(target._logger, `API method '${prop}' failed`, error, { duration: `${duration}ms` }, context)
+               throw error
+             }
+           }
+@@ -1299,12 +1316,11 @@
+         }
+       } catch (error) {
+         const duration = Date.now() - startTime
+-        this._logger.error(`Hook handler '${functionName}' failed`, {
++        logFailure(this._logger, `Hook handler '${functionName}' failed`, error, {
+           plugin: pluginName,
+           hook: name,
+-          error: error.message,
+           duration: `${duration}ms`
+-        })
++        }, context)
+         throw error // Propagate error to method caller
+       }
+ 
+--- /dev/null
++++ b/tests/test-thrown-values.test.js
+@@ -0,0 +1,50 @@
++import test from 'node:test'
++import assert from 'node:assert/strict'
++import { Api, ValidationError } from '../index.js'
++
++const values = [null, undefined, false, 0, 'failure', Object.freeze(new Error('Frozen')), new ValidationError('Typed'), Object.create(null)]
++for (const [index, value] of values.entries()) {
++  for (const boundary of ['api', 'scope', 'hook']) {
++    test(`${boundary} preserves thrown value ${index}`, async () => {
++      const api = new Api({ name: 'throw-test', logging: { level: 'error', logger: { log () {}, warn () {}, error () {} } } })
++      const fail = () => { throw value }
++      await api.customize({
++        apiMethods: { fail },
++        scopeMethods: { fail, viaHook: ({ runHooks }) => runHooks('failure') },
++        hooks: { failure: { functionName: 'throw-value', handler: fail } }
++      })
++      await api.addScope('items', {})
++      const invoke = boundary === 'api' ? () => api.fail() : boundary === 'scope' ? () => api.scopes.items.fail() : () => api.scopes.items.viaHook()
++      let rejected = false
++      try { await invoke() } catch (error) { rejected = true; assert.equal(error, value) }
++      assert.equal(rejected, true)
++    })
++  }
++}
++
++for (const [index, primary] of [null, undefined, Object.freeze(new Error('Frozen')), new ValidationError('Typed')].entries()) {
++  for (const secondary of [new Error('Logger failed'), null]) {
++    for (const boundary of ['api', 'scope', 'hook']) {
++      test(`${boundary} keeps primary ${index} when logging throws ${String(secondary)}`, async () => {
++        const context = {}
++        const api = new Api({ name: 'log-failure-test', logging: {
++          level: 'error', logger: { log () {}, warn () {}, error () { throw secondary } }
++        } })
++        const fail = () => { throw primary }
++        await api.customize({
++          apiMethods: { fail },
++          scopeMethods: { fail, viaHook: ({ runHooks }) => runHooks('failure') },
++          hooks: { failure: { functionName: 'throw-value', handler: fail } }
++        })
++        await api.addScope('items', {})
++        const invoke = boundary === 'api'
++          ? () => api.fail({}, context)
++          : boundary === 'scope' ? () => api.scopes.items.fail({}, context) : () => api.scopes.items.viaHook({}, context)
++        let rejected = false
++        try { await invoke() } catch (error) { rejected = true; assert.equal(error, primary) }
++        assert.equal(rejected, true)
++        assert.deepEqual(context.cleanupErrors, Array.from({ length: boundary === 'hook' ? 2 : 1 }, () => ({ phase: 'logging', error: secondary })))
++      })
++    }
++  }
++}

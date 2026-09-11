@@ -4,14 +4,14 @@ import knexLib from 'knex'
 import { io as ioClient } from 'socket.io-client'
 import { SignJWT } from 'jose'
 import {
-  validateJsonApiStructure,
+
   cleanTables,
   createJsonApiDocument,
-  assertResourceAttributes,
   createRelationship,
   resourceIdentifier
 } from './helpers/test-utils.js'
-import { createWebSocketApi } from './fixtures/api-configs.js'
+import { createWebSocketApi, closeWebSocketApi } from './fixtures/api-configs.js'
+import { waitForSocketEvent, installSocketBarrier, drainSocketEvents } from './helpers/socketio.js'
 
 // Create JWT token using jose
 async function createToken (payload = {}, secret = 'test-secret-key') {
@@ -45,20 +45,6 @@ const knex = knexLib({
 let api
 let server
 
-// Helper function to wait for socket event with timeout
-function waitForSocketEvent (socket, eventName, timeout = 1000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timeout waiting for ${eventName}`))
-    }, timeout)
-
-    socket.once(eventName, (data) => {
-      clearTimeout(timer)
-      resolve(data)
-    })
-  })
-}
-
 describe('WebSocket/Socket.IO Plugin', () => {
   // IMPORTANT: before() runs ONCE for the entire test suite
   before(async () => {
@@ -66,48 +52,16 @@ describe('WebSocket/Socket.IO Plugin', () => {
     const result = await createWebSocketApi(knex)
     api = result.api
     server = result.server
+    installSocketBarrier(api.io)
   })
 
   // IMPORTANT: after() cleans up resources
   after(async () => {
-    // Skip cleanup if nothing was initialized
-    if (!api || !server) {
-      return
+    try {
+      await closeWebSocketApi(api, server)
+    } finally {
+      await knex.destroy()
     }
-
-    // Close Socket.IO server first
-    if (api.vars.socketIO) {
-      // Disconnect all connected sockets
-      await api.vars.socketIO.disconnectSockets()
-
-      // Close the Socket.IO server
-      await new Promise((resolve) => {
-        api.vars.socketIO.close(() => {
-          resolve()
-        })
-      })
-    }
-
-    // Close Redis clients if they exist
-    if (api.vars.socketIORedisClients) {
-      await api.vars.socketIORedisClients.pubClient.quit()
-      await api.vars.socketIORedisClients.subClient.quit()
-    }
-
-    // Close HTTP server
-    if (server) {
-      await new Promise((resolve) => {
-        server.close(resolve)
-      })
-    }
-
-    // Clean up JWT plugin resources
-    if (api.helpers?.auth?.cleanup) {
-      api.helpers.auth.cleanup()
-    }
-
-    // Always destroy knex connection to allow tests to exit
-    await knex.destroy()
   })
 
   // IMPORTANT: beforeEach() cleans data but does NOT recreate API
@@ -134,18 +88,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         // Subscribe to posts with status filter
-        const subResponse = await new Promise((resolve) => {
-          socket.emit('subscribe', {
-            resource: 'books',
-            filters: { title: 'Test Book' }  // Exact match
-          }, resolve)
+        const subResponse = await socket.timeout(5000).emitWithAck('subscribe', {
+          resource: 'books',
+          filters: { title: 'Test Book' }  // Exact match
         })
 
         assert(subResponse.success, 'Subscription should succeed')
@@ -161,7 +109,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Create a book using API
@@ -172,12 +120,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         const createResult = await api.resources.books.post({
           inputRecord: bookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Check notification
         const notification = await updatePromise
-        assert.equal(notification.type, 'resource.postd')
+        assert.equal(notification.type, 'resource.created')
         assert.equal(notification.resource, 'books')
         assert.equal(String(notification.id), String(createResult.data.id))
         assert.equal(notification.action, 'post')
@@ -198,24 +146,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', () => {
-            console.log('Socket connected successfully')
-            resolve()
-          })
-          socket.on('connect_error', (error) => {
-            console.error('Connection error:', error.message, error.type)
-            reject(error)
-          })
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         // Subscribe with specific filter
-        await new Promise((resolve) => {
-          socket.emit('subscribe', {
-            resource: 'books',
-            filters: { title: 'Specific Title' }
-          }, resolve)
+        await socket.timeout(5000).emitWithAck('subscribe', {
+          resource: 'books',
+          filters: { title: 'Specific Title' }
         })
 
         // Create a country first (required for books)
@@ -225,8 +161,11 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
+
+        const notifications = []
+        socket.on('subscription.update', value => notifications.push(value))
 
         // Create a book that doesn't match filter
         const bookDoc = createJsonApiDocument('books',
@@ -236,14 +175,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         await api.resources.books.post({
           inputRecord: bookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Should not receive update
-        await assert.rejects(
-          waitForSocketEvent(socket, 'subscription.update', 500),
-          { message: /Timeout/ }
-        )
+        await drainSocketEvents(socket)
+        assert.deepEqual(notifications, [])
       } finally {
         socket.close()
       }
@@ -262,17 +199,11 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Try invalid filter
-        const response = await new Promise((resolve) => {
-          socket.emit('subscribe', {
-            resource: 'books',
-            filters: { invalid_field: 'value' }
-          }, resolve)
+        const response = await socket.timeout(5000).emitWithAck('subscribe', {
+          resource: 'books',
+          filters: { invalid_field: 'value' }
         })
 
         assert(response.error, 'Should return error')
@@ -282,7 +213,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
       }
     })
 
-    it('should reject function filters without filterRecord', async () => {
+    it('accepts a public relationship filter', async () => {
       // Generate a real JWT token for testing
       const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key')
 
@@ -293,11 +224,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Create a country first
         const countryDoc = createJsonApiDocument('countries', {
           name: 'Test Country',
@@ -305,16 +232,13 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
-        // Assuming we add a complex filter to the schema that uses filterOperator function
-        // For now, test with country_id which is a simple filter
-        const response = await new Promise((resolve) => {
-          socket.emit('subscribe', {
-            resource: 'books',
-            filters: { country: countryResult.data.id }
-          }, resolve)
+        // Subscribe using the public relationship alias.
+        const response = await socket.timeout(5000).emitWithAck('subscribe', {
+          resource: 'books',
+          filters: { country: countryResult.data.id }
         })
 
         // Should succeed for simple filters
@@ -346,16 +270,10 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         // Subscribe to all books
-        await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         // Track notifications
         const notifications = []
@@ -369,18 +287,13 @@ describe('WebSocket/Socket.IO Plugin', () => {
           // Missing required country relationship
         )
 
-        try {
-          await api.resources.books.post({
-            inputRecord: bookDoc,
-            simplified: false
-          })
-          assert.fail('Should have thrown an error')
-        } catch (error) {
-          // Expected to fail due to missing required relationship
-        }
+        await assert.rejects(api.resources.books.post({
+          inputRecord: bookDoc,
+          format: 'jsonapi'
+        }))
 
-        // Wait a bit to ensure no broadcast happens
-        await new Promise(resolve => setTimeout(resolve, 100))
+        // Flush server packets before asserting absence
+        await drainSocketEvents(socket)
 
         // Should not have received any notification
         assert.equal(notifications.length, 0, 'Should not receive any notifications for failed operations')
@@ -403,16 +316,10 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         // Subscribe to all books
-        await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         // Create a country first (required for books)
         const countryDoc = createJsonApiDocument('countries', {
@@ -421,7 +328,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Track notifications
@@ -438,15 +345,15 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         const createResult = await api.resources.books.post({
           inputRecord: bookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
-        // Wait a bit to ensure broadcast happens (setImmediate)
-        await new Promise(resolve => setTimeout(resolve, 50))
+        // Flush server packets after the committed operation
+        await drainSocketEvents(socket)
 
         // Should have received the notification
         assert.equal(notifications.length, 1, 'Should receive one notification')
-        assert.equal(notifications[0].type, 'resource.postd')
+        assert.equal(notifications[0].type, 'resource.created')
         assert.equal(notifications[0].resource, 'books')
         assert.equal(String(notifications[0].id), String(createResult.data.id))
       } finally {
@@ -463,18 +370,14 @@ describe('WebSocket/Socket.IO Plugin', () => {
       })
 
       try {
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         const country = await api.resources.countries.post({
           inputRecord: createJsonApiDocument('countries', {
             name: 'Original Country',
             code: 'OC'
           }),
-          simplified: false
+          format: 'jsonapi'
         })
 
         const nextCountry = await api.resources.countries.post({
@@ -482,7 +385,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
             name: 'Next Country',
             code: 'NC'
           }),
-          simplified: false
+          format: 'jsonapi'
         })
 
         const book = await api.resources.books.post({
@@ -491,12 +394,10 @@ describe('WebSocket/Socket.IO Plugin', () => {
             { title: 'Relationship Patch Broadcast' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
           ),
-          simplified: false
+          format: 'jsonapi'
         })
 
-        await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         const updatePromise = waitForSocketEvent(socket, 'subscription.update', 1000)
 
@@ -507,7 +408,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
 
         const notification = await updatePromise
-        assert.equal(notification.type, 'resource.patchd')
+        assert.equal(notification.type, 'resource.updated')
         assert.equal(notification.resource, 'books')
         assert.equal(String(notification.id), String(book.data.id))
         assert.equal(notification.action, 'patch')
@@ -529,19 +430,11 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Subscribe to books and countries
-        const bookSubResponse = await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        const bookSubResponse = await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
-        const countrySubResponse = await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'countries' }, resolve)
-        })
+        const countrySubResponse = await socket.timeout(5000).emitWithAck('subscribe', { resource: 'countries' })
 
         assert(bookSubResponse.success)
         assert(countrySubResponse.success)
@@ -555,19 +448,19 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         // Create a country first (required for books)
         const countryDoc = createJsonApiDocument('countries', { name: 'Multi Test Country', code: 'MT' })
-        const countryResult = await api.resources.countries.post({ inputRecord: countryDoc, simplified: false })
+        const countryResult = await api.resources.countries.post({ inputRecord: countryDoc, format: 'jsonapi' })
 
         const bookDoc = createJsonApiDocument('books',
           { title: 'Multi Test Book' },
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
-        await api.resources.books.post({ inputRecord: bookDoc, simplified: false })
+        await api.resources.books.post({ inputRecord: bookDoc, format: 'jsonapi' })
 
         const countryDoc2 = createJsonApiDocument('countries', { name: 'Multi Test Country 2', code: 'MT2' })
-        await api.resources.countries.post({ inputRecord: countryDoc2, simplified: false })
+        await api.resources.countries.post({ inputRecord: countryDoc2, format: 'jsonapi' })
 
-        // Wait a bit for notifications
-        await new Promise(resolve => setTimeout(resolve, 100))
+        // Flush server packets after the writes
+        await drainSocketEvents(socket)
 
         assert.equal(notifications.length, 3, 'Should receive 3 notifications')
         assert.equal(notifications.filter(n => n.resource === 'books').length, 1, 'Should receive 1 book notification')
@@ -588,22 +481,14 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Subscribe
-        const subResponse = await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        const subResponse = await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         const subscriptionId = subResponse.data.subscriptionId
 
         // Unsubscribe
-        const unsubResponse = await new Promise((resolve) => {
-          socket.emit('unsubscribe', { subscriptionId }, resolve)
-        })
+        const unsubResponse = await socket.timeout(5000).emitWithAck('unsubscribe', { subscriptionId })
 
         assert(unsubResponse.success)
 
@@ -614,21 +499,22 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
+
+        const notifications = []
+        socket.on('subscription.update', value => notifications.push(value))
 
         // Create a book
         const bookDoc = createJsonApiDocument('books',
           { title: 'After Unsub Book' },
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
-        await api.resources.books.post({ inputRecord: bookDoc, simplified: false })
+        await api.resources.books.post({ inputRecord: bookDoc, format: 'jsonapi' })
 
         // Should not receive notification
-        await assert.rejects(
-          waitForSocketEvent(socket, 'subscription.update', 500),
-          { message: /Timeout/ }
-        )
+        await drainSocketEvents(socket)
+        assert.deepEqual(notifications, [])
       } finally {
         socket.close()
       }
@@ -647,11 +533,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Create a country first (required for books)
         const countryDoc = createJsonApiDocument('countries', {
           name: 'Test Country',
@@ -659,7 +541,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Create a book first
@@ -669,14 +551,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         const createResult = await api.resources.books.post({
           inputRecord: bookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
         const bookId = createResult.data.id
 
         // Subscribe to books
-        await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         // Update the book
         const updatePromise = waitForSocketEvent(socket, 'subscription.update')
@@ -692,12 +572,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
         await api.resources.books.patch({
           id: bookId,
           inputRecord: patchDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Check notification
         const notification = await updatePromise
-        assert.equal(notification.type, 'resource.patchd')
+        assert.equal(notification.type, 'resource.updated')
         assert.equal(notification.resource, 'books')
         assert.equal(String(notification.id), String(bookId))
         assert.equal(notification.action, 'patch')
@@ -717,11 +597,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Create a country first (required for books)
         const countryDoc = createJsonApiDocument('countries', {
           name: 'Test Country',
@@ -729,7 +605,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Create a book first
@@ -739,14 +615,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         const createResult = await api.resources.books.post({
           inputRecord: bookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
         const bookId = createResult.data.id
 
         // Subscribe to books
-        await new Promise((resolve) => {
-          socket.emit('subscribe', { resource: 'books' }, resolve)
-        })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books' })
 
         // Delete the book
         const deletePromise = waitForSocketEvent(socket, 'subscription.update')
@@ -777,16 +651,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
       try {
         // Wait for connection
-        await new Promise((resolve, reject) => {
-          socket.on('connect', resolve)
-          socket.on('connect_error', reject)
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        })
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
         // Create test data
         const countryDoc = createJsonApiDocument('countries', { name: 'Filter Country', code: 'FC' })
         const countryResult = await api.resources.countries.post({
           inputRecord: countryDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         const publisherDoc = createJsonApiDocument('publishers',
@@ -795,15 +665,13 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         const publisherResult = await api.resources.publishers.post({
           inputRecord: publisherDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Subscribe to books filtered by publisher
-        await new Promise((resolve) => {
-          socket.emit('subscribe', {
-            resource: 'books',
-            filters: { publisher: publisherResult.data.id }
-          }, resolve)
+        await socket.timeout(5000).emitWithAck('subscribe', {
+          resource: 'books',
+          filters: { publisher: publisherResult.data.id }
         })
 
         // Create book with matching publisher
@@ -818,7 +686,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         await api.resources.books.post({
           inputRecord: matchingBookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Should receive notification
@@ -832,8 +700,11 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         const otherPublisherResult = await api.resources.publishers.post({
           inputRecord: otherPublisherDoc,
-          simplified: false
+          format: 'jsonapi'
         })
+
+        const notifications = []
+        socket.on('subscription.update', value => notifications.push(value))
 
         const nonMatchingBookDoc = createJsonApiDocument('books',
           { title: 'Non-Matching Book' },
@@ -844,14 +715,12 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
         await api.resources.books.post({
           inputRecord: nonMatchingBookDoc,
-          simplified: false
+          format: 'jsonapi'
         })
 
         // Should not receive notification for non-matching book
-        await assert.rejects(
-          waitForSocketEvent(socket, 'subscription.update', 500),
-          { message: /Timeout/ }
-        )
+        await drainSocketEvents(socket)
+        assert.deepEqual(notifications, [])
       } finally {
         socket.close()
       }

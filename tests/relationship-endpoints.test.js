@@ -8,11 +8,11 @@ import {
   cleanTables,
   createJsonApiDocument,
   createRelationship,
-  createToManyRelationship,
   resourceIdentifier,
   countRecords
 } from './helpers/test-utils.js'
 import { createBasicApi } from './fixtures/api-configs.js'
+import { holdManagedTransaction } from './helpers/transaction-completion.js'
 
 // Create Knex instance for tests
 const knex = knexLib({
@@ -28,12 +28,14 @@ let api
 let app
 const relationshipCommitEvents = []
 const relationshipRollbackEvents = []
+const relationshipContexts = []
 
 describe('Relationship Endpoints Plugin', () => {
   before(async () => {
     // Initialize API with the relationships plugin
     app = express()
     api = await createBasicApi(knex, {
+      mappedPivot: true,
       express: {
         mountPath: ''  // No mount path for this test
       },
@@ -43,6 +45,20 @@ describe('Relationship Endpoints Plugin', () => {
 
     await api.customize({
       hooks: {
+        'transport:request': {
+          functionName: 'relationship-context-source',
+          handler: ({ context }) => {
+            if (context.transport?.request?.headers?.['x-relationship-context'] === 'yes') context.relationshipMarker = 'forwarded'
+          }
+        },
+        checkPermissions: {
+          functionName: 'relationship-context-observer',
+          handler: ({ context }) => {
+            if (context.method?.endsWith('Relationship') || context.method === 'getRelated') {
+              relationshipContexts.push({ method: context.method, marker: context.relationshipMarker })
+            }
+          }
+        },
         afterCommit: {
           functionName: 'relationship-after-commit-test-tracker',
           handler: async ({ context }) => {
@@ -92,7 +108,7 @@ describe('Relationship Endpoints Plugin', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       countryId = countryResult.data.id
 
@@ -103,7 +119,7 @@ describe('Relationship Endpoints Plugin', () => {
       )
       const bookResult = await api.resources.books.post({
         inputRecord: bookDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       book1Id = bookResult.data.id
 
@@ -111,23 +127,80 @@ describe('Relationship Endpoints Plugin', () => {
       const author1Doc = createJsonApiDocument('authors', { name: 'Author One' })
       const author1Result = await api.resources.authors.post({
         inputRecord: author1Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       author1Id = author1Result.data.id
 
       const author2Doc = createJsonApiDocument('authors', { name: 'Author Two' })
       const author2Result = await api.resources.authors.post({
         inputRecord: author2Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       author2Id = author2Result.data.id
 
       const author3Doc = createJsonApiDocument('authors', { name: 'Author Three' })
       const author3Result = await api.resources.authors.post({
         inputRecord: author3Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       author3Id = author3Result.data.id
+    })
+
+    it('forwards HTTP request context through all relationship routes', async () => {
+      relationshipContexts.length = 0
+      const linkage = { data: [{ type: 'authors', id: author1Id }] }
+      for (const [method, path, body] of [
+        ['get', `/books/${book1Id}/relationships/authors`],
+        ['get', `/books/${book1Id}/authors`],
+        ['post', `/books/${book1Id}/relationships/authors`, linkage],
+        ['patch', `/books/${book1Id}/relationships/authors`, linkage],
+        ['delete', `/books/${book1Id}/relationships/authors`, linkage]
+      ]) {
+        const req = request(app)[method](path).set('x-relationship-context', 'yes')
+        if (body) req.set('Content-Type', 'application/vnd.api+json').send(body)
+        const response = await req
+        assert.equal(response.status, method === 'get' ? 200 : 204)
+      }
+      assert.deepEqual(relationshipContexts.map(entry => entry.method), ['getRelationship', 'getRelated', 'postRelationship', 'patchRelationship', 'deleteRelationship'])
+      assert.ok(relationshipContexts.every(entry => entry.marker === 'forwarded'))
+    })
+
+    it('reads uncommitted linkage using the caller transaction without completing it', async () => {
+      const unit = await holdManagedTransaction(api)
+      const transaction = unit.transaction
+      try {
+        await api.resources.books.postRelationship({
+          id: book1Id, relationshipName: 'authors', relationshipData: [{ type: 'authors', id: author1Id }], transaction
+        })
+        const result = await api.resources.books.getRelationship({ id: book1Id, relationshipName: 'authors', transaction })
+        assert.deepEqual(result.data, [{ type: 'authors', id: author1Id }])
+        assert.equal(transaction.isCompleted(), false)
+      } finally {
+        await unit.rollback()
+      }
+      const result = await api.resources.books.getRelationship({ id: book1Id, relationshipName: 'authors' })
+      assert.deepEqual(result.data, [])
+    })
+
+    it('adds many-to-many members once across duplicates and repeated calls', async () => {
+      const options = { id: book1Id, relationshipName: 'authors' }
+      const first = resourceIdentifier('authors', author1Id)
+      const second = resourceIdentifier('authors', author2Id)
+      await api.resources.books.postRelationship({ ...options, relationshipData: [first, first, second] })
+      await api.resources.books.postRelationship({ ...options, relationshipData: [first] })
+      assert.equal(await countRecords(knex, 'basic_book_authors'), 2)
+      const linked = await api.resources.books.getRelationship(options)
+      assert.deepEqual(linked.data.map(record => record.id).sort(), [author1Id, author2Id].sort())
+      await api.resources.books.deleteRelationship({ ...options, relationshipData: [first, first] })
+      await api.resources.books.deleteRelationship({ ...options, relationshipData: [first] })
+      assert.deepEqual((await api.resources.books.getRelationship(options)).data, [second])
+      const path = `/books/${book1Id}/relationships/authors`
+      for (const data of [[first, first], []]) {
+        await request(app).patch(path).set('content-type', 'application/vnd.api+json').send({ data }).expect(204)
+        const expected = data.length ? [first] : []
+        assert.deepEqual((await request(app).get(path).expect(200)).body.data, expected)
+        assert.equal(await countRecords(knex, 'basic_book_authors'), expected.length)
+      }
     })
 
     it('should get empty relationship data for new book', async () => {
@@ -174,7 +247,7 @@ describe('Relationship Endpoints Plugin', () => {
         queryParams: {
           include: ['authors']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(getResult.included, 'Should have included data')
@@ -311,8 +384,6 @@ describe('Relationship Endpoints Plugin', () => {
   describe('One-to-Many Relationship Endpoints', () => {
     let countryId
     let publisherId
-    let book1Id
-    let book2Id
 
     beforeEach(async () => {
       await cleanTables(knex, [
@@ -323,7 +394,7 @@ describe('Relationship Endpoints Plugin', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       countryId = countryResult.data.id
 
@@ -334,7 +405,7 @@ describe('Relationship Endpoints Plugin', () => {
       )
       const publisherResult = await api.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       publisherId = publisherResult.data.id
 
@@ -346,11 +417,10 @@ describe('Relationship Endpoints Plugin', () => {
           publisher: createRelationship(resourceIdentifier('publishers', publisherId))
         }
       )
-      const book1Result = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: book1Doc,
-        simplified: false
+        format: 'jsonapi'
       })
-      book1Id = book1Result.data.id
 
       const book2Doc = createJsonApiDocument('books',
         { title: 'Book Two' },
@@ -359,11 +429,10 @@ describe('Relationship Endpoints Plugin', () => {
           publisher: createRelationship(resourceIdentifier('publishers', publisherId))
         }
       )
-      const book2Result = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: book2Doc,
-        simplified: false
+        format: 'jsonapi'
       })
-      book2Id = book2Result.data.id
     })
 
     it('should get one-to-many relationship data', async () => {
@@ -391,8 +460,43 @@ describe('Relationship Endpoints Plugin', () => {
       assert.deepEqual(titles, ['Book One', 'Book Two'])
     })
 
-    // Note: belongsTo relationships (like 'publisher') are not accessible via relationship endpoints
-    // They are foreign key fields, not true JSON:API relationships
+    it('persists hasMany changes through real HTTP relationship routes', async () => {
+      const created = await api.resources.books.post({
+        inputRecord: createJsonApiDocument('books', { title: 'New member' }, {
+          country: createRelationship(resourceIdentifier('countries', countryId))
+        }),
+        format: 'jsonapi'
+      })
+      const path = `/publishers/${publisherId}/relationships/books`
+      const payload = { data: [resourceIdentifier('books', created.data.id)] }
+      await request(app).post(path).set('content-type', 'application/vnd.api+json').send(payload).expect(204)
+      assert.equal((await request(app).get(path).expect(200)).body.data.length, 3)
+      await request(app).patch(path).set('content-type', 'application/vnd.api+json').send(payload).expect(204)
+      assert.deepEqual((await request(app).get(path).expect(200)).body.data, payload.data)
+      for (let repeat = 0; repeat < 2; repeat++) {
+        await request(app).delete(path).set('content-type', 'application/vnd.api+json').send(payload).expect(204)
+      }
+      assert.deepEqual((await request(app).get(path).expect(200)).body.data, [])
+      assert.equal((await api.resources.books.get({ id: created.data.id })).data.relationships.publisher.data, null)
+    })
+
+    it('follows real HTTP pagination links within the same parent relationship', async () => {
+      await api.resources.books.post({
+        inputRecord: createJsonApiDocument('books', { title: 'Unrelated' }, {
+          country: createRelationship(resourceIdentifier('countries', countryId))
+        }),
+        format: 'jsonapi'
+      })
+      const path = `/publishers/${publisherId}/books`
+      const first = await request(app).get(path).query({ 'page[number]': 1, 'page[size]': 1, sort: 'id' }).expect(200)
+      assert.equal(first.body.meta.pagination.total, 2)
+      assert.equal(first.body.data.length, 1)
+      assert.equal(new URL(first.body.links.next, 'http://localhost').pathname, path)
+      const second = await request(app).get(first.body.links.next).expect(200)
+      assert.equal(second.body.meta.pagination.total, 2)
+      assert.deepEqual([first.body.data[0].attributes.title, second.body.data[0].attributes.title], ['Book One', 'Book Two'])
+      assert.equal(second.body.links.next, undefined)
+    })
   })
 
   describe('Relationship Cardinality Validation', () => {
@@ -413,7 +517,7 @@ describe('Relationship Endpoints Plugin', () => {
 
       const country = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
-        simplified: false
+        format: 'jsonapi'
       })
       countryId = country.data.id
 
@@ -423,13 +527,13 @@ describe('Relationship Endpoints Plugin', () => {
           { title: 'Cardinality Book' },
           { country: createRelationship(resourceIdentifier('countries', countryId)) }
         ),
-        simplified: false
+        format: 'jsonapi'
       })
       bookId = book.data.id
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', { name: 'Author One' }),
-        simplified: false
+        format: 'jsonapi'
       })
       authorId = author.data.id
     })
@@ -540,13 +644,13 @@ describe('Relationship Endpoints Plugin', () => {
 
       const country = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
-        simplified: false
+        format: 'jsonapi'
       })
       countryId = country.data.id
 
       const secondCountry = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'Canada', code: 'CA' }),
-        simplified: false
+        format: 'jsonapi'
       })
       secondCountryId = secondCountry.data.id
 
@@ -556,13 +660,13 @@ describe('Relationship Endpoints Plugin', () => {
           { title: 'Hook Book' },
           { country: createRelationship(resourceIdentifier('countries', countryId)) }
         ),
-        simplified: false
+        format: 'jsonapi'
       })
       bookId = book.data.id
 
       const author = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', { name: 'Hook Author' }),
-        simplified: false
+        format: 'jsonapi'
       })
       authorId = author.data.id
 

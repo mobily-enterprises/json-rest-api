@@ -1,9 +1,15 @@
 import { createContext } from './lib/request-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
-import { buildTransportRouteSchema } from './lib/transport-route-schemas.js'
+import { getOperationDiagnosticContext } from '../../../lib/error-context.js'
+import { buildTransportRouteSchema, getTransportRouteContract } from './lib/transport-route-schemas.js'
+import { validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import {
   isWriteMethod,
   isAllowedWriteContentType,
+  mergeResponseHeaders,
+  acceptsJsonApi,
+  getNotAcceptableErrorBody,
+  getNotFoundErrorBody,
   getUnsupportedMediaTypeErrorBody
 } from './lib/transport-http-helpers.js'
 import {
@@ -11,58 +17,52 @@ import {
   buildTransportRequestData,
   createConnectorContext,
   runTransportRequestLifecycle,
+  applyTransportResponseLifecycle,
+  addWriteOutcomeToHttpErrors,
   buildTransportRejectionBody,
   executeConnectorRoute,
   handleConnectorError
 } from './lib/connector-core.js'
 
 function applyHeaders (reply, headers = {}) {
-  for (const [headerName, headerValue] of Object.entries(headers)) {
+  const merged = mergeResponseHeaders({ vary: reply.getHeader('vary') }, headers, { vary: 'Accept' })
+  for (const [headerName, headerValue] of Object.entries(merged)) {
     reply.header(headerName, headerValue)
   }
 }
 
-function registerVendorJsonParser (app) {
-  if (typeof app?.addContentTypeParser !== 'function') return
-  if (typeof app?.hasContentTypeParser === 'function' && app.hasContentTypeParser('application/vnd.api+json')) {
-    return
-  }
+async function setJsonApiResponseType (request, reply, payload) {
+  // Fastify adds a charset during serialization; normalize after that step.
+  reply.header('Content-Type', 'application/vnd.api+json')
+  return payload
+}
 
-  app.addContentTypeParser(
-    'application/vnd.api+json',
-    { parseAs: 'string' },
-    (request, body, done) => {
-      if (body === '' || body === undefined || body === null) {
-        done(null, {})
-        return
-      }
-
-      try {
-        done(null, JSON.parse(body))
-      } catch (error) {
-        error.statusCode = 400
-        done(error)
-      }
+function registerJsonParsers (app) {
+  const parse = (request, body, done) => {
+    try { done(null, body === '' ? {} : JSON.parse(body)) } catch (error) {
+      error.statusCode = 400
+      done(error)
     }
-  )
+  }
+  for (const contentType of ['application/json', 'application/vnd.api+json']) {
+    if (app.hasContentTypeParser(contentType)) app.removeContentTypeParser(contentType)
+    app.addContentTypeParser(contentType, { parseAs: 'string' }, parse)
+  }
 }
 
 export const FastifyPlugin = {
   name: 'fastify',
   dependencies: ['rest-api'],
 
-  async install ({ vars, helpers, pluginOptions, log, api, runHooks, addHook }) {
+  async install ({ vars, helpers, pluginOptions, log, api, scopes, runHooks, addHook }) {
     const fastifyOptions = pluginOptions || {}
+    const httpValidators = fastifyOptions.httpValidators ?? false
+    if (typeof httpValidators !== 'boolean') throw new TypeError('httpValidators must be a boolean')
     const app = fastifyOptions.app
 
     if (!app || typeof app.route !== 'function') {
       throw new Error('FastifyPlugin requires a Fastify instance in pluginOptions.app.')
     }
-
-    const enhancedLog = createEnhancedLogger(log, {
-      logFullErrors: true,
-      includeStack: true
-    })
 
     if (!api.http) {
       api.http = {}
@@ -80,19 +80,49 @@ export const FastifyPlugin = {
       publicBaseUrl
     }
 
-    registerVendorJsonParser(app)
+    const ensureContext = (request, reply) => {
+      if (!request.jsonRestContext) {
+        const requestData = buildTransportRequestData({
+          method: request.method,
+          url: request.url,
+          path: request.url,
+          headers: request.headers,
+          body: request.body,
+          params: request.params,
+          query: request.query
+        })
+        const { context } = createConnectorContext({
+          request, reply, source: 'fastify', mountPath, publicBaseUrl, requestData, createContext
+        })
+        request.jsonRestContext = context
+      }
+      return request.jsonRestContext
+    }
+    const sendResponse = async (request, reply, status, body) => {
+      const context = ensureContext(request, reply)
+      body = addWriteOutcomeToHttpErrors(body, context)
+      const headers = await applyTransportResponseLifecycle({ context, transportData: context.transport, status, body, runHooks })
+      applyHeaders(reply, headers)
+      return reply.code(status).type('application/vnd.api+json').send(body)
+    }
 
     const buildFastifyHandler = ({ method, path, handler, routeMeta }) => {
       const routeSchema = buildTransportRouteSchema({ routeMeta, api })
 
       const fastifyErrorHandler = async (error, request, reply) => {
-        enhancedLog.logError('Fastify request error', error, {
-          method: request.method,
-          path: request.url
+        const context = ensureContext(request, reply)
+        const schemaInfo = scopes[routeMeta?.scopeName]?.vars?.schemaInfo || context.schemaInfo
+        createEnhancedLogger(log, { schemaInfo }).logError('Fastify request error', error, {
+          ...getOperationDiagnosticContext(context, {
+            phase: 'httpError',
+            method: request.method,
+            scopeName: routeMeta?.scopeName || context.scopeName,
+            backend: api.knex?.instance?.client?.config?.client
+          }),
+          path
         })
 
-        const context = request.jsonRestContext || null
-        const transportData = context?.transport || null
+        const transportData = context.transport
         const { status, body, headers } = await handleConnectorError({
           error,
           context,
@@ -107,65 +137,54 @@ export const FastifyPlugin = {
       }
 
       const preValidation = async (request, reply) => {
-        if (!strictContentType || !isWriteMethod(method)) {
+        const context = ensureContext(request, reply)
+        const { rejected, handled } = await runTransportRequestLifecycle({ context, runHooks })
+        if (rejected) {
+          return sendResponse(request, reply, context.rejection.status || 500, buildTransportRejectionBody(context))
+        }
+        if (handled) return
+
+        applyHeaders(reply)
+        if (!acceptsJsonApi(request.headers?.accept)) {
+          return sendResponse(request, reply, 406, getNotAcceptableErrorBody())
+        }
+      }
+
+      const preParsing = async (request, reply, payload) => {
+        if (strictContentType && isWriteMethod(request.method) && !isAllowedWriteContentType(request.headers?.['content-type'])) {
+          await sendResponse(request, reply, 415, getUnsupportedMediaTypeErrorBody())
           return
         }
-
-        const contentType = request.headers?.['content-type'] || ''
-        if (isAllowedWriteContentType(contentType)) {
-          return
-        }
-
-        reply.code(415)
-        reply.type('application/vnd.api+json')
-        return reply.send(getUnsupportedMediaTypeErrorBody())
+        return payload
       }
 
       return {
         method,
         url: path,
-        ...(routeSchema ? { schema: routeSchema } : {}),
+        ...(routeSchema
+          ? {
+              schema: routeSchema,
+              // Use the existing request contract without Ajv's field removal or coercion.
+              validatorCompiler: () => (payload) => {
+                try {
+                  const contract = getTransportRouteContract({ routeMeta, api })
+                  return { value: validateRequestContractOrThrow(contract, payload) }
+                } catch (error) { return { error } }
+              }
+            }
+          : {}),
         errorHandler: fastifyErrorHandler,
+        onSend: setJsonApiResponseType,
+        preParsing,
         preValidation,
         handler: async (request, reply) => {
-          const requestData = buildTransportRequestData({
-            method: request.method,
-            url: request.url,
-            path: request.url,
-            headers: request.headers,
-            body: request.body,
-            params: request.params,
-            query: request.query
-          })
-          const { context, transportData } = createConnectorContext({
-            request,
-            reply,
-            source: 'fastify',
-            mountPath,
-            publicBaseUrl,
-            requestData,
-            createContext
-          })
-          request.jsonRestContext = context
-
-          const { rejected, handled } = await runTransportRequestLifecycle({
-            context,
-            runHooks
-          })
-
-          if (rejected) {
-            const rejectionBody = buildTransportRejectionBody(context)
-            applyHeaders(reply, transportData.response.headers)
-            reply.code(context.rejection.status || 500)
-            reply.type('application/vnd.api+json')
-            return reply.send(rejectionBody)
-          }
-
-          if (handled) {
-            return
-          }
+          const context = request.jsonRestContext
+          if (context.handled) return
+          const transportData = context.transport
 
           const outcome = await executeConnectorRoute({
+            api,
+            httpValidators,
             method,
             handler,
             queryString: extractQueryString(request?.raw?.url || request?.url || ''),
@@ -199,9 +218,32 @@ export const FastifyPlugin = {
       }
     }
 
+    const pendingRoutes = []
+    let registerRoute = route => pendingRoutes.push(route)
+    app.register(async (instance) => {
+      registerJsonParsers(instance)
+      registerRoute = route => instance.route(route)
+      for (const route of pendingRoutes.splice(0)) registerRoute(route)
+
+      if (fastifyOptions.handle404 !== false) {
+        instance.register(async (fallback) => {
+          const route = buildFastifyHandler({
+            method: 'GET',
+            handler: async ({ context }) => ({
+              statusCode: 404,
+              body: getNotFoundErrorBody(context.transport.request.method, context.transport.request.path.split('?')[0])
+            })
+          })
+          fallback.setErrorHandler(route.errorHandler)
+          fallback.addHook('onSend', setJsonApiResponseType)
+          fallback.addHook('preParsing', route.preParsing)
+          fallback.setNotFoundHandler({ preValidation: route.preValidation }, route.handler)
+        }, { prefix: mountPath })
+      }
+    })
+
     addHook('addRoute', 'fastifyRouteCreator', {}, async ({ context }) => {
-      const route = buildFastifyHandler(context)
-      app.route(route)
+      registerRoute(buildFastifyHandler(context))
       log.trace(`Fastify route created: ${context.method} ${context.path}`)
     })
 

@@ -44,6 +44,9 @@ function detectDialect (knex) {
   if (clientName.includes('mysql')) {
     return 'mysql2'
   }
+  if (clientName === 'pg' || clientName === 'postgresql') {
+    return 'pg'
+  }
 
   throw new Error(`Unsupported knex client "${clientName || 'unknown'}" for introspectKnexTableSnapshot.`)
 }
@@ -67,10 +70,11 @@ function toNullableNumber (value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function normalizeColumnDefault (value) {
+function normalizeColumnDefault (value, literal = false) {
   if (value == null) {
     return null
   }
+  if (literal) return value
 
   if (typeof value === 'string') {
     const text = value.trim()
@@ -89,7 +93,12 @@ function normalizeColumnDefault (value) {
   return value
 }
 
-function parseEnumLikeValues (columnType = '', typeName = 'enum') {
+function decodeMysqlStringEscapes (value) {
+  const escapes = { 0: '\0', b: '\b', n: '\n', r: '\r', t: '\t', Z: '\x1a' }
+  return value.replace(/\\(.)/gs, (_match, char) => escapes[char] ?? char)
+}
+
+function parseEnumLikeValues (columnType = '', typeName = 'enum', backslashEscapes = false) {
   const source = normalizeText(columnType)
   const normalizedType = `${String(typeName || '').toLowerCase()}(`
   if (!source.toLowerCase().startsWith(normalizedType) || !source.endsWith(')')) {
@@ -98,13 +107,25 @@ function parseEnumLikeValues (columnType = '', typeName = 'enum') {
 
   const body = source.slice(normalizedType.length, -1)
   const values = []
-  const pattern = /'((?:''|\\'|[^'])*)'/g
+  const pattern = backslashEscapes ? /'((?:''|\\.|[^'\\])*)'/gs : /'((?:''|[^'])*)'/g
   let match = null
   while ((match = pattern.exec(body)) != null) {
-    values.push(match[1].replace(/''/g, "'").replace(/\\'/g, "'"))
+    const value = match[1].replace(/''/g, "'")
+    values.push(backslashEscapes ? decodeMysqlStringEscapes(value) : value)
   }
 
   return values
+}
+
+function normalizeMysqlDefault (row) {
+  const value = Object.hasOwn(row, 'columnDefault') ? row.columnDefault : row.column_default
+  if (row.dataType !== 'json' || typeof value !== 'string') return value
+  let expression = value.trim()
+  if (expression.startsWith('(') && expression.endsWith(')')) expression = expression.slice(1, -1).trim()
+  // MySQL escapes a generated default expression once more in COLUMN_DEFAULT.
+  if (/^(?:_[a-z0-9]+)?\\'/i.test(expression)) expression = decodeMysqlStringEscapes(expression)
+  const literal = /^(?:_[a-z0-9]+)?('(?:''|\\.|[^'\\])*')$/is.exec(expression)
+  return literal ? parseEnumLikeValues(`enum(${literal[1]})`, 'enum', true)[0] : value
 }
 
 function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
@@ -113,6 +134,8 @@ function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
 
   if (
     normalizedType === 'varchar' ||
+    normalizedType === 'character varying' ||
+    normalizedType === 'character' ||
     normalizedType === 'char' ||
     normalizedType === 'text' ||
     normalizedType === 'tinytext' ||
@@ -146,6 +169,7 @@ function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
     normalizedType === 'numeric' ||
     normalizedType === 'float' ||
     normalizedType === 'double' ||
+    normalizedType === 'double precision' ||
     normalizedType === 'real'
   ) {
     return 'number'
@@ -155,20 +179,21 @@ function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
     return 'boolean'
   }
 
-  if (normalizedType === 'datetime' || normalizedType === 'timestamp') {
+  if (['datetime', 'timestamp', 'timestamp with time zone', 'timestamp without time zone'].includes(normalizedType)) {
     return 'datetime'
   }
   if (normalizedType === 'date') {
     return 'date'
   }
-  if (normalizedType === 'time') {
+  if (['time', 'time without time zone'].includes(normalizedType)) {
     return 'time'
   }
-  if (normalizedType === 'json') {
+  if (normalizedType === 'json' || normalizedType === 'jsonb') {
     return 'json'
   }
   if (
     normalizedType === 'blob' ||
+    normalizedType === 'bytea' ||
     normalizedType === 'binary' ||
     normalizedType === 'varbinary'
   ) {
@@ -184,6 +209,7 @@ function buildColumnSnapshot ({
   columnType = '',
   nullable = false,
   defaultValue = null,
+  defaultIsLiteral = false,
   extra = '',
   autoIncrement = false,
   unsigned = false,
@@ -200,7 +226,7 @@ function buildColumnSnapshot ({
   const normalizedName = normalizeText(name)
   const normalizedDataType = normalizeText(dataType).toLowerCase()
   const normalizedColumnType = normalizeText(columnType)
-  const normalizedDefaultValue = normalizeColumnDefault(defaultValue)
+  const normalizedDefaultValue = normalizeColumnDefault(defaultValue, defaultIsLiteral)
 
   return {
     name: normalizedName,
@@ -225,8 +251,8 @@ function buildColumnSnapshot ({
     characterSetName: normalizeText(characterSetName),
     collationName: normalizeText(collationName),
     ordinalPosition: toNullableNumber(ordinalPosition),
-    enumValues: Array.isArray(enumValues) ? enumValues : parseEnumLikeValues(normalizedColumnType, 'enum'),
-    setValues: Array.isArray(setValues) ? setValues : parseEnumLikeValues(normalizedColumnType, 'set')
+    enumValues: Array.isArray(enumValues) ? enumValues : parseEnumLikeValues(normalizedColumnType, 'enum', true),
+    setValues: Array.isArray(setValues) ? setValues : parseEnumLikeValues(normalizedColumnType, 'set', true)
   }
 }
 
@@ -365,16 +391,12 @@ function requireIdColumn (columns, idColumn) {
   if (!idSpec) {
     throw new Error(`Could not find id column "${normalizedIdColumn}" in table.`)
   }
-  if (idSpec.typeKind !== 'integer') {
-    throw new Error(`Id column "${normalizedIdColumn}" must use an integer type.`)
+  if (!['integer', 'string'].includes(idSpec.typeKind)) {
+    throw new Error(`Id column "${normalizedIdColumn}" must use an integer or string type.`)
   }
   if (idSpec.nullable) {
     throw new Error(`Id column "${normalizedIdColumn}" must be not-null.`)
   }
-  if (!idSpec.autoIncrement && !idSpec.hasDefault) {
-    throw new Error(`Id column "${normalizedIdColumn}" must be auto-incrementing or have a database default.`)
-  }
-
   return normalizedIdColumn
 }
 
@@ -760,7 +782,7 @@ function deriveSqliteColumnNumbers (dataType, args = '') {
   }
 }
 
-async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
+async function introspectSqliteColumns (knex, tableName) {
   const quotedTableName = quoteSqliteIdentifier(tableName)
   const tableRows = normalizeRows(await knex.raw(
     'SELECT name, sql FROM sqlite_master WHERE type = \'table\' AND name = ? LIMIT 1',
@@ -819,6 +841,13 @@ async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
     .filter((row) => Number(row.pk) > 0)
     .sort((left, right) => Number(left.pk) - Number(right.pk))
     .map((row) => normalizeText(row.name))
+
+  return { columns, primaryKeyColumns, parsedConstraints }
+}
+
+async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
+  const { columns, primaryKeyColumns, parsedConstraints } = await introspectSqliteColumns(knex, tableName)
+  const quotedTableName = quoteSqliteIdentifier(tableName)
 
   const indexListRows = normalizeRows(await knex.raw(`PRAGMA index_list(${quotedTableName})`))
   const indexRows = []
@@ -1016,7 +1045,8 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
     dataType: row.dataType,
     columnType: row.columnType,
     nullable: normalizeText(row.isNullable).toUpperCase() === 'YES',
-    defaultValue: Object.prototype.hasOwnProperty.call(row, 'columnDefault') ? row.columnDefault : row.column_default,
+    defaultValue: normalizeMysqlDefault(row),
+    defaultIsLiteral: true,
     extra: row.extra,
     autoIncrement: normalizeText(row.extra).toLowerCase().includes('auto_increment'),
     unsigned: normalizeText(row.columnType).toLowerCase().includes('unsigned'),
@@ -1055,6 +1085,167 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
   }
 }
 
+async function introspectPostgresColumns (knex, tableName, explicitSchema) {
+  const schemaName = explicitSchema || normalizeDbSchemaName(normalizeRows(await knex.raw('SELECT current_schema() AS "schemaName"')))
+  const columnRows = normalizeRows(await knex.raw(`
+    SELECT c.*, pg_catalog.format_type(a.atttypid, a.atttypmod) AS column_type
+    FROM information_schema.columns c
+    JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
+    JOIN pg_catalog.pg_class t ON t.relnamespace = n.oid AND t.relname = c.table_name
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name
+    WHERE c.table_schema = ? AND c.table_name = ?
+    ORDER BY c.ordinal_position
+  `, [schemaName, tableName]))
+  if (columnRows.length < 1) throw new Error(`Could not introspect table "${tableName}" in schema "${schemaName}".`)
+
+  const columns = columnRows.map(row => {
+    const autoIncrement = row.is_identity === 'YES' || /^nextval\(/.test(row.column_default || '')
+    // Decode quoted SQL constants without evaluating default expressions.
+    const constant = /^'((?:''|[^'])*)'::[a-z ]+(?:\(\d+(?:,\d+)?\))?$/.exec(row.column_default || '')
+    const defaultValue = constant ? constant[1].replace(/''/g, "'") : /^NULL(?:::.*)?$/i.test(row.column_default || '') ? null : row.column_default
+    return buildColumnSnapshot({
+      name: row.column_name,
+      dataType: row.data_type,
+      columnType: row.column_type,
+      nullable: row.is_nullable === 'YES',
+      defaultValue,
+      defaultIsLiteral: Boolean(constant),
+      autoIncrement,
+      extra: autoIncrement ? 'auto_increment' : '',
+      maxLength: row.character_maximum_length,
+      numericPrecision: row.numeric_precision,
+      numericScale: row.numeric_scale,
+      datetimePrecision: row.datetime_precision,
+      characterSetName: row.character_set_name,
+      collationName: row.collation_name,
+      ordinalPosition: row.ordinal_position
+    })
+  })
+  const constraints = normalizeRows(await knex.raw(`
+    SELECT c.conname, c.contype, c.confupdtype, c.confdeltype,
+      parent.relname AS referenced_table, parent_ns.nspname AS referenced_schema,
+      pg_catalog.pg_get_expr(c.conbin, c.conrelid) AS clause,
+      ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY AS k(num, position)
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.num
+        ORDER BY k.position) AS columns,
+      ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY AS k(num, position)
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.num
+        ORDER BY k.position) AS referenced_columns
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+    LEFT JOIN pg_catalog.pg_class parent ON parent.oid = c.confrelid
+    LEFT JOIN pg_catalog.pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+    WHERE n.nspname = ? AND t.relname = ?
+    ORDER BY c.conname
+  `, [schemaName, tableName]))
+  for (const constraint of constraints) {
+    if (constraint.contype !== 'c' || constraint.columns.length !== 1) continue
+    const match = /^\((?:"((?:""|[^"])*)"|([\w]+)) = ANY \(ARRAY\[(.*)\]\)\)$/.exec(constraint.clause || '')
+    const column = columns.find(column => column.name === constraint.columns[0])
+    if (!match || column?.dataType !== 'text' || (match[1]?.replace(/""/g, '"') || match[2]) !== column.name) continue
+    const literalPattern = /'((?:''|[^'])*)'::text/g
+    const literals = [...match[3].matchAll(literalPattern)]
+    if (!literals.length || match[3].replace(literalPattern, '').replace(/[,\s]/g, '')) continue
+    column.enumValues = literals.map(literal => literal[1].replace(/''/g, "'"))
+    // PostgreSQL rewrites Knex's inline IN check to ANY; retain its logical form.
+    constraint.clause = `"${column.name.replace(/"/g, '""')}" in (${literals.map(literal => `'${literal[1]}'`).join(', ')})`
+  }
+  return { schemaName, columns, constraints }
+}
+
+async function introspectPostgresTableSnapshot (knex, { tableName, idColumn }) {
+  const { schemaName, columns, constraints } = await introspectPostgresColumns(knex, tableName)
+  const indexRows = normalizeRows(await knex.raw(`
+    SELECT idx.relname AS "indexName", CASE WHEN i.indisunique THEN 0 ELSE 1 END AS "nonUnique",
+      am.amname AS "indexType", a.attname AS "columnName", k.position AS "seqInIndex",
+      i.indexprs IS NOT NULL OR i.indpred IS NOT NULL OR i.indnatts <> i.indnkeyatts
+        OR i.indnullsnotdistinct OR NOT i.indisvalid AS unsupported
+    FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_catalog.pg_class idx ON idx.oid = i.indexrelid
+    JOIN pg_catalog.pg_am am ON am.oid = idx.relam
+    CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(num, position)
+    LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.num
+    WHERE n.nspname = ? AND t.relname = ? AND NOT i.indisprimary
+    ORDER BY idx.relname, k.position
+  `, [schemaName, tableName]))
+  const unsupportedIndex = indexRows.find(row => row.unsupported)
+  if (unsupportedIndex) throw new Error(`Index '${unsupportedIndex.indexName}' cannot be represented by a simple column-index snapshot.`)
+  const unsupportedConstraint = constraints.find(row => row.contype === 'x' || (row.contype === 'f' && row.referenced_schema !== schemaName))
+  if (unsupportedConstraint) throw new Error(`Constraint '${unsupportedConstraint.conname}' cannot be represented by this table snapshot.`)
+
+  const primaryKeyColumns = constraints.find(row => row.contype === 'p')?.columns || []
+  const resolvedIdColumn = requireIdColumn(columns, idColumn)
+  requirePrimaryKeyContainsId(primaryKeyColumns, resolvedIdColumn)
+  const actions = { a: 'NO ACTION', r: 'RESTRICT', c: 'CASCADE', n: 'SET NULL', d: 'SET DEFAULT' }
+  const foreignKeyRows = constraints.filter(row => row.contype === 'f').flatMap(row => row.columns.map((column, index) => ({
+    constraintName: row.conname,
+    columnName: column,
+    referencedTableName: row.referenced_table,
+    referencedColumnName: row.referenced_columns[index],
+    ordinalPosition: index + 1,
+    updateRule: actions[row.confupdtype],
+    deleteRule: actions[row.confdeltype]
+  })))
+  return {
+    dialect: 'pg',
+    schemaName,
+    tableName,
+    tableCollation: '',
+    idColumn: resolvedIdColumn,
+    primaryKeyColumns,
+    hasWorkspaceIdColumn: columns.some(column => column.name === 'workspace_id'),
+    hasUserIdColumn: columns.some(column => column.name === 'user_id'),
+    columns,
+    indexes: normalizeIndexes(indexRows),
+    foreignKeys: normalizeForeignKeys(foreignKeyRows, [], tableName),
+    checkConstraints: normalizeCheckConstraints(constraints.filter(row => row.contype === 'c').map(row => ({ name: row.conname, clause: row.clause })), tableName)
+  }
+}
+
+export async function hasKnexTableIndex (knex, tableName, indexName) {
+  const client = knex.client.config.client
+  if (['sqlite3', 'better-sqlite3'].includes(client)) {
+    const rows = normalizeRows(await knex.raw('PRAGMA index_list(??)', [tableName]))
+    return rows.some(row => row.name === indexName)
+  }
+  if (['mysql', 'mysql2'].includes(client)) {
+    return Boolean(await knex('information_schema.statistics').first('INDEX_NAME').where({
+      TABLE_SCHEMA: knex.raw('DATABASE()'), TABLE_NAME: tableName, INDEX_NAME: indexName
+    }))
+  }
+  if (['pg', 'postgresql'].includes(client)) {
+    return Boolean(await knex('pg_indexes').first('indexname').where({
+      schemaname: knex.raw('current_schema()'), tablename: tableName, indexname: indexName
+    }))
+  }
+  throw new Error(`Unsupported knex client '${client}' for hasKnexTableIndex`)
+}
+
+// Column-only ALTER must not impose the resource snapshot's ID or index restrictions.
+export async function introspectKnexColumnConstraints (knex, tableName) {
+  requireKnexRaw(knex)
+  const resolvedTableName = normalizeText(tableName)
+  if (!resolvedTableName) throw new TypeError('Column introspection requires tableName.')
+  const dialect = detectDialect(knex)
+  if (dialect === 'sqlite') {
+    const { columns, parsedConstraints } = await introspectSqliteColumns(knex, resolvedTableName)
+    return { columns, checkConstraints: normalizeCheckConstraints(parsedConstraints.checkConstraints, resolvedTableName) }
+  }
+  if (dialect === 'pg') {
+    const parts = resolvedTableName.split('.')
+    if (parts.length > 2 || parts.some(part => !part)) throw new Error('Expected a table name or schema.table for column introspection.')
+    const { columns, constraints } = await introspectPostgresColumns(knex, parts.at(-1), parts.length === 2 ? parts[0] : undefined)
+    return {
+      columns,
+      checkConstraints: normalizeCheckConstraints(constraints.filter(row => row.contype === 'c').map(row => ({ name: row.conname, clause: row.clause })), resolvedTableName)
+    }
+  }
+  throw new Error('Column check introspection is not required for native MySQL enum alterations.')
+}
+
 export async function introspectKnexTableSnapshot (knex, { tableName = '', idColumn = 'id' } = {}) {
   requireKnexRaw(knex)
   const resolvedTableName = requireTableName(tableName)
@@ -1072,6 +1263,9 @@ export async function introspectKnexTableSnapshot (knex, { tableName = '', idCol
       tableName: resolvedTableName,
       idColumn
     })
+  }
+  if (dialect === 'pg') {
+    return introspectPostgresTableSnapshot(knex, { tableName: resolvedTableName, idColumn })
   }
 
   throw new Error(`Unsupported dialect "${dialect}" for introspectKnexTableSnapshot.`)

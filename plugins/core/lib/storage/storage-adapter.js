@@ -1,21 +1,29 @@
+// @ts-check
 import {
-  getFieldValue as getLegacyFieldValue,
+  getFieldValue as getTableFieldValue,
   getIdColumn,
   getStorageInfo,
   getStorageColumn,
   translateAttributesForStorage,
+  serializeFieldValueForStorage,
+  assertWritableKnexColumns,
 } from './storage-mapping.js'
 import {
   getCanonicalFieldValue,
   getCanonicalResourceIdColumn,
   translateCanonicalAttributesForStorage,
 } from './canonical-storage-mapping.js'
+import { assertScalarQueryField } from '../querying-writing/field-utils.js'
 import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
 
-const passthrough = (value) => value
-const identityTranslate = (_field, value) => value
-const identityScope = (query) => query
+/** @import { BaseStorageAdapterOptions, CanonicalDescriptor, SelectColumn, SelectTranslator, StorageAdapter, StorageAdapterOptions, StorageAdapterLookupOptions, StorageSchemaInfo, StorageFieldDefinition } from './storage-types.js' */
 
+/** @template T @param {T} value @returns {T} */
+const passthrough = (value) => value
+/** @type {StorageAdapter['translateFilterValue']} */
+const identityTranslate = (_field, value) => value
+
+/** @type {StorageAdapter['selectColumns']} */
 const selectColumnsOnBuilder = (builder, columns) => {
   if (!columns) return builder
   if (Array.isArray(columns)) {
@@ -26,16 +34,16 @@ const selectColumnsOnBuilder = (builder, columns) => {
   return builder
 }
 
-const normalizeArray = (value, normalizeFn) => value.map((entry) => normalizeFn(entry))
-
+/** @param {unknown} value @returns {unknown} */
 const normalizeBelongsToValue = (value) => {
   if (value === null || value === undefined) return value
   if (Array.isArray(value)) {
-    return normalizeArray(value, normalizeBelongsToValue)
+    return value.map(entry => normalizeBelongsToValue(entry))
   }
   return String(value)
 }
 
+/** @param {unknown} value @returns {boolean} */
 const normalizeBooleanValue = (value) => {
   if (typeof value === 'boolean') return value
   if (typeof value === 'string') {
@@ -50,13 +58,16 @@ const normalizeBooleanValue = (value) => {
   return Boolean(value)
 }
 
-const normalizeFilterValueForDefinition = (value, definition = {}, { isRelationship = false } = {}) => {
+/**
+ * @param {unknown} value
+ * @param {StorageFieldDefinition} [definition]
+ * @param {{ isRelationship?: boolean, databaseClient?: string, textStorage?: boolean }} [options]
+ * @returns {unknown}
+ */
+const normalizeFilterValueForDefinition = (value, definition = {}, { isRelationship = false, databaseClient, textStorage } = {}) => {
   if (value === null || value === undefined) return value
   if (Array.isArray(value)) {
-    return normalizeArray(
-      value,
-      (entry) => normalizeFilterValueForDefinition(entry, definition, { isRelationship })
-    )
+    return value.map(entry => normalizeFilterValueForDefinition(entry, definition, { isRelationship, databaseClient, textStorage }))
   }
 
   if (isRelationship) {
@@ -79,6 +90,8 @@ const normalizeFilterValueForDefinition = (value, definition = {}, { isRelations
 
   if (['date', 'dateTime', 'time'].includes(type)) {
     return normalizeValueForDatabaseStorage(value, type, {
+      databaseClient,
+      textStorage,
       temporalPrecision: definition?.temporalPrecision
     })
   }
@@ -86,11 +99,15 @@ const normalizeFilterValueForDefinition = (value, definition = {}, { isRelations
   return value
 }
 
+/** @param {string} source @param {StorageAdapter | null | undefined} adapter @returns {string} */
 const translateSourceColumn = (source, adapter) => {
   if (!adapter || source === '*') return source
   return adapter.translateColumn(source) || source
 }
 
+/** @overload @param {StorageAdapter} adapter @returns {SelectTranslator} */
+/** @overload @param {StorageAdapter | null | undefined} adapter @returns {SelectTranslator | null} */
+/** @param {StorageAdapter | null | undefined} adapter @returns {SelectTranslator | null} */
 export const createSelectTranslator = (adapter) => {
   if (!adapter) return null
 
@@ -119,6 +136,7 @@ export const createSelectTranslator = (adapter) => {
   }
 }
 
+/** @param {SelectColumn[] | null | undefined} fields @param {StorageAdapter | null | undefined} adapter @returns {SelectColumn[] | null | undefined} */
 export const translateSelectFieldsForAdapter = (fields, adapter) => {
   if (!adapter || !fields) return fields
 
@@ -130,7 +148,7 @@ export const translateSelectFieldsForAdapter = (fields, adapter) => {
 
     const aliasMatch = field.match(/\s+as\s+/i)
     if (aliasMatch) {
-      const [source, alias] = field.split(/\s+as\s+/i)
+      const [source = '', alias = ''] = field.split(/\s+as\s+/i)
       const translatedSource = translateSourceColumn(source.trim(), adapter)
       return `${translatedSource} as ${alias.trim()}`
     }
@@ -139,20 +157,23 @@ export const translateSelectFieldsForAdapter = (fields, adapter) => {
   })
 }
 
+/** @param {BaseStorageAdapterOptions} options @returns {StorageAdapter} */
 const baseAdapter = ({
   knex,
   tableName,
   idColumn,
   translateColumn,
   translateFilterValue = identityTranslate,
-  applyResourceScope = identityScope,
+  translateCursorValue = identityTranslate,
+  applyResourceScope = passthrough,
   toStorageRow = passthrough,
   getFieldValue = (record, fieldName) => record?.[fieldName],
   isCanonical = false,
 }) => {
-  const buildBaseQuery = ({ transaction } = {}) => {
-    const query = (transaction || knex)(tableName)
-    return applyResourceScope(query)
+  /** @type {StorageAdapter['buildBaseQuery']} */
+  const buildBaseQuery = ({ transaction, tableAlias } = {}) => {
+    const query = (transaction || knex)(tableAlias ? { [tableAlias]: tableName } : tableName)
+    return applyResourceScope(query, tableAlias)
   }
 
   return {
@@ -161,28 +182,45 @@ const baseAdapter = ({
     getIdColumn: () => idColumn,
     translateColumn,
     translateFilterValue,
+    translateCursorValue,
     applyResourceScope,
     toStorageRow,
     getFieldValue,
     buildBaseQuery,
-    selectColumns: (builder, columns) => selectColumnsOnBuilder(builder, columns),
+    selectColumns: selectColumnsOnBuilder,
   }
 }
 
-const createLegacyAdapter = ({ knex, schemaInfo }) => {
+/** @param {StorageAdapterOptions} options @returns {StorageAdapter} */
+const createTableAdapter = ({ knex, schemaInfo }) => {
+  assertWritableKnexColumns(getStorageInfo(schemaInfo))
   const tableName = schemaInfo.tableName
   const idColumn = getIdColumn(schemaInfo)
 
+  /** @type {StorageAdapter['translateColumn']} */
   const translateColumn = (field) => getStorageColumn(schemaInfo, field)
-  const toStorageRow = (attributes, options = {}) => translateAttributesForStorage(attributes, schemaInfo, options)
-  const getFieldValue = (record, fieldName) => getLegacyFieldValue(record, schemaInfo, fieldName)
+  /** @type {StorageAdapter['toStorageRow']} */
+  const toStorageRow = (attributes, options = {}) => translateAttributesForStorage(attributes, schemaInfo, { ...options, databaseClient: knex.client.config.client })
+  /** @type {StorageAdapter['getFieldValue']} */
+  const getFieldValue = (record, fieldName) => getTableFieldValue(record, schemaInfo, fieldName)
+  /** @type {StorageAdapter['translateCursorValue']} */
+  const translateCursorValue = (field, value) => {
+    const definition = schemaInfo.schemaStructure?.[field]
+    return normalizeFilterValueForDefinition(value, definition, {
+      isRelationship: Boolean(definition?.belongsTo || definition?.belongsToPolymorphic),
+      databaseClient: knex.client.config.client
+    })
+  }
+  /** @type {StorageAdapter['translateFilterValue']} */
   const translateFilterValue = (field, value) => {
     const searchField = schemaInfo.searchSchemaStructure?.[field]
     const fieldName = searchField?.actualField || field
     const schemaField = schemaInfo.schemaStructure?.[fieldName]
+    assertScalarQueryField(schemaField, fieldName, 'filter')
     const fieldStorage = getStorageInfo(schemaInfo).fields[fieldName]
     if (fieldStorage?.serialize) {
-      const serialize = (entry) => fieldStorage.serialize(entry, {
+      /** @param {unknown} entry */
+      const serialize = (entry) => serializeFieldValueForStorage(entry, {
         fieldName,
         columnName: fieldStorage.column,
         definition: fieldStorage.definition,
@@ -198,7 +236,7 @@ const createLegacyAdapter = ({ knex, schemaInfo }) => {
       schemaField?.belongsTo ||
       schemaField?.belongsToPolymorphic
     )
-    return normalizeFilterValueForDefinition(value, definition, { isRelationship })
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client })
   }
 
   return baseAdapter({
@@ -207,25 +245,28 @@ const createLegacyAdapter = ({ knex, schemaInfo }) => {
     idColumn,
     translateColumn,
     translateFilterValue,
-    applyResourceScope: identityScope,
+    translateCursorValue,
+    applyResourceScope: passthrough,
     toStorageRow,
     getFieldValue,
     isCanonical: false,
   })
 }
 
-const createCanonicalAdapter = ({ knex, schemaInfo }) => {
-  const descriptor = schemaInfo.descriptor || {}
-  const canonical = descriptor.canonical || {}
+/** @param {StorageAdapterOptions & { descriptor: CanonicalDescriptor }} options @returns {StorageAdapter} */
+const createCanonicalAdapter = ({ knex, schemaInfo, descriptor }) => {
+  const canonical = descriptor.canonical
   const canonicalFieldMap = descriptor.canonicalFieldMap || {}
   const fieldsInfo = descriptor.fields || {}
   const belongsToInfo = descriptor.belongsTo || {}
   const idProperty = schemaInfo.idProperty || descriptor.idProperty || 'id'
+  /** @param {string} field */
   const isLogicalIdField = (field) => field === 'id' || field === idProperty
   const descriptorWithIdProperty = descriptor.idProperty === idProperty
     ? descriptor
     : { ...descriptor, idProperty }
 
+  /** @type {StorageAdapter['translateColumn']} */
   const translateColumn = (field) => {
     if (!field) return field
     if (isLogicalIdField(field)) return getCanonicalResourceIdColumn(descriptor)
@@ -251,7 +292,7 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
     if (!canonicalEntry && field.endsWith('_type')) {
       const alias = field.slice(0, -5)
       const aliasEntry = canonicalFieldMap[alias]
-      if (aliasEntry?.typeSlot) return aliasEntry.typeSlot
+      if (typeof aliasEntry === 'object' && aliasEntry?.typeSlot) return aliasEntry.typeSlot
     }
 
     const fieldInfo = fieldsInfo[field]
@@ -263,9 +304,27 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
     return field
   }
 
+  /** @type {StorageAdapter['translateFilterValue']} */
   const translateFilterValue = (field, value) => {
     const searchField = schemaInfo.searchSchemaStructure?.[field]
-    const schemaField = schemaInfo.schemaStructure?.[field]
+    const fieldName = searchField?.actualField || field
+    const schemaField = schemaInfo.schemaStructure?.[fieldName]
+    assertScalarQueryField(schemaField, fieldName, 'filter')
+    if (schemaField?.storage?.serialize) {
+      /** @param {unknown} entry */
+      const serialize = entry => {
+        const serialized = serializeFieldValueForStorage(entry, {
+          fieldName,
+          columnName: translateColumn(fieldName),
+          definition: schemaField,
+          schemaInfo,
+          operation: 'filter'
+        })
+        return schemaField.type === 'id' ? normalizeBelongsToValue(serialized) : serialized
+      }
+      return Array.isArray(value) ? value.map(serialize) : serialize(value)
+    }
+    if (isLogicalIdField(fieldName) || schemaField?.type === 'id') return normalizeBelongsToValue(value)
     const isRelationship = Boolean(
       searchField?.isRelationship ||
       schemaField?.belongsTo ||
@@ -273,20 +332,33 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
     )
     const definition = searchField || schemaField || {}
 
-    return normalizeFilterValueForDefinition(value, definition, { isRelationship })
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client, textStorage: fieldsInfo[fieldName]?.slotType === 'string' })
   }
 
-  const applyResourceScope = (query) => {
+  /** @type {StorageAdapter['translateCursorValue']} */
+  const translateCursorValue = (field, value) => {
+    const definition = schemaInfo.schemaStructure?.[field]
+    if (isLogicalIdField(field) || definition?.type === 'id') return normalizeBelongsToValue(value)
+    return normalizeFilterValueForDefinition(value, definition, {
+      isRelationship: Boolean(definition?.belongsTo || definition?.belongsToPolymorphic),
+      databaseClient: knex.client.config.client,
+      textStorage: fieldsInfo[field]?.slotType === 'string'
+    })
+  }
+
+  /** @type {StorageAdapter['applyResourceScope']} */
+  const applyResourceScope = (query, tableAlias) => {
+    const prefix = tableAlias ? `${tableAlias}.` : ''
     return query
-      .where(canonical.tenantColumn, descriptor.tenant)
-      .where(canonical.resourceColumn, descriptor.resource)
+      .where(`${prefix}${canonical.tenantColumn}`, descriptor.tenant)
+      .where(`${prefix}${canonical.resourceColumn}`, descriptor.resource)
   }
 
-  const toStorageRow = (attributes) => translateCanonicalAttributesForStorage(attributes, descriptor)
+  /** @type {StorageAdapter['toStorageRow']} */
+  const toStorageRow = (attributes, options = {}) => translateCanonicalAttributesForStorage(attributes, descriptor, { ...options, schemaInfo, databaseClient: knex.client.config.client })
+  /** @type {StorageAdapter['getFieldValue']} */
   const getFieldValue = (record, fieldName) => (
-    isLogicalIdField(fieldName)
-      ? getCanonicalFieldValue(record, descriptorWithIdProperty, fieldName)
-      : getCanonicalFieldValue(record, descriptor, fieldName)
+    getCanonicalFieldValue(record, isLogicalIdField(fieldName) ? descriptorWithIdProperty : descriptor, fieldName)
   )
 
   return baseAdapter({
@@ -295,6 +367,7 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
     idColumn: getCanonicalResourceIdColumn(descriptor),
     translateColumn,
     translateFilterValue,
+    translateCursorValue,
     applyResourceScope,
     toStorageRow,
     getFieldValue,
@@ -302,14 +375,34 @@ const createCanonicalAdapter = ({ knex, schemaInfo }) => {
   })
 }
 
+/** @param {StorageAdapterOptions} options @returns {StorageAdapter} */
 export const createStorageAdapter = ({ knex, schemaInfo }) => {
   if (!schemaInfo) {
     throw new Error('createStorageAdapter requires schemaInfo')
   }
 
-  if (schemaInfo?.descriptor?.canonical?.tableName) {
-    return createCanonicalAdapter({ knex, schemaInfo })
+  const descriptor = schemaInfo.descriptor
+  if (descriptor?.canonical?.tableName) {
+    return createCanonicalAdapter({ knex, schemaInfo, descriptor })
   }
 
-  return createLegacyAdapter({ knex, schemaInfo })
+  return createTableAdapter({ knex, schemaInfo })
+}
+
+/** @param {StorageAdapterLookupOptions} options @returns {(scopeName: string) => StorageAdapter | null} */
+export function createStorageAdapterLookup ({ knex, getResource }) {
+  /** @type {Map<string, { schemaInfo: StorageSchemaInfo, adapter: StorageAdapter }>} */
+  const adapters = new Map()
+  return scopeName => {
+    if (!scopeName) return null
+    const resource = getResource(scopeName)
+    const schemaInfo = resource?.vars?.schemaInfo
+    if (!schemaInfo) return null
+    const cached = adapters.get(scopeName)
+    if (cached && cached.schemaInfo === schemaInfo) return cached.adapter
+    const adapter = createStorageAdapter({ knex, schemaInfo })
+    adapters.set(scopeName, { adapter, schemaInfo })
+    if (resource?.vars) resource.vars.storageAdapter = adapter
+    return adapter
+  }
 }

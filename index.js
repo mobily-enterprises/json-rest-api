@@ -25,22 +25,11 @@ export { RestApiAnyapiKnexPlugin } from './plugins/core/rest-api-anyapi-knex-plu
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js'
 export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js'
-// Future: export { KoaPlugin } from './plugins/core/connectors/koa-plugin.js';
 
 // Storage plugins for file handling
 export { LocalStorage } from './plugins/storage/local-storage.js'
 export { S3Storage } from './plugins/storage/s3-storage.js'
 
-// Error classes for consumers who need them
-export {
-  RestApiFieldsetError,
-  RestApiTemporalDataError,
-  RestApiValidationError,
-  RestApiResourceError,
-  RestApiPayloadError
-} from './lib/rest-api-errors.js'
-
-// Re-export everything for backward compatibility
 export * from './lib/rest-api-errors.js'
 
 // URL helper function for generating API URL prefix

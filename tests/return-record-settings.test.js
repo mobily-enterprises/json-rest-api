@@ -1,184 +1,73 @@
-import { describe, it, before, after, beforeEach } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
 import { createReturnRecordApi } from './fixtures/api-configs.js'
 import { cleanTables } from './helpers/test-utils.js'
 
-const knex = knexLib({
-  client: 'better-sqlite3',
-  connection: {
-    filename: ':memory:'
-  },
-  useNullAsDefault: true
-})
-
+const knex = knexLib({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
 let api
 
-function itemDocument (type, name, id) {
-  const doc = {
-    data: {
-      type,
-      attributes: { name }
+describe('Explicit response options', () => {
+  before(async () => { api = await createReturnRecordApi(knex) })
+  after(async () => { await knex.destroy() })
+  beforeEach(async () => { await cleanTables(knex, ['return_global_items', 'return_scope_items']) })
+
+  it('uses global and resource defaults, with per-call overrides', async () => {
+    const global = await api.resources.global_items.post({ inputRecord: { name: 'Global' }, format: 'plain' })
+    assert.equal(global.name, 'Global')
+    const scoped = await api.resources.scope_items.post({ inputRecord: { id: '43', name: 'Scoped' }, format: 'plain' })
+    assert.deepEqual(scoped, { type: 'scope_items', id: '43' })
+    const full = await api.resources.scope_items.patch({
+      id: scoped.id, inputRecord: { name: 'Updated' }, format: 'plain', returning: 'full'
+    })
+    assert.equal(full.name, 'Updated')
+    assert.equal(await api.resources.scope_items.patch({
+      id: scoped.id, inputRecord: { name: 'Stored' }, format: 'plain', returning: 'none'
+    }), undefined)
+    assert.equal((await api.resources.scope_items.get({ id: scoped.id, format: 'plain' })).name, 'Stored')
+  })
+
+  it('keeps record fields separate from operation controls', async () => {
+    const created = await api.resources.global_items.post({
+      inputRecord: { id: '41', name: 'Options', format: 'record format', returning: 'record returning', queryParams: 'record query', data: { type: 'record data', value: 0 } },
+      format: 'plain',
+      returning: 'full'
+    })
+    assert.equal(created.id, '41')
+    assert.equal(created.format, 'record format')
+    assert.equal(created.returning, 'record returning')
+    assert.equal(created.queryParams, 'record query')
+    assert.deepEqual(created.data, { type: 'record data', value: 0 })
+    await assert.rejects(api.resources.global_items.patch({
+      id: '41', inputRecord: { id: '42', name: 'Wrong target' }, format: 'plain'
+    }))
+    assert.equal((await api.resources.global_items.get({ id: '41', format: 'plain' })).name, 'Options')
+    await assert.rejects(api.resources.global_items.get({ id: '42' }), { code: 'REST_API_RESOURCE', subtype: 'not_found' })
+  })
+
+  it('rejects ambiguous shorthand before writing', async () => {
+    await assert.rejects(api.resources.global_items.post({ name: 'Missing inputRecord' }), {
+      code: 'REST_API_VALIDATION', details: { fields: ['inputRecord'], violations: [] }
+    })
+    assert.deepEqual((await api.resources.global_items.query({})).data, [])
+  })
+
+  it('rejects invalid representations and return modes instead of silently falling back', async () => {
+    for (const format of [true, false, null, 'JSONAPI', 'simple', {}, []]) {
+      await assert.rejects(api.resources.global_items.post({ inputRecord: { name: 'Invalid' }, format }), { code: 'REST_API_VALIDATION' })
+      await assert.rejects(api.resources.global_items.query({ format }), { code: 'REST_API_VALIDATION' })
     }
-  }
-
-  if (id !== undefined) {
-    doc.data.id = String(id)
-  }
-
-  return doc
-}
-
-describe('Return record settings', () => {
-  before(async () => {
-    api = await createReturnRecordApi(knex)
+    for (const returning of [true, false, null, 'no', 'FULL', {}, { post: 'full' }, []]) {
+      await assert.rejects(api.resources.global_items.post({ inputRecord: { name: 'Invalid' }, format: 'plain', returning }), { code: 'REST_API_VALIDATION' })
+    }
+    assert.deepEqual((await api.resources.global_items.query({})).data, [])
   })
 
-  after(async () => {
-    await knex.destroy()
-  })
-
-  beforeEach(async () => {
-    await cleanTables(knex, [
-      'return_global_items',
-      'return_scope_items'
-    ])
-  })
-
-  it('normalizes plugin-level boolean return settings', async () => {
-    const created = await api.resources.global_items.post({
-      inputRecord: itemDocument('global_items', 'Global Created'),
-      simplified: false
-    })
-
-    assert.equal(created.data.type, 'global_items')
-    assert.equal(created.data.attributes.name, 'Global Created')
-
-    const replaced = await api.resources.global_items.put({
-      id: created.data.id,
-      inputRecord: itemDocument('global_items', 'Global Replaced', created.data.id),
-      simplified: false
-    })
-    assert.equal(replaced, undefined)
-
-    const patched = await api.resources.global_items.patch({
-      id: created.data.id,
-      inputRecord: itemDocument('global_items', 'Global Patched', created.data.id),
-      simplified: false
-    })
-    assert.equal(patched, undefined)
-
-    const fetched = await api.resources.global_items.get({
-      id: created.data.id,
-      simplified: false
-    })
-    assert.equal(fetched.data.attributes.name, 'Global Patched')
-  })
-
-  it('normalizes per-call boolean return settings', async () => {
-    const created = await api.resources.global_items.post({
-      inputRecord: itemDocument('global_items', 'Per-call Created'),
-      simplified: false,
-      returnFullRecord: false
-    })
-    assert.equal(created, undefined)
-
-    const queryResult = await api.resources.global_items.query({
-      simplified: false
-    })
-    assert.equal(queryResult.data.length, 1)
-    const fetched = queryResult.data[0]
-    assert.equal(fetched.attributes.name, 'Per-call Created')
-
-    const patched = await api.resources.global_items.patch({
-      id: fetched.id,
-      inputRecord: itemDocument('global_items', 'Per-call Patched', fetched.id),
-      simplified: false,
-      returnFullRecord: true
-    })
-    assert.equal(patched.data.type, 'global_items')
-    assert.equal(patched.data.id, fetched.id)
-    assert.equal(patched.data.attributes.name, 'Per-call Patched')
-  })
-
-  it('normalizes resource-level boolean return settings', async () => {
-    const created = await api.resources.scope_items.post({
-      inputRecord: itemDocument('scope_items', 'Scoped Created'),
-      simplified: false
-    })
-    assert.equal(created, undefined)
-
-    const queryResult = await api.resources.scope_items.query({
-      simplified: false
-    })
-    assert.equal(queryResult.data.length, 1)
-    const fetched = queryResult.data[0]
-
-    const replaced = await api.resources.scope_items.put({
-      id: fetched.id,
-      inputRecord: itemDocument('scope_items', 'Scoped Replaced', fetched.id),
-      simplified: false
-    })
-    assert.equal(replaced.data.type, 'scope_items')
-    assert.equal(replaced.data.id, fetched.id)
-    assert.equal(replaced.data.attributes.name, 'Scoped Replaced')
-
-    const patched = await api.resources.scope_items.patch({
-      id: fetched.id,
-      inputRecord: itemDocument('scope_items', 'Scoped Patched', fetched.id),
-      simplified: false
-    })
-    assert.deepEqual(patched, {
-      data: {
-        type: 'scope_items',
-        id: fetched.id
-      }
-    })
-  })
-
-  it('normalizes transport boolean return settings', async () => {
-    const created = await api.resources.global_items.post({
-      inputRecord: itemDocument('global_items', 'Transport Created'),
-      simplified: false,
-      isTransport: true
-    })
-    assert.equal(created, undefined)
-
-    const queryResult = await api.resources.global_items.query({
-      simplified: false
-    })
-    assert.equal(queryResult.data.length, 1)
-    const fetched = queryResult.data[0]
-
-    const replaced = await api.resources.global_items.put({
-      id: fetched.id,
-      inputRecord: itemDocument('global_items', 'Transport Replaced', fetched.id),
-      simplified: false,
-      isTransport: true
-    })
-    assert.equal(replaced.data.type, 'global_items')
-    assert.equal(replaced.data.id, fetched.id)
-    assert.equal(replaced.data.attributes.name, 'Transport Replaced')
-
-    const patched = await api.resources.global_items.patch({
-      id: fetched.id,
-      inputRecord: itemDocument('global_items', 'Transport Patched', fetched.id),
-      simplified: false,
-      isTransport: true
-    })
-    assert.deepEqual(patched, {
-      data: {
-        type: 'global_items',
-        id: fetched.id
-      }
-    })
-
-    const scoped = await api.resources.scope_items.post({
-      inputRecord: itemDocument('scope_items', 'Scoped Transport Created'),
-      simplified: false,
-      isTransport: true
-    })
-    assert.equal(scoped.data.type, 'scope_items')
-    assert.equal(scoped.data.attributes.name, 'Scoped Transport Created')
+  it('reports removed options instead of running a different operation silently', async () => {
+    for (const name of ['simplified', 'returnFullRecord', 'isTransport', 'simplifiedApi', 'simplifiedTransport', 'returnRecordApi', 'returnRecordTransport']) {
+      await assert.rejects(api.resources.global_items.post({ inputRecord: { name: 'Invalid' }, [name]: true }), { code: 'REST_API_VALIDATION' })
+      await assert.rejects(api.resources.global_items.query({ [name]: true }), { code: 'REST_API_VALIDATION' })
+    }
+    assert.deepEqual((await api.resources.global_items.query({})).data, [])
   })
 })

@@ -307,7 +307,7 @@ describe('dbIntrospection.introspectKnexTableSnapshot (sqlite)', () => {
     const unsupportedKnex = {
       client: {
         config: {
-          client: 'pg'
+          client: 'mssql'
         }
       },
       async raw () {

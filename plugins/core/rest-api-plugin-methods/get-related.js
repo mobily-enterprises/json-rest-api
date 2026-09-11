@@ -1,19 +1,18 @@
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
+import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { findRelationshipDefinition, getVisibleRelationshipParent } from './common.js'
-import { buildRelationshipUrl } from '../lib/querying/url-helpers.js'
+import { getVisibleRelationshipParent, validateRequestedIncludes } from './common.js'
+import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
+import { buildRelationshipUrl, buildJsonApiLink } from '../lib/querying/url-helpers.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
+import { queryConstraint } from '../lib/querying/query-constraint.js'
 
 /**
- * GET RELATED
- * Retrieves the actual related resources (full data)
- * GET /api/articles/1/comments
- *
- * @param {string} id - The ID of the parent resource
- * @param {string} relationshipName - The name of the relationship
- * @param {object} queryParams - Standard query parameters
- * @returns {Promise<object>} Related resources with full data
+ * Build a JSON:API document for the authorized related resource or collection.
+ * The outer getRelated method selects the caller-facing representation.
+ * Parent identity, relationship name and query controls come from params.
  */
-export default async function getRelatedMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
+async function getRelatedDocument ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
   context.method = 'getRelated'
   context.id = requireExistingResourceId(params.id, {
     scopeOptions,
@@ -36,14 +35,34 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     )
   }
 
-  // Determine target type based on relationship type
+  await runHooks('checkPermissions')
+  await runHooks('checkPermissionsGetRelated')
+  const parentRecord = await getVisibleRelationshipParent({ context, helpers, scopeName, runHooks })
+  if (!parentRecord) {
+    throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
+  }
+
+  if (relDef.belongsTo || relDef.belongsToPolymorphic || relDef.type === 'hasOne') {
+    const types = relDef.belongsToPolymorphic?.types || [relDef.belongsTo || relDef.target]
+    validateRequestedIncludes({ ...context, scopeName: types.length === 1 ? types[0] : scopeName }, scopes, types)
+  }
+
+  // A polymorphic target is determined by the visible parent record.
   let targetType
   if (relDef.type === 'hasMany' || relDef.type === 'hasOne') {
     targetType = relDef.target
   } else if (relDef.type === 'manyToMany') {
-    targetType = context.relationshipName // For manyToMany, use the relationship name
+    targetType = relDef.target || context.relationshipName
   } else if (relDef.belongsTo) {
     targetType = relDef.belongsTo // belongsTo still in schema
+  } else if (relDef.belongsToPolymorphic) {
+    targetType = parentRecord.relationships?.[context.relationshipName]?.data?.type
+    if (!targetType) {
+      return {
+        links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
+        data: null
+      }
+    }
   }
 
   if (!targetType || !scopes[targetType]) {
@@ -53,308 +72,85 @@ export default async function getRelatedMethod ({ params, context, vars, helpers
     )
   }
 
-  // Check permissions
-  await runHooks('checkPermissions')
-  await runHooks('checkPermissionsGetRelated')
+  if (relDef.belongsTo || relDef.belongsToPolymorphic || relDef.type === 'hasOne') {
+    // Resolve visible linkage, then use the target GET lifecycle for every selection.
+    const parent = await scope.get({
+      id: context.id,
+      queryParams: {
+        include: [context.relationshipName],
+        fields: targetType === scopeName ? {} : { [targetType]: 'id' }
+      },
+      transaction: context.transaction,
+      format: 'jsonapi'
+    }, { ...context })
 
-  // Verify the parent exists in the caller's visible dataset.
-  const parentRecord = await getVisibleRelationshipParent({
-    context,
-    helpers,
-    scopeName,
-    runHooks
-  })
+    const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
+    const links = { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) }
+    if (relatedId == null) return { links, data: null }
 
-  if (!parentRecord) {
-    throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
+    const related = await api.resources[targetType].get({
+      id: relatedId,
+      queryParams: context.queryParams,
+      transaction: context.transaction,
+      format: 'jsonapi'
+    }, { ...context })
+
+    return { links, data: related.data, ...(related.included ? { included: related.included } : {}) }
   }
 
-  // Handle to-one relationships (belongsTo and hasOne)
-  // For example: GET /api/books/1/country or GET /api/books/1/publisher
-  if (relDef.belongsTo || relDef.type === 'hasOne') {
-    // OPTIMIZATION: Detect if we actually need to make two API calls
-    //
-    // The naive approach always makes 2 calls:
-    // 1. Get parent with relationship included (fetches FULL related record)
-    // 2. Extract just the ID and fetch the same record again with queryParams
-    //
-    // This optimization checks if there are queryParams that would affect
-    // the related resource. If not, we can use the data from the first call.
-    const hasRelevantQueryParams = context.queryParams && (
-      // Check for includes on the related resource (e.g., ?include=some.nested.relation)
-      context.queryParams.include?.length > 0 ||
-      // Check for field selection on the related resource (e.g., ?fields[countries]=name,code)
-      context.queryParams.fields?.[targetType] ||
-      // Note: Filters and sorting don't make sense for a single to-one relationship
-      // so we don't check for them
-      false
-    )
-
-    if (hasRelevantQueryParams) {
-      // CASE 1: Has queryParams that affect the related resource
-      // We need to make two calls to properly apply the queryParams
-
-      // First call: Get parent with minimal data (just need the related ID)
-      const parent = await scope.get({
-        id: context.id,
-        queryParams: {
-          include: [context.relationshipName],
-          fields: { [scopeName]: vars.idProperty || 'id' } // Only fetch parent ID to minimize data
-        },
-        transaction: context.transaction,
-        simplified: false,
-        isTransport: params.isTransport
-      }, { ...context })
-
-      const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
-      if (!relatedId) {
-        return {
-          links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
-          data: null
-        }
-      }
-
-      // Second call: Get the related resource with all queryParams applied
-      const related = await api.resources[targetType].get({
-        id: relatedId,
-        queryParams: context.queryParams,
-        transaction: context.transaction,
-        simplified: false,
-        isTransport: params.isTransport
-      }, { ...context })
-
-      return {
-        links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
-        data: related.data,
-        included: related.included
-      }
-    } else {
-      // CASE 2: No queryParams that affect the related resource
-      // We can get everything in one call and extract from included
-
-      // Single call: Get parent with full related resource included
-      const parent = await scope.get({
-        id: context.id,
-        queryParams: {
-          include: [context.relationshipName],
-          fields: context.queryParams.fields // Respect any field selections for the parent
-        },
-        transaction: context.transaction,
-        simplified: false,
-        isTransport: params.isTransport
-      }, { ...context })
-
-      // Extract the related resource from the parent's relationships
-      const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
-      if (!relatedId) {
-        return {
-          links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
-          data: null
-        }
-      }
-
-      // Find the full related resource in the included array
-      // The include system already fetched it for us!
-      const relatedResource = parent.included?.find(
-        r => r.type === targetType && r.id === relatedId
-      )
-
-      return {
-        links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
-        data: relatedResource || null
-      }
-    }
-  }
-
-  // Handle simple hasMany (one-to-many, NOT many-to-many)
+  let constraint
   if (relDef.type === 'hasMany') {
-    // Check if this is a polymorphic relationship using 'via'
+    let values
     if (relDef.via) {
-      // Polymorphic hasMany relationship
-      // Example: publishers hasMany reviews via reviewable
       const targetRelationships = scopes[targetType].vars.schemaInfo.schemaRelationships
       const viaRel = targetRelationships?.[relDef.via]
-
       if (!viaRel?.belongsToPolymorphic) {
         throw new RestApiResourceError(
           `Via relationship '${relDef.via}' not found or not polymorphic in '${targetType}'`,
           { subtype: 'invalid_via_relationship' }
         )
       }
-
       const { typeField, idField } = viaRel.belongsToPolymorphic
-
-      // Add polymorphic filters
-      const filters = {
-        ...context.queryParams.filters,
-        [typeField]: scopeName,
-        [idField]: context.id
-      }
-
-      const result = await api.resources[targetType].query({
-        queryParams: { ...context.queryParams, filters },
-        transaction: context.transaction,
-        simplified: false,
-        isTransport: params.isTransport
-      }, { ...context })
-
-      if (!result.links) {
-        result.links = {}
-      }
-      result.links.self = buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
-      return result
+      values = { [typeField]: scopeName, [idField]: context.id }
     } else {
-      // Regular hasMany with foreignKey
-      // Need to find the relationship name in the target resource that points back to this resource
-      const targetSchema = scopes[targetType].vars.schemaInfo.schemaStructure
-      let relationshipFilterName = null
-
-      // Find the field in target schema that has the foreign key and get its relationship name
-      for (const [fieldName, fieldDef] of Object.entries(targetSchema)) {
-        if (fieldName === relDef.foreignKey && fieldDef.belongsTo === scopeName && fieldDef.as) {
-          relationshipFilterName = fieldDef.as
-          break
-        }
-      }
-
-      // Fall back to foreign key if no relationship name found (shouldn't happen with proper schema)
-      const filterKey = relationshipFilterName || relDef.foreignKey
-
-      const filters = {
-        ...context.queryParams.filters,
-        [filterKey]: context.id
-      }
-
-      const result = await api.resources[targetType].query({
-        queryParams: { ...context.queryParams, filters },
-        transaction: context.transaction,
-        simplified: false,
-        isTransport: params.isTransport
-      }, { ...context })
-
-      if (!result.links) {
-        result.links = {}
-      }
-      result.links.self = buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
-      return result
+      values = { [relDef.foreignKey]: context.id }
     }
+    constraint = { scopeName: targetType, values }
+  } else if (relDef.type === 'manyToMany') {
+    const { query } = await helpers.dataRelatedIdsQuery({ context, scopeName, relDef })
+    constraint = { scopeName: targetType, idsQuery: query }
   }
 
-  // Handle many-to-many relationships
-  // For example: GET /api/authors/1/books (where authors and books are linked via book_authors)
-  if (relDef?.through) {
-    if (api.anyapi?.links?.listMany) {
-      const identifiers = await api.anyapi.links.listMany({
-        context,
-        scopeName,
-        relName: context.relationshipName,
-      })
+  const result = await api.resources[targetType].query({
+    queryParams: { ...context.queryParams },
+    transaction: context.transaction,
+    format: 'jsonapi',
+    [queryConstraint]: constraint
+  }, { ...context })
 
-      const results = []
-      for (const identifier of identifiers) {
-        const related = await api.resources[targetType].get({
-          id: identifier.id,
-          queryParams: context.queryParams,
-          transaction: context.transaction,
-          simplified: false,
-          isTransport: params.isTransport,
-        }, { ...context })
-        if (related?.data) {
-          results.push(related.data)
-        }
-      }
-
-      return {
-        links: {
-          self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
-        },
-        data: results,
-      }
-    }
-
-    // Legacy fallback
-    const pivotResource = relDef.through
-    const foreignKey = relDef.foreignKey
-    const otherKey = relDef.otherKey
-    if (!foreignKey || !otherKey) {
-      throw new Error('Missing foreignKey or otherKey in many-to-many relationship')
-    }
-    const pivotScope = scopes[pivotResource]
-    if (!pivotScope) {
-      throw new RestApiResourceError(
-        `Pivot table resource '${pivotResource}' not found`,
-        { subtype: 'pivot_table_not_found' }
-      )
-    }
-    const pivotSchema = pivotScope.vars.schemaInfo.schemaStructure
-    let parentRelationshipName = null
-    for (const [fieldName, fieldDef] of Object.entries(pivotSchema)) {
-      if (fieldName === foreignKey && fieldDef.belongsTo === scopeName && fieldDef.as) {
-        parentRelationshipName = fieldDef.as
-        break
-      }
-    }
-    const filterKey = parentRelationshipName || foreignKey
-    const pivotFilters = {
-      [filterKey]: context.id
-    }
-    const pivotResult = await api.resources[pivotResource].query({
-      queryParams: {
-        filters: pivotFilters,
-        include: [context.relationshipName],
-        fields: context.queryParams.fields,
-        sort: context.queryParams.sort,
-        page: context.queryParams.page
-      },
-      transaction: context.transaction,
-      simplified: false,
-      isTransport: params.isTransport
-    }, { ...context })
-    let includedResources = pivotResult.included?.filter((r) => r.type === targetType) || []
-
-    if (includedResources.length === 0) {
-      const pivotData = pivotResult.data || []
-      const relatedIds = [...new Set(pivotData
-        .map((item) => {
-          const attrId = item?.attributes?.[otherKey]
-          if (attrId !== null && attrId !== undefined) {
-            return String(attrId)
-          }
-          const relationships = item?.relationships || {}
-          for (const rel of Object.values(relationships)) {
-            const data = rel?.data
-            if (data?.type === targetType && data?.id != null) {
-              return String(data.id)
-            }
-          }
-          return null
-        })
-        .filter((id) => id !== null)
-      )]
-
-      if (relatedIds.length > 0) {
-        includedResources = []
-        for (const relatedId of relatedIds) {
-          const related = await api.resources[targetType].get({
-            id: relatedId,
-            queryParams: context.queryParams,
-            transaction: context.transaction,
-            simplified: false,
-            isTransport: params.isTransport,
-          }, { ...context })
-          if (related?.data) {
-            includedResources.push(related.data)
-          }
-        }
-      }
-    }
-
-    return {
-      links: {
-        self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
-      },
-      data: includedResources,
-      meta: pivotResult.meta
-    }
+  const relatedUrl = buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false)
+  result.links ||= { self: relatedUrl }
+  for (const name of ['self', 'first', 'last', 'prev', 'next']) {
+    const link = result.links[name]
+    if (typeof link !== 'string') continue
+    const queryIndex = link.indexOf('?')
+    result.links[name] = relatedUrl + (queryIndex === -1 ? '' : link.slice(queryIndex))
   }
+  return result
+}
+
+export default async function getRelatedMethod (args) {
+  const { params, vars, scopes } = args
+  rejectRemovedOptions(params)
+  const format = resolveFormat(params.format, vars.format)
+  const record = await getRelatedDocument(args)
+  if (params.queryParams?.include != null) record.included ||= []
+  if (!Array.isArray(record.data)) record.links.self = buildJsonApiLink(record.links.self, args.context.queryParams)
+  if (format === 'jsonapi') return record
+  if (record.data === null) return null
+  const type = Array.isArray(record.data) ? record.data[0]?.type : record.data.type
+  const schemaInfo = scopes[type]?.vars.schemaInfo
+  return transformJsonApiToSimplified({ record }, {
+    context: { schemaStructure: schemaInfo?.schemaStructure, schemaRelationships: schemaInfo?.schemaRelationships, scopes }
+  })
 }

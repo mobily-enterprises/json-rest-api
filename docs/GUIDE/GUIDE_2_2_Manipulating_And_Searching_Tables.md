@@ -1,808 +1,178 @@
-# 2.2 Manipulating and searching tables with no relationships
+# 2.2 Manipulating and searching tables
 
-## Setting up the schema
+This example uses countries without relationships. Insert the blocks below in
+order into the [starting script](GUIDE_2_1_The_Starting_Point.md), with a fresh
+database and before starting the HTTP server.
 
-First of all, define a resource with a schema:
+## Declare the record and search schemas
 
 ```javascript
-// Countries table
 await api.addResource('countries', {
   schema: {
     name: { type: 'string', required: true, max: 100, search: true },
-    code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
-  }
-});
-await api.resources.countries.createKnexTable()
-```
-
-## Adding data
-
-Note that we create the database table at the same time.
-This resource has just two fields, name and code, both searchable.
-
-Programmatically you can `post` and `get` easily:
-
-```javascript
-const addedFrance = await api.resources.countries.post({ name: 'France', code: 'FR' });
-console.log('Added record    :', inspect(addedFrance))
-
-const fetchedFrance = await api.resources.countries.get({ id: addedFrance.id });
-console.log('Refetched record:', inspect(fetchedFrance))
-```
-
-After the logging messages, you will see:
-
-```text
-Added record    : { id: '1', name: 'France', code: 'FR' }
-Refetched record: { id: '1', name: 'France', code: 'FR' }
-Express server started on port 3000. API available at http://localhost:3000/api
-```
-
-You can do the same thing talking to the server directly (although you will be dealing with JSON:API results).
-Leaving the code as it is, you will add nother country:
-
-
-```bash
-$ curl -i -X POST -H "Content-Type: application/vnd.api+json" -d '{
-  "data": {
-    "type": "countries",
-    "attributes": {
-      "name": "United Kingdom",
-      "code": "UK"
-    }
-  }
-}' http://localhost:3000/api/countries
-```
-```text
-HTTP/1.1 204 No Content
-X-Powered-By: Express
-Location: /api/countries/2
-ETag: W/"a-bAsFyilMr4Ra1hIU5PyoyFRunpI"
-Date: Wed, 23 Jul 2025 07:54:09 GMT
-Connection: keep-alive
-Keep-Alive: timeout=5
-```
-```bash
-$ curl -i -X GET http://localhost:3000/api/countries/2
-```
-```txt
-HTTP/1.1 200 OK
-X-Powered-By: Express
-Content-Type: application/vnd.api+json; charset=utf-8
-Content-Length: 169
-ETag: W/"a9-lnEVXaZ/V6qra0YgjpoEBUTZ3EY"
-Date: Wed, 23 Jul 2025 07:54:12 GMT
-Connection: keep-alive
-Keep-Alive: timeout=5
-
-{"data":{"type":"countries","id":"2","attributes":{"name":"United Kingdom","code":"UK"},"links":{"self":"/api/countries/2"}},"links":{"self":"/api/countries/2"}}
-```
-
-Note that in "transport" mode after the POST the record was not returned to the client: instead, a status `204 No Content` was returned. However, the client will be aware of the ID of the newly created record thanks to the `Location` header.
-
-## Manipulating data
-
-Replace the data commands with these:
-
-```javascript
-await api.addResource('countries', {
-  schema: {
-    id: { type: 'string' },
-    name: { type: 'string', required: true, max: 100, search: true, filterOperator: 'like' },
-    code: { type: 'string', max: 2, unique: true, search: true }, // ISO country code
-  }
-});
-await api.resources.countries.createKnexTable()
-
-const fr = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const it = await api.resources.countries.post({ name: 'Italyy', code: 'IT' }); // Typo intentional
-const de = await api.resources.countries.post({ name: 'Germ', code: 'DE' }); // Typo intentional
-
-// Patching Germany. It will only change the name
-await api.resources.countries.patch({id: de.id, name: 'Germany' })
-let deFromDb = await api.resources.countries.get({ id: de.id });
-
-// Putting  France. Note that this will actually reset any attributes that were not passed
-await api.resources.countries.put({id: it.id, name: 'Italy' })
-let itFromDb = await api.resources.countries.get({ id: it.id });
-
-console.log('Patched record (Germany):', inspect(deFromDb))
-console.log('Put record: (Italy)', inspect(itFromDb))
-```
-
-The result will be:
-
-```text
-Patched record (Germany): { id: '3', name: 'Germany', code: 'DE' }
-Put record: (Italy) { id: '2', name: 'Italy', code: null }
-```
-
-As you can see, using PUT on Italy was a problem: since put didn't include the `code` field, and since PUT assumes a FULL record, the `code` field was reset to null. On the other hand, since the method PATCH assumes a partial update, the update for Germany did not _not_ overwrite the `code` field. This is a very important distinction, and it's the reason why most clients avoid PUT calls.
-
-
-## Search (Filtering)
-
-The API supports powerful filtering capabilities out of the box for any fields you've marked as `search: true` in your schema.
-
-**Important Note about Query Results in Simplified Mode:**
-
-When using `query()` in simplified mode (the default for programmatic access), the return value is an object containing:
-- `data`: The array of matching records
-- `meta`: Metadata about the results (e.g., pagination info)
-- `links`: Links for pagination and related resources
-
-For example:
-```javascript
-const result = await api.resources.countries.query({ /* ... */ });
-// result is: { data: [...], meta: {...}, links: {...} }
-// To access the records: result.data
-```
-
-**Programmatic Example: Searching for countries**
-
-Change the code to add some countries:
-
-```javascript
-const fr = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const it = await api.resources.countries.post({ name: 'Italy', code: 'IT' });
-const de = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const au = await api.resources.countries.post({ name: 'Australia', code: 'AU' });
-const at = await api.resources.countries.post({ name: 'Austria', code: 'AT' });
-const ge = await api.resources.countries.post({ name: 'Georgia', code: 'GE' });
-
-const searchAustralia = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      name: 'Australia'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[name]=Australia
-// Returns: {
-//   data: [{ id: '2', name: 'Australia', code: 'AU' }]
-// }
-
-const searchAustr = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      name: 'Austr'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[name]=Austr
-// Returns: {
-//   data: []
-// }
-
-console.log('Search for "Australia":', inspect(searchAustralia))
-console.log('Search for "Austr":', inspect(searchAustr))
-// Note: searchAustralia and searchAustr contain { data, meta, links } objects
-```
-
-The result will be:
-
-```
-Search for Australia: { data: [ { id: '4', name: 'Australia', code: 'AU' } ], meta: {...}, links: {...} }
-Search for "Austr": { data: [], meta: {...}, links: {...} }
-```
-
-It's clear that the search is only matching precise results.
-
-
-There are two ways to enable search on a field in your schema. The first one is the one we are currently using, with `search: true`.
-As seen above, the only time filtering works is when there is an exact match.
-However, rather than `true` or `false`, `search` can also be an object.
-Changing the definition of `name` in the `countries` resource to this:
-
-```javascript
-    name: { type: 'string', required: true, max: 100, search: { filterOperator: 'like' } },
-```
-
-Will give you the expected results:
-
-```text
-Search for Australia: [ { id: '4', name: 'Australia', code: 'AU' } ]
-Search for "Austr": [
-  { id: '4', name: 'Australia', code: 'AU' },
-  { id: '5', name: 'Austria', code: 'AT' }
-]
-```
-
-This is the 
-
-**Available operators for `filterOperator`:**
-- `'='` - Exact match (default)
-- `'like'` - Partial match with % wildcards automatically added on both sides
-- `'>'`, `'>='`, `'<'`, `'<='` - Comparison operators for numeric/date fields
-- Other SQL operators are passed through directly (e.g., `'!='`, `'<>'`)
-
-Note: Only `'like'` receives special handling (automatic % wildcards). All other operators are passed directly to the SQL query.
-
-You can also define multiple search patterns from a single field:
-
-```javascript
-await api.addResource('countries', {
-  schema: {
-    name: {
-      type: 'string', required: true, search: {
-        name: { filterOperator: '=', type: 'string' },
-        nameLike: { filterOperator: 'like', type: 'string' }
-      }
-    },
-    code: { type: 'string', unique: true, search: true }
-  }
-});
-await api.resources.countries.createKnexTable()
-
-await api.resources.countries.post({ name: 'Georgia', code: 'GE' });
-await api.resources.countries.post({ name: 'France', code: 'FR' });
-await api.resources.countries.post({ name: 'Italy', code: 'IT' });
-await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-await api.resources.countries.post({ name: 'Australia', code: 'AU' });
-await api.resources.countries.post({ name: 'Austria', code: 'AT' });
-
-const searchAustralia = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      name: 'Australia'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[name]=Australia
-// Returns: {
-//   data: [{ id: '2', name: 'Australia', code: 'AU' }]
-// }
-
-const searchAustr = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      nameLike: 'Austr'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[nameLike]=Austr
-// Returns: {
-//   data: [{ id: '2', name: 'Australia', code: 'AU' }, { id: '3', name: 'Austria', code: 'AT' }]
-// }
-
-console.log('Search for "Australia":', inspect(searchAustralia))
-console.log('Search for "Austr":', inspect(searchAustr))
-```
-
-This is very powerful in that it allows you to define multiple ways of filtering a field depending on needs.
-
-There is another, even more powerful way to define how to search in a resource: define a whole searchSchema that is completely independent to the main schema.
-
-Under the hood, `rest-api-plugin` actually creates a `searchSchema` object based on the option on the default schema. However, it's very possible for an attribute to define a `searchSchema` directly: 
-
-
-```javascript
-await api.addResource('countries', {
-  schema: {
-    name: { type: 'string', required: true, max: 100 },
-    code: { type: 'string', max: 2, unique: true }
+    code: { type: 'string', max: 2, nullable: true, unique: true, search: true },
+    population: { type: 'number', nullable: true }
   },
   searchSchema: {
-    // Define searchable fields explicitly
     name: { type: 'string', filterOperator: '=' },
-    code: { type: 'string', filterOperator: '=' },
-    nameLike: { type: 'string', actualField: 'name', filterOperator: 'like' }
-  }
-});
-await api.resources.countries.createKnexTable()
-```
-
-Note that the definition above is functionally _identical_ to the one provided a few paragraphs above.
-
-**Important: When you define a `searchSchema`, it takes precedence over fields marked with `search: true` in the main schema.** However, fields marked with `search: true` that are NOT in the explicit `searchSchema` will be automatically added to enable searching. This allows you to:
-- Use `searchSchema` to override specific field behaviors
-- Still benefit from `search: true` markers for additional fields  
-- Have the explicit `searchSchema` always win in case of conflicts
-
-The `searchSchema` gives you:
-
-* Complete control where needed: Override specific fields while keeping the convenience of `search: true` for others
-* No mixing of concerns: Your data schema stays focused on data validation and storage, while searchSchema handles complex search behavior
-* Flexibility to extend: Add virtual fields or complex filters via searchSchema while basic fields use `search: true`
-* Best of both worlds: Explicit control for complex cases, automatic setup for simple ones
-
-`searchSchema` also defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. Treat `searchSchema` as an allowlist plus normalization layer for filter input: the actual meaning of each key is still implemented by the backend through mappings such as `actualField`, multi-field rules such as `oneOf`, standard operators, or custom `applyFilter` logic. It is not a portable filter DSL.
-
-The merge rules and validation surface are shared across storage backends. Advanced execution semantics are still backend-owned. In practice, that means alias filters such as `oneOf` and custom `applyFilter` functions should be validated against the backend you actually run, and the SQL-heavy examples in this chapter assume the Knex-backed query layer.
-
-`searchSchema` also gives you the ability to define a search field that will search in multiple fields. For example:
-
-```javascript
-searchSchema: {
-  search: {
-    type: 'string',
-    oneOf: ['name', 'code'],
-    filterOperator: 'like'
-  }
-}
-
-const searchGe = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      search: 'ge'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[search]=ge
-// Returns: {
-//   data: [{ id: '3', name: 'Georgia', code: 'GE' }, { id: '6', name: 'Germany', code: 'DE' }]
-// }
-
-console.log('Search for "ge":', inspect(searchGe))
-```
-
-Will return:
-
-```
-Search for "ge": { data: [
-  { id: '3', name: 'Georgia', code: 'GE' },
-  { id: '6', name: 'Germany', code: 'DE' }
-], meta: {...}, links: {...} }
-```
-
-This common pattern will give you the ability to create "global" search fields that will look in multiple fields.
-
-### Merging searchSchema with search:true Fields
-
-When you combine `searchSchema` with fields marked `search: true`, the library intelligently merges them:
-
-```javascript
-await api.addResource('products', {
-  schema: {
-    name: { type: 'string', search: true },        // Will be added to searchSchema
-    description: { type: 'string', search: true }, // Will be added to searchSchema  
-    price: { type: 'number', search: true },       // Overridden by searchSchema below
-    category_id: { type: 'number' },               // Not searchable
-    sku: { type: 'string', search: true }          // Will be added to searchSchema
-  },
-  searchSchema: {
-    // Explicit searchSchema entries take precedence
-    price: { 
-      type: 'number', 
-      filterOperator: 'between'  // Overrides the search:true with custom operator
+    nameContains: { type: 'string', actualField: 'name', filterOperator: 'contains' },
+    populationRange: { type: 'array', actualField: 'population', filterOperator: 'between' },
+    words: {
+      type: 'string', oneOf: ['name', 'code'],
+      filterOperator: 'contains', splitBy: ' ', matchAll: true
     },
-    category_name: {              // Virtual field (doesn't exist in schema)
-      type: 'string',
-      actualField: 'category.name',
-      filterOperator: 'like'
-    }
-  }
-});
-
-// Result: The effective searchSchema includes:
-// - name (from search:true, uses default '=' operator)
-// - description (from search:true, uses default '=' operator)  
-// - sku (from search:true, uses default '=' operator)
-// - price (from explicit searchSchema, uses 'between' operator)
-// - category_name (from explicit searchSchema, virtual field)
-
-// You can now search using all these fields:
-const results = await api.resources.products.query({
-  queryParams: {
-    filters: {
-      name: 'Widget',           // From search:true
-      price: [10, 100],         // From searchSchema with 'between'
-      category_name: 'Electronics' // Virtual field from searchSchema
-    }
-  }
-});
-```
-
-This merge behavior gives you the best of both worlds:
-- Quick setup with `search: true` for simple fields
-- Precise control with `searchSchema` for complex requirements
-- No need to repeat fields in searchSchema that already have `search: true`
-
-### Multi-word Search with AND Logic
-
-The `oneOf` search feature becomes even more powerful when combined with `splitBy` and `matchAll` options. This allows you to search for multiple words where ALL must appear somewhere in the specified fields.
-
-```javascript
-await api.addResource('countries', {
-  schema: {
-    name: { type: 'string', required: true },
-    code: { type: 'string', unique: true }
-  },
-  searchSchema: {
-    search: {
-      type: 'string',
-      oneOf: ['name', 'code'],
-      filterOperator: 'like',
-      splitBy: ' ',      // Split search terms by space
-      matchAll: true     // Require ALL terms to match (AND logic)
-    }
-  }
-});
-await api.resources.countries.createKnexTable()
-```
-
-With this configuration, searching becomes much more precise:
-
-```javascript
-// Add some countries
-await api.resources.countries.post({ name: 'United States', code: 'US' });
-await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-await api.resources.countries.post({ name: 'United Arab Emirates', code: 'AE' });
-await api.resources.countries.post({ name: 'South Africa', code: 'ZA' });
-
-// Search for "united states" - both words must appear
-const results = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      search: 'united states'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[search]=united%20states
-// Returns: {
-//   data: [{ id: '1', name: 'United States', code: 'US' }]
-// }
-
-console.log('Found:', results);
-// Note: results contains { data, meta, links } - access results.data for the array
-// Note: results now contains { data, meta, links } - access results.data for the array
-// Returns: [{ id: '1', name: 'United States', code: 'US' }]
-// Does NOT return United Kingdom or United Arab Emirates
-```
-
-**How it works:**
-
-1. The search term "united states" is split by space into ["united", "states"]
-2. With `matchAll: true`, the query requires BOTH terms to appear
-3. Each term can appear in ANY of the fields listed in `oneOf`
-4. The SQL generated looks like:
-
-```sql
-WHERE (
-  (countries.name LIKE '%united%' OR countries.code LIKE '%united%')
-  AND
-  (countries.name LIKE '%states%' OR countries.code LIKE '%states%')
-)
-```
-
-**More examples:**
-
-```javascript
-// Search for "south africa" - finds only South Africa
-const southAfrica = await api.resources.countries.query({
-  queryParams: { filters: { search: 'south africa' } }
-});
-// HTTP: GET /api/countries?filter[search]=south%20africa
-// Returns: {
-//   data: [{ id: '4', name: 'South Africa', code: 'ZA' }]
-// }
-
-// Search for "united arab" - finds only United Arab Emirates
-const uae = await api.resources.countries.query({
-  queryParams: { filters: { search: 'united arab' } }
-});
-// HTTP: GET /api/countries?filter[search]=united%20arab
-// Returns: {
-//   data: [{ id: '3', name: 'United Arab Emirates', code: 'AE' }]
-// }
-
-// Single word searches still work normally
-const allUnited = await api.resources.countries.query({
-  queryParams: { filters: { search: 'united' } }
-});
-// HTTP: GET /api/countries?filter[search]=united
-// Returns: {
-//   data: [
-//   { id: '1', name: 'United States', code: 'US' },
-//   { id: '2', name: 'United Kingdom', code: 'UK' },
-//   { id: '3', name: 'United Arab Emirates', code: 'AE' }
-// ]
-// }
-```
-
-**Alternative configurations:**
-
-You can also use different separators and OR logic:
-
-```javascript
-searchSchema: {
-  // Comma-separated OR search
-  tags: {
-    type: 'string',
-    oneOf: ['tags', 'categories', 'keywords'],
-    filterOperator: 'like',
-    splitBy: ',',       // Split by comma
-    matchAll: false     // OR logic (default) - match ANY term
-  },
-  
-  // Exact match with AND logic
-  codes: {
-    type: 'string',
-    oneOf: ['primary_code', 'secondary_code'],
-    filterOperator: '=',   // Exact match
-    splitBy: ' ',
-    matchAll: true      // All codes must match exactly
-  }
-}
-```
-
-This feature is particularly useful for:
-- Full-text search functionality where users type multiple words
-- Tag or keyword searches where all terms must be present
-- Product searches matching multiple criteria
-- Finding records that match complex multi-word queries
-
-### Custom Search Functions
-
-If you need even more complex searches, you can use `searchSchema` to define search fields with custom query logic:
-
-```javascript
-await api.addResource('countries', {
-  schema: {
-    name: { type: 'string', required: true },
-    code: { type: 'string', unique: true }
-  },
-  searchSchema: {
-    // Standard fields
-    name: { type: 'string', filterOperator: '=' },
-    code: { type: 'string', filterOperator: '=' },
-    
-    // Custom search using a function
     nameOrCode: {
       type: 'string',
-      applyFilter: function(query, filterValue) {
-        // Custom SQL logic: case-insensitive search in name OR exact match on code
-        query.where(function() {
-          this.whereRaw('LOWER(name) LIKE LOWER(?)', [`%${filterValue}%`])
-              .orWhereRaw('LOWER(code) = LOWER(?)', [filterValue]);
-        });
+      applyFilter (query, input, { column }) {
+        query.where(function () {
+          this.whereRaw('LOWER(??) LIKE LOWER(?)', [column('name'), `%${input}%`])
+            .orWhereRaw('LOWER(??) = LOWER(?)', [column('code'), input])
+        })
       }
     }
   }
-});
+})
 await api.resources.countries.createKnexTable()
-
-await api.resources.countries.post({ name: 'United States', code: 'US' });
-await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-await api.resources.countries.post({ name: 'United Arab Emirates', code: 'AE' });
-await api.resources.countries.post({ name: 'South Africa', code: 'ZA' });
 ```
 
-When `filterOperator` is a function instead of an operator string, it receives:
-- `query` - The Knex query builder instance
-- `filterValue` - The search value from the user
-- `fieldName` - The name of the search field (optional third parameter)
+The record schema validates stored data. `searchSchema` declares public filter
+names and their meaning. An explicit search field overrides the same field
+inferred from `search: true`; other inferred fields remain available. Here,
+`name` explicitly uses equality and `code` remains searchable through its marker.
+The record's `population` field is searchable through `populationRange` only.
 
-This gives you complete control over the SQL generated for that search field.
+Filter names need not be column names. `actualField` maps an alias to a logical
+resource field. `oneOf` applies a filter across several fields. Search schemas
+are an allowlist and input-validation contract, not arbitrary client-supplied SQL.
 
-**Example usage:**
+## Create, patch, replace and delete records
 
 ```javascript
-// This custom search will find both:
-// - Countries with "at" in the name (United States, United Kingdom, United Arab Emirates)
-// - Countries with code "at"
-const results = await api.resources.countries.query({
-  queryParams: {
-    filters: {
-      nameOrCode: 'at'
-    }
-  }
-});
-// HTTP: GET /api/countries?filter[nameOrCode]=at
-// Returns: {
-//   data: [
-//   { id: '1', name: 'United States', code: 'US' },
-//   { id: '2', name: 'United Kingdom', code: 'UK' },
-//   { id: '3', name: 'United Arab Emirates', code: 'AE' },
-//   { id: '5', name: 'Austria', code: 'AT' }
-// ]
-// }
+const france = await api.resources.countries.post({
+  inputRecord: { name: 'France', code: 'FR', population: 68 }
+})
+const italy = await api.resources.countries.post({
+  inputRecord: { name: 'Italyy', code: 'IT', population: 59 }
+})
+const germany = await api.resources.countries.post({
+  inputRecord: { name: 'Germ', code: 'DE', population: 84 }
+})
+await api.resources.countries.patch({
+  id: germany.id, inputRecord: { name: 'Germany' }, returning: 'none'
+})
+const patched = await api.resources.countries.get({ id: germany.id })
+const replaced = await api.resources.countries.put({
+  id: italy.id, inputRecord: { name: 'Italy', code: null, population: null }
+})
+console.log('Patched:', patched)
+console.log('Replaced:', replaced)
+await api.resources.countries.delete({ id: italy.id })
 ```
 
-The result is:
+These population values are illustrative numbers for demonstrating filters.
+PATCH changes the supplied name while retaining Germany's code and population.
+PUT replaces Italy's record and explicitly clears its nullable fields. A
+replacement must include attributes that already have values; omitting them
+rejects with a complete-replacement validation error. Use null explicitly when
+the schema permits clearing a value. PUT can also create a missing target. DELETE returns
+undefined. Writes always place record attributes inside `inputRecord`.
 
-```text
-Query results: [
-  { id: '1', name: 'United States', code: 'US' },
-  { id: '3', name: 'United Arab Emirates', code: 'AE' }
-]
-```
-
-The function approach is powerful for:
-- Case-insensitive searches
-- Complex conditions combining multiple fields
-- Database-specific functions
-- Custom business logic in searches
-
-Since `applyFilter` functions tend to be database-dependent, it's best to avoid using it unless necessary.
-
-### Sparse Fieldsets
-
-The JSON:API specification includes a powerful feature called "sparse fieldsets" that allows you to request only specific fields from a resource. This is essential for optimizing API performance by reducing payload sizes and network traffic.
-
-**How Sparse Fieldsets Work:**
-
-By default, API responses include all fields defined in the schema. With sparse fieldsets, you can specify exactly which fields you want returned. The `id` field is always included automatically as it's required by JSON:API.
-
-Let's work with our countries table:
+## Query and filter
 
 ```javascript
-await api.addResource('countries', {
-  schema: {
-    name: { type: 'string', required: true, max: 100, search: true },
-    code: { type: 'string', max: 2, unique: true, search: true }
-  }
-});
-await api.resources.countries.createKnexTable()
-
-// Add some test data
-await api.resources.countries.post({ name: 'France', code: 'FR' });
-await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-await api.resources.countries.post({ name: 'Italy', code: 'IT' });
-await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-await api.resources.countries.post({ name: 'United States', code: 'US' });
+await api.resources.countries.post({
+  inputRecord: { name: 'United States', code: 'US', population: 330 }
+})
+await api.resources.countries.post({
+  inputRecord: { name: 'United Kingdom', code: 'GB', population: 67 }
+})
+await api.resources.countries.post({
+  inputRecord: { name: 'Austria', code: 'AT', population: 9 }
+})
+const exact = await api.resources.countries.query({
+  queryParams: { filters: { name: 'France' } }
+})
+const byCode = await api.resources.countries.query({
+  queryParams: { filters: { code: 'DE' } }
+})
+const contains = await api.resources.countries.query({
+  queryParams: { filters: { nameContains: 'United' }, sort: ['name'] }
+})
+const range = await api.resources.countries.query({
+  queryParams: { filters: { populationRange: [60, 90] }, sort: ['name'] }
+})
+console.log('Exact:', exact.data)
+console.log('By code:', byCode.data)
+console.log('Contains:', contains.data)
+console.log('Range:', range.data)
 ```
 
-**Sparse Fieldsets with `get()` - Single Record:**
+The results are France, Germany, the two United countries, and France/Germany/
+United Kingdom respectively. Query returns an object with a `data` array, not a
+bare array. Pagination metadata is supplied for explicit pagination requests;
+it is not guaranteed on every collection. Multiple filter keys combine as
+constraints. The selected operator and database collation determine string
+comparison behavior; avoid assuming all databases ignore case.
+
+## Search multiple fields and words
 
 ```javascript
-// Fetch a single country with all fields (default behavior)
-const fullCountry = await api.resources.countries.get({ id: '1' });
-console.log('Full record:', inspect(fullCountry));
-
-// Fetch only the name field
-const nameOnly = await api.resources.countries.get({ 
-  id: '1',
-  queryParams: { fields: { countries: 'name' } }
-});
-console.log('Name only:', inspect(nameOnly));
-
-// Fetch only the code field
-const codeOnly = await api.resources.countries.get({ 
-  id: '1',
-  queryParams: { fields: { countries: 'code' } }
-});
-console.log('Code only:', inspect(codeOnly));
+const allWords = await api.resources.countries.query({
+  queryParams: { filters: { words: 'United US' } }
+})
+const custom = await api.resources.countries.query({
+  queryParams: { filters: { nameOrCode: 'at' }, sort: ['name'] }
+})
+console.log('All words:', allWords.data)
+console.log('Custom filter:', custom.data)
 ```
 
-The output will be:
+`words` splits on spaces and requires every term to match at least one of name
+or code. `United US` matches United States: one term matches its name, the other
+its code. Setting `matchAll: false` would allow any term to match.
 
-```text
-Full record: { id: '1', name: 'France', code: 'FR' }
-Name only: { id: '1', name: 'France' }
-Code only: { id: '1', code: 'FR' }
-```
+The custom filter searches a case-folded name substring or an exact case-folded
+code. It finds Austria and United States for `at`, not United Kingdom.
+`applyFilter(query, input, { column, value, context, scopeName })` runs
+synchronously and mutates the supplied Knex builder. `column(field)` translates
+logical fields and `value(field, input)` converts values for their storage
+representation. Group OR conditions so they do not bypass other filters or
+access constraints. This example binds user input as values; SQL LIKE wildcard
+characters in that input retain their SQL meaning. Custom SQL functions and
+collations must be verified on the database you deploy.
 
-**Sparse Fieldsets with `query()` - Multiple Records:**
-
-Sparse fieldsets become even more valuable when fetching collections, as they can significantly reduce the response size:
+## Select fields and paginate
 
 ```javascript
-// Query all countries starting with 'United' - full records
-const fullRecords = await api.resources.countries.query({
+const page = await api.resources.countries.query({
   queryParams: {
-    filters: { name: 'United' }
+    fields: { countries: 'name,code' },
+    sort: ['name'],
+    page: { number: 1, size: 2 }
   }
-});
-// HTTP: GET /api/countries?filter[name]=United
-// Returns: {
-//   data: [
-//   { id: '4', name: 'United Kingdom', code: 'UK' },
-//   { id: '5', name: 'United States', code: 'US' }
-// ]
-// }
-
-console.log('Full records:', inspect(fullRecords));
-// Note: fullRecords contains { data, meta, links }
-
-// Query with only names returned
-const namesOnly = await api.resources.countries.query({
-  queryParams: {
-    filters: { name: 'United' },
-    fields: { countries: 'name' }
-  }
-});
-// HTTP: GET /api/countries?filter[name]=United&fields[countries]=name
-// Returns: {
-//   data: [
-//   { id: '4', name: 'United Kingdom' },
-//   { id: '5', name: 'United States' }
-// ]
-// }
-
-console.log('Names only:', inspect(namesOnly));
-// Note: namesOnly contains { data, meta, links }
-
-// Query with only codes returned
-const codesOnly = await api.resources.countries.query({
-  queryParams: {
-    filters: { name: 'United' },
-    fields: { countries: 'code' }
-  }
-});
-// HTTP: GET /api/countries?filter[name]=United&fields[countries]=code
-// Returns: {
-//   data: [
-//   { id: '4', code: 'UK' },
-//   { id: '5', code: 'US' }
-// ]
-// }
-
-console.log('Codes only:', inspect(codesOnly));
-// Note: codesOnly contains { data, meta, links }
+})
+console.log('Selected fields:', page.data)
+console.log('Pagination:', page.meta.pagination)
 ```
 
-**Combining Sparse Fieldsets with Complex Searches:**
+This returns Austria and France, with IDs, names and codes but no populations.
+The numbered pagination total is five. Fieldsets select output and do not grant
+access to hidden fields. See [pagination and ordering](GUIDE_2_7_Pagination_And_Ordering.md)
+for cursors and collection limits.
 
-Sparse fieldsets work seamlessly with all search features, including our new multi-word search:
+## HTTP queries
 
-```javascript
-// Define a countries resource with multi-word search
-await api.addResource('countries', {
-  schema: {
-    name: { type: 'string', required: true },
-    code: { type: 'string', unique: true },
-    population: { type: 'integer' },
-    continent: { type: 'string' }
-  },
-  searchSchema: {
-    search: {
-      type: 'string',
-      oneOf: ['name', 'continent'],
-      filterOperator: 'like',
-      splitBy: ' ',
-      matchAll: true
-    }
-  }
-});
+With the example server running:
 
-// Add countries with more fields
-await api.resources.countries.post({ 
-  name: 'South Africa', 
-  code: 'ZA', 
-  population: 59308690,
-  continent: 'Africa'
-});
-await api.resources.countries.post({ 
-  name: 'South Korea', 
-  code: 'KR', 
-  population: 51269185,
-  continent: 'Asia'
-});
-
-// Search for "south africa" but return only name and population
-const sparseSearch = await api.resources.countries.query({
-  queryParams: {
-    filters: { search: 'south africa' },
-    fields: { countries: 'name,population' }
-  }
-});
-// HTTP: GET /api/countries?filter[search]=south%20africa&fields[countries]=name,population
-// Returns: {
-//   data: [{ id: '1', name: 'South Africa', population: 59308690 }]
-// }
-
-console.log('Sparse search result:', inspect(sparseSearch));
-// Note: sparseSearch contains { data, meta, links }
+```bash
+curl --globoff 'http://localhost:3000/api/countries?filter[nameContains]=United'
+curl --globoff 'http://localhost:3000/api/countries?filter[words]=United%20US'
+curl --globoff 'http://localhost:3000/api/countries?fields[countries]=name,code&page[number]=1&page[size]=2&sort=name'
 ```
 
-**Important Notes:**
+HTTP filters use `filter[...]`; programmatic queries use `queryParams.filters`.
+Generated HTTP responses are JSON:API documents. For payload changes from the
+older API, use the [migration guide](MIGRATING_API_V2.md).
 
-1. **The `id` field is always included** - This is required by the JSON:API specification
-2. **Field names must match schema** - Requesting non-existent fields will be ignored
-3. **Improves performance** - Especially important for large records or when fetching many records
-4. **Works with relationships** - When we cover relationships, you'll see how to apply sparse fieldsets to related resources too
-
-**HTTP API Usage:**
-
-When using the HTTP API, sparse fieldsets are specified as comma-separated values:
-
-```
-GET /api/countries?fields[countries]=name,code
-GET /api/countries/1?fields[countries]=name
-GET /api/countries?filter[search]=united+states&fields[countries]=code
-```
-
----
-
-[Previous: 2.1 The starting point](./GUIDE_2_1_The_Starting_Point.md) | [Back to Guide](./README.md) | [Next: 2.3 `belongsTo` Relationships](./GUIDE_2_3_BelongsTo_Relationships.md)
+[Previous: starting point](GUIDE_2_1_The_Starting_Point.md) |
+[Guide index](index.md) | [Next: belongsTo](GUIDE_2_3_BelongsTo_Relationships.md)

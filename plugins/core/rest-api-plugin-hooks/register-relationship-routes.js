@@ -7,13 +7,13 @@ export default async function registerRelationshipRoutes ({ context, api, log })
 
   // Helper to create route handlers
   const createRouteHandler = (methodName) => {
-    return async ({ params, body, queryString }) => {
+    return async ({ params, body, queryString, context }) => {
       const scope = api.scopes[scopeName]
 
       const methodParams = {
         id: params.id,
         relationshipName: params.relationshipName,
-        isTransport: true
+        format: 'jsonapi'
       }
 
       // Add query params for getRelated
@@ -26,7 +26,7 @@ export default async function registerRelationshipRoutes ({ context, api, log })
         methodParams.relationshipData = body.data
       }
 
-      return await scope[methodName](methodParams)
+      return await scope[methodName](methodParams, context)
     }
   }
 

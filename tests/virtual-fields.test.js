@@ -33,13 +33,8 @@ describe('Virtual Fields Tests', () => {
 
     // Install plugins
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false,
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      }
+      format: 'jsonapi',
+      returning: 'full'
     })
     await api.use(RestApiKnexPlugin, { knex })
 
@@ -83,7 +78,7 @@ describe('Virtual Fields Tests', () => {
 
       const result = await api.resources.users.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Validate response structure - POST returns single resource, not array
@@ -114,7 +109,7 @@ describe('Virtual Fields Tests', () => {
 
       const createResult = await api.resources.users.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Verify data was created
@@ -142,7 +137,7 @@ describe('Virtual Fields Tests', () => {
 
       const createResult = await api.resources.users.post({
         inputRecord: createDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const userId = createResult.data.id
@@ -162,7 +157,7 @@ describe('Virtual Fields Tests', () => {
       const patchResult = await api.resources.users.patch({
         id: userId,
         inputRecord: patchDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Virtual field should be in response
@@ -183,7 +178,7 @@ describe('Virtual Fields Tests', () => {
 
       const createResult = await api.resources.users.post({
         inputRecord: createDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const userId = createResult.data.id
@@ -208,7 +203,7 @@ describe('Virtual Fields Tests', () => {
             users: 'email,passwordConfirmation'
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Should only have requested fields
@@ -232,7 +227,7 @@ describe('Virtual Fields Tests', () => {
 
       const createResult = await api.resources.users.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const userId = createResult.data.id
@@ -245,7 +240,7 @@ describe('Virtual Fields Tests', () => {
             users: 'username,email'
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Should only have requested fields
@@ -268,7 +263,7 @@ describe('Virtual Fields Tests', () => {
 
       const createResult = await api.resources.users.post({
         inputRecord: createDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const userId = createResult.data.id
@@ -291,7 +286,7 @@ describe('Virtual Fields Tests', () => {
       const putResult = await api.resources.users.put({
         id: userId,
         inputRecord: putDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Virtual fields should be in response
@@ -353,7 +348,7 @@ describe('Virtual Fields Tests', () => {
 
       const result = await api.resources.products.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Check response
@@ -390,7 +385,7 @@ describe('Virtual Fields Tests', () => {
 
       const result = await api.resources.products.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Computed field should have calculated value

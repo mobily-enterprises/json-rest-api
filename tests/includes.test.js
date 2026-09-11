@@ -10,12 +10,9 @@ import {
   validateJsonApiStructure,
   resourceIdentifier,
   cleanTables,
-  countRecords,
   createJsonApiDocument,
   createRelationship,
-  createToManyRelationship,
-  assertResourceAttributes,
-  assertResourceRelationship
+  createToManyRelationship
 } from './helpers/test-utils.js'
 
 // Create Knex instance for tests
@@ -56,7 +53,7 @@ describe('Include/Sideloading Operations', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.country = countryResult.data
 
@@ -66,7 +63,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const publisherResult = await basicApi.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
 
@@ -74,11 +71,11 @@ describe('Include/Sideloading Operations', () => {
       const author2Doc = createJsonApiDocument('authors', { name: 'Author Two' })
       const author1Result = await basicApi.resources.authors.post({
         inputRecord: author1Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       const author2Result = await basicApi.resources.authors.post({
         inputRecord: author2Doc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.authors = [author1Result.data, author2Result.data]
 
@@ -95,7 +92,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const bookResult = await basicApi.resources.books.post({
         inputRecord: bookDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.book = bookResult.data
     })
@@ -106,7 +103,7 @@ describe('Include/Sideloading Operations', () => {
         queryParams: {
           include: ['publisher']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, false)
@@ -128,7 +125,7 @@ describe('Include/Sideloading Operations', () => {
         queryParams: {
           include: ['publisher', 'authors', 'country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, false)
@@ -155,7 +152,7 @@ describe('Include/Sideloading Operations', () => {
         queryParams: {
           include: ['publisher', 'country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -199,7 +196,7 @@ describe('Include/Sideloading Operations', () => {
                 [request.includedType]: 'definitelyHidden'
               }
             },
-            simplified: false
+            format: 'jsonapi'
           }),
           (error) => {
             assert(error instanceof RestApiFieldsetError)
@@ -228,7 +225,7 @@ describe('Include/Sideloading Operations', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Nested Country', code: 'NC' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.country = countryResult.data
 
@@ -238,7 +235,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const publisherResult = await basicApi.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
 
@@ -251,7 +248,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const bookResult = await basicApi.resources.books.post({
         inputRecord: bookDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.book = bookResult.data
     })
@@ -262,7 +259,7 @@ describe('Include/Sideloading Operations', () => {
         queryParams: {
           include: ['publisher.country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, false)
@@ -288,7 +285,7 @@ describe('Include/Sideloading Operations', () => {
       const authorDoc = createJsonApiDocument('authors', { name: 'Nested Author' })
       const authorResult = await basicApi.resources.authors.post({
         inputRecord: authorDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Update book to have author
@@ -306,7 +303,7 @@ describe('Include/Sideloading Operations', () => {
       await basicApi.resources.books.patch({
         id: testData.book.id,
         inputRecord: patchDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Query with multiple nested includes
@@ -314,7 +311,7 @@ describe('Include/Sideloading Operations', () => {
         queryParams: {
           include: ['publisher.country', 'authors', 'country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -350,7 +347,7 @@ describe('Include/Sideloading Operations', () => {
       })
       const countryResult = await extendedApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.country = countryResult.data
 
@@ -365,7 +362,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const publisherResult = await extendedApi.resources.publishers.post({
         inputRecord: publisherDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
 
@@ -384,7 +381,7 @@ describe('Include/Sideloading Operations', () => {
       )
       const bookResult = await extendedApi.resources.books.post({
         inputRecord: bookDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       testData.book = bookResult.data
     })
@@ -400,7 +397,7 @@ describe('Include/Sideloading Operations', () => {
             countries: 'name,code'
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, false)

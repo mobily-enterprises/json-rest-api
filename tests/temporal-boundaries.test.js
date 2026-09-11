@@ -6,7 +6,6 @@ import { createTemporalBoundaryApi } from './fixtures/api-configs.js'
 import { cleanTables, createJsonApiDocument } from './helpers/test-utils.js'
 import { mapRestApiErrorToHttp } from '../plugins/core/connectors/lib/transport-http-helpers.js'
 import { normalizeAttributes, normalizeRecordAttributes } from '../plugins/core/lib/querying-writing/database-value-normalizers.js'
-import { storageMode } from './helpers/storage-mode.js'
 import { RestApiTemporalDataError } from '../lib/rest-api-errors.js'
 
 const knex = knexLib({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
@@ -29,11 +28,13 @@ describe('Temporal storage and response boundaries', () => {
       if (context.simplified && attributes?.person) attributes.person.producedAt = finishValue
       for (const included of context.responseRecord?.included || []) included.attributes.producedAt = finishValue
     }
-    await api.customize({ hooks: {
-      finishPost: { functionName: 'temporal-finish-post', handler },
-      finishPut: { functionName: 'temporal-finish-put', handler },
-      finishPatch: { functionName: 'temporal-finish-patch', handler }
-    } })
+    await api.customize({
+      hooks: {
+        finishPost: { functionName: 'temporal-finish-post', handler },
+        finishPut: { functionName: 'temporal-finish-put', handler },
+        finishPatch: { functionName: 'temporal-finish-patch', handler }
+      }
+    })
   })
   after(async () => { await knex.destroy() })
   beforeEach(async () => {
@@ -79,13 +80,15 @@ describe('Temporal storage and response boundaries', () => {
     const queryParams = { sort: ['projectedAt'], fields: { events: 'projectedAt' }, page: { size: 2 } }
     const first = await api.resources.events.query({ queryParams })
     assert.equal(first.data[0].attributes.projectedAt, '2026-09-01T10:20:30.123Z')
-    const second = await api.resources.events.query({ queryParams: {
-      ...queryParams, page: { size: 2, after: first.meta.pagination.cursor.next }
-    } })
+    const second = await api.resources.events.query({
+      queryParams: {
+        ...queryParams, page: { size: 2, after: first.meta.pagination.cursor.next }
+      }
+    })
     assert.equal(second.data[0].attributes.projectedAt, '2026-09-01T10:20:32.123Z')
   })
 
-  it('uses a custom serializer consistently for writes and filters', { skip: storageMode.isAnyApi() }, async () => {
+  it('uses a custom serializer consistently for writes and filters', async () => {
     const value = '2026-09-01T10:20:30.123456Z'
     const created = await api.resources.events.post({ inputRecord: document({ serializedAt: value }) })
     assert.equal(created.data.attributes.serializedAt, value)
@@ -111,9 +114,12 @@ describe('Temporal storage and response boundaries', () => {
   it('normalizes nested simplified to-many and polymorphic resources without changing ordinary objects', () => {
     const date = new Date('2026-09-08T11:22:33.987Z')
     const child = { id: 'child', producedAt: date }
-    const payload = { id: 'event', person: { id: 'person', events: [child, child] },
+    const payload = {
+      id: 'event',
+      person: { id: 'person', events: [child, child] },
       subject: { id: 'person', _type: 'people', producedAt: date },
-      arbitrary: { producedAt: date, value: 'unchanged' } }
+      arbitrary: { producedAt: date, value: 'unchanged' }
+    }
     const result = normalizeRecordAttributes(payload, api.resources, { simplified: true, resourceType: 'events', source: 'response' })
     assert.equal(result.person.events[0].producedAt, '2026-09-08T11:22:33Z')
     assert.equal(result.person.events[0], result.person.events[1])
@@ -154,12 +160,17 @@ describe('Temporal storage and response boundaries', () => {
 
   it('preserves typed errors from setters and post-write storage reads', async () => {
     const error = new RestApiTemporalDataError({ field: 'occurredAt', resourceType: 'events' })
-    await assert.rejects(applyFieldSetters({ occurredAt: '2026-09-08T00:00:00Z' }, {
-      fieldSetters: { occurredAt: { setter: () => { throw error } } },
-      sortedSetterFields: ['occurredAt']
-    }, { scopeName: 'events' }), actual => actual === error)
+    await assert.rejects(applyFieldSetters({
+      scopeName: 'events',
+      inputRecord: { data: { attributes: { occurredAt: '2026-09-08T00:00:00Z' } } },
+      schemaInfo: {
+        fieldSetters: { occurredAt: { setter: () => { throw error } } },
+        sortedSetterFields: ['occurredAt']
+      }
+    }), actual => actual === error)
     await assert.rejects(handleRecordReturnAfterWrite({
-      context: { method: 'POST' }, scopeName: 'events',
+      context: { method: 'POST' },
+      scopeName: 'events',
       helpers: { dataGetMinimal: async () => { throw error } },
       log: { warn () {} }
     }), actual => actual === error)
@@ -168,9 +179,11 @@ describe('Temporal storage and response boundaries', () => {
   for (const direction of ['after', 'before']) {
     it(`rejects malformed temporal and numeric values in page[${direction}] as client errors`, async () => {
       for (const [field, value] of [['occurredAt', 'garbage'], ['day', '2026-02-30'], ['atTime', '25:30'], ['observedAtMs', 'NaN']]) {
-        await assert.rejects(api.resources.events.query({ queryParams: {
-          sort: [field], page: { size: 2, [direction]: `${field}:${encodeURIComponent(value)},id:1` }
-        } }), (error) => {
+        await assert.rejects(api.resources.events.query({
+          queryParams: {
+            sort: [field], page: { size: 2, [direction]: `${field}:${encodeURIComponent(value)},id:1` }
+          }
+        }), (error) => {
           assertValidationError(error)
           assert.deepEqual(error.details.fields, [`page.${direction}`])
           return true
@@ -189,8 +202,10 @@ describe('Temporal storage and response boundaries', () => {
         if (created) inputRecord.data.id = created.data.id
         finishValue = new Date('2026-09-08T11:22:33.987Z')
         const result = await api.resources.events[method]({
-          ...(created ? { id: created.data.id } : {}), inputRecord,
-          queryParams: { include: ['person'] }, simplified
+          ...(created ? { id: created.data.id } : {}),
+          inputRecord: simplified ? { ...inputRecord.data.attributes, person: person.data.id } : inputRecord,
+          queryParams: { include: ['person'] },
+          format: (simplified) ? 'plain' : 'jsonapi'
         })
         assert.equal((simplified ? result : result.data.attributes).producedAt, '2026-09-08T11:22:33Z')
         assert.equal((simplified ? result.person : result.included[0].attributes).producedAt, '2026-09-08T11:22:33Z')
@@ -198,7 +213,7 @@ describe('Temporal storage and response boundaries', () => {
     }
     it(`rejects invalid finish values with simplified=${simplified}`, async () => {
       finishValue = 'not-a-date'
-      await assert.rejects(api.resources.events.post({ inputRecord: document(), simplified }), (error) => {
+      await assert.rejects(api.resources.events.post({ inputRecord: simplified ? { name: 'Event' } : document(), format: simplified ? 'plain' : 'jsonapi' }), (error) => {
         assert.equal(error.code, 'REST_API_TEMPORAL_DATA_INVALID')
         assert.equal(mapRestApiErrorToHttp(error).status, 500)
         return true

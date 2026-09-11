@@ -18,7 +18,7 @@ This is unsafe and paginates the wrong dataset:
 ```js
 const page = await api.resources.organisation_units.query({
   queryParams: { page: { number: 1, size: 20 } },
-  simplified: false
+  format: 'jsonapi'
 }, context)
 
 page.data = page.data.filter((unit) => canSeeUnit(context, unit))
@@ -77,20 +77,14 @@ The page size and count now describe the visible dataset.
 
 Install the REST plugin, one supported Knex storage plugin, and then the row-policy plugin. Install `RowPolicyPlugin` before adding resources that declare `rowPolicy`.
 
-### Normal table storage
+The following example starts with an `api` that already has `RestApiPlugin` and
+one of `RestApiKnexPlugin` or `RestApiAnyapiKnexPlugin` installed, as described in
+[initial setup](GUIDE_1_Initial_Setup.md). Use a fresh database for this example.
+The policy code is the same for both storage modes:
 
-```js
-import { Api } from 'hooked-api'
-import {
-  RestApiPlugin,
-  RestApiKnexPlugin,
-  RowPolicyPlugin
-} from 'json-rest-api'
+```javascript
+import { RowPolicyPlugin } from 'json-rest-api'
 
-const api = new Api({ name: 'application-api' })
-
-await api.use(RestApiPlugin)
-await api.use(RestApiKnexPlugin, { knex })
 await api.use(RowPolicyPlugin, {
   policies: {
     workspaceMember: ({ query, context, column, value }) => {
@@ -107,33 +101,8 @@ await api.use(RowPolicyPlugin, {
 })
 ```
 
-### AnyAPI canonical storage
-
-Use the same plugin and logical field names:
-
-```js
-await api.use(RestApiPlugin)
-await api.use(RestApiAnyapiKnexPlugin, {
-  knex,
-  tenantId: 'application'
-})
-await api.use(RowPolicyPlugin, {
-  policies: {
-    workspaceMember: ({ query, context, column, value }) => {
-      const workspaceId = context.session?.workspaceId
-      if (!workspaceId) return false
-
-      query.where(
-        column('workspace_id'),
-        value('workspace_id', workspaceId)
-      )
-      return true
-    }
-  }
-})
-```
-
-`column()` and `value()` translate logical schema fields and values through the active storage adapter. The example therefore works with both normal tables and AnyAPI canonical slots.
+`column()` and `value()` translate logical schema fields and values through the
+active storage adapter, including canonical slots.
 
 ## Resource configuration
 
@@ -141,7 +110,7 @@ await api.use(RowPolicyPlugin, {
 
 Registered policies are preferred for shared or package-owned behavior:
 
-```js
+```javascript
 await api.addResource('documents', {
   schema: {
     id: { type: 'id' },
@@ -151,9 +120,43 @@ await api.addResource('documents', {
   rowPolicy: 'workspaceMember',
   tableName: 'documents'
 })
+await api.resources.documents.createKnexTable()
 ```
 
 The string must match a function in `RowPolicyPlugin`'s `policies` option. Unknown names fail while the resource is being added.
+
+Create two documents in one workspace and one in another. Supply trusted
+application context separately from the call parameters:
+
+```javascript
+const acmeContext = { session: { workspaceId: 'acme' } }
+const otherContext = { session: { workspaceId: 'other' } }
+for (const title of ['Alpha', 'Beta']) {
+  await api.resources.documents.post({
+    inputRecord: { title, workspace_id: 'acme' }, returning: 'none'
+  }, acmeContext)
+}
+await api.resources.documents.post({
+  inputRecord: { title: 'Other workspace', workspace_id: 'other' }, returning: 'none'
+}, otherContext)
+
+const acmePage = await api.resources.documents.query({
+  format: 'jsonapi',
+  queryParams: { sort: 'title', page: { number: 1, size: 1 } }
+}, acmeContext)
+const otherPage = await api.resources.documents.query({}, otherContext)
+const deniedPage = await api.resources.documents.query({})
+
+console.log(acmePage.data[0].attributes.title) // Alpha
+console.log(acmePage.meta.pagination.total) // 2, before the page limit
+console.log(otherPage.data.map(document => document.title)) // ['Other workspace']
+console.log(deniedPage.data) // []: no workspace in the caller context
+```
+
+These inserts explicitly supply `workspace_id`. This policy does not stamp or
+validate ownership on writes; use autofilter and write permissions for that
+contract. The example demonstrates read visibility, counts and missing-context
+denial.
 
 ### Inline policy
 
@@ -279,8 +282,9 @@ Policies are reused for the resource selections that define externally visible d
 | `count` | A separate count query, including native offset-pagination counts and standalone count helpers. |
 | `single` | Minimal lookup used by `get`, and by existing-record preflights for `put`, `patch`, and `delete`. |
 | `include` | A target resource loaded into JSON:API `included` data. |
+| `search-join` | A related resource used by a cross-resource or polymorphic search, reference filter, or reference sort, including intermediate search path segments. |
 | `relationship-identifiers` | Child identifiers attached to a relationship, including has-many and AnyAPI many-to-many links. |
-| `relationship-validation` | A target record referenced by a write payload. |
+| `relationship-validation` | A batch of up to 100 distinct target IDs referenced by a write payload, or a scoped lookup retaining database ID equality. |
 | `relationship-parent` | The parent of a relationship route such as `getRelated`. |
 | `unspecified` | A custom call to the lower-level query-filtering seam did not provide a purpose. |
 
@@ -288,11 +292,73 @@ The important invariant is not the label. It is that the predicate is attached b
 
 Treat `queryPurpose` as diagnostic context, not as permission to weaken a policy. A policy should normally add the same visibility predicate for every purpose. If an advanced policy uses a purpose-specific SQL shape, each branch must enforce equivalent visibility and must be tested independently; never skip a predicate for counts, includes, identifiers, or relationship validation.
 
+Relationship identifier visibility is selected in batches of at most 100 unique
+IDs per target resource type. Target query permissions and filtering hooks run
+for each batch, with the caller's authorization and transaction context. Always
+attach the complete predicate to the supplied builder; a request-level
+"already applied" flag must not skip later queries. Keep ordering, pagination
+and include limits in their operation/resource settings. Visibility hooks add
+row predicates and retain the query's selected ID and mandatory constraints.
+Their invocation count is not a per-request or per-record contract.
+
+Regular and polymorphic belongs-to includes also load at most 100 target IDs
+per query, with target permission and filtering hooks applied to every batch
+under `queryPurpose: 'include'`. SQL projection callbacks run for each query.
+Nested collection includes run after all target batches have been collected,
+so a global collection limit is not restarted for each batch.
+
+Relationship validation uses the same batch bound. Its query context has no
+individual `id` and no parent client filters. Retain the selected ID and scope
+predicates; filtering supplies an ID subquery used to fetch complete minimal
+records. Read permission hooks then receive each target's ID and minimal record,
+once per distinct identifier per relationship. Link writers do not run target
+response GET hooks. See the [migration steps](MIGRATING_API_V2.md#relationship-target-validation).
+
+Large collection and relationship-metadata reads keep their selection in one
+SQL query. PostgreSQL uses an array predicate and SQLite uses a JSON1 ID
+subquery; their policies and projections still run before the original sort
+and limit. Apply predicates using the supplied query/context rather than
+assuming the internal ID constraint is always a Knex `whereIn` value array.
+
+The identifier selection uses `DISTINCT` so predicate joins do not multiply its
+returned ID rows. The library retains the input linkage order and occurrences
+after visibility filtering. A permission or filter failure in a later batch
+rejects the read rather than returning a partial set. No visibility results are
+shared between calls, resource types or tenant APIs.
+
 ### Collections and counts
 
 Offset pagination applies the same mandatory policy to the data query and its count. This remains true when the caller supplies no `filters` object.
 
 Cursor predicates are added after the row policy, so the cursor moves through visible rows rather than through a page that will later be filtered.
+
+Related search rows are filtered inside each joined selection. A hidden related
+name cannot match a search or contribute to its count. A visible primary record
+can still match its own attributes in an OR search when its related row is hidden
+or absent. These selections check the target's `query` permission and use the
+caller's authorization and transaction context, without inheriting the primary
+resource's client filters. Explicit permission or query-hook failures reject the
+query. Keep mandatory policy predicates active for `search-join` too.
+
+Built-in filters on a belongs-to foreign key, its relationship alias, or a
+polymorphic ID/type pair also require a visible target. A hidden or missing
+reference behaves as null when evaluating the declared filter operator. This
+applies to `actualField`, `oneOf` and joined target fields as well as direct
+filters. Comparisons retain the stored column's type and collation. Custom
+`applyFilter` callbacks still own the visibility of any related SQL they write;
+the library cannot infer relationships from arbitrary custom predicates.
+
+Built-in sorting on these reference fields and their aliases uses the same
+visibility boundary, including `defaultSort`. Hidden and absent references
+share a null sort value; later fields and the primary ID resolve ties. Ordering,
+cursor comparisons and cursor values all use the same visible value, so a
+hidden target's ID cannot appear in pagination metadata or links. Visible values
+retain their storage column's type and collation. Target lookup predicates use
+`search-join`, the current caller and the caller's transaction.
+
+For HTTP null filters, send `filter[field][json]=null`; plain
+`filter[field]=null` is the literal string. Generated links preserve typed nulls
+and arrays using this explicit JSON form.
 
 ### Single records and writes
 
@@ -309,6 +375,27 @@ The target resource's policy is used when the framework loads:
 - nested includes
 - per-parent windowed include queries
 - a relationship target during write validation
+
+These secondary reads also check the target resource's `query` action permission.
+A permission denial rejects the read, whereas a row policy filters individual
+rows. Default relationship identifiers are subject to the same permission check
+as requested includes. The target permission context retains caller auth and
+transaction, with target scope/schema and no inherited parent ID or filters.
+
+Regular-storage many-to-many reads also apply the pivot resource's permission and
+policy to membership before standard/windowed include limits and linkage. AnyAPI
+uses tenant-scoped canonical links for these associations; a declared pivot
+resource's row policy does not apply to canonical links.
+
+Both storage backends apply include ordering and limits after target visibility.
+`include: { strategy: 'window', limit: 2, orderBy: ['name'] }` selects up to two
+visible children for each parent. The default/`standard` strategy applies a global
+limit to the included target set; a shared many-to-many child counts once and
+remains linked to every selected parent it belongs to. Duplicate physical links
+do not consume extra slots. Sparse fields and SQL query projections retain the
+configured strategy. Reverse polymorphic collections follow the same rules.
+Included linkage lists the selected subset; use the relationship/related endpoint
+to read or paginate the full visible membership.
 
 Filtering the parent resource does not automatically define child visibility. Put `rowPolicy` on every child resource that has its own visibility rule.
 

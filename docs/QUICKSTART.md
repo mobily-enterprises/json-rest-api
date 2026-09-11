@@ -1,346 +1,173 @@
 # Quickstart
 
+Use Node 24 or newer. Development verification runs on Node 24. This example
+uses an in-memory SQLite database: restarting the process discards its records.
 
-## Make a new npm project and install the basic NPM modules
+## Install
 
 ```bash
 mkdir quickstart-api
 cd quickstart-api
-npm init
-npm install json-rest-api
-npm install knex
-npm install better-sqlite3
-npm install express
+npm init -y
+npm pkg set type=module
+npm install json-rest-api hooked-api knex better-sqlite3 express
 ```
 
-These modules are all defined as peer dependencies and will be 
+These examples use the revised API described in the
+[migration guide](GUIDE/MIGRATING_API_V2.md). Until that release is published,
+install the intended library tarball in place of the registry package.
 
-## Use ESM syntax for importing
+## Define resources
 
-Make sure package.json has `type: "module"` in it
-
-## Create a basic file
+Create `index.js` with the following code. Install the HTTP connector before
+registering resources so it can register their routes.
 
 ```javascript
-//
-// index.js
-//
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'; // Added: ExpressPlugin
-import { Api } from 'hooked-api';
-import knexLib from 'knex';
-import util from 'util';
-import express from 'express'; // Added: Express
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'
+import { Api } from 'hooked-api'
+import knexLib from 'knex'
+import express from 'express'
 
-// Utility used throughout this guide
-const inspect = (obj) => util.inspect(obj, { depth: 8 })
-
-// Create a Knex instance connected to SQLite in-memory database
 const knex = knexLib({
   client: 'better-sqlite3',
-  connection: {
-    filename: ':memory:'
-  },
+  connection: { filename: ':memory:' },
   useNullAsDefault: true
-});
+})
+const api = new Api({ name: 'book-catalog-api' })
+await api.use(RestApiPlugin)
+await api.use(RestApiKnexPlugin, { knex })
+await api.use(ExpressPlugin, { mountPath: '/api' })
 
-// Create API instance
-const api = new Api({ name: 'book-catalog-api'});
-
-// Install plugins
-await api.use(RestApiPlugin); // URLs auto-detected from request headers
-await api.use(RestApiKnexPlugin, { knex });
-await api.use(ExpressPlugin, {  mountPath: '/api' }); // Added: Express Plugin
-
-/// *** ...programmatic calls here... ***
-
-// Create the express server and add the API's routes 
-const app = express();
-app.use(api.http.express.router);
-app.use(api.http.express.notFoundRouter);
-
-app.listen(3000, () => {
-  console.log('Express server started on port 3000. API available at http://localhost:3000/api');
-}).on('error', (err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1)
-});
-```
-
-## Add a couple of resources
-
-In the snippet above, add a couple of related resourcs:
-
-```javascript
-// Define publishers resource
 await api.addResource('publishers', {
   schema: {
-    name: { type: 'string', required: true, max: 255, search: true, indexed: true },
+    name: { type: 'string', required: true, max: 255, search: true }
   },
   relationships: {
-    // A publisher has many authors
-    authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' },
-  },
-  searchSchema: { // Adding search schema for publishers
-    name: { type: 'string', filterOperator: 'like' }
+    authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' }
   }
-});
-await api.resources.publishers.createKnexTable();
-
-// Define authors resource, which belongs to a publisher
+})
 await api.addResource('authors', {
   schema: {
     name: { type: 'string', required: true, max: 100, search: true },
-    surname: { type: 'string', required: true, max: 100, search: true },
+    surname: { type: 'string', required: true, max: 100 },
     publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
   },
-  searchSchema: { // Adding search schema for authors
-    name: { type: 'string', filterOperator: 'like' },
-    surname: { type: 'string', filterOperator: 'like' },
-    publisher: { type: 'id', actualField: 'publisher_id', nullable: true },
-    publisherName: { type: 'string', actualField: 'publishers.name', filterOperator: 'like' } // Cross-table search
+  searchSchema: {
+    nameContains: { type: 'string', actualField: 'name', filterOperator: 'contains' }
   }
-});
-await api.resources.authors.createKnexTable();
+})
+await api.resources.publishers.createKnexTable()
+await api.resources.authors.createKnexTable()
 ```
 
-`searchSchema` defines the public filter names your API accepts. Those keys do not need to match database columns or even resource field names. Keep the quickstart mental model simple: `searchSchema` is the resource's public filter contract. For advanced mapping, multi-field search, and custom backend filtering, see [Manipulating and Searching Tables](GUIDE/GUIDE_2_2_Manipulating_And_Searching_Tables.md).
+`searchSchema` declares accepted public filters; `actualField` maps a filter to
+a resource field. See [searching](GUIDE/GUIDE_2_2_Manipulating_And_Searching_Tables.md)
+for more complex filters and [schema migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md)
+for persistent databases.
 
-If you want to inspect the physical table shape or generate Knex migrations directly from your resource definitions, see [Knex Schema and Migrations](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
+## Call the API programmatically
 
-## Run the program
-
-```bash
-$ node index.js 
-2025-08-01T00:25:50.730Z [INFO] [book-catalog-api] Installing plugin 'rest-api'
-2025-08-01T00:25:50.736Z [INFO] [book-catalog-api] Plugin 'rest-api' installed successfully { duration: '2ms' }
-2025-08-01T00:25:50.736Z [INFO] [book-catalog-api] Installing plugin 'rest-api-knex' { options: '[Object with methods]' }
-2025-08-01T00:25:50.745Z [INFO] [book-catalog-api:plugin:rest-api-knex] Database capabilities detected: { database: 'SQLite', version: '3.50.2', windowFunctions: true }
-2025-08-01T00:25:50.746Z [INFO] [book-catalog-api:plugin:rest-api-knex] RestApiKnexPlugin installed - basic CRUD operations ready
-2025-08-01T00:25:50.747Z [INFO] [book-catalog-api] Plugin 'rest-api-knex' installed successfully { duration: '10ms' }
-2025-08-01T00:25:50.747Z [INFO] [book-catalog-api] Installing plugin 'express' { options: { mountPath: '/api' } }
-2025-08-01T00:25:50.750Z [INFO] [book-catalog-api:plugin:express] Express plugin initialized successfully
-2025-08-01T00:25:50.751Z [INFO] [book-catalog-api] Plugin 'express' installed successfully { duration: '4ms' }
-2025-08-01T00:25:50.751Z [INFO] [book-catalog-api] Scope 'publishers' added successfully
-2025-08-01T00:25:50.758Z [INFO] [book-catalog-api:global] Routes registered for scope 'publishers'
-2025-08-01T00:25:50.763Z [INFO] [book-catalog-api] Scope 'authors' added successfully
-2025-08-01T00:25:50.765Z [INFO] [book-catalog-api:global] Routes registered for scope 'authors'
-Express server started on port 3000. API available at http://localhost:3000/api
-```
-
-Success!
-
-## Try the API programmatically
-
-Stop the server (CTRL-C).
-Now, just after the creation of the knex table for authors, make some queries programmatically:
+Append this code before starting the HTTP server:
 
 ```javascript
-// Method 1: Simplified mode without inputRecord (most concise)
-const penguinResult = await api.resources.publishers.post({
-  name: 'Penguin Random House'
-});
-console.log('Created publisher:', inspect(penguinResult));
+const publisher = await api.resources.publishers.post({
+  inputRecord: { name: 'Penguin Random House' }
+})
+const author = await api.resources.authors.post({
+  inputRecord: { name: 'George', surname: 'Orwell', publisher: publisher.id }
+})
 
-// Method 2: Simplified mode with inputRecord (explicit)
-const harperResult = await api.resources.publishers.post({
-  inputRecord: {
-    name: 'HarperCollins'
+const found = await api.resources.authors.query({
+  queryParams: {
+    filters: { nameContains: 'Georg' },
+    sort: ['surname'],
+    page: { number: 1, size: 10 }
   }
-});
+})
+console.log('Matching authors:', found.data)
+console.log('Pagination:', found.meta.pagination)
 
-// Method 3: Full JSON:API mode (standards compliant)
-const oxfordResult = await api.resources.publishers.post({
+const withAuthors = await api.resources.publishers.get({
+  id: publisher.id,
+  queryParams: { include: ['authors'] }
+})
+console.log('Publisher and included authors:', withAuthors)
+
+const updated = await api.resources.authors.patch({
+  id: author.id,
+  inputRecord: { surname: 'Orwell (Eric Blair)' },
+  returning: 'minimal'
+})
+console.log('Updated identifier:', updated)
+
+const document = await api.resources.publishers.post({
+  format: 'jsonapi',
   inputRecord: {
     data: {
       type: 'publishers',
-      attributes: {
-        name: 'Oxford University Press'
-      }
+      attributes: { name: 'Oxford University Press' }
     }
-  },
-  simplified: false
-});
-console.log('JSON:API response:', inspect(oxfordResult));
-
-// Create an author linked to the first publisher (simplified)
-const authorResult = await api.resources.authors.post({
-  name: 'George',
-  surname: 'Orwell',
-  publisher: penguinResult.id
-});
-console.log('Created author:', inspect(authorResult));
-
-// Get all publishers
-const allPublishers = await api.resources.publishers.query({});
-console.log('All publishers:', inspect(allPublishers));
-
-// Get publisher with included authors
-const publisherWithAuthors = await api.resources.publishers.get({
-  id: penguinResult.id,
-  include: ['authors']
-});
-console.log('Publisher with authors:', inspect(publisherWithAuthors));
-
-// Search authors by name
-const searchResult = await api.resources.authors.query({
-  filter: { name: 'George' }
-});
-console.log('Search results:', inspect(searchResult));
-
-// Update an author
-const updateResult = await api.resources.authors.patch({
-  id: authorResult.id,
-  surname: 'Orwell (Eric Blair)'
-});
-console.log('Updated author:', inspect(updateResult));
+  }
+})
+console.log('JSON:API publisher:', document.data)
 ```
 
-The API supports three different ways to interact with resources programmatically:
+Programmatic calls default to `format: 'plain'` and `returning: 'full'`.
+Writes always place record data in `inputRecord`. Read selection, filtering,
+sorting and pagination go in `queryParams`; identifiers and response options
+remain method parameters.
 
-1. **Simplified mode without inputRecord** (default): Pass attributes directly as top-level properties. This is the most concise approach.
-2. **Simplified mode with inputRecord**: Explicitly wrap attributes in an `inputRecord` property. Still returns simplified objects.
-3. **Full JSON:API mode**: Set `simplified: false` to use the complete JSON:API specification format for both requests and responses. This provides full standards compliance and access to all JSON:API features.
+Plain reads return a record for `get`, and a collection with `data` for `query`.
+The filtered query above returns George and pagination metadata with `total: 1`.
+The PATCH returns `{ type: 'authors', id: author.id }` because it selects
+`returning: 'minimal'`. Use `returning: 'none'` for an undefined write result.
+`format: 'jsonapi'` selects JSON:API input and output documents for that call.
 
-Restart the server, and watch the output:
+## Start the HTTP server
 
-```text
-Created publisher: { id: '1', name: 'Penguin Random House', authors_ids: [] }
-JSON:API response: {
-  data: {
-    type: 'publishers',
-    id: '3',
-    attributes: { name: 'Oxford University Press' },
-    relationships: { authors: { data: [] } },
-    links: { self: '/api/publishers/3' }
-  },
-  links: { self: '/api/publishers/3' }
+Append this last block:
+
+```javascript
+const app = express()
+app.use(api.http.express.router)
+app.use(api.http.express.notFoundRouter)
+const server = app.listen(3000, () => {
+  console.log('API listening at http://localhost:3000/api')
+})
+
+async function shutdown () {
+  server.close(async () => { await knex.destroy() })
 }
-Created author: { id: '1', name: 'George', surname: 'Orwell', publisher: { id: '1' } }
-All publishers: {
-  data: [
-    { id: '1', name: 'Penguin Random House', authors: [ { id: '1' } ] },
-    { id: '2', name: 'HarperCollins', authors: [] },
-    { id: '3', name: 'Oxford University Press', authors: [] }
-  ],
-  links: { self: '/api/publishers' }
-}
-Publisher with authors: { id: '1', name: 'Penguin Random House', authors: [ { id: '1' } ] }
-Search results: {
-  data: [ { id: '1', name: 'George', surname: 'Orwell', publisher: { id: '1' } } ],
-  links: { self: '/api/authors' }
-}
-Updated author: {
-  id: '1',
-  name: 'George',
-  surname: 'Orwell (Eric Blair)',
-  publisher: { id: '1' }
-}
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
 ```
 
-## Try the API via cURL
-
-With the server running on port 3000 and the data created programmatically above, you can interact with the API using cURL:
+Run `node index.js`. HTTP requests use JSON:API documents. The connector handles
+request-body parsing. The following commands assume a fresh run of the example;
+use returned IDs when adapting them to an existing database. `--globoff` keeps
+curl from interpreting the square brackets in query parameters.
 
 ```bash
-
-# Get all publishers
 curl http://localhost:3000/api/publishers
+curl --globoff 'http://localhost:3000/api/publishers/1?include=authors'
+curl --globoff 'http://localhost:3000/api/authors?filter[nameContains]=Georg'
+curl --globoff 'http://localhost:3000/api/authors?fields[authors]=name,surname'
+curl --globoff 'http://localhost:3000/api/publishers?page[number]=1&page[size]=10'
+curl 'http://localhost:3000/api/authors?sort=-surname'
 
-# Get all authors
-curl http://localhost:3000/api/authors
-
-# Get a specific publisher with included authors
-curl "http://localhost:3000/api/publishers/1?include=authors"
-
-# Search authors by name
-curl "http://localhost:3000/api/authors?filter[name]=George"
-
-# Search authors by publisher name (cross-table search)
-curl "http://localhost:3000/api/authors?filter[publisherName]=Penguin"
-
-# Get authors with sparse fields (only name and surname)
-curl "http://localhost:3000/api/authors?fields[authors]=name,surname"
-
-# Update an author
-curl -X PATCH http://localhost:3000/api/authors/1 \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": {
-      "type": "authors",
-      "id": "1",
-      "attributes": {
-        "surname": "Orwell (Blair)"
-      }
-    }
-  }'
-
-# Create a new author
 curl -X POST http://localhost:3000/api/authors \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": {
-      "type": "authors",
-      "attributes": {
-        "name": "Jane",
-        "surname": "Austen"
-      },
-      "relationships": {
-        "publisher": {
-          "data": { "type": "publishers", "id": "2" }
-        }
-      }
-    }
-  }'
+  -H 'Content-Type: application/vnd.api+json' \
+  -d '{"data":{"type":"authors","attributes":{"name":"Jane","surname":"Austen"},"relationships":{"publisher":{"data":{"type":"publishers","id":"1"}}}}}'
 
-# Update the new author's surname
 curl -X PATCH http://localhost:3000/api/authors/2 \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": {
-      "type": "authors",
-      "id": "2",
-      "attributes": {
-        "surname": "Austen (1775-1817)"
-      }
-    }
-  }'
+  -H 'Content-Type: application/vnd.api+json' \
+  -d '{"data":{"type":"authors","id":"2","attributes":{"surname":"Austen (1775-1817)"}}}'
 
-# Update author's relationship to a different publisher
-curl -X PATCH http://localhost:3000/api/authors/2 \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": {
-      "type": "authors",
-      "id": "2",
-      "relationships": {
-        "publisher": {
-          "data": { "type": "publishers", "id": "1" }
-        }
-      }
-    }
-  }'
-
-# Delete the newly created author
 curl -X DELETE http://localhost:3000/api/authors/2
-
-# Get publishers with pagination
-curl "http://localhost:3000/api/publishers?page[offset]=0&page[limit]=10"
-
-# Sort authors by surname descending
-curl "http://localhost:3000/api/authors?sort=-surname"
 ```
 
-## Read the guide and party!
+For an API without an HTTP server, omit the connector/server setup and call
+`await knex.destroy()` after the programmatic operations finish.
 
-You've successfully set up a basic JSON REST API! This quickstart covered the essentials, but there's much more to explore.
-
-Check out the [full guide](./GUIDE) to learn about:
-- Advanced relationships (many-to-many, polymorphic)
-- Permission hooks, request auth context, and autofiltering
-- Hooks and middleware
-- Custom validation
-- Pagination strategies
-- Performance optimization
-- And much more!
-
-Happy coding!
+Continue with the [full guide](GUIDE/index.md),
+[API reference](API.md), and [verified backend capabilities](GUIDE/BACKEND_CAPABILITIES.md).

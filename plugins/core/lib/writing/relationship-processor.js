@@ -1,162 +1,91 @@
-import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { validateRelationshipDataCardinality } from '../querying-writing/relationship-contracts.js'
+import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../querying-writing/knex-constants.js'
+import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+
+export const lockRelationshipParent = async ({ context, helpers, scopeName }) => {
+  if (!context.transaction) return
+  const adapter = helpers.getStorageAdapter(scopeName)
+  const idColumn = adapter.getIdColumn()
+  const parent = () => adapter.buildBaseQuery({ transaction: context.transaction })
+    .where(idColumn, adapter.translateFilterValue('id', context.id))
+  // A row version change also rejects stale PostgreSQL repeatable-read writers.
+  const matched = await parent().update({ [idColumn]: context.transaction.ref(idColumn) })
+  // MySQL can report changed rows rather than matched rows when FOUND_ROWS is disabled.
+  if (!matched && !await parent().select(idColumn).forUpdate().first()) {
+    throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
+  }
+}
+
+export const lockRelationshipTargets = async (api, transaction, identifiers) => {
+  if (!transaction) return identifiers
+  const targets = []
+  const resolved = []
+  const resources = new Map()
+  for (const { type, id } of identifiers) {
+    if (!resources.has(type)) resources.set(type, { adapter: api.knex.helpers.getStorageAdapter(type), seen: new Set(), resolved: new Set() })
+    const { adapter, seen } = resources.get(type)
+    const value = adapter.translateFilterValue('id', id)
+    if (seen.has(String(value))) continue
+    seen.add(String(value))
+    targets.push({ type, id, value, adapter })
+  }
+  for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
+    const batch = targets.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
+    const byType = new Map()
+    for (const target of batch) {
+      if (!byType.has(target.type)) byType.set(target.type, [])
+      byType.get(target.type).push(target)
+    }
+    const found = new Map()
+    for (const [type, group] of byType) {
+      const { adapter } = group[0]
+      const idColumn = adapter.getIdColumn()
+      const rows = await applyDatabaseReadOptions(adapter.buildBaseQuery({ transaction })
+        .whereIn(idColumn, group.map(target => target.value))
+        .orderBy(`${adapter.getTableName()}.${idColumn}`).forUpdate().select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
+      found.set(type, new Set(rows.map(row => String(row[idColumn]))))
+    }
+    for (const { type, id, value, adapter } of batch) {
+      let storedId = String(value)
+      // Let the database resolve alternate spellings under its column collation.
+      if (!found.get(type).has(storedId)) {
+        const record = await applyDatabaseReadOptions(adapter.buildBaseQuery({ transaction })
+          .where(adapter.getIdColumn(), value).forUpdate().first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
+        if (!record) {
+          throw new RestApiResourceError(`Related ${type} with id ${id} not found`, {
+            subtype: 'not_found', resourceType: type, resourceId: id
+          })
+        }
+        storedId = String(record[adapter.getIdColumn()])
+      }
+      const identities = resources.get(type).resolved
+      if (!identities.has(storedId)) {
+        identities.add(storedId)
+        resolved.push({ type, id })
+      }
+    }
+  }
+  // Return each database identity once, retaining its first submitted spelling.
+  return resolved
+}
 
 /**
- * Processes JSON:API relationship data and converts to database operations
+ * Classify normalized linkage for the resource write lifecycle.
+ * Validates cardinality and polymorphic target types, then separates owner
+ * columns, referenced targets, pivot writes and reverse child writes. This
+ * helper prepares work; it does not write storage or establish authorization.
  *
- * @param {Object} scope - The scope object containing schema info
- * @param {Object} deps - Dependencies object
- * @returns {Object} Object with belongsToUpdates and manyToManyRelationships arrays
- *
+ * @param {Object} scope - Resource with compiled schemaInfo in vars
+ * @param {Object} deps
+ * @param {Object} deps.context
+ * @param {Object} deps.context.inputRecord - Normalized JSON:API write document
+ * @returns {Object} belongsToUpdates map plus belongsToTargets,
+ *   manyToManyRelationships and reverseRelationships arrays
  * @example
- * // Input: Simple belongsTo relationship
- * const inputRecord = {
- *   data: {
- *     type: 'articles',
- *     attributes: { title: 'My Article' },
- *     relationships: {
- *       author: {
- *         data: { type: 'users', id: '123' }
- *       },
- *       category: {
- *         data: { type: 'categories', id: '5' }
- *       }
- *     }
- *   }
- * };
- *
- * // Schema has:
- * // author_id: { belongsTo: 'users', as: 'author' }
- * // category_id: { belongsTo: 'categories', as: 'category' }
- *
- * const result = processRelationships(scope, { context: { inputRecord } });
- *
- * // Output: Foreign keys extracted
- * // {
- * //   belongsToUpdates: {
- * //     author_id: '123',
- * //     category_id: '5'
- * //   },
- * //   manyToManyRelationships: []
- * // }
- *
- * @example
- * // Input: Polymorphic relationship
- * const inputRecord = {
- *   data: {
- *     type: 'comments',
- *     relationships: {
- *       commentable: {
- *         data: { type: 'posts', id: '456' }
- *       }
- *     }
- *   }
- * };
- *
- * // Schema relationships has:
- * // commentable: {
- * //   belongsToPolymorphic: {
- * //     types: ['posts', 'videos'],
- * //     typeField: 'commentable_type',
- * //     idField: 'commentable_id'
- * //   }
- * // }
- *
- * const result = processRelationships(scope, { context: { inputRecord } });
- *
- * // Output: Both type and id fields set
- * // {
- * //   belongsToUpdates: {
- * //     commentable_type: 'posts',
- * //     commentable_id: '456'
- * //   },
- * //   manyToManyRelationships: []
- * // }
- *
- * @example
- * // Input: Many-to-many relationship
- * const inputRecord = {
- *   data: {
- *     type: 'articles',
- *     relationships: {
- *       tags: {
- *         data: [
- *           { type: 'tags', id: '10' },
- *           { type: 'tags', id: '20' }
- *         ]
- *       }
- *     }
- *   }
- * };
- *
- * // Schema relationships has:
- * // tags: {
- * //   type: 'manyToMany',
- * //   through: 'article_tags',
- * //   foreignKey: 'article_id',
- * //   otherKey: 'tag_id'
- * // }
- *
- * const result = processRelationships(scope, { context: { inputRecord } });
- *
- * // Output: Many-to-many data collected
- * // {
- * //   belongsToUpdates: {},
- * //   manyToManyRelationships: [{
- * //     relName: 'tags',
- * //     relDef: {
- * //       through: 'article_tags',
- * //       foreignKey: 'article_id',
- * //       otherKey: 'tag_id'
- * //     },
- * //     relData: [
- * //       { type: 'tags', id: '10' },
- * //       { type: 'tags', id: '20' }
- * //     ]
- * //   }]
- * // }
- *
- * @example
- * // Input: Clearing relationships
- * const inputRecord = {
- *   data: {
- *     relationships: {
- *       author: { data: null },      // Clear belongsTo
- *       tags: { data: [] }           // Clear many-to-many
- *     }
- *   }
- * };
- *
- * const result = processRelationships(scope, { context: { inputRecord } });
- *
- * // Output: Null for belongsTo, empty array for many-to-many
- * // {
- * //   belongsToUpdates: { author_id: null },
- * //   manyToManyRelationships: [{
- * //     relName: 'tags',
- * //     relDef: { ... },
- * //     relData: []  // Will delete all pivot records
- * //   }]
- * // }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin's dataPut and dataPatch methods
- * - Called before database writes to prepare relationship updates
- *
- * Purpose:
- * - Converts JSON:API relationship format to database operations
- * - Handles all relationship types: belongsTo, polymorphic, many-to-many
- * - Validates polymorphic types against allowed values
- * - Separates concerns: foreign keys vs pivot table operations
- *
- * Data flow:
- * 1. Receives JSON:API document with relationships section
- * 2. Analyzes schema to determine relationship types
- * 3. For belongsTo: extracts foreign key values
- * 4. For polymorphic: extracts both type and id fields
- * 5. For many-to-many: collects data for pivot operations
- * 6. Returns structured data for database updates
+ * // An explicit author clear produces belongsToUpdates.author_id = null.
+ * // An explicit empty tags array produces a pivot operation with relData: [].
+ * // Omitting relationships produces empty work collections, not implicit clears.
  */
 export const processRelationships = (scope, deps) => {
   // Extract values from scope
@@ -170,10 +99,12 @@ export const processRelationships = (scope, deps) => {
   const { context } = deps
   const { inputRecord } = context
   const belongsToUpdates = {}
+  const belongsToTargets = []
   const manyToManyRelationships = []
+  const reverseRelationships = []
 
   if (!inputRecord.data.relationships) {
-    return { belongsToUpdates, manyToManyRelationships }
+    return { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships }
   }
 
   for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
@@ -201,6 +132,7 @@ export const processRelationships = (scope, deps) => {
           belongsToUpdates[fieldName] = null
         } else if (relData.data?.id) {
           belongsToUpdates[fieldName] = relData.data.id
+          belongsToTargets.push(relData.data)
         }
       }
     }
@@ -232,6 +164,7 @@ export const processRelationships = (scope, deps) => {
 
         belongsToUpdates[typeField] = type
         belongsToUpdates[idField] = id
+        belongsToTargets.push(relData.data)
       }
     }
 
@@ -240,6 +173,7 @@ export const processRelationships = (scope, deps) => {
       manyToManyRelationships.push({
         relName,
         relDef: {
+          target: relDef.target,
           through: relDef.through,
           foreignKey: relDef.foreignKey,
           otherKey: relDef.otherKey
@@ -247,8 +181,10 @@ export const processRelationships = (scope, deps) => {
         relData: relData.data
       })
     }
-    // Note: hasOne and hasMany don't need processing here as they don't update the current record
+    if ((relDef?.type === 'hasOne' || relDef?.type === 'hasMany') && relData.data !== undefined) {
+      reverseRelationships.push({ relName, relDef, relData: relData.data })
+    }
   }
 
-  return { belongsToUpdates, manyToManyRelationships }
+  return { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships }
 }

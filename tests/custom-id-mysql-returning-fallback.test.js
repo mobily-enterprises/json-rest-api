@@ -1,128 +1,56 @@
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import knexLib from 'knex'
-import { Api } from 'hooked-api'
-import { RestApiPlugin } from '../plugins/core/rest-api-plugin.js'
-import { RestApiKnexPlugin } from '../plugins/core/rest-api-knex-plugin.js'
-import {
-  cleanTables,
-  validateJsonApiStructure
-} from './helpers/test-utils.js'
+import { createConformanceFixture } from './fixtures/conformance.js'
+import { createIdConformanceApi } from './fixtures/api-configs.js'
+import { validateJsonApiStructure } from './helpers/test-utils.js'
+import { holdManagedTransaction } from './helpers/transaction-completion.js'
 
-const knex = knexLib({
-  client: 'better-sqlite3',
-  connection: {
-    filename: ':memory:'
-  },
-  useNullAsDefault: true
-})
-
-let api
-
-function createMysqlStyleInsertDb (baseKnex) {
-  return (tableName) => {
-    const query = baseKnex(tableName)
-    const originalInsert = query.insert.bind(query)
-
-    query.insert = (...args) => {
-      const insertBuilder = originalInsert(...args)
-      const originalReturning = insertBuilder.returning.bind(insertBuilder)
-
-      insertBuilder.returning = async (...returnArgs) => {
-        await originalReturning(...returnArgs)
-        return [0]
-      }
-
-      return insertBuilder
-    }
-
-    return query
-  }
-}
-
-describe('Custom id POST fallback when insert returning is unusable', () => {
+describe('Custom ID POST fallback when insert returning is unusable', () => {
+  let fixture
   before(async () => {
-    api = new Api({
-      name: 'custom-id-mysql-returning-fallback-test'
+    fixture = await createConformanceFixture({
+      storage: 'knex',
+      createApi: createIdConformanceApi,
+      apiOptions: { idType: 'string' },
+      tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
     })
+  })
+  after(async () => { await fixture?.close() })
+  beforeEach(async () => { await fixture.reset() })
 
-    await api.use(RestApiPlugin, {
-      simplifiedApi: true,
-      simplifiedTransport: false,
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
+  for (const format of ['plain', 'jsonapi']) {
+    it(`returns the explicit ID when the insert result is zero (${format})`, async t => {
+      const unit = await holdManagedTransaction(fixture.api)
+      const transaction = unit.transaction
+      const original = transaction.client.processResponse
+      let inserts = 0
+      // Simulate an unusable driver result after a real insert on the borrowed connection.
+      t.mock.method(transaction.client, 'processResponse', function (query, runner) {
+        const result = original.call(this, query, runner)
+        if (query.method === 'insert') { inserts++; return [0] }
+        return result
+      })
+      try {
+        const created = await fixture.api.resources.items.post({
+          inputRecord: format === 'plain'
+            ? { id: '8', name: 'Created' }
+            : { data: { type: 'items', id: '8', attributes: { name: 'Created' } } },
+          format,
+          transaction
+        })
+        if (format === 'jsonapi') validateJsonApiStructure(created)
+        assert.equal((format === 'plain' ? created : created.data).id, '8')
+        assert.equal((format === 'plain' ? created : created.data.attributes).name, 'Created')
+        assert.equal(inserts, 1)
+        const row = await transaction('conformance_items').where('items_key', '8').first()
+        assert.equal(row.items_key, '8')
+        assert.equal(row.display_name, 'Created')
+        assert.equal(transaction.isCompleted(), false)
+      } finally {
+        t.mock.restoreAll()
+        await unit.rollback()
       }
+      assert.equal(await fixture.count('items'), 0)
     })
-    await api.use(RestApiKnexPlugin, { knex })
-
-    await api.addResource('user_settings', {
-      tableName: 'mysqlish_user_settings',
-      idProperty: 'user_id',
-      searchSchema: {
-        id: { type: 'id', actualField: 'id' }
-      },
-      schema: {
-        theme: { type: 'string', required: true, max: 32 }
-      }
-    })
-    await api.resources.user_settings.createKnexTable()
-  })
-
-  after(async () => {
-    await knex.destroy()
-  })
-
-  beforeEach(async () => {
-    await cleanTables(knex, ['mysqlish_user_settings'])
-  })
-
-  it('returns the explicit id for simplified POST when the insert result is 0', async () => {
-    const mysqlStyleDb = createMysqlStyleInsertDb(knex)
-
-    const created = await api.resources.user_settings.post({
-      inputRecord: {
-        id: '6',
-        theme: 'dark'
-      },
-      simplified: true,
-      transaction: mysqlStyleDb
-    })
-
-    assert.equal(created.id, '6')
-    assert.equal(created.theme, 'dark')
-
-    const dbRow = await knex('mysqlish_user_settings').where('user_id', 6).first()
-    assert.ok(dbRow)
-    assert.equal(String(dbRow.user_id), '6')
-    assert.equal(dbRow.theme, 'dark')
-  })
-
-  it('returns the explicit id for non-simplified POST when the insert result is 0', async () => {
-    const mysqlStyleDb = createMysqlStyleInsertDb(knex)
-
-    const created = await api.resources.user_settings.post({
-      inputRecord: {
-        data: {
-          type: 'user_settings',
-          id: '8',
-          attributes: {
-            theme: 'light'
-          }
-        }
-      },
-      simplified: false,
-      transaction: mysqlStyleDb
-    })
-
-    validateJsonApiStructure(created)
-    assert.equal(created.data.id, '8')
-    assert.equal(created.data.attributes.theme, 'light')
-
-    const dbRow = await knex('mysqlish_user_settings').where('user_id', 8).first()
-    assert.ok(dbRow)
-    assert.equal(String(dbRow.user_id), '8')
-    assert.equal(dbRow.theme, 'light')
-  })
+  }
 })

@@ -1,4 +1,5 @@
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { snapshotResourceConfiguration } from './lib/querying-writing/schema-helpers.js'
 import { createStorageAdapterUtilities } from './lib/querying/storage-adapter-utils.js'
 
 const PUBLIC_PRESET_NAME = 'public'
@@ -37,7 +38,7 @@ function buildAutofilterConsistencyError ({ filter, resolvedValue }) {
 }
 
 function ensureResolverMap (resolverMap = {}) {
-  const normalized = {}
+  const normalized = Object.create(null)
 
   for (const [name, resolver] of Object.entries(resolverMap)) {
     if (typeof resolver !== 'function') {
@@ -50,7 +51,7 @@ function ensureResolverMap (resolverMap = {}) {
 }
 
 function getPresetFilters (presetName, presets) {
-  const preset = presets[presetName]
+  const preset = Object.hasOwn(presets, presetName) ? presets[presetName] : undefined
 
   if (!preset) {
     throw new Error(`Unknown autofilter preset '${presetName}'.`)
@@ -77,7 +78,7 @@ function normalizeFilterDefinition ({ filterDef, resolvers, schemaStructure, sco
     throw new Error(`Autofilter definitions on resource '${scopeName}' must include a field.`)
   }
 
-  const fieldDef = schemaStructure[field]
+  const fieldDef = Object.hasOwn(schemaStructure, field) ? schemaStructure[field] : undefined
   if (!fieldDef) {
     throw new Error(`Autofilter field '${field}' does not exist on resource '${scopeName}'.`)
   }
@@ -91,7 +92,7 @@ function normalizeFilterDefinition ({ filterDef, resolvers, schemaStructure, sco
   let resolverName
 
   if (typeof resolverDef === 'string') {
-    resolve = resolvers[resolverDef]
+    resolve = Object.hasOwn(resolvers, resolverDef) ? resolvers[resolverDef] : undefined
     resolverName = resolverDef
     if (!resolve) {
       throw new Error(`Unknown autofilter resolver '${resolverDef}' on resource '${scopeName}'.`)
@@ -283,10 +284,10 @@ export const AutoFilterPlugin = {
 
     const state = {
       resolvers: ensureResolverMap(pluginOptions.resolvers || {}),
-      presets: {
+      presets: snapshotResourceConfiguration({
         [PUBLIC_PRESET_NAME]: { filters: [] },
         ...(pluginOptions.presets || {})
-      }
+      })
     }
 
     vars.autofilter = {
@@ -294,15 +295,12 @@ export const AutoFilterPlugin = {
       resolvers: Object.keys(state.resolvers)
     }
 
-    addHook('scope:added', 'compile-autofilter', {}, ({ context }) => {
-      const { scopeName, scopeOptions = {} } = context
-      const scope = scopes[scopeName]
-      const schemaStructure = scope?.vars?.schemaInfo?.schemaStructure || scopeOptions.schema || {}
-
-      scope.vars.autofilter = compileAutoFilterDefinition({
+    addHook('schema:compiled', 'compile-autofilter', {}, ({ context }) => {
+      const { scopeName, scopeOptions, schemaInfo } = context
+      schemaInfo.autofilter = compileAutoFilterDefinition({
         scopeName,
         scopeOptions,
-        schemaStructure,
+        schemaStructure: schemaInfo.schemaStructure,
         resolvers: state.resolvers,
         presets: state.presets
       })
@@ -312,7 +310,7 @@ export const AutoFilterPlugin = {
       const { query, tableName, scopeName } = context.knexQuery || {}
       if (!query || !scopeName) return
 
-      const compiledConfig = scopes[scopeName]?.vars?.autofilter
+      const compiledConfig = scopes[scopeName]?.vars?.schemaInfo?.autofilter
       if (!compiledConfig || compiledConfig.filters.length === 0) return
       const adapterUtils = createStorageAdapterUtilities({ context }, {
         getStorageAdapter: helpers.getStorageAdapter
@@ -345,7 +343,7 @@ export const AutoFilterPlugin = {
 
     addHook('beforeProcessingPost', 'autofilter-stamp-post', {}, async ({ context, scopeName }) => {
       await enforceScopedInput({
-        compiledConfig: scopes[scopeName]?.vars?.autofilter,
+        compiledConfig: scopes[scopeName]?.vars?.schemaInfo?.autofilter,
         context,
         scopeName,
         injectMissing: true,
@@ -359,7 +357,7 @@ export const AutoFilterPlugin = {
 
     addHook('beforeProcessingPut', 'autofilter-stamp-put', {}, async ({ context, scopeName }) => {
       await enforceScopedInput({
-        compiledConfig: scopes[scopeName]?.vars?.autofilter,
+        compiledConfig: scopes[scopeName]?.vars?.schemaInfo?.autofilter,
         context,
         scopeName,
         injectMissing: true,
@@ -373,7 +371,7 @@ export const AutoFilterPlugin = {
 
     addHook('beforeProcessingPatch', 'autofilter-validate-patch', {}, async ({ context, scopeName }) => {
       await enforceScopedInput({
-        compiledConfig: scopes[scopeName]?.vars?.autofilter,
+        compiledConfig: scopes[scopeName]?.vars?.schemaInfo?.autofilter,
         context,
         scopeName,
         injectMissing: false,
@@ -392,7 +390,7 @@ export const AutoFilterPlugin = {
       }),
 
       getScopeConfig: (scopeName) => {
-        const compiledConfig = scopes[scopeName]?.vars?.autofilter
+        const compiledConfig = scopes[scopeName]?.vars?.schemaInfo?.autofilter
         if (!compiledConfig) return null
 
         return {

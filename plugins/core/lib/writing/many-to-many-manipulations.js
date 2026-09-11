@@ -1,303 +1,133 @@
-import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { normalizeRelationshipIdentifiers } from '../querying-writing/resource-id-normalization.js'
+import { getIdColumn, getStorageColumn } from '../storage/storage-mapping.js'
+import { lockRelationshipTargets } from './relationship-processor.js'
+import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../querying-writing/knex-constants.js'
+import { whereInIdentifiers } from '../querying/identifier-query.js'
+import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+import { assertVersionedRelationshipTransaction, hasVersionedInverse, invalidateManyToManyVersions } from './resource-version.js'
 
-/**
- * Updates many-to-many relationships intelligently by synchronizing pivot table records
- *
- * @param {Object} scope - The scope object (not used directly, for consistency)
- * @param {Object} deps - Dependencies object
- * @returns {Promise<void>}
- *
- * @example
- * // Input: Article currently has tags [1, 2], want to change to [1, 3]
- * const deps = {
- *   api,
- *   context: {
- *     resourceId: '100',
- *     relDef: {
- *       through: 'article_tags',     // Pivot table
- *       foreignKey: 'article_id',    // Points to article
- *       otherKey: 'tag_id'          // Points to tag
- *     },
- *     relData: [
- *       { type: 'tags', id: '1' },  // Keep this
- *       { type: 'tags', id: '3' }   // Add this
- *     ],
- *     transaction: trx
- *   }
- * };
- *
- * // Before: article_tags table
- * // article_id | tag_id | created_at
- * // 100        | 1      | 2024-01-01
- * // 100        | 2      | 2024-01-02
- *
- * await updateManyToManyRelationship(null, deps);
- *
- * // After: article_tags table
- * // article_id | tag_id | created_at
- * // 100        | 1      | 2024-01-01  (preserved!)
- * // 100        | 3      | 2024-12-01  (new)
- * // Tag 2 was deleted, Tag 1 kept its metadata
- *
- * @example
- * // Input: Pivot table has extra fields to preserve
- * // article_tags has: article_id, tag_id, display_order, featured
- *
- * // Current data:
- * // article_id | tag_id | display_order | featured
- * // 100        | 1      | 1            | true
- * // 100        | 2      | 2            | false
- *
- * const deps = {
- *   context: {
- *     resourceId: '100',
- *     relData: [
- *       { type: 'tags', id: '1' },  // Keep tag 1
- *       { type: 'tags', id: '5' }   // Add tag 5
- *     ]
- *   }
- * };
- *
- * await updateManyToManyRelationship(null, deps);
- *
- * // Result:
- * // article_id | tag_id | display_order | featured
- * // 100        | 1      | 1            | true      (preserved!)
- * // 100        | 5      | NULL         | NULL      (new with defaults)
- *
- * @example
- * // Input: Clear all relationships
- * const deps = {
- *   context: {
- *     resourceId: '100',
- *     relData: []  // Empty array means remove all
- *   }
- * };
- *
- * await updateManyToManyRelationship(null, deps);
- * // All article_tags records for article 100 are deleted
- *
- * @description
- * Used by:
- * - relationship-processor.js calls this for many-to-many updates
- * - Used in PATCH operations to sync relationships
- * - Also used in PUT operations (replaces deleteExistingPivotRecords pattern)
- *
- * Purpose:
- * - Intelligently syncs pivot table to match desired state
- * - Preserves existing pivot records that should remain (with their metadata)
- * - Only deletes records that should be removed
- * - Only creates records that are new
- * - Much better than delete-all-then-recreate pattern
- *
- * Data flow:
- * 1. Queries existing pivot records for the resource
- * 2. Compares existing IDs with desired IDs
- * 3. Calculates which to delete and which to add
- * 4. Validates new related resources exist (optional)
- * 5. Performs bulk delete for removed relationships
- * 6. Performs bulk insert for new relationships
- * 7. Records that exist in both are untouched (metadata preserved)
- */
-export const updateManyToManyRelationship = async (scope, deps) => {
-  // Extract values from deps
-  const { api, context } = deps
-  const { resourceId, relDef, transaction: trx } = context
-  const relData = normalizeRelationshipIdentifiers(context.relData || [], { api })
-
-  // Get the knex instance from the pivot scope
-  const pivotScope = api.resources[relDef.through]
-  if (!pivotScope) {
-    throw new Error(`Pivot table resource '${relDef.through}' not found`)
-  }
-
-  // Get the actual database table name (might be different from scope name)
-  const tableName = pivotScope.vars.schemaInfo.tableName || relDef.through
-
-  // Get existing pivot records directly from database
-  const existingRecords = await trx(tableName)
-    .where(relDef.foreignKey, resourceId)
-    .select(relDef.otherKey)
-
-  // Create sets for efficient comparison
-  const existingIds = new Set(existingRecords.map(r => String(r[relDef.otherKey])))
-  const newIds = new Set(relData.map(r => String(r.id)))
-
-  // Determine what to delete and add
-  const toDelete = [...existingIds].filter(id => !newIds.has(id))
-  const toAdd = [...newIds].filter(id => !existingIds.has(id))
-
-  // Validate related resources exist if needed (do this before any changes)
-  if (relDef.validateExists !== false && toAdd.length > 0) {
-    for (const relatedId of toAdd) {
-      const related = relData.find(r => String(r.id) === relatedId)
-      try {
-        await api.resources[related.type].get({
-          id: related.id,
-          transaction: trx
-        }, { ...context })
-      } catch (error) {
-        throw new RestApiResourceError(
-          `Related ${related.type} with id ${related.id} not found`,
-          {
-            subtype: 'not_found',
-            resourceType: related.type,
-            resourceId: related.id
-          }
-        )
-      }
+export async function invalidateDeletedPivotTargets (api, scopeName, context) {
+  const relationships = []
+  for (const [parentType, parent] of Object.entries(api.resources)) {
+    if (!parent.vars.schemaInfo?.versionField) continue
+    for (const relationship of Object.values(parent.vars.schemaInfo.schemaRelationships)) {
+      if (relationship.type !== 'manyToMany' || relationship.target !== scopeName) continue
+      relationships.push({ target: parentType, through: relationship.through, foreignKey: relationship.otherKey, otherKey: relationship.foreignKey })
     }
   }
-
-  // Bulk delete records that should be removed
-  if (toDelete.length > 0) {
-    await trx(tableName)
-      .where(relDef.foreignKey, resourceId)
-      .whereIn(relDef.otherKey, toDelete)
-      .delete()
+  if (!relationships.length) return
+  assertVersionedRelationshipTransaction(api, relationships[0], context.transaction)
+  await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }])
+  const id = api.knex.helpers.getStorageAdapter(scopeName).translateFilterValue('id', context.id)
+  for (const inverse of relationships) {
+    const pivot = getPivotStorage(api, inverse)
+    const query = context.transaction(pivot.tableName).where(pivot.foreignKey, id)
+    await invalidateRemovedPivotVersions(api, inverse, query, context.transaction)
   }
-
-  // Bulk insert new records
-  if (toAdd.length > 0) {
-    const recordsToInsert = toAdd.map(relatedId => ({
-      [relDef.foreignKey]: resourceId,
-      [relDef.otherKey]: relatedId
-    }))
-
-    await trx(tableName).insert(recordsToInsert)
-  }
-
-  // Records that exist in both are automatically preserved with their pivot data
 }
 
-// Note: deleteExistingPivotRecords has been removed in favor of using
-// updateManyToManyRelationship for all sync operations (including PUT).
-// This aligns with industry standards where ORMs use intelligent sync
-// rather than delete-all-then-recreate patterns.
-
-/**
- * Creates new pivot table records for many-to-many relationships
- *
- * @param {Object} api - The API instance with access to resources
- * @param {string|number} resourceId - The ID of the primary resource
- * @param {Object} relDef - The relationship definition
- * @param {Array} relData - Array of related resources to link
- * @param {Object} trx - Database transaction object
- * @param {Object} [context] - Caller context forwarded to relationship validation
- * @returns {Promise<void>}
- *
- * @example
- * // Input: Create article-tag relationships
- * const relDef = {
- *   through: 'article_tags',
- *   foreignKey: 'article_id',
- *   otherKey: 'tag_id'
- * };
- * const relData = [
- *   { type: 'tags', id: '10' },
- *   { type: 'tags', id: '20' },
- *   { type: 'tags', id: '30' }
- * ];
- *
- * await createPivotRecords(api, '100', relDef, relData, trx);
- *
- * // Result: 3 new records in article_tags table
- * // article_id | tag_id
- * // 100        | 10
- * // 100        | 20
- * // 100        | 30
- *
- * @example
- * // Input: Validation ensures related resources exist
- * const relData = [
- *   { type: 'tags', id: '999' }  // Non-existent tag
- * ];
- *
- * try {
- *   await createPivotRecords(api, '100', relDef, relData, trx);
- * } catch (error) {
- *   console.log(error.message);
- *   // "Related tags with id 999 not found"
- *   // Transaction rolled back, no records created
- * }
- *
- * @example
- * // Input: Skip validation for performance
- * const relDef = {
- *   through: 'user_permissions',
- *   foreignKey: 'user_id',
- *   otherKey: 'permission_id',
- *   validateExists: false  // Skip GET requests
- * };
- *
- * // With 100 permissions, saves 100 GET requests
- * await createPivotRecords(api, userId, relDef, permissions, trx);
- *
- * // Risk: Could create orphaned relationships if permissions don't exist
- * // Benefit: Much faster for bulk operations when you trust the data
- *
- * @description
- * Used by:
- * - relationship-processor.js for POST operations
- * - updateManyToManyRelationship internally for new relationships
- * - Any code that needs to create pivot records
- *
- * Purpose:
- * - Creates pivot table records to link resources
- * - Validates related resources exist by default (referential integrity)
- * - Supports bulk insert for efficiency
- * - Works within transactions for atomicity
- * - Allows skipping validation when performance matters
- *
- * Data flow:
- * 1. Validates pivot table resource exists
- * 2. Gets actual database table name
- * 3. Optionally validates each related resource exists (GET requests)
- * 4. Prepares bulk insert data with foreign keys
- * 5. Performs single INSERT with all records
- * 6. Returns (no data returned, throws on error)
- */
-export const createPivotRecords = async (api, resourceId, relDef, relData, trx, context = {}) => {
-  relData = normalizeRelationshipIdentifiers(relData, { api })
-  if (relData.length === 0) return // Early exit if nothing to create
-
-  // Get pivot table info
-  const pivotScope = api.resources[relDef.through]
-  if (!pivotScope) {
-    throw new Error(`Pivot table resource '${relDef.through}' not found`)
-  }
-
-  // Get the actual database table name (might be different from scope name)
-  const tableName = pivotScope.vars.schemaInfo.tableName || relDef.through
-
-  // Validate all related resources exist if needed (do this before any inserts)
-  if (relDef.validateExists !== false) {
-    for (const related of relData) {
-      try {
-        await api.resources[related.type].get({
-          id: related.id,
-          transaction: trx
-        }, { ...context })
-      } catch (error) {
-        throw new RestApiResourceError(
-          `Related ${related.type} with id ${related.id} not found`,
-          {
-            subtype: 'not_found',
-            resourceType: related.type,
-            resourceId: related.id
-          }
-        )
+export async function deletePivotReferences (api, scopeName, context) {
+  const targets = new Map()
+  for (const [ownerType, owner] of Object.entries(api.resources)) {
+    for (const relationship of Object.values(owner.vars.schemaInfo?.schemaRelationships || {})) {
+      if (relationship.type !== 'manyToMany' || (ownerType !== scopeName && relationship.target !== scopeName)) continue
+      const pivot = getPivotStorage(api, relationship)
+      for (const column of [ownerType === scopeName ? pivot.foreignKey : null, relationship.target === scopeName ? pivot.otherKey : null]) {
+        if (column) targets.set(JSON.stringify([pivot.tableName, column]), { tableName: pivot.tableName, column })
       }
     }
   }
+  const id = api.knex.helpers.getStorageAdapter(scopeName).translateFilterValue('id', context.id)
+  const db = context.transaction || context.db || api.knex.instance
+  for (const { tableName, column } of targets.values()) await db(tableName).where(column, id).delete()
+}
 
-  // Prepare records for bulk insert
-  const recordsToInsert = relData.map(related => ({
-    [relDef.foreignKey]: resourceId,
-    [relDef.otherKey]: related.id
-  }))
+export async function invalidateRemovedPivotVersions (api, relDef, query, transaction) {
+  if (!hasVersionedInverse(api, relDef)) return
+  assertVersionedRelationshipTransaction(api, relDef, transaction)
+  const pivot = getPivotStorage(api, relDef)
+  let afterId
+  while (true) {
+    const page = query.clone().orderBy(pivot.idColumn).limit(RELATIONSHIP_WRITE_BATCH_SIZE).forUpdate()
+      .select({ [pivot.idColumn]: databaseIdentityExpression(transaction, pivot.idColumn), [pivot.otherKey]: databaseIdentityExpression(transaction, pivot.otherKey) })
+    if (afterId !== undefined) page.where(pivot.idColumn, '>', afterId)
+    const rows = await applyDatabaseReadOptions(page)
+    if (!rows.length) break
+    await invalidateManyToManyVersions(api, relDef, rows.map(row => row[pivot.otherKey]), transaction)
+    afterId = rows.at(-1)[pivot.idColumn]
+  }
+}
 
-  // Bulk insert all pivot records in a single query
-  await trx(tableName).insert(recordsToInsert)
+const getPivotStorage = (api, relDef) => {
+  const pivotScope = api.resources[relDef.through]
+  if (!pivotScope) throw new Error(`Pivot table resource '${relDef.through}' not found`)
+  const { schemaInfo } = pivotScope.vars
+  return {
+    tableName: schemaInfo.tableName || relDef.through,
+    idColumn: getIdColumn(schemaInfo),
+    foreignKey: getStorageColumn(schemaInfo, relDef.foreignKey),
+    otherKey: getStorageColumn(schemaInfo, relDef.otherKey)
+  }
+}
+
+// Targets are already authorized and locked. Keep existing pivot rows intact.
+const insertMissingPivotRecords = async (trx, { tableName, idColumn, foreignKey, otherKey }, resourceId, ids) => {
+  for (let offset = 0; offset < ids.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
+    const batch = ids.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
+    const requestedIds = new Set(batch)
+    const existingIds = new Set()
+    let hasExisting = false
+    let afterId
+    // A pivot resource can contain duplicate edges; bound returned rows as well as IDs.
+    while (true) {
+      const query = trx(tableName).where(foreignKey, resourceId).whereIn(otherKey, batch)
+        .orderBy(`${tableName}.${idColumn}`).limit(RELATIONSHIP_WRITE_BATCH_SIZE + 1).forUpdate()
+        .select({ [idColumn]: databaseIdentityExpression(trx, idColumn), [otherKey]: databaseIdentityExpression(trx, otherKey) })
+      if (afterId !== undefined) query.where(idColumn, '>', afterId)
+      const existing = await applyDatabaseReadOptions(query)
+      hasExisting ||= existing.length > 0
+      for (const record of existing) {
+        const id = String(record[otherKey])
+        if (requestedIds.has(id)) existingIds.add(id)
+      }
+      if (existing.length <= RELATIONSHIP_WRITE_BATCH_SIZE) break
+      afterId = existing.at(-1)[idColumn]
+    }
+    const toAdd = []
+    for (const id of batch) {
+      if (existingIds.has(id)) continue
+      // A returned spelling can match another requested ID under the column's collation.
+      if (hasExisting && await trx(tableName).where(foreignKey, resourceId).where(otherKey, id).forUpdate().first(otherKey)) continue
+      toAdd.push({ [foreignKey]: resourceId, [otherKey]: id })
+    }
+    if (toAdd.length) await trx(tableName).insert(toAdd)
+  }
+}
+
+// The resource operation authorizes targets before calling these storage writers.
+export const updateManyToManyRelationship = async (scope, { api, context }) => {
+  const { resourceId, relDef, transaction: trx } = context
+  assertVersionedRelationshipTransaction(api, relDef, trx)
+  const relData = normalizeRelationshipIdentifiers(context.relData || [], { api })
+  const pivot = getPivotStorage(api, relDef)
+  const targets = await lockRelationshipTargets(api, trx, relData)
+  const ids = [...new Set(targets.map(record => String(record.id)))]
+  // Negate the complete keep-list once; independent batch deletions lose wanted links.
+  const removals = trx(pivot.tableName).where(pivot.foreignKey, resourceId)
+    .whereNot(query => whereInIdentifiers(query, pivot.otherKey, ids))
+  await invalidateRemovedPivotVersions(api, relDef, removals, trx)
+  await removals.delete()
+  await insertMissingPivotRecords(trx, pivot, resourceId, ids)
+  await invalidateManyToManyVersions(api, relDef, ids, trx)
+}
+
+export const createPivotRecords = async (api, resourceId, relDef, relData, trx) => {
+  resourceId = String(resourceId)
+  relData = [...new Map(normalizeRelationshipIdentifiers(relData, { api }).map(record => [record.id, record])).values()]
+  if (relData.length === 0) return
+  assertVersionedRelationshipTransaction(api, relDef, trx)
+  const pivot = getPivotStorage(api, relDef)
+  const targets = await lockRelationshipTargets(api, trx, relData)
+  await insertMissingPivotRecords(trx, pivot, resourceId, targets.map(record => record.id))
+  await invalidateManyToManyVersions(api, relDef, targets.map(record => record.id), trx)
 }

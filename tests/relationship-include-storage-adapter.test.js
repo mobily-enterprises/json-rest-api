@@ -46,7 +46,7 @@ describe('Relationship include storage adapters', () => {
           pets: 'firstName'
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     const includedPet = result.included.find(resource => resource.type === 'pets')

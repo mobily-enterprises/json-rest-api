@@ -1,44 +1,40 @@
+import { initializeResourceVersion } from '../lib/writing/resource-version.js'
 import {
+  RestApiIncludeError,
   RestApiResourceError,
   RestApiValidationError
 } from '../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
 import { normalizeRelationshipIdentifiers } from '../lib/querying-writing/resource-id-normalization.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
-import {
-  normalizeReturnRecordMode,
-  normalizeReturnRecordSetting
-} from '../lib/querying-writing/return-record-settings.js'
+import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import {
   getRequestContracts,
   validateRequestContractOrThrow
 } from '../lib/querying-writing/request-contracts.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
-import { isRestApiError } from '../../../lib/error-context.js'
+import { beginWriteTransaction, commitTransaction, getOperationDiagnosticContext, isTransactionOwner, rollbackAfterError, wrapUnexpectedError } from '../../../lib/error-context.js'
+import { filterVisibleIdentifiers } from '../lib/querying/include-query-helpers.js'
+import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
+import { RELATIONSHIP_READ_BATCH_SIZE } from '../lib/querying-writing/knex-constants.js'
+import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
 
-export { normalizeReturnRecordMode as normalizeReturnValue }
+// A trusted connector callback, evaluated after normal write validation and authorization.
+export const writePrecondition = Symbol('writePrecondition')
 
 /**
  * Gets an enhanced logger instance with full error details and stack traces
  * @param {Object} log - The base logger instance
+ * @param {Object} context - Request context carrying compiled field visibility
  * @returns {Object} Enhanced logger instance
  */
-export const getEnhancedLogger = (log) => {
+export const getEnhancedLogger = (log, context = {}) => {
   return createEnhancedLogger(log, {
     logFullErrors: true,
-    includeStack: true
+    includeStack: true,
+    schemaInfo: context.schemaInfo
   })
 }
-
-/**
- * Cascades configuration values through multiple sources with fallback to default
- * @param {string} settingName - The setting name to look for
- * @param {Array} sources - Array of objects to search through
- * @param {*} defaultValue - Default value if not found
- * @returns {*} The first defined value found or the default
- */
-export const cascadeConfig = (settingName, sources, defaultValue) =>
-  sources.find(source => source?.[settingName] !== undefined)?.[settingName] ?? defaultValue
 
 /**
  * Sets up common request context for REST API methods
@@ -48,65 +44,35 @@ export const cascadeConfig = (settingName, sources, defaultValue) =>
  * @param {Object} context - The request context
  * @param {Object} vars - Plugin variables
  * @param {Object} scopes - All available scopes
- * @param {Object} scopeOptions - Scope-specific options
  * @param {string} scopeName - The name of the current scope
  * @param {Object} api - The API instance
  * @param {Object} helpers - Helper functions
  * @returns {Object} An object containing schema-related shortcuts
  */
-export async function setupCommonRequest ({ params, context, vars, scopes, scopeOptions, scopeName, api, helpers }) {
-  // Determine which simplified setting to use based on transport
-  const isTransport = params.isTransport === true
-
-  // Use vars which automatically cascade from scope to global
-  const defaultSimplified = isTransport ? vars.simplifiedTransport : vars.simplifiedApi
-
-  // Get simplified setting - from params only (per-call override) or use default
-  context.simplified = params.simplified !== undefined ? params.simplified : defaultSimplified
-
-  // Special case: if no inputRecord provided, force simplified mode
-  if (!params.inputRecord && context.simplified === false) {
-    context.simplified = true
-  }
-
-  // Params is totally bypassed in simplified mode
-  if (context.simplified) {
-    if (params.inputRecord) {
-      context.inputRecord = params.inputRecord
-      context.params = params
-    } else {
-      context.inputRecord = params
-      // Preserve returnFullRecord if specified in params
-      context.params = params.returnFullRecord !== undefined ? { returnFullRecord: params.returnFullRecord } : {}
-    }
-  } else {
-    context.inputRecord = params.inputRecord
-    context.params = params
-  }
-
-  // Assign common context properties
+export async function setupCommonRequest ({ params, context, vars, scopes, scopeName, api, helpers, runHooks }) {
+  context.id = undefined
+  context.originalInputAttributes = undefined
+  context.minimalRecord = undefined
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
-
-  // Use vars which automatically cascade from scope to global
-  const defaultReturnFullRecord = isTransport ? vars.returnRecordTransport : vars.returnRecordApi
-
-  // Get return record setting - from params only (per-call override) or use default
-  context.returnRecordSetting = normalizeReturnRecordSetting(
-    context.params.returnFullRecord,
-    defaultReturnFullRecord
-  )
+  rejectRemovedOptions(params)
+  context.format = resolveFormat(params.format, vars.format)
+  context.simplified = context.format === 'plain'
+  context.returning = resolveReturning(params.returning, vars.returning)
+  context.params = params
+  context.inputRecord = params.inputRecord
+  if (!context.inputRecord || typeof context.inputRecord !== 'object' || Array.isArray(context.inputRecord)) {
+    throw new RestApiValidationError('inputRecord must be a record object', { fields: ['inputRecord'] })
+  }
 
   // These only make sense as parameter per query, not in vars etc.
   context.queryParams = params.queryParams || {}
-  context.queryParams.fields = cascadeConfig('fields', [context.queryParams], {})
-  context.queryParams.include = cascadeConfig('include', [context.queryParams], [])
+  context.queryParams.fields = context.queryParams.fields ?? {}
+  if (context.queryParams.include == null) delete context.queryParams.include
 
   context.scopeName = scopeName
 
   // Transaction handling
-  context.transaction = params.transaction ||
-    (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null)
-  context.shouldCommit = !params.transaction && !!context.transaction
+  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction || api.knex.instance
 
   // These are just shortcuts used in this function and will be returned
@@ -123,7 +89,8 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
   }
 
   // Return key schema-related objects for direct use in the main methods
-  return { schema, schemaStructure, schemaRelationships }
+  const versionState = initializeResourceVersion({ context, expectedVersion: params.expectedVersion })
+  return { schema, schemaStructure, schemaRelationships, versionState }
 }
 
 /**
@@ -134,37 +101,31 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
  * @param {string} method - The HTTP method name (POST, PUT, PATCH)
  * @param {string} scopeName - The name of the resource scope
  * @param {Object} log - The logger instance
- * @param {Function} runHooks - Function to run hooks
  * @throws {Error} Re-throws the original error after cleanup
  */
-export const handleWriteMethodError = async (error, context, method, scopeName, log, runHooks) => {
-  // Rollback transaction if we created it
-  if (context.shouldCommit && !context.transactionCommitted) {
-    await context.transaction.rollback()
-    await runHooks('afterRollback')
+export const handleWriteMethodError = async (error, context, method, scopeName, log) => {
+  await rollbackAfterError(error, context, context.transaction)
+  const cleanupErrors = context.cleanupErrors
+
+  try {
+    await getEnhancedLogger(log, context).logError(`Error in ${method} method`, error, {
+      ...getOperationDiagnosticContext(context, { phase: 'writeFailure', scopeName, method: method.toLowerCase() }),
+      inputRecord: context.inputRecord,
+      cleanupErrors
+    })
+  } catch (error) {
+    cleanupErrors.push({ phase: 'logging', error })
   }
-
-  // Create enhanced logger for error logging
-  const enhancedLog = getEnhancedLogger(log)
-
-  // Log the full error details
-  enhancedLog.logError(`Error in ${method} method`, error, {
-    scopeName,
-    method: method.toLowerCase(),
-    inputRecord: context.inputRecord
-  })
 
   throw error
 }
 
-export const commitOwnedTransaction = async (context, runHooks) => {
-  if (!context.shouldCommit) {
+export const commitOwnedTransaction = async (context) => {
+  if (!isTransactionOwner(context)) {
     return
   }
 
-  await context.transaction.commit()
-  context.transactionCommitted = true
-  await runHooks('afterCommit')
+  await commitTransaction(context.transaction, context)
 }
 
 export const validateRelationshipRoutePayload = ({
@@ -187,7 +148,18 @@ export const validateRelationshipRoutePayload = ({
     `${operation} relationship request body is invalid`
   )
 
-  return validated.data
+  const record = validateRequestContractOrThrow(
+    contracts.patch,
+    {
+      data: {
+        type: scopeName,
+        id: context.id,
+        relationships: { [context.relationshipName]: { data: validated.data } }
+      }
+    },
+    `${operation} relationship data is invalid`
+  )
+  return record.data.relationships[context.relationshipName].data
 }
 
 /**
@@ -237,12 +209,11 @@ export const validateCompleteReplacePayload = ({
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (!fieldDef) continue
     if (fieldName === idProperty) continue
+    if (Object.hasOwn(belongsToUpdates, fieldName)) continue
     if (fieldDef.computed === true || fieldDef.virtual === true) continue
     if (fieldDef.type === undefined) continue
 
     if (fieldDef.belongsTo && fieldDef.as) {
-      if (Object.hasOwn(belongsToUpdates, fieldName)) continue
-
       const existingRelationshipData = context.minimalRecord?.relationships?.[fieldDef.as]?.data
       if (existingRelationshipData?.id !== undefined && existingRelationshipData?.id !== null) {
         missingFields.push({
@@ -319,28 +290,17 @@ export const validateResourceAttributesBeforeWrite = async ({
     ...(hasLogicalIdField && resourceId !== undefined ? { id: resourceId } : {})
   }
 
-  // Extract computed fields and foreign key fields before validation
-  const computedFields = {}
+  // Reject physical foreign keys supplied outside their relationship alias.
   const foreignKeyFields = {}
   Object.entries(attributesToValidate).forEach(([key, value]) => {
     const fieldDef = schemaStructure[key]
-    // Computed fields should be stripped from input
-    if (fieldDef && fieldDef.computed === true && value !== undefined) {
-      computedFields[key] = value
-    }
     // Foreign key fields (belongsTo with 'as' property) should NOT be in attributes
     // They should only come through relationships or belongsToUpdates
     // Check if key exists in belongsToUpdates (not just truthy value)
-    if (fieldDef && fieldDef.belongsTo && fieldDef.as && value !== undefined && !(key in belongsToUpdates)) {
+    if (fieldDef && fieldDef.belongsTo && fieldDef.as && value !== undefined && !Object.hasOwn(belongsToUpdates, key)) {
       foreignKeyFields[key] = value
     }
   })
-
-  // Warn if computed fields were sent in the input
-  if (Object.keys(computedFields).length > 0) {
-    const fieldNames = Object.keys(computedFields).join(', ')
-    console.warn(`Computed fields [${fieldNames}] were sent in input for resource '${context.scopeName}' but will be ignored as they are output-only`)
-  }
 
   // Reject if foreign key fields were sent directly in attributes
   if (Object.keys(foreignKeyFields).length > 0) {
@@ -362,25 +322,16 @@ export const validateResourceAttributesBeforeWrite = async ({
     )
   }
 
-  // Filter out computed fields and foreign key fields from validation
-  // Virtual fields MUST go through validation
-  const attributesForValidation = Object.entries(attributesToValidate)
+  // Virtual input remains writable; computed fields are absent from this schema.
+  const attributesForValidation = Object.fromEntries(Object.entries(attributesToValidate)
     .filter(([key, _]) => {
       const fieldDef = schemaStructure[key]
-      // Exclude computed fields
-      if (fieldDef && fieldDef.computed === true) {
-        return false
-      }
       // Exclude foreign key fields that weren't provided via belongsToUpdates
-      if (fieldDef && fieldDef.belongsTo && fieldDef.as && !belongsToUpdates[key]) {
+      if (fieldDef && fieldDef.belongsTo && fieldDef.as && !Object.hasOwn(belongsToUpdates, key)) {
         return false
       }
       return true
-    })
-    .reduce((acc, [key, value]) => {
-      acc[key] = value
-      return acc
-    }, {})
+    }))
 
   const validationMethod = isPartialValidation
     ? 'patch'
@@ -466,58 +417,59 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
       ? normalizedRelationshipData
       : [normalizedRelationshipData]
 
-    for (const item of relatedItems) {
-      // Get the scope for the related resource
-      const relatedScope = api.resources[item.type]
-      if (!relatedScope) {
-        throw new Error(`Unknown resource type: ${item.type}`)
+    const unique = new Map()
+    for (const item of relatedItems) unique.set(JSON.stringify([item.type, item.id]), item)
+    const targets = [...unique.values()]
+    for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
+      const batch = targets.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
+      const byType = new Map()
+      for (const item of batch) {
+        if (!byType.has(item.type)) byType.set(item.type, [])
+        byType.get(item.type).push(item)
       }
-
-      // Create context for dataGetMinimal
-      const getContext = {
-        ...context,
-        id: item.id,
-        schemaInfo: relatedScope.vars.schemaInfo,
-        scopeName: item.type,
-        queryParams: {},
-        method: 'get', // We're checking read permission
-        isUpdate: false
-      }
-
-      // Get the minimal record
-      const record = await helpers.dataGetMinimal({
-        scopeName: item.type,
-        context: getContext,
-        applyQueryFilters: relatedScope.applyQueryFilters
-          ? (filterParams) => relatedScope.applyQueryFilters({
-              ...filterParams,
-              schemaInfo: getContext.schemaInfo
-            }, getContext)
-          : undefined,
-        filters: {},
-        queryPurpose: 'relationship-validation'
-      })
-
-      if (!record) {
-        throw new RestApiResourceError(
-          `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
-          {
-            subtype: 'not_found',
-            resourceType: item.type,
-            resourceId: item.id
-          }
-        )
-      }
-
-      // Check permissions using the related scope's checkPermissions
-      await relatedScope.checkPermissions({
-        method: 'get',
-        originalContext: {
+      const lookups = new Map()
+      for (const [type, items] of byType) {
+        const relatedScope = api.resources[type]
+        if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
+        const getContext = {
           ...context,
-          id: item.id,
-          minimalRecord: record
+          id: undefined,
+          minimalRecord: undefined,
+          schemaInfo: relatedScope.vars.schemaInfo,
+          scopeName: type,
+          queryParams: {},
+          method: 'get',
+          isUpdate: false
         }
-      })
+        const lookup = {
+          scopeName: type,
+          context: getContext,
+          applyQueryFilters: filterParams => relatedScope.applyQueryFilters({
+            ...filterParams, schemaInfo: getContext.schemaInfo
+          }, getContext),
+          filters: {},
+          queryPurpose: 'relationship-validation'
+        }
+        const records = await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })
+        lookups.set(type, { relatedScope, lookup, records: new Map(records.map(record => [String(record.id), record])) })
+      }
+      for (const item of batch) {
+        const { relatedScope, lookup, records } = lookups.get(item.type)
+        // A database collation can equate IDs with different spellings.
+        const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
+          ...lookup, context: { ...lookup.context, id: item.id }
+        })
+        if (!record) {
+          throw new RestApiResourceError(
+            `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
+            { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
+          )
+        }
+        await relatedScope.checkPermissions({
+          method: 'get',
+          originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
+        })
+      }
     }
   }
 }
@@ -539,30 +491,30 @@ export const getVisibleRelationshipParent = async ({
 }
 
 /**
- * Applies field setters to transform attribute values before storage
- * Setters are applied in dependency order to handle interdependent fields
- *
- * @param {object} attributes - The validated attributes to transform
- * @param {object} schemaInfo - Schema information including fieldSetters
- * @param {object} context - The request context
+ * Replaces validated write attributes with setter results in dependency order.
+ * Assigns results only after every setter succeeds; does not complete transactions.
+ * @param {object} context - Write context with inputRecord and schemaInfo
  * @param {object} api - The API instance
  * @param {object} helpers - Helper functions
- * @returns {object} Transformed attributes ready for storage
+ * @returns {Promise<void>}
  */
-export const applyFieldSetters = async (attributes, schemaInfo, context, api, helpers) => {
+export const applyFieldSetters = async (context, api, helpers) => {
+  const attributes = context.inputRecord?.data?.attributes
+  if (!attributes) return
+  const schemaInfo = context.schemaInfo
   const fieldSetters = schemaInfo.fieldSetters || {}
   const sortedSetterFields = schemaInfo.sortedSetterFields || []
 
   // No setters to apply
   if (sortedSetterFields.length === 0) {
-    return attributes
+    return
   }
 
   const transformedAttributes = { ...attributes }
 
   for (const fieldName of sortedSetterFields) {
     const setterInfo = fieldSetters[fieldName]
-    const fieldPresent = fieldName in transformedAttributes
+    const fieldPresent = Object.hasOwn(transformedAttributes, fieldName)
     const hasDependencies = Array.isArray(setterInfo.runSetterAfter) && setterInfo.runSetterAfter.length > 0
 
     if (!fieldPresent && !hasDependencies) continue
@@ -571,7 +523,7 @@ export const applyFieldSetters = async (attributes, schemaInfo, context, api, he
       const setterContext = {
         attributes: transformedAttributes, // Current state with previous setters applied
         fieldName,
-        originalValue: attributes[fieldName],
+        originalValue: Object.hasOwn(attributes, fieldName) ? attributes[fieldName] : undefined,
         originalAttributes: attributes,
         scopeName: context.scopeName,
         method: context.method,
@@ -580,153 +532,121 @@ export const applyFieldSetters = async (attributes, schemaInfo, context, api, he
         auth: context.auth
       }
       transformedAttributes[fieldName] = await setterInfo.setter(
-        transformedAttributes[fieldName],
+        fieldPresent ? transformedAttributes[fieldName] : undefined,
         setterContext
       )
     } catch (error) {
-      if (isRestApiError(error)) throw error
-      const message = error instanceof Error ? error.message : String(error)
-      throw new RestApiValidationError(
-        `Setter for field '${fieldName}' failed: ${message}`,
-        {
-          fields: [`data.attributes.${fieldName}`],
-          violations: [{
-            field: `data.attributes.${fieldName}`,
-            rule: 'setter_failed',
-            message
-          }]
-        }
-      )
+      throw wrapUnexpectedError(error, {
+        message: `Setter for field '${fieldName}' failed`,
+        context: { scopeName: context.scopeName, fieldName, phase: 'setter' }
+      })
     }
   }
 
-  return transformedAttributes
+  context.inputRecord.data.attributes = transformedAttributes
 }
 
-export async function handleRecordReturnAfterWrite ({
-  context,
-  scopeName,
-  api,
-  scopes,
-  schemaStructure,
-  schemaRelationships,
-  scopeOptions,
-  vars,
-  runHooks,
-  helpers,
-  log
-}) {
-  // Create enhanced logger for warnings
-  const enhancedLog = getEnhancedLogger(log)
+/**
+ * Refreshes post-write state and prepares POST/PATCH/PUT responses before commit.
+ * Runs finish hooks once and normalizes their result; borrows the write transaction.
+ */
+export async function handleRecordReturnAfterWrite ({ context, scopeName, api, scopes, runHooks, helpers }) {
   const methodSpecificHookSuffix = getMethodHookSuffix(context.method)
+  if (context.minimalRecord) context.originalMinimalRecord = context.minimalRecord
 
-  // Step 1: Set up record state for hooks
-  // Handle originalMinimalRecord and minimalRecord based on method type
-  if (context.method === 'DELETE') {
-    // For DELETE, keep the deleted record reference
-    if (context.minimalRecord) {
-      context.originalMinimalRecord = context.minimalRecord
-    }
-  } else {
-    // For POST, PUT, PATCH - save the original state if it exists
-    if (context.minimalRecord) {
-      context.originalMinimalRecord = context.minimalRecord
-    }
-
-    // Fetch the current state of the record after the write operation
-    try {
-      const currentRecord = await helpers.dataGetMinimal({
-        scopeName,
-        context,
-        runHooks
-      })
-      context.minimalRecord = currentRecord
-    } catch (error) {
-      if (isRestApiError(error)) throw error
-      enhancedLog.warn(`Could not fetch minimal record after ${context.method} operation`, { error, id: context.id })
-    }
-  }
-
-  // Step 2: Determine what to return based on configuration
-  const returnMode = context.returnRecordSetting[context.method]
-
-  // Case 1: Return nothing (204 No Content)
-  if (returnMode === 'no') {
-    context.responseRecord = undefined
-    await runHooks('finish')
-    await runHooks(`finish${methodSpecificHookSuffix}`)
-    return undefined
-  }
-
-  // Case 2: Return minimal record (just type and id)
-  if (returnMode === 'minimal') {
-    if (context.simplified) {
-      context.responseRecord = {
-        id: String(context.id),
-        type: scopeName
-      }
-    } else {
-      context.responseRecord = {
-        data: {
-          type: scopeName,
-          id: String(context.id)
-        }
-      }
-    }
-    await runHooks('finish')
-    await runHooks(`finish${methodSpecificHookSuffix}`)
-    context.responseRecord = normalizeRecordAttributes(context.responseRecord, scopes, {
-      source: 'response',
-      simplified: context.simplified,
-      resourceType: scopeName
+  try {
+    context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks })
+  } catch (error) {
+    throw wrapUnexpectedError(error, {
+      message: `Failed to refresh record after ${context.method}`,
+      context: { scopeName, phase: 'postWriteRead' }
     })
-    return context.responseRecord
   }
 
-  // Case 3: Return full record
-  if (returnMode === 'full') {
-    // Fetch the complete record using the GET method
+  const returnMode = context.returning
+  if (returnMode === 'none') {
+    context.responseRecord = undefined
+  } else if (returnMode === 'minimal') {
+    const identifier = { type: scopeName, id: String(context.id) }
+    context.responseRecord = context.simplified ? identifier : { data: identifier }
+  } else if (returnMode === 'full') {
     const fullRecord = await api.resources[scopeName].get({
       id: context.id,
       queryParams: context.queryParams,
       transaction: context.transaction,
-      simplified: context.simplified
-    }, { ...context })
-
-    context.responseRecord = fullRecord || undefined
-
-    // Run finish hooks
-    await runHooks('finish')
-    await runHooks(`finish${methodSpecificHookSuffix}`)
-
-    context.responseRecord = normalizeRecordAttributes(context.responseRecord, scopes, {
-      source: 'response',
-      simplified: context.simplified,
-      resourceType: scopeName
+      format: context.format
+    }, {
+      ...context,
+      inputRecord: {
+        ...context.inputRecord,
+        data: { ...context.inputRecord.data, id: String(context.id) }
+      }
     })
-
-    // No transformation needed - GET already returns the correct format
-    // based on context.simplified
-    return context.responseRecord
+    context.responseRecord = fullRecord || undefined
+  } else {
+    throw new Error(`Invalid returnMode: ${returnMode}`)
   }
 
-  // This should never be reached, but just in case
-  throw new Error(`Invalid returnMode: ${returnMode}`)
+  await runHooks('finish')
+  await runHooks(`finish${methodSpecificHookSuffix}`)
+  if (returnMode === 'none') return undefined
+
+  context.responseRecord = normalizeRecordAttributes(context.responseRecord, scopes, {
+    source: 'response',
+    simplified: context.simplified,
+    resourceType: scopeName,
+    fields: returnMode === 'full' ? context.queryParams?.fields : undefined
+  })
+  // After-commit observers must not mutate the prepared response.
+  return structuredClone(context.responseRecord)
 }
 
-export const findRelationshipDefinition = (schemaInfo, relationshipName) => {
-  // First check schemaRelationships (for relationships defined in relationships object)
-  const relDef = schemaInfo.schemaRelationships?.[relationshipName]
-  if (relDef) {
-    return relDef
-  }
-
-  // Then check schema fields for belongsTo relationships with matching 'as' property
-  for (const [, fieldDef] of Object.entries(schemaInfo.schemaStructure || {})) {
-    if (fieldDef.as === relationshipName && fieldDef.belongsTo) {
-      return fieldDef
+export const filterToOneResponseLinkage = async (context, scopes) => {
+  const document = context.record
+  const resources = [document?.data, document?.included].flat().filter(Boolean)
+  const linkages = []
+  for (const resource of resources) {
+    const schemaInfo = scopes[resource.type]?.vars?.schemaInfo
+    if (!schemaInfo) continue
+    const requestedFields = parseFieldset(getResourceFieldset(context.queryParams?.fields, resource.type))
+    for (const [name, relationship] of Object.entries(resource.relationships || {})) {
+      if (requestedFields !== null && !requestedFields.includes(name)) continue
+      const definition = findRelationshipDefinition(schemaInfo, name)
+      if ((definition?.belongsTo || definition?.belongsToPolymorphic) && relationship.data) linkages.push(relationship)
     }
   }
+  if (linkages.length === 0) return
+  const visible = new Set(await filterVisibleIdentifiers({
+    identifiers: linkages.map(relationship => relationship.data), scopes, knex: context.db, context
+  }))
+  for (const relationship of linkages) {
+    if (!visible.has(relationship.data)) relationship.data = null
+  }
+}
 
-  return null
+export const validateRequestedIncludes = (context, scopes, resourceTypes = [context.scopeName]) => {
+  const paths = context.queryParams?.include || []
+  if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string')) {
+    throw new RestApiValidationError('Include must be an array of relationship paths')
+  }
+  for (const path of paths) {
+    let candidates = new Set(resourceTypes)
+    for (const name of path.split('.')) {
+      const targets = new Set()
+      for (const resourceType of candidates) {
+        const schemaInfo = Object.hasOwn(scopes, resourceType) && scopes[resourceType]?.vars?.schemaInfo
+        if (!schemaInfo) continue
+        const relationship = findRelationshipDefinition(schemaInfo, name)
+        if (!relationship) continue
+        const types = relationship.belongsToPolymorphic?.types ||
+          [relationship.belongsTo || relationship.target || (relationship.type === 'manyToMany' ? name : undefined)]
+        for (const type of types) {
+          if (Object.hasOwn(scopes, type) && scopes[type]?.vars?.schemaInfo) targets.add(type)
+        }
+      }
+      if (targets.size === 0) throw new RestApiIncludeError({ path, resourceType: context.scopeName })
+      // A polymorphic path may apply to a subset of the declared target types.
+      candidates = targets
+    }
+  }
 }

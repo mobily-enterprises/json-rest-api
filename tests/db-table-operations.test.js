@@ -319,6 +319,7 @@ describe('dbTablesOperations.generateKnexMigration', () => {
       .replace(/exports\.up/g, 'migrationModule.up')
       .replace(/exports\.down/g, 'migrationModule.down')
 
+    // eslint-disable-next-line no-new-func -- Execute generated migration code against the real test database.
     new Function('migrationModule', migrationCode)(migrationModule)
 
     await migrationModule.up(db)
@@ -336,6 +337,36 @@ describe('dbTablesOperations.generateKnexMigration', () => {
 
     const existsAfter = await db.schema.hasTable('users')
     assert.equal(existsAfter, false)
+  })
+
+  it('creates integer columns through both direct setup and executable migration', async () => {
+    const schema = makeTableSchema({
+      signedKey: { type: 'integer', required: true, storage: { column: 'signed_key' } },
+      unsignedKey: { type: 'integer', unsigned: true, required: true }
+    })
+    await createKnexTable(db, makeSchemaInfo('direct_integers'), schema)
+    const migrationModule = {}
+    const code = generateKnexMigration('migrated_integers', schema)
+      .replace(/exports\.up/g, 'migrationModule.up').replace(/exports\.down/g, 'migrationModule.down')
+    // eslint-disable-next-line no-new-func -- Exercise the generated migration against SQLite.
+    new Function('migrationModule', code)(migrationModule)
+    await migrationModule.up(db)
+    for (const table of ['direct_integers', 'migrated_integers']) {
+      const columns = await db(table).columnInfo()
+      assert.equal(columns.signed_key.type, 'integer')
+      assert.equal(columns.unsigned_key.type, 'integer')
+      await db(table).insert({ signed_key: -7, unsigned_key: 0 })
+      const stored = await db(table).first()
+      assert.equal(stored.signed_key, -7)
+      assert.equal(stored.unsigned_key, 0)
+      const snapshot = await introspectKnexTableSnapshot(db, { tableName: table, idColumn: 'id' })
+      const diff = generateKnexMigrationDiff(table, snapshot, schema)
+      assert.deepEqual(diff.plan.addColumns, [])
+      assert.deepEqual(diff.plan.dropColumns, [])
+      assert.deepEqual(diff.plan.alterColumns.filter(column => column.name === 'signed_key'), [])
+    }
+    await migrationModule.down(db)
+    assert.equal(await db.schema.hasTable('migrated_integers'), false)
   })
 
   it('includes the expected schema features in generated migrations', () => {
@@ -359,7 +390,7 @@ describe('dbTablesOperations.generateKnexMigration', () => {
     assert.ok(migration.includes("table.integer('id').unsigned().primary()"))
     assert.ok(migration.includes("table.string('title', 200).notNullable()"))
     assert.ok(migration.includes("table.decimal('price', 10, 2)"))
-    assert.ok(migration.includes(".defaultTo(true)"))
+    assert.ok(migration.includes('.defaultTo(true)'))
     assert.ok(migration.includes("table.foreign(['category_id'], 'products_category_id_foreign').references(['id']).inTable('categories').onDelete('SET NULL')"))
     assert.ok(migration.includes('table.timestamps(true, true)'))
   })
@@ -440,7 +471,7 @@ describe('dbTablesOperations.generateKnexMigration', () => {
     assert.ok(migration.includes("table.specificType('flags', 'set(\\'featured\\', \\'archived\\')')"))
     assert.ok(migration.includes("table.unique(['workspace_id', 'user_id'], 'uq_memberships_workspace_user')"))
     assert.ok(migration.includes("table.foreign(['workspace_id', 'user_id'], 'fk_memberships_workspace_user').references(['workspace_id', 'user_id']).inTable('workspace_users').onDelete('CASCADE').onUpdate('RESTRICT')"))
-    assert.ok(migration.includes("table.check('note_count >= 0', [], 'chk_memberships_note_count_non_negative')"))
+    assert.ok(migration.includes("table.check('note_count >= 0', [], knex.raw('??', ['chk_memberships_note_count_non_negative']).toQuery())"))
   })
 
   it('includes indexType for non-unique indexes in generated migrations', () => {
@@ -548,7 +579,7 @@ describe('dbTablesOperations.generateKnexMigrationDiff', () => {
     })
 
     assert.deepEqual(diff.warnings, [])
-    assert.equal(Object.hasOwn(diff.plan, 'dropCheckConstraints'), false)
+    assert.deepEqual(diff.plan.dropCheckConstraints, [])
     assert.deepEqual(diff.plan.addColumns.map((column) => column.name), ['note_count', 'role'])
     assert.deepEqual(diff.plan.addIndexes.map((index) => index.name), ['uq_memberships_workspace_user'])
     assert.deepEqual(diff.plan.addForeignKeys.map((foreignKey) => foreignKey.name), ['fk_memberships_workspace_user'])
@@ -556,6 +587,7 @@ describe('dbTablesOperations.generateKnexMigrationDiff', () => {
     assert.ok(diff.migration.includes("table.enu('role', ['owner', 'member']).notNullable().defaultTo('member')"))
 
     const migrationModule = {}
+    // eslint-disable-next-line no-new-func -- Execute generated migration code against the real test database.
     new Function('migrationModule', diff.migration
       .replace(/exports\.up/g, 'migrationModule.up')
       .replace(/exports\.down/g, 'migrationModule.down'))(migrationModule)
@@ -746,8 +778,8 @@ describe('RestApiKnexPlugin migration scope methods', () => {
     })
 
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false
+      format: 'jsonapi',
+
     })
     await api.use(RestApiKnexPlugin, { knex: db })
 
@@ -785,7 +817,7 @@ describe('RestApiKnexPlugin migration scope methods', () => {
     const createMigration = await api.resources.memberships.generateKnexMigration()
 
     assert.ok(createMigration.includes("table.unique(['workspace_id', 'user_id'], 'uq_scope_memberships_workspace_user')"))
-    assert.ok(createMigration.includes("table.check('workspace_id > 0', [], 'chk_scope_memberships_workspace_positive')"))
+    assert.ok(createMigration.includes("table.check('workspace_id > 0', [], knex.raw('??', ['chk_scope_memberships_workspace_positive']).toQuery())"))
 
     const diff = await api.resources.memberships.generateKnexMigrationDiff()
 

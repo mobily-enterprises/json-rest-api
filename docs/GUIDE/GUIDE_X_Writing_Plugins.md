@@ -9,27 +9,67 @@ Use this guide when you want to:
 - compile resource metadata into reusable runtime state
 - hook into query or write processing
 
-For internal architecture notes and maintainer-oriented details, see [docs/ONBOARDING.md](../ONBOARDING.md).
+For internal architecture notes and maintainer-oriented details, see docs/ONBOARDING.md (source checkout: `docs/ONBOARDING.md`).
 
 ## Minimal plugin shape
 
+These three blocks form a runnable example. Add them to the
+[starting script](GUIDE_2_1_The_Starting_Point.md) after installing storage,
+before starting the server, on a fresh database. Later snippets are fragments
+for a plugin's `install` function.
+
 ```javascript
-export const MyPlugin = {
+const MyPlugin = {
   name: 'my-plugin',
   dependencies: ['rest-api'],
-
-  install ({ addHook, addScopeMethod, helpers, log, pluginOptions = {} }) {
+  install ({ addHook, addScopeMethod }) {
+    addHook('beforeSchemaValidate', 'trim-example-name', {}, ({ context }) => {
+      const attributes = context.inputRecord?.data?.attributes
+      if (typeof attributes?.name === 'string') attributes.name = attributes.name.trim()
+    })
     addHook('scope:added', 'compile-my-plugin', {}, ({ context, scopes }) => {
       const scope = scopes[context.scopeName]
-      scope.vars.myPlugin = { enabled: true }
+      scope.vars.myPlugin = { enabled: context.scopeOptions.exampleFlag === true }
     })
-
-    addScopeMethod('doSomething', async ({ scopeName, scope, params, context }) => {
-      return { scopeName, enabled: scope.vars.myPlugin?.enabled === true }
-    })
+    addScopeMethod('describeExample', async ({ scopeName, scope }) => ({
+      scopeName, enabled: scope.vars.myPlugin.enabled
+    }))
   }
 }
+await api.use(MyPlugin)
 ```
+
+Install registration hooks before registering the resources they configure.
+
+```javascript
+await api.addResource('authors', {
+  schema: { name: { type: 'string', required: true } },
+  exampleFlag: true
+})
+await api.addResource('publishers', {
+  schema: { name: { type: 'string', required: true } }
+})
+await api.resources.authors.createKnexTable()
+await api.resources.publishers.createKnexTable()
+```
+
+The custom method is available on each resource, with resource-specific state.
+
+```javascript
+const authorDescription = await api.resources.authors.describeExample()
+const publisherDescription = await api.resources.publishers.describeExample()
+const createdAuthor = await api.resources.authors.post({
+  format: 'plain', inputRecord: { name: '  Ada  ' }
+})
+console.log(authorDescription, publisherDescription, createdAuthor)
+```
+
+The first result is `{ scopeName: 'authors', enabled: true }`; the second is
+`{ scopeName: 'publishers', enabled: false }`. The created author's `name` is
+`'Ada'`: the hook trims the declared attribute before attribute validation and
+storage.
+Export `MyPlugin` as a named
+export when moving the declaration into its own module.
 
 The usual pattern is:
 
@@ -45,16 +85,19 @@ Use this to inspect `scopeOptions`, validate configuration, and compile resource
 
 Typical uses:
 
-- compile autofilter presets
-- compile query-field definitions
-- validate resource-specific options
+- initialize resource-specific extension state
+- validate non-schema resource options
+
+Declare fields during `schema:enrich` (or `computedSchema:enrich` for computed
+fields). Use `schema:compiled` for work that needs the compiled schema, such
+as autofilter configuration; do not add fields after compilation.
 
 Example:
 
-```javascript
+```js
 addHook('scope:added', 'compile-example', {}, ({ context, scopes }) => {
   const scope = scopes[context.scopeName]
-  const options = scope.scopeOptions || {}
+  const options = context.scopeOptions || {}
 
   scope.vars.example = {
     flag: options.exampleFlag === true
@@ -64,24 +107,22 @@ addHook('scope:added', 'compile-example', {}, ({ context, scopes }) => {
 
 ### `beforeSchemaValidate`
 
-Use this to normalize or strip write input before schema validation runs.
+Use this to normalize attribute values before attribute schema validation runs.
+Request document validation and relationship processing have already begun.
+Use the earlier `beforeProcessing` stage if an extension must change the input
+structure before those checks, and validate any untrusted shape it reads.
 
 Typical uses:
 
 - inject derived input values
-- remove output-only fields from `POST`/`PUT`/`PATCH`
-- translate alternate request forms into canonical attributes/relationships
+- apply attribute-level business checks
 
-Example:
+This hook cannot make an otherwise rejected request document valid retroactively.
 
-```javascript
-addHook('beforeSchemaValidate', 'strip-output-only-input', {}, ({ context }) => {
-  const attributes = context.inputRecord?.data?.attributes
-  if (!attributes) return
-
-  delete attributes.output_only_field
-})
-```
+The complete example above trims a declared string attribute here. It does not
+attempt to remove an unknown field after request validation has rejected it.
+For stage order and available context, use the
+[write lifecycle reference](GUIDE_7_Hooks_Data_Management_And_Plugins.md#resource-write-order).
 
 ### `knexQueryFiltering`
 
@@ -93,20 +134,21 @@ Typical uses:
 - cross-table filters
 - custom public filter semantics
 
-Example:
+The hook receives the current builder through `context.knexQuery.query`,
+along with its `scopeName` and `tableName`. It also runs for nested queries.
+Raw column names are unsafe to assume: ordinary resources can map logical fields
+to different columns, and canonical resources use storage slots and aliases.
 
-```javascript
-addHook('knexQueryFiltering', 'scope-by-workspace', {}, async ({ context }) => {
-  const query = context.knexQuery?.query
-  if (!query) return
+For equality scoping and write stamping, use
+[AutoFilterPlugin](GUIDE_X_Autofiltering.md). For mandatory resource visibility,
+use [RowPolicyPlugin](GUIDE_X_Row_Policies.md), whose policy context supplies
+logical column/value translation and query-purpose metadata. For a public
+client-selected filter, use the
+[custom search filter contract](GUIDE_2_2_Manipulating_And_Searching_Tables.md).
+These mechanisms avoid duplicating storage translation in application hooks.
 
-  query.where('workspace_id', context.session.workspaceId)
-})
-```
-
-`knexQueryFiltering` is the right seam for filtering. It is **not** the right seam for turning ad hoc SQL aliases into first-class fields.
-
-For mandatory resource visibility, prefer the supported [`RowPolicyPlugin`](GUIDE_X_Row_Policies.md) contract over registering a raw filtering hook. It validates resource configuration, requires an explicit allow/deny decision, provides logical field translation, exposes query-purpose metadata, and is exercised across pagination counts, single-record preflights, includes, and relationship loading.
+A filtering hook does not turn an ad hoc SQL alias into a declared field;
+use the query-field contract below for selected or sortable derived values.
 
 ### `addScopeMethod`
 
@@ -114,7 +156,7 @@ Use this when a plugin needs a reusable method on every resource or selected res
 
 Example:
 
-```javascript
+```js
 addScopeMethod('introspect', async ({ vars }) => {
   return {
     tableName: vars.schemaInfo?.tableName,
@@ -131,28 +173,30 @@ This is the seam used by `QueryProjectionsPlugin`, and it is the recommended pat
 
 ### What a plugin should provide
 
-Compile resource-level definitions into:
+Declare query fields during the existing schema-enrichment stage:
 
-```javascript
-scope.vars.queryFields = {
-  full_name: {
+```js
+addHook('schema:enrich', 'declare-uppercase-name', {}, ({ context }) => {
+  if (context.scopeName !== 'authors') return
+  context.queryFields.uppercase_name = {
     type: 'string',
     sortable: true,
-    hidden: false,
-    normallyHidden: false,
-    select: ({ knex, db, context, scopeName, tableName, fieldName, schemaInfo, adapter, column, ref }) => {
-      return knex.raw(
-        "trim(coalesce(??, '') || ' ' || coalesce(??, ''))",
-        [column('first_name'), column('last_name')]
-      )
-    }
+    select: ({ knex, column }) => knex.raw('upper(??)', [column('first_name')])
   }
-}
+})
 ```
 
-### What core will do with `scope.vars.queryFields`
+Install the hook before registering resources. Core normalizes the final map
+and rejects names that collide with attributes, computed fields, relationships
+or logical IDs. If another declaration hook replaces the map, order this hook
+after that one. The published definitions are available at
+`scope.vars.schemaInfo.queryFields`; do not mutate a separate `vars.queryFields`
+map. Canonical `addKnexFields` recompiles declarations and dependencies before
+publication. SQL callbacks are still evaluated with each query's context.
 
-Once a plugin sets `scope.vars.queryFields`, core will:
+### What core does with compiled query fields
+
+Core will:
 
 - include visible query fields by default in `get()` and `query()`
 - allow them in sparse fieldsets
@@ -184,7 +228,7 @@ For the concrete projection example, see [Query Projections](GUIDE_X_Query_Proje
 When you add a new plugin feature, prefer this flow:
 
 1. read plugin options at install time
-2. validate and compile per-resource config in `scope:added`
+2. declare schema metadata during its enrichment stage; use `scope:added` for other registration work
 3. store only normalized runtime state in `scope.vars`
 4. use hooks or scope methods to apply behavior
 
@@ -193,7 +237,7 @@ That keeps the plugin declarative and avoids re-parsing configuration during req
 ## Boundaries to keep clean
 
 - Keep **query-layer** extensions out of `schema`.
-- Keep **write/input** reshaping in `beforeSchemaValidate`.
+- Choose input hooks according to the [write lifecycle](GUIDE_7_Hooks_Data_Management_And_Plugins.md#resource-write-order).
 - Keep **filtering** in `knexQueryFiltering`.
 - Keep **response-only** enrichment in `enrichAttributes`.
 - Do not rely on arbitrary internal helper filenames as public API.

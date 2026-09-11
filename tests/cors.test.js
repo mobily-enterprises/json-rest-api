@@ -4,13 +4,16 @@ import knexLib from 'knex'
 import express from 'express'
 import request from 'supertest'
 import {
-  validateJsonApiStructure,
+
   cleanTables,
-  createJsonApiDocument,
-  assertResourceAttributes
+  createJsonApiDocument
 } from './helpers/test-utils.js'
 import { createBasicApi } from './fixtures/api-configs.js'
 import { CorsPlugin } from '../plugins/core/rest-api-cors-plugin.js'
+
+function assertCorsVary (response) {
+  assert.deepEqual(response.headers.vary.split(',').map(value => value.trim().toLowerCase()).sort(), ['accept', 'origin'])
+}
 
 // Create Knex instance for tests - always use SQLite in-memory
 const knex = knexLib({
@@ -42,7 +45,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
 
       // Install plugins
       await baseUrlApi.use((await import('../plugins/core/rest-api-plugin.js')).RestApiPlugin, {
-        simplifiedApi: false
+        format: 'jsonapi'
       })
       await baseUrlApi.use((await import('../plugins/core/rest-api-knex-plugin.js')).RestApiKnexPlugin, { knex })
       await baseUrlApi.use((await import('../plugins/core/connectors/express-plugin.js')).ExpressPlugin, {
@@ -117,7 +120,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert(response.status === 200 || response.status === 500, `Expected 200 or 500, got ${response.status}`)
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should handle wildcard OPTIONS route with baseUrl', async () => {
@@ -189,9 +192,9 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         code: 'TC'
       })
 
-      const createResult = await api.resources.countries.post({
+      await api.resources.countries.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Make HTTP request with origin header
@@ -206,7 +209,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
       assert.equal(response.headers['access-control-expose-headers'], 'X-Total-Count, X-Page-Count, Link')
       // Vary header should be set when specific origin is returned
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should add CORS headers for POST requests', async () => {
@@ -228,7 +231,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
       assert.equal(response.headers['access-control-expose-headers'], 'X-Total-Count, X-Page-Count, Link')
       // Vary header should be set when specific origin is returned
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should handle requests without Origin header', async () => {
@@ -256,7 +259,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
       assert.equal(response.headers['access-control-allow-methods'], 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
       assert.equal(response.headers['access-control-allow-headers'], 'Content-Type, Authorization, X-Custom-Header')
       assert.equal(response.headers['access-control-max-age'], '86400')
       assert.equal(response.text, '') // Empty body
@@ -285,7 +288,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 200)
       // When credentials are true and origin is sent, specific origin is returned
       assert.equal(response.headers['access-control-allow-origin'], 'https://any-origin.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
   })
 
@@ -306,7 +309,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
 
       const result = await api.resources.countries.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       testCountryId = result.data.id
@@ -333,7 +336,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 200)
       // When credentials are true and origin is sent, specific origin is returned
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should handle DELETE requests with CORS', async () => {
@@ -345,7 +348,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 204)
       // When credentials are true and origin is sent, specific origin is returned
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should handle PUT requests with CORS', async () => {
@@ -367,9 +370,9 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         .set('Content-Type', 'application/vnd.api+json')
         .send(putDoc)
 
-      assert.equal(response.status, 204)
+      assert.equal(response.status, 200)
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
       assert.equal(response.headers['access-control-expose-headers'], 'X-Total-Count, X-Page-Count, Link')
     })
   })
@@ -523,7 +526,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         .set('Access-Control-Request-Method', 'POST')
 
       assert.equal(response.status, 403)
-      assert(response.body.error.includes('CORS origin not allowed'))
+      assert.equal(response.body.errors[0].detail, 'CORS origin not allowed')
       assert.equal(response.headers['access-control-allow-origin'], undefined)
     })
 
@@ -537,7 +540,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 204)
       // When credentials are true and origin is sent, specific origin is returned
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
   })
 
@@ -553,7 +556,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       // CORS headers should still be set for error responses
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
 
     it('should handle CORS for validation errors', async () => {
@@ -573,7 +576,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 422)
       // CORS headers should be set for validation errors
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
     })
   })
 
@@ -684,8 +687,8 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       assert.equal(response.status, 200)
       assert.equal(response.headers['access-control-allow-origin'], '*')
       assert.equal(response.headers['access-control-allow-credentials'], undefined)
-      // No Vary header when using wildcard without credentials
-      assert.equal(response.headers['vary'], undefined)
+      // Wildcard CORS does not vary on Origin; JSON:API still varies on Accept.
+      assert.equal(response.headers['vary'], 'Accept')
     })
 
     it('should handle custom allowed headers configuration', async () => {
@@ -728,7 +731,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
 
       const createResult = await api.resources.countries.post({
         inputRecord: doc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const countryId = createResult.data.id
@@ -752,12 +755,12 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
         .set('Content-Type', 'application/vnd.api+json')
         .set('Accept', 'application/vnd.api+json')
 
-      assert.equal(response.status, 204)
+      assert.equal(response.status, 200)
       assert.equal(response.headers['access-control-allow-origin'], 'https://example.com')
       assert.equal(response.headers['access-control-allow-credentials'], 'true')
-      assert.equal(response.headers['vary'], 'Origin')
+      assertCorsVary(response)
 
-      // Note: PUT might not return the full record by default depending on returnFullRecord settings
+      // HTTP resource writes return the full JSON:API document.
       // The important part for CORS testing is that the headers are correct, which we've verified above
     })
 

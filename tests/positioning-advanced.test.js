@@ -1,24 +1,20 @@
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import knexLib from 'knex'
+import { createTestDatabase } from './helpers/test-database.js'
+import { storageMode } from './helpers/storage-mode.js'
 import { cleanTables } from './helpers/test-utils.js'
 import { createPositioningApi } from './fixtures/api-configs.js'
 import { PositioningPlugin } from '../plugins/core/rest-api-positioning-plugin.js'
 import { rebalancePositions, isValidPosition, getUnpositionedItems, assignInitialPositions } from '../plugins/core/lib/fractional-positioning.js'
 
-// Create Knex instance for tests
-const knex = knexLib({
-  client: 'better-sqlite3',
-  connection: {
-    filename: ':memory:'
-  },
-  useNullAsDefault: true
-})
+let database, knex
 
 describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
   let api
 
   before(async () => {
+    database = await createTestDatabase()
+    knex = database.knex
     // Initialize API once
     api = await createPositioningApi(knex, {
       apiName: 'positioning-advanced-test',
@@ -35,7 +31,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
   })
 
   after(async () => {
-    await knex.destroy()
+    try { await database?.close() } finally { storageMode.clearRegistry(knex) }
   })
 
   beforeEach(async () => {
@@ -176,23 +172,14 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         defaultPosition: 'first' // New items go to beginning
       })
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create tasks - they should be added at the beginning
-      const task1 = await api.resources.tasks.post({
-        title: 'Task 1',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({
-        title: 'Task 2',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
 
-      const task3 = await api.resources.tasks.post({
-        title: 'Task 3',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 3', category: category.id } })
 
       // Query tasks
       const { data: tasks } = await api.resources.tasks.query({
@@ -226,24 +213,14 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         defaultPosition: 'first'
       })
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
-      const task1 = await api.resources.tasks.post({
-        title: 'Task 1',
-        category: category.id
-      })
+      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({
-        title: 'Task 2',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
 
       // Create task with explicit beforeId (should override defaultPosition)
-      const task3 = await api.resources.tasks.post({
-        title: 'Task 3',
-        category: category.id,
-        beforeId: task1.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 3', category: category.id, beforeId: task1.id } })
 
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
@@ -273,17 +250,11 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         defaultPosition: 'last'
       })
 
-      const project = await api.resources.projects.post({ name: 'Test Project' })
+      const project = await api.resources.projects.post({ format: 'plain', inputRecord: { name: 'Test Project' } })
 
-      const item1 = await api.resources.items.post({
-        name: 'Item 1',
-        project: project.id
-      })
+      const item1 = await api.resources.items.post({ format: 'plain', inputRecord: { name: 'Item 1', project: project.id } })
 
-      const item2 = await api.resources.items.post({
-        name: 'Item 2',
-        project: project.id
-      })
+      const item2 = await api.resources.items.post({ format: 'plain', inputRecord: { name: 'Item 2', project: project.id } })
 
       // Should have sort_order field, not position
       assert(item1.sort_order)
@@ -320,24 +291,14 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         defaultPosition: 'last'
       })
 
-      const project = await api.resources.projects.post({ name: 'Test Project' })
+      const project = await api.resources.projects.post({ format: 'plain', inputRecord: { name: 'Test Project' } })
 
-      const item1 = await api.resources.items.post({
-        name: 'Item 1',
-        project: project.id
-      })
+      await api.resources.items.post({ format: 'plain', inputRecord: { name: 'Item 1', project: project.id } })
 
-      const item2 = await api.resources.items.post({
-        name: 'Item 2',
-        project: project.id
-      })
+      const item2 = await api.resources.items.post({ format: 'plain', inputRecord: { name: 'Item 2', project: project.id } })
 
       // Use custom beforeId field name
-      const item3 = await api.resources.items.post({
-        name: 'Item 3',
-        project: project.id,
-        insertBefore: item2.id
-      })
+      await api.resources.items.post({ format: 'plain', inputRecord: { name: 'Item 3', project: project.id, insertBefore: item2.id } })
 
       const { data: items } = await api.resources.items.query({
         queryParams: {
@@ -357,27 +318,17 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
     it('should handle concurrent inserts at same position gracefully', async () => {
       // Use the main api instance
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
-      const task1 = await api.resources.tasks.post({
-        title: 'Task 1',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({
-        title: 'Task 2',
-        category: category.id
-      })
+      const task2 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
 
       // Simulate concurrent inserts before task2
       const promises = []
       for (let i = 0; i < 5; i++) {
         promises.push(
-          api.resources.tasks.post({
-            title: `Concurrent Task ${i}`,
-            category: category.id,
-            beforeId: task2.id
-          })
+          api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Concurrent Task ${i}`, category: category.id, beforeId: task2.id } })
         )
       }
 
@@ -416,15 +367,12 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
     it('should maintain consistency when moving items rapidly', async () => {
       // Use the main api instance
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create initial items
       const items = []
       for (let i = 0; i < 10; i++) {
-        const item = await api.resources.tasks.post({
-          title: `Task ${i}`,
-          category: category.id
-        })
+        const item = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
         items.push(item)
       }
 
@@ -433,21 +381,21 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
 
       // Move multiple items to beginning
       updates.push(
-        api.resources.tasks.patch({ id: items[5].id, beforeId: 'FIRST' }),
-        api.resources.tasks.patch({ id: items[7].id, beforeId: 'FIRST' }),
-        api.resources.tasks.patch({ id: items[9].id, beforeId: 'FIRST' })
+        api.resources.tasks.patch({ id: items[5].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } }),
+        api.resources.tasks.patch({ id: items[7].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } }),
+        api.resources.tasks.patch({ id: items[9].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } })
       )
 
       // Move multiple items to end
       updates.push(
-        api.resources.tasks.patch({ id: items[0].id, beforeId: null }),
-        api.resources.tasks.patch({ id: items[2].id, beforeId: null })
+        api.resources.tasks.patch({ id: items[0].id, format: 'plain', inputRecord: { beforeId: null } }),
+        api.resources.tasks.patch({ id: items[2].id, format: 'plain', inputRecord: { beforeId: null } })
       )
 
       // Move items to middle positions
       updates.push(
-        api.resources.tasks.patch({ id: items[1].id, beforeId: items[4].id }),
-        api.resources.tasks.patch({ id: items[3].id, beforeId: items[6].id })
+        api.resources.tasks.patch({ id: items[1].id, format: 'plain', inputRecord: { beforeId: items[4].id } }),
+        api.resources.tasks.patch({ id: items[3].id, format: 'plain', inputRecord: { beforeId: items[6].id } })
       )
 
       await Promise.all(updates)
@@ -480,24 +428,17 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
     it('should handle FIRST positioning correctly', async () => {
       // Use the main api instance
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create initial tasks
       const tasks = []
       for (let i = 1; i <= 5; i++) {
-        const task = await api.resources.tasks.post({
-          title: `Task ${i}`,
-          category: category.id
-        })
+        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Position new task at beginning
-      const firstTask = await api.resources.tasks.post({
-        title: 'First Task',
-        category: category.id,
-        beforeId: 'FIRST'
-      })
+      const firstTask = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'First Task', category: category.id, beforeId: 'FIRST' } })
 
       const { data: allTasks } = await api.resources.tasks.query({
         queryParams: {
@@ -510,10 +451,7 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
       assert(firstTask.position < tasks[0].position)
 
       // Update existing task to move to beginning
-      await api.resources.tasks.patch({
-        id: tasks[2].id,
-        beforeId: 'FIRST'
-      })
+      await api.resources.tasks.patch({ id: tasks[2].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } })
 
       const { data: updatedTasks } = await api.resources.tasks.query({
         queryParams: {
@@ -529,24 +467,15 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
     it('should handle null beforeId as positioning at end', async () => {
       // Use the main api instance
 
-      const category = await api.resources.categories.post({ name: 'Test Category' })
+      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create tasks
-      const task1 = await api.resources.tasks.post({
-        title: 'Task 1',
-        category: category.id
-      })
+      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({
-        title: 'Task 2',
-        category: category.id
-      })
+      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
 
       // Move task 1 to end with explicit null
-      await api.resources.tasks.patch({
-        id: task1.id,
-        beforeId: null
-      })
+      await api.resources.tasks.patch({ id: task1.id, format: 'plain', inputRecord: { beforeId: null } })
 
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
@@ -574,30 +503,20 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         excludeResources: ['system_migrations', 'system_logs', 'categories', 'projects']
       })
 
-      const category = await softDeleteApi.resources.categories.post({ name: 'Test Category' })
+      const category = await softDeleteApi.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create tasks
       const tasks = []
       for (let i = 1; i <= 5; i++) {
-        const task = await softDeleteApi.resources.tasks.post({
-          title: `Task ${i}`,
-          category: category.id
-        })
+        const task = await softDeleteApi.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Soft delete task 3
-      await softDeleteApi.resources.tasks.patch({
-        id: tasks[2].id,
-        deleted_at: new Date().toISOString()
-      })
+      await softDeleteApi.resources.tasks.patch({ id: tasks[2].id, format: 'plain', inputRecord: { deleted_at: new Date().toISOString() } })
 
       // Create new task - should still position correctly
-      const newTask = await softDeleteApi.resources.tasks.post({
-        title: 'New Task',
-        category: category.id,
-        beforeId: tasks[3].id // Before task 4
-      })
+      await softDeleteApi.resources.tasks.post({ format: 'plain', inputRecord: { title: 'New Task', category: category.id, beforeId: tasks[3].id } })
 
       // Query non-deleted tasks
       const { data: activeTasks } = await softDeleteApi.resources.tasks.query({
@@ -632,32 +551,20 @@ describe('Advanced Positioning Plugin Tests', { timeout: 30000 }, () => {
         excludeResources: ['system_migrations', 'system_logs', 'categories', 'projects']
       })
 
-      const category = await versionApi.resources.categories.post({ name: 'Test Category' })
+      const category = await versionApi.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
 
       // Create v1 tasks
       const v1Tasks = []
       for (let i = 1; i <= 3; i++) {
-        const task = await versionApi.resources.tasks.post({
-          title: `Task ${i} v1`,
-          category: category.id,
-          version: 1
-        })
+        const task = await versionApi.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i} v1`, category: category.id, version: 1 } })
         v1Tasks.push(task)
       }
 
       // Create v2 of task 2
-      const task2v2 = await versionApi.resources.tasks.post({
-        title: 'Task 2 v2',
-        category: category.id,
-        version: 2
-      })
+      const task2v2 = await versionApi.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2 v2', category: category.id, version: 2 } })
 
       // Create v2 of task 1
-      const task1v2 = await versionApi.resources.tasks.post({
-        title: 'Task 1 v2',
-        category: category.id,
-        version: 2
-      })
+      await versionApi.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1 v2', category: category.id, version: 2 } })
 
       // Query v1 tasks
       const { data: v1Items } = await versionApi.resources.tasks.query({

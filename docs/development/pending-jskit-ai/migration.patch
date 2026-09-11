@@ -1,0 +1,1134 @@
+diff --git a/packages/crud-core/src/server/jsonApiModule/repository.js b/packages/crud-core/src/server/jsonApiModule/repository.js
+index 10a0a7fdfd47fc78a09b64b8750edd8ba909b670..582ca29629e3e1ffd7523b0c278a21b0166b9aa4 100644
+--- a/packages/crud-core/src/server/jsonApiModule/repository.js
++++ b/packages/crud-core/src/server/jsonApiModule/repository.js
+@@ -38,7 +38,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+         {
+           queryParams: buildJsonRestQueryParams(scopeName, query),
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       )
+@@ -53,7 +53,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+             id: recordId,
+             queryParams: buildJsonRestQueryParams(scopeName, query),
+             transaction: options.trx || null,
+-            simplified: false
++            format: "jsonapi"
+           },
+           createJsonRestContext(options.context || null)
+         )
+@@ -66,7 +66,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+       {
+         inputRecord: createJsonApiInputRecord(scopeName, payload, { resource }),
+         transaction: options.trx || null,
+-        simplified: false
++        format: "jsonapi"
+       },
+       createJsonRestContext(options.context || null)
+     );
+@@ -84,7 +84,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+           id: recordId,
+           inputRecord: createJsonApiInputRecord(scopeName, sourcePatch, { resource }),
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       )
+@@ -97,7 +97,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+         {
+           id: recordId,
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       );
+diff --git a/packages/json-rest-api-core/src/server/jsonRestApiHost.js b/packages/json-rest-api-core/src/server/jsonRestApiHost.js
+index 5cafc95518f02cfa504b62d80dfbcad8555a15f9..f9e607d6f33bdddf26412b11d0e0f78e29c7b64c 100644
+--- a/packages/json-rest-api-core/src/server/jsonRestApiHost.js
++++ b/packages/json-rest-api-core/src/server/jsonRestApiHost.js
+@@ -810,13 +810,8 @@ async function createJsonRestApiHost({ knex }) {
+   });
+ 
+   await api.use(RestApiPlugin, {
+-    simplifiedApi: true,
+-    simplifiedTransport: false,
+-    returnRecordApi: {
+-      post: "full",
+-      put: "full",
+-      patch: "full"
+-    },
++    format: "plain",
++    returning: "full",
+     normalizeId: normalizeRecordId
+   });
+ 
+diff --git a/packages/users-core/src/server/common/repositories/userProfilesRepository.js b/packages/users-core/src/server/common/repositories/userProfilesRepository.js
+index 97b0c128e559a9aa12c564fb01721c436f25b712..57ea85d826378304349412b82f3729d64354f44a 100644
+--- a/packages/users-core/src/server/common/repositories/userProfilesRepository.js
++++ b/packages/users-core/src/server/common/repositories/userProfilesRepository.js
+@@ -8,13 +8,11 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { normalizeIdentity } from "../support/identity.js";
+ 
+-const RESOURCE_TYPE = "userProfiles";
+ const USERNAME_MAX_LENGTH = 120;
+ 
+ function normalizeUsername(value) {
+@@ -150,7 +148,7 @@ async function resolveUniqueUsername(api, baseUsername, { excludeUserId = null,
+           }
+         },
+         transaction,
+-        simplified: true
++        format: "plain"
+       })
+     );
+     const existing = existingRows[0] || null;
+@@ -181,7 +179,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -233,16 +231,9 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            displayName,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedUserId,
++        inputRecord: { displayName, updatedAt: new Date().toISOString() },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -259,18 +250,9 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            avatarStorageKey: avatar.avatarStorageKey ?? null,
+-            avatarVersion: avatar.avatarVersion ?? null,
+-            avatarUpdatedAt: toIsoString(avatar.avatarUpdatedAt ?? new Date()),
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedUserId,
++        inputRecord: { avatarStorageKey: avatar.avatarStorageKey ?? null, avatarVersion: avatar.avatarVersion ?? null, avatarUpdatedAt: toIsoString(avatar.avatarUpdatedAt ?? new Date()), updatedAt: new Date().toISOString() },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -287,18 +269,9 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            avatarStorageKey: null,
+-            avatarVersion: null,
+-            avatarUpdatedAt: null,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedUserId,
++        inputRecord: { avatarStorageKey: null, avatarVersion: null, avatarUpdatedAt: null, updatedAt: new Date().toISOString() },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -343,18 +316,9 @@ function createRepository({ api, knex } = {}) {
+ 
+           const updated = await api.resources.userProfiles.patch(
+             {
+-              inputRecord: createJsonApiInputRecord(
+-                RESOURCE_TYPE,
+-                {
+-                  email,
+-                  displayName,
+-                  username,
+-                  updatedAt: new Date().toISOString()
+-                },
+-                {
+-                  id: normalizeDbRecordId(existing.id, { fallback: null })
+-                }
+-              ),
++              format: "plain",
++              id: normalizeDbRecordId(existing.id, { fallback: null }),
++              inputRecord: { email, displayName, username, updatedAt: new Date().toISOString() },
+               transaction: trx
+             },
+             createJsonRestContext(options?.context || null)
+@@ -371,14 +335,8 @@ function createRepository({ api, knex } = {}) {
+ 
+         const created = await api.resources.userProfiles.post(
+           {
+-            inputRecord: createJsonApiInputRecord(RESOURCE_TYPE, {
+-              authProvider: identity.provider,
+-              authProviderUserSid: identity.providerUserId,
+-              email,
+-              displayName,
+-              username,
+-              createdAt: new Date().toISOString()
+-            }),
++            format: "plain",
++            inputRecord: { authProvider: identity.provider, authProviderUserSid: identity.providerUserId, email, displayName, username, createdAt: new Date().toISOString() },
+             transaction: trx
+           },
+           createJsonRestContext(options?.context || null)
+diff --git a/packages/users-core/src/server/common/repositories/userSettingsRepository.js b/packages/users-core/src/server/common/repositories/userSettingsRepository.js
+index a57a7114b8645e1a80c0c66f6c06f8ec5da1499a..21bce45b60eedc0294668a32a39289c1d06f345c 100644
+--- a/packages/users-core/src/server/common/repositories/userSettingsRepository.js
++++ b/packages/users-core/src/server/common/repositories/userSettingsRepository.js
+@@ -4,13 +4,11 @@ import {
+   createWithTransaction
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { DEFAULT_USER_SETTINGS } from "../../../shared/settings.js";
+ 
+-const RESOURCE_TYPE = "userSettings";
+ const USER_SETTINGS_PATCH_FIELDS = Object.freeze([
+   "theme",
+   "locale",
+@@ -73,7 +71,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -105,13 +103,8 @@ function createRepository({ api, knex } = {}) {
+     try {
+       await api.resources.userSettings.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            createDefaultUserSettingsCreatePayload(normalizedUserId),
+-            {
+-              id: normalizedUserId
+-            }
+-          ),
++          format: "plain",
++          inputRecord: { id: normalizedUserId, ...createDefaultUserSettingsCreatePayload(normalizedUserId) },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -141,16 +134,9 @@ function createRepository({ api, knex } = {}) {
+ 
+     await api.resources.userSettings.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            ...updatePayload,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedUserId,
++        inputRecord: { ...updatePayload, updatedAt: new Date().toISOString() },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/users-core/test/repositoryContracts.test.js b/packages/users-core/test/repositoryContracts.test.js
+index 05d42754eeacdd160d4d531bc576d20be74fff80..4b485d834cc0a7116957029217e0ad3392e4f9f0 100644
+--- a/packages/users-core/test/repositoryContracts.test.js
++++ b/packages/users-core/test/repositoryContracts.test.js
+@@ -74,7 +74,7 @@ function createUserProfilesApiStub(expectedRecord) {
+   };
+ }
+ 
+-test("userSettingsRepository.ensureForUserId sends transaction outside simplified attributes", async () => {
++test("userSettingsRepository.ensureForUserId sends transaction outside plain record attributes", async () => {
+   const trx = { trxId: "trx-1" };
+   let queryCount = 0;
+   let postParams = null;
+@@ -108,20 +108,16 @@ test("userSettingsRepository.ensureForUserId sends transaction outside simplifie
+ 
+   const record = await repository.ensureForUserId("7", { trx });
+ 
+-  assert.equal(postParams?.simplified, undefined);
++  assert.equal(postParams?.format, "plain");
+   assert.equal(postParams?.transaction, trx);
+-  assert.deepEqual(postParams?.inputRecord?.data, {
+-    type: "userSettings",
++  assert.deepEqual(postParams?.inputRecord, {
+     id: "7",
+-    attributes: {
+-      id: "7",
+-      ...DEFAULT_USER_SETTINGS
+-    }
++    ...DEFAULT_USER_SETTINGS
+   });
+   assert.equal(record?.id, "7");
+ });
+ 
+-test("userProfilesRepository.upsert sends native JSON:API write documents with transaction outside the record body", async () => {
++test("userProfilesRepository.upsert sends plain write records with transaction outside the record body", async () => {
+   const trx = { trxId: "trx-1" };
+   let postParams = null;
+   const repository = createUserProfilesRepository({
+@@ -141,7 +137,7 @@ test("userProfilesRepository.upsert sends native JSON:API write documents with t
+           },
+           async post(params) {
+             postParams = params;
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.inputRecord || {};
+             return {
+               id: "11",
+               authProvider: attributes.authProvider,
+@@ -167,11 +163,11 @@ test("userProfilesRepository.upsert sends native JSON:API write documents with t
+     displayName: "Ada Example"
+   }, { trx });
+ 
+-  assert.equal(postParams?.simplified, undefined);
++  assert.equal(postParams?.format, "plain");
+   assert.equal(postParams?.transaction, trx);
+   assert.equal(postParams?.inputRecord?.transaction, undefined);
+-  assert.equal(postParams?.inputRecord?.data?.type, "userProfiles");
+-  assert.equal(postParams?.inputRecord?.data?.attributes?.authProvider, "supabase");
++  assert.equal(postParams?.inputRecord?.data, undefined);
++  assert.equal(postParams?.inputRecord?.authProvider, "supabase");
+   assert.equal(record?.id, "11");
+ });
+ 
+@@ -208,7 +204,7 @@ test("userProfilesRepository.upsert patches existing profiles with resource-back
+           },
+           async patch(params) {
+             patchParams = params;
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.inputRecord || {};
+             return {
+               ...existingRecord,
+               ...attributes
+@@ -226,7 +222,7 @@ test("userProfilesRepository.upsert patches existing profiles with resource-back
+     displayName: "Ada Renamed"
+   }, { trx });
+ 
+-  const attributes = patchParams?.inputRecord?.data?.attributes || {};
++  const attributes = patchParams?.inputRecord || {};
+   assert.equal(userProfileResource.schema.updatedAt?.type, "dateTime");
+   assert.equal(userProfileResource.schema.updatedAt?.storage?.column, "updated_at");
+   assert.equal(userProfileResource.schema.updatedAt?.storage?.writeSerializer, "datetime-utc");
+@@ -253,9 +249,9 @@ test("userProfilesRepository profile patch helpers stamp updatedAt through the r
+           },
+           async patch(params) {
+             calls.push(params);
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.inputRecord || {};
+             return {
+-              id: params.inputRecord?.data?.id || "7",
++              id: params.id || "7",
+               authProvider: "local",
+               authProviderUserSid: "local-user-7",
+               email: "ada@example.com",
+@@ -285,21 +281,21 @@ test("userProfilesRepository profile patch helpers stamp updatedAt through the r
+   assert.equal(calls.length, 3);
+   for (const call of calls) {
+     assert.equal(call.transaction, trx);
+-    assert.equal(typeof call.inputRecord?.data?.attributes?.updatedAt, "string");
++    assert.equal(typeof call.inputRecord?.updatedAt, "string");
+   }
+-  assert.deepEqual(Object.keys(calls[0].inputRecord.data.attributes).sort(), ["displayName", "updatedAt"]);
+-  assert.deepEqual(Object.keys(calls[1].inputRecord.data.attributes).sort(), [
++  assert.deepEqual(Object.keys(calls[0].inputRecord).sort(), ["displayName", "updatedAt"]);
++  assert.deepEqual(Object.keys(calls[1].inputRecord).sort(), [
+     "avatarStorageKey",
+     "avatarUpdatedAt",
+     "avatarVersion",
+     "updatedAt"
+   ]);
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarStorageKey, "avatars/7.png");
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarVersion, "v1");
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarUpdatedAt, avatarUpdatedAt.toISOString());
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarStorageKey, null);
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarVersion, null);
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarUpdatedAt, null);
++  assert.equal(calls[1].inputRecord.avatarStorageKey, "avatars/7.png");
++  assert.equal(calls[1].inputRecord.avatarVersion, "v1");
++  assert.equal(calls[1].inputRecord.avatarUpdatedAt, avatarUpdatedAt.toISOString());
++  assert.deepEqual(calls[2].inputRecord.avatarStorageKey, null);
++  assert.deepEqual(calls[2].inputRecord.avatarVersion, null);
++  assert.deepEqual(calls[2].inputRecord.avatarUpdatedAt, null);
+ });
+ 
+ test("userProfilesRepository.findByEmail normalizes email lookup", async () => {
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js b/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
+index 92086e10a2bc501aba96cbb71291a0f8574ef578..87b93c26d953b3d4e04d3900091fc5d94e77b68f 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
+@@ -8,13 +8,10 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ 
+-const RESOURCE_TYPE = "workspaceInvites";
+ 
+ function normalizeInviteRecord(payload) {
+   if (!payload) {
+@@ -84,10 +81,10 @@ function createInviteRelationships({ workspaceId = null, invitedByUserId = undef
+   const relationships = {};
+ 
+   if (workspaceId) {
+-    relationships.workspace = createJsonApiRelationship("workspaces", workspaceId);
++    relationships.workspace = workspaceId;
+   }
+   if (invitedByUserId !== undefined) {
+-    relationships.invitedByUser = createJsonApiRelationship("userProfiles", invitedByUserId);
++    relationships.invitedByUser = invitedByUserId;
+   }
+ 
+   return relationships;
+@@ -112,7 +109,7 @@ function createRepository({ api, knex } = {}) {
+             ...(includeWorkspace ? { include: ["workspace"] } : {})
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -210,26 +207,11 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       const created = await api.resources.workspaceInvites.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              email: createPayload.email,
+-              roleSid: createPayload.roleSid,
+-              status: createPayload.status,
+-              tokenHash: createPayload.tokenHash,
+-              expiresAt: createPayload.expiresAt == null ? null : toIsoString(createPayload.expiresAt),
+-              acceptedAt: null,
+-              revokedAt: null,
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createInviteRelationships({
++          format: "plain",
++          inputRecord: { email: createPayload.email, roleSid: createPayload.roleSid, status: createPayload.status, tokenHash: createPayload.tokenHash, expiresAt: createPayload.expiresAt == null ? null : toIsoString(createPayload.expiresAt), acceptedAt: null, revokedAt: null, createdAt, updatedAt: createdAt, ...createInviteRelationships({
+                 workspaceId: createPayload.workspaceId,
+                 invitedByUserId: createPayload.invitedByUserId ?? null
+-              })
+-            }
+-          ),
++              }) },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -277,16 +259,9 @@ function createRepository({ api, knex } = {}) {
+       }
+       await api.resources.workspaceInvites.patch(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              status: patch.status,
+-              updatedAt: new Date().toISOString()
+-            },
+-            {
+-              id: row.id
+-            }
+-          ),
++          format: "plain",
++          id: row.id,
++          inputRecord: { status: patch.status, updatedAt: new Date().toISOString() },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -303,17 +278,9 @@ function createRepository({ api, knex } = {}) {
+     const acceptedAt = new Date().toISOString();
+     await api.resources.workspaceInvites.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            status: "accepted",
+-            acceptedAt,
+-            updatedAt: acceptedAt
+-          },
+-          {
+-            id: normalizedInviteId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedInviteId,
++        inputRecord: { status: "accepted", acceptedAt, updatedAt: acceptedAt },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -329,17 +296,9 @@ function createRepository({ api, knex } = {}) {
+     const revokedAt = new Date().toISOString();
+     await api.resources.workspaceInvites.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            status: "revoked",
+-            revokedAt,
+-            updatedAt: revokedAt
+-          },
+-          {
+-            id: normalizedInviteId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedInviteId,
++        inputRecord: { status: "revoked", revokedAt, updatedAt: revokedAt },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js b/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
+index fcfe2aae099837b0a96aa1bc0dc30a14400cec6d..32b272519ed64cf30640356c491da340cc4e3526 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
+@@ -8,14 +8,11 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { OWNER_ROLE_ID } from "../../../shared/roles.js";
+ 
+-const RESOURCE_TYPE = "workspaceMemberships";
+ 
+ function normalizeMembershipRecord(payload) {
+   if (!payload) {
+@@ -65,10 +62,10 @@ function createMembershipRelationships({ workspaceId = null, userId = null } = {
+   const relationships = {};
+ 
+   if (workspaceId) {
+-    relationships.workspace = createJsonApiRelationship("workspaces", workspaceId);
++    relationships.workspace = workspaceId;
+   }
+   if (userId) {
+-    relationships.user = createJsonApiRelationship("userProfiles", userId);
++    relationships.user = userId;
+   }
+ 
+   return relationships;
+@@ -100,7 +97,7 @@ function createRepository({ api, knex } = {}) {
+             ...(normalizedInclude.length > 0 ? { include: normalizedInclude } : {})
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -139,17 +136,9 @@ function createRepository({ api, knex } = {}) {
+         const updatedAt = new Date().toISOString();
+         await api.resources.workspaceMemberships.patch(
+           {
+-            inputRecord: createJsonApiInputRecord(
+-              RESOURCE_TYPE,
+-              {
+-                roleSid: OWNER_ROLE_ID,
+-                status: "active",
+-                updatedAt
+-              },
+-              {
+-                id: existing.id
+-              }
+-            ),
++            format: "plain",
++            id: existing.id,
++            inputRecord: { roleSid: OWNER_ROLE_ID, status: "active", updatedAt },
+             transaction: options?.trx || null
+           },
+           createJsonRestContext(options?.context || null)
+@@ -162,21 +151,11 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       await api.resources.workspaceMemberships.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              roleSid: OWNER_ROLE_ID,
+-              status: "active",
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createMembershipRelationships({
++          format: "plain",
++          inputRecord: { roleSid: OWNER_ROLE_ID, status: "active", createdAt, updatedAt: createdAt, ...createMembershipRelationships({
+                 workspaceId: normalizedWorkspaceId,
+                 userId: normalizedUserId
+-              })
+-            }
+-          ),
++              }) },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -210,21 +189,11 @@ function createRepository({ api, knex } = {}) {
+         const createdAt = new Date().toISOString();
+         await api.resources.workspaceMemberships.post(
+           {
+-            inputRecord: createJsonApiInputRecord(
+-              RESOURCE_TYPE,
+-              {
+-                roleSid,
+-                status,
+-                createdAt,
+-                updatedAt: createdAt
+-              },
+-              {
+-                relationships: createMembershipRelationships({
++            format: "plain",
++            inputRecord: { roleSid, status, createdAt, updatedAt: createdAt, ...createMembershipRelationships({
+                   workspaceId: normalizedWorkspaceId,
+                   userId: normalizedUserId
+-                })
+-              }
+-            ),
++                }) },
+             transaction: options?.trx || null
+           },
+           createJsonRestContext(options?.context || null)
+@@ -240,17 +209,9 @@ function createRepository({ api, knex } = {}) {
+     const updatedAt = new Date().toISOString();
+     await api.resources.workspaceMemberships.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            roleSid,
+-            status,
+-            updatedAt
+-          },
+-          {
+-            id: existing.id
+-          }
+-        ),
++        format: "plain",
++        id: existing.id,
++        inputRecord: { roleSid, status, updatedAt },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js b/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
+index d380573532600dff28149ab417f056669eb71114..891dc23528cc912c317788650be52b432bae529f 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
+@@ -6,13 +6,10 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ 
+-const RESOURCE_TYPE = "workspaces";
+ 
+ function normalizeWorkspaceRecord(payload = null) {
+   if (!payload || typeof payload !== "object") {
+@@ -37,7 +34,7 @@ function createWorkspaceRelationships(source = {}) {
+   const ownerUserId = normalizeRecordId(source.ownerUserId, { fallback: null });
+ 
+   if (ownerUserId) {
+-    relationships.owner = createJsonApiRelationship("userProfiles", ownerUserId);
++    relationships.owner = ownerUserId;
+   }
+ 
+   return relationships;
+@@ -61,7 +58,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -104,7 +101,7 @@ function createRepository({ api, knex } = {}) {
+             }
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -140,17 +137,8 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       const created = await api.resources.workspaces.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              ...createPayload,
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createWorkspaceRelationships({ ownerUserId })
+-            }
+-          ),
++          format: "plain",
++          inputRecord: { ...createPayload, createdAt, updatedAt: createdAt, ...createWorkspaceRelationships({ ownerUserId }) },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -184,18 +172,14 @@ function createRepository({ api, knex } = {}) {
+       ...sourcePatch,
+       updatedAt: new Date().toISOString()
+     };
++    delete workspacePatch.ownerUserId;
+     const relationships = createWorkspaceRelationships(sourcePatch);
+ 
+     const updated = await api.resources.workspaces.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          workspacePatch,
+-          {
+-            id: normalizedWorkspaceId,
+-            relationships
+-          }
+-        ),
++        format: "plain",
++        id: normalizedWorkspaceId,
++        inputRecord: { ...workspacePatch, ...relationships },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -221,7 +205,7 @@ function createRepository({ api, knex } = {}) {
+             include: ["workspace"]
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+diff --git a/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js b/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
+index bda112c2cf945f8efcaf048492d8c9575ad41f22..e559b9784b7986a2e13fa5f1621092b51700f64b 100644
+--- a/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
++++ b/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
+@@ -4,13 +4,11 @@ import {
+   createWithTransaction
+ } from "../common/repositories/repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { resolveWorkspaceThemePalettes } from "../../shared/settings.js";
+ 
+-const RESOURCE_TYPE = "workspaceSettings";
+ const WORKSPACE_SETTINGS_PATCH_FIELDS = Object.freeze([
+   "lightPrimaryColor",
+   "lightSecondaryColor",
+@@ -69,7 +67,7 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -101,13 +99,8 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+     try {
+       await api.resources.workspaceSettings.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            createDefaultWorkspaceSettingsCreatePayload(normalizedWorkspaceId, defaultInvitesEnabled === true),
+-            {
+-              id: normalizedWorkspaceId
+-            }
+-          ),
++          format: "plain",
++          inputRecord: { id: normalizedWorkspaceId, ...createDefaultWorkspaceSettingsCreatePayload(normalizedWorkspaceId, defaultInvitesEnabled === true) },
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -137,16 +130,9 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+ 
+     await api.resources.workspaceSettings.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            ...updatePayload,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedWorkspaceId
+-          }
+-        ),
++        format: "plain",
++        id: normalizedWorkspaceId,
++        inputRecord: { ...updatePayload, updatedAt: new Date().toISOString() },
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/test/workspaceInvitesRepository.test.js b/packages/workspaces-core/test/workspaceInvitesRepository.test.js
+index b6fe2e1c64fda14267fe10fb70b3c63c52397ad4..e9906c61e70abf61672f90ece159dbc9c566b823 100644
+--- a/packages/workspaces-core/test/workspaceInvitesRepository.test.js
++++ b/packages/workspaces-core/test/workspaceInvitesRepository.test.js
+@@ -82,21 +82,21 @@ function createWorkspaceInvitesApiStub({
+           return asCollectionDocument(matching.map((row) => toWorkspaceInviteRow(row)));
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.postPayload = inputRecord;
+           const row = {
+             id: "1",
+-            workspace: { id: String(inputRecord.relationships?.workspace?.data?.id || "") },
+-            email: inputRecord.attributes?.email,
+-            roleSid: inputRecord.attributes?.roleSid,
+-            status: inputRecord.attributes?.status,
+-            tokenHash: inputRecord.attributes?.tokenHash,
+-            invitedByUser: inputRecord.relationships?.invitedByUser?.data
+-              ? { id: String(inputRecord.relationships.invitedByUser.data.id) }
++            workspace: { id: String(inputRecord?.workspace || "") },
++            email: inputRecord?.email,
++            roleSid: inputRecord?.roleSid,
++            status: inputRecord?.status,
++            tokenHash: inputRecord?.tokenHash,
++            invitedByUser: inputRecord?.invitedByUser
++              ? { id: String(inputRecord.invitedByUser) }
+               : null,
+-            expiresAt: inputRecord.attributes?.expiresAt,
+-            acceptedAt: inputRecord.attributes?.acceptedAt,
+-            revokedAt: inputRecord.attributes?.revokedAt,
++            expiresAt: inputRecord?.expiresAt,
++            acceptedAt: inputRecord?.acceptedAt,
++            revokedAt: inputRecord?.revokedAt,
+             createdAt: "2026-03-09 00:26:35.710",
+             updatedAt: "2026-03-09 00:26:35.710"
+           };
+@@ -105,13 +105,13 @@ function createWorkspaceInvitesApiStub({
+           return toWorkspaceInviteRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.patchPayloads.push(inputRecord);
+           const existing = rowById.get(String(inputRecord.id));
+           if (existing) {
+             const updated = {
+               ...existing,
+-              ...(inputRecord.attributes || {})
++              ...(inputRecord)
+             };
+             rowById.set(String(inputRecord.id), updated);
+           }
+@@ -139,11 +139,11 @@ test("workspaceInvitesRepository.insert preserves expiresAt and relationship fie
+     expiresAt: "2026-03-16T00:26:35.709Z"
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.workspace?.data?.id, "1");
+-  assert.equal(state.postPayload.attributes?.email, "invitee@example.com");
+-  assert.equal(state.postPayload.relationships?.invitedByUser?.data?.id, "1");
+-  assert.equal(state.postPayload.attributes?.tokenHash, "hash");
+-  assert.equal(typeof state.postPayload.attributes?.expiresAt, "string");
++  assert.equal(state.postPayload?.workspace, "1");
++  assert.equal(state.postPayload?.email, "invitee@example.com");
++  assert.equal(state.postPayload?.invitedByUser, "1");
++  assert.equal(state.postPayload?.tokenHash, "hash");
++  assert.equal(typeof state.postPayload?.expiresAt, "string");
+ });
+ 
+ test("workspaceInvitesRepository.findPendingByTokenHash reads from the canonical invite resource without workspace data", async () => {
+@@ -232,9 +232,9 @@ test("workspaceInvitesRepository.markAcceptedById uses the internal invite resou
+   await repository.markAcceptedById("1");
+ 
+   const payload = state.patchPayloads[0];
+-  assert.equal(payload.attributes?.status, "accepted");
+-  assert.equal(typeof payload.attributes?.acceptedAt, "string");
+-  assert.equal(payload.attributes?.updatedAt, payload.attributes?.acceptedAt);
++  assert.equal(payload?.status, "accepted");
++  assert.equal(typeof payload?.acceptedAt, "string");
++  assert.equal(payload?.updatedAt, payload?.acceptedAt);
+ });
+ 
+ test("workspaceInvitesRepository.listPendingByWorkspaceIdWithWorkspace keeps workspace join fields outside the base resource contract", async () => {
+diff --git a/packages/workspaces-core/test/workspaceMembershipsRepository.test.js b/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
+index 92d9cc44b03848ea32c45f9f5df05279018948f7..2081207361d8ff625a58777cb42c3bb1a07bf63a 100644
+--- a/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
++++ b/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
+@@ -100,14 +100,14 @@ function createWorkspaceMembershipsApiStub({
+           return asCollectionDocument([]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.postPayload = inputRecord;
+           const row = rowById.get("1") || {
+             id: "1",
+-            workspace: { id: String(inputRecord.relationships?.workspace?.data?.id || "") },
+-            user: { id: String(inputRecord.relationships?.user?.data?.id || "") },
+-            roleSid: String(inputRecord.attributes?.roleSid || ""),
+-            status: String(inputRecord.attributes?.status || ""),
++            workspace: { id: String(inputRecord?.workspace || "") },
++            user: { id: String(inputRecord?.user || "") },
++            roleSid: String(inputRecord?.roleSid || ""),
++            status: String(inputRecord?.status || ""),
+             createdAt: "2026-03-09 00:26:35.710",
+             updatedAt: "2026-03-09 00:26:35.710"
+           };
+@@ -116,12 +116,12 @@ function createWorkspaceMembershipsApiStub({
+           return toWorkspaceMembershipRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.patchPayload = inputRecord;
+           const existing = rowById.get(String(inputRecord.id));
+           const updated = {
+             ...(existing || {}),
+-            ...(inputRecord.attributes || {}),
++            ...(inputRecord),
+             id: String(inputRecord.id),
+             workspace: existing?.workspace || { id: "" },
+             user: existing?.user || { id: "" }
+@@ -189,9 +189,9 @@ test("workspaceMembershipsRepository.ensureOwnerMembership upgrades an existing
+ 
+   const membership = await repository.ensureOwnerMembership("7", "9");
+ 
+-  assert.equal(state.patchPayload.attributes?.roleSid, "owner");
+-  assert.equal(state.patchPayload.attributes?.status, "active");
+-  assert.equal(typeof state.patchPayload.attributes?.updatedAt, "string");
++  assert.equal(state.patchPayload?.roleSid, "owner");
++  assert.equal(state.patchPayload?.status, "active");
++  assert.equal(typeof state.patchPayload?.updatedAt, "string");
+   assert.deepEqual(membership, {
+     id: "11",
+     workspaceId: "7",
+@@ -199,7 +199,7 @@ test("workspaceMembershipsRepository.ensureOwnerMembership upgrades an existing
+     roleSid: "owner",
+     status: "active",
+     createdAt: toIsoString("2026-03-09 00:26:35.710"),
+-    updatedAt: toIsoString(state.patchPayload.attributes.updatedAt)
++    updatedAt: toIsoString(state.patchPayload.updatedAt)
+   });
+ });
+ 
+@@ -224,10 +224,10 @@ test("workspaceMembershipsRepository.upsertMembership creates normalized members
+     status: "ACTIVE"
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.workspace?.data?.id, "7");
+-  assert.equal(state.postPayload.relationships?.user?.data?.id, "9");
+-  assert.equal(state.postPayload.attributes?.roleSid, "admin");
+-  assert.equal(state.postPayload.attributes?.status, "active");
++  assert.equal(state.postPayload?.workspace, "7");
++  assert.equal(state.postPayload?.user, "9");
++  assert.equal(state.postPayload?.roleSid, "admin");
++  assert.equal(state.postPayload?.status, "active");
+ });
+ 
+ test("workspaceMembershipsRepository.listActiveByWorkspaceId keeps summary rows separate from the canonical membership resource", async () => {
+diff --git a/packages/workspaces-core/test/workspaceSettingsRepository.test.js b/packages/workspaces-core/test/workspaceSettingsRepository.test.js
+index ab329f024c2e0bb53090d83567529bc5ea63a339..350b40db58fc7d6ad940624f55e1974f39b1792e 100644
+--- a/packages/workspaces-core/test/workspaceSettingsRepository.test.js
++++ b/packages/workspaces-core/test/workspaceSettingsRepository.test.js
+@@ -66,8 +66,8 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+           }]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          const attributes = inputRecord.attributes || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
++          const attributes = inputRecord;
+           state.postPayload = inputRecord;
+           state.row = {
+             id: String(inputRecord.id),
+@@ -89,8 +89,8 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+           };
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          const attributes = inputRecord.attributes || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
++          const attributes = inputRecord;
+           state.patchPayload = inputRecord;
+           state.row = {
+             ...state.row,
+@@ -153,7 +153,7 @@ test("workspaceSettingsRepository.updateSettingsByWorkspaceId updates invitesEna
+     invitesEnabled: false
+   });
+ 
+-  assert.equal(state.patchPayload.attributes?.invitesEnabled, false);
++  assert.equal(state.patchPayload?.invitesEnabled, false);
+   assert.equal(updated.invitesEnabled, false);
+ });
+ 
+@@ -168,15 +168,15 @@ test("workspaceSettingsRepository.ensureForWorkspaceId delegates defaults to the
+   const record = await repository.ensureForWorkspaceId("5");
+ 
+   assert.equal(state.postPayload.id, "5");
+-  assert.equal(state.postPayload.attributes?.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
+-  assert.equal(state.postPayload.attributes?.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
+-  assert.equal(state.postPayload.attributes?.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
+-  assert.equal(state.postPayload.attributes?.lightSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor);
+-  assert.equal(state.postPayload.attributes?.darkPrimaryColor, DEFAULT_WORKSPACE_THEME.dark.color);
+-  assert.equal(state.postPayload.attributes?.darkSecondaryColor, DEFAULT_WORKSPACE_THEME.dark.secondaryColor);
+-  assert.equal(state.postPayload.attributes?.darkSurfaceColor, DEFAULT_WORKSPACE_THEME.dark.surfaceColor);
+-  assert.equal(state.postPayload.attributes?.darkSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor);
+-  assert.equal(state.postPayload.attributes?.invitesEnabled, true);
++  assert.equal(state.postPayload?.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
++  assert.equal(state.postPayload?.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
++  assert.equal(state.postPayload?.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
++  assert.equal(state.postPayload?.lightSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor);
++  assert.equal(state.postPayload?.darkPrimaryColor, DEFAULT_WORKSPACE_THEME.dark.color);
++  assert.equal(state.postPayload?.darkSecondaryColor, DEFAULT_WORKSPACE_THEME.dark.secondaryColor);
++  assert.equal(state.postPayload?.darkSurfaceColor, DEFAULT_WORKSPACE_THEME.dark.surfaceColor);
++  assert.equal(state.postPayload?.darkSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor);
++  assert.equal(state.postPayload?.invitesEnabled, true);
+   assert.equal(record.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
+   assert.equal(record.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
+   assert.equal(record.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
+@@ -200,7 +200,7 @@ test("workspaceSettingsRepository.updateSettingsByWorkspaceId updates workspace
+     lightPrimaryColor: "#123abc"
+   });
+ 
+-  assert.equal(state.patchPayload.attributes?.lightPrimaryColor, "#123abc");
++  assert.equal(state.patchPayload?.lightPrimaryColor, "#123abc");
+   assert.equal(updated.lightPrimaryColor, "#123ABC");
+ });
+ 
+diff --git a/packages/workspaces-core/test/workspacesRepository.test.js b/packages/workspaces-core/test/workspacesRepository.test.js
+index dded997e811a32f1edfa4cb15a4d0a2ae54ec9b2..fea891eb445d04c7f057a2b2f8818c48f1056665 100644
+--- a/packages/workspaces-core/test/workspacesRepository.test.js
++++ b/packages/workspaces-core/test/workspacesRepository.test.js
+@@ -81,7 +81,7 @@ function createWorkspacesApiStub({
+           return asCollectionDocument([]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.postPayload = inputRecord;
+           if (insertError) {
+             throw insertError;
+@@ -89,13 +89,13 @@ function createWorkspacesApiStub({
+ 
+           const row = {
+             id: "1",
+-            slug: String(inputRecord.attributes?.slug || ""),
+-            name: String(inputRecord.attributes?.name || ""),
+-            ownerUserId: String(inputRecord.relationships?.owner?.data?.id || ""),
+-            isPersonal: Boolean(inputRecord.attributes?.isPersonal),
+-            avatarUrl: String(inputRecord.attributes?.avatarUrl || ""),
+-            createdAt: inputRecord.attributes?.createdAt,
+-            updatedAt: inputRecord.attributes?.updatedAt,
++            slug: String(inputRecord?.slug || ""),
++            name: String(inputRecord?.name || ""),
++            ownerUserId: String(inputRecord?.owner || ""),
++            isPersonal: Boolean(inputRecord?.isPersonal),
++            avatarUrl: String(inputRecord?.avatarUrl || ""),
++            createdAt: inputRecord?.createdAt,
++            updatedAt: inputRecord?.updatedAt,
+             deletedAt: null
+           };
+           rowsById.set(row.id, row);
+@@ -105,16 +105,16 @@ function createWorkspacesApiStub({
+           return toWorkspaceRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
++          const inputRecord = { ...payload?.inputRecord, ...(payload?.id === undefined ? {} : { id: payload.id }) };
+           state.patchPayload = inputRecord;
+           const existing = rowsById.get(String(inputRecord.id)) || {
+             id: String(inputRecord.id)
+           };
+           const updated = {
+             ...existing,
+-            ...(inputRecord.attributes || {}),
+-            ...(inputRecord.relationships?.owner?.data?.id
+-              ? { ownerUserId: String(inputRecord.relationships.owner.data.id) }
++            ...(inputRecord),
++            ...(inputRecord?.owner
++              ? { ownerUserId: String(inputRecord.owner) }
+               : {}),
+             id: String(inputRecord.id)
+           };
+@@ -227,13 +227,13 @@ test("workspacesRepository.insert writes canonical fields through json-rest-api"
+     isPersonal: false
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.owner?.data?.id, "9");
+-  assert.equal(state.postPayload.attributes?.slug, "TonyMobily3");
+-  assert.equal(state.postPayload.attributes?.name, "TonyMobily3");
+-  assert.equal(state.postPayload.attributes?.isPersonal, false);
+-  assert.equal(state.postPayload.attributes?.avatarUrl, "");
+-  assert.equal(typeof state.postPayload.attributes?.createdAt, "string");
+-  assert.equal(state.postPayload.attributes?.updatedAt, state.postPayload.attributes?.createdAt);
++  assert.equal(state.postPayload?.owner, "9");
++  assert.equal(state.postPayload?.slug, "TonyMobily3");
++  assert.equal(state.postPayload?.name, "TonyMobily3");
++  assert.equal(state.postPayload?.isPersonal, false);
++  assert.equal(state.postPayload?.avatarUrl, "");
++  assert.equal(typeof state.postPayload?.createdAt, "string");
++  assert.equal(state.postPayload?.updatedAt, state.postPayload?.createdAt);
+   assert.equal(inserted.id, "1");
+   assert.equal(inserted.ownerUserId, "9");
+ });
+@@ -289,8 +289,8 @@ test("workspacesRepository.updateById patches canonical fields and updatedAt", a
+   });
+ 
+   assert.equal(state.patchPayload.id, "7");
+-  assert.equal(state.patchPayload.attributes?.name, "TonyMobily 4");
+-  assert.equal(typeof state.patchPayload.attributes?.updatedAt, "string");
++  assert.equal(state.patchPayload?.name, "TonyMobily 4");
++  assert.equal(typeof state.patchPayload?.updatedAt, "string");
+ });
+ 
+ test("workspacesRepository.listForUserId keeps membership fields outside the canonical workspace row", async () => {

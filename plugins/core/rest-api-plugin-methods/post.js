@@ -1,4 +1,6 @@
-import { processRelationships } from '../lib/writing/relationship-processor.js'
+import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
+import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
@@ -14,10 +16,9 @@ import {
 } from './common.js'
 
 /**
- * POST
- * Creates a new resource. The request must include a JSON:API document with a 'data' object
- * containing 'type' and 'attributes'. It can also establish relationships to existing resources.
- * The returned document contains the created resource with its server-assigned ID.
+ * Create a resource from params.inputRecord, normalized from the selected format.
+ * Supplied IDs and existing-resource linkage are validated before writing.
+ * Prepare the selected returning result before completing an owned transaction.
  */
 export default async function postMethod ({
   params,
@@ -27,8 +28,6 @@ export default async function postMethod ({
   scope,
   scopes,
   runHooks,
-  apiOptions,
-  pluginOptions,
   scopeOptions,
   scopeName,
   api,
@@ -37,15 +36,15 @@ export default async function postMethod ({
   context.method = 'post'
 
   try {
-    const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+    const { schema, versionState } = await setupCommonRequest({
       params,
       context,
       vars,
       scopes,
-      scopeOptions,
       scopeName,
       api,
-      helpers
+      helpers,
+      runHooks
     })
 
     // Run early hooks for pre-processing (e.g., file handling)
@@ -78,7 +77,7 @@ export default async function postMethod ({
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later
-    const { belongsToUpdates, manyToManyRelationships } = await processRelationships(
+    const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = await processRelationships(
       scope,
       { context }
     )
@@ -117,22 +116,19 @@ export default async function postMethod ({
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPost')
 
-    // Apply field setters after validation and before storage
-    if (context.inputRecord?.data?.attributes) {
-      context.inputRecord.data.attributes = await applyFieldSetters(
-        context.inputRecord.data.attributes,
-        context.schemaInfo,
-        context,
-        api,
-        helpers
-      )
-    }
+    await lockRelationshipTargets(api, context.transaction, belongsToTargets)
 
-    // Create the main record - storage helper should return the created record with its ID
+    await applyFieldSetters(context, api, helpers)
+    const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName, isCreate: true })
+    await applyResourceVersion({ state: versionState, context, helpers, scopeName, isCreate: true })
+
+    // Create the main record and retain the logical ID returned by storage.
     context.id = await helpers.dataPost({
       scopeName,
       context
     })
+
+    await invalidateInverseVersions({ state: inverseVersions, context, helpers, api })
 
     await runHooks('afterDataCallPost')
     await runHooks('afterDataCall')
@@ -152,7 +148,11 @@ export default async function postMethod ({
 
       // Validate pivot resource exists
       validatePivotResource(scopes, relDef, relName)
-      await createPivotRecords(api, context.id, relDef, relData, context.transaction, context)
+      await createPivotRecords(api, context.id, relDef, relData, context.transaction)
+    }
+
+    for (const { relDef, relData } of reverseRelationships) {
+      await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData })
     }
 
     const ret = await handleRecordReturnAfterWrite({
@@ -160,19 +160,14 @@ export default async function postMethod ({
       scopeName,
       api,
       scopes,
-      schemaStructure,
-      schemaRelationships,
-      scopeOptions,
-      vars,
       runHooks,
-      helpers,
-      log
+      helpers
     })
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     return ret
   } catch (error) {
-    await handleWriteMethodError(error, context, 'POST', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'POST', scopeName, log)
   }
 }

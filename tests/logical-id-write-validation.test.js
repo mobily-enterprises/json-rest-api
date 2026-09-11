@@ -26,13 +26,8 @@ describe('Logical resource ids in write validation', () => {
     })
 
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false,
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      }
+      format: 'jsonapi',
+      returning: 'full'
     })
     await api.use(RestApiKnexPlugin, { knex })
 
@@ -101,17 +96,14 @@ describe('Logical resource ids in write validation', () => {
   })
 
   it('accepts explicit resource ids in simplified POST and still keeps id out of attributes', async () => {
-    const created = await api.resources.profiles.post({
-      id: '202',
-      name: 'Bob'
-    })
+    const created = await api.resources.profiles.post({ format: 'plain', inputRecord: { id: '202', name: 'Bob' } })
 
     assert.equal(created.id, '202')
     assert.equal(created.name, 'Bob')
 
     const fetched = await api.resources.profiles.get({
       id: '202',
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(fetched)

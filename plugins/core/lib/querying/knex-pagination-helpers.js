@@ -1,10 +1,48 @@
 import { getFieldValue } from '../storage/storage-mapping.js'
-import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
+import { buildJsonApiLink } from './url-helpers.js'
 import { normalizeDateValue } from '../querying-writing/database-value-normalizers.js'
+import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from '../querying-writing/knex-constants.js'
+import { applyCursorPredicate, validateCursorValues } from './query-field-sort-helpers.js'
+import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
-const buildJsonApiLink = (baseUrl, queryParams, page) => {
-  const queryString = serializeJsonApiQuery(queryParams, { page })
-  return queryString ? `${baseUrl}?${queryString}` : baseUrl
+// Page parameters have passed the shared request contract. Physical sort
+// columns and built-in value conversion remain with descriptors and adapters.
+export const applyPaginationToQuery = ({ query, page = {}, vars, sortDescriptors, storageAdapter }) => {
+  const pageSize = Math.min(page.size ?? (vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT), vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT)
+  if (!Number.isInteger(pageSize) || pageSize <= 0) {
+    throw new RestApiValidationError('Page size must be a positive integer', {
+      fields: ['page.size'],
+      violations: [{ field: 'page.size', rule: 'min_value', message: 'Page size must be a positive integer' }]
+    })
+  }
+  const parameter = page.before !== undefined ? 'before' : page.after !== undefined ? 'after' : null
+  const mode = page.number !== undefined ? 'offset' : parameter || page.size !== undefined ? 'cursor' : 'default'
+  const before = parameter === 'before'
+  const pageNumber = page.number ?? 1
+
+  if (parameter) {
+    let values
+    try {
+      values = parseCursor(page[parameter])
+    } catch (error) {
+      const field = `page.${parameter}`
+      throw new RestApiValidationError(`Invalid cursor format in page[${parameter}] parameter`, {
+        fields: [field],
+        violations: [{ field, rule: 'invalid_cursor', message: error.message }]
+      })
+    }
+    values = validateCursorValues(sortDescriptors, values, parameter, vars.schemaInfo.schemaInstance)
+    applyCursorPredicate(query, sortDescriptors, values, direction => {
+      const descending = direction.toUpperCase() === 'DESC'
+      return before ? (descending ? '>' : '<') : (descending ? '<' : '>')
+    }, (builder, descriptor, operator, value) => builder.where(
+      descriptor.column, operator, storageAdapter.translateCursorValue(descriptor.actualField, value)
+    ))
+  }
+
+  query.limit(pageSize + (mode === 'cursor' ? 1 : 0))
+  if (mode === 'offset') query.offset((pageNumber - 1) * pageSize)
+  return { mode, page: pageNumber, pageSize, before }
 }
 
 /**
@@ -15,47 +53,6 @@ const buildJsonApiLink = (baseUrl, queryParams, page) => {
  * @param {number} pageSize - Number of records per page
  * @returns {Object} Pagination metadata including page count and hasMore flag
  * @throws {Error} If pageSize <= 0 or page < 1
- *
- * @example
- * // Input: 100 total records, viewing page 2 of 20 records each
- * const meta = calculatePaginationMeta(100, 2, 20);
- * // Output:
- * // {
- * //   page: 2,         // current page
- * //   pageSize: 20,    // records per page
- * //   pageCount: 5,    // total pages (100/20)
- * //   total: 100,      // total records
- * //   hasMore: true    // page 2 < 5, so more pages exist
- * // }
- *
- * @example
- * // Input: Last page scenario
- * const meta = calculatePaginationMeta(45, 5, 10);
- * // Output:
- * // {
- * //   page: 5,
- * //   pageSize: 10,
- * //   pageCount: 5,    // 45/10 = 4.5, rounds up to 5
- * //   total: 45,
- * //   hasMore: false   // on last page
- * // }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin's dataQuery method after counting total records
- * - generatePaginationLinks to build navigation links
- * - Applied when offset-based pagination is enabled
- *
- * Purpose:
- * - Provides consistent pagination metadata across all collection responses
- * - Calculates derived values like pageCount and hasMore flag
- * - Validates pagination parameters to prevent invalid states
- *
- * Data flow:
- * 1. Query method counts total records when pagination.counts is enabled
- * 2. calculatePaginationMeta processes the count with current page/size
- * 3. Returns metadata that goes into response.meta.pagination
- * 4. Used by generatePaginationLinks to determine which links to include
  */
 export const calculatePaginationMeta = (total, page, pageSize) => {
   if (pageSize <= 0) {
@@ -86,64 +83,6 @@ export const calculatePaginationMeta = (total, page, pageSize) => {
  * @param {Object} queryParams - Current query parameters
  * @param {Object} paginationMeta - Pagination metadata from calculatePaginationMeta
  * @returns {Object|null} Links object with self, first, last, prev, next
- *
- * @example
- * // Input data:
- * const urlPrefix = '/api/v1';
- * const scopeName = 'articles';
- * const queryParams = {
- *   filter: { status: 'published' },
- *   sort: ['-created_at'],
- *   page: { number: 2, size: 20 }
- * };
- * const paginationMeta = {
- *   page: 2,
- *   pageSize: 20,
- *   pageCount: 5,
- *   total: 100,
- *   hasMore: true
- * };
- *
- * const links = generatePaginationLinks(urlPrefix, scopeName, queryParams, paginationMeta);
- *
- * // Output - complete URLs with all parameters preserved:
- * // {
- * //   self: '/api/articles?filter[status]=published&sort=-created_at&page[number]=2&page[size]=20',
- * //   first: '/api/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
- * //   last: '/api/articles?filter[status]=published&sort=-created_at&page[number]=5&page[size]=20',
- * //   prev: '/api/articles?filter[status]=published&sort=-created_at&page[number]=1&page[size]=20',
- * //   next: '/api/articles?filter[status]=published&sort=-created_at&page[number]=3&page[size]=20'
- * // }
- *
- * @example
- * // Input: First page (no prev link)
- * const paginationMeta = { page: 1, pageSize: 10, pageCount: 3 };
- * const links = generatePaginationLinks('/api', 'users', {}, paginationMeta);
- *
- * // Output - notice no 'prev' property:
- * // {
- * //   self: '/api/users?page[number]=1&page[size]=10',
- * //   first: '/api/users?page[number]=1&page[size]=10',
- * //   last: '/api/users?page[number]=3&page[size]=10',
- * //   next: '/api/users?page[number]=2&page[size]=10'
- * // }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin's dataQuery adds these links to response.links
- * - Called when offset-based pagination is used (not cursor-based)
- *
- * Purpose:
- * - JSON:API spec requires pagination links for easy navigation
- * - Preserves all other query parameters (filters, sorts, includes)
- * - Uses the shared JSON:API query serializer for transport-supported params
- * - Only includes prev/next when applicable
- *
- * Data flow:
- * 1. After records are fetched and pagination calculated
- * 2. Builds complete URLs preserving all query parameters
- * 3. Conditionally includes prev (not on page 1) and next (not on last page)
- * 4. Added to response.links for client navigation
  */
 export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, paginationMeta) => {
   // Allow empty urlPrefix to generate relative links
@@ -178,61 +117,6 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
  * @param {Object} record - Database record to create cursor from
  * @param {Array<string>} sortFields - Fields to include in cursor (default: ['id'])
  * @returns {string} URL-safe cursor string
- *
- * @example
- * // Input: Simple ID-based cursor
- * const record = {
- *   id: 123,
- *   title: 'My Article',
- *   created_at: '2024-01-01T10:00:00Z'
- * };
- * const cursor = createCursor(record, ['id']);
- *
- * // Output: "id:123"
- * // This cursor marks position at record with id=123
- *
- * @example
- * // Input: Multi-field cursor for complex sorting
- * const record = {
- *   id: 5,
- *   created_at: new Date('2024-01-15T08:30:00Z'),
- *   title: 'Article: Part 2'
- * };
- * const cursor = createCursor(record, ['created_at', 'id']);
- *
- * // Output: "created_at:2024-01-15T08%3A30%3A00.000Z,id:5"
- * // URL-encoded to handle the colons in timestamp
- * // Used for queries like: WHERE (created_at, id) > ('2024-01-15T08:30:00.000Z', 5)
- *
- * @example
- * // Input: Handling special characters
- * const record = {
- *   category: 'Tech & Science',
- *   title: 'AI: The Future?',
- *   id: 42
- * };
- * const cursor = createCursor(record, ['category', 'title', 'id']);
- *
- * // Output: "category:Tech%20%26%20Science,title:AI%3A%20The%20Future%3F,id:42"
- * // Spaces encoded as %20, & as %26, : as %3A, ? as %3F
- *
- * @description
- * Used by:
- * - generateCursorPaginationLinks to create next/prev cursors
- * - buildCursorMeta to provide cursor in response metadata
- *
- * Purpose:
- * - Cursor-based pagination is more stable than offset for changing data
- * - Encodes multiple sort fields to maintain stable ordering
- * - URL-encodes values to handle special characters safely
- * - Simple format that's easy to parse back
- *
- * Data flow:
- * 1. After fetching records, takes the last record
- * 2. Extracts values for all sort fields
- * 3. Creates cursor encoding those values
- * 4. Cursor used in 'next' link for fetching subsequent pages
- * 5. Enables efficient "WHERE (field1, field2) > (val1, val2)" queries
  */
 export const createCursor = (record, sortFields = ['id'], { schemaInfo = null, definitions = {} } = {}) => {
   const parts = []
@@ -245,7 +129,7 @@ export const createCursor = (record, sortFields = ['id'], { schemaInfo = null, d
       parts.push(`${field}:~null`)
       return
     }
-    if (['date', 'dateTime', 'time'].includes(definition?.type) && value != null) {
+    if (!definition?.storage?.serialize && !definition?.select && ['date', 'dateTime', 'time'].includes(definition?.type) && value != null) {
       value = normalizeDateValue(value, definition.type, {
         temporalPrecision: definition.temporalPrecision,
         fieldName: field,
@@ -267,51 +151,6 @@ export const createCursor = (record, sortFields = ['id'], { schemaInfo = null, d
  * @param {string} cursor - Cursor string to parse
  * @returns {Object} Object with field names as keys and decoded values
  * @throws {Error} If cursor format is invalid
- *
- * @example
- * // Input: Simple cursor
- * const cursor = "id:123";
- * const data = parseCursor(cursor);
- *
- * // Output: { id: "123" }
- * // Ready to use in SQL: WHERE id > '123'
- *
- * @example
- * // Input: Multi-field cursor with URL-encoded values
- * const cursor = "created_at:2024-01-15T08%3A30%3A00.000Z,id:5";
- * const data = parseCursor(cursor);
- *
- * // Output:
- * // {
- * //   created_at: "2024-01-15T08:30:00.000Z",  // Decoded
- * //   id: "5"
- * // }
- * // Used for: WHERE (created_at, id) > ('2024-01-15T08:30:00.000Z', '5')
- *
- * @example
- * // Input: Invalid cursor (throws error)
- * try {
- *   const data = parseCursor("invalid-no-colon");
- * } catch (e) {
- *   console.log(e.message);
- *   // "Invalid cursor format: Invalid cursor format: missing colon separator"
- * }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin's dataQuery when processing page[after] parameter
- * - Used to build WHERE clause for cursor-based queries
- *
- * Purpose:
- * - Decodes cursor back to usable values for SQL queries
- * - Handles URL-encoded special characters
- * - Validates cursor format to prevent injection attacks
- *
- * Data flow:
- * 1. Client sends page[after]=cursor parameter
- * 2. parseCursor extracts field values from cursor
- * 3. Values used to build WHERE clause like "WHERE id > 123"
- * 4. Ensures pagination continues from exact position
  */
 export const parseCursor = (cursor) => {
   try {
@@ -356,69 +195,6 @@ export const parseCursor = (cursor) => {
  * @param {boolean} hasMore - Whether more records exist
  * @param {Array<string>} sortFields - Fields used for cursor
  * @returns {Object|null} Links object with self, first, next
- *
- * @example
- * // Input: First page of results
- * const urlPrefix = '/api/v1';
- * const scopeName = 'articles';
- * const queryParams = {
- *   filter: { status: 'published' },
- *   page: { size: 20 }
- * };
- * const records = [
- *   { id: 1, created_at: '2024-01-01', title: 'First' },
- *   { id: 2, created_at: '2024-01-02', title: 'Second' },
- *   { id: 3, created_at: '2024-01-03', title: 'Third' }
- * ];
- * const hasMore = true;  // More records exist
- *
- * const links = generateCursorPaginationLinks(
- *   urlPrefix, scopeName, queryParams, records, 20, hasMore, ['created_at', 'id']
- * );
- *
- * // Output:
- * // {
- * //   self: '/api/v1/articles?filter[status]=published&page[size]=20',
- * //   first: '/api/v1/articles?filter[status]=published&page[size]=20',
- * //   next: '/api/v1/articles?filter[status]=published&page[size]=20&page[after]=created_at:2024-01-03,id:3'
- * // }
- * // The 'next' cursor points after the last record (id:3)
- *
- * @example
- * // Input: Last page (no more records)
- * const records = [
- *   { id: 98, created_at: '2024-03-01' },
- *   { id: 99, created_at: '2024-03-02' }
- * ];
- * const hasMore = false;  // No more records
- *
- * const links = generateCursorPaginationLinks(
- *   '/api', 'articles', {}, records, 20, hasMore, ['id']
- * );
- *
- * // Output - no 'next' link:
- * // {
- * //   self: '/api/articles?page[size]=20',
- * //   first: '/api/articles?page[size]=20'
- * // }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin when cursor pagination is enabled
- * - Called after fetching records with cursor-based query
- *
- * Purpose:
- * - Cursor pagination is more efficient for large datasets
- * - Stable pagination when data is being added/removed
- * - Only includes 'next' link when more data exists
- * - Preserves all other query parameters
- *
- * Data flow:
- * 1. After cursor-based query fetches records
- * 2. If hasMore is true, creates cursor from last record
- * 3. Builds next link with page[after] parameter
- * 4. Added to response.links for navigation
- * 5. Client uses next link to fetch subsequent pages
  */
 export const generateCursorPaginationLinks = (
   urlPrefix,
@@ -464,54 +240,6 @@ export const generateCursorPaginationLinks = (
  * @param {boolean} hasMore - Whether more records exist
  * @param {Array<string>} sortFields - Fields used for cursor
  * @returns {Object} Metadata with pageSize, hasMore, and optional cursor
- *
- * @example
- * // Input: Page with more records available
- * const records = [
- *   { id: 10, created_at: '2024-01-10', title: 'Article 10' },
- *   { id: 11, created_at: '2024-01-11', title: 'Article 11' },
- *   { id: 12, created_at: '2024-01-12', title: 'Article 12' }
- * ];
- * const meta = buildCursorMeta(records, 20, true, ['created_at', 'id']);
- *
- * // Output:
- * // {
- * //   pageSize: 20,
- * //   hasMore: true,
- * //   cursor: {
- * //     next: 'created_at:2024-01-12,id:12'  // Cursor from last record
- * //   }
- * // }
- *
- * @example
- * // Input: Last page (no more records)
- * const records = [
- *   { id: 98, name: 'Last Item' }
- * ];
- * const meta = buildCursorMeta(records, 20, false, ['id']);
- *
- * // Output:
- * // {
- * //   pageSize: 20,
- * //   hasMore: false
- * //   // No cursor property since hasMore is false
- * // }
- *
- * @description
- * Used by:
- * - rest-api-knex-plugin adds this to response.meta for cursor pagination
- * - Provides cursor that client can use directly if needed
- *
- * Purpose:
- * - Gives clients direct access to cursor for custom pagination
- * - Indicates whether more pages exist without counting
- * - Simpler than offset pagination metadata (no total count)
- *
- * Data flow:
- * 1. Called after fetching records with cursor query
- * 2. Creates cursor from last record if more exist
- * 3. Added to response.meta.pagination
- * 4. Clients can use cursor directly or use the next link
  */
 export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'], { schemaInfo = null, definitions = {}, before = false } = {}) => {
   const meta = {

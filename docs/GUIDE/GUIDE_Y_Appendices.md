@@ -39,15 +39,25 @@ The API supports three string temporal types and two numeric epoch types in sche
 
 ## Schema Definition
 
-Define date/time fields in your schema like this:
+The following three executable blocks form one scenario. Add them to the
+[starting script](GUIDE_2_1_The_Starting_Point.md) after installing storage and
+before starting the server, on a fresh database. Other snippets are illustrative
+payloads or configuration fragments.
 
 ```javascript
-const articleSchema = {
-  publishedDate: { type: 'date', required: true },
-  createdAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
-  updatedAt: { type: 'dateTime', temporalPrecision: 3, defaultTo: () => new Date().toISOString() },
-  dailyPostTime: { type: 'time', nullable: true }
-};
+await api.addResource('articles', {
+  schema: {
+    title: { type: 'string', required: true },
+    publishedDate: { type: 'date', required: true, search: true },
+    createdAt: { type: 'dateTime', temporalPrecision: 3, required: true },
+    dailyPostTime: { type: 'time', nullable: true },
+    publishedEpoch: { type: 'epochMilliseconds', required: true }
+  },
+  searchSchema: {
+    createdBetween: { type: 'array', actualField: 'createdAt', filterOperator: 'between' }
+  }
+})
+await api.resources.articles.createKnexTable()
 ```
 
 `Date.prototype.toISOString()` always emits three fractional-second digits, so
@@ -63,18 +73,27 @@ than silently truncating it.
 The API validates and normalizes date/time inputs:
 
 ```javascript
-// POST /api/articles
-{
-  "data": {
-    "type": "articles",
-    "attributes": {
-      "publishedDate": "2024-01-15",           // Valid date
-      "createdAt": "2024-01-15T14:30:00Z",     // Valid dateTime (ISO 8601)
-      "dailyPostTime": "14:30:00"              // Valid time
-    }
+const januaryArticle = await api.resources.articles.post({
+  inputRecord: {
+    title: 'January', publishedDate: '2024-01-15',
+    createdAt: '2024-01-15T22:30:00+08:00', dailyPostTime: '14:30:00',
+    publishedEpoch: '1705329000000'
   }
-}
+})
+await api.resources.articles.post({
+  inputRecord: {
+    title: 'February', publishedDate: '2024-02-01',
+    createdAt: '2024-02-01T00:00:00Z', dailyPostTime: null,
+    publishedEpoch: 1706745600000
+  }
+})
+console.log(januaryArticle)
 ```
+
+The first result retains date `2024-01-15` and time `14:30:00`, normalizes
+createdAt to `2024-01-15T14:30:00.000Z`, and returns publishedEpoch as the number
+`1705329000000`. Its dateTime offset describes the same instant as UTC; callers
+are not required to send only `Z` inputs.
 
 **Accepted Input Formats:**
 - **date**: a real calendar date in `YYYY-MM-DD` form
@@ -106,7 +125,7 @@ epoch data.
 
 All date/time values are normalized when returned from the API:
 
-```javascript
+```js
 // GET /api/articles/123
 {
   "data": {
@@ -131,7 +150,7 @@ All date/time values are normalized when returned from the API:
 Normalization runs once after the database read and again at the final response
 boundary. The final pass covers getters, computed fields, query projections,
 and finishing hooks that produce native `Date` values, including nested
-relationships in simplified write responses. A malformed non-null temporal value is not
+relationships in plain write responses. A malformed non-null temporal value is not
 reported as `null`; it fails with `REST_API_TEMPORAL_DATA_INVALID` and HTTP 500
 so stored-data or enrichment defects remain visible.
 
@@ -150,7 +169,7 @@ so stored-data or enrichment defects remain visible.
 ## Best Practices
 
 ### 1. Always Store in UTC
-```javascript
+```js
 // Good: Store timestamps in UTC
 const article = {
   createdAt: new Date().toISOString() // "2024-01-15T14:30:00.000Z"
@@ -168,20 +187,39 @@ const article = {
 - Use `time` for recurring daily events
 
 ### 3. Timezone Handling
-- Send all dateTime values to the API in UTC
+- Send dateTime values with an explicit timezone; UTC is convenient, and valid offsets are accepted
 - The API always returns dateTime values in UTC (with 'Z' suffix)
 - Handle timezone conversion in your client application
 
 ### 4. Filtering and Querying
-When filtering by dates, use ISO 8601 format:
+
+Declare public filter names in the schema or search schema, then use
+`queryParams.filters` in programmatic calls. Temporal filter values use the
+same declared field conversion as writes.
 
 ```javascript
-// Filter articles published after a date
-GET /api/articles?filters[publishedDate][$gte]=2024-01-01
-
-// Filter by datetime range
-GET /api/articles?filters[createdAt][$gte]=2024-01-01T00:00:00Z&filters[createdAt][$lt]=2024-02-01T00:00:00Z
+const onDate = await api.resources.articles.query({
+  queryParams: { filters: { publishedDate: '2024-01-15' } }
+})
+const inJanuary = await api.resources.articles.query({
+  queryParams: {
+    filters: { createdBetween: ['2024-01-01T00:00:00Z', '2024-01-31T23:59:59.999Z'] }
+  }
+})
+console.log(onDate.data.map(article => article.title), inJanuary.data.map(article => article.title))
 ```
+
+Both queries return January only. `between` includes both boundaries. The
+corresponding HTTP equality query uses the singular `filter` key:
+
+```http
+GET /api/articles?filter[publishedDate]=2024-01-15
+```
+
+Use declared aliases such as `createdBetween`; arbitrary `$gte`/`$lt` objects
+are not the public filter grammar. See
+[searching](GUIDE_2_2_Manipulating_And_Searching_Tables.md) for custom ranges and
+[backend limits](BACKEND_CAPABILITIES.md#temporal-values) for precision rules.
 
 ## Migration Considerations
 
@@ -198,18 +236,18 @@ If migrating from a system that stores dates differently:
 For optimal date handling, configure your database connection:
 
 **MySQL** (in Knex config):
-```javascript
+```js
 {
   client: 'mysql2',
   connection: {
     // ... other config
-    timezone: 'UTC'
+    timezone: 'Z'
   }
 }
 ```
 
 **PostgreSQL** (in Knex config):
-```javascript
+```js
 {
   client: 'pg',
   connection: {

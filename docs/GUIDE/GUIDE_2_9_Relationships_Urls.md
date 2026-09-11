@@ -1,517 +1,170 @@
-# REST API Relationships Plugin Guide
+# Relationship endpoints
 
-The REST API Relationships Plugin adds JSON:API compliant relationship endpoints to your API, allowing clients to view and manage relationships between resources as first-class citizens. This guide shows you how to use these powerful features with our book catalog system.
+Relationship methods are part of `RestApiPlugin`; no extra relationship plugin
+is required. Install a storage plugin and an HTTP connector before registering
+resources. Configure the connector's `mountPath`, for example `/api`, as in the
+[quickstart](../QUICKSTART.md).
 
-## Table of Contents
-- [Why Use Relationship Endpoints?](#why-use-relationship-endpoints)
-- [Installation](#installation)
-- [Understanding Relationship Endpoints](#understanding-relationship-endpoints)
-- [Working with Relationships](#working-with-relationships)
-  - [Viewing Relationship Links](#viewing-relationship-links)
-  - [Fetching Related Resources](#fetching-related-resources)
-  - [Adding Relationships](#adding-relationships)
-  - [Replacing Relationships](#replacing-relationships)
-  - [Removing Relationships](#removing-relationships)
-- [Relationship Types](#relationship-types)
-- [Security and Permissions](#security-and-permissions)
-- [Error Handling](#error-handling)
-- [Best Practices](#best-practices)
+There are two kinds of read endpoint:
 
-## Why Use Relationship Endpoints?
+| Endpoint | Programmatic method | Response |
+| --- | --- | --- |
+| `/api/publishers/1/relationships/authors` | `getRelationship` | JSON:API identifier linkage |
+| `/api/publishers/1/authors` | `getRelated` | Related resource records |
 
-Relationship endpoints provide several advantages:
+A linkage read returns a document even when programmatic record format is plain.
+A related read respects `format`: plain to-one reads return a record or null,
+plain to-many reads return a collection with `data`, and JSON:API reads return
+a document. Related reads apply the target's fields, filtering and pagination;
+they do not promise every related record in a single response.
 
-1. **Efficient Relationship Management**: Add or remove related items without fetching and updating entire resources
-2. **Clear API Navigation**: Self-documenting links show how resources connect
-3. **Reduced Payload Size**: Fetch just relationship data without full resource details
-4. **Atomic Operations**: Manage relationships in isolation with proper transaction support
+## Set up a runnable example
 
-## Installation
-
-To use relationship endpoints, install the plugin after your core REST API setup:
+Insert these blocks into the [starting script](GUIDE_2_1_The_Starting_Point.md)
+on a fresh database, before the HTTP server starts.
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin } from 'json-rest-api';
-import { Api } from 'hooked-api';
-
-const api = new Api();
-
-// Core plugins first
-await api.use(RestApiPlugin, {
-  resourceUrlPrefix: '/api'  // Important: enables relationship links
-});
-await api.use(RestApiKnexPlugin, { knex });
-
-// Define your resources as usual
-await api.addResource('books', { /* schema */ });
-await api.addResource('authors', { /* schema */ });
-```
-
-## Understanding Relationship Endpoints
-
-The plugin creates two types of endpoints for each relationship:
-
-### 1. Relationship Endpoints (Linkage)
-- **URL Pattern**: `/api/{resource}/{id}/relationships/{relationshipName}`
-- **Purpose**: View and manage just the linkage data (IDs and types)
-- **Example**: `/api/books/1/relationships/authors`
-- **Returns**: Minimal data showing which resources are connected
-
-### 2. Related Resource Endpoints
-- **URL Pattern**: `/api/{resource}/{id}/{relationshipName}`
-- **Purpose**: Fetch the full related resources
-- **Example**: `/api/books/1/authors`
-- **Returns**: Complete resource data for all related items
-
-## Working with Relationships
-
-Let's explore each operation using our book catalog system.
-
-### Setup Test Data
-
-First, let's create some test data to work with:
-
-```javascript
-// Create a country
-const usa = await api.resources.countries.post({
-  name: 'United States',
-  code: 'US'
-});
-
-// Create authors
-const stephenKing = await api.resources.authors.post({
-  name: 'Stephen King'
-});
-
-const peterStraub = await api.resources.authors.post({
-  name: 'Peter Straub'
-});
-
-// Create a publisher
-const scribner = await api.resources.publishers.post({
-  name: 'Scribner',
-  country_id: usa.id
-});
-
-// Create a book with initial relationships
-const talisman = await api.resources.books.post({
-  title: 'The Talisman',
-  country_id: usa.id,
-  publisher_id: scribner.id
-}, {
-  simplified: false  // Use full JSON:API format
-});
-```
-
-### Viewing Relationship Links
-
-Get just the relationship linkage data without fetching full resources:
-
-**Programmatic:**
-```javascript
-const bookAuthorsRelationship = await api.resources.books.getRelationship({
-  id: talisman.data.id,
-  relationshipName: 'authors'
-});
-
-console.log(bookAuthorsRelationship);
-// Output:
-// {
-//   data: [],  // Empty because we haven't added authors yet
-//   links: {
-//     self: "/api/books/1/relationships/authors",
-//     related: "/api/books/1/authors"
-//   }
-// }
-```
-
-**HTTP:**
-```bash
-curl -X GET http://localhost:3000/api/books/1/relationships/authors
-
-# Response:
-# {
-#   "data": [],
-#   "links": {
-#     "self": "/api/books/1/relationships/authors",
-#     "related": "/api/books/1/authors"
-#   }
-# }
-```
-
-### Fetching Related Resources
-
-Get the full related resources with all their attributes:
-
-**Programmatic:**
-```javascript
-const bookAuthors = await api.resources.books.getRelated({
-  id: talisman.data.id,
-  relationshipName: 'authors',
-  queryParams: {
-    fields: { authors: 'name' }  // Optional: sparse fieldsets
+await api.addResource('publishers', {
+  schema: { name: { type: 'string', required: true } },
+  relationships: { authors: { type: 'hasMany', target: 'authors', foreignKey: 'publisher_id' } }
+})
+await api.addResource('authors', {
+  schema: {
+    name: { type: 'string', required: true },
+    publisher_id: { type: 'id', belongsTo: 'publishers', as: 'publisher', nullable: true }
   }
-});
-
-console.log(bookAuthors);
-// Output:
-// {
-//   data: [
-//     {
-//       type: "authors",
-//       id: "1",
-//       attributes: { name: "Stephen King" }
-//     }
-//   ]
-// }
+})
+await api.resources.publishers.createKnexTable()
+await api.resources.authors.createKnexTable()
+const publisher = await api.resources.publishers.post({ inputRecord: { name: 'Scribner' } })
+const stephen = await api.resources.authors.post({ inputRecord: { name: 'Stephen King' } })
+const peter = await api.resources.authors.post({ inputRecord: { name: 'Peter Straub' } })
 ```
 
-**HTTP:**
-```bash
-curl -X GET 'http://localhost:3000/api/books/1/authors?fields[authors]=name'
+The inverse relationships are explicitly declared. A `belongsTo` field does not
+automatically create an arbitrary reverse `hasOne` or `hasMany` endpoint.
 
-# Response:
-# {
-#   "data": [
-#     {
-#       "type": "authors",
-#       "id": "1",
-#       "attributes": { "name": "Stephen King" }
-#     }
-#   ]
-# }
-```
+## Add membership and read each representation
 
-### Adding Relationships
-
-Add new relationships without replacing existing ones (only for to-many relationships):
-
-**Programmatic:**
 ```javascript
-// Add Stephen King and Peter Straub as authors
-const addAuthorsResult = await api.resources.books.postRelationship({
-  id: talisman.data.id,
+await api.resources.publishers.postRelationship({
+  id: publisher.id,
   relationshipName: 'authors',
-  inputRecord: {
-    data: [
-      { type: 'authors', id: stephenKing.id },
-      { type: 'authors', id: peterStraub.id }
-    ]
-  }
-});
-
-console.log('Authors added successfully');
+  relationshipData: [
+    { type: 'authors', id: stephen.id },
+    { type: 'authors', id: peter.id }
+  ]
+})
+const linkage = await api.resources.publishers.getRelationship({
+  id: publisher.id, relationshipName: 'authors'
+})
+const related = await api.resources.publishers.getRelated({
+  id: publisher.id,
+  relationshipName: 'authors',
+  queryParams: { fields: { authors: 'name' }, sort: ['name'] }
+})
+console.log('Identifiers:', linkage.data)
+console.log('Records:', related.data)
 ```
 
-**HTTP:**
-```bash
-curl -X POST http://localhost:3000/api/books/1/relationships/authors \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": [
-      { "type": "authors", "id": "1" },
-      { "type": "authors", "id": "2" }
-    ]
-  }'
+Linkage contains `{ type: 'authors', id }` identifiers. Related records contain
+IDs and names, ordered Peter then Stephen. Relationship-only writes take
+`relationshipData`, not `inputRecord`; HTTP wraps that linkage in a `data` member.
+POST adds members and DELETE removes specified members; both apply only to
+supported to-many relationships. PATCH replaces a to-many set or a to-one target.
+All three relationship write methods return undefined.
 
-# Response: 204 No Content (success)
-```
+## Replace and remove members
 
-### Replacing Relationships
-
-Replace all existing relationships with a new set:
-
-**Programmatic:**
 ```javascript
-// Replace all authors with just Stephen King
-const replaceAuthorsResult = await api.resources.books.patchRelationship({
-  id: talisman.data.id,
+await api.resources.publishers.patchRelationship({
+  id: publisher.id,
   relationshipName: 'authors',
-  inputRecord: {
-    data: [
-      { type: 'authors', id: stephenKing.id }
-    ]
-  }
-});
+  relationshipData: [{ type: 'authors', id: stephen.id }]
+})
+const replaced = await api.resources.publishers.getRelationship({
+  id: publisher.id, relationshipName: 'authors'
+})
+await api.resources.publishers.deleteRelationship({
+  id: publisher.id,
+  relationshipName: 'authors',
+  relationshipData: [{ type: 'authors', id: stephen.id }]
+})
+const empty = await api.resources.publishers.getRelationship({
+  id: publisher.id, relationshipName: 'authors'
+})
+console.log('After replacement:', replaced.data)
+console.log('After removal:', empty.data)
+```
 
-// For to-one relationships, you can also set to null
-const removePublisher = await api.resources.books.patchRelationship({
-  id: talisman.data.id,
+Replacement leaves Stephen alone; removal leaves an empty array. Authors remain
+in the database. With `hasMany`, detachment clears the child's nullable foreign
+key. With ordinary many-to-many storage, it removes the pivot row. Required
+relationships cannot be cleared by detaching a child.
+
+## Change and clear a to-one target
+
+```javascript
+await api.resources.authors.patchRelationship({
+  id: peter.id,
   relationshipName: 'publisher',
-  inputRecord: {
-    data: null
-  }
-});
+  relationshipData: { type: 'publishers', id: publisher.id }
+})
+const peterPublisher = await api.resources.authors.getRelated({
+  id: peter.id, relationshipName: 'publisher'
+})
+await api.resources.authors.patchRelationship({
+  id: peter.id, relationshipName: 'publisher', relationshipData: null
+})
+const cleared = await api.resources.authors.getRelationship({
+  id: peter.id, relationshipName: 'publisher'
+})
+console.log('Related publisher:', peterPublisher.name)
+console.log('Cleared linkage:', cleared.data)
 ```
 
-**HTTP:**
+The related read returns Scribner; the final linkage is null. Use null only when
+the relationship permits it. Polymorphic linkage also requires its target type;
+see [polymorphic relationships](GUIDE_2_5_HasMany_Polymorphic.md).
+
+## HTTP equivalents
+
+After running all blocks, both authors are unassigned. These commands add them,
+read both endpoints, and clear the collection again:
+
 ```bash
-# Replace all authors
-curl -X PATCH http://localhost:3000/api/books/1/relationships/authors \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": [
-      { "type": "authors", "id": "1" }
-    ]
-  }'
-
-# Remove publisher (set to null)
-curl -X PATCH http://localhost:3000/api/books/1/relationships/publisher \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": null
-  }'
+curl -X POST http://localhost:3000/api/publishers/1/relationships/authors \
+  -H 'Content-Type: application/vnd.api+json' \
+  -d '{"data":[{"type":"authors","id":"1"},{"type":"authors","id":"2"}]}'
+curl http://localhost:3000/api/publishers/1/relationships/authors
+curl --globoff 'http://localhost:3000/api/publishers/1/authors?fields[authors]=name&sort=name'
+curl -X PATCH http://localhost:3000/api/publishers/1/relationships/authors \
+  -H 'Content-Type: application/vnd.api+json' \
+  -d '{"data":[]}'
 ```
 
-### Removing Relationships
+Successful generated relationship writes return HTTP 204 without a body. Use IDs
+returned by the server for persistent databases. Resource PATCH is a different
+body shape: `data.type`, `data.id`, and `data.relationships` alongside any
+attributes being changed.
 
-Remove specific relationships without affecting others (only for to-many relationships):
+## Permissions and transactions
 
-**Programmatic:**
-```javascript
-// Remove Peter Straub from the book's authors
-const removeAuthorResult = await api.resources.books.deleteRelationship({
-  id: talisman.data.id,
-  relationshipName: 'authors',
-  inputRecord: {
-    data: [
-      { type: 'authors', id: peterStraub.id }
-    ]
-  }
-});
-```
+Relationship operations apply their method-specific permission checks and
+resource/target visibility. Linkage discovery is not a bypass for related query
+permissions. Ordinary pivot rows also have their own query visibility; canonical
+links are separate from pivot resource rows. Configure hooks through
+`api.customize` using the [hook guide](GUIDE_7_Hooks_Data_Management_And_Plugins.md).
 
-**HTTP:**
-```bash
-curl -X DELETE http://localhost:3000/api/books/1/relationships/authors \
-  -H "Content-Type: application/vnd.api+json" \
-  -d '{
-    "data": [
-      { "type": "authors", "id": "2" }
-    ]
-  }'
+A successful relationship write participates in the library's transaction
+lifecycle. Compose several operations with a handle from
+[`api.transaction`](managed-transactions.md). A loop of independent operations
+is not a single atomic transaction. Failures report the
+[write outcome](transaction-outcomes.md); do not blindly retry an unknown outcome.
 
-# Response: 204 No Content (success)
-```
+Use relationship writes for membership-only changes, related reads for records,
+and resource PATCH when updating attributes and relationships together. Where
+provided, follow response links for discovery and pagination; relative links
+must be resolved against the API URL by clients that require absolute URLs.
 
-## Relationship Types
-
-The plugin handles all relationship types defined in your schema:
-
-### belongsTo Relationships
-
-Books belong to publishers:
-
-```javascript
-// View the publisher relationship
-const bookPublisher = await api.resources.books.getRelationship({
-  id: talisman.data.id,
-  relationshipName: 'publisher'
-});
-// Returns: { data: { type: "publishers", id: "1" }, links: {...} }
-
-// Change the publisher
-await api.resources.books.patchRelationship({
-  id: talisman.data.id,
-  relationshipName: 'publisher',
-  inputRecord: {
-    data: { type: 'publishers', id: '2' }
-  }
-});
-```
-
-### hasOne Relationships
-
-The inverse of belongsTo (automatically created):
-
-```javascript
-// If you define country → publishers (hasMany)
-// Each publisher has one country (implicit hasOne)
-const publisherCountry = await api.resources.publishers.getRelationship({
-  id: scribner.id,
-  relationshipName: 'country'
-});
-```
-
-### hasMany Relationships
-
-Publishers have many books:
-
-```javascript
-// View all books for a publisher
-const publisherBooks = await api.resources.publishers.getRelated({
-  id: scribner.id,
-  relationshipName: 'books',
-  queryParams: {
-    sort: '-year',  // Sort by year descending
-    filter: { inStock: true }  // Only in-stock books
-  }
-});
-```
-
-### Many-to-Many Relationships
-
-Books have many authors through the book_authors pivot table:
-
-```javascript
-// This is the most flexible relationship type
-// Supports POST (add), PATCH (replace), and DELETE (remove)
-const bookAuthors = await api.resources.books.getRelationship({
-  id: talisman.data.id,
-  relationshipName: 'authors'
-});
-```
-
-## Security and Permissions
-
-The plugin respects your existing security setup and adds specific hooks:
-
-```javascript
-// Add permission checks for relationship operations
-api.addHook('checkPermissionsGetRelationship', async ({ context }) => {
-  // Check if user can view this relationship
-  if (!context.auth?.userId) {
-    throw new Error('Authentication required');
-  }
-});
-
-api.addHook('checkPermissionsPostRelationship', async ({ context }) => {
-  // Check if user can add relationships
-  const { scopeName, relationshipName } = context;
-  
-  if (scopeName === 'books' && relationshipName === 'authors') {
-    // Only editors can modify book authors
-    if (context.auth?.role !== 'editor') {
-      throw new Error('Only editors can modify book authors');
-    }
-  }
-});
-```
-
-## Error Handling
-
-Common errors you might encounter:
-
-### Relationship Not Found
-```javascript
-try {
-  await api.resources.books.getRelationship({
-    id: '1',
-    relationshipName: 'invalid'
-  });
-} catch (error) {
-  // RestApiResourceError: Relationship 'invalid' not found on resource 'books'
-}
-```
-
-### Invalid Operation
-```javascript
-try {
-  // Can't POST to a to-one relationship
-  await api.resources.books.postRelationship({
-    id: '1',
-    relationshipName: 'publisher',  // belongsTo is to-one
-    inputRecord: { data: { type: 'publishers', id: '1' } }
-  });
-} catch (error) {
-  // RestApiValidationError: POST operation not allowed on to-one relationship
-}
-```
-
-### Resource Not Found
-```javascript
-try {
-  await api.resources.books.getRelationship({
-    id: '999',  // Non-existent book
-    relationshipName: 'authors'
-  });
-} catch (error) {
-  // RestApiResourceError: Resource not found
-}
-```
-
-## Best Practices
-
-### 1. Use Relationship Endpoints for Bulk Operations
-
-Instead of updating each book individually to add an author:
-```javascript
-// ❌ Inefficient
-for (const bookId of bookIds) {
-  const book = await api.resources.books.get({ id: bookId });
-  await api.resources.books.patch({
-    id: bookId,
-    inputRecord: {
-      data: {
-        type: 'books',
-        id: bookId,
-        relationships: {
-          authors: {
-            data: [...book.data.relationships.authors.data, newAuthor]
-          }
-        }
-      }
-    }
-  });
-}
-
-// ✅ Efficient
-for (const bookId of bookIds) {
-  await api.resources.books.postRelationship({
-    id: bookId,
-    relationshipName: 'authors',
-    inputRecord: {
-      data: [newAuthor]
-    }
-  });
-}
-```
-
-### 2. Use Links for API Discovery
-
-The `links` object in responses helps clients navigate your API:
-```javascript
-const relationship = await api.resources.books.getRelationship({
-  id: '1',
-  relationshipName: 'authors'
-});
-
-console.log(relationship.links);
-// {
-//   self: "/api/books/1/relationships/authors",
-//   related: "/api/books/1/authors"
-// }
-
-// Client can use these links directly
-const fullAuthors = await fetch(relationship.links.related);
-```
-
-### 3. Choose the Right Endpoint
-
-- **Use relationship endpoints** when you only need to manage connections
-- **Use related endpoints** when you need full resource data
-- **Use regular PATCH** when updating multiple aspects of a resource
-
-### 4. Handle Transactions Properly
-
-The plugin automatically handles transactions for data integrity:
-```javascript
-// This is atomic - either all authors are added or none
-await api.resources.books.postRelationship({
-  id: bookId,
-  relationshipName: 'authors',
-  inputRecord: {
-    data: [
-      { type: 'authors', id: '1' },
-      { type: 'authors', id: '2' },
-      { type: 'authors', id: '3' }
-    ]
-  }
-});
-```
-
-## Summary
-
-The REST API Relationships Plugin transforms relationships from second-class citizens to fully manageable resources. It provides efficient, standards-compliant endpoints that make working with related data intuitive and performant. By following JSON:API specifications, it ensures your API remains consistent and predictable for clients.
-
-Whether you're building a simple blog or a complex e-commerce system, relationship endpoints help you create cleaner, more maintainable APIs that scale with your application's needs.
+[Guide index](index.md) | [API reference](../API.md)

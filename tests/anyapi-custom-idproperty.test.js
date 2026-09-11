@@ -28,13 +28,8 @@ maybeDescribe('AnyAPI custom idProperty', () => {
 
     api = new Api({ name: 'anyapi-custom-idproperty-test', log: { level: 'warn' } })
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false,
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full',
-      },
+      format: 'jsonapi',
+      returning: 'full',
       sortableFields: ['id', 'owner_id', 'item_id', 'code', 'name', 'category'],
       queryDefaultLimit: 20,
       queryMaxLimit: 100,
@@ -78,7 +73,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
   it('uses logical ids for post, get, query, sparse fields, cursors, and includes', async () => {
     const owner = await api.resources.owners.post({
       inputRecord: createJsonApiDocument('owners', { name: 'Owner One' }),
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const itemInputs = [
@@ -96,7 +91,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
           item,
           { owner: createRelationship(resourceIdentifier('owners', owner.data.id)) }
         ),
-        simplified: false,
+        format: 'jsonapi',
       })
       createdItems.push(created)
     }
@@ -110,7 +105,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
           owners: 'owner_id,name',
         },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     assert.equal(fetched.data.id, createdItems[0].data.id)
@@ -131,7 +126,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
         sort: ['category', 'name'],
         page: { size: 2 },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     assert.equal(firstPage.data.length, 2)
@@ -152,7 +147,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
           after: firstPage.meta.pagination.cursor.next,
         },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const firstIds = firstPage.data.map((item) => item.id)

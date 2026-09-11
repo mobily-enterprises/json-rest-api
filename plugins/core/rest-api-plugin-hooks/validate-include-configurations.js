@@ -1,39 +1,33 @@
-export default async function validateIncludeConfigurations ({ context, scopes, log }) {
-  const { scopeName } = context
-  const scope = scopes[scopeName]
-  const relationships = scope.vars.schemaInfo?.schemaRelationships
+import { buildEffectiveSortList } from '../lib/querying/query-field-sort-helpers.js'
 
-  if (!relationships) return
+export function validateIncludeConfigurations ({ context, scopes, log }) {
+  const { scopeName, scopeOptions, schemaInfo } = context
+  const maxLimit = scopeOptions.queryMaxLimit !== undefined
+    ? scopeOptions.queryMaxLimit
+    : scopes[scopeName]?.vars?.queryMaxLimit
 
-  // Check each relationship for include configuration
-  for (const [relName, relDef] of Object.entries(relationships)) {
+  for (const [relName, relDef] of Object.entries(schemaInfo.outputRelationships)) {
     if (relDef.include?.strategy === 'window') {
-      // This relationship requires window functions
-      // We'll validate this at query time since the database might not be connected yet
+      // Database support is checked when the include query is prepared.
       log.debug(`Relationship ${scopeName}.${relName} configured for window function includes`)
     }
 
-    // Validate include configuration
-    if (relDef.include?.limit) {
-      if (typeof relDef.include.limit !== 'number') {
-        throw new Error(
-          `Invalid include limit for ${scopeName}.${relName}: limit must be a number`
-        )
+    const limit = relDef.include?.limit
+    if (limit !== undefined && limit !== null && limit !== false) {
+      if (!Number.isInteger(limit) || limit < 0) {
+        throw new Error(`Invalid include limit for ${scopeName}.${relName}: expected a non-negative integer, null or false`)
       }
-      // Check against queryMaxLimit if available
-      const maxLimit = scope.vars?.queryMaxLimit
-      if (maxLimit && relDef.include.limit > maxLimit) {
-        throw new Error(
-          `Invalid include limit for ${scopeName}.${relName}: ` +
-          `limit (${relDef.include.limit}) exceeds queryMaxLimit (${maxLimit})`
-        )
+      if (maxLimit && limit > maxLimit) {
+        throw new Error(`Invalid include limit for ${scopeName}.${relName}: limit (${limit}) exceeds queryMaxLimit (${maxLimit})`)
       }
     }
 
-    if (relDef.include?.orderBy && !Array.isArray(relDef.include.orderBy)) {
-      throw new Error(
-        `Invalid include orderBy for ${scopeName}.${relName}: orderBy must be an array`
-      )
+    const orderBy = relDef.include?.orderBy
+    if (orderBy !== undefined && orderBy !== null) {
+      if (!Array.isArray(orderBy)) {
+        throw new Error(`Invalid include orderBy for ${scopeName}.${relName}: orderBy must be an array`)
+      }
+      buildEffectiveSortList(orderBy)
     }
   }
 }

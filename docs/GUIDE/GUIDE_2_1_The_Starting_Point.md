@@ -1,11 +1,11 @@
 # 2.1 The starting point
 
 ```javascript
-import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api'; // Added: ExpressPlugin
+import { RestApiPlugin, RestApiKnexPlugin, ExpressPlugin } from 'json-rest-api';
 import { Api } from 'hooked-api';
 import knexLib from 'knex';
 import util from 'util';
-import express from 'express'; // Added: Express
+import express from 'express';
 
 // Utility used throughout this guide
 const inspect = (obj) => util.inspect(obj, { depth: 8 })
@@ -46,43 +46,39 @@ Note that every time we provide a snippet of code, it will be assumed that
 
 1. The script is edited in the section `/// *** ...programmatic calls here... ***`
 2. The code is stopped with CTRL-C and then restarted. 
-3. The core proposed in each snippet _replaces_ the code provided earlier.
+3. The code proposed in each snippet _replaces_ the code provided earlier.
 
 This will ensure that each example has a fresh start.
 
 Each example will be introduced programmatically first, and then via HTTP. The HTTP calls will be run assuming that the API calls (and any data created with them) stay. The use of the in-memory database will be assumed, which means that the data will start afresh each time.
 
-## Database-First Design Philosophy
+## Logical fields and storage columns
 
-JSON REST API follows a **database-first** approach, providing different levels of abstraction for different audiences:
+Resource definitions describe logical fields and relationships. Table-backed
+storage maps those fields to physical columns: snake_case by default, explicit
+`storage.column` overrides, or exact naming when configured. Canonical storage
+uses its own allocation and descriptor mapping. A logical field name is not a
+portable physical SQL column name.
 
-### For Backend Developers (Schema Definition, Hooks, and Internal Logic)
+For a definition such as `country_id: { type: 'id', belongsTo: 'countries',
+as: 'country' }`, callers write the relationship through
+`inputRecord: { country: countryId }`. Plain output contains a `country` object
+with its ID; an unassigned to-one relationship is omitted from plain output.
+Including the country adds its selected attributes.
+JSON:API output represents linkage under `data.relationships.country` and
+included records under `included`.
 
-When defining schemas and writing hooks, you work directly with database reality:
-- Schema fields map directly to database columns (`author_id`, `category_id`, `commentable_type`)
-- Hooks receive actual database field names in `context.belongsToUpdates`
-- Search schemas can reference exact database columns and table structures
-- Full access to write raw Knex queries when needed
+Hooks operate at specific processing stages. The write pipeline converts plain
+input into its internal JSON:API representation before validation and storage.
+Do not assume every hook receives raw columns or the original public payload.
+Use the [hook guide](GUIDE_7_Hooks_Data_Management_And_Plugins.md) and the
+[API reference](../API.md) for the context available at each stage.
 
-This direct approach ensures backend developers have complete control and visibility into database operations.
-
-### For API Consumers (External Interface)
-
-The API layer provides a clean abstraction that shields consumers from database implementation details:
-- Relationships use semantic names (`author`, `category`) instead of foreign key fields
-- Foreign key fields (`author_id`, `category_id`) are automatically filtered from API responses
-- Polymorphic type/id fields (`commentable_type`, `commentable_id`) are hidden behind relationship objects
-- Simplified mode returns intuitive objects without exposing database structure
-
-### Why This Matters for Relationships
-
-This abstraction is particularly important for **belongsTo** and **polymorphic** relationships, where foreign key fields would otherwise be exposed in API responses. The system ensures that:
-- Input: Consumers provide relationships using clean names (`author: 123`)
-- Output: Responses return relationship objects (`author: { id: '123' }`)
-- Internal: Hooks and database operations work with actual columns (`author_id`)
-
-This design provides the best of both worlds: backend developers get full database access for powerful implementations, while API consumers enjoy a clean, intuitive interface.
+Search schemas name the filters callers may use and map them to logical fields
+or declared related-resource fields. Raw SQL remains available through Knex,
+but code that uses physical tables/columns must account for the selected storage
+backend and does not automatically inherit resource access policies.
 
 ---
 
-[Back to Guide](./README.md) | [Next: 2.2 Manipulating and searching tables with no relationships](./GUIDE_2_2_Manipulating_And_Searching_Tables.md)
+[Back to Guide](index.md) | [Next: 2.2 Manipulating and searching tables with no relationships](./GUIDE_2_2_Manipulating_And_Searching_Tables.md)

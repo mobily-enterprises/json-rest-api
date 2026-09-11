@@ -1,25 +1,16 @@
-/**
- * Express Plugin for Hooked API
- *
- * This plugin creates HTTP endpoints for your REST API by listening to
- * route registrations from the REST API plugin and creating Express routes.
- *
- * Features:
- * - Automatic route creation via addRoute hook
- * - JSON:API compliant request/response handling
- * - Query parameter parsing
- * - Error mapping to HTTP status codes
- * - Content type validation
- * - Middleware injection points
- * - File upload support with busboy or formidable
- */
-
 import { requirePackage } from 'hooked-api'
+import onHeaders from 'on-headers'
+import { getOperationDiagnosticContext } from '../../../lib/error-context.js'
 import { createContext } from './lib/request-helpers.js'
 import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import {
   isWriteMethod,
   isAllowedWriteContentType,
+  isMultipartContentType,
+  mergeResponseHeaders,
+  acceptsJsonApi,
+  getNotAcceptableErrorBody,
+  getNotFoundErrorBody,
   getUnsupportedMediaTypeErrorBody
 } from './lib/transport-http-helpers.js'
 import {
@@ -27,6 +18,8 @@ import {
   buildTransportRequestData,
   createConnectorContext,
   runTransportRequestLifecycle,
+  applyTransportResponseLifecycle,
+  addWriteOutcomeToHttpErrors,
   buildTransportRejectionBody,
   executeConnectorRoute,
   handleConnectorError
@@ -36,11 +29,7 @@ export const ExpressPlugin = {
   name: 'express',
   dependencies: ['rest-api'],
 
-  async install ({ on, vars, helpers, pluginOptions, log, scopes, api, runHooks, addHook }) {
-    addHook('release', 'releaseHook', {},
-      async ({ api }) => {} // TODO: Anything to do here?
-    )
-
+  async install ({ vars, helpers, pluginOptions, log, scopes, api, runHooks, addHook }) {
     // Dynamic import for Express
     let express
     try {
@@ -49,12 +38,6 @@ export const ExpressPlugin = {
       requirePackage('express', 'express',
         'Express.js is required for HTTP server functionality. This is a peer dependency.')
     }
-    // Enhance the logger
-    const enhancedLog = createEnhancedLogger(log, {
-      logFullErrors: true,
-      includeStack: true
-    })
-
     // Initialize express namespace
     if (!api.http) {
       api.http = {}
@@ -62,10 +45,12 @@ export const ExpressPlugin = {
     api.http.express = {}
 
     const expressOptions = pluginOptions || {}
+    const httpValidators = expressOptions.httpValidators ?? false
+    if (typeof httpValidators !== 'boolean') throw new TypeError('httpValidators must be a boolean')
 
     // Get mountPath from options (this is now a transport concern)
     const mountPath = expressOptions.mountPath || ''
-    const basePath = mountPath // Keep basePath for internal use
+    const basePath = mountPath.replace(/\/+$/, '')
     const publicBaseUrl = expressOptions.publicBaseUrl || ''
     const strictContentType = expressOptions.strictContentType !== false
     const requestSizeLimit = expressOptions.requestSizeLimit || '1mb'
@@ -86,19 +71,16 @@ export const ExpressPlugin = {
       let detector
 
       if (parserLib === 'busboy') {
-        try {
-          const { createBusboyDetector } = await import('../lib/busboy-detector.js')
-          detector = createBusboyDetector(parserOptions)
-        } catch (e) {
-          log.warn('Busboy not installed. Install with: npm install busboy')
-        }
+        const { createBusboyDetector } = await import('./lib/busboy-detector.js')
+        detector = createBusboyDetector(parserOptions)
       } else if (parserLib === 'formidable') {
-        try {
-          const { createFormidableDetector } = await import('../lib/formidable-detector.js')
-          detector = createFormidableDetector(parserOptions)
-        } catch (e) {
-          log.warn('Formidable not installed. Install with: npm install formidable')
-        }
+        const { createFormidableDetector } = await import('./lib/formidable-detector.js')
+        detector = createFormidableDetector(parserOptions)
+      } else if (typeof parserLib === 'function') detector = await parserLib(parserOptions)
+      else throw new Error('fileParser must be busboy, formidable, or a detector factory')
+
+      if (!detector?.name || typeof detector.detect !== 'function' || typeof detector.parse !== 'function') {
+        throw new Error('File detector must have name, detect() and parse()')
       }
 
       if (detector) {
@@ -122,94 +104,124 @@ export const ExpressPlugin = {
     const router = expressOptions.router || express.Router()
     const notFoundRouter = express.Router()
 
+    const isApiPath = path => !basePath || path === basePath || path.startsWith(`${basePath}/`)
+    const allowsMultipart = () => expressOptions.enableFileUploads !== false && !!api.rest?.fileDetectors?.length
+    const ensureContext = (req, res) => {
+      if (!req.context || !req.transportData) {
+        const requestData = buildTransportRequestData({
+          method: req.method,
+          url: req.url,
+          path: req.path,
+          headers: req.headers,
+          body: req.body,
+          params: req.params,
+          query: req.query
+        })
+        const { context, transportData } = createConnectorContext({
+          request: req,
+          reply: res,
+          source: 'express',
+          mountPath: basePath,
+          publicBaseUrl,
+          requestData,
+          createContext,
+          urlPrefixOverride: req.urlPrefixOverride
+        })
+        req.context = context
+        req.transportData = transportData
+      }
+      return { context: req.context, transportData: req.transportData }
+    }
+    const applyHeaders = (res, headers) => res.set(mergeResponseHeaders({ vary: res.getHeader('Vary') }, headers, { vary: 'Accept' }))
+    const sendResponse = async (req, res, status, body) => {
+      const { context, transportData } = ensureContext(req, res)
+      body = addWriteOutcomeToHttpErrors(body, context)
+      const headers = await applyTransportResponseLifecycle({ context, transportData, status, body, runHooks })
+      applyHeaders(res, headers)
+      return res.status(status).type('application/vnd.api+json').json(body)
+    }
+    router.use((req, res, next) => next(isApiPath(req.path) ? undefined : 'router'))
+    router.use((req, res, next) => {
+      onHeaders(res, function () {
+        if (httpValidators && req.method === 'PUT') this.removeHeader('ETag')
+        if (String(this.getHeader('Content-Type')).split(';')[0] === 'application/vnd.api+json') {
+          // Express adds a charset during JSON serialization; JSON:API forbids it.
+          this.setHeader('Content-Type', 'application/vnd.api+json')
+        }
+      })
+      next()
+    })
+
+    // Reject unsupported media types before a body parser can report a syntax error.
+    if (strictContentType) {
+      router.use((req, res, next) => {
+        if (isWriteMethod(req.method) && !isAllowedWriteContentType(req.get('Content-Type'), { allowMultipart: allowsMultipart() })) {
+          sendResponse(req, res, 415, getUnsupportedMediaTypeErrorBody({ allowMultipart: allowsMultipart() })).catch(next)
+          return
+        }
+        next()
+      })
+    }
+
     // Add body parsing middleware
     router.use(express.json({
       limit: requestSizeLimit,
+      strict: false,
       type: ['application/json', 'application/vnd.api+json']
     }))
 
     // Add transport hook middleware
-    router.use(async (req, res, next) => {
-      const requestData = buildTransportRequestData({
-        method: req.method,
-        url: req.url,
-        path: req.path,
-        headers: req.headers,
-        body: req.body,
-        params: req.params,
-        query: req.query
-      })
-      const { context, transportData } = createConnectorContext({
-        request: req,
-        reply: res,
-        source: 'express',
-        mountPath: basePath,
-        publicBaseUrl,
-        requestData,
-        createContext,
-        urlPrefixOverride: req.urlPrefixOverride
-      })
+    const handleTransportRequest = async (req, res, next) => {
+      const { context } = ensureContext(req, res)
       const { rejected, handled } = await runTransportRequestLifecycle({
         context,
         runHooks
       })
 
       if (rejected) {
-        if (transportData.response.headers) {
-          res.set(transportData.response.headers)
-        }
-        return res.status(context.rejection.status || 500).json(
-          buildTransportRejectionBody(context)
-        )
+        return sendResponse(req, res, context.rejection.status || 500, buildTransportRejectionBody(context))
       }
 
       if (handled) {
         return
       }
 
-      // Store transport data and context for later use
-      req.transportData = transportData
-      req.context = context
+      res.vary('Accept')
+      if (!acceptsJsonApi(req.get('Accept'))) {
+        return sendResponse(req, res, 406, getNotAcceptableErrorBody())
+      }
+
       next()
-    })
-
-    // Content type validation middleware
-    if (strictContentType) {
-      router.use((req, res, next) => {
-        if (isWriteMethod(req.method)) {
-          const contentType = req.get('Content-Type')
-
-          if (!isAllowedWriteContentType(contentType, { allowMultipart: true })) {
-            return res.status(415).json(
-              getUnsupportedMediaTypeErrorBody({ allowMultipart: true })
-            )
-          }
-        }
-        next()
-      })
     }
+    router.use((req, res, next) => {
+      handleTransportRequest(req, res, next).catch(next)
+    })
 
     /**
      * Error handler - maps REST API errors to HTTP responses
      */
-    const handleError = async (error, req, res) => {
-      enhancedLog.logError('HTTP request error', error, {
-        method: req.method,
-        path: req.path,
-        url: req.url
+    const handleError = async (error, req, res, routeMeta) => {
+      const { context, transportData } = ensureContext(req, res)
+      const schemaInfo = scopes[routeMeta?.scopeName]?.vars?.schemaInfo || context.schemaInfo
+      createEnhancedLogger(log, { schemaInfo }).logError('HTTP request error', error, {
+        ...getOperationDiagnosticContext(context, {
+          phase: 'httpError',
+          method: req.method,
+          scopeName: routeMeta?.scopeName || context.scopeName,
+          backend: api.knex?.instance?.client?.config?.client
+        }),
+        path: req.route?.path
       })
 
       const { status, body: errorResponse, headers } = await handleConnectorError({
         error,
-        context: req.context,
-        transportData: req.transportData,
+        context,
+        transportData,
         runHooks
       })
 
-      if (headers) {
-        res.set(headers)
-      }
-      res.status(status).json(errorResponse)
+      applyHeaders(res, headers)
+      res.status(status).type('application/vnd.api+json').json(errorResponse)
     }
 
     /**
@@ -225,42 +237,19 @@ export const ExpressPlugin = {
         // Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
         const expressHandler = async (req, res) => {
           try {
-            let context = req.context
-            let transportData = req.transportData
-
-            if (!context || !transportData) {
-              const requestData = buildTransportRequestData({
-                method: req.method,
-                url: req.url,
-                path: req.path,
-                headers: req.headers,
-                body: req.body,
-                params: req.params,
-                query: req.query
-              })
-              const setup = createConnectorContext({
-                request: req,
-                reply: res,
-                source: 'express',
-                mountPath: basePath,
-                publicBaseUrl,
-                requestData,
-                createContext,
-                urlPrefixOverride: req.urlPrefixOverride
-              })
-              context = setup.context
-              transportData = setup.transportData
-              req.context = context
-              req.transportData = transportData
-            }
+            const { context, transportData } = ensureContext(req, res)
 
             const outcome = await executeConnectorRoute({
+              api,
+              httpValidators,
               method: req.method,
               handler,
               queryString: extractQueryString(req.url),
               headers: req.headers,
               params: req.params,
-              body: req.body,
+              body: isMultipartContentType(req.get('Content-Type')) && routeMeta?.kind === 'resource' && ['post', 'put', 'patch'].includes(routeMeta.operation)
+                ? { data: { type: routeMeta.scopeName, attributes: {} } }
+                : req.body,
               context,
               transportData,
               routeMeta,
@@ -269,7 +258,7 @@ export const ExpressPlugin = {
               publicBaseUrl,
               runHooks
             })
-            res.set(outcome.headers)
+            applyHeaders(res, outcome.headers)
 
             // Set content type
             res.set('Content-Type', 'application/vnd.api+json')
@@ -281,11 +270,13 @@ export const ExpressPlugin = {
             // Handle response based on status
             if (outcome.status === 204) {
               res.sendStatus(204)
+            } else if (outcome.serialized) {
+              res.status(outcome.status).send(outcome.body)
             } else {
               res.status(outcome.status).json(outcome.body)
             }
           } catch (error) {
-            handleError(error, req, res)
+            await handleError(error, req, res, routeMeta)
           }
         }
 
@@ -359,55 +350,28 @@ export const ExpressPlugin = {
     })
 
     // Apply global middleware if configured
-    let finalRouter = router
+    const finalRouter = express.Router()
     if (expressOptions.middleware?.beforeAll) {
-      const globalRouter = express.Router()
-      globalRouter.use(...expressOptions.middleware.beforeAll)
-      globalRouter.use(router)
-      finalRouter = globalRouter
+      finalRouter.use(...expressOptions.middleware.beforeAll)
     }
+    finalRouter.use(router)
+    // Catch parser, request-hook and route-matching errors on Express 4 and 5.
+    finalRouter.use((error, req, res, next) => {
+      if (res.headersSent) return next(error)
+      handleError(error, req, res).catch(next)
+    })
 
     // Set up 404 handler in separate router (unless disabled)
     if (expressOptions.handle404 !== false) {
-      notFoundRouter.use(async (req, res, next) => {
-        if (basePath && req.path.startsWith(basePath)) {
-          // Create minimal context for 404
-          const context = createContext(req, res, 'express')
-          const transportData = {
-            request: {
-              method: req.method,
-              url: req.url,
-              path: req.path,
-              headers: req.headers
-            },
-            response: {
-              headers: {},
-              status: 404,
-              body: {
-                errors: [{
-                  status: '404',
-                  title: 'Not Found',
-                  detail: `The requested endpoint ${req.method} ${req.path} does not exist`
-                }]
-              }
-            }
-          }
-
-          // Add transport data to context
-          context.transport = transportData
-
-          // Run transport:response hook for 404
-          await runHooks('transport:response', context)
-
-          // Apply response headers from hooks
-          if (transportData.response.headers) {
-            res.set(transportData.response.headers)
-          }
-
-          res.status(404).json(transportData.response.body)
+      const handleNotFound = async (req, res, next) => {
+        if (isApiPath(req.path)) {
+          await sendResponse(req, res, 404, getNotFoundErrorBody(req.method, req.path))
         } else {
           next()
         }
+      }
+      notFoundRouter.use((req, res, next) => {
+        handleNotFound(req, res, next).catch(error => handleError(error, req, res).catch(next))
       })
     }
 

@@ -8,6 +8,8 @@
 
 ## Build, Test, and Development Commands
 - `npm test` runs `node --test tests/*.test.js` against the in-memory SQLite fixtures; run it before every push.
+- Use Node 24 (`nvm use`). `npm run verify` runs types, query budgets, both SQLite suite invocations, Express 4, lint and docs.
+- Run affected native checks separately with `npm run test:databases` and `npm run test:redis`; `npm run test:connectors` selects the full connector matrix. See `tests/README.md` for scope and prerequisites.
 - `node quickTest.js` spins up an in-memory API instance for experimenting with endpoints during development.
 - `npm run docs` rebuilds the static docs via `scripts/run-docs.js` whenever reference prose changes.
 - `npm run sloc` prints a line-count summary to gauge change size before opening a PR.
@@ -21,7 +23,8 @@
 ## Testing Guidelines
 - Instantiate the API once per suite following `tests/TEST_TEMPLATE.test.js`, and call `cleanTables()` in `beforeEach` to reset state.
 - Seed data through helpers in `tests/fixtures/api-configs.js`; never invoke `api.addResource` directly in test code.
-- Run suites in strict JSON:API mode (`simplified: false`) unless the scenario explicitly covers the simplified flag.
+- Run suites with `format: 'jsonapi'` unless testing `format: 'plain'`; use `returning` for write responses. Removed options belong only in rejection/migration tests.
+- Use `createConformanceFixture` for driver-aware suites; its `reset()` calls `cleanTables()`. Historical direct SQLite fixtures do not establish native-driver coverage.
 - Prefer the shared assertion helpers for response checks to keep expectations consistent.
 
 ## Commit & Pull Request Guidelines

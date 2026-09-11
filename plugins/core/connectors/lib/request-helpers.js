@@ -4,8 +4,17 @@
  */
 
 /**
+ * Copy HTTP header fields, including repeated-value arrays, for a separate view.
+ * @param {import('node:http').IncomingHttpHeaders} [headers]
+ * @returns {import('node:http').IncomingHttpHeaders}
+ */
+export function cloneRequestHeaders (headers = {}) {
+  return Object.fromEntries(Object.entries(headers).map(([name, value]) => [name, Array.isArray(value) ? [...value] : value]))
+}
+
+/**
  * Extract the real client IP address, handling proxies
- * @param {Object} req - The request object (Node.js http.IncomingMessage or Express Request)
+ * @param {Object} req - The request object
  * @returns {string} The client IP address
  */
 export function getClientIP (req) {

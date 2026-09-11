@@ -51,7 +51,7 @@ describe('Include Depth Validation', () => {
       }
     })
 
-    const author = await api.resources.authors.post({
+    await api.resources.authors.post({
       inputRecord: {
         data: {
           type: 'authors',
@@ -227,7 +227,7 @@ describe('Include Depth Validation', () => {
         }
       })
 
-      const author = await limitedApi.resources.authors.post({
+      await limitedApi.resources.authors.post({
         inputRecord: {
           data: {
             type: 'authors',
@@ -267,7 +267,7 @@ describe('Include Depth Validation', () => {
         queryParams: { include: [] }
       })
       assert(result.data.length > 0, 'Should return books')
-      assert(!result.included, 'Should not have included resources')
+      assert.deepEqual(result.included, [], 'Explicit empty includes retain the included array')
     })
 
     it('should handle single-level paths correctly', async () => {

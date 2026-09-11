@@ -46,7 +46,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
 
     const country = await api.resources.countries.post({
       inputRecord: createJsonApiDocument('countries', { name: 'Cursorland', code: 'CL' }),
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const publisher = await api.resources.publishers.post({
@@ -55,7 +55,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
         { name: 'Cursor Press' },
         { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
       ),
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const titles = ['Book A', 'Book B', 'Book C', 'Book D', 'Book E', 'Book F']
@@ -69,7 +69,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
             publisher: createRelationship(resourceIdentifier('publishers', publisher.data.id)),
           }
         ),
-        simplified: false,
+        format: 'jsonapi',
       })
     }
   })
@@ -79,7 +79,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
       queryParams: {
         page: { size: 2 },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     assert.equal(result.data.length, 2)
@@ -92,7 +92,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
       queryParams: {
         page: { size: 2 },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const cursor = firstPage.meta.pagination.cursor.next
@@ -100,7 +100,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
       queryParams: {
         page: { size: 2, after: cursor },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     assert.equal(secondPage.data.length, 2)
@@ -114,7 +114,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
       queryParams: {
         page: { size: 2 },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const secondPage = await api.resources.books.query({
@@ -124,7 +124,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
           after: firstPage.meta.pagination.cursor.next,
         },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const beforeCursor = `id:${encodeURIComponent(secondPage.data[0].id)}`
@@ -136,7 +136,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
           before: beforeCursor,
         },
       },
-      simplified: false,
+      format: 'jsonapi',
     })
 
     const secondIds = secondPage.data.map((book) => book.id)

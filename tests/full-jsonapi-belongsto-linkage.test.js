@@ -38,7 +38,7 @@ describe('Full JSON:API belongsTo linkage', () => {
       inputRecord: createJsonApiDocument('countries', {
         name: 'United States'
       }),
-      simplified: false
+      format: 'jsonapi'
     })
   }
 
@@ -53,7 +53,7 @@ describe('Full JSON:API belongsTo linkage', () => {
           )
         }
       ),
-      simplified: false
+      format: 'jsonapi'
     })
   }
 
@@ -70,7 +70,7 @@ describe('Full JSON:API belongsTo linkage', () => {
 
     const single = await api.resources.publishers.get({
       id: publisher.data.id,
-      simplified: false
+      format: 'jsonapi'
     })
 
     assertResourceRelationship(
@@ -81,7 +81,7 @@ describe('Full JSON:API belongsTo linkage', () => {
     assert.equal(Object.hasOwn(single.data.attributes, 'countryId'), false)
 
     const collection = await api.resources.publishers.query({
-      simplified: false
+      format: 'jsonapi'
     })
 
     assert.equal(collection.data.length, 1)
@@ -102,8 +102,8 @@ describe('Full JSON:API belongsTo linkage', () => {
       queryParams: {
         include: ['country']
       },
-      simplified: false,
-      returnFullRecord: 'full'
+      format: 'jsonapi',
+      returning: 'full'
     })
 
     assertResourceRelationship(
@@ -132,8 +132,8 @@ describe('Full JSON:API belongsTo linkage', () => {
           }
         }
       },
-      simplified: false,
-      returnFullRecord: 'full'
+      format: 'jsonapi',
+      returning: 'full'
     })
 
     assert.equal(patched.data.relationships?.country?.data, null)
@@ -141,7 +141,7 @@ describe('Full JSON:API belongsTo linkage', () => {
 
     const single = await api.resources.publishers.get({
       id: publisher.data.id,
-      simplified: false
+      format: 'jsonapi'
     })
 
     assert.equal(single.data.relationships?.country?.data, null)

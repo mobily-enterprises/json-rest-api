@@ -1,7 +1,11 @@
+import { lockRelationshipParent } from '../lib/writing/relationship-processor.js'
+import { advanceResourceVersion } from '../lib/writing/resource-version.js'
+import { beginWriteTransaction } from '../../../lib/error-context.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
+import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import {
   commitOwnedTransaction,
-  findRelationshipDefinition,
   getVisibleRelationshipParent,
   handleWriteMethodError,
   validateRelationshipRoutePayload
@@ -10,19 +14,21 @@ import {
   normalizeRelationshipIdentifiers,
   requireExistingResourceId
 } from '../lib/querying-writing/resource-id-normalization.js'
+import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
+import { invalidateRemovedPivotVersions } from '../lib/writing/many-to-many-manipulations.js'
+import { getStorageColumn } from '../lib/storage/storage-mapping.js'
+import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../lib/querying-writing/knex-constants.js'
 
 /**
- * DELETE RELATIONSHIP
- * Removes specific members from a to-many relationship
- * DELETE /api/articles/1/relationships/tags
- *
- * @param {string} id - The ID of the resource
- * @param {string} relationshipName - The name of the relationship
- * @param {array} relationshipData - Array of resource identifiers to remove
- * @returns {Promise<void>} 204 No Content
+ * Remove the identifiers in params.relationshipData from a to-many relationship.
+ * Authorization and parent/version locking precede mutation. The method
+ * returns no resource and completes only an owned transaction.
  */
 export default async function deleteRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+  rejectRemovedOptions(params)
+  if (params.format !== undefined) resolveFormat(params.format)
   context.method = 'deleteRelationship'
+  context.scopeName = scopeName
   context.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
@@ -32,9 +38,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
   // Transaction handling
-  context.transaction = params.transaction ||
-    (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null)
-  context.shouldCommit = !params.transaction && !!context.transaction
+  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction || api.knex.instance
 
   try {
@@ -78,6 +82,14 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
     if (!parentRecord) {
       throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
     }
+    context.minimalRecord = parentRecord
+    context.originalMinimalRecord = parentRecord
+
+    await runHooks('beforeDataCall')
+    await runHooks('beforeDataCallDeleteRelationship')
+
+    const revision = await advanceResourceVersion({ scopeName, context, helpers, expectedVersion: params.expectedVersion })
+    if (revision === undefined) await lockRelationshipParent({ context, helpers, scopeName })
 
     // Remove relationships
     if (relDef?.through) {
@@ -94,43 +106,30 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
         const pivotResource = relDef.through
         const pivotScope = api.resources[pivotResource]
         const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || pivotResource
-        const localKey = relDef.foreignKey
-        const foreignKey = relDef.otherKey
+        const localKey = getStorageColumn(pivotScope.vars.schemaInfo, relDef.foreignKey)
+        const foreignKey = getStorageColumn(pivotScope.vars.schemaInfo, relDef.otherKey)
 
-        for (const identifier of params.relationshipData) {
-          await knex(pivotTable)
+        const ids = [...new Set(params.relationshipData.map(identifier => identifier.id))]
+        for (let offset = 0; offset < ids.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
+          const removals = knex(pivotTable)
             .where(localKey, context.id)
-            .where(foreignKey, identifier.id)
-            .delete()
+            .whereIn(foreignKey, ids.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE))
             .transacting(context.transaction)
+          await invalidateRemovedPivotVersions(api, relDef, removals, context.transaction)
+          await removals.delete()
         }
       }
     } else {
-      // Null out foreign keys for hasMany
-      const targetType = relDef.target
-      for (const identifier of params.relationshipData) {
-        await api.resources[targetType].patch({
-          id: identifier.id,
-          inputRecord: {
-            data: {
-              type: targetType,
-              id: identifier.id,
-              attributes: { [relDef.foreignKey]: null }
-            }
-          },
-          transaction: context.transaction,
-          simplified: false
-        }, { ...context })
-      }
+      await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData: params.relationshipData, operation: 'remove' })
     }
 
     await runHooks('finish')
     await runHooks('finishDeleteRelationship')
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     // 204 No Content
   } catch (error) {
-    await handleWriteMethodError(error, context, 'DELETE_RELATIONSHIP', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'DELETE_RELATIONSHIP', scopeName, log)
   }
 }

@@ -1,5 +1,6 @@
 import { addType, addValidator, createSchema } from 'json-rest-schema'
 import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { requireDocumentResourceId, requireExistingResourceId } from './resource-id-normalization.js'
 import { getRelationshipCardinality } from './relationship-contracts.js'
 
 function isPlainObject (value) {
@@ -345,18 +346,9 @@ function installRequestContractSupport () {
 
 function buildWritableAttributesStructure (schemaInfo = {}) {
   const schemaStructure = schemaInfo.schemaStructure || {}
-  const schemaRelationships = schemaInfo.schemaRelationships || {}
   const idProperty = schemaInfo.idProperty || 'id'
   const attributesStructure = {}
-  const excludedFieldNames = new Set()
-
-  for (const relDef of Object.values(schemaRelationships)) {
-    if (!relDef?.belongsToPolymorphic) continue
-
-    const { typeField, idField } = relDef.belongsToPolymorphic
-    if (typeField) excludedFieldNames.add(typeField)
-    if (idField) excludedFieldNames.add(idField)
-  }
+  const excludedFieldNames = schemaInfo.foreignKeyFields
 
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (!fieldDef) continue
@@ -364,7 +356,6 @@ function buildWritableAttributesStructure (schemaInfo = {}) {
     if (excludedFieldNames.has(fieldName)) continue
     if (fieldDef.computed === true) continue
     if (fieldDef.type === undefined) continue
-    if (fieldDef.belongsTo && fieldDef.as) continue
     attributesStructure[fieldName] = { ...fieldDef }
   }
 
@@ -386,12 +377,12 @@ function resolveRelationshipAllowedTypes (relName, relDef) {
     return relDef.belongsToPolymorphic.types
   }
 
-  if (relDef?.target) {
-    return [relDef.target]
-  }
-
   if (relDef?.belongsTo) {
     return [relDef.belongsTo]
+  }
+
+  if (relDef?.target) {
+    return [relDef.target]
   }
 
   if (relDef?.type === 'manyToMany' || relDef?.type === 'hasMany' || relDef?.type === 'hasOne') {
@@ -402,28 +393,9 @@ function resolveRelationshipAllowedTypes (relName, relDef) {
 }
 
 function buildRelationshipStructure (schemaInfo = {}) {
-  const schemaStructure = schemaInfo.schemaStructure || {}
-  const schemaRelationships = schemaInfo.schemaRelationships || {}
   const relationshipStructure = {}
 
-  for (const [, fieldDef] of Object.entries(schemaStructure)) {
-    if (!fieldDef?.belongsTo || !fieldDef?.as) continue
-
-    relationshipStructure[fieldDef.as] = {
-      type: 'object',
-      schema: createSchema({
-        data: {
-          type: 'jsonApiRelationshipData',
-          required: true,
-          nullable: true,
-          cardinality: 'one',
-          allowedTypes: [fieldDef.belongsTo]
-        }
-      })
-    }
-  }
-
-  for (const [relName, relDef] of Object.entries(schemaRelationships)) {
+  for (const [relName, relDef] of Object.entries(schemaInfo.outputRelationships || {})) {
     const cardinality = getRelationshipCardinality(relDef)
     relationshipStructure[relName] = {
       type: 'object',
@@ -593,8 +565,9 @@ function buildRequestContracts ({ scopeName, schemaInfo, includeDepthLimit, sort
   }
 }
 
-function buildContractCacheKey ({ includeDepthLimit, sortableFields }) {
+function buildContractCacheKey ({ scopeName, includeDepthLimit, sortableFields }) {
   return JSON.stringify({
+    scopeName,
     includeDepthLimit,
     sortableFields: Array.isArray(sortableFields) ? [...sortableFields].sort() : []
   })
@@ -603,7 +576,7 @@ function buildContractCacheKey ({ includeDepthLimit, sortableFields }) {
 export function getRequestContracts ({ scopeName, schemaInfo, includeDepthLimit = 3, sortableFields = [] }) {
   installRequestContractSupport()
 
-  const cacheKey = buildContractCacheKey({ includeDepthLimit, sortableFields })
+  const cacheKey = buildContractCacheKey({ scopeName, includeDepthLimit, sortableFields })
   if (schemaInfo.requestContracts && schemaInfo.requestContractsCacheKey === cacheKey) {
     return schemaInfo.requestContracts
   }
@@ -629,6 +602,10 @@ export function validateRequestContractOrThrow (contract, payload, message = 'Re
     throw new Error('Invalid request contract.')
   }
 
+  if (!isPlainObject(payload)) {
+    throw new RestApiValidationError('inputRecord must be a record object', { fields: ['inputRecord'] })
+  }
+
   const { validatedObject, errors } = schema[mode](payload)
   if (Object.keys(errors).length === 0) {
     return validatedObject
@@ -646,4 +623,57 @@ export function validateRequestContractOrThrow (contract, payload, message = 'Re
     fields: violations.map((entry) => entry.field),
     violations
   })
+}
+
+/** Validate PUT/PATCH identity and body, then store the normalized document and ID on context. */
+export function validateUpdateRequest ({ method, params, context, vars, scopeOptions, scopeName }) {
+  const requestContracts = getRequestContracts({
+    scopeName,
+    schemaInfo: context.schemaInfo,
+    includeDepthLimit: vars.includeDepthLimit,
+    sortableFields: vars.sortableFields
+  })
+  const normalizedPathId = params.id === undefined
+    ? null
+    : requireExistingResourceId(params.id, {
+      scopeOptions,
+      vars,
+      scopeName
+    })
+
+  if (normalizedPathId && context.inputRecord?.data?.id === undefined) {
+    context.inputRecord = {
+      ...context.inputRecord,
+      data: {
+        ...(context.inputRecord?.data || {}),
+        id: normalizedPathId
+      }
+    }
+  }
+
+  context.inputRecord = validateRequestContractOrThrow(
+    requestContracts[method],
+    context.inputRecord,
+    `${method.toUpperCase()} request body is invalid`
+  )
+  const normalizedBodyId = requireDocumentResourceId(context.inputRecord.data.id, {
+    scopeOptions,
+    vars
+  })
+
+  if (normalizedPathId && normalizedPathId !== normalizedBodyId) {
+    throw new RestApiValidationError(
+      `ID mismatch. URL path ID '${normalizedPathId}' does not match request body ID '${normalizedBodyId}'`,
+      {
+        fields: ['data.id'],
+        violations: [{
+          field: 'data.id',
+          rule: 'id_consistency',
+          message: 'Request body ID must match URL path ID when both are provided'
+        }]
+      }
+    )
+  }
+  context.inputRecord.data.id = normalizedBodyId
+  context.id = normalizedPathId || normalizedBodyId
 }

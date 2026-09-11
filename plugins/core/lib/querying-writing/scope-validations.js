@@ -1,148 +1,90 @@
-/**
- * Scope configuration validators for relationship definitions
- *
- * @description
- * These validators run at scope registration time to ensure:
- * - Polymorphic relationships are properly configured
- * - HasMany relationships specify required foreign keys
- * - ManyToMany relationships have pivot table settings
- * - Referenced scopes actually exist in the system
- */
+import { assertFieldName, assertFieldNameMap } from './field-utils.js'
+
+export function validateSchemaFieldNames (fields, scopeName) {
+  assertFieldNameMap(fields, `schema in '${scopeName}'`)
+  for (const [name, definition] of Object.entries(fields || {})) {
+    if (definition?.belongsTo !== undefined && typeof definition.belongsTo !== 'string') {
+      throw new Error(`Invalid field '${scopeName}.${name}': 'belongsTo' must be a string`)
+    }
+    if (definition?.as !== undefined && typeof definition.as !== 'string') {
+      throw new Error(`Invalid relationship alias for '${scopeName}.${name}': 'as' must be a string`)
+    }
+    assertFieldName(definition?.as, `relationship alias for '${scopeName}.${name}'`)
+    for (const backing of [definition?.belongsToPolymorphic?.typeField, definition?.belongsToPolymorphic?.idField]) {
+      assertFieldName(backing, `backing field for relationship '${scopeName}.${name}'`)
+    }
+    if (definition?.search && typeof definition.search === 'object') {
+      assertFieldNameMap(definition.search, `search declaration for '${scopeName}.${name}'`)
+    }
+  }
+}
+
+export function validateRelationshipFieldNames (relationships, scopeName) {
+  assertFieldNameMap(relationships, `relationships in '${scopeName}'`)
+  for (const [name, definition] of Object.entries(relationships || {})) {
+    for (const option of ['target', 'through', 'via', 'foreignKey', 'otherKey']) {
+      if (definition?.[option] !== undefined && typeof definition[option] !== 'string') {
+        throw new Error(`Invalid relationship '${scopeName}.${name}': '${option}' must be a string`)
+      }
+    }
+    for (const field of [definition?.foreignKey, definition?.otherKey, definition?.belongsToPolymorphic?.typeField, definition?.belongsToPolymorphic?.idField]) {
+      assertFieldName(field, `backing field for relationship '${scopeName}.${name}'`)
+    }
+    if (definition?.belongsToPolymorphic !== undefined) {
+      const validation = validatePolymorphicRelationship(definition, scopeName)
+      if (!validation.valid) {
+        throw new Error(`Invalid polymorphic relationship '${name}' in scope '${scopeName}': ${validation.error}`)
+      }
+    }
+
+    // Validate based on relationship type
+    if (definition.type === 'hasMany') {
+      const validation = validateHasManyRelationship(definition, name, scopeName)
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid hasMany relationship '${name}' in scope '${scopeName}': ${validation.error}`
+        )
+      }
+    }
+
+    if (definition.type === 'hasOne') {
+      const validation = validateHasOneRelationship(definition, name, scopeName)
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid hasOne relationship '${name}' in scope '${scopeName}': ${validation.error}`
+        )
+      }
+    }
+
+    if (definition.type === 'manyToMany') {
+      const validation = validateManyToManyRelationship(definition, name, scopeName)
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid manyToMany relationship '${name}' in scope '${scopeName}': ${validation.error}`
+        )
+      }
+    }
+  }
+}
+
+/** Registration-time shape checks for declared relationships and backing names. */
 
 /**
- * Validates all relationships in a scope configuration
+ * Check declared relationship shapes before resource registration completes.
+ * Polymorphic targets must already be registered. Other relationships are
+ * checked for required mapping options here; this is not database introspection
+ * or complete validation of every target field and referential constraint.
  *
- * @param {Object} params - Validation parameters
- * @param {Object} params.context - Event context with scopeName and scopeOptions
- * @param {Object} params.scopes - All registered scopes for validation
- * @throws {Error} If any relationship is misconfigured
- *
- * @example
- * // Input: Valid polymorphic relationship
- * validateRelationships({
- *   context: {
- *     scopeName: 'comments',
- *     scopeOptions: {
- *       schema: {
- *         commentable_type: { type: 'string' },
- *         commentable_id: { type: 'integer' }
- *       },
- *       relationships: {
- *         commentable: {
- *           belongsToPolymorphic: {
- *             types: ['posts', 'videos'],     // Must exist
- *             typeField: 'commentable_type',
- *             idField: 'commentable_id'
- *           }
- *         }
- *       }
- *     }
- *   },
- *   scopes: { posts: {}, videos: {} }         // Referenced types exist
- * });
- * // Output: No error (valid configuration)
- *
- * @example
- * // Input: Missing required field
- * validateRelaationships({
- *   context: {
- *     scopeName: 'attachments',
- *     scopeOptions: {
- *       relationships: {
- *         attachable: {
- *           belongsToPolymorphic: {
- *             types: ['documents'],
- *             typeField: 'attachable_type'
- *             // Missing: idField
- *           }
- *         }
- *       }
- *     }
- *   },
- *   scopes: { documents: {} }
- * });
- * // Throws: Error
- * // "Invalid polymorphic relationship 'attachable' in scope 'attachments':
- * //  belongsToPolymorphic.idField must be specified"
- *
- * @example
- * // Input: HasMany without foreignKey
- * validateRelationships({
- *   context: {
- *     scopeName: 'users',
- *     scopeOptions: {
- *       relationships: {
- *         posts: {
- *           type: 'hasMany',
- *           target: 'posts'
- *           // Missing: foreignKey
- *         }
- *       }
- *     }
- *   },
- *   scopes: { posts: {} }
- * });
- * // Throws: Error
- * // "Invalid hasMany relationship 'posts' in scope 'users':
- * //  hasMany relationship requires foreignKey to be specified"
- *
- * @example
- * // Input: Complex activity feed with multiple polymorphic relationships
- * validateRelationships({
- *   context: {
- *     scopeName: 'activities',
- *     scopeOptions: {
- *       schema: {
- *         trackable_type: { type: 'string' },
- *         trackable_id: { type: 'integer' },
- *         actor_type: { type: 'string' },
- *         actor_id: { type: 'integer' }
- *       },
- *       relationships: {
- *         trackable: {                    // What was changed
- *           belongsToPolymorphic: {
- *             types: ['posts', 'comments', 'users'],
- *             typeField: 'trackable_type',
- *             idField: 'trackable_id'
- *           }
- *         },
- *         actor: {                        // Who made the change
- *           belongsToPolymorphic: {
- *             types: ['users', 'api_clients'],
- *             typeField: 'actor_type',
- *             idField: 'actor_id'
- *           }
- *         }
- *       }
- *     }
- *   },
- *   scopes: { posts: {}, comments: {}, users: {}, api_clients: {} }
- * });
- * // Output: No error (both polymorphic relationships valid)
- *
- * @description
- * Used by:
- * - rest-api-plugin on 'scope:added' event
- * - Runs automatically when scopes are registered
- *
- * Purpose:
- * - Catches configuration errors at startup, not runtime
- * - Validates polymorphic relationship structure
- * - Ensures referenced scope types exist
- * - Validates hasMany/manyToMany foreign keys
- * - Provides clear error messages for debugging
- *
- * Data flow:
- * 1. Extracts relationships from scope options
- * 2. For each relationship, checks its type
- * 3. Validates polymorphic: types, typeField, idField
- * 4. Validates hasMany: foreignKey (unless via)
- * 5. Validates manyToMany: through, foreignKey, otherKey
- * 6. Throws descriptive error on first validation failure
+ * @param {Object} params
+ * @param {Object} params.context - scopeName and scopeOptions being registered
+ * @param {Object} params.scopes - Registry used for polymorphic target lookup
+ * @returns {void}
+ * @throws {Error} On invalid relationship configuration
  */
 export function validateRelationships ({ context, scopes }) {
   const { scopeName, scopeOptions } = context
   const relationships = scopeOptions.relationships || {}
+  validateRelationshipFieldNames(relationships, scopeName)
 
   for (const [relName, relDef] of Object.entries(relationships)) {
     if (relDef.belongsToPolymorphic) {
@@ -153,97 +95,18 @@ export function validateRelationships ({ context, scopes }) {
         )
       }
     }
-
-    // Validate based on relationship type
-    if (relDef.type === 'hasMany') {
-      const validation = validateHasManyRelationship(relDef, relName, scopeName)
-      if (!validation.valid) {
-        throw new Error(
-          `Invalid hasMany relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        )
-      }
-    }
-
-    if (relDef.type === 'hasOne') {
-      const validation = validateHasOneRelationship(relDef, relName, scopeName)
-      if (!validation.valid) {
-        throw new Error(
-          `Invalid hasOne relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        )
-      }
-    }
-
-    if (relDef.type === 'manyToMany') {
-      const validation = validateManyToManyRelationship(relDef, relName, scopeName)
-      if (!validation.valid) {
-        throw new Error(
-          `Invalid manyToMany relationship '${relName}' in scope '${scopeName}': ${validation.error}`
-        )
-      }
-    }
   }
 }
 
 /**
- * Validates a polymorphic relationship definition
- *
- * @param {Object} relDef - Relationship definition with belongsToPolymorphic
- * @param {string} scopeName - Scope being registered (for error messages)
- * @param {Object} scopes - All registered scopes for validation
- * @returns {Object} Validation result {valid: boolean, error?: string}
- *
- * @example
- * // Input: Valid polymorphic configuration
- * const relDef = {
- *   belongsToPolymorphic: {
- *     types: ['articles', 'videos', 'products'],
- *     typeField: 'commentable_type',
- *     idField: 'commentable_id'
- *   }
- * };
- * validatePolymorphicRelationship(relDef, 'comments', scopes);
- * // Output: { valid: true }
- *
- * @example
- * // Input: Missing required types array
- * const relDef = {
- *   belongsToPolymorphic: {
- *     typeField: 'commentable_type',
- *     idField: 'commentable_id'
- *     // Missing: types
- *   }
- * };
- * validatePolymorphicRelationship(relDef, 'comments', scopes);
- * // Output: {
- * //   valid: false,
- * //   error: 'belongsToPolymorphic.types must be a non-empty array'
- * // }
- *
- * @example
- * // Input: References non-existent scope
- * const relDef = {
- *   belongsToPolymorphic: {
- *     types: ['articles', 'unicorns'],    // 'unicorns' doesn't exist
- *     typeField: 'attachable_type',
- *     idField: 'attachable_id'
- *   }
- * };
- * validatePolymorphicRelationship(relDef, 'attachments', scopes);
- * // Output: {
- * //   valid: false,
- * //   error: "Polymorphic type 'unicorns' is not a registered scope"
- * // }
- *
- * @private
+ * Check target and backing names, and registered targets when a registry is supplied.
+ * This helper does not inspect whether the backing columns exist in a database.
+ * @param {Object} relDef
+ * @param {string} scopeName
+ * @param {Object} [scopes]
+ * @returns {Object} Validation result with valid and an optional error
  */
 const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
-  // Validation logic:
-  // 1. Check relDef.belongsToPolymorphic exists
-  // 2. Validate required properties: types, typeField, idField
-  // 3. Ensure types is non-empty array
-  // 4. Verify all types are registered scopes
-  // 5. Check that typeField and idField exist in the schema
-
   const { belongsToPolymorphic } = relDef
 
   if (!belongsToPolymorphic) {
@@ -275,7 +138,10 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
 
   // Check that all types are valid scopes
   for (const type of types) {
-    if (!scopes[type]) {
+    if (typeof type !== 'string' || !type) {
+      return { valid: false, error: 'belongsToPolymorphic.types must contain non-empty strings' }
+    }
+    if (scopes && !scopes[type]) {
       return {
         valid: false,
         error: `Polymorphic type '${type}' is not a registered scope`
@@ -287,47 +153,11 @@ const validatePolymorphicRelationship = (relDef, scopeName, scopes) => {
 }
 
 /**
- * Validates a hasMany relationship definition
- *
- * @param {Object} relDef - Relationship definition with hasMany
- * @param {string} relName - Relationship name
- * @param {string} scopeName - Scope being registered
- * @returns {Object} Validation result {valid: boolean, error?: string}
- *
- * @example
- * // Input: Valid hasMany configuration
- * const relDef = {
- *   type: 'hasMany',
- *   target: 'posts',
- *   foreignKey: 'author_id'              // Required!
- * };
- * validateHasManyRelationship(relDef, 'posts', 'users');
- * // Output: { valid: true }
- *
- * @example
- * // Input: Missing required foreignKey
- * const relDef = {
- *   type: 'hasMany',
- *   target: 'posts'
- *   // Missing: foreignKey
- * };
- * validateHasManyRelationship(relDef, 'posts', 'users');
- * // Output: {
- * //   valid: false,
- * //   error: 'hasMany relationship requires foreignKey to be specified...'
- * // }
- *
- * @example
- * // Input: Polymorphic hasMany with 'via' (doesn't need foreignKey)
- * const relDef = {
- *   type: 'hasMany',
- *   target: 'comments',
- *   via: 'commentable'                   // Uses polymorphic relationship
- * };
- * validateHasManyRelationship(relDef, 'comments', 'posts');
- * // Output: { valid: true }
- *
- * @private
+ * Require a target and explicit foreign key, except for reverse polymorphic via.
+ * @param {Object} relDef
+ * @param {string} relName
+ * @param {string} scopeName
+ * @returns {Object} Validation result with valid and an optional error
  */
 const validateHasManyRelationship = (relDef, relName, scopeName) => {
   // Validate target is specified
@@ -408,39 +238,11 @@ const validateHasOneRelationship = (relDef, relName, scopeName) => {
 }
 
 /**
- * Validates a manyToMany relationship definition
- *
- * @param {Object} relDef - Relationship definition with manyToMany
- * @param {string} relName - Relationship name
- * @param {string} scopeName - Scope being registered
- * @returns {Object} Validation result {valid: boolean, error?: string}
- *
- * @example
- * // Input: Valid manyToMany configuration
- * const relDef = {
- *   type: 'manyToMany',
- *   through: 'article_tags',           // Pivot table
- *   foreignKey: 'article_id',          // This scope's FK
- *   otherKey: 'tag_id'                 // Other scope's FK
- * };
- * validateManyToManyRelationship(relDef, 'tags', 'articles');
- * // Output: { valid: true }
- *
- * @example
- * // Input: Missing required fields
- * const relDef = {
- *   type: 'manyToMany',
- *   through: 'article_tags',
- *   foreignKey: 'article_id'
- *   // Missing: otherKey
- * };
- * validateManyToManyRelationship(relDef, 'tags', 'articles');
- * // Output: {
- * //   valid: false,
- * //   error: 'manyToMany relationship requires otherKey to be specified...'
- * // }
- *
- * @private
+ * Require the pivot table and both explicit foreign-key mappings.
+ * @param {Object} relDef
+ * @param {string} relName
+ * @param {string} scopeName
+ * @returns {Object} Validation result with valid and an optional error
  */
 const validateManyToManyRelationship = (relDef, relName, scopeName) => {
   const { through, foreignKey, otherKey } = relDef

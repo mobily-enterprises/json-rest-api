@@ -1,0 +1,8 @@
+{
+  "base_version": "1.0.24",
+  "base_index_sha256": "de248b7cc8ef4bf3ebcd0f0793c24fabd419cb9e7c117de5f24d745c6dc245b9",
+  "payload_patch_sha256": "1272a4e7865cb5f1d862bbf0fbe6b4b61f1eb9af97b856c66be8a93ac64fd167",
+  "payload_patched_index_sha256": "88d93f7a3cb1014092be4b2f495774787eca8674c87aed1feb3fa13d5ceab8ad",
+  "regression_sha256": "4dfe69b0a33aab142d416c0845af04eee276349d65571c91b240d0b2632df6b5",
+  "composed_with_thrown_values_index_sha256": "b133ffb941ba8b9ea9e4b306bf83230337689e8a630682b1fc653da8d80d4c64"
+}

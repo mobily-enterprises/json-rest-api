@@ -1,6 +1,22 @@
 import { requirePackage } from 'hooked-api'
+import { randomUUID } from 'node:crypto'
+import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
+import { errorMessage } from '../../lib/error-context.js'
+import { queryConstraint } from './lib/querying/query-constraint.js'
 
-const pendingBroadcasts = new WeakMap()
+const pendingRoomChanges = new WeakMap()
+
+// Preserve room mutation order when an adapter completes joins/leaves asynchronously.
+async function changeRoom (socket, method, room) {
+  const previous = pendingRoomChanges.get(socket) || Promise.resolve()
+  const pending = previous.catch(() => {}).then(() => socket[method](room))
+  pendingRoomChanges.set(socket, pending)
+  try {
+    await pending
+  } finally {
+    if (pendingRoomChanges.get(socket) === pending) pendingRoomChanges.delete(socket)
+  }
+}
 
 function normalizeAuthContext (auth) {
   if (!auth) return null
@@ -15,96 +31,22 @@ function normalizeAuthContext (auth) {
   return normalized
 }
 
-function matchesFilters (record, filters, searchSchemaStructure) {
-  if (!filters || Object.keys(filters).length === 0) return true
-
-  if (!record) return false
-
-  if (!searchSchemaStructure || Object.keys(searchSchemaStructure).length === 0) {
+async function matchesSubscription ({ subscription, scopeName, id, transaction, api, scopes, log }) {
+  try {
+    const result = await api.resources[scopeName].query({
+      format: 'jsonapi',
+      transaction,
+      queryParams: { filters: subscription.filters, include: [], page: { size: 1 } },
+      [queryConstraint]: { scopeName, values: { id } }
+    }, { ...subscription.context, auth: subscription.auth })
+    return result.data.some(record => record.type === scopeName && String(record.id) === String(id))
+  } catch (error) {
+    try {
+      await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo })
+        .warn('Socket.IO subscription query failed', { scopeName, subscriptionId: subscription.id, error })
+    } catch { /* Warning failure must preserve the existing non-match result. */ }
     return false
   }
-
-  for (const [filterKey, filterValue] of Object.entries(filters)) {
-    const fieldDef = searchSchemaStructure[filterKey]
-    if (!fieldDef) continue
-
-    const fieldName = fieldDef.actualField || filterKey
-
-    let recordValue
-    if (fieldDef.isRelationship) {
-      const relationshipData = record.relationships?.[filterKey]?.data
-      recordValue = relationshipData?.id
-    } else {
-      recordValue = record.attributes?.[fieldName] ?? record[fieldName]
-    }
-
-    if (recordValue === null || recordValue === undefined) {
-      if (filterValue !== null && filterValue !== undefined) {
-        return false
-      }
-      continue
-    }
-
-    if (typeof fieldDef.filterOperator === 'function') {
-      if (!fieldDef.filterRecord?.(record, filterValue)) {
-        return false
-      }
-      continue
-    }
-
-    const operator = fieldDef.filterOperator || '='
-
-    switch (operator) {
-      case 'like':
-        if (!String(recordValue).toLowerCase().includes(String(filterValue).toLowerCase())) {
-          return false
-        }
-        break
-      case 'in':
-        if (Array.isArray(filterValue)) {
-          if (!filterValue.includes(recordValue)) {
-            return false
-          }
-        } else if (recordValue !== filterValue) {
-          return false
-        }
-        break
-      case 'between':
-        if (Array.isArray(filterValue) && filterValue.length === 2) {
-          if (recordValue < filterValue[0] || recordValue > filterValue[1]) {
-            return false
-          }
-        }
-        break
-      case '>':
-        if (!(recordValue > filterValue)) return false
-        break
-      case '>=':
-        if (!(recordValue >= filterValue)) return false
-        break
-      case '<':
-        if (!(recordValue < filterValue)) return false
-        break
-      case '<=':
-        if (!(recordValue <= filterValue)) return false
-        break
-      case '!=':
-      case '<>':
-        if (recordValue === filterValue) return false
-        break
-      case '=':
-      default:
-        if (fieldDef.isRelationship) {
-          if (String(recordValue) !== String(filterValue)) {
-            return false
-          }
-        } else if (recordValue !== filterValue) {
-          return false
-        }
-    }
-  }
-
-  return true
 }
 
 function buildConfig (pluginOptions = {}) {
@@ -151,137 +93,125 @@ async function authenticateSocket ({ socket, api, helpers, log, config }) {
       try {
         await onAuthenticationFailed({ socket, error, log })
       } catch (hookError) {
-        log.error('socketio auth failure handler threw error', hookError)
+        try {
+          await log.error('socketio auth failure handler threw error', hookError)
+        } catch { /* A diagnostic failure must not replace the authentication rejection. */ }
       }
     }
     throw error
   }
 }
 
-async function registerSubscription ({
-  socket,
-  data,
-  scopes,
-  runHooks,
-  log,
-  config
-}) {
-  const { resource, filters = {}, include, fields, subscriptionId } = data || {}
-
-  if (!resource || typeof resource !== 'string') {
-    throw Object.assign(new Error('Resource is required'), { code: 'RESOURCE_REQUIRED' })
+async function validateSubscriptionFilters (filters, scope, resource) {
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+    throw Object.assign(new Error('Filters must be an object'), { code: 'INVALID_FILTERS' })
   }
-
-  const scope = scopes[resource]
-  if (!scope) {
-    throw Object.assign(new Error(`Resource '${resource}' not found`), { code: 'RESOURCE_NOT_FOUND' })
+  if (Object.keys(filters).length === 0) return {}
+  const { searchSchemaStructure, searchSchemaInstance } = scope.vars.schemaInfo
+  if (!searchSchemaStructure || !searchSchemaInstance) {
+    throw Object.assign(new Error(`Filtering is not enabled for resource '${resource}'`), { code: 'FILTERING_NOT_ENABLED' })
   }
+  for (const key of Object.keys(filters)) {
+    if (!Object.hasOwn(searchSchemaStructure, key)) {
+      throw Object.assign(new Error(`Unknown filter '${key}'`), { code: 'INVALID_FILTERS' })
+    }
+  }
+  const { validatedObject, errors } = await searchSchemaInstance.patch(filters)
+  if (errors && Object.keys(errors).length) {
+    throw Object.assign(new Error('Invalid filter values'), { code: 'INVALID_FILTERS', details: errors })
+  }
+  return validatedObject
+}
 
-  const auth = socket.data.auth || null
-
-  if (scope.checkPermissions) {
+async function registerSubscription ({ socket, data, scopes, runHooks, log, config }) {
+  let scope, scopeName
+  try {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw Object.assign(new Error('Subscription must be an object'), { code: 'INVALID_SUBSCRIPTION' })
+    }
+    for (const key of Object.keys(data)) {
+      if (!['resource', 'filters', 'subscriptionId'].includes(key)) {
+        throw Object.assign(new Error(`Subscription option '${key}' is not supported`), { code: 'UNSUPPORTED_OPTION' })
+      }
+    }
+    const { resource, filters = {}, subscriptionId = randomUUID() } = data
+    if (!resource || typeof resource !== 'string') {
+      throw Object.assign(new Error('Resource is required'), { code: 'RESOURCE_REQUIRED' })
+    }
+    const candidate = Object.hasOwn(scopes, resource) ? scopes[resource] : undefined
+    if (!candidate?.vars?.schemaInfo) {
+      throw Object.assign(new Error(`Resource '${resource}' not found`), { code: 'RESOURCE_NOT_FOUND' })
+    }
+    scope = candidate
+    scopeName = resource
+    if (typeof subscriptionId !== 'string' || subscriptionId.trim() === '') {
+      throw Object.assign(new Error('Subscription ID must be a nonempty string'), { code: 'INVALID_SUBSCRIPTION_ID' })
+    }
+    const auth = socket.data.auth || null
+    const subscription = {
+      id: subscriptionId,
+      resource,
+      filters: await validateSubscriptionFilters(filters, scope, resource),
+      auth,
+      context: {},
+      createdAt: new Date()
+    }
+    await runHooks('subscriptionFilters', { subscription, auth })
+    if (subscription.id !== subscriptionId || subscription.resource !== resource) {
+      throw Object.assign(new Error('subscriptionFilters may change filters, not subscription identity'), { code: 'INVALID_SUBSCRIPTION' })
+    }
+    subscription.filters = await validateSubscriptionFilters(subscription.filters, scope, resource)
+    if (!subscription.context || typeof subscription.context !== 'object' || Array.isArray(subscription.context)) {
+      throw Object.assign(new Error('Subscription context must be an object'), { code: 'INVALID_SUBSCRIPTION_CONTEXT' })
+    }
     await scope.checkPermissions({
       method: 'query',
-      originalContext: { auth }
+      originalContext: { ...subscription.context, auth: subscription.auth, scopeName: resource, queryParams: { filters: subscription.filters } }
     })
-  }
+    subscription.generation = randomUUID()
 
-  const schemaInfo = scope.vars?.schemaInfo
-  const searchSchemaStructure = schemaInfo?.searchSchemaStructure
-  const searchSchemaInstance = schemaInfo?.searchSchemaInstance
-
-  const validatedFilters = { ...filters }
-  if (Object.keys(validatedFilters).length > 0) {
-    if (!searchSchemaStructure || Object.keys(searchSchemaStructure).length === 0 || !searchSchemaInstance) {
-      throw Object.assign(new Error(`Filtering is not enabled for resource '${resource}'`), { code: 'FILTERING_NOT_ENABLED' })
+    if (!socket.connected) throw Object.assign(new Error('Socket disconnected during subscription'), { code: 'SOCKET_DISCONNECTED' })
+    const subscriptions = socket.data.subscriptions
+    if (subscriptions.some(item => item.id === subscriptionId)) {
+      throw Object.assign(new Error('Subscription ID is already active'), { code: 'SUBSCRIPTION_EXISTS' })
     }
-
-    for (const filterKey of Object.keys(validatedFilters)) {
-      const fieldDef = searchSchemaStructure[filterKey]
-      if (fieldDef && typeof fieldDef.filterOperator === 'function' && !fieldDef.filterRecord) {
-        throw Object.assign(
-          new Error(`Filter '${filterKey}' uses custom SQL logic and requires 'filterRecord' for real-time subscriptions`),
-          { code: 'UNSUPPORTED_FILTER' }
-        )
+    if (subscriptions.length >= config.subscriptions.maxPerSocket) {
+      throw Object.assign(new Error('Subscription limit reached for this connection'), { code: 'SUBSCRIPTION_LIMIT' })
+    }
+    // Reserve capacity before awaiting an adapter's room join.
+    subscriptions.push(subscription)
+    try {
+      await changeRoom(socket, 'join', `${resource}:updates`)
+      if (!socket.connected) {
+        // A late adapter join can recreate the disconnected socket's membership entry.
+        await socket.adapter.delAll(socket.id)
+        throw Object.assign(new Error('Socket disconnected during subscription'), { code: 'SOCKET_DISCONNECTED' })
       }
-    }
-
-    const { validatedObject, errors } = await searchSchemaInstance.patch(validatedFilters)
-
-    if (errors && Object.keys(errors).length > 0) {
-      const error = new Error('Invalid filter values')
-      error.code = 'INVALID_FILTERS'
-      error.details = errors
+    } catch (error) {
+      const index = subscriptions.indexOf(subscription)
+      if (index !== -1) subscriptions.splice(index, 1)
       throw error
     }
-
-    Object.assign(validatedFilters, validatedObject)
+    try {
+      await log.info(`Socket ${socket.id} subscribed to ${resource}`, { subscriptionId })
+    } catch { /* Logging cannot undo a subscription already installed in its room. */ }
+    return { subscriptionId, resource, filters: subscription.filters, status: 'active' }
+  } catch (error) {
+    // Only a successfully resolved resource supplies diagnostic field policy.
+    try {
+      await createEnhancedLogger(log, { schemaInfo: scope?.vars?.schemaInfo })
+        .error('Socket.IO subscribe error', { operation: 'subscribe', phase: 'admission', scopeName, error })
+    } catch { /* Logging must not replace the subscription rejection. */ }
+    throw error
   }
+}
 
-  if (include !== undefined) {
-    if (!Array.isArray(include)) {
-      throw Object.assign(new Error('Include parameter must be an array'), { code: 'INVALID_INCLUDE' })
-    }
-
-    const relationships = schemaInfo?.schemaRelationships || {}
-    for (const includePath of include) {
-      const baseName = includePath.split('.')[0]
-      if (!relationships[baseName]) {
-        throw Object.assign(new Error(`Invalid relationship '${baseName}' for resource '${resource}'`), {
-          code: 'INVALID_INCLUDE'
-        })
-      }
-    }
-  }
-
-  if (fields !== undefined) {
-    if (typeof fields !== 'object' || Array.isArray(fields) || fields === null) {
-      throw Object.assign(new Error('Fields parameter must be an object'), { code: 'INVALID_FIELDS' })
-    }
-
-    for (const [resourceType, fieldList] of Object.entries(fields)) {
-      if (!Array.isArray(fieldList)) {
-        throw Object.assign(new Error(`Fields for '${resourceType}' must be an array`), { code: 'INVALID_FIELDS' })
-      }
-    }
-  }
-
-  if (!socket.data.subscriptions) {
-    socket.data.subscriptions = new Map()
-  }
-
-  if (socket.data.subscriptions.size >= config.subscriptions.maxPerSocket) {
-    throw Object.assign(new Error('Subscription limit reached for this connection'), { code: 'SUBSCRIPTION_LIMIT' })
-  }
-
-  const subscription = {
-    id: subscriptionId || `${resource}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    resource,
-    filters: validatedFilters,
-    include: include || [],
-    fields: fields || {},
-    auth,
-    createdAt: new Date()
-  }
-
-  await runHooks('subscriptionFilters', { subscription, auth })
-
-  const roomName = `${resource}:updates`
-  socket.join(roomName)
-  socket.data.subscriptions.set(subscription.id, subscription)
-
-  log.info(`Socket ${socket.id} subscribed to ${resource}`, {
-    subscriptionId: subscription.id,
-    filters: subscription.filters
-  })
-
+function subscriptionError (error) {
+  let code
+  try { code = error?.code } catch { /* Invalid error metadata must not prevent rejection. */ }
   return {
-    subscriptionId: subscription.id,
-    resource: subscription.resource,
-    filters: subscription.filters,
-    include: subscription.include,
-    fields: subscription.fields,
-    status: 'active'
+    code: typeof code === 'string' && code ? code : 'SUBSCRIBE_ERROR',
+    message: error == null ? 'Subscription failed' : errorMessage(error)
   }
 }
 
@@ -303,10 +233,7 @@ async function handleRestoreSubscriptions ({ socket, subscriptions, scopes, runH
     } catch (error) {
       failed.push({
         subscriptionId: sub?.subscriptionId || null,
-        error: {
-          code: error.code || 'SUBSCRIBE_ERROR',
-          message: error.message
-        }
+        error: subscriptionError(error)
       })
     }
   }
@@ -314,62 +241,40 @@ async function handleRestoreSubscriptions ({ socket, subscriptions, scopes, runH
   return { restored, failed }
 }
 
-function getRecordForFiltering (context) {
-  return context?.minimalRecord || context?.originalMinimalRecord || null
-}
-
-async function performBroadcast ({ method, scopeName, id, context, api, io, log }) {
-  if (!io) return
-
+async function performBroadcast ({ method, scopeName, id, isCreate, recipients, api, scopes, io, log }) {
+  if (!io || recipients.length === 0) return
   const scope = api.resources[scopeName]
-  if (!scope) {
-    log.warn(`Socket.IO broadcast skipped: unknown resource ${scopeName}`)
-    return
-  }
+  const sockets = new Map((await io.in(`${scopeName}:updates`).fetchSockets()).map(socket => [socket.id, socket]))
 
-  const roomName = `${scopeName}:updates`
-  const socketsInRoom = await io.in(roomName).fetchSockets()
-  if (!socketsInRoom || socketsInRoom.length === 0) {
-    log.debug(`Socket.IO broadcast skipped: no subscribers for ${roomName}`)
-    return
-  }
-
-  const schemaInfo = scope.vars?.schemaInfo
-  const searchSchemaStructure = schemaInfo?.searchSchemaStructure
-  const recordForFiltering = getRecordForFiltering(context)
-
-  for (const socket of socketsInRoom) {
-    const subscriptions = socket.data.subscriptions
-    if (!subscriptions || subscriptions.size === 0) continue
-
-    for (const subscription of subscriptions.values()) {
-      if (subscription.resource !== scopeName) continue
-
-      if (recordForFiltering && subscription.filters && Object.keys(subscription.filters).length > 0) {
-        if (!matchesFilters(recordForFiltering, subscription.filters, searchSchemaStructure)) {
-          continue
-        }
-      }
-
-      const notification = {
-        type: `resource.${method}d`,
-        resource: scopeName,
-        id,
-        action: method,
-        subscriptionId: subscription.id,
-        meta: {
-          timestamp: new Date().toISOString()
-        }
-      }
-
-      if (method === 'delete') {
-        notification.deletedRecord = { id }
-      }
-
-      socket.emit('subscription.update', notification)
-      log.debug(`Socket.IO broadcast: ${scopeName}/${id} -> socket ${socket.id}`)
-      break
+  for (const recipient of recipients) {
+    const socket = sockets.get(recipient.socketId)
+    const subscription = socket?.data.subscriptions?.find(item =>
+      item.resource === scopeName && item.id === recipient.subscriptionId && item.generation === recipient.generation
+    )
+    if (!subscription) continue
+    try {
+      await scope.checkPermissions({
+        method: 'query',
+        originalContext: { ...subscription.context, auth: subscription.auth, scopeName, id, queryParams: { filters: subscription.filters } }
+      })
+    } catch (error) {
+      try {
+        await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo })
+          .warn('Socket.IO notification permission check failed', { scopeName, subscriptionId: subscription.id, error })
+      } catch { /* Warning failure must not interrupt delivery to other recipients. */ }
+      continue
     }
+
+    const notification = {
+      type: method === 'delete' ? 'resource.deleted' : method === 'post' || (method === 'put' && isCreate) ? 'resource.created' : 'resource.updated',
+      resource: scopeName,
+      id: String(id),
+      action: method,
+      subscriptionId: subscription.id,
+      meta: { timestamp: new Date().toISOString() }
+    }
+    if (method === 'delete') notification.deletedRecord = { id: String(id) }
+    socket.emit('subscription.update', notification)
   }
 }
 
@@ -378,7 +283,10 @@ export const SocketIOPlugin = {
   dependencies: ['rest-api'],
 
   async install ({ api, addHook, log, scopes, helpers, vars, runHooks, pluginOptions = {} }) {
+    log = createEnhancedLogger(log)
     const config = buildConfig(pluginOptions)
+    const pendingChanges = new WeakMap()
+    const pendingBroadcasts = new WeakMap()
 
     let Server
     try {
@@ -391,64 +299,91 @@ export const SocketIOPlugin = {
     let createAdapter
     let createClient
     let io
+    let starting = false
 
     api.startSocketServer = async (server, startOptions = {}) => {
+      if (starting || io) throw new Error('Socket.IO server is already starting or started')
       const authConfig = { ...config.auth, ...(startOptions.auth || {}) }
       const redisConfig = startOptions.redis ?? pluginOptions.redis ?? null
-
-      config.auth = authConfig
 
       const defaultPath = vars.transport?.mountPath ? `${vars.transport.mountPath}/socket.io` : '/socket.io'
       const path = startOptions.path || config.transport.path || defaultPath
       const cors = startOptions.cors || config.transport.cors || { origin: '*', methods: ['GET', 'POST'] }
 
-      io = new Server(server, {
-        path,
-        cors,
-        transports: ['websocket', 'polling']
-      })
+      let redisClients
+      starting = true
+      try {
+        if (redisConfig) {
+          try {
+            ({ createClient } = await import('redis'))
+          } catch (error) {
+            requirePackage('redis', 'socketio', 'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.')
+            throw error
+          }
 
-      vars.socketIO = io
-      api.io = io
+          try {
+            ({ createAdapter } = await import('@socket.io/redis-adapter'))
+          } catch (error) {
+            requirePackage('@socket.io/redis-adapter', 'socketio',
+              'Socket.IO Redis adapter is required for horizontal scaling. This is a peer dependency.')
+            throw error
+          }
 
-      if (redisConfig) {
-        try {
-          ({ createClient } = await import('redis'))
-        } catch (error) {
-          requirePackage('redis', 'socketio', 'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.')
-          throw error
+          const pubClient = createClient(redisConfig)
+          redisClients = { pubClient, subClient: pubClient.duplicate() }
+          for (const [role, client] of Object.entries(redisClients)) {
+            client.on('error', error => log.warn('Socket.IO Redis connection error', { role, message: error.message, error }))
+          }
+          const connections = Object.values(redisClients).map(client => client.connect())
+          try {
+            await Promise.all(connections)
+          } catch (error) {
+            for (const client of Object.values(redisClients)) if (client.isOpen) client.destroy()
+            await Promise.allSettled(connections)
+            throw error
+          }
         }
 
-        try {
-          ({ createAdapter } = await import('@socket.io/redis-adapter'))
-        } catch (error) {
-          requirePackage('@socket.io/redis-adapter', 'socketio',
-            'Socket.IO Redis adapter is required for horizontal scaling. This is a peer dependency.')
-          throw error
+        io = new Server(server, { path, cors, transports: ['websocket', 'polling'] })
+        if (redisClients) {
+          io.adapter(createAdapter(redisClients.pubClient, redisClients.subClient))
+          vars.socketIORedisClients = redisClients
+          log.info('Socket.IO configured with Redis adapter')
         }
-
-        const pubClient = createClient(redisConfig)
-        const subClient = pubClient.duplicate()
-
-        await Promise.all([
-          pubClient.connect(),
-          subClient.connect()
-        ])
-
-        io.adapter(createAdapter(pubClient, subClient))
-        vars.socketIORedisClients = { pubClient, subClient }
-        log.info('Socket.IO configured with Redis adapter')
+        vars.socketIO = io
+        api.io = io
+        config.auth = authConfig
+      } catch (error) {
+        for (const client of Object.values(redisClients || {})) if (client.isOpen) client.destroy()
+        throw error
+      } finally {
+        starting = false
       }
+
+      const socketServer = io
+      server.once('close', () => {
+        if (io !== socketServer) return
+        io = undefined
+        delete api.io
+        vars.socketIO = undefined
+        vars.socketIORedisClients = undefined
+        for (const [role, client] of Object.entries(redisClients || {})) {
+          if (client.isOpen) client.close().catch(error => log.warn('Socket.IO Redis shutdown failed', { role, error }))
+        }
+      })
 
       io.use(async (socket, next) => {
         try {
           const authContext = await authenticateSocket({ socket, api, helpers, log, config })
           socket.data.auth = authContext
-          socket.data.subscriptions = new Map()
+          socket.data.subscriptions = []
           next()
         } catch (error) {
-          log.warn('Socket.IO authentication failed', error)
-          next(new Error(error.message || 'Authentication failed'))
+          try {
+            await log.warn('Socket.IO authentication failed', error)
+          } catch { /* The client must still receive the authentication rejection. */ }
+          const message = error == null ? 'Authentication failed' : errorMessage(error) || 'Authentication failed'
+          next(new Error(message, { cause: error }))
         }
       })
 
@@ -463,6 +398,7 @@ export const SocketIOPlugin = {
         })
 
         socket.on('subscribe', async (payload, callback) => {
+          callback = typeof callback === 'function' ? callback : null
           try {
             const result = await registerSubscription({
               socket,
@@ -476,19 +412,14 @@ export const SocketIOPlugin = {
             if (callback) callback({ success: true, data: result })
             else socket.emit('subscription.created', result)
           } catch (error) {
-            log.error('Socket.IO subscribe error', error)
-            const response = {
-              error: {
-                code: error.code || 'SUBSCRIBE_ERROR',
-                message: error.message
-              }
-            }
+            const response = { error: subscriptionError(error) }
             if (callback) callback(response)
             else socket.emit('subscription.error', response.error)
           }
         })
 
-        socket.on('unsubscribe', (payload, callback) => {
+        socket.on('unsubscribe', async (payload, callback) => {
+          callback = typeof callback === 'function' ? callback : null
           try {
             const subscriptionId = payload?.subscriptionId
             if (!subscriptionId) {
@@ -497,29 +428,33 @@ export const SocketIOPlugin = {
               return
             }
 
-            const subscription = socket.data.subscriptions?.get(subscriptionId)
+            const subscription = socket.data.subscriptions?.find(item => item.id === subscriptionId)
             if (!subscription) {
               const error = { code: 'SUBSCRIPTION_NOT_FOUND', message: 'Subscription not found' }
               if (callback) callback({ error })
               return
             }
 
-            socket.data.subscriptions.delete(subscriptionId)
-            const hasOther = Array.from(socket.data.subscriptions.values())
+            socket.data.subscriptions.splice(socket.data.subscriptions.indexOf(subscription), 1)
+            const hasOther = socket.data.subscriptions
               .some((sub) => sub.resource === subscription.resource)
             if (!hasOther) {
-              socket.leave(`${subscription.resource}:updates`)
+              await changeRoom(socket, 'leave', `${subscription.resource}:updates`)
             }
 
+            try {
+              await log.info(`Socket ${socket.id} unsubscribed from ${subscription.resource}`, { subscriptionId })
+            } catch { /* Logging cannot undo a completed unsubscribe. */ }
             if (callback) callback({ success: true })
-            log.info(`Socket ${socket.id} unsubscribed from ${subscription.resource}`, { subscriptionId })
           } catch (error) {
-            log.error('Socket.IO unsubscribe error', error)
+            try {
+              await log.error('Socket.IO unsubscribe error', error)
+            } catch { /* Report the room failure even when diagnostics fail. */ }
             if (callback) {
               callback({
                 error: {
                   code: 'UNSUBSCRIBE_ERROR',
-                  message: error.message
+                  message: error == null ? 'Unsubscribe failed' : errorMessage(error)
                 }
               })
             }
@@ -527,6 +462,7 @@ export const SocketIOPlugin = {
         })
 
         socket.on('restore-subscriptions', async (payload, callback) => {
+          callback = typeof callback === 'function' ? callback : null
           try {
             const subscriptions = payload?.subscriptions
             if (!Array.isArray(subscriptions)) {
@@ -561,7 +497,7 @@ export const SocketIOPlugin = {
         socket.on('disconnect', (reason) => {
           log.info(`Socket disconnected: ${socket.id}`, {
             reason,
-            subscriptionCount: socket.data.subscriptions?.size || 0
+            subscriptionCount: socket.data.subscriptions?.length || 0
           })
         })
       })
@@ -570,47 +506,70 @@ export const SocketIOPlugin = {
       return io
     }
 
-    addHook('finish', 'socketio-broadcast', {}, async ({ context }) => {
-      const { method, scopeName, id } = context
-
-      if (!io) {
-        log.debug('Socket.IO broadcast skipped: server not started')
-        return
-      }
-
-      if (!['post', 'put', 'patch', 'delete'].includes(method)) {
-        return
-      }
-
-      if (!id && method !== 'delete') {
-        log.debug('Socket.IO broadcast skipped: missing record id')
-        return
-      }
-
-      if (context.transaction) {
-        if (!pendingBroadcasts.has(context.transaction)) {
-          pendingBroadcasts.set(context.transaction, [])
+    addHook('beforeDataCall', 'socketio-capture-before', {}, async ({ context }) => {
+      pendingChanges.delete(context)
+      if (!io || !['post', 'put', 'patch', 'delete', 'postRelationship', 'deleteRelationship'].includes(context.method)) return
+      const { scopeName, id, transaction } = context
+      const candidates = []
+      const sockets = await io.in(`${scopeName}:updates`).fetchSockets()
+      for (const socket of sockets) {
+        for (const subscription of socket.data.subscriptions || []) {
+          if (subscription.resource !== scopeName) continue
+          const before = context.method !== 'post' && !(context.method === 'put' && context.isCreate) && id != null &&
+            await matchesSubscription({ subscription, scopeName, id, transaction, api, scopes, log })
+          candidates.push({ socketId: socket.id, subscription, before })
         }
-        pendingBroadcasts.get(context.transaction).push({ method, scopeName, id, context })
-        return
       }
+      pendingChanges.set(context, candidates)
+    })
 
-      await performBroadcast({ method, scopeName, id, context, api, io, log })
+    addHook('finish', 'socketio-broadcast', {}, async ({ context }) => {
+      const candidates = pendingChanges.get(context)
+      if (!candidates) return
+      pendingChanges.delete(context)
+      const { scopeName, id, transaction, isCreate } = context
+      if (!io || id == null || id === '') return
+      const method = ['postRelationship', 'deleteRelationship'].includes(context.method) ? 'patch' : context.method
+      const recipients = []
+      for (const { socketId, subscription, before } of candidates) {
+        const after = method !== 'delete' && await matchesSubscription({ subscription, scopeName, id, transaction, api, scopes, log })
+        if (before || after) recipients.push({ socketId, subscriptionId: subscription.id, generation: subscription.generation })
+      }
+      if (recipients.length === 0) return
+      // Capture operation values now; callers may reuse or mutate their context.
+      const change = { method, scopeName, id, isCreate, recipients }
+      if (transaction) {
+        if (!pendingBroadcasts.has(transaction)) pendingBroadcasts.set(transaction, [])
+        pendingBroadcasts.get(transaction).push(change)
+      } else {
+        await performBroadcast({ ...change, api, scopes, io, log })
+      }
     })
 
     addHook('afterCommit', 'socketio-broadcast-deferred', {}, async ({ context }) => {
       if (!context?.transaction) return
       const broadcasts = pendingBroadcasts.get(context.transaction)
       if (!broadcasts) return
-
-      for (const broadcast of broadcasts) {
-        await performBroadcast({ ...broadcast, api, io, log })
-      }
-
       pendingBroadcasts.delete(context.transaction)
+
+      let failed = false
+      let firstError
+      for (const [broadcastIndex, broadcast] of broadcasts.entries()) {
+        try {
+          await performBroadcast({ ...broadcast, api, scopes, io, log })
+        } catch (error) {
+          (context.cleanupErrors ||= []).push({ phase: 'socketioBroadcast', broadcastIndex, error })
+          if (!failed) {
+            failed = true
+            firstError = error
+          }
+        }
+      }
+      if (failed) throw firstError
     })
 
     addHook('afterRollback', 'socketio-cleanup-broadcasts', {}, async ({ context }) => {
+      pendingChanges.delete(context)
       if (!context?.transaction) return
       pendingBroadcasts.delete(context.transaction)
     })

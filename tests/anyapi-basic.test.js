@@ -20,7 +20,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
       await ensureAnyApiSchema(knex)
 
       api = new Api({ name: 'anyapi-test', log: { level: 'warn' } })
-      await api.use(RestApiPlugin, { simplifiedApi: false, simplifiedTransport: false })
+      await api.use(RestApiPlugin, { format: 'jsonapi', })
       await api.use(RestApiAnyapiKnexPlugin, { knex })
 
       await api.addResource('countries', {
@@ -60,7 +60,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
           },
         },
       },
-      simplified: false,
+      format: 'jsonapi',
     }).catch((error) => {
       console.error('POST failed', error)
       throw error
@@ -74,7 +74,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
     assert.equal(stored.string_1, 'Australia')
     assert.equal(stored.string_2, 'AU')
 
-    const fetched = await api.resources.countries.get({ id: result.data.id, simplified: false })
+    const fetched = await api.resources.countries.get({ id: result.data.id, format: 'jsonapi' })
       .catch((error) => {
         console.error('GET failed', error)
         throw error
@@ -97,7 +97,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
       string_2: 'BR',
     }])
 
-    const result = await api.resources.countries.query({ simplified: false })
+    const result = await api.resources.countries.query({ format: 'jsonapi' })
     assert.equal(result.data.length, 2)
     const names = result.data.map((entry) => entry.attributes.name).sort()
     assert.deepEqual(names, ['Brazil', 'Canada'])

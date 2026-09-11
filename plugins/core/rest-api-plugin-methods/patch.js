@@ -1,14 +1,13 @@
-import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { processRelationships } from '../lib/writing/relationship-processor.js'
+import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
+import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
+import { lockRelationshipParent, lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { updateManyToManyRelationship } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
-import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
-import {
-  requireDocumentResourceId,
-  requireExistingResourceId
-} from '../lib/querying-writing/resource-id-normalization.js'
+import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import {
   setupCommonRequest,
+  writePrecondition,
   validateResourceAttributesBeforeWrite,
   validateRelationshipAccess,
   applyFieldSetters,
@@ -19,12 +18,9 @@ import {
 } from './common.js'
 
 /**
- * PATCH
- * Performs a partial update on an existing resource's attributes or relationships.
- * Unlike PUT, PATCH only updates the fields provided, leaving other fields unchanged.
- * This method supports updating both attributes and relationships (1:1 and n:n).
- * For relationships, only the ones explicitly provided will be updated.
- * Just like PUT, it CANNOT have the `included` array in data.
+ * Update only supplied attributes and relationships on an existing resource.
+ * Input normalization, selected write response and transaction ownership use
+ * the same contracts as POST/PUT; omitted fields remain unchanged.
  */
 export default async function patchMethod ({
   params,
@@ -34,8 +30,6 @@ export default async function patchMethod ({
   scope,
   scopes,
   runHooks,
-  apiOptions,
-  pluginOptions,
   scopeOptions,
   scopeName,
   api,
@@ -44,69 +38,21 @@ export default async function patchMethod ({
   context.method = 'patch'
 
   try {
-    const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+    const { schema, versionState } = await setupCommonRequest({
       params,
       context,
       vars,
       scopes,
-      scopeOptions,
       scopeName,
       api,
-      helpers
+      helpers,
+      runHooks
     })
     // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPatch')
 
-    const requestContracts = getRequestContracts({
-      scopeName,
-      schemaInfo: context.schemaInfo,
-      includeDepthLimit: vars.includeDepthLimit,
-      sortableFields: vars.sortableFields
-    })
-    const normalizedPathId = params.id === undefined
-      ? null
-      : requireExistingResourceId(params.id, {
-        scopeOptions,
-        vars,
-        scopeName
-      })
-
-    if (normalizedPathId && !context.inputRecord?.data?.id) {
-      context.inputRecord = {
-        ...context.inputRecord,
-        data: {
-          ...(context.inputRecord?.data || {}),
-          id: normalizedPathId
-        }
-      }
-    }
-
-    context.inputRecord = validateRequestContractOrThrow(
-      requestContracts.patch,
-      context.inputRecord,
-      'PATCH request body is invalid'
-    )
-    const normalizedBodyId = requireDocumentResourceId(context.inputRecord.data.id, {
-      scopeOptions,
-      vars
-    })
-
-    if (normalizedPathId && normalizedPathId !== normalizedBodyId) {
-      throw new RestApiValidationError(
-        `ID mismatch. URL path ID '${normalizedPathId}' does not match request body ID '${normalizedBodyId}'`,
-        {
-          fields: ['data.id'],
-          violations: [{
-            field: 'data.id',
-            rule: 'id_consistency',
-            message: 'Request body ID must match URL path ID when both are provided'
-          }]
-        }
-      )
-    }
-    context.inputRecord.data.id = normalizedBodyId
-    context.id = normalizedPathId || normalizedBodyId
+    validateUpdateRequest({ method: 'patch', params, context, vars, scopeOptions, scopeName })
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access
@@ -115,7 +61,7 @@ export default async function patchMethod ({
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
-    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+    const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(
       scope,
       { context }
     )
@@ -138,7 +84,7 @@ export default async function patchMethod ({
     if (!minimalRecord) {
       throw new RestApiResourceError(
         `Resource not found: ${scopeName}/${context.id}`,
-        ERROR_SUBTYPES.NOT_FOUND
+        { subtype: ERROR_SUBTYPES.NOT_FOUND }
       )
     }
 
@@ -149,6 +95,8 @@ export default async function patchMethod ({
       method: 'patch',
       originalContext: context,
     })
+
+    await params[writePrecondition]?.()
 
     // Merge belongsTo updates into attributes before patching the record
     if (Object.keys(belongsToUpdates).length > 0) {
@@ -161,22 +109,23 @@ export default async function patchMethod ({
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPatch')
 
-    // Apply field setters after validation and before storage
-    if (context.inputRecord?.data?.attributes) {
-      context.inputRecord.data.attributes = await applyFieldSetters(
-        context.inputRecord.data.attributes,
-        context.schemaInfo,
-        context,
-        api,
-        helpers
-      )
+    await lockRelationshipTargets(api, context.transaction, belongsToTargets)
+
+    if (manyToManyRelationships.length || reverseRelationships.length) {
+      await lockRelationshipParent({ context, helpers, scopeName })
     }
+
+    await applyFieldSetters(context, api, helpers)
+    const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName })
+    await applyResourceVersion({ state: versionState, context, helpers, scopeName })
 
     // Call the storage helper - should return the patched record
     await helpers.dataPatch({
       scopeName,
       context
     })
+
+    await invalidateInverseVersions({ state: inverseVersions, context, helpers, api })
 
     await runHooks('afterDataCallPatch')
     await runHooks('afterDataCall')
@@ -201,6 +150,7 @@ export default async function patchMethod ({
       await updateManyToManyRelationship(null, {
         api,
         context: {
+          ...context,
           resourceId: context.id,
           relDef,
           relData,
@@ -209,24 +159,23 @@ export default async function patchMethod ({
       })
     }
 
+    for (const { relDef, relData } of reverseRelationships) {
+      await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData })
+    }
+
     const ret = await handleRecordReturnAfterWrite({
       context,
       scopeName,
       api,
       scopes,
-      schemaStructure,
-      schemaRelationships,
-      scopeOptions,
-      vars,
       runHooks,
-      helpers,
-      log
+      helpers
     })
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     return ret
   } catch (error) {
-    await handleWriteMethodError(error, context, 'PATCH', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'PATCH', scopeName, log)
   }
 }

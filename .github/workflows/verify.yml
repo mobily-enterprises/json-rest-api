@@ -1,0 +1,107 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    name: Library / Node 24
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.6.0'
+          cache: npm
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '3.2.3'
+          bundler: '2.6.9'
+          bundler-cache: true
+          working-directory: docs
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run test:databases:sqlite
+
+  databases:
+    name: Database / Node 24 / ${{ matrix.database }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [pg, mysql2, redis]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.6.0'
+          cache: npm
+      - run: npm ci
+      - name: Extract native server binaries
+        shell: bash
+        run: |
+          sudo apt-get update
+          JRA_TEST_BINARIES=$(mktemp -d)
+          cd "$JRA_TEST_BINARIES"
+          apt-get download postgresql-16 postgresql-client-16 mysql-server-core-8.0 \
+            libmecab2 libevent-pthreads-2.1-7t64 redis-server redis-tools liblzf1 libjemalloc2
+          for package in ./*.deb; do
+            dpkg-deb --extract "$package" "$JRA_TEST_BINARIES/root"
+          done
+          {
+            echo "JSON_REST_API_POSTGRES_BIN=$JRA_TEST_BINARIES/root/usr/lib/postgresql/16/bin"
+            echo "JSON_REST_API_MYSQL_BIN=$JRA_TEST_BINARIES/root/usr/sbin/mysqld"
+            echo "JSON_REST_API_REDIS_BIN=$JRA_TEST_BINARIES/root/usr/bin/redis-server"
+            echo "LD_LIBRARY_PATH=$JRA_TEST_BINARIES/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          } >> "$GITHUB_ENV"
+      - name: Verify both storage modes on the real server
+        env:
+          JRA_TEST_DATABASE: ${{ matrix.database }}
+        run: node scripts/test-databases.js "$JRA_TEST_DATABASE"
+      - name: Verify failure and interruption cleanup on the real server
+        env:
+          JSON_REST_API_RUNNER_DATABASE: ${{ matrix.database }}
+        run: node --test tests/database-runner.test.js
+
+  package:
+    name: Clean package / Node 24
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.6.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:clean-package
+
+  verification:
+    name: Verification
+    if: ${{ always() }}
+    needs: [library, databases, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every library and database job
+        env:
+          LIBRARY_RESULT: ${{ needs.library.result }}
+          DATABASE_RESULT: ${{ needs.databases.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: |
+          test "$LIBRARY_RESULT" = success
+          test "$DATABASE_RESULT" = success
+          test "$PACKAGE_RESULT" = success

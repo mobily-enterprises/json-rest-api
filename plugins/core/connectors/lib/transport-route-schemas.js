@@ -1,6 +1,6 @@
 import { getRequestContracts } from '../../lib/querying-writing/request-contracts.js'
 
-export function buildTransportRouteSchema ({ routeMeta, api }) {
+export function getTransportRouteContract ({ routeMeta, api }) {
   if (!routeMeta) {
     return null
   }
@@ -38,7 +38,10 @@ export function buildTransportRouteSchema ({ routeMeta, api }) {
     return null
   }
 
-  return {
-    body: contract.schema.toJsonSchema({ mode: contract.mode, additionalProperties: false })
-  }
+  return contract
+}
+
+export function buildTransportRouteSchema (options) {
+  const contract = getTransportRouteContract(options)
+  return contract ? { body: contract.schema.toJsonSchema({ mode: contract.mode, additionalProperties: false }) } : null
 }

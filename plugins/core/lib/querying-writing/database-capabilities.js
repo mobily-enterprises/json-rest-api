@@ -1,23 +1,13 @@
+// @ts-check
+
+import { errorMessage } from '../../../../lib/error-context.js'
+import { formatDiagnosticValue } from '../../../../lib/error-formatter.js'
+
 /**
  * Parses database version string to comparable format
  *
  * @param {string} versionString - Raw version string from database
- * @returns {Object|null} Parsed version with major, minor, patch
- *
- * @example
- * // Input: MySQL version
- * parseVersion("8.0.33");
- * // Output: { major: 8, minor: 0, patch: 33 }
- *
- * @example
- * // Input: PostgreSQL version with extra info
- * parseVersion("14.5 (Ubuntu 14.5-1.pgdg20.04+1)");
- * // Output: { major: 14, minor: 5, patch: 0 }
- *
- * @example
- * // Input: MariaDB version
- * parseVersion("10.6.12-MariaDB");
- * // Output: { major: 10, minor: 6, patch: 12 }
+ * @returns {{major: number, minor: number, patch: number}|null} Parsed version
  */
 const parseVersion = (versionString) => {
   // MySQL: "8.0.33"
@@ -29,237 +19,173 @@ const parseVersion = (versionString) => {
   if (!match) return null
 
   return {
-    major: parseInt(match[1]),
-    minor: parseInt(match[2]),
-    patch: match[3] ? parseInt(match[3]) : 0
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: match[3] ? Number(match[3]) : 0
   }
 }
 
 /**
  * Checks if the database supports window functions based on version
  *
- * @param {Object} knex - Knex instance
+ * @param {import('../storage/storage-types.js').StorageDatabase} knex - Knex instance
+ * @param {{ version: string }} [databaseInfo] - Already fetched version
+ * @param {import('../storage/storage-types.js').CapabilityLogger} [log] - Configured diagnostic sink
  * @returns {Promise<boolean>} True if window functions are supported
- *
- * @example
- * // Input: MySQL 8.0.33
- * const supports = await supportsWindowFunctions(knex);
- * // Output: true (MySQL 8.0+ supports window functions)
- *
- * @example
- * // Input: MySQL 5.7.42
- * const supports = await supportsWindowFunctions(knex);
- * // Output: false (MySQL < 8.0 doesn't support window functions)
- *
- * @example
- * // Input: PostgreSQL (any modern version)
- * const supports = await supportsWindowFunctions(knex);
- * // Output: true (PostgreSQL 8.4+ supports window functions)
- *
- * @example
- * // Input: SQLite 3.24.0
- * const supports = await supportsWindowFunctions(knex);
- * // Output: false (SQLite needs 3.25.0+)
- *
- * @description
- * Used by:
- * - buildWindowedIncludeSubquery to validate before using window functions
- * - rest-api-knex-plugin to determine query strategies
- *
- * Purpose:
- * - Prevents runtime errors by checking feature support
- * - Enables fallback strategies for older databases
- * - Provides clear error messages about version requirements
- *
- * Data flow:
- * 1. Identifies database client type from Knex config
- * 2. For version-dependent databases, queries version string
- * 3. Parses version and compares against known thresholds
- * 4. Returns boolean indicating support
- * 5. Falls back to false if version can't be determined
- *
- * Version requirements:
- * - PostgreSQL: 8.4+ (all modern versions)
- * - MySQL: 8.0+
- * - MariaDB: 10.2+
- * - SQLite: 3.25.0+
- * - SQL Server: 2005+ (all versions)
- * - Oracle: Supported (long-standing feature)
  */
-export const supportsWindowFunctions = async (knex) => {
-  try {
-    const client = knex.client.config.client
+export const supportsWindowFunctions = async (knex, databaseInfo, log) => {
+  const client = knex.client.config.client
+  if (['pg', 'postgresql', 'mssql', 'oracledb'].includes(client)) return true
+  if (!['mysql', 'mysql2', 'sqlite3', 'better-sqlite3'].includes(client) && !client.includes('maria')) return false
 
-    let versionString
+  const info = databaseInfo || await getDatabaseInfo(knex, log)
+  const parsed = typeof info.version === 'string' ? parseVersion(info.version) : null
+  if (!parsed) return false
+  if (['mysql', 'mysql2'].includes(client)) return parsed.major >= 8
+  if (client.includes('sqlite')) return parsed.major > 3 || (parsed.major === 3 && parsed.minor >= 25)
+  return info.version.toLowerCase().includes('mariadb') &&
+    (parsed.major > 10 || (parsed.major === 10 && parsed.minor >= 2))
+}
 
-    switch (client) {
-      case 'pg':
-      case 'postgresql':
-        // PostgreSQL 8.4+ supports window functions (all modern versions)
-        return true
+// Built-in rules; custom field declarations still undergo their own validation.
+/** @type {import('../storage/storage-types.js').SerializationCapabilities} */
+export const SERIALIZATION_CAPABILITIES = Object.freeze({
+  customSerializerResult: 'synchronous',
+  structuredTypes: Object.freeze(['object', 'array']),
+  structuredEncoding: 'json',
+  wholeDocumentPredicates: false
+})
 
-      case 'mysql':
-      case 'mysql2':
-        try {
-          const row = await knex.first(knex.raw('VERSION() as version'))
-          const mysqlVersion = parseVersion(row.version)
+/** @type {import('../storage/storage-types.js').RelationshipCapabilities} */
+export const RELATIONSHIP_CAPABILITIES = Object.freeze({
+  attributeKinds: Object.freeze(['belongsTo', 'belongsToPolymorphic']),
+  declaredCardinalities: Object.freeze({ hasOne: 'one', hasMany: 'many', manyToMany: 'many' })
+})
 
-          return mysqlVersion && mysqlVersion.major >= 8
-        } catch (dbError) {
-          console.warn(`[supportsWindowFunctions] Failed to get MySQL version: ${dbError.message}`)
-          return false
-        }
+/**
+ * Both storage plugins share one version observation during initialization.
+ * @param {import('../storage/storage-types.js').StorageDatabase} knex
+ * @param {import('../storage/storage-types.js').CapabilityLogger} [log]
+ * @returns {Promise<import('../storage/storage-types.js').DatabaseCapabilities>}
+ */
+export const getDatabaseCapabilities = async (knex, log) => {
+  const dbInfo = await getDatabaseInfo(knex, log)
+  return {
+    dbInfo,
+    windowFunctions: await supportsWindowFunctions(knex, dbInfo),
+    insertResult: getInsertResultMode(knex.client.config.client),
+    serialization: SERIALIZATION_CAPABILITIES,
+    relationships: RELATIONSHIP_CAPABILITIES,
+    temporal: {
+      native: getTemporalStorageCapabilities(knex.client.config.client),
+      text: getTemporalStorageCapabilities(knex.client.config.client, { textStorage: true })
+    },
+    schema: getSchemaCapabilities(knex.client.config.client)
+  }
+}
 
-      case 'sqlite3':
-      case 'better-sqlite3':
-        try {
-          versionString = await knex.raw('SELECT sqlite_version() as version')
-          const sqliteVersion = versionString[0].version
-          // SQLite 3.25.0+ supports window functions
-          const parsed = parseVersion(sqliteVersion)
-          return parsed && (parsed.major > 3 || (parsed.major === 3 && parsed.minor >= 25))
-        } catch (dbError) {
-          console.warn(`[supportsWindowFunctions] Failed to get SQLite version: ${dbError.message}`)
-          return false
-        }
+/**
+ * @param {unknown} dialect
+ * @returns {import('../storage/storage-types.js').InsertResultMode}
+ */
+export const getInsertResultMode = dialect => {
+  const client = String(dialect || '').toLowerCase()
+  if (['mysql', 'mysql2'].includes(client)) return 'insert-id'
+  if (['pg', 'postgresql', 'sqlite3', 'better-sqlite3'].includes(client)) return 'rows'
+  return 'driver-defined'
+}
 
-      case 'mssql':
-        // SQL Server 2005+ supports window functions
-        return true
+/**
+ * Choose the query form; each caller must still validate its driver's result.
+ * @param {import('knex').Knex.QueryBuilder<import('../storage/storage-types.js').StorageRow, unknown>} query
+ * @param {string|string[]|Record<string, string|import('knex').Knex.Raw<unknown>>} columns
+ * @returns {import('knex').Knex.QueryBuilder<import('../storage/storage-types.js').StorageRow, unknown>}
+ */
+export const applyInsertReturning = (query, columns) => {
+  if (getInsertResultMode(query.client.config.client) === 'insert-id') return query
+  // Knex supports alias dictionaries at runtime; its declarations omit that overload.
+  const returning = /** @type {(columns: string|string[]|Record<string, string|import('knex').Knex.Raw<unknown>>) => typeof query} */ (query.returning)
+  return returning.call(query, columns)
+}
 
-      case 'oracledb':
-        // Oracle has supported window functions for a long time
-        return true
+/**
+ * Built-in value conversion limits; schemas/custom serializers may differ.
+ * @param {unknown} dialect
+ * @param {{textStorage?: boolean}} [options]
+ * @returns {import('../storage/storage-types.js').TemporalStorageCapabilities}
+ */
+export const getTemporalStorageCapabilities = (dialect, { textStorage = false } = {}) => {
+  const client = String(dialect || '').toLowerCase()
+  const mysql = ['mysql', 'mysql2'].includes(client)
+  return {
+    dateMinYear: !textStorage && mysql ? 1000 : 0,
+    dateTimeMinYear: mysql ? 1000 : 0,
+    maxYear: 9999,
+    dateTimeFractionDigits: 3,
+    timeFractionDigits: !textStorage && (mysql || ['pg', 'postgresql'].includes(client)) ? 6 : null
+  }
+}
 
-      default:
-        // For MariaDB, we need to check if it's actually MariaDB or MySQL
-        if (client.includes('maria')) {
-          try {
-            versionString = await knex.raw('SELECT VERSION() as version')
-            const version = versionString[0].version.toLowerCase()
-            if (version.includes('mariadb')) {
-              const mariaVersion = parseVersion(version)
-              // MariaDB 10.2+ supports window functions
-              return mariaVersion && (mariaVersion.major > 10 ||
-                (mariaVersion.major === 10 && mariaVersion.minor >= 2))
-            }
-          } catch (dbError) {
-            console.warn(`[supportsWindowFunctions] Failed to get MariaDB version: ${dbError.message}`)
-            return false
-          }
-        }
-        return false
-    }
-  } catch (error) {
-    // Log error with context
-    console.error('[supportsWindowFunctions] Unexpected error checking database capabilities:', {
-      error: error.message,
-      stack: error.stack,
-      client: knex?.client?.config?.client || 'unknown'
-    })
-    // If we can't determine, assume no support for safety
-    return false
+/**
+ * Describe the existing field-alteration runner, not all database DDL.
+ * @param {unknown} dialect
+ * @returns {import('../storage/storage-types.js').SchemaCapabilities}
+ */
+export const getSchemaCapabilities = dialect => {
+  const client = String(dialect || '').toLowerCase()
+  const mysql = /mysql/.test(client)
+  const sqlite = client.includes('sqlite')
+  const postgres = ['pg', 'postgresql'].includes(client)
+  return {
+    recognizedDialect: mysql || sqlite || postgres,
+    fieldAlteration: mysql ? 'standalone' : sqlite ? 'sqlite-rebuild' : 'transaction',
+    callerFieldAlteration: mysql ? 'forbidden' : sqlite ? 'foreign-keys-off' : 'savepoint',
+    temporalColumnFractionDigits: mysql || postgres ? 6 : null,
+    setValues: mysql
   }
 }
 
 /**
  * Gets database info for error messages and capability checks
  *
- * @param {Object} knex - Knex instance
- * @returns {Promise<Object>} Database info with client and version
- *
- * @example
- * // Input: MySQL connection
- * const info = await getDatabaseInfo(knex);
- * // Output: { client: 'MySQL', version: '8.0.33' }
- *
- * @example
- * // Input: PostgreSQL connection
- * const info = await getDatabaseInfo(knex);
- * // Output: {
- * //   client: 'PostgreSQL',
- * //   version: 'PostgreSQL 14.5 (Ubuntu 14.5-1.pgdg20.04+1)'
- * // }
- *
- * @example
- * // Input: Connection error case
- * const info = await getDatabaseInfo(knexWithError);
- * // Output: {
- * //   client: 'MySQL',
- * //   version: 'unknown',
- * //   error: 'Connection refused'
- * // }
- *
- * @description
- * Used by:
- * - Error messages to show which database/version lacks a feature
- * - Capability detection for feature flags
- * - Debugging connection issues
- *
- * Purpose:
- * - Provides human-readable database identification
- * - Helps users understand version requirements
- * - Enables detailed error messages
- * - Gracefully handles query failures
- *
- * Data flow:
- * 1. Identifies client type from Knex config
- * 2. Runs version query specific to each database
- * 3. Returns formatted info object
- * 4. Includes error details if version query fails
- * 5. Falls back to 'unknown' for unsupported databases
+ * @param {import('../storage/storage-types.js').StorageDatabase} knex - Knex instance
+ * @param {import('../storage/storage-types.js').CapabilityLogger} [log] - Configured diagnostic sink
+ * @returns {Promise<import('../storage/storage-types.js').DatabaseInfo>} Database info with client and version
  */
-export const getDatabaseInfo = async (knex) => {
+export const getDatabaseInfo = async (knex, log) => {
+  const client = knex.client.config.client
+  let name = client
+  if (['mysql', 'mysql2'].includes(client)) name = 'MySQL'
+  else if (['sqlite3', 'better-sqlite3'].includes(client)) name = 'SQLite'
+  else if (['pg', 'postgresql'].includes(client)) name = 'PostgreSQL'
   try {
-    const client = knex.client.config.client
-
-    let versionString
-    switch (client) {
-      case 'mysql':
-      case 'mysql2':
-        try {
-          const row = await knex.first(knex.raw('VERSION() as version'))
-          return { client: 'MySQL', version: row.version }
-        } catch (dbError) {
-          console.warn(`[getDatabaseInfo] Failed to get MySQL version: ${dbError.message}`)
-          return { client: 'MySQL', version: 'unknown', error: dbError.message }
-        }
-
-      case 'sqlite3':
-      case 'better-sqlite3':
-        try {
-          versionString = await knex.raw('SELECT sqlite_version() as version')
-          return { client: 'SQLite', version: versionString[0].version }
-        } catch (dbError) {
-          console.warn(`[getDatabaseInfo] Failed to get SQLite version: ${dbError.message}`)
-          return { client: 'SQLite', version: 'unknown', error: dbError.message }
-        }
-
-      case 'pg':
-      case 'postgresql':
-        try {
-          versionString = await knex.raw('SELECT version() as version')
-          return { client: 'PostgreSQL', version: versionString.rows[0].version }
-        } catch (dbError) {
-          console.warn(`[getDatabaseInfo] Failed to get PostgreSQL version: ${dbError.message}`)
-          return { client: 'PostgreSQL', version: 'unknown', error: dbError.message }
-        }
-
+    /** @type {unknown} */
+    let version
+    switch (name) {
+      case 'MySQL': {
+        const row = await knex.first(knex.raw('VERSION() as version'))
+        version = row && 'version' in row ? row.version : undefined
+        break
+      }
+      case 'SQLite':
+        version = (await knex.raw('SELECT sqlite_version() as version'))?.[0]?.version
+        break
+      case 'PostgreSQL':
+        version = (await knex.raw('SELECT version() as version'))?.rows?.[0]?.version
+        break
       default:
-        return { client, version: 'unknown' }
+        if (!client.includes('maria')) return { client: name, version: 'unknown' }
+        version = (await knex.raw('SELECT VERSION() as version'))?.[0]?.version
     }
+    if (typeof version !== 'string') throw new Error('Database version query did not return a string')
+    return { client: name, version }
   } catch (error) {
-    // Log unexpected errors
-    console.error('[getDatabaseInfo] Unexpected error getting database info:', {
-      error: error.message,
-      stack: error.stack,
-      client: knex?.client?.config?.client || 'unknown'
-    })
-
-    return {
-      client: knex?.client?.config?.client || 'unknown',
-      version: 'unknown',
-      error: error.message
-    }
+    // Capability observation is advisory; a failing diagnostic must not replace it.
+    try {
+      await log?.warn('Database version observation failed', formatDiagnosticValue({
+        operation: 'database-capabilities', phase: 'version-observation', backend: client, error
+      }))
+    } catch {}
+    return { client: name, version: 'unknown', error: errorMessage(error) }
   }
 }

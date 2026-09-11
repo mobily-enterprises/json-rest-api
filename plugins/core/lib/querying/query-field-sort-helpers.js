@@ -1,11 +1,33 @@
+import { assertScalarQueryField } from '../querying-writing/field-utils.js'
 import { normalizeStableSort, parseSortEntry } from './sort-helpers.js'
 import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
-import { createSchema } from 'json-rest-schema'
-import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+import { createSchemaFactory } from 'json-rest-schema'
+import { normalizeDateValue } from '../querying-writing/database-value-normalizers.js'
 
-export const validateCursorValues = (descriptors, cursorValues, parameter) => {
+const cursorContractCache = new WeakMap()
+
+function getCursorContract (schema, definition) {
+  let cache = cursorContractCache.get(schema)
+  if (!cache) {
+    cache = {
+      factory: createSchemaFactory({ types: schema.types, validators: schema.validators, installCore: false }),
+      contracts: new Map()
+    }
+    cursorContractCache.set(schema, cache)
+  }
+  // Unusual/invalid declarations retain schema validation without lossy JSON keys.
+  if (typeof definition.type !== 'string' ||
+      (definition.temporalPrecision !== undefined && !Number.isInteger(definition.temporalPrecision))) {
+    return cache.factory({ value: definition })
+  }
+  const key = JSON.stringify(definition)
+  if (!cache.contracts.has(key)) cache.contracts.set(key, cache.factory({ value: definition }))
+  return cache.contracts.get(key)
+}
+
+export const validateCursorValues = (descriptors, cursorValues, parameter, schema) => {
   const validated = Object.create(null)
-  for (const { field, definition = {}, isRelationship } of descriptors) {
+  for (const { field, definition = {}, isRelationship, queryFieldRuntime } of descriptors) {
     if (!Object.hasOwn(cursorValues, field)) continue
     const value = cursorValues[field]
     // Public resource IDs may be opaque strings, even when the storage schema
@@ -17,27 +39,44 @@ export const validateCursorValues = (descriptors, cursorValues, parameter) => {
       validated[field] = value
       continue
     }
-    const contract = createSchema({
-      value: {
-        type,
-        noTrim: true,
-        nullable: field !== 'id',
-        ...(definition?.temporalPrecision !== undefined
-          ? { temporalPrecision: definition.temporalPrecision }
-          : {})
-      }
+    const contract = getCursorContract(schema, {
+      type,
+      noTrim: true,
+      nullable: field !== 'id',
+      ...(definition?.temporalPrecision !== undefined
+        ? { temporalPrecision: definition.temporalPrecision }
+        : {})
     })
-    const { validatedObject, errors } = contract.patch({ value })
-    if (Object.keys(errors).length > 0 || (field === 'id' && !String(value ?? '').trim())) {
+    let validationValue = value
+    let invalidStorageValue = false
+    const storedTemporal = Boolean(queryFieldRuntime || definition.storage?.serialize) && ['date', 'dateTime', 'time'].includes(type)
+    if (storedTemporal && value !== null) {
+      try {
+        validationValue = normalizeDateValue(value, type, { temporalPrecision: definition.temporalPrecision, fieldName: field, source: 'cursor' })
+      } catch {
+        invalidStorageValue = true
+      }
+    }
+    const { validatedObject, errors } = contract.patch({ value: validationValue })
+    if (invalidStorageValue || Object.keys(errors).length > 0 || (field === 'id' && !String(value ?? '').trim())) {
       const path = `page.${parameter}`
       throw new RestApiValidationError(`Invalid cursor value for sort field '${field}'.`, {
         fields: [path],
         violations: [{ field: path, rule: 'invalid_cursor_value', message: `Invalid ${type} value for '${field}'.` }]
       })
     }
-    validated[field] = validatedObject.value
+    // Preserve temporal SQL spelling, but bind epochs and scalar numbers as
+    // numbers: SQLite expressions have no column affinity to coerce strings.
+    validated[field] = storedTemporal
+      ? (typeof value === 'string' && /^-?\d+$/.test(value) ? Number(value) : value)
+      : validatedObject.value
   }
   return validated
+}
+
+export const resolveSortField = (field, schemaInfo = {}) => {
+  if (field === 'id' || Object.hasOwn(schemaInfo.schemaStructure || {}, field) || Object.hasOwn(schemaInfo.queryFields || {}, field)) return field
+  return schemaInfo.searchSchemaStructure?.[field]?.actualField || field
 }
 
 export const getEffectiveSortableFields = (vars = {}) => {
@@ -50,42 +89,87 @@ export const getEffectiveSortableFields = (vars = {}) => {
       }), ...Object.entries(vars.schemaInfo?.searchSchemaStructure || {})
         .filter(([, definition]) => definition.isRelationship && schema[definition.actualField]?.hidden !== true)
         .map(([field]) => field)]
-  const queryFieldSortableFields = Object.entries(vars.queryFields || {})
+  const queryFieldSortableFields = Object.entries(vars.schemaInfo?.queryFields || {})
     .filter(([, fieldDef]) => fieldDef?.sortable === true)
     .map(([fieldName]) => fieldName)
 
-  return Array.from(new Set([...baseSortableFields, ...queryFieldSortableFields]))
+  return Array.from(new Set([...baseSortableFields, ...queryFieldSortableFields])).filter(field => {
+    const actualField = resolveSortField(field, vars.schemaInfo)
+    const queryFields = vars.schemaInfo?.queryFields || {}
+    const definition = Object.hasOwn(queryFields, actualField) ? queryFields[actualField] : schema[actualField]
+    return definition?.hidden !== true && !['object', 'array'].includes(definition?.type)
+  })
 }
 
-export const buildEffectiveSortList = (sort, { defaultSort, idField = 'id' } = {}) => {
-  let sortList = Array.isArray(sort) ? [...sort] : (sort ? [sort] : [])
-
-  if (sortList.length === 0 && defaultSort) {
-    if (Array.isArray(defaultSort)) {
-      sortList = [...defaultSort]
-    } else if (typeof defaultSort === 'string') {
-      sortList = [defaultSort]
-    } else if (typeof defaultSort === 'object') {
-      const field = defaultSort.field || defaultSort.column || idField
-      const direction = (defaultSort.direction || '').toLowerCase() === 'desc' ? '-' : ''
-      sortList = [`${direction}${field}`]
-    }
+export const buildEffectiveSortList = (sort, { defaultSort, idField = 'id', schemaInfo } = {}) => {
+  const toList = (value, option) => {
+    if (value === undefined || value === null) return []
+    const list = Array.isArray(value) ? [...value] : [value]
+    if (list.some(entry => typeof entry !== 'string')) throw new Error(`${option} must be a string or an array of strings, such as ['-name', 'id'].`)
+    return list
   }
+  let sortList = toList(sort, 'sort')
+  if (sortList.length === 0) sortList = toList(defaultSort, 'defaultSort')
 
-  return normalizeStableSort(sortList.length > 0 ? sortList : [idField], { idField })
+  const normalized = normalizeStableSort(sortList.length > 0 ? sortList : [idField], { idField })
+  for (const entry of normalized) {
+    const { field } = parseSortEntry(entry)
+    const actualField = resolveSortField(field, schemaInfo)
+    const queryFields = schemaInfo?.queryFields || {}
+    const definition = Object.hasOwn(queryFields, actualField) ? queryFields[actualField] : schemaInfo?.schemaStructure?.[actualField]
+    if (definition?.hidden === true) {
+      throw new RestApiValidationError(`Hidden field '${field}' cannot be used for sorting.`, {
+        fields: [field],
+        violations: [{ field, rule: 'hidden_sort', message: 'Sort fields must be publicly readable because their values may appear in cursors.' }]
+      })
+    }
+    assertScalarQueryField(definition, field, 'sort')
+  }
+  return normalized
 }
 
 export const applyQueryFieldOrder = (query, queryFieldRuntime, direction, nulls = 'last') => {
+  if (['pg', 'postgresql'].includes(query.client.config.client)) {
+    // The selected alias also avoids different bound parameter numbers under DISTINCT.
+    query.orderBy(queryFieldRuntime.fieldName, direction, nulls)
+    return
+  }
+  if (['better-sqlite3', 'sqlite3'].includes(query.client.config.client)) {
+    const order = String(direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+    query.orderByRaw(`(${queryFieldRuntime.sql}) ${order} NULLS ${nulls === 'last' ? 'LAST' : 'FIRST'}`, queryFieldRuntime.bindings)
+    return
+  }
   query.orderByRaw(`(${queryFieldRuntime.sql}) IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, queryFieldRuntime.bindings)
   query.orderByRaw(`(${queryFieldRuntime.sql}) ${direction}`, queryFieldRuntime.bindings)
 }
 
+export const applyColumnOrder = (query, column, direction, nulls = 'last') => {
+  if (['pg', 'postgresql'].includes(query.client.config.client)) {
+    query.orderBy(column, direction, nulls)
+  } else if (['better-sqlite3', 'sqlite3'].includes(query.client.config.client)) {
+    // Native null placement lets SQLite use the column's ordering index.
+    const order = String(direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+    query.orderByRaw(`?? ${order} NULLS ${nulls === 'last' ? 'LAST' : 'FIRST'}`, [column])
+  } else {
+    query.orderByRaw(`?? IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, [column])
+    query.orderBy(column, direction)
+  }
+}
+
+// Both storage modes use the same cursor direction and null placement.
+export const applySortDescriptorOrder = (query, { column, queryFieldRuntime, direction }, { before = false } = {}) => {
+  const ascending = String(direction).toLowerCase() === 'asc'
+  const queryDirection = (before ? !ascending : ascending) ? 'asc' : 'desc'
+  const nulls = before ? 'first' : 'last'
+  if (queryFieldRuntime) {
+    applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), nulls)
+  } else {
+    applyColumnOrder(query, column, queryDirection, nulls)
+  }
+}
+
 export const applyQueryFieldPredicate = (builder, queryFieldRuntime, operator, value) => {
-  const definition = queryFieldRuntime.definition || {}
-  const normalizedValue = normalizeValueForDatabaseStorage(value, definition.type, {
-    temporalPrecision: definition.temporalPrecision
-  })
-  builder.whereRaw(`(${queryFieldRuntime.sql}) ${operator} ?`, [...queryFieldRuntime.bindings, normalizedValue])
+  builder.whereRaw(`(${queryFieldRuntime.sql}) ${operator} ?`, [...queryFieldRuntime.bindings, value])
 }
 
 export const applySortDescriptorPredicate = (builder, descriptor, operator, value, applyPlainPredicate, includeNull = false) => {
@@ -105,6 +189,9 @@ export const applySortDescriptorPredicate = (builder, descriptor, operator, valu
       return builder.whereRaw(`(${descriptor.queryFieldRuntime.sql}) IS ${isNotNull ? 'NOT ' : ''}NULL`, descriptor.queryFieldRuntime.bindings)
     }
     return isNotNull ? builder.whereNotNull(descriptor.column) : builder.whereNull(descriptor.column)
+  }
+  if (descriptor.definition?.storage?.serialize) {
+    return builder.where(descriptor.column, operator, value)
   }
   if (descriptor?.queryFieldRuntime) {
     return applyQueryFieldPredicate(builder, descriptor.queryFieldRuntime, operator, value)

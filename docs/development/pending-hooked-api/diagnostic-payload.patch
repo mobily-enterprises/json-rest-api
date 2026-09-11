@@ -1,0 +1,29 @@
+--- a/index.js
++++ b/index.js
+@@ -526,7 +526,7 @@
+ 
+                 // Disabled due to circular reference issues when params contain non-serializable objects
+                 // console.log(`🚀 [HOOKED-API-PROXY] Scope method '${prop}' called on '${scopeName}' with params:`, JSON.stringify(params, null, 2));
+-                this._logger.debug(`Scope method '${prop}' called on '${scopeName}'`, { params })
++                this._logger.debug(`Scope method '${prop}' called on '${scopeName}'`)
+ 
+                 /**
+                  * Create a fresh context object for this method call
+@@ -684,7 +684,7 @@
+             const startTime = Date.now()
+             const handler = target._apiMethods.get(prop)
+ 
+-            target._logger.debug(`API method '${prop}' called`, { params })
++            target._logger.debug(`API method '${prop}' called`)
+ 
+             /**
+              * Create a fresh context for this API method call
+@@ -2104,7 +2104,7 @@
+       }
+     }
+ 
+-    this._logger.info(`Installing plugin '${plugin.name}'`, { options })
++    this._logger.info(`Installing plugin '${plugin.name}'`)
+     const startTime = Date.now()
+ 
+     try {

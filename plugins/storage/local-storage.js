@@ -4,7 +4,7 @@
  * Production-ready local storage with secure filename handling
  */
 
-import { promises as fs } from 'fs'
+import { createReadStream, promises as fs } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
@@ -147,25 +147,16 @@ export class LocalStorage {
    */
   async ensureUnique (filename) {
     const filepath = this.resolveStoragePath(filename)
-
-    try {
-      await fs.access(filepath)
-      // File exists, generate unique name
-      const ext = path.extname(filename)
-      const base = path.basename(filename, ext)
-      let counter = 1
-      let newFilename
-
-      do {
-        newFilename = `${base}_${counter}${ext}`
-        counter++
-      } while (await this.fileExists(this.resolveStoragePath(newFilename)))
-
-      return newFilename
-    } catch (error) {
-      // File doesn't exist, name is unique
-      return filename
-    }
+    if (!await this.fileExists(filepath)) return filename
+    const ext = path.extname(filename)
+    const base = path.basename(filename, ext)
+    let counter = 1
+    let newFilename
+    do {
+      newFilename = `${base}_${counter}${ext}`
+      counter++
+    } while (await this.fileExists(this.resolveStoragePath(newFilename)))
+    return newFilename
   }
 
   /**
@@ -173,9 +164,10 @@ export class LocalStorage {
    */
   async fileExists (filepath) {
     try {
-      await fs.access(filepath)
+      await fs.lstat(filepath)
       return true
-    } catch {
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
       return false
     }
   }
@@ -205,24 +197,36 @@ export class LocalStorage {
    * Upload file with secure filename
    */
   async upload (file) {
+    if (!file.data && !file.filepath) throw new Error('File has no data or filepath')
     // Ensure directory exists
     await fs.mkdir(this.directory, { recursive: true })
 
-    // Generate secure filename
-    const filename = await this.generateFilename(file)
-    const filepath = this.resolveStoragePath(filename)
-
-    // Write file
-    if (file.data) {
-      await fs.writeFile(filepath, file.data)
-    } else if (file.filepath) {
-      await fs.rename(file.filepath, filepath)
-    } else {
-      throw new Error('File has no data or filepath')
+    const requested = await this.generateFilename(file)
+    let filename = requested
+    for (;;) {
+      const filepath = this.resolveStoragePath(filename)
+      let handle
+      try {
+        handle = await fs.open(filepath, 'wx')
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+        filename = await this.ensureUnique(requested)
+        continue
+      }
+      try {
+        await handle.writeFile(file.data || createReadStream(file.filepath))
+        await handle.close()
+        if (!file.data) await fs.unlink(file.filepath)
+        return `${this.fileBaseUrl}/${filename}`
+      } catch (error) {
+        // Only this upload's exclusively reserved destination may be removed.
+        const cleanupErrors = []
+        try { await handle.close() } catch (cleanupError) { cleanupErrors.push(cleanupError) }
+        try { await fs.unlink(filepath) } catch (cleanupError) { if (cleanupError.code !== 'ENOENT') cleanupErrors.push(cleanupError) }
+        if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors], 'Upload failed and its destination could not be fully cleaned up', { cause: error })
+        throw error
+      }
     }
-
-    // Return public URL
-    return `${this.fileBaseUrl}/${filename}`
   }
 
   /**

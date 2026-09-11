@@ -1,14 +1,13 @@
-import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { processRelationships } from '../lib/writing/relationship-processor.js'
+import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
+import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
+import { lockRelationshipParent, lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { updateManyToManyRelationship, createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
-import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
-import {
-  requireDocumentResourceId,
-  requireExistingResourceId
-} from '../lib/querying-writing/resource-id-normalization.js'
+import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import {
   setupCommonRequest,
+  writePrecondition,
   validateCompleteReplacePayload,
   validateResourceAttributesBeforeWrite,
   validateRelationshipAccess,
@@ -20,13 +19,10 @@ import {
 } from './common.js'
 
 /**
- * PUT
- * Updates an existing top-level resource by completely replacing it.
- * This method supports updating both attributes and relationships (1:1 and n:n).
- * Existing persisted values cannot be silently dropped: if a stored attribute or belongsTo
- * relationship already has a value, PUT must include it explicitly. Relationship collections
- * still follow replacement semantics when a relationships object is provided.
- * This method does NOT support creating new related resources via an `included` array.
+ * Create or replace a resource at the selected ID. Replacement requires existing
+ * stored values to be explicitly represented; relationship collections follow
+ * replacement semantics when a relationships object is supplied. This operation
+ * links existing related resources rather than creating an included graph.
  */
 export default async function putMethod ({
   params,
@@ -36,8 +32,6 @@ export default async function putMethod ({
   scope,
   scopes,
   runHooks,
-  apiOptions,
-  pluginOptions,
   scopeOptions,
   scopeName,
   api,
@@ -46,69 +40,21 @@ export default async function putMethod ({
   context.method = 'put'
 
   try {
-    const { schema, schemaStructure, schemaRelationships } = await setupCommonRequest({
+    const { schema, schemaStructure, schemaRelationships, versionState } = await setupCommonRequest({
       params,
       context,
       vars,
       scopes,
-      scopeOptions,
       scopeName,
       api,
-      helpers
+      helpers,
+      runHooks
     })
     // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPut')
 
-    const requestContracts = getRequestContracts({
-      scopeName,
-      schemaInfo: context.schemaInfo,
-      includeDepthLimit: vars.includeDepthLimit,
-      sortableFields: vars.sortableFields
-    })
-    const normalizedPathId = params.id === undefined
-      ? null
-      : requireExistingResourceId(params.id, {
-        scopeOptions,
-        vars,
-        scopeName
-      })
-
-    if (normalizedPathId && !context.inputRecord?.data?.id) {
-      context.inputRecord = {
-        ...context.inputRecord,
-        data: {
-          ...(context.inputRecord?.data || {}),
-          id: normalizedPathId
-        }
-      }
-    }
-
-    context.inputRecord = validateRequestContractOrThrow(
-      requestContracts.put,
-      context.inputRecord,
-      'PUT request body is invalid'
-    )
-    const normalizedBodyId = requireDocumentResourceId(context.inputRecord.data.id, {
-      scopeOptions,
-      vars
-    })
-
-    if (normalizedPathId && normalizedPathId !== normalizedBodyId) {
-      throw new RestApiValidationError(
-        `ID mismatch. URL path ID '${normalizedPathId}' does not match request body ID '${normalizedBodyId}'`,
-        {
-          fields: ['data.id'],
-          violations: [{
-            field: 'data.id',
-            rule: 'id_consistency',
-            message: 'Request body ID must match URL path ID when both are provided'
-          }]
-        }
-      )
-    }
-    context.inputRecord.data.id = normalizedBodyId
-    context.id = normalizedPathId || normalizedBodyId
+    validateUpdateRequest({ method: 'put', params, context, vars, scopeOptions, scopeName })
 
     // Validate that user has read access to all related resources
     // This ensures users can only create relationships to resources they can access
@@ -117,7 +63,7 @@ export default async function putMethod ({
     // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
     // Example: relationships.author -> author_id: '123' for storage
     // Example: relationships.tags -> array of pivot records to create later
-    const { belongsToUpdates, manyToManyRelationships } = processRelationships(
+    const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(
       scope,
       { context }
     )
@@ -142,7 +88,7 @@ export default async function putMethod ({
       if (!minimalRecord) {
         throw new RestApiResourceError(
           `Resource not found: ${scopeName}/${context.id}`,
-          ERROR_SUBTYPES.NOT_FOUND
+          { subtype: ERROR_SUBTYPES.NOT_FOUND }
         )
       }
 
@@ -196,6 +142,11 @@ export default async function putMethod ({
 
     // Only null out missing relationships if a relationships object was provided
     if (hasRelationshipsObject) {
+      for (const [relName, relDef] of Object.entries(schemaRelationships || {})) {
+        if (!providedRelationships.has(relName) && (relDef.type === 'hasOne' || relDef.type === 'hasMany')) {
+          reverseRelationships.push({ relName, relDef, relData: relDef.type === 'hasOne' ? null : [] })
+        }
+      }
       for (const [relName, relInfo] of Object.entries(allRelationships)) {
         if (!providedRelationships.has(relName)) {
           if (relInfo.type === 'belongsTo') {
@@ -226,25 +177,28 @@ export default async function putMethod ({
       originalContext: context,
     })
 
+    await params[writePrecondition]?.()
+
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPut')
 
-    // Apply field setters after validation and before storage
-    if (context.inputRecord?.data?.attributes) {
-      context.inputRecord.data.attributes = await applyFieldSetters(
-        context.inputRecord.data.attributes,
-        context.schemaInfo,
-        context,
-        api,
-        helpers
-      )
+    await lockRelationshipTargets(api, context.transaction, belongsToTargets)
+
+    if (!context.isCreate && (manyToManyRelationships.length || reverseRelationships.length)) {
+      await lockRelationshipParent({ context, helpers, scopeName })
     }
+
+    await applyFieldSetters(context, api, helpers)
+    const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName, isCreate: context.isCreate })
+    await applyResourceVersion({ state: versionState, context, helpers, scopeName, isCreate: context.isCreate })
 
     // Pass the operation type to the helper
     await helpers.dataPut({
       scopeName,
       context
     })
+    await invalidateInverseVersions({ state: inverseVersions, context, helpers, api })
+
     await runHooks('afterDataCallPut')
     await runHooks('afterDataCall')
 
@@ -268,6 +222,7 @@ export default async function putMethod ({
         await updateManyToManyRelationship(null, {
           api,
           context: {
+            ...context,
             resourceId: context.id,
             relDef,
             relData,
@@ -275,8 +230,12 @@ export default async function putMethod ({
           }
         })
       } else if (relData.length > 0) {
-        await createPivotRecords(api, context.id, relDef, relData, context.transaction, context)
+        await createPivotRecords(api, context.id, relDef, relData, context.transaction)
       }
+    }
+
+    for (const { relDef, relData } of reverseRelationships) {
+      await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData })
     }
 
     const ret = await handleRecordReturnAfterWrite({
@@ -284,19 +243,14 @@ export default async function putMethod ({
       scopeName,
       api,
       scopes,
-      schemaStructure,
-      schemaRelationships,
-      scopeOptions,
-      vars,
       runHooks,
-      helpers,
-      log
+      helpers
     })
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     return ret
   } catch (error) {
-    await handleWriteMethodError(error, context, 'PUT', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'PUT', scopeName, log)
   }
 }

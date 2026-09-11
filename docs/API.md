@@ -2,19 +2,34 @@
 
 This reference provides comprehensive documentation for all methods, parameters, and features available in the json-rest-api library.
 
-## Important Notes
+## Current contract
 
-1. **Context Parameter**: The `context` parameter shown in method signatures is typically managed internally by the framework. When using the API programmatically, you usually don't need to provide it unless you're implementing custom request identity/auth context or other request-specific data.
+This reference targets the current working tree, not a coordinated released
+consumer upgrade. See the [migration guide](GUIDE/MIGRATING_API_V2.md) and
+[backend limits](GUIDE/BACKEND_CAPABILITIES.md) before upgrading.
 
-2. **App-Owned Auth Context**: `json-rest-api` does not define authentication semantics. If you use `context.auth` in hooks, treat it as application-owned data supplied by your transport or surrounding stack.
+Pass method controls in the first `params` object and application-owned
+identity/authentication data in the optional second context object. Write data
+belongs under `inputRecord`; direct attribute shorthand is not accepted.
 
-3. **Simplified Mode Defaults**: 
-   - `simplifiedApi`: `true` (default for programmatic API calls)
-   - `simplifiedTransport`: `false` (default for HTTP transport)
+`format: 'plain' | 'jsonapi'` selects the input/output representation.
+Programmatic calls default to `plain`. POST/PUT/PATCH use
+`returning: 'none' | 'minimal' | 'full'`, defaulting to `full`. Per-call options
+override configured resource/plugin defaults. The built-in HTTP connectors
+select JSON:API with full write responses independently of these defaults;
+resource deletion and relationship mutations return no content.
+Boolean representation/return aliases are removed and rejected.
 
-4. **All parameters must be passed within a single params object** as the first argument to each method.
+On a resource configured with `versionField`, PUT/PATCH/DELETE and relationship
+writes accept an `expectedVersion` string; unconditional writes may omit it.
+POST does not accept that condition. See [optimistic concurrency](GUIDE/MIGRATING_API_V2.md)
+for version-field configuration, bulk version arrays and the separate opt-in
+HTTP validator contract.
 
-5. **Simplified shorthand is payload-only**: when you pass attributes directly (for example, `post({ title: 'Hello' })`), that plain object is treated as the resource payload. If you also need per-call options such as `transaction`, `queryParams`, `simplified`, or `returnFullRecord`, put the record under `inputRecord` and keep those options at the top level of `params`.
+Read calls can borrow raw Knex transactions. Library writes must use the handle
+from `api.transaction` when grouping operations; they reject unmanaged raw
+transactions. Context is application-owned but enriched during each call, so use
+a separate context for each enlisted operation. See [transaction support](#transaction-support).
 
 ## Table of Contents
 
@@ -55,7 +70,7 @@ Retrieves a collection of resources with support for filtering, sorting, paginat
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].query(params, context)
+const result = await api.resources[resourceType].query(params, context)
 ```
 
 #### Parameters
@@ -71,7 +86,7 @@ All parameters are passed within a single `params` object:
     sort: Array,         // Sort fields
     page: Object         // Pagination parameters
   },
-  simplified: Boolean,   // Override simplified mode (default: true for API)
+  format: String,          // 'plain' (default) or 'jsonapi'
   transaction: Object    // Database transaction object
 }
 ```
@@ -88,12 +103,12 @@ All parameters are passed within a single `params` object:
 | `queryParams.page.size` | Number | No | Items per page |
 | `queryParams.page.after` | String | No | Cursor for forward pagination |
 | `queryParams.page.before` | String | No | Cursor for backward pagination |
-| `simplified` | Boolean | No | Override simplified mode setting (default: true) |
+| `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
 
 #### Return Value
 
-**JSON:API Mode (simplified: false):**
+**JSON:API Mode (format: 'jsonapi'):**
 ```javascript
 {
   data: [
@@ -121,10 +136,12 @@ All parameters are passed within a single `params` object:
     }
   ],
   meta: {
-    page: {
+    pagination: {
+      page: 1,
+      pageSize: 10,
+      pageCount: 5,
       total: 50,
-      size: 10,
-      number: 1
+      hasMore: true
     }
   },
   links: {
@@ -135,7 +152,7 @@ All parameters are passed within a single `params` object:
 }
 ```
 
-**Simplified Mode (simplified: true - default):**
+**Plain Mode (format: 'plain' - default):**
 ```javascript
 {
   data: [
@@ -143,7 +160,6 @@ All parameters are passed within a single `params` object:
       id: '1',
       title: 'First Article',
       content: 'Article content...',
-      author: '10',
       author: {
         id: '10',
         name: 'John Doe'
@@ -151,10 +167,12 @@ All parameters are passed within a single `params` object:
     }
   ],
   meta: {
-    page: {
+    pagination: {
+      page: 1,
+      pageSize: 10,
+      pageCount: 5,
       total: 50,
-      size: 10,
-      number: 1
+      hasMore: true
     }
   }
 }
@@ -171,7 +189,7 @@ Accept: application/vnd.api+json
 
 **Basic Query:**
 ```javascript
-// Get all articles (simplified mode by default)
+// Get all articles (plain mode by default)
 const result = await api.resources.articles.query({});
 
 // HTTP equivalent
@@ -237,7 +255,7 @@ const result = await api.resources.articles.query({
     filters: { status: 'published' },
     include: ['author']
   },
-  simplified: false
+  format: 'jsonapi'
 });
 
 // Returns full JSON:API structure with type, id, attributes, relationships
@@ -245,18 +263,15 @@ const result = await api.resources.articles.query({
 
 **Cursor-based Pagination:**
 ```javascript
-// Get next page using cursor
-const result = await api.resources.articles.query({
-  queryParams: {
-    page: {
-      after: 'eyJpZCI6MTAsImNyZWF0ZWRBdCI6IjIwMjQtMDEtMTUifQ==',
-      size: 10
-    }
-  }
+const firstPage = await api.resources.articles.query({
+  queryParams: { page: { size: 10 } }
 });
-
-// HTTP equivalent
-// GET /articles?page[after]=eyJpZCI6MTAsImNyZWF0ZWRBdCI6IjIwMjQtMDEtMTUifQ==&page[size]=10
+const cursor = firstPage.meta.pagination.cursor?.next;
+if (cursor) {
+  const nextPage = await api.resources.articles.query({
+    queryParams: { page: { after: cursor, size: 10 } }
+  });
+}
 ```
 
 ---
@@ -267,7 +282,7 @@ Retrieves a single resource by its ID with optional relationship inclusion.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].get(params, context)
+const result = await api.resources[resourceType].get(params, context)
 ```
 
 #### Parameters
@@ -279,7 +294,7 @@ const result = await api.resources.[resourceType].get(params, context)
     include: Array,      // Relationship paths to include
     fields: Object       // Sparse fieldsets
   },
-  simplified: Boolean,   // Override simplified mode (default: true for API)
+  format: String,          // 'plain' (default) or 'jsonapi'
   transaction: Object    // Database transaction object
 }
 ```
@@ -290,14 +305,14 @@ const result = await api.resources.[resourceType].get(params, context)
 | `queryParams` | Object | No | Query parameters |
 | `queryParams.include` | Array | No | Relationship paths to include |
 | `queryParams.fields` | Object | No | Sparse fieldsets for specific resource types |
-| `simplified` | Boolean | No | Override simplified mode setting (default: true) |
+| `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
 
 `id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
 
 #### Return Value
 
-**JSON:API Mode (simplified: false):**
+**JSON:API Mode (format: 'jsonapi'):**
 ```javascript
 {
   data: {
@@ -325,7 +340,7 @@ const result = await api.resources.[resourceType].get(params, context)
 }
 ```
 
-**Simplified Mode (simplified: true - default):**
+**Plain Mode (format: 'plain' - default):**
 ```javascript
 {
   id: '1',
@@ -350,7 +365,7 @@ Accept: application/vnd.api+json
 
 **Basic Get:**
 ```javascript
-// Get article by ID (simplified mode by default)
+// Get article by ID (plain mode by default)
 const result = await api.resources.articles.get({
   id: '1'
 });
@@ -399,7 +414,7 @@ const result = await api.resources.articles.get({
   queryParams: {
     include: ['author', 'tags']
   },
-  simplified: false
+  format: 'jsonapi'
 });
 
 // Returns full JSON:API document structure
@@ -413,54 +428,54 @@ Creates a new resource with attributes and optional relationships.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].post(params, context)
+const result = await api.resources[resourceType].post(params, context)
 ```
 
 #### Parameters
 
 ```javascript
 {
-  inputRecord: Object,      // Required: Resource data (JSON:API or simplified)
+  inputRecord: Object,      // Required: Resource data (JSON:API or plain)
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
   },
-  simplified: Boolean,      // Override simplified mode (default: true for API)
+  format: String,          // 'plain' (default) or 'jsonapi'
   transaction: Object,      // Database transaction object
-  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
+  returning: String         // 'none', 'minimal' or 'full' (default)
 }
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Resource data to create |
-| `inputRecord.id` | String | No (simplified) | Optional explicit logical resource ID |
+| `inputRecord.id` | String | No (plain) | Optional explicit logical resource ID |
 | `inputRecord.data` | Object | Yes (JSON:API) | Resource data container |
 | `inputRecord.data.id` | String | No (JSON:API) | Optional explicit logical resource ID |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
-| `inputRecord.data.attributes` | Object | Yes (JSON:API) | Resource attributes |
+| `inputRecord.data.attributes` | Object | No | Resource attributes, subject to schema requirements/defaults |
 | `inputRecord.data.relationships` | Object | No | Related resources |
 | `queryParams` | Object | No | For includes/fields in response |
-| `simplified` | Boolean | No | Override simplified mode (default: true) |
+| `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
+| `returning` | String | No | `'none'`, `'minimal'` or `'full'`; booleans are rejected |
 
 When an explicit resource id is provided, `normalizeId` runs before persistence and before any follow-up record fetch used for the return payload. If the normalized id is empty, the request fails as `REST_API_VALIDATION` on `data.id`.
 
 #### Return Value Behavior
 
-The return value depends on `returnFullRecord` setting and whether it's an API or transport call:
+POST/PUT/PATCH use the selected `returning` mode:
 
-**Default behavior:**
-- API calls (programmatic): `returnFullRecord = 'full'` (returns complete resource)
-- Transport calls (HTTP): `returnFullRecord = 'no'` (returns 204 No Content)
+| Mode | Plain output | JSON:API output |
+| --- | --- | --- |
+| `none` | `undefined` | `undefined` |
+| `minimal` | `{ type, id }` | `{ data: { type, id } }` |
+| `full` | Resource object | Resource document |
 
-**Options:**
-- `'no'`: Returns `undefined` (204 No Content)
-- `'minimal'`: Returns resource with ID only
-- `'full'`: Returns complete resource with all fields
-
-Boolean values are accepted for backward compatibility: `true` is normalized to `'full'` and `false` is normalized to `'no'`. New code should use the string values.
+Full responses honor requested fieldsets/includes and visibility; they do not
+promise every declared field. Programmatic calls default to `full`. HTTP
+connectors choose their response behavior explicitly and map no-content writes
+to 204. A POST with a response body uses 201; PUT/PATCH with a body use 200.
 
 #### HTTP Equivalent
 
@@ -487,9 +502,9 @@ Accept: application/vnd.api+json
 
 #### Examples
 
-**Basic Create (Simplified Mode):**
+**Basic Create (Plain Mode):**
 ```javascript
-// Create article with simplified input (default mode)
+// Create article with plain input (default mode)
 const result = await api.resources.articles.post({
   inputRecord: {
     title: 'New Article',
@@ -521,7 +536,7 @@ const result = await api.resources.articles.post({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 });
 ```
 
@@ -540,13 +555,13 @@ const result = await api.resources.articles.post({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 });
 ```
 
 **Create with Multiple Relationships:**
 ```javascript
-// Create article with author and tags (simplified)
+// Create article with author and tags (plain)
 const result = await api.resources.articles.post({
   inputRecord: {
     title: 'New Article',
@@ -568,24 +583,25 @@ const result = await api.resources.articles.post({
     title: 'New Article',
     content: 'Article content...'
   },
-  returnFullRecord: 'minimal'
+  returning: 'minimal'
 });
 
-// Returns (simplified mode):
+// Returns (plain mode):
 // {
+//   type: 'articles',
 //   id: '123'
 // }
 ```
 
 **Create with No Return:**
 ```javascript
-// Create without returning data (like HTTP transport)
+// Create without returning data to this programmatic caller
 const result = await api.resources.articles.post({
   inputRecord: {
     title: 'New Article',
     content: 'Article content...'
   },
-  returnFullRecord: 'no'
+  returning: 'none'
 });
 
 // Returns: undefined
@@ -595,40 +611,45 @@ const result = await api.resources.articles.post({
 
 ### PUT - Replace Resource
 
-Completely replaces an existing resource. All attributes must be provided; missing relationships are removed.
+Creates a missing target at the supplied ID or replaces a visible existing
+resource. Replacement applies schema required/default/nullability rules and the
+method's relationship-omission semantics. See [PUT and PATCH](GUIDE/GUIDE_2_8_Effects_of_PUT_and_PATCH.md).
+Target visibility checks still apply.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].put(params, context)
+const result = await api.resources[resourceType].put(params, context)
 ```
 
 #### Parameters
 
 ```javascript
 {
+  id: String|Number|BigInt, // Target ID; may instead be supplied in inputRecord
   inputRecord: Object,      // Required: Complete resource data
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
   },
-  simplified: Boolean,      // Override simplified mode (default: true for API)
+  format: String,          // 'plain' (default) or 'jsonapi'
   transaction: Object,      // Database transaction object
-  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
+  returning: String         // 'none', 'minimal' or 'full' (default)
 }
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Complete resource data |
-| `inputRecord.id` | String | Yes (simplified) | Logical resource ID |
-| `inputRecord.data.id` | String | Yes (JSON:API) | Logical resource ID |
+| `id` | String\|Number\|BigInt | Conditional | Target ID; required if the input document does not supply one |
+| `inputRecord.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
+| `inputRecord.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
 | `inputRecord.data.attributes` | Object | Yes (JSON:API) | All resource attributes |
 | `inputRecord.data.relationships` | Object | No | All relationships (missing ones are nulled) |
 | `queryParams` | Object | No | For response formatting |
-| `simplified` | Boolean | No | Override simplified mode (default: true) |
+| `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
+| `returning` | String | No | `'none'`, `'minimal'` or `'full'`; booleans are rejected |
 
 `inputRecord.id` and `inputRecord.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
 
@@ -636,7 +657,7 @@ If both the URL id and body id are present, both are normalized before the equal
 
 #### Return Value
 
-Updated resource based on `returnFullRecord` setting (defaults: API='full', transport='no').
+Returns according to `returning`: `none`, `minimal` or `full`. See the POST return-value table.
 
 #### HTTP Equivalent
 
@@ -665,9 +686,9 @@ Accept: application/vnd.api+json
 
 #### Examples
 
-**Basic Replace (Simplified):**
+**Basic Replace (Plain):**
 ```javascript
-// Replace entire article (simplified mode)
+// Replace entire article (plain mode)
 const result = await api.resources.articles.put({
   inputRecord: {
     id: '1',
@@ -703,7 +724,7 @@ const result = await api.resources.articles.put({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 });
 ```
 
@@ -730,42 +751,44 @@ Partially updates an existing resource. Only provided attributes and relationshi
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].patch(params, context)
+const result = await api.resources[resourceType].patch(params, context)
 ```
 
 #### Parameters
 
 ```javascript
 {
+  id: String|Number|BigInt, // Target ID; may instead be supplied in inputRecord
   inputRecord: Object,      // Required: Partial resource data
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
   },
-  simplified: Boolean,      // Override simplified mode (default: true for API)
+  format: String,          // 'plain' (default) or 'jsonapi'
   transaction: Object,      // Database transaction object
-  returnFullRecord: String|Boolean  // Override return setting ('no', 'minimal', 'full')
+  returning: String         // 'none', 'minimal' or 'full' (default)
 }
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `inputRecord` | Object | Yes | Partial resource data |
-| `inputRecord.id` | String | Yes (simplified) | Logical resource ID |
-| `inputRecord.data.id` | String | Yes (JSON:API) | Logical resource ID |
+| `id` | String\|Number\|BigInt | Conditional | Target ID; required if the input document does not supply one |
+| `inputRecord.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
+| `inputRecord.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
 | `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
 | `inputRecord.data.attributes` | Object | No | Attributes to update |
 | `inputRecord.data.relationships` | Object | No | Relationships to update |
 | `queryParams` | Object | No | For response formatting |
-| `simplified` | Boolean | No | Override simplified mode (default: true) |
+| `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
-| `returnFullRecord` | String\|Boolean | No | Override return setting (`'no'`, `'minimal'`, `'full'`; legacy `true` = `'full'`, `false` = `'no'`) |
+| `returning` | String | No | `'none'`, `'minimal'` or `'full'`; booleans are rejected |
 
 If both the URL id and body id are present, both are normalized before the equality check. If either id normalizes to an empty value, the operation fails before storage is touched.
 
 #### Return Value
 
-Updated resource based on `returnFullRecord` setting (defaults: API='full', transport='no').
+Returns according to `returning`: `none`, `minimal` or `full`. See the POST return-value table.
 
 #### HTTP Equivalent
 
@@ -787,9 +810,9 @@ Accept: application/vnd.api+json
 
 #### Examples
 
-**Basic Update (Simplified):**
+**Basic Update (Plain):**
 ```javascript
-// Update only the status (simplified mode)
+// Update only the status (plain mode)
 const result = await api.resources.articles.patch({
   inputRecord: {
     id: '1',
@@ -832,13 +855,13 @@ const result = await api.resources.articles.patch({
       }
     }
   },
-  simplified: false
+  format: 'jsonapi'
 });
 ```
 
 **Update Relationships Only:**
 ```javascript
-// Change author and add tags (simplified)
+// Change author and add tags (plain)
 const result = await api.resources.articles.patch({
   inputRecord: {
     id: '1',
@@ -867,7 +890,7 @@ Permanently deletes a resource from the system.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].delete(params, context)
+const result = await api.resources[resourceType].delete(params, context)
 ```
 
 #### Parameters
@@ -914,32 +937,27 @@ await api.resources.articles.delete({
 
 **Delete with Transaction:**
 ```javascript
-// Delete within a transaction
-const trx = await knex.transaction();
-try {
+await api.transaction(async transaction => {
   // Delete article
   await api.resources.articles.delete({
     id: '1',
-    transaction: trx
+    transaction
   });
   
   // Delete related comments
   await api.resources.comments.delete({
     id: '10',
-    transaction: trx
+    transaction
   });
   
-  await trx.commit();
-} catch (error) {
-  await trx.rollback();
-  throw error;
-}
+});
 ```
 
 **Note on Transaction Auto-commit:**
-The library automatically manages transaction commits when you don't provide one:
-- If you provide a transaction, you're responsible for committing/rolling back
-- If you don't provide a transaction, the library creates one and auto-commits
+Writes without a transaction own their completion. To compose writes, pass the
+handle supplied by `api.transaction`; the helper awaits the callback, commits and
+then runs completion hooks, or rolls back when the unit fails. Raw transactions and
+savepoints cannot own library writes.
 
 ---
 
@@ -951,7 +969,7 @@ Retrieves the actual related resources with full data, not just identifiers.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].getRelated(params, context)
+const result = await api.resources[resourceType].getRelated(params, context)
 ```
 
 #### Parameters
@@ -960,7 +978,8 @@ const result = await api.resources.[resourceType].getRelated(params, context)
 {
   id: String|Number,           // Required: Parent resource ID
   relationshipName: String,    // Required: Name of the relationship
-  queryParams: Object,         // Standard query parameters
+  format: String,             // plain or jsonapi
+  queryParams: Object,         // Selection; collection filters/sort/page for to-many
   transaction: Object          // Database transaction object
 }
 ```
@@ -969,14 +988,18 @@ const result = await api.resources.[resourceType].getRelated(params, context)
 |-----------|------|----------|-------------|
 | `id` | String\|Number | Yes | Parent resource ID |
 | `relationshipName` | String | Yes | Name of the relationship |
-| `queryParams` | Object | No | Standard query parameters for related resources |
+| `format` | String | No | plain or jsonapi; uses the configured default |
+| `queryParams` | Object | No | Selection options; collection filters/sort/page only for to-many |
 | `transaction` | Object | No | Database transaction object |
 
 `id` is normalized with the effective `normalizeId` function before validation and lookup. If it normalizes to an empty value, the operation fails as `REST_API_RESOURCE` with subtype `not_found`.
 
 #### Return Value
 
-JSON:API response with related resources (supports all query features like filtering, pagination, etc.)
+Uses the selected `format` (default `plain`). A to-one relationship returns one
+resource or null; a to-many relationship returns a collection envelope. JSON:API
+wraps either cardinality under `data`. Collection filters/sort/page apply to
+to-many related resources; to-one reads accept selection options.
 
 #### HTTP Equivalent
 
@@ -996,7 +1019,7 @@ const result = await api.resources.articles.getRelated({
   relationshipName: 'author'
 });
 
-// Returns single resource (simplified mode by default):
+// Returns single resource (plain mode by default):
 // {
 //   id: '10',
 //   name: 'John Doe',
@@ -1033,7 +1056,7 @@ Retrieves only the resource identifiers for a relationship, not the full resourc
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].getRelationship(params, context)
+const result = await api.resources[resourceType].getRelationship(params, context)
 ```
 
 #### Parameters
@@ -1108,7 +1131,7 @@ Adds new members to a to-many relationship without affecting existing members.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].postRelationship(params, context)
+const result = await api.resources[resourceType].postRelationship(params, context)
 ```
 
 #### Parameters
@@ -1169,7 +1192,7 @@ Completely replaces a relationship. For to-one relationships, sets the new relat
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].patchRelationship(params, context)
+const result = await api.resources[resourceType].patchRelationship(params, context)
 ```
 
 #### Parameters
@@ -1252,7 +1275,7 @@ Removes specific members from a to-many relationship.
 
 #### Method Signature
 ```javascript
-const result = await api.resources.[resourceType].deleteRelationship(params, context)
+const result = await api.resources[resourceType].deleteRelationship(params, context)
 ```
 
 #### Parameters
@@ -1307,475 +1330,85 @@ await api.resources.articles.deleteRelationship({
 
 ## Hook System
 
-The library provides a comprehensive hook system for customizing behavior at every stage of request processing.
+Register hooks with `api.customize({ hooks })`, or with a resource's `extras`
+when declaring it. Handlers receive an injected argument object containing
+`context`; they do not receive that context as the entire first argument.
+The library does not provide the `api.resource(...).hook(...)` API used by older
+examples in this reference.
 
-### Hook Execution Order by Method
-
-Each API method has its own specific hook execution order. Here's the exact sequence for each method:
-
-#### QUERY Method Hooks
-```
-1. beforeData
-2. beforeDataQuery
-3. knexQueryFiltering (multiple handlers for built-in filters and optional server-side policies)
-   - polymorphicFiltersHook
-   - crossTableFiltersHook
-   - basicFiltersHook
-4. enrichRecord (for each record)
-5. finish
-6. finishQuery
-```
-
-#### GET Method Hooks
-```
-1. beforeData
-2. beforeDataGet
-3. checkDataPermissions
-4. checkDataPermissionsGet
-5. enrichRecord
-6. enrichRecordWithRelationships
-7. finish
-8. finishGet
+```javascript
+await api.customize({
+  hooks: {
+    beforeSchemaValidatePost: {
+      functionName: 'trim-article-title',
+      handler: ({ context }) => {
+        if (context.scopeName !== 'articles') return;
+        const attributes = context.inputRecord.data.attributes;
+        if (typeof attributes?.title === 'string') attributes.title = attributes.title.trim();
+      }
+    }
+  }
+});
 ```
 
-#### POST Method Hooks
-```
-1. beforeProcessing
-2. beforeProcessingPost
-3. beforeSchemaValidate
-4. beforeSchemaValidatePost
-5. afterSchemaValidatePost
-6. afterSchemaValidate
-7. beforeDataCall
-8. beforeDataCallPost
-9. [Database INSERT operation]
-10. afterDataCallPost
-11. afterDataCall
-12. finish
-13. finishPost
-14. afterCommit (if transaction was created)
-```
+### Complete Hook Execution Order
 
-#### PUT Method Hooks
-```
-1. beforeProcessing
-2. beforeProcessingPut
-3. beforeSchemaValidate
-4. beforeSchemaValidatePut
-5. afterSchemaValidatePut
-6. afterSchemaValidate
-7. beforeDataCall
-8. beforeDataCallPut
-9. [Database UPDATE operation - full replacement]
-10. afterDataCallPut
-11. afterDataCall
-12. finish
-13. finishPut
-14. afterCommit (if transaction was created)
-```
+POST, PUT and PATCH retain their method-specific behavior within this sequence:
 
-#### PATCH Method Hooks
-```
-1. beforeProcessing
-2. beforeProcessingPatch
-3. beforeSchemaValidate
-4. beforeSchemaValidatePatch
-5. afterSchemaValidatePatch
-6. afterSchemaValidate
-7. beforeDataCall
-8. beforeDataCallPatch
-9. [Database UPDATE operation - partial update]
-10. afterDataCallPatch
-11. afterDataCall
-12. finish
-13. finishPatch
-14. afterCommit (if transaction was created)
-```
+1. Set up the transaction and response options; run `beforeProcessing`, then the
+   method-specific processing hook.
+2. Validate the request/relationships and perform the method's existence checks.
+   Run `beforeSchemaValidate`, then its method-specific hook; validate attributes;
+   run method-specific `afterSchemaValidate`, then `afterSchemaValidate`.
+3. Authorize the write; run `beforeDataCall`, then its method-specific hook.
+4. Lock the required records, apply setters and perform the storage operation.
+5. Run method-specific `afterDataCall`, then `afterDataCall`; update relationships
+   and refresh minimal stored data.
+6. Prepare the selected response; run `finish`, then its method-specific hook.
+7. An owning operation commits and awaits `afterCommit`. Managed participants
+   defer completion to their owner.
 
-#### DELETE Method Hooks
-```
-1. beforeDataCall
-2. beforeDataCallDelete
-3. [Database DELETE operation]
-4. afterDataCallDelete
-5. afterDataCall
-6. finish
-7. finishDelete
-8. afterCommit (if transaction was created)
-```
+`returning: 'full'` performs a nested GET during response preparation. Its GET
+hooks observe `method: 'get'`, while outer write hooks retain their write method.
+The nested read keeps authentication and transaction identity. None/minimal
+responses do not imply that validation, setters or finish hooks are skipped.
 
-#### Relationship Method Hooks
-
-**getRelated:**
-```
-1. checkPermissions
-2. checkPermissionsGetRelated
-3. [Delegates to GET or QUERY methods internally]
-```
-
-**getRelationship:**
-```
-1. checkPermissions
-2. checkPermissionsGetRelationship
-3. [Delegates to GET method internally]
-```
-
-**postRelationship:**
-```
-1. checkPermissions
-2. checkPermissionsPostRelationship
-3. [Relationship manipulation]
-4. finish
-5. finishPostRelationship
-```
-
-**patchRelationship:**
-```
-1. checkPermissions
-2. checkPermissionsPatchRelationship
-3. [Delegates to PATCH method internally]
-4. finish
-5. finishPatchRelationship
-```
-
-**deleteRelationship:**
-```
-1. checkPermissions
-2. checkPermissionsDeleteRelationship
-3. [Relationship manipulation]
-4. finish
-5. finishDeleteRelationship
-```
-
-### Key Differences Between Methods
-
-1. **Processing Hooks**: Only POST, PUT, and PATCH have `beforeProcessing` hooks
-2. **Schema Validation**: Only POST, PUT, and PATCH have schema validation hooks
-3. **Permission Hooks**: GET uses `checkDataPermissions`, while relationship methods use `checkPermissions`
-4. **Query Filtering**: Collection queries and storage-backed scoped lookups trigger `knexQueryFiltering`; use `RowPolicyPlugin` for mandatory visibility rather than relying on method-specific hook assumptions
-5. **Enrichment**: Only GET and QUERY have `enrichRecord` hooks
-6. **Relationships**: Only GET has `enrichRecordWithRelationships`
-7. **Transactions**: All write methods (POST, PUT, PATCH, DELETE) can trigger `afterCommit`/`afterRollback`
+GET and QUERY run `beforeData` and their method-specific hook before reading.
+They run enrichment and finish hooks over the internal JSON:API record before
+final output conversion. GET additionally runs data-permission checks and
+`enrichRecordWithRelationships`. DELETE and relationship writes have their own
+sequences; use the [hook and lifecycle guide](GUIDE/GUIDE_7_Hooks_Data_Management_And_Plugins.md)
+for those contracts rather than extrapolating POST's stages.
 
 ### Hook Context Objects
 
-Each hook receives a context object with different properties based on the hook type and method:
+Context availability is stage-specific:
 
-#### beforeProcessing / beforeProcessing[Method]
+| Stage | Fields and use |
+| --- | --- |
+| Write processing/schema validation | `method`, `scopeName`, `inputRecord`, `format`, `returning`, `queryParams`, `schemaInfo`, `transaction`, `db`; plain input has been converted to an internal JSON:API `inputRecord`. Modify `inputRecord.data.attributes` before validation when preparing input. |
+| After attribute validation | `inputRecord.data.attributes` contains validated values; setters run later. `originalInputAttributes` retains the pre-validation attribute snapshot. |
+| After storage write | POST has assigned its storage ID; after-data hooks see transformed input attributes. Method-specific PUT/PATCH behavior remains visible. |
+| Read enrichment/finish | `record` is the internal JSON:API document. Final normalization/field filtering and plain conversion happen after finish. |
+| Write finish | `responseRecord` holds the selected output; minimal stored data is separately available. A full response may already have run nested GET hooks. |
+| Completion | `afterCommit` follows acknowledged commit; `afterRollback` follows acknowledged rollback. A managed participant finishes its data work before its owner's completion hooks. |
 
-```javascript
-{
-  method: 'post',              // HTTP method
-  resourceType: 'articles',    // Resource being accessed
-  params: {                    // Request parameters
-    inputRecord: {...},
-    queryParams: {...},
-    simplified: true
-  },
-  auth: {...},                 // App-provided auth/identity context if present
-  transaction: {...},          // Database transaction
-  schemaInfo: {...},           // Resource schema
-  db: {...}                    // Database connection
-}
-```
+Application authentication is not defined by the library. Pass trusted
+application context from the caller/transport; do not infer it from payload data.
+Use [row policies](GUIDE/GUIDE_X_Row_Policies.md) for mandatory row visibility.
+Do not treat a single GET permission hook as a universal query/relationship guard.
 
-**What can be modified:**
-- `params` - Modify input data
-- Add custom properties to context
-
-**Example:**
-```javascript
-api.resource('articles').hook('beforeProcessingPost', async (context) => {
-  // Add default status if not provided
-  if (context.params.inputRecord && !context.params.inputRecord.status) {
-    context.params.inputRecord.status = 'draft';
-  }
-  
-  // Add metadata to context
-  context.requestTime = new Date();
-});
-```
-
-#### beforeSchemaValidate / afterSchemaValidate
-
-```javascript
-{
-  method: 'patch',
-  resourceType: 'articles',
-  inputData: {                 // Parsed input data
-    attributes: {...},
-    relationships: {...}
-  },
-  existingRecord: {...},       // For update operations
-  auth: {...},
-  transaction: {...},
-  schemaInfo: {...}
-}
-```
-
-**What can be modified:**
-- `inputData` - Modify before/after validation
-- Throw errors for custom validation
-
-**Example:**
-```javascript
-api.resource('articles').hook('afterSchemaValidate', async (context) => {
-  // Custom validation
-  if (context.inputData.attributes.status === 'published' && 
-      !context.inputData.attributes.published_at) {
-    throw new Error('Published articles must have a published_at date');
-  }
-});
-```
-
-#### checkDataPermissions / checkDataPermissions[Method]
-
-```javascript
-{
-  method: 'delete',
-  resourceType: 'articles',
-  id: '1',                     // For single resource operations
-  auth: {...},
-  existingRecord: {...},       // For update/delete
-  transaction: {...}
-}
-```
-
-**Purpose:** Permission or visibility checks implemented by your app hooks. Throw an error to deny the operation.
-
-**Example:**
-```javascript
-api.resource('articles').hook('checkDataPermissionsDelete', async (context) => {
-  // Only author or admin can delete
-  if (context.auth.userId !== context.existingRecord.relationships?.author?.data?.id && 
-      !context.auth.isAdmin) {
-    throw new Error('Unauthorized to delete this article');
-  }
-});
-```
-
-#### beforeData / afterData
-
-```javascript
-{
-  method: 'get',
-  resourceType: 'articles',
-  storageParams: {             // Parameters for storage layer
-    id: '1',
-    include: ['author'],
-    fields: {...},
-    filters: {...}
-  },
-  result: {...},               // After data operations
-  auth: {...},
-  transaction: {...},
-  schemaInfo: {...}
-}
-```
-
-**What can be modified:**
-- `storageParams` (beforeData) - Modify query parameters
-- `result` (afterData) - Modify query results
-
-**Example:**
-```javascript
-api.resource('articles').hook('beforeDataQuery', async (context) => {
-  // Add automatic filtering based on user
-  if (context.auth.userId && !context.auth.isAdmin) {
-    context.storageParams.filters = {
-      ...context.storageParams.filters,
-      author: context.auth.userId
-    };
-  }
-});
-```
-
-#### enrichRecord
-
-```javascript
-{
-  method: 'get',
-  resourceType: 'articles',
-  record: {                    // Full JSON:API record
-    type: 'articles',
-    id: '1',
-    attributes: {...},
-    relationships: {...}
-  },
-  isMainResource: true,        // vs included resource
-  auth: {...},
-  requestedFields: [...],      // Fields requested via sparse fieldsets
-  parentContext: {...}         // Parent request context
-}
-```
-
-**What can be modified:**
-- `record` - Modify the entire record structure
-
-**Example:**
-```javascript
-api.resource('articles').hook('enrichRecord', async (context) => {
-  // Add metadata
-  context.record.meta = {
-    can_edit: context.auth.userId === context.record.attributes.author_id,
-    version: context.record.attributes.version || 1
-  };
-});
-```
-
-#### enrichAttributes
-
-```javascript
-{
-  method: 'get',
-  resourceType: 'articles',
-  attributes: {...},           // Current attributes
-  requestedComputedFields: ['word_count', 'reading_time'],
-  isMainResource: true,
-  record: {...},               // Full record for reference
-  auth: {...},
-  parentContext: {...},
-  computedDependencies: Set    // Fields to remove if not requested
-}
-```
-
-**What can be modified:**
-- `attributes` - Add/modify attribute values
-
-**Example:**
-```javascript
-api.resource('articles').hook('enrichAttributes', async (context) => {
-  // Add computed fields
-  if (context.requestedComputedFields.includes('word_count')) {
-    context.attributes.word_count = 
-      context.attributes.content.split(/\s+/).length;
-  }
-  
-  if (context.requestedComputedFields.includes('reading_time')) {
-    const wordsPerMinute = 200;
-    context.attributes.reading_time = 
-      Math.ceil(context.attributes.word_count / wordsPerMinute);
-  }
-});
-```
-
-#### finish / finish[Method]
-
-```javascript
-{
-  method: 'post',
-  resourceType: 'articles',
-  response: {                  // Final response object
-    data: {...},
-    included: [...],
-    meta: {...}
-  },
-  auth: {...}
-}
-```
-
-**What can be modified:**
-- `response` - Final modifications to response
-
-**Example:**
-```javascript
-api.resource('articles').hook('finish', async (context) => {
-  // Add response metadata
-  context.response.meta = {
-    ...context.response.meta,
-    generated_at: new Date().toISOString(),
-  };
-});
-```
-
-#### afterCommit / afterRollback
-
-```javascript
-{
-  method: 'post',
-  resourceType: 'articles',
-  result: {...},               // Operation result
-  error: {...},                // For rollback
-  auth: {...},
-  params: {...}                // Original parameters
-}
-```
-
-**Use cases:**
-- Send emails, notifications
-- Clear caches
-- Log events
-- Cleanup on failure
-
-**Example:**
-```javascript
-api.resource('articles').hook('afterCommit', async (context) => {
-  if (context.method === 'post') {
-    // Send notification email
-    await emailService.sendNewArticleNotification({
-      articleId: context.result.data.id,
-      authorId: context.auth.userId
-    });
-  }
-});
-```
-
-### Method-Specific Hooks
-
-You can register hooks for specific methods by appending the method name:
-
-```javascript
-// Runs only for POST requests
-api.resource('articles').hook('beforeDataPost', async (context) => {
-  context.inputData.attributes.created_by = context.auth.userId;
-});
-
-// Runs only for PATCH requests
-api.resource('articles').hook('beforeDataPatch', async (context) => {
-  context.inputData.attributes.updated_by = context.auth.userId;
-  context.inputData.attributes.updated_at = new Date().toISOString();
-});
-
-// Runs only for DELETE requests
-api.resource('articles').hook('beforeDataDelete', async (context) => {
-  // Archive instead of delete
-  context.softDelete = true;
-  context.inputData = {
-    attributes: {
-      deleted_at: new Date().toISOString(),
-      deleted_by: context.auth.userId
-    }
-  };
-});
-```
-
-### Query-Specific Hooks
+An ordinary failure stops later stages. A post-commit failure cannot undo the
+write; unknown outcomes require reconciliation. Original and secondary diagnostics
+remain subject to the [transaction/error contract](#transaction-support).
 
 #### knexQueryFiltering
 
-Special hook for modifying database queries:
-
-```javascript
-api.resource('articles').hook('knexQueryFiltering', async (context) => {
-  const { query, filters, resourceSchema } = context;
-  
-  // Add custom where clauses
-  if (filters.search) {
-    query.where(function() {
-      this.where('title', 'like', `%${filters.search}%`)
-          .orWhere('content', 'like', `%${filters.search}%`);
-    });
-  }
-  
-  // Add joins for complex filtering
-  if (filters.author_name) {
-    query.join('users', 'articles.author_id', 'users.id')
-         .where('users.name', 'like', `%${filters.author_name}%`);
-  }
-});
-```
-
----
+Query customization operates on native builders with explicit storage mapping.
+Use the [query hook migration contract](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation)
+for aliases, logical/physical fields and canonical tenant/resource scoping.
+Keep mandatory predicates in the supported policy/filtering mechanisms. A raw
+query fragment is not automatically translated or made tenant-safe.
 
 ## Query Features
 
@@ -1802,82 +1435,60 @@ const result = await api.resources.articles.query({
 
 #### Operator-based Filtering
 
-Filters support various operators when defined in the resource schema:
+Name filters explicitly in `searchSchema`, selecting the underlying field and
+operator. Field type names and `filterOperator` values follow their actual
+contracts; an arbitrary `operators` array does not register filter aliases.
 
 ```javascript
-// Resource schema configuration
 searchSchema: {
-  created_at: {
-    type: 'datetime',
-    operators: ['gt', 'gte', 'lt', 'lte']
-  },
-  title: {
-    type: 'string',
-    operators: ['eq', 'like', 'ilike']
-  },
-  view_count: {
-    type: 'number',
-    operators: ['eq', 'gt', 'gte', 'lt', 'lte', 'in']
-  }
+  publishedAfter: { type: 'dateTime', actualField: 'published_at', filterOperator: '>=' },
+  titleContains: { type: 'string', actualField: 'title', filterOperator: 'contains' },
+  above: { type: 'number', actualField: 'view_count', filterOperator: '>' },
+  articleIds: { type: 'array', actualField: 'id', filterOperator: 'in' }
 }
+```
 
-// Usage
+With those declarations:
+
+```javascript
 const result = await api.resources.articles.query({
-  queryParams: {
-    filters: {
-      'created_at:gte': '2024-01-01',
-      'created_at:lt': '2024-02-01',
-      'title:like': '%javascript%',
-      'view_count:gt': 100
-    }
-  }
+  queryParams: { filters: { titleContains: 'javascript', above: 100 } }
 });
 ```
 
 #### Array Filters (IN operator)
 
 ```javascript
-// Find articles with specific IDs
 const result = await api.resources.articles.query({
-  queryParams: {
-    filters: {
-      'id:in': ['1', '2', '3'],
-      'status:in': ['published', 'featured']
-    }
-  }
+  queryParams: { filters: { articleIds: ['1', '2', '3'] } }
 });
-
-// HTTP equivalent (comma-separated)
-// GET /articles?filter[id:in]=1,2,3&filter[status:in]=published,featured
 ```
+
+Use the [structured-query transport contract](GUIDE/MIGRATING_API_V2.md) when
+encoding non-scalar filter values for HTTP. Declared field equality/search
+capabilities and mandatory row policies still apply.
 
 #### Custom Filter Logic
 
-Use the `knexQueryFiltering` hook for complex filtering:
+Declare custom filters in the resource's `searchSchema`. `applyFilter` receives
+the native builder, validated filter input and explicit mapping helpers:
 
 ```javascript
-api.resource('articles').hook('knexQueryFiltering', async (context) => {
-  const { query, filters } = context;
-  
-  // Full-text search
-  if (filters.q) {
-    query.whereRaw("to_tsvector('english', title || ' ' || content) @@ plainto_tsquery('english', ?)", [filters.q]);
+searchSchema: {
+  minimumRank: {
+    type: 'number',
+    applyFilter(query, input, { column, value }) {
+      query.where(column('rank'), '>=', value('rank', input));
+    }
   }
-  
-  // Date range
-  if (filters.date_from && filters.date_to) {
-    query.whereBetween('created_at', [filters.date_from, filters.date_to]);
-  }
-  
-  // Complex boolean logic
-  if (filters.featured_or_trending) {
-    query.where(function() {
-      this.where('is_featured', true)
-          .orWhere('trending_score', '>', 0.8);
-    });
-  }
-});
+}
 ```
+
+Here `rank` must be a declared stored field. Mapping helpers resolve the active
+alias and storage representation in either storage mode. Callbacks run
+synchronously and must mutate the supplied builder. Raw SQL and extra joins
+remain responsible for their own physical columns and visibility semantics.
+See [custom-filter migration](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation).
 
 ### Sorting
 
@@ -1932,93 +1543,55 @@ const result = await api.resources.articles.query({
 
 ### Pagination
 
-The library supports multiple pagination strategies:
+| `queryParams.page` | Behavior |
+| --- | --- |
+| Omitted or `{}` | Capped default limit, no pagination metadata |
+| `{ number: 2, size: 20 }` | Offset page 2 |
+| `{ size: 20 }` | First cursor page |
+| `{ after: cursor, size: 20 }` | Forward cursor page |
+| `{ before: cursor, size: 20 }` | Backward cursor page |
+
+Use one of `number`, `after` or `before`. Sizes/numbers must be positive integers;
+empty or malformed cursors reject. Treat cursors as opaque and follow generated
+links to preserve the resource, selection, filters, sort and effective size.
+Do not construct base64 cursor payloads yourself.
 
 #### Offset Pagination
 
 ```javascript
-// Page-based pagination
 const result = await api.resources.articles.query({
-  queryParams: {
-    page: {
-      number: 2,
-      size: 20
-    }
-  }
+  queryParams: { page: { number: 2, size: 20 } }
 });
-
-// Response includes:
-// {
-//   data: [...],
-//   meta: {
-//     page: {
-//       total: 150,      // Total records (if enablePaginationCounts: true)
-//       size: 20,        // Page size
-//       number: 2,       // Current page
-//       totalPages: 8    // Total pages (if counts enabled)
-//     }
-//   },
-//   links: {
-//     first: '/articles?page[number]=1&page[size]=20',
-//     prev: '/articles?page[number]=1&page[size]=20',
-//     self: '/articles?page[number]=2&page[size]=20',
-//     next: '/articles?page[number]=3&page[size]=20',
-//     last: '/articles?page[number]=8&page[size]=20'
-//   }
-// }
-
-// HTTP equivalent
-// GET /articles?page[number]=2&page[size]=20
+// With counts enabled and 150 matching records:
+// result.meta.pagination = { page: 2, pageSize: 20, pageCount: 8, total: 150, hasMore: true }
 ```
+
+Pagination metadata is under `meta.pagination`. With counts disabled, it includes
+`page` and `pageSize`, without
+promising totals or `hasMore`. The library supplies pagination links appropriate
+to the available count/boundary information.
 
 #### Cursor Pagination
 
 ```javascript
-// Forward pagination
-const result = await api.resources.articles.query({
-  queryParams: {
-    page: {
-      after: 'eyJpZCI6MTAwLCJjcmVhdGVkX2F0IjoiMjAyNC0wMS0xNSJ9',
-      size: 10
-    }
-  }
+const firstPage = await api.resources.articles.query({
+  queryParams: { page: { size: 20 } }
 });
-
-// Backward pagination
-const result = await api.resources.articles.query({
-  queryParams: {
-    page: {
-      before: 'eyJpZCI6NTAsImNyZWF0ZWRfYXQiOiIyMDI0LTAxLTEwIn0=',
-      size: 10
-    }
-  }
-});
-
-// Response includes:
-// {
-//   data: [...],
-//   meta: {
-//     page: {
-//       hasMore: true,   // More records available
-//       size: 10         // Page size
-//     }
-//   },
-//   links: {
-//     prev: '/articles?page[before]=...',
-//     self: '/articles?page[after]=...',
-//     next: '/articles?page[after]=...'
-//   }
-// }
+// Follow firstPage.links.next through the HTTP client, or use the returned
+// cursor with the same query configuration for a programmatic next-page call.
 ```
+
+Cursor pages use an extra row for `hasMore`; they never issue an offset count
+query. See [pagination and ordering](GUIDE/GUIDE_2_7_Pagination_And_Ordering.md)
+for cursor metadata, link traversal and ordering guarantees.
 
 #### Pagination Configuration
 
 ```javascript
-// Configure in plugin
-const restApiPlugin = new RestApiPlugin({
-  queryDefaultLimit: 20,      // Default page size
-  queryMaxLimit: 100,         // Maximum allowed page size
-  enablePaginationCounts: true // Enable total counts (may impact performance)
+await api.use(RestApiPlugin, {
+  queryDefaultLimit: 20,
+  queryMaxLimit: 100,
+  enablePaginationCounts: true
 });
 ```
 
@@ -2105,24 +1678,13 @@ const result = await api.resources.articles.query({
 
 #### Include with Filtering
 
-Some implementations support filtering included resources:
-
-```javascript
-// Custom hook to filter included resources
-api.resource('articles').hook('afterDataQuery', async (context) => {
-  if (context.result.included) {
-    // Filter included comments to only show approved
-    context.result.included = context.result.included.filter(resource => {
-      if (resource.type === 'comments') {
-        return resource.attributes.status === 'approved';
-      }
-      return true;
-    });
-  }
-});
-```
-
----
+Use target-resource policies and supported query/filter configuration to control
+which related records are visible. Filtering `included` after fetching does not
+remove corresponding linkage, authorize the target rows, or establish correct
+per-parent limits. The library does not provide an `afterDataQuery` hook for that
+purpose. See [row policies](GUIDE/GUIDE_X_Row_Policies.md),
+[include configuration](GUIDE/MIGRATING_API_V2.md#include-configuration-is-validated-before-publication)
+and the query hook contract above.
 
 ## Configuration Options
 
@@ -2130,40 +1692,17 @@ api.resource('articles').hook('afterDataQuery', async (context) => {
 
 ```javascript
 await api.use(RestApiPlugin, {
-  // API behavior
-  simplifiedApi: true,              // Use simplified mode for programmatic calls (default: true)
-  simplifiedTransport: false,       // Use JSON:API for HTTP transport (default: false)
-  normalizeId: (value) => {
-    if (value === null || value === undefined) {
-      return null
-    }
-
-    const normalized = String(value).trim()
-    return normalized ? normalized.toUpperCase() : null
-  },
-  
-  // Return record configuration
-  returnRecordApi: {
-    post: 'full',                   // Return full record after create (default)
-    put: 'full',                    // Return full record after replace (default)
-    patch: 'full'                   // Return full record after update (default)
-  },
-  
-  returnRecordTransport: {
-    post: 'no',                     // Return 204 for HTTP POST (default)
-    put: 'no',                      // Return 204 for HTTP PUT (default)
-    patch: 'no'                     // Return 204 for HTTP PATCH (default)
-  },
-  
-  // Query limits
-  queryDefaultLimit: 20,            // Default pagination size
-  queryMaxLimit: 100,               // Maximum allowed page size
-  
-  // Include depth
-  includeDepthLimit: 3,             // Maximum relationship nesting depth
-  
-  // Performance
-  enablePaginationCounts: true      // Execute count queries for total pages
+  format: 'plain',
+  returning: 'full',
+  queryDefaultLimit: 20,
+  queryMaxLimit: 100,
+  includeDepthLimit: 3,
+  enablePaginationCounts: true,
+  normalizeId: value => {
+    if (value === null || value === undefined) return null;
+    const normalized = String(value).trim();
+    return normalized ? normalized.toUpperCase() : null;
+  }
 });
 ```
 
@@ -2173,162 +1712,52 @@ await api.use(RestApiPlugin, {
 
 ### Resource Schema Structure
 
+Pass the resource name separately from its options. `schema` is the field map;
+relationships and search configuration are sibling resource options.
+
 ```javascript
-api.addResource({
-  name: 'articles',
-  
-  // Primary key configuration
-  idProperty: 'id',                 // Physical primary-key column name for table-backed resources
-  
+await api.addResource('articles', {
+  tableName: 'articles',
+  sortableFields: ['id', 'title'],
   schema: {
-    // Attributes
-    attributes: {
-      title: {
-        type: 'string',
-        required: true,
-        maxLength: 200
-      },
-      content: {
-        type: 'string',
-        required: true
-      },
-      status: {
-        type: 'string',
-        enum: ['draft', 'published', 'archived'],
-        default: 'draft'
-      },
-      published_at: {
-        type: 'datetime',
-        nullable: true
-      },
-      metadata: {
-        type: 'object',
-        // Custom getter/setter for data transformation
-        getter: (value) => JSON.parse(value || '{}'),
-        setter: (value) => JSON.stringify(value)
-      },
-      price: {
-        type: 'number',
-        // Store as cents, display as dollars
-        getter: (value) => value / 100,
-        setter: (value) => Math.round(value * 100)
-      }
-    },
-    
-    // Virtual fields (excluded from database operations)
-    virtualFields: ['temp_data', 'ui_state'],
-    
-    // Relationships
-    relationships: {
-      author: {
-        type: 'users',
-        required: true,
-        relationshipType: 'belongsTo',
-        foreignKey: 'author_id'        // Explicit foreign key
-      },
-      category: {
-        type: 'categories',
-        relationshipType: 'belongsTo',
-        nullable: true
-      },
-      tags: {
-        type: 'tags',
-        relationshipType: 'manyToMany',
-        through: 'article_tags',       // Junction table
-        pivotFields: ['sort_order']    // Additional pivot fields
-      },
-      comments: {
-        type: 'comments',
-        relationshipType: 'hasMany',
-        foreignKey: 'article_id'
-      },
-      // Polymorphic relationship
-      commentable: {
-        polymorphic: true,
-        types: ['articles', 'videos', 'photos'],
-        typeField: 'commentable_type',
-        idField: 'commentable_id'
-      }
-    },
-    
-    // Computed fields
-    computedFields: {
-      word_count: {
-        type: 'number',
-        compute: (record) => record.content.split(/\s+/).length,
-        dependencies: ['content']      // Recompute when content changes
-      },
-      reading_time: {
-        type: 'number',
-        compute: (record) => Math.ceil(record.word_count / 200),
-        dependencies: ['word_count']
-      },
-      full_name: {
-        type: 'string',
-        compute: (record) => `${record.first_name} ${record.last_name}`,
-        dependencies: ['first_name', 'last_name']
-      }
-    },
-    
-    // Hidden fields (never exposed in API)
-    hiddenFields: ['internal_notes', 'admin_flags'],
-    
-    // Search configuration
-    searchSchema: {
-      title: {
-        type: 'string',
-        operators: ['eq', 'like', 'ilike']
-      },
-      status: {
-        type: 'string',
-        operators: ['eq', 'in']
-      },
-      published_at: {
-        type: 'datetime',
-        operators: ['gt', 'gte', 'lt', 'lte']
-      },
-      author: {
-        type: 'number',
-        operators: ['eq', 'in']
-      },
-      view_count: {
-        type: 'number',
-        operators: ['eq', 'gt', 'gte', 'lt', 'lte', 'between']
-      }
-    },
-    
-    // No built-in permissions option exists here.
-    // Use permission hooks for access decisions, and optional plugins
-    // such as AutoFilterPlugin for equality-based dataset scoping or
-    // RowPolicyPlugin for mandatory SQL visibility predicates.
-    
-    // Soft delete configuration
-    softDelete: {
-      field: 'deleted_at',
-      includeDeleted: false
-    },
-    
-    // Custom validation
-    validate: async (data, method, context) => {
-      if (data.status === 'published' && !data.published_at) {
-        throw new Error('Published articles must have published_at date');
-      }
-      
-      if (method === 'post' && data.title.length < 10) {
-        throw new Error('Title must be at least 10 characters');
-      }
+    id: { type: 'id' },
+    title: { type: 'string', required: true, max: 200, search: true },
+    content: { type: 'string', required: true },
+    published_at: { type: 'dateTime', nullable: true },
+    metadata: { type: 'object', nullable: true },
+    internal_notes: { type: 'string', hidden: true },
+    preview: { type: 'boolean', virtual: true },
+    word_count: {
+      type: 'number', computed: true, dependencies: ['content'],
+      compute: ({ attributes }) => attributes.content.trim().split(/\s+/).filter(Boolean).length
     }
+  },
+  searchSchema: {
+    titleContains: { type: 'string', actualField: 'title', filterOperator: 'contains' }
   }
 });
+await api.resources.articles.createKnexTable();
 ```
+
+Stored belongs-to fields declare `belongsTo: 'users'` and `as: 'author'` on their
+schema field. Reverse and many-to-many relationships live in the sibling
+`relationships` map, for example `{ type: 'hasMany', target: 'comments',
+foreignKey: 'article_id' }`. A many-to-many definition specifies `target`,
+`through`, `foreignKey` and `otherKey`; register its target and pivot resources.
+Use the [relationship guides](GUIDE/GUIDE_2_Data_And_Relations.md) for complete
+related declarations, nullability and cardinality rules.
+
+Schema compilation snapshots declarations. Install enrichment hooks before
+registration; changing an earlier declaration object does not recompile a live
+resource. See [schema compilation](GUIDE/MIGRATING_API_V2.md#schema-compilation-snapshots-declarations)
+and [table/schema helper contracts](GUIDE/GUIDE_X_Knex_Schema_And_Migrations.md).
 
 ### Important Schema Features
 
 #### ID Property Configuration
 ```javascript
 // Physical primary key column: user_id
-api.addResource({
-  name: 'users',
+await api.addResource('users', {
   idProperty: 'user_id',
   schema: {
     id: { type: 'id', required: true, storage: { column: 'user_id' } },
@@ -2403,8 +1832,7 @@ Table-backed resources use snake_case physical columns by default. For example, 
 Use `storage.column` when a field needs a specific column name:
 
 ```javascript
-api.addResource({
-  name: 'profiles',
+await api.addResource('profiles', {
   schema: {
     id: { type: 'id' },
     displayName: { type: 'string', required: true },
@@ -2416,58 +1844,37 @@ api.addResource({
 If physical columns should match logical field names exactly for an entire resource, use `storage: { naming: 'exact' }`.
 
 #### Virtual Fields
-Virtual fields are excluded from database operations but can be used for temporary UI state:
 
-```javascript
-virtualFields: ['expanded', 'selected', 'temp_calculation']
-
-// These fields are ignored during database operations
-const result = await api.resources.articles.post({
-  inputRecord: {
-    title: 'New Article',
-    expanded: true,  // Ignored in database
-    selected: false  // Ignored in database
-  }
-});
-```
+Mark an individual schema field with `virtual: true`, for example
+`preview: { type: 'boolean', virtual: true }`. It is validated but omitted from
+database writes; it is not a persisted UI-state field. Use a setter when a
+virtual input needs to prepare other stored attributes. A `virtualFields` array
+is not the resource declaration contract. See [virtual-field behavior](GUIDE/GUIDE_3_Field_Transformations.md).
 
 #### Field Transformations
-Use getters and setters for automatic data transformation:
+
+Getters and setters receive a value and an injected context. Computed fields
+receive the context object with `attributes`, not a bare record positional
+argument. Declare dependencies when another field's value is needed.
 
 ```javascript
-attributes: {
-  // JSON storage
-  settings: {
-    type: 'object',
-    getter: (value) => JSON.parse(value || '{}'),
-    setter: (value) => JSON.stringify(value)
-  },
-  
-  // Encryption
-  ssn: {
-    type: 'string',
-    getter: (value) => decrypt(value),
-    setter: (value) => encrypt(value)
-  },
-  
-  // Unit conversion
-  temperature_c: {
-    type: 'number',
-    getter: (value) => value,  // Store as Celsius
-    setter: (value) => value
-  },
+schema: {
+  temperature_c: { type: 'number' },
   temperature_f: {
-    type: 'number',
-    virtual: true,
-    getter: (record) => (record.temperature_c * 9/5) + 32,
-    setter: (value, record) => {
-      record.temperature_c = (value - 32) * 5/9;
-    }
-  }
+    type: 'number', computed: true, dependencies: ['temperature_c'],
+    compute: ({ attributes }) => attributes.temperature_c * 9 / 5 + 32
+  },
+  settings: { type: 'object', nullable: true }
 }
 ```
 
----
+Object/array storage already serializes and decodes JSON; do not add
+JSON.stringify/JSON.parse callbacks solely to duplicate that conversion.
+Use a synchronous `storage.serialize` when writes and filter comparisons need
+a custom storage representation. Getters/setters may be asynchronous; their
+failures propagate under the documented error contract. See
+[field transformations](GUIDE/GUIDE_3_Field_Transformations.md) and
+[serializer migration](GUIDE/MIGRATING_API_V2.md#temporal-values-and-storage-serializers).
 
 ## Error Handling
 
@@ -2475,108 +1882,90 @@ The library uses standard JSON:API error format:
 
 ### Error Response Format
 
+HTTP connectors return JSON:API `errors` arrays. Fields depend on the mapped
+error; a programmatic error's `code` is not copied into every HTTP error object.
+For example, a resource not-found error maps to:
+
 ```javascript
 {
-  errors: [
-    {
-      status: '422',
-      code: 'VALIDATION_ERROR',
-      title: 'Validation Failed',
-      detail: 'The title field is required.',
-      source: {
-        pointer: '/data/attributes/title'
-      },
-      meta: {
-        field: 'title',
-        rule: 'required'
-      }
-    }
-  ]
+  errors: [{ status: '404', title: 'Not Found', detail: 'Article not found' }]
 }
 ```
 
 ### Common Error Types
 
-#### Validation Errors (422)
-```javascript
-{
-  errors: [{
-    status: '422',
-    code: 'VALIDATION_ERROR',
-    title: 'Validation Failed',
-    detail: 'The email field must be a valid email address.',
-    source: { pointer: '/data/attributes/email' }
-  }]
-}
-```
+| Programmatic error/code | Default HTTP status |
+| --- | --- |
+| `RestApiValidationError` / `REST_API_VALIDATION` | 422 |
+| `RestApiResourceError`, subtype `not_found` | 404 |
+| `RestApiResourceError`, subtype `forbidden` | 403 |
+| `RestApiResourceError`, subtype `conflict` | 409 |
+| Other resource/relationship subtypes | 400 |
+| `RestApiPayloadError` | 400, or 413 for a size rejection |
+| `REST_API_FIELDSET_INVALID`, `REST_API_INCLUDE_INVALID` | 400 |
+| `REST_API_VERSION_CONFLICT` | 409 |
+| `REST_API_PRECONDITION_FAILED` | 412 |
+| Unexpected or temporal output failure | 500 |
 
-#### Not Found Errors (404)
-```javascript
-{
-  errors: [{
-    status: '404',
-    code: 'RESOURCE_NOT_FOUND',
-    title: 'Resource Not Found',
-    detail: 'Article with id 999 not found.'
-  }]
-}
-```
-
-#### Permission Errors (403)
-```javascript
-{
-  errors: [{
-    status: '403',
-    code: 'FORBIDDEN',
-    title: 'Forbidden',
-    detail: 'You do not have permission to update this article.'
-  }]
-}
-```
-
-#### Relationship Errors (400)
-```javascript
-{
-  errors: [{
-    status: '400',
-    code: 'INVALID_RELATIONSHIP',
-    title: 'Invalid Relationship',
-    detail: 'Cannot set author to user 999: user does not exist.',
-    source: { pointer: '/data/relationships/author' }
-  }]
-}
-```
+Validation violations produce individual HTTP errors with their message and
+field location; generic validation errors retain their available details.
+Relationship validation/access failures follow their actual typed classification,
+not a universal `INVALID_RELATIONSHIP` code. Write errors additionally carry
+transaction outcome metadata as described below.
 
 ### Custom Error Handling
 
 Typed API errors thrown by getters, setters, computed fields, file detectors, or upload adapters retain their original code and details. For example, throwing `new RestApiResourceError('Upload forbidden', { subtype: 'forbidden' })` from an upload adapter produces a 403 response and still runs temporary-file cleanup.
 
+Unexpected setter/getter/computed failures reject the operation with their
+original `cause` and `context: { scopeName, fieldName, phase }`; on writes, this
+diagnostic error is the outer `RestApiWriteError`'s cause. HTTP connectors
+return 500. Getters no longer retain an untransformed value after failure, and
+computed fields no longer substitute null. Use `RestApiValidationError` for
+intentional validation rejection (422). Full write-response enrichment fails
+before owned commit; borrowed transactions remain the owner's responsibility.
+See the [callback migration guide](GUIDE/MIGRATING_API_V2.md#setter-getter-and-computed-field-failures)
+for examples and intentional fallback handling.
+
+Resource, relationship, bulk and canonical registry write failures use the root
+export `RestApiWriteError`. Its immutable `transactionOutcome` is `none`,
+`pending`, `committed`, `rolledBack` or `unknown`. Its `cause` preserves the
+original thrown value, including frozen errors, while classification fields
+such as `code`, `subtype` and `details` remain directly readable. Read errors
+retain their existing contract.
+
+HTTP JSON:API write errors include `meta.transactionOutcome`; non-atomic bulk
+entries include `error.transactionOutcome`. A failed call can represent a
+committed write when a later hook rejects. Retrying that call can duplicate its
+effects; neither an HTTP status nor an unknown outcome authorizes automatic
+replay. See the [transaction migration guide](GUIDE/MIGRATING_API_V2.md#transactions-and-errors)
+for all five meanings and cause-chain handling. If acknowledgement is lost,
+`unknown` requires application reconciliation before replay or file deletion;
+see [commit uncertainty](GUIDE/transaction-outcomes.md#when-commit-acknowledgement-is-lost).
+Consumer migration remains separate.
+
 ```javascript
-// In hooks
-api.resource('articles').hook('beforeDataPost', async (context) => {
-  if (context.inputData.attributes.title.length < 10) {
-    const error = new Error('Title too short');
-    error.status = 422;
-    error.code = 'TITLE_TOO_SHORT';
-    error.pointer = '/data/attributes/title';
-    throw error;
+import { RestApiValidationError } from 'json-rest-api';
+
+await api.customize({
+  hooks: {
+    beforeSchemaValidatePost: {
+      functionName: 'validate-article-title',
+      handler: ({ context }) => {
+        if (context.scopeName !== 'articles') return;
+        const title = context.inputRecord.data.attributes?.title;
+        if (typeof title === 'string' && title.length < 10) {
+          throw new RestApiValidationError('Title too short', { fields: ['title'] });
+        }
+      }
+    }
   }
 });
-
-// Custom error transformation
-api.hook('errorTransform', async (error, context) => {
-  return {
-    status: error.status || '500',
-    code: error.code || 'INTERNAL_ERROR',
-    title: error.title || 'Error',
-    detail: error.message,
-    meta: {
-      timestamp: new Date().toISOString(),
-      request_id: context.requestId
-    }
-  };
-});
 ```
+
+For HTTP customization use the documented transport response/error hooks.
+There is no library-wide `api.hook('errorTransform', ...)` API. Preserve typed
+error classification, original causes and write outcomes when customizing output.
 
 ---
 
@@ -2584,7 +1973,10 @@ api.hook('errorTransform', async (error, context) => {
 
 ### Transaction Support
 
-All methods support database transactions with automatic management:
+`api.transaction(callback, context = {})` owns one top-level transaction and
+awaits completion hooks before returning the callback value unchanged. The
+callback receives a real Knex transaction for library operations and raw SQL.
+Await every operation and use a separate context object per enlisted operation.
 
 ```javascript
 // Automatic transaction (recommended)
@@ -2596,16 +1988,16 @@ const result = await api.resources.articles.post({
   // No transaction provided - library creates and auto-commits
 });
 
-// Manual transaction management
-const trx = await knex.transaction();
-try {
+// Several writes in one managed unit
+const article = await api.transaction(async transaction => {
   // Create article
   const article = await api.resources.articles.post({
     inputRecord: {
       title: 'New Article',
       content: 'Content...'
     },
-    transaction: trx  // Provide transaction
+    format: 'plain',
+    transaction
   });
   
   // Create related comments
@@ -2615,18 +2007,24 @@ try {
         content: commentData.content,
         article_id: article.id
       },
-      transaction: trx  // Same transaction
+      format: 'plain',
+      transaction
     });
   }
   
-  await trx.commit();  // Manual commit required
-} catch (error) {
-  await trx.rollback();
-  throw error;
-}
+  return article;
+});
 ```
 
-**Important:** When you provide a transaction, you're responsible for committing/rolling back. When you don't provide one, the library auto-commits.
+Return normally to commit; throw to roll back. A caught participating write or
+observed SQL failure still aborts the unit. Do not call `commit()` or `rollback()`
+inside the callback. Another `api.transaction()` call creates an independent
+top-level unit; compose work by forwarding the existing handle. Raw Knex
+transactions remain available for direct SQL and read-only API calls.
+
+The core helper is implemented in the working tree; final integration and
+consumer migration remain in progress. See the [managed contract](GUIDE/managed-transactions.md)
+and [migration guide](GUIDE/MIGRATING_API_V2.md#transactions-and-errors).
 
 ### Knex Schema Helpers
 
@@ -2674,244 +2072,120 @@ Process multiple operations efficiently:
 ```javascript
 // Batch create with transaction
 const createArticles = async (articlesData) => {
-  const trx = await knex.transaction();
-  const results = [];
-  
-  try {
+  return api.transaction(async transaction => {
+    const results = [];
     for (const data of articlesData) {
       const result = await api.resources.articles.post({
         inputRecord: data,
-        transaction: trx,
-        returnFullRecord: 'minimal' // Optimize for batch
+        transaction,
+        format: 'plain',
+        returning: 'minimal'
       });
       results.push(result);
     }
     
-    await trx.commit();
     return results;
-  } catch (error) {
-    await trx.rollback();
-    throw error;
-  }
+  });
 };
 
 // Batch update
 const updateArticles = async (updates) => {
-  const trx = await knex.transaction();
-  
-  try {
+  return api.transaction(async transaction => {
     for (const { id, data } of updates) {
       await api.resources.articles.patch({
-        inputRecord: { id, ...data },
-        transaction: trx,
-        returnFullRecord: 'no'  // Skip return for performance
+        id,
+        inputRecord: data,
+        transaction,
+        format: 'plain',
+        returning: 'none'
       });
     }
     
-    await trx.commit();
-  } catch (error) {
-    await trx.rollback();
-    throw error;
-  }
+  });
 };
 ```
 
 ### Computed Fields
 
-Add dynamic fields calculated at runtime:
+Declare computed fields in `schema`, with `computed: true`, `dependencies` and
+`compute: ({ id, attributes, context }) => value`. Computed values are not stored
+columns. Callbacks can return promises; requested fieldsets determine which
+computed values and their dependencies are evaluated. Dependencies establish
+read preparation/order, not a persistent reactive cache.
 
-```javascript
-// In resource schema
-computedFields: {
-  full_name: {
-    type: 'string',
-    compute: (record) => `${record.first_name} ${record.last_name}`,
-    dependencies: ['first_name', 'last_name']
-  },
-  age: {
-    type: 'number',
-    compute: (record) => {
-      const birthDate = new Date(record.birth_date);
-      const today = new Date();
-      return today.getFullYear() - birthDate.getFullYear();
-    },
-    dependencies: ['birth_date']
-  },
-  // Async computed field
-  stats: {
-    type: 'object',
-    compute: async (record, context) => {
-      return await statsService.getArticleStats(record.id);
-    },
-    dependencies: []
-  }
-}
-
-// Request computed fields
-const result = await api.resources.users.get({
-  id: '1',
-  queryParams: {
-    fields: {
-      users: 'first_name,last_name,full_name,age'
-    }
-  }
-});
-```
+The resource schema example above declares `word_count`. Request it through
+`queryParams.fields`, for example `{ articles: 'title,word_count' }`. See
+[field transformations](GUIDE/GUIDE_3_Field_Transformations.md) for hidden
+dependencies, getter ordering and callback context.
 
 ### Polymorphic Relationships
 
-Support relationships to multiple resource types:
+Declare a polymorphic belongs-to relationship under the resource's sibling
+`relationships` option:
 
 ```javascript
-// Schema configuration
 relationships: {
   commentable: {
-    polymorphic: true,
-    types: ['articles', 'videos', 'photos'],
-    typeField: 'commentable_type',
-    idField: 'commentable_id'
-  }
-}
-
-// Usage
-const result = await api.resources.comments.post({
-  inputRecord: {
-    content: 'Great article!',
-    commentable_type: 'articles',
-    commentable_id: '1'
-  }
-});
-
-// Query polymorphic relationships
-const result = await api.resources.comments.query({
-  queryParams: {
-    include: ['commentable'],  // Includes the related article/video/photo
-    filters: {
-      commentable_type: 'articles'
+    belongsToPolymorphic: {
+      types: ['articles', 'videos', 'photos'],
+      typeField: 'commentable_type',
+      idField: 'commentable_id'
     }
   }
-});
+}
 ```
+
+For a JSON:API write, send the selected target as relationship linkage,
+for example `relationships: { commentable: { data: { type: 'articles', id: '1' } } }`
+inside the document's `data`. The target type must be declared and the referenced
+record must satisfy visibility/validation rules. Reverse polymorphic relationships
+use their declared `via` relationship. See the [polymorphic guide](GUIDE/GUIDE_2_5_HasMany_Polymorphic.md)
+for complete schemas and reverse declarations.
 
 ### Soft Deletes
 
-Implement soft deletion pattern:
-
-```javascript
-// Configure in schema
-softDelete: {
-  field: 'deleted_at',
-  includeDeleted: false  // Default behavior
-}
-
-// Hook implementation
-api.resource('articles').hook('beforeDataDelete', async (context) => {
-  // Convert delete to update
-  context.method = 'patch';
-  context.inputData = {
-    attributes: {
-      deleted_at: new Date().toISOString()
-    }
-  };
-});
-
-// Query including soft-deleted
-const result = await api.resources.articles.query({
-  queryParams: {
-    filters: {
-      include_deleted: true
-    }
-  }
-});
-
-// Restore soft-deleted record
-const result = await api.resources.articles.patch({
-  inputRecord: {
-    id: '1',
-    deleted_at: null
-  }
-});
-```
+Soft deletion is an application policy, not a built-in `softDelete` resource
+option. Declare a nullable timestamp/marker and explicitly PATCH it when archiving.
+Changing `context.method` during DELETE does not change the executing method into
+PATCH. Apply a row policy for normal visibility and design a separate authorized
+restore path; an arbitrary `include_deleted` filter does not enable bypassing that
+policy. See [row policies](GUIDE/GUIDE_X_Row_Policies.md) and the transaction
+contract when archiving must update related records.
 
 ### Field-Level Permissions
 
-Control access to specific fields:
+Declare `hidden` or `normallyHidden` output fields according to their intended
+visibility. Output omission is not write authorization. Use trusted application
+context and the appropriate validation/permission hook to reject unauthorized
+attribute changes before storage. Global customizations must restrict themselves
+to the intended `context.scopeName`; write attributes at schema-validation stages
+are in `context.inputRecord.data.attributes`.
 
-```javascript
-// In enrichAttributes hook
-api.resource('users').hook('enrichAttributes', async (context) => {
-  // Hide sensitive fields for non-admin users
-  if (!context.auth.isAdmin) {
-    delete context.attributes.email;
-    delete context.attributes.phone;
-    delete context.attributes.internal_notes;
-  }
-  
-  // Show computed permission fields
-  if (context.requestedComputedFields.includes('can_edit')) {
-    context.attributes.can_edit = 
-      context.auth.userId === context.record.id || 
-      context.auth.isAdmin;
-  }
-});
-
-// In beforeSchemaValidate hook - prevent updates
-api.resource('users').hook('beforeSchemaValidatePatch', async (context) => {
-  // Prevent non-admins from updating certain fields
-  if (!context.auth.isAdmin) {
-    const restrictedFields = ['role', 'permissions', 'verified'];
-    for (const field of restrictedFields) {
-      if (field in context.inputData.attributes) {
-        throw new Error(`Cannot update field: ${field}`);
-      }
-    }
-  }
-});
-```
+See [field transformations and visibility](GUIDE/GUIDE_3_Field_Transformations.md)
+and [row policies](GUIDE/GUIDE_X_Row_Policies.md). Computed values must obey the
+selected fieldset and the application's authorization rules too.
 
 ### Cross-Table Search
 
-The library supports searching across related tables:
-
-```javascript
-// Using knexQueryFiltering hook
-api.resource('articles').hook('knexQueryFiltering', async (context) => {
-  const { query, filters } = context;
-  
-  // Search across multiple tables
-  if (filters.global_search) {
-    query.leftJoin('users', 'articles.author_id', 'users.id')
-         .leftJoin('categories', 'articles.category_id', 'categories.id')
-         .where(function() {
-           this.where('articles.title', 'like', `%${filters.global_search}%`)
-               .orWhere('articles.content', 'like', `%${filters.global_search}%`)
-               .orWhere('users.name', 'like', `%${filters.global_search}%`)
-               .orWhere('categories.name', 'like', `%${filters.global_search}%`);
-         });
-  }
-});
-```
+Prefer declared cross-resource search paths so the library can prepare aliases
+and apply target-resource visibility. A native join in a custom filtering hook
+does not automatically gain those permission checks. Custom SQL must use the
+active `context.knexQuery` builder/alias and explicit storage mappings, with
+bindings for values. See [native query builders](GUIDE/MIGRATING_API_V2.md#native-query-builders-and-explicit-custom-filter-translation)
+and [query projections](GUIDE/GUIDE_X_Query_Projections.md).
 
 ### Database-Specific Features
 
-The library detects database capabilities and adjusts behavior:
+Both Knex plugins expose the detected window-function capability as
+`api.knex.capabilities.windowFunctions`. Per-parent include limits require that
+capability; the library rejects those limits when detection reports no support.
+The operation's `context.db` is a Knex connection or transaction. It does not
+provide `supportsWindowFunctions` or `supportsJsonb` flags.
 
-```javascript
-// Window functions (PostgreSQL, MySQL 8+, SQLite 3.25+)
-api.resource('articles').hook('afterDataQuery', async (context) => {
-  // Add ranking if database supports window functions
-  if (context.db.supportsWindowFunctions) {
-    // Ranking logic using ROW_NUMBER(), RANK(), etc.
-  }
-});
-
-// JSON operations (PostgreSQL, MySQL 5.7+)
-api.resource('articles').hook('knexQueryFiltering', async (context) => {
-  const { query, filters } = context;
-  
-  if (filters.metadata_key && context.db.supportsJsonb) {
-    // PostgreSQL JSONB query
-    query.whereRaw("metadata->>'key' = ?", [filters.metadata_key]);
-  }
-});
-```
+Use declared scalar JSON-key query fields for structured-value filtering,
+sorting and cursors. Whole object/array fields are not generic query keys;
+custom raw SQL remains specific to its actual driver and physical storage.
+See the [query projection guide](GUIDE/GUIDE_X_Query_Projections.md) and
+executed capability map (source checkout: `docs/development/conformance.md`) for supported
+operations, tests and limitations. A dialect branch in a helper is not evidence
+that every server version or storage combination has been verified.

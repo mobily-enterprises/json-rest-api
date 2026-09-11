@@ -79,14 +79,14 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('workspace_reports', {
         title: 'Workspace A report'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.workspace_reports.post({
       inputRecord: createJsonApiDocument('workspace_reports', {
         title: 'Workspace B report'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-b', 202))
 
     validateJsonApiStructure(reportA)
@@ -96,7 +96,7 @@ describe('AutoFilter Plugin', () => {
     })
 
     const queryA = await api.resources.workspace_reports.query({
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 999))
 
     validateJsonApiStructure(queryA, true)
@@ -110,14 +110,14 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('user_notes', {
         body: 'User 101 note'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.user_notes.post({
       inputRecord: createJsonApiDocument('user_notes', {
         body: 'User 202 note'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 202))
 
     validateJsonApiStructure(noteA)
@@ -127,7 +127,7 @@ describe('AutoFilter Plugin', () => {
     })
 
     const queryA = await api.resources.user_notes.query({
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-b', 101))
 
     validateJsonApiStructure(queryA, true)
@@ -141,21 +141,21 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('projects', {
         name: 'Workspace A / User 101'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.projects.post({
       inputRecord: createJsonApiDocument('projects', {
         name: 'Workspace A / User 202'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 202))
 
     await api.resources.projects.post({
       inputRecord: createJsonApiDocument('projects', {
         name: 'Workspace B / User 101'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-b', 101))
 
     validateJsonApiStructure(ownProject)
@@ -166,7 +166,7 @@ describe('AutoFilter Plugin', () => {
     })
 
     const scopedQuery = await api.resources.projects.query({
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     validateJsonApiStructure(scopedQuery, true)
@@ -180,19 +180,19 @@ describe('AutoFilter Plugin', () => {
         key: 'app.version',
         value: '1.0.0'
       }),
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(created)
 
     const anonymousQuery = await api.resources.system_settings.query({
-      simplified: false
+      format: 'jsonapi'
     })
     validateJsonApiStructure(anonymousQuery, true)
     assert.equal(anonymousQuery.data.length, 1)
 
     const scopedQuery = await api.resources.system_settings.query({
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
     validateJsonApiStructure(scopedQuery, true)
     assert.equal(scopedQuery.data.length, 1)
@@ -203,14 +203,14 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('projects', {
         name: 'Scoped Project'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await assert.rejects(
       async () => {
         await api.resources.projects.get({
           id: project.data.id,
-          simplified: false
+          format: 'jsonapi'
         }, scopedContext('workspace-a', 202))
       },
       (error) => error.code === 'REST_API_RESOURCE',
@@ -224,7 +224,7 @@ describe('AutoFilter Plugin', () => {
         name: 'Original Project',
         description: 'Original Description'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.projects.put({
@@ -239,12 +239,12 @@ describe('AutoFilter Plugin', () => {
           }
         }
       },
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const afterPut = await api.resources.projects.get({
       id: project.data.id,
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     validateJsonApiStructure(afterPut)
@@ -268,7 +268,7 @@ describe('AutoFilter Plugin', () => {
               }
             }
           },
-          simplified: false
+          format: 'jsonapi'
         }, scopedContext('workspace-a', 101))
       },
       (error) => error.code === 'REST_API_VALIDATION',
@@ -281,14 +281,14 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('projects', {
         name: 'Project A'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const projectB = await api.resources.projects.post({
       inputRecord: createJsonApiDocument('projects', {
         name: 'Project B'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-b', 101))
 
     const task = await api.resources.tasks.post({
@@ -300,7 +300,7 @@ describe('AutoFilter Plugin', () => {
           project: createRelationship(resourceIdentifier('projects', projectA.data.id))
         }
       ),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     validateJsonApiStructure(task)
@@ -321,7 +321,7 @@ describe('AutoFilter Plugin', () => {
               project: createRelationship(resourceIdentifier('projects', projectB.data.id))
             }
           ),
-          simplified: false
+          format: 'jsonapi'
         }, scopedContext('workspace-a', 101))
       },
       (error) => error.code === 'REST_API_RESOURCE' || error.code === 'REST_API_VALIDATION',
@@ -334,7 +334,7 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('projects', {
         name: 'Scoped include project'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const visibleTask = await api.resources.tasks.post({
@@ -346,7 +346,7 @@ describe('AutoFilter Plugin', () => {
           project: createRelationship(resourceIdentifier('projects', project.data.id))
         }
       ),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const hiddenTask = await api.resources.tasks.post({
@@ -358,7 +358,7 @@ describe('AutoFilter Plugin', () => {
           project: createRelationship(resourceIdentifier('projects', project.data.id))
         }
       ),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await moveTaskOutOfScope({
@@ -372,7 +372,7 @@ describe('AutoFilter Plugin', () => {
       queryParams: {
         include: ['tasks']
       },
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     validateJsonApiStructure(result)
@@ -389,7 +389,7 @@ describe('AutoFilter Plugin', () => {
       inputRecord: createJsonApiDocument('optional_tasks', {
         title: 'Implicit null project'
       }),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const explicitNull = await api.resources.optional_tasks.post({
@@ -402,17 +402,17 @@ describe('AutoFilter Plugin', () => {
           project: { data: null }
         }
       ),
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const implicitFetched = await api.resources.optional_tasks.get({
       id: implicitNull.data.id,
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const explicitFetched = await api.resources.optional_tasks.get({
       id: explicitNull.data.id,
-      simplified: false
+      format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     validateJsonApiStructure(implicitFetched)
@@ -425,7 +425,7 @@ describe('AutoFilter Plugin', () => {
     await assert.rejects(
       async () => {
         await api.resources.projects.query({
-          simplified: false
+          format: 'jsonapi'
         })
       },
       (error) => error.code === 'REST_API_AUTOFILTER_CONTEXT',
@@ -438,7 +438,7 @@ describe('AutoFilter Plugin', () => {
           inputRecord: createJsonApiDocument('projects', {
             name: 'No Scope'
           }),
-          simplified: false
+          format: 'jsonapi'
         })
       },
       (error) => error.code === 'REST_API_AUTOFILTER_CONTEXT',

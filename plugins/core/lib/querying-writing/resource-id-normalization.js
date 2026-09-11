@@ -1,8 +1,17 @@
+// @ts-check
+
+/** @import { RestApiPluginOptions } from '../../../../types/plugin-options.js' */
+/** @typedef {Pick<RestApiPluginOptions, 'normalizeId'>} NormalizerConfig */
+/** @typedef {{ scopeOptions?: NormalizerConfig | null, vars?: NormalizerConfig | null, scopeName?: string }} NormalizationOptions */
+/** @typedef {{ resources?: Record<string, { scopeOptions?: NormalizerConfig | null, _scopeOptions?: NormalizerConfig | null, vars?: NormalizerConfig | null }> }} NormalizationApi */
+/** @typedef {{ api?: NormalizationApi }} ReferenceOptions */
+
 import {
   RestApiResourceError,
   RestApiValidationError
 } from '../../../../lib/rest-api-errors.js'
 
+/** @param {unknown} value @returns {string | null} */
 export function defaultNormalizeResourceId (value) {
   if (value === null || value === undefined) {
     return null
@@ -21,10 +30,10 @@ export function defaultNormalizeResourceId (value) {
     return String(value)
   }
 
-  const normalized = String(value).trim()
-  return normalized || null
+  return null
 }
 
+/** @param {NormalizationOptions} [options] @returns {NonNullable<RestApiPluginOptions["normalizeId"]>} */
 export function resolveResourceIdNormalizer ({ scopeOptions = null, vars = null } = {}) {
   if (typeof scopeOptions?.normalizeId === 'function') {
     return scopeOptions.normalizeId
@@ -37,11 +46,13 @@ export function resolveResourceIdNormalizer ({ scopeOptions = null, vars = null 
   return defaultNormalizeResourceId
 }
 
+/** @param {unknown} value @param {NormalizationOptions} [options] @returns {string | null} */
 export function normalizeResourceId (value, options = {}) {
   const normalizer = resolveResourceIdNormalizer(options)
   return defaultNormalizeResourceId(normalizer(value))
 }
 
+/** @param {unknown} value @param {NormalizationOptions} [options] @returns {string} */
 export function requireExistingResourceId (value, {
   scopeOptions = null,
   vars = null,
@@ -57,11 +68,12 @@ export function requireExistingResourceId (value, {
     {
       subtype: 'not_found',
       resourceType: scopeName,
-      resourceId: value == null ? null : String(value)
+      resourceId: typeof value === 'string' ? value : defaultNormalizeResourceId(value)
     }
   )
 }
 
+/** @param {unknown} value @param {NormalizationOptions} [options] @returns {string} */
 export function requireDocumentResourceId (value, {
   scopeOptions = null,
   vars = null
@@ -84,6 +96,7 @@ export function requireDocumentResourceId (value, {
   )
 }
 
+/** @param {string} resourceType @param {ReferenceOptions} [options] @returns {NormalizationOptions} */
 function resolveResourceNormalizationOptions (resourceType, { api } = {}) {
   const scope = api?.resources?.[resourceType]
   return {
@@ -93,6 +106,7 @@ function resolveResourceNormalizationOptions (resourceType, { api } = {}) {
   }
 }
 
+/** @param {string} resourceType @param {unknown} value @param {ReferenceOptions} [options] @returns {string} */
 export function requireReferencedResourceId (resourceType, value, { api } = {}) {
   return requireExistingResourceId(
     value,
@@ -100,12 +114,15 @@ export function requireReferencedResourceId (resourceType, value, { api } = {}) 
   )
 }
 
+/** @param {unknown} identifier @param {ReferenceOptions} [options] @returns {unknown} */
 function normalizeRelationshipIdentifier (identifier, { api } = {}) {
   if (!identifier || typeof identifier !== 'object' || Array.isArray(identifier)) {
     return identifier
   }
 
-  const type = typeof identifier.type === 'string' ? identifier.type : ''
+  // Object shape is known here; its property values remain unvalidated.
+  const record = /** @type {Record<string, unknown>} */ (identifier)
+  const type = typeof record.type === 'string' ? record.type : ''
   if (!type || !Object.hasOwn(identifier, 'id')) {
     return {
       ...identifier
@@ -114,10 +131,11 @@ function normalizeRelationshipIdentifier (identifier, { api } = {}) {
 
   return {
     ...identifier,
-    id: requireReferencedResourceId(type, identifier.id, { api })
+    id: requireReferencedResourceId(type, record.id, { api })
   }
 }
 
+/** @param {unknown} relationshipData @param {ReferenceOptions} [options] @returns {unknown} */
 export function normalizeRelationshipIdentifiers (relationshipData, { api } = {}) {
   if (Array.isArray(relationshipData)) {
     return relationshipData.map((identifier) => normalizeRelationshipIdentifier(identifier, { api }))

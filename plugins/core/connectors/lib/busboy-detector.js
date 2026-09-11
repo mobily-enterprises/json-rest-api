@@ -1,174 +1,92 @@
-/**
- * Busboy File Detector for HTTP Multipart Uploads
- *
- * This detector handles multipart/form-data uploads using the busboy library.
- * It's suitable for both HTTP and Express connectors.
- *
- * Features:
- * - Streaming parser (memory efficient)
- * - Configurable file size limits
- * - Automatic field parsing
- * - No temporary files by default (keeps in memory)
- *
- * Usage:
- * ```javascript
- * import { createBusboyDetector } from 'jsonrestapi/plugins/core/lib/busboy-detector.js';
- *
- * api.use(HttpPlugin, {
- *   fileParser: 'busboy',
- *   fileParserOptions: {
- *     limits: { fileSize: 10 * 1024 * 1024 } // 10MB
- *   }
- * });
- * ```
- */
-
 import { requirePackage } from 'hooked-api'
-import { Readable } from 'stream'
+import { RestApiPayloadError } from '../../../../lib/rest-api-errors.js'
+import { isMultipartContentType } from './transport-http-helpers.js'
+import { addMultipartField, multipartLimits } from './multipart-helpers.js'
 
-let Busboy
-try {
-  Busboy = (await import('busboy')).default
-} catch (e) {
-  requirePackage('busboy', 'express/http-connector',
-    'Busboy is required for multipart/form-data file uploads. This is a peer dependency.')
+let busboyFactory
+try { busboyFactory = (await import('busboy')).default } catch {
+  requirePackage('busboy', 'express-connector', 'Busboy is required for multipart uploads. Install the optional busboy peer.')
 }
 
-/**
- * Creates a busboy-based file detector
- *
- * @param {Object} options - Busboy configuration options
- * @param {Object} options.limits - Size limits
- * @param {number} options.limits.fileSize - Max file size in bytes
- * @param {number} options.limits.files - Max number of files
- * @param {number} options.limits.fields - Max number of fields
- * @returns {Object} Detector object with detect() and parse() methods
- */
+/** Parse a streamed multipart request into buffered files and text fields. */
 export function createBusboyDetector (options = {}) {
+  const limits = { ...multipartLimits, ...options.limits }
   return {
     name: 'busboy-multipart',
-
-    /**
-     * Check if this detector can handle the request
-     * @param {Object} params - Request parameters
-     * @returns {boolean} True if this is a multipart request
-     */
-    detect: (params) => {
-      const req = params._httpReq || params._expressReq
-      if (!req || !req.headers) return false
-
-      const contentType = req.headers['content-type'] || ''
-      return contentType.includes('multipart/form-data')
-    },
-
-    /**
-     * Parse multipart data from the request
-     * @param {Object} params - Request parameters
-     * @returns {Promise<{fields: Object, files: Object}>} Parsed data
-     */
+    detect: params => isMultipartContentType((params._httpReq || params._expressReq)?.headers?.['content-type']),
     parse: async (params) => {
       const req = params._httpReq || params._expressReq
-
+      if (!req?.pipe || req.aborted) throw new RestApiPayloadError('Multipart request is unavailable or aborted')
       return new Promise((resolve, reject) => {
-        const busboy = new Busboy({
-          headers: req.headers,
-          ...options
+        let parser
+        const fields = new Map()
+        const files = new Map()
+        const fileNames = new Set()
+        let failure
+        const cleanup = () => {
+          req.removeListener('aborted', onAborted)
+          req.removeListener('error', onError)
+        }
+        const fail = error => {
+          if (failure) return
+          failure = error
+          fields.clear()
+          files.clear()
+          req.unpipe(parser)
+          req.resume()
+          cleanup()
+          // A limit event can run inside Busboy's current write; destroy afterwards.
+          queueMicrotask(() => parser?.destroy())
+          reject(error)
+        }
+        const onError = cause => fail(new RestApiPayloadError('Malformed multipart request', { cause }))
+        const onAborted = () => fail(new RestApiPayloadError('Multipart request aborted'))
+        const limitError = field => new RestApiPayloadError(`Multipart limit exceeded: ${field}`, { path: field, statusCode: 413 })
+        try {
+          parser = busboyFactory({
+            defParamCharset: 'utf8',
+            ...options,
+            headers: req.headers,
+            // Busboy reports truncation when a limit is reached, including exact size.
+            limits: { ...limits, fileSize: limits.fileSize + 1, fieldSize: limits.fieldSize + 1, parts: limits.parts + 1 }
+          })
+        } catch (cause) { reject(new RestApiPayloadError('Invalid multipart headers or boundary', { cause })); return }
+        req.once('aborted', onAborted)
+        req.once('error', onError)
+        parser.on('field', (name, value, info) => {
+          if (failure) return
+          if (info.valueTruncated || info.nameTruncated || Buffer.byteLength(value) > limits.fieldSize) return fail(limitError(name))
+          try { addMultipartField(fields, name, value) } catch (error) { fail(error) }
         })
-
-        const fields = {}
-        const files = {}
-        const filePromises = []
-
-        // Handle fields
-        busboy.on('field', (fieldname, val) => {
-          // Handle array notation (field[] or field[0])
-          const arrayMatch = fieldname.match(/^(.+)\[\d*\]$/)
-          if (arrayMatch) {
-            const baseName = arrayMatch[1]
-            if (!fields[baseName]) {
-              fields[baseName] = []
-            }
-            if (Array.isArray(fields[baseName])) {
-              fields[baseName].push(val)
-            }
-          } else {
-            fields[fieldname] = val
+        parser.on('file', (name, stream, { filename, encoding, mimeType }) => {
+          stream.on('error', onError)
+          if (failure) { stream.resume(); return }
+          if (fileNames.has(name)) {
+            stream.resume()
+            fail(new RestApiPayloadError(`Multiple files for field '${name}' are not supported`, { path: name }))
+            return
           }
-        })
-
-        // Handle files
-        busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+          fileNames.add(name)
           const chunks = []
           let size = 0
-
-          const filePromise = new Promise((resolve, reject) => {
-            file.on('data', (chunk) => {
-              chunks.push(chunk)
-              size += chunk.length
-            })
-
-            file.on('limit', () => {
-              reject(new Error(`File size limit exceeded for field '${fieldname}'`))
-            })
-
-            file.on('end', () => {
-              files[fieldname] = {
-                filename,
-                mimetype,
-                encoding,
-                size,
-                data: Buffer.concat(chunks)
-              }
-              resolve()
-            })
-
-            file.on('error', reject)
+          stream.on('data', chunk => {
+            if (failure) return
+            size += chunk.length
+            if (size > limits.fileSize) { fail(limitError(name)); return }
+            chunks.push(chunk)
           })
-
-          filePromises.push(filePromise)
+          stream.on('limit', () => fail(limitError(name)))
+          stream.on('end', () => {
+            if (!failure) files.set(name, { filename, encoding, mimetype: mimeType, size, data: Buffer.concat(chunks) })
+          })
         })
-
-        // Handle completion
-        busboy.on('finish', async () => {
-          try {
-            // Wait for all files to be fully read
-            await Promise.all(filePromises)
-            resolve({ fields, files })
-          } catch (error) {
-            reject(error)
-          }
+        for (const event of ['partsLimit', 'filesLimit', 'fieldsLimit']) parser.on(event, () => fail(limitError(event)))
+        parser.on('error', onError)
+        parser.on('close', () => {
+          cleanup()
+          if (!failure) resolve({ fields: Object.fromEntries(fields), files: Object.fromEntries(files) })
         })
-
-        // Handle errors
-        busboy.on('error', (error) => {
-          reject(error)
-        })
-
-        // Handle limit errors
-        busboy.on('partsLimit', () => {
-          reject(new Error('Parts limit exceeded'))
-        })
-
-        busboy.on('filesLimit', () => {
-          reject(new Error('Files limit exceeded'))
-        })
-
-        busboy.on('fieldsLimit', () => {
-          reject(new Error('Fields limit exceeded'))
-        })
-
-        // Pipe request to busboy
-        if (req.pipe) {
-          req.pipe(busboy)
-        } else if (req.on) {
-          // For already buffered requests
-          const stream = new Readable()
-          stream.push(req.body || req)
-          stream.push(null)
-          stream.pipe(busboy)
-        } else {
-          reject(new Error('Request object is not a stream'))
-        }
+        req.pipe(parser)
       })
     }
   }

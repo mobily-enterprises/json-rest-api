@@ -1,3 +1,6 @@
+import { createSchema } from 'json-rest-schema'
+import { getForeignKeyFields, assertFieldName, assertFieldNameMap } from './field-utils.js'
+
 /**
  * Schema processing utilities for search and field dependencies
  *
@@ -10,79 +13,15 @@
  */
 
 /**
- * Marks all fields in a searchSchema as indexed for database optimization
+ * Mark object-valued search definitions indexed in place, overriding false.
+ * This is search metadata, not a DDL operation or a query-performance guarantee.
  *
- * @param {Object} searchSchema - Search schema object to process
- * @returns {void} Modifies the searchSchema in-place
- *
+ * @param {Object} searchSchema - Search definitions, if available
+ * @returns {void}
  * @example
- * // Input: Search fields without index flags
- * const searchSchema = {
- *   title: { type: 'string', filterOperator: 'contains' },
- *   status: { type: 'string', filterOperator: '=' },
- *   created_at: { type: 'datetime', filterOperator: '>=' }
- * };
- * ensureSearchFieldsAreIndexed(searchSchema);
- *
- * // Output: All fields marked as indexed
- * // {
- * //   title: { type: 'string', filterOperator: 'contains', indexed: true },
- * //   status: { type: 'string', filterOperator: '=', indexed: true },
- * //   created_at: { type: 'datetime', filterOperator: '>=', indexed: true }
- * // }
- *
- * @example
- * // Input: Virtual field for cross-table search
- * const searchSchema = {
- *   name: { type: 'string', filterOperator: 'contains' },
- *   author_name: {                              // Virtual field
- *     type: 'string',
- *     filterOperator: 'contains',
- *     virtualField: {
- *       joinTo: 'users',
- *       joinOn: ['author_id', 'id'],
- *       searchField: 'name'
- *     }
- *   }
- * };
- * ensureSearchFieldsAreIndexed(searchSchema);
- *
- * // Output: Both regular and virtual fields indexed
- * // {
- * //   name: { ..., indexed: true },
- * //   author_name: { ..., indexed: true }  // Enables efficient JOIN
- * // }
- *
- * @example
- * // Input: Already indexed or explicitly false
- * const searchSchema = {
- *   email: { type: 'string', indexed: false },   // Explicitly false
- *   username: { type: 'string', indexed: true }   // Already true
- * };
- * ensureSearchFieldsAreIndexed(searchSchema);
- *
- * // Output: All forced to indexed: true
- * // {
- * //   email: { type: 'string', indexed: true },    // Overridden
- * //   username: { type: 'string', indexed: true }   // Unchanged
- * // }
- *
- * @description
- * Used by:
- * - rest-api-plugin during scope initialization
- * - Applied to all searchSchema fields before storage setup
- *
- * Purpose:
- * - Signals storage plugins which fields need database indexes
- * - Enables efficient filtering without full table scans
- * - Supports cross-table searches via indexed JOINs
- * - Improves query performance for filtered API requests
- *
- * Data flow:
- * 1. Receives searchSchema object (or null)
- * 2. Iterates through each field definition
- * 3. Sets indexed: true on all fields
- * 4. Storage plugins use this flag for index creation
+ * const fields = { title: { type: 'string', indexed: false } }
+ * ensureSearchFieldsAreIndexed(fields)
+ * // fields.title.indexed === true
  */
 export function ensureSearchFieldsAreIndexed (searchSchema) {
   if (!searchSchema) return
@@ -118,7 +57,8 @@ function createRelationshipSearchEntries (fieldName, fieldDef, searchEntry) {
 
 function registerSearchEntries (searchSchema, entries = []) {
   for (const [searchFieldName, searchEntry] of entries) {
-    if (!searchFieldName || searchSchema[searchFieldName]) {
+    assertFieldName(searchFieldName, 'generated search schema')
+    if (!searchFieldName || Object.hasOwn(searchSchema, searchFieldName)) {
       continue
     }
 
@@ -127,137 +67,21 @@ function registerSearchEntries (searchSchema, entries = []) {
 }
 
 /**
- * Generates complete searchSchema by merging schema search definitions with explicit searchSchema
+ * Merge generated field filters into an explicit search schema.
+ * Explicit names win. Boolean search copies the field declaration; configured
+ * search may define one filter or named filters with actualField mappings.
+ * belongsTo aliases and physical-field search entries share the target metadata.
+ * Operator defaults are resolved later, not hard-coded by this generator.
  *
- * @param {Object} schema - Main resource schema with optional 'search' properties
- * @param {Object} explicitSearchSchema - Optional explicit searchSchema to merge
- * @returns {Object|null} Merged searchSchema or null if no search fields
- * @throws {RestApiValidationError} If same field defined in multiple places
- *
+ * @param {Object} schema - Resource field definitions
+ * @param {Object} explicitSearchSchema - Explicit filters taking precedence
+ * @returns {Object|null} Merged definitions, or null when none exist
  * @example
- * // Input: Simple search fields in schema
- * const schema = {
- *   title: { type: 'string', search: true },              // Simple
- *   content: { type: 'text' },                            // Not searchable
- *   status: { type: 'string', search: { filterOperator: '=' } }  // Custom
- * };
- * const result = generateSearchSchemaFromSchema(schema, null);
- *
- * // Output: Generated search schema
- * // {
- * //   title: { type: 'string' },                           // No operator set; resolver applies defaults
- * //   status: { type: 'string', filterOperator: '=' }      // Specified operator
- * // }
- *
- * @example
- * // Input: Multiple filters from one field
- * const schema = {
- *   published_at: {
- *     type: 'datetime',
- *     search: {
- *       published_after: { filterOperator: '>=', type: 'datetime' },
- *       published_before: { filterOperator: '<=', type: 'datetime' }
- *     }
- *   }
- * };
- * const result = generateSearchSchemaFromSchema(schema, null);
- *
- * // Output: Two search fields from one database field
- * // {
- * //   published_after: {
- * //     type: 'datetime',
- * //     actualField: 'published_at',      // Maps to real field
- * //     filterOperator: '>='
- * //   },
- * //   published_before: {
- * //     type: 'datetime',
- * //     actualField: 'published_at',      // Same field, different operator
- * //     filterOperator: '<='
- * //   }
- * // }
- *
- * @example
- * // Input: Merging with explicit searchSchema
- * const schema = {
- *   name: { type: 'string', search: true }
- * };
- * const explicitSearchSchema = {
- *   email: { type: 'string', filterOperator: '=' },
- *   age: { type: 'number', filterOperator: '>=' }
- * };
- * const result = generateSearchSchemaFromSchema(schema, explicitSearchSchema);
- *
- * // Output: Combined from both sources
- * // {
- * //   email: { type: 'string', filterOperator: '=' },    // Explicit
- * //   age: { type: 'number', filterOperator: '>=' },     // Explicit
- * //   name: { type: 'string' }                           // From schema (no operator set)
- * // }
- *
- * @example
- * // Input: Explicit searchSchema takes precedence
- * const schema = {
- *   email: { type: 'string', search: true }
- * };
- * const explicitSearchSchema = {
- *   email: { type: 'string', filterOperator: 'contains' }
- * };
- * const result = generateSearchSchemaFromSchema(schema, explicitSearchSchema);
- * // Output: Explicit searchSchema wins
- * // {
- * //   email: { type: 'string', filterOperator: 'contains' }  // Uses explicit definition
- * // }
- *
- * @example
- * // Input: Virtual search fields
- * const schema = {
- *   title: { type: 'string' },
- *   _virtual: {
- *     search: {
- *       category_name: {                    // Doesn't exist in DB
- *         type: 'string',
- *         filterOperator: 'contains',
- *         virtualField: {
- *           joinTo: 'categories',
- *           joinOn: ['category_id', 'id'], // JOIN condition
- *           searchField: 'name'             // Field in related table
- *         }
- *       }
- *     }
- *   }
- * };
- *
- * // Output: Virtual field for cross-table search
- * // {
- * //   category_name: {
- * //     type: 'string',
- * //     filterOperator: 'contains',
- * //     virtualField: { ... join config ... }
- * //   }
- * // }
- *
- * @description
- * Used by:
- * - rest-api-plugin during scope initialization
- * - Generates searchSchema from various sources
- *
- * Purpose:
- * - Provides flexible search configuration options
- * - Enables virtual fields for cross-table searches
- * - Supports range queries (before/after patterns)
- * - Merges search:true fields with explicit searchSchema
- * - Explicit searchSchema always takes precedence
- * - Allows storage plugins to optimize queries
- *
- * Data flow:
- * 1. Starts with explicit searchSchema (if any)
- * 2. Processes schema fields with 'search' property
- * 3. Skips fields already in explicit searchSchema (no conflicts)
- * 4. Handles multiple filters from single field
- * 5. Processes virtual search definitions
- * 6. Returns merged searchSchema or null
+ * generateSearchSchemaFromSchema({ title: { type: 'string', search: true } }, {})
+ * // { title: { type: 'string' } }
  */
 export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => {
+  assertFieldNameMap(explicitSearchSchema, 'explicit search schema')
   // Start with explicit searchSchema or empty object
   const searchSchema = explicitSearchSchema ? { ...explicitSearchSchema } : {}
 
@@ -278,6 +102,7 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
           // Do not set filterOperator here; centralized resolver will apply sensible defaults
         }))
       } else if (typeof effectiveSearch === 'object') {
+        assertFieldNameMap(effectiveSearch, `search declaration for '${fieldName}'`)
         // Check if search defines multiple filter fields
         const hasNestedFilters = Object.values(effectiveSearch).some(
           v => typeof v === 'object' && v.filterOperator
@@ -287,7 +112,7 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
           // Multiple filters from one field (like published_after/before)
           Object.entries(effectiveSearch).forEach(([filterName, filterDef]) => {
             // Check if filter already exists in explicit searchSchema
-            if (searchSchema[filterName]) {
+            if (Object.hasOwn(searchSchema, filterName)) {
               // Skip - explicit searchSchema takes precedence
               return
             }
@@ -311,9 +136,10 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
 
   // Handle _virtual search definitions
   if (schema._virtual?.search) {
+    assertFieldNameMap(schema._virtual.search, 'virtual search schema')
     Object.entries(schema._virtual.search).forEach(([filterName, filterDef]) => {
       // Check if filter already exists in explicit searchSchema
-      if (searchSchema[filterName]) {
+      if (Object.hasOwn(searchSchema, filterName)) {
         // Skip - explicit searchSchema takes precedence
         return
       }
@@ -326,52 +152,21 @@ export const generateSearchSchemaFromSchema = (schema, explicitSearchSchema) => 
 }
 
 /**
- * Generic topological sort for handling dependencies
- *
- * @param {Array} items - Array of items to sort
- * @param {Function} getDependencies - Function that returns dependencies for an item
- * @returns {Array} Sorted array respecting dependencies
- * @throws {Error} If circular dependencies or unknown dependencies detected
- *
- * @example
- * // Input: Simple dependency chain
- * const items = ['a', 'b', 'c'];
- * const deps = { a: ['b'], b: ['c'], c: [] };
- * const sorted = topologicalSort(items, item => deps[item]);
- * // Output: ['c', 'b', 'a']
- * // c first (no deps), then b (depends on c), then a (depends on b)
- *
- * @example
- * // Input: Circular dependency
- * const items = ['a', 'b'];
- * const deps = { a: ['b'], b: ['a'] };  // Circular!
- * topologicalSort(items, item => deps[item]);
- * // Throws: Error "Circular dependency detected: b"
- *
- * @example
- * // Input: Unknown dependency
- * const items = ['a', 'b'];
- * const deps = { a: ['c'], b: [] };     // 'c' not in items
- * topologicalSort(items, item => deps[item]);
- * // Throws: Error "Unknown dependency 'c' for 'a'"
- *
- * @description
- * Used by:
- * - sortFieldsByDependencies for ordering field operations
- * - Any code needing dependency-based ordering
- *
- * Purpose:
- * - Orders items so dependencies come before dependents
- * - Detects circular dependencies early
- * - Validates all dependencies exist
- * - Uses depth-first search algorithm
+ * Sort a fixed field graph dependency-first, preserving traversal order for ties.
+ * Membership is indexed once; cycles and references outside the graph reject.
+ * @template T
+ * @param {readonly T[]} items
+ * @param {(item: T) => Iterable<T> | null | undefined} getDependencies
+ * @returns {T[]}
  */
 export function topologicalSort (items, getDependencies) {
+  const itemNames = new Set(items)
   const sorted = []
   const visited = new Set()
   const visiting = new Set()
+  const stack = []
 
-  function visit (item) {
+  function enter (item) {
     if (visited.has(item)) return
 
     if (visiting.has(item)) {
@@ -380,100 +175,184 @@ export function topologicalSort (items, getDependencies) {
 
     visiting.add(item)
 
-    const dependencies = getDependencies(item) || []
-    for (const dep of dependencies) {
-      if (!items.includes(dep)) {
-        throw new Error(`Unknown dependency '${dep}' for '${item}'`)
-      }
-      visit(dep)
-    }
-
-    visiting.delete(item)
-    visited.add(item)
-    sorted.push(item)
+    stack.push({ item, iterator: (getDependencies(item) || [])[Symbol.iterator]() })
   }
 
-  for (const item of items) {
-    visit(item)
+  try {
+    for (const item of items) {
+      enter(item)
+      while (stack.length) {
+        const frame = stack[stack.length - 1]
+        let next
+        try {
+          next = frame.iterator.next()
+        } catch (error) {
+          stack.pop()
+          throw error
+        }
+        if (next.done) {
+          visiting.delete(frame.item)
+          visited.add(frame.item)
+          sorted.push(frame.item)
+          stack.pop()
+          continue
+        }
+        if (!itemNames.has(next.value)) {
+          throw new Error(`Unknown dependency '${next.value}' for '${frame.item}'`)
+        }
+        enter(next.value)
+      }
+    }
+  } catch (error) {
+    // Match nested for-of cleanup while retaining the original graph failure.
+    for (let index = stack.length - 1; index >= 0; index--) {
+      try { stack[index].iterator.return?.() } catch {}
+    }
+    throw error
   }
 
   return sorted
 }
 
-/**
- * Sorts fields by their dependencies using topological sort
- *
- * @param {Object} fields - Object with field definitions
- * @param {string} dependencyProperty - Property name containing dependencies
- * @returns {Array} Field names sorted by dependencies
- * @throws {Error} If circular dependencies or unknown fields detected
- *
- * @example
- * // Input: Getter dependencies (fullName needs firstName and lastName)
- * const fields = {
- *   firstName: { getter: v => v.trim() },
- *   lastName: { getter: v => v.trim() },
- *   fullName: {
- *     getter: (v, ctx) => `${ctx.attributes.firstName} ${ctx.attributes.lastName}`,
- *     runGetterAfter: ['firstName', 'lastName']
- *   }
- * };
- * const sorted = sortFieldsByDependencies(fields, 'runGetterAfter');
- * // Output: ['firstName', 'lastName', 'fullName']
- * // Ensures firstName/lastName getters run before fullName
- *
- * @example
- * // Input: Complex dependency chain
- * const fields = {
- *   a: { runGetterAfter: ['b', 'c'] },    // a needs b and c
- *   b: { runGetterAfter: ['d'] },         // b needs d
- *   c: { runGetterAfter: ['d'] },         // c needs d
- *   d: { runGetterAfter: [] }             // d needs nothing
- * };
- * const sorted = sortFieldsByDependencies(fields, 'runGetterAfter');
- * // Output: ['d', 'b', 'c', 'a']
- * // d first, then b/c (both need d), then a (needs b/c)
- *
- * @example
- * // Input: Circular dependency error
- * const fields = {
- *   a: { runGetterAfter: ['b'] },
- *   b: { runGetterAfter: ['a'] }          // Circular!
- * };
- * sortFieldsByDependencies(fields, 'runGetterAfter');
- * // Throws: Error "Circular dependency detected: a in runGetterAfter"
- *
- * @description
- * Used by:
- * - Schema processing for getter/setter ordering
- * - Ensures dependent fields process after dependencies
- *
- * Purpose:
- * - Orders field operations by dependencies
- * - Enables computed fields that depend on other fields
- * - Validates dependency graph is acyclic
- * - Provides clear error messages for debugging
- *
- * Data flow:
- * 1. Extracts field names from object
- * 2. Calls topologicalSort with dependency function
- * 3. Returns ordered field names
- * 4. Enhances error messages with property name
- */
-export function sortFieldsByDependencies (fields, dependencyProperty) {
-  const fieldNames = Object.keys(fields)
+/** Validate callback dependencies once; retain direct read edges and execution orders. */
+export function compileFieldDependencies ({ schemaStructure, computedFields, queryFields = {}, schemaRelationships = {}, idProperty = 'id', scopeName }) {
+  const inputNames = new Set([...Object.keys(schemaStructure), 'id', idProperty])
+  const getterNames = new Set([...inputNames, ...Object.keys(queryFields)])
+  const readNames = new Set([...getterNames, ...Object.keys(computedFields)])
+  const relationshipFields = getForeignKeyFields(schemaStructure, schemaRelationships)
+  const getterDependencies = new Set([...getterNames].filter(name => !relationshipFields.has(name)))
+  const computedDependencies = new Set([...readNames].filter(name => !relationshipFields.has(name)))
+  const fieldGetters = Object.create(null)
+  const fieldSetters = Object.create(null)
+  const readDependencies = Object.fromEntries([...readNames].map(name => [name, []]))
 
-  if (fieldNames.length === 0) return []
-
-  try {
-    return topologicalSort(fieldNames, (fieldName) => {
-      const field = fields[fieldName]
-      return field[dependencyProperty] || []
-    })
-  } catch (error) {
-    if (error.message.includes('Circular dependency')) {
-      throw new Error(`${error.message} in ${dependencyProperty}`)
+  const dependencies = (name, definition, property, kind, available) => {
+    const declared = definition[property]
+    if (declared === undefined) return []
+    if (!Array.isArray(declared) || declared.some(dep => typeof dep !== 'string' || dep.length === 0)) {
+      throw new Error(`Field '${name}' in resource '${scopeName}' must declare ${property} as an array of nonempty field names`)
     }
-    throw error
+    for (const dep of declared) {
+      if (!available.has(dep)) {
+        throw new Error(`Field '${name}' in resource '${scopeName}' has ${kind} dependency '${dep}' that does not exist in schema or is unavailable at that stage`)
+      }
+    }
+    return [...new Set(declared)]
   }
+
+  for (const [name, definition] of Object.entries({ ...schemaStructure, ...queryFields })) {
+    for (const [callback, property, available, target] of [
+      ['getter', 'runGetterAfter', getterDependencies, fieldGetters],
+      ['setter', 'runSetterAfter', inputNames, fieldSetters]
+    ]) {
+      if (callback === 'setter' && Object.hasOwn(queryFields, name)) {
+        if (definition.setter !== undefined || definition.runSetterAfter !== undefined) {
+          throw new Error(`Query field '${name}' in resource '${scopeName}' cannot declare a setter or runSetterAfter; projections are read-only`)
+        }
+        continue
+      }
+      if (definition[callback] !== undefined && typeof definition[callback] !== 'function') {
+        throw new Error(`Field '${name}' in resource '${scopeName}' has invalid ${callback} function`)
+      }
+      if (definition[callback] === undefined) {
+        if (definition[property] !== undefined) {
+          throw new Error(`Field '${name}' in resource '${scopeName}' declares ${property} without a ${callback} function`)
+        }
+        continue
+      }
+      const after = dependencies(name, definition, property, callback, available)
+      target[name] = { [callback]: definition[callback], [property]: after, fieldDef: definition }
+      if (callback === 'getter') readDependencies[name] = after
+    }
+  }
+
+  for (const [name, definition] of Object.entries(computedFields)) {
+    readDependencies[name] = dependencies(name, definition, 'dependencies', 'computed', computedDependencies)
+  }
+
+  let sortedGetterFields, sortedSetterFields, sortedComputedFields
+  try {
+    sortedGetterFields = topologicalSort([...getterNames], name => fieldGetters[name]?.runGetterAfter || [])
+      .filter(name => Object.hasOwn(fieldGetters, name))
+  } catch (error) {
+    throw new Error(`Invalid getter dependencies in ${scopeName}: ${error.message}`, { cause: error })
+  }
+  try {
+    sortedSetterFields = topologicalSort([...inputNames], name => fieldSetters[name]?.runSetterAfter || [])
+      .filter(name => Object.hasOwn(fieldSetters, name))
+  } catch (error) {
+    throw new Error(`Invalid setter dependencies in ${scopeName}: ${error.message}`, { cause: error })
+  }
+  try {
+    sortedComputedFields = topologicalSort([...readNames], name => readDependencies[name])
+      .filter(name => Object.hasOwn(computedFields, name))
+  } catch (error) {
+    throw new Error(`Invalid computed dependencies in ${scopeName}: ${error.message}`, { cause: error })
+  }
+
+  return { fieldGetters, sortedGetterFields, fieldSetters, sortedSetterFields, readDependencies, sortedComputedFields, foreignKeyFields: relationshipFields }
+}
+
+/** Find only the dependencies needed by this read; ordering is already compiled.
+ * @param {{ readDependencies?: Record<string, readonly string[]> }} schemaInfo
+ * @param {Iterable<string>} fields
+ * @returns {Set<string>}
+ */
+export function getFieldDependencyClosure (schemaInfo, fields) {
+  const selected = new Set(fields)
+  const pending = [...selected]
+  const dependencies = schemaInfo.readDependencies || {}
+  while (pending.length) {
+    const name = pending.pop()
+    if (!Object.hasOwn(dependencies, name)) continue
+    for (const dependency of dependencies[name]) {
+      if (selected.has(dependency)) continue
+      selected.add(dependency)
+      pending.push(dependency)
+    }
+  }
+  return selected
+}
+
+/** Copy declaration data without freezing caller-owned values or cloning callbacks. */
+export function snapshotResourceConfiguration (value, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value
+  if (seen.has(value)) return seen.get(value)
+
+  let copy
+  if (value instanceof Date) copy = new Date(value.getTime())
+  else if (value instanceof RegExp) {
+    copy = new RegExp(value.source, value.flags)
+    copy.lastIndex = value.lastIndex
+  } else if (typeof value.validateWith === 'function' && typeof value.getFieldDefinitions === 'function') {
+    const factory = createSchema.createFactory(value)
+    copy = factory({}, { operations: value.operations })
+    seen.set(value, copy)
+    copy.structure = snapshotResourceConfiguration(value.structure, seen)
+    return copy
+  } else if (Array.isArray(value)) copy = new Array(value.length)
+  else {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return value
+    copy = Object.create(prototype)
+  }
+  seen.set(value, copy)
+  if (value instanceof Date || value instanceof RegExp) return copy
+  for (const key of Object.keys(value)) {
+    // File backends are external handles; their state and method receiver stay intact.
+    const isFileBackend = key === 'storage' && value.type === 'file' && typeof value[key]?.upload === 'function'
+    let propertyValue
+    if (isFileBackend) {
+      propertyValue = value[key]
+    } else {
+      propertyValue = snapshotResourceConfiguration(value[key], seen)
+    }
+    Object.defineProperty(copy, key, {
+      value: propertyValue,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+  }
+  return copy
 }

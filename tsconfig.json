@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "target": "ES2023",
+    "lib": ["ES2024"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"]
+  },
+  "include": [
+    "lib/knex-transaction.js",
+    "lib/error-context.js",
+    "lib/enhanced-logger.js",
+    "lib/error-formatter.js",
+    "lib/transaction-types.d.ts",
+    "lib/hooked-api-error.d.ts",
+    "plugins/core/connectors/lib/http-validators.js",
+    "plugins/core/lib/storage/**/*.js",
+    "plugins/core/lib/storage/**/*.d.ts",
+    "plugins/core/lib/querying/storage-adapter-utils.js",
+    "plugins/core/lib/querying/knex-query-helpers-base.js",
+    "plugins/core/lib/querying/query-constraint.js",
+    "plugins/core/lib/querying/query-builder-utils.js",
+    "plugins/core/rest-api-plugin-methods/apply-query-filters.js",
+    "plugins/core/lib/querying/sort-helpers.js",
+    "plugins/core/lib/querying-writing/resource-id-normalization.js",
+    "plugins/core/lib/querying-writing/response-options.js",
+    "plugins/core/lib/querying-writing/relationship-contracts.js",
+    "plugins/core/lib/querying-writing/field-utils.js",
+    "plugins/core/lib/querying-writing/default-data-helpers.js",
+    "plugins/core/lib/querying-writing/knex-json-api-transformers.js",
+    "plugins/core/lib/querying-writing/query-field-helpers.js",
+    "plugins/core/lib/querying-writing/knex-field-helpers.js",
+    "plugins/core/lib/querying-writing/database-capabilities.js",
+    "tests/types/**/*.js",
+    "tests/types/**/*.ts"
+  ]
+}

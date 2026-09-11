@@ -111,11 +111,7 @@ describe('Resource ID normalization', () => {
     overrideApi = await createIdNormalizationApi(knex, {
       tablePrefix: 'id_norm_override',
       'rest-api': {
-        returnRecordApi: {
-          post: 'no',
-          put: false,
-          patch: false
-        },
+        returning: 'full',
         normalizeId: (value) => {
           if (value === null || value === undefined) {
             return null
@@ -174,12 +170,12 @@ describe('Resource ID normalization', () => {
 
     await defaultApi.resources.countries.post({
       inputRecord: countryDoc,
-      simplified: false
+      format: 'jsonapi'
     })
 
     const result = await defaultApi.resources.countries.get({
       id: `  ${countryId}  `,
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(result)
@@ -201,17 +197,17 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.countries.post({
       inputRecord: countryDoc,
-      simplified: false
+      format: 'jsonapi'
     })
 
     await overrideApi.resources.publishers.post({
       inputRecord: publisherDoc,
-      simplified: false
+      format: 'jsonapi'
     })
 
     const countryResult = await overrideApi.resources.countries.get({
       id: `  ${countryId.toUpperCase()}  `,
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(countryResult)
@@ -219,11 +215,35 @@ describe('Resource ID normalization', () => {
 
     const publisherResult = await overrideApi.resources.publishers.get({
       id: `  ${publisherId}  `,
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(publisherResult)
     assert.equal(publisherResult.data.id, publisherId.toUpperCase())
+  })
+
+  it('compares path and body IDs after the selected normalizer in both formats', async () => {
+    await overrideApi.resources.publishers.post({ format: 'plain', inputRecord: { id: 'shared-id', name: 'Original' } })
+    for (const format of ['plain', 'jsonapi']) {
+      for (const method of ['patch', 'put']) {
+        const inputRecord = format === 'plain'
+          ? { id: ' shared-id ', name: 'Changed' }
+          : { data: { type: 'publishers', id: ' shared-id ', attributes: { name: 'Changed' } } }
+        const updated = await overrideApi.resources.publishers[method]({ id: ' SHARED-ID ', format, inputRecord })
+        assert.equal(format === 'plain' ? updated.id : updated.data.id, 'SHARED-ID')
+        if (format === 'plain') inputRecord.id = 'different-id'
+        else inputRecord.data.id = 'different-id'
+        await assert.rejects(overrideApi.resources.publishers[method]({ id: 'shared-id', format, inputRecord }), error => {
+          assert.equal(error.code, 'REST_API_VALIDATION')
+          assert.equal(error.details.violations[0].rule, 'id_consistency')
+          return true
+        })
+      }
+    }
+    const country = await overrideApi.resources.countries.post({ format: 'plain', inputRecord: { id: ' Country-ID ', name: 'Country' } })
+    assert.equal(country.id, 'country-id')
+    const updated = await overrideApi.resources.countries.patch({ id: ' COUNTRY-ID ', format: 'plain', inputRecord: { id: 'country-id', name: 'Updated' } })
+    assert.equal(updated.id, 'country-id')
   })
 
   it('normalizes explicit POST resource ids before persistence and return fetches', async () => {
@@ -234,7 +254,8 @@ describe('Resource ID normalization', () => {
 
     const result = await overrideApi.resources.publishers.post({
       inputRecord,
-      simplified: false
+      returning: 'none',
+      format: 'jsonapi'
     })
 
     assert.equal(result, undefined)
@@ -255,7 +276,7 @@ describe('Resource ID normalization', () => {
 
     const fetched = await overrideApi.resources.publishers.get({
       id: 'publisher-explicit',
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(fetched)
@@ -271,7 +292,7 @@ describe('Resource ID normalization', () => {
     await assert.rejects(
       () => overrideApi.resources.publishers.post({
         inputRecord,
-        simplified: false
+        format: 'jsonapi'
       }),
       (error) => {
         assert.equal(error.code, 'REST_API_VALIDATION')
@@ -287,7 +308,7 @@ describe('Resource ID normalization', () => {
     await assert.rejects(
       () => overrideApi.resources.publishers.get({
         id: '   ',
-        simplified: false
+        format: 'jsonapi'
       }),
       (error) => {
         assert.equal(error.code, 'REST_API_RESOURCE')
@@ -307,7 +328,7 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.countries.post({
       inputRecord: countryRecord,
-      simplified: false
+      format: 'jsonapi'
     })
 
     const publisherRecord = createJsonApiDocument('publishers', {
@@ -324,7 +345,7 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.publishers.post({
       inputRecord: publisherRecord,
-      simplified: false
+      format: 'jsonapi'
     })
 
     const inserted = await loadStoredResourceRow({
@@ -350,7 +371,7 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.publishers.post({
       inputRecord: publisherRecord,
-      simplified: false
+      format: 'jsonapi'
     })
 
     await assert.rejects(
@@ -363,7 +384,7 @@ describe('Resource ID normalization', () => {
             id: '   '
           }
         ],
-        simplified: false
+        format: 'jsonapi'
       }),
       (error) => {
         assert.equal(error.code, 'REST_API_RESOURCE')
@@ -383,7 +404,7 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.tags.post({
       inputRecord: tagRecord,
-      simplified: false
+      format: 'jsonapi'
     })
 
     const publisherRecord = createJsonApiDocument('publishers', {
@@ -393,7 +414,7 @@ describe('Resource ID normalization', () => {
 
     await overrideApi.resources.publishers.post({
       inputRecord: publisherRecord,
-      simplified: false
+      format: 'jsonapi'
     })
 
     await overrideApi.resources.publishers.postRelationship({
@@ -405,7 +426,7 @@ describe('Resource ID normalization', () => {
           id: '  TAG-1  '
         }
       ],
-      simplified: false
+      format: 'jsonapi'
     })
 
     let pivotRows = await loadStoredManyToManyLinks({
@@ -429,7 +450,7 @@ describe('Resource ID normalization', () => {
           id: ' TAG-1 '
         }
       ],
-      simplified: false
+      format: 'jsonapi'
     })
 
     pivotRows = await loadStoredManyToManyLinks({

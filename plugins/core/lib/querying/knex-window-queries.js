@@ -1,261 +1,70 @@
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { ROW_NUMBER_KEY, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_MAX_INCLUDE_LIMIT } from '../querying-writing/knex-constants.js'
+import { prepareReferenceSortColumns } from './knex-query-helpers.js'
+import { buildEffectiveSortList, parseSortEntry, resolveSortField } from './query-field-sort-helpers.js'
+import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 
-/**
- * Builds the inner window-function query used to limit included children per
- * parent. Mandatory target filters must be applied to this inner query before
- * the caller wraps it and filters by ROW_NUMBER.
- *
- * @param {Object} knex - Knex instance
- * @param {string} tableName - Target table name
- * @param {string} foreignKey - Foreign key field
- * @param {Array} parentIds - Parent record IDs
- * @param {Array|string} fieldsToSelect - Fields to select, or '*'
- * @param {Object} includeConfig - Include limit and ordering
- * @param {Object} capabilities - Database capabilities
- * @param {Object} scopeVars - Resource query limits
- * @returns {{ subquery: Object, effectiveLimit: number }} Inner query and validated limit
- */
-export const buildWindowedIncludeSubquery = (
-  knex,
-  tableName,
-  foreignKey,
-  parentIds,
-  fieldsToSelect,
-  includeConfig,
-  capabilities,
-  scopeVars = {}
-) => {
-  const { orderBy = [] } = includeConfig
-
-  // Apply defaults for limit
-  const effectiveLimit = includeConfig.limit ?? scopeVars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT
-
-  // Validate against max
-  if (scopeVars.queryMaxLimit && effectiveLimit > scopeVars.queryMaxLimit) {
-    throw new RestApiResourceError({
-      title: 'Include Limit Exceeds Maximum',
-      detail: `Requested include limit (${effectiveLimit}) exceeds queryMaxLimit (${scopeVars.queryMaxLimit})`,
-      status: 400
-    })
+// Apply ordering and limits after target/pivot visibility has constrained the query.
+export async function applyIncludeQueryConfig ({ query, scopeName, tableName, parentColumn, includeConfig = {}, context = {}, capabilities, queryFieldRuntimeByField = new Map() }, dependencies) {
+  const { scopes, knex, getStorageAdapter } = dependencies
+  const db = context.db || context.transaction || knex
+  const vars = scopes[scopeName].vars
+  const storageAdapter = getStorageAdapter(scopeName)
+  const fields = buildEffectiveSortList(includeConfig.orderBy, { defaultSort: vars.defaultSort, schemaInfo: vars.schemaInfo }).map(parseSortEntry)
+  const references = await prepareReferenceSortColumns({
+    query,
+    fields: fields.map(({ field }) => field).filter(field => !queryFieldRuntimeByField.has(field)),
+    scopeName,
+    tableAlias: tableName,
+    context
+  }, dependencies)
+  const names = new Set([
+    ...Object.keys(vars.schemaInfo?.queryFields || {}),
+    ...Object.keys(vars.schemaInfo.schemaStructure).flatMap(field => [field, storageAdapter.translateColumn(field)]),
+    ...[...references.values()].map(reference => reference.resultColumn)
+  ])
+  const uniqueName = base => {
+    let name = base
+    while (names.has(name)) name += '_'
+    names.add(name)
+    return name
   }
-
-  // Check if window functions are supported
-  if (!capabilities.windowFunctions) {
-    const { dbInfo } = capabilities
-    throw new RestApiResourceError(
-      `Include limits require window function support. Your database (${dbInfo.client} ${dbInfo.version}) does not support this feature. ` +
-      'Window functions are supported in: PostgreSQL 8.4+, MySQL 8.0+, MariaDB 10.2+, SQLite 3.25+, SQL Server 2005+',
-      {
-        subtype: 'unsupported_operation',
-        database: dbInfo.client,
-        version: dbInfo.version,
-        requiredFeature: 'window_functions'
+  const parentResultColumn = uniqueName('__jra_include_parent')
+  const rowNumberColumn = uniqueName(ROW_NUMBER_KEY)
+  query.select({ [parentResultColumn]: typeof parentColumn === 'string' ? databaseIdentityExpression(db, parentColumn) : parentColumn })
+  const ordering = fields.map(({ field, sqlDirection }) => {
+    const runtime = queryFieldRuntimeByField.get(field)
+    if (runtime) {
+      return {
+        sql: `(${runtime.sql}) IS NULL ASC, (${runtime.sql}) ${sqlDirection}`,
+        bindings: [...runtime.bindings, ...runtime.bindings]
       }
-    )
-  }
-
-  // Build the window function query
-  // This creates a subquery that partitions by the foreign key and numbers rows
-  const subquery = knex(tableName)
-    .select('*')
-    .select(
-      knex.raw(
-        'ROW_NUMBER() OVER (PARTITION BY ?? ORDER BY ' +
-        buildOrderByClause(orderBy) +
-        ') as ' + ROW_NUMBER_KEY,
-        [foreignKey]
-      )
-    )
-    .whereIn(foreignKey, parentIds)
-
-  // Apply field selection if specified
-  if (fieldsToSelect !== '*' && Array.isArray(fieldsToSelect)) {
-    // Include the foreign key and row number in selection
-    const fieldsWithFK = [...new Set([...fieldsToSelect, foreignKey, ROW_NUMBER_KEY])]
-    subquery.select(fieldsWithFK)
-  }
-
-  return { subquery, effectiveLimit }
-}
-
-/**
- * Builds ORDER BY clause from array of sort fields
- *
- * @param {Array<string>} orderBy - Array of field names, prefix with '-' for DESC
- * @param {string} tablePrefix - Optional table name to prefix fields
- * @returns {string} SQL ORDER BY clause
- *
- * @example
- * // Input: Simple ascending sort
- * const clause = buildOrderByClause(['name', 'created_at']);
- * // Output: "name ASC, created_at ASC"
- *
- * @example
- * // Input: Mixed ascending/descending with '-' prefix
- * const clause = buildOrderByClause(['name', '-created_at', 'status']);
- * // Output: "name ASC, created_at DESC, status ASC"
- *
- * @example
- * // Input: With table prefix for joins
- * const clause = buildOrderByClause(['-updated_at', 'title'], 'articles');
- * // Output: "articles.updated_at DESC, articles.title ASC"
- *
- * @example
- * // Input: Empty array (default to id)
- * const clause = buildOrderByClause([]);
- * // Output: "id ASC"
- *
- * @description
- * Used by:
- * - buildWindowedIncludeSubquery for PARTITION BY ordering
- * - applyStandardIncludeConfig for regular ORDER BY
- * - Query builders that need consistent sort syntax
- *
- * Purpose:
- * - Converts API sort syntax (with '-' prefix) to SQL ORDER BY
- * - Handles table prefixing for queries with joins
- * - Provides default ordering by id when none specified
- * - Ensures consistent sort behavior across the API
- *
- * Data flow:
- * 1. Receives array of sort fields from API parameters
- * 2. Detects DESC sorts by '-' prefix
- * 3. Optionally prefixes with table name
- * 4. Joins into SQL-compatible ORDER BY clause
- */
-export const buildOrderByClause = (orderBy, tablePrefix) => {
-  if (!orderBy || orderBy.length === 0) {
-    const defaultField = tablePrefix ? `${tablePrefix}.id` : 'id'
-    return `${defaultField} ASC` // Default ordering
-  }
-
-  return orderBy.map(field => {
-    const isDesc = field.startsWith('-')
-    const fieldName = isDesc ? field.substring(1) : field
-    const qualifiedField = tablePrefix ? `${tablePrefix}.${fieldName}` : fieldName
-    return `${qualifiedField} ${isDesc ? 'DESC' : 'ASC'}`
-  }).join(', ')
-}
-
-/**
- * Applies standard (non-windowed) include configuration to a query
- *
- * @param {Object} query - Knex query builder instance
- * @param {Object} includeConfig - Include configuration object
- * @param {Object} scopeVars - Scope variables with defaults and limits
- * @param {Object} log - Logger instance
- * @returns {Object} Modified query builder
- *
- * @example
- * // Input: Basic include with limit and ordering
- * let query = knex('comments').whereIn('article_id', [1, 2, 3]);
- * query = applyStandardIncludeConfig(
- *   query,
- *   { limit: 20, orderBy: ['-created_at', 'id'] },
- *   { queryDefaultLimit: 100, queryMaxLimit: 1000 },
- *   logger
- * );
- *
- * // Result: Query modified with:
- * // ORDER BY created_at DESC, id ASC
- * // LIMIT 20
- *
- * @example
- * // Input: No explicit limit, uses defaults
- * let query = knex('tags');
- * query = applyStandardIncludeConfig(
- *   query,
- *   { orderBy: ['name'] },  // No limit specified
- *   { queryDefaultLimit: 50, queryMaxLimit: 500 },
- *   logger
- * );
- *
- * // Result: Uses default limit
- * // ORDER BY name ASC
- * // LIMIT 50
- * // Log: "Using default limit"
- *
- * @example
- * // Input: Limit exceeds maximum
- * let query = knex('reviews');
- * query = applyStandardIncludeConfig(
- *   query,
- *   { limit: 5000 },  // Exceeds max
- *   { queryMaxLimit: 1000, maxIncludeLimit: 500 },
- *   logger
- * );
- *
- * // Result: Clamped to effective maximum
- * // LIMIT 500 (min of maxIncludeLimit and queryMaxLimit)
- *
- * @example
- * // Input: Explicitly disable limit
- * let query = knex('categories');
- * query = applyStandardIncludeConfig(
- *   query,
- *   { limit: null },  // Explicitly no limit
- *   { queryDefaultLimit: 100 },
- *   logger
- * );
- *
- * // Result: No LIMIT clause added
- * // Log: "No limit applied to include query (explicitly disabled)"
- *
- * @description
- * Used by:
- * - loadHasMany when window functions not available or not requested
- * - loadReversePolymorphic for standard relationship queries
- * - Any include loader that needs consistent limit/order handling
- *
- * Purpose:
- * - Provides fallback when window functions unavailable
- * - Applies consistent ordering based on API sort syntax
- * - Enforces limit hierarchy: explicit > default > max
- * - Respects both queryMaxLimit and maxIncludeLimit
- * - Logs decisions for debugging
- *
- * Data flow:
- * 1. Applies ORDER BY for each field in orderBy array
- * 2. Determines effective limit from explicit/default/max values
- * 3. Clamps limit to maximum allowed values
- * 4. Adds LIMIT clause unless explicitly disabled
- * 5. Logs the reasoning for the applied limit
- */
-export const applyStandardIncludeConfig = (query, includeConfig, scopeVars, log) => {
-  const { orderBy = [] } = includeConfig
-
-  // Apply ordering
-  orderBy.forEach(field => {
-    const desc = field.startsWith('-')
-    const column = desc ? field.substring(1) : field
-    query = query.orderBy(column, desc ? 'desc' : 'asc')
+    }
+    const actualField = resolveSortField(field, vars.schemaInfo)
+    const column = references.get(field)?.column || `${tableName}.${storageAdapter.translateColumn(actualField)}`
+    return { sql: `?? IS NULL ASC, ?? ${sqlDirection}`, bindings: [column, column] }
   })
+  const orderSql = ordering.map(order => order.sql).join(', ')
+  const orderBindings = ordering.flatMap(order => order.bindings)
+  const requested = includeConfig.limit
+  const limit = requested === null || requested === false
+    ? null
+    : Math.min(requested ?? vars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT,
+      vars.queryMaxLimit ?? DEFAULT_MAX_QUERY_LIMIT, vars.maxIncludeLimit ?? DEFAULT_MAX_INCLUDE_LIMIT)
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0)) throw new Error(`Invalid include limit for ${scopeName}: expected a non-negative integer or null`)
 
-  // Apply limit with defaults
-  const requestedLimit = includeConfig.limit
-  const defaultLimit = scopeVars.queryDefaultLimit ?? DEFAULT_QUERY_LIMIT
-  const limit = requestedLimit ?? defaultLimit
-
-  // Allow explicit null/false to mean no limit
-  if (limit !== null && limit !== false) {
-    const maxInclude = scopeVars.maxIncludeLimit || DEFAULT_MAX_INCLUDE_LIMIT
-    const maxQuery = scopeVars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-    const effectiveMax = Math.min(maxInclude, maxQuery)
-    const effectiveLimit = Math.min(limit, effectiveMax)
-
-    query = query.limit(effectiveLimit)
-
-    log.debug('Applied include limit:', {
-      requested: requestedLimit,
-      default: defaultLimit,
-      effective: effectiveLimit,
-      maxAllowed: effectiveMax,
-      note: requestedLimit !== undefined ? 'Using explicit limit' : 'Using default limit'
-    })
+  if (includeConfig.strategy === 'window' && limit !== null) {
+    if (capabilities?.windowFunctions === false) throw new RestApiResourceError('Per-parent include limits require window function support', { subtype: 'unsupported_operation' })
+    query.select(db.raw(`ROW_NUMBER() OVER (PARTITION BY ?? ORDER BY ${orderSql}) as ??`, [parentColumn, ...orderBindings, rowNumberColumn]))
+    query = db.select('*').from(query.as('_windowed')).where(rowNumberColumn, '<=', limit)
+      .orderBy(parentResultColumn).orderBy(rowNumberColumn)
   } else {
-    log.debug('No limit applied to include query (explicitly disabled)')
+    query.orderByRaw(orderSql, orderBindings)
+    if (limit !== null) query.limit(limit)
   }
-
-  return query
+  return {
+    query: applyDatabaseReadOptions(query),
+    parentColumn: parentResultColumn,
+    temporaryFields: [parentResultColumn, rowNumberColumn, ...[...references.values()].map(reference => reference.resultColumn)]
+  }
 }

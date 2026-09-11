@@ -1,5 +1,7 @@
+import { createKnexTransaction } from '../../lib/knex-transaction.js'
 import { requirePackage } from 'hooked-api'
 import { createSchema } from 'json-rest-schema'
+import { deletePivotReferences, invalidateDeletedPivotTargets } from './lib/writing/many-to-many-manipulations.js'
 import {
   createKnexTable,
   addKnexFields,
@@ -10,42 +12,45 @@ import {
 import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js'
 import { buildJsonApiResponse } from './lib/querying/knex-json-api-transformers-querying.js'
-import { processBelongsToRelationships } from './lib/writing/knex-json-api-transformers-writing.js'
 import { toJsonApiRecordWithBelongsTo } from './lib/querying-writing/knex-json-api-transformers.js'
 import { processIncludes } from './lib/querying/knex-process-includes.js'
-import { loadRelationshipIdentifiers } from './lib/querying/knex-relationship-includes.js'
+import { loadRelationshipIdentifiers } from './lib/querying/relationship-identifiers.js'
+import { applyQueryConstraint } from './lib/querying/query-constraint.js'
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
-  basicFiltersHook
+  basicFiltersHook,
+  prepareReferenceSortColumns
 } from './lib/querying/knex-query-helpers.js'
-import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js'
-import { supportsWindowFunctions, getDatabaseInfo } from './lib/querying-writing/database-capabilities.js'
-import { ERROR_SUBTYPES, DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT } from './lib/querying-writing/knex-constants.js'
+import { RestApiResourceError } from '../../lib/rest-api-errors.js'
+import { applyInsertReturning, getDatabaseCapabilities } from './lib/querying-writing/database-capabilities.js'
+import { ERROR_SUBTYPES } from './lib/querying-writing/knex-constants.js'
 import {
   calculatePaginationMeta,
   generatePaginationLinks,
   generateCursorPaginationLinks,
   buildCursorMeta,
-  parseCursor
+  applyPaginationToQuery
 } from './lib/querying/knex-pagination-helpers.js'
 import { getUrlPrefix } from './lib/querying/url-helpers.js'
-import { createStorageAdapter } from './lib/storage/storage-adapter.js'
+import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
+import { assertWritableKnexColumns } from './lib/storage/storage-mapping.js'
+import { assertFieldNameMap } from './lib/querying-writing/field-utils.js'
 import {
-  applyCursorPredicate,
-  validateCursorValues,
-  applyQueryFieldOrder,
+  applySortDescriptorOrder,
   buildEffectiveSortList,
-  parseSortEntry
+  parseSortEntry,
+  resolveSortField
 } from './lib/querying/query-field-sort-helpers.js'
-import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
+import { unwrapQueryBuilderState, withQueryFilteringContext } from './lib/querying/query-builder-utils.js'
 import { serializeJsonApiQuery } from './lib/querying-writing/connectors-query-parser.js'
+import { applyDatabaseReadOptions, databaseIdentityExpression } from './lib/querying-writing/database-value-normalizers.js'
 
 export const RestApiKnexPlugin = {
   name: 'rest-api-knex',
   dependencies: ['rest-api'],
 
-  async install ({ helpers, vars, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
+  async install ({ helpers, pluginOptions, api, log, scopes, addHook, addScopeMethod }) {
     // Try to import knex dynamically
     try {
       await import('knex')
@@ -64,29 +69,51 @@ export const RestApiKnexPlugin = {
       helpers: {}
     }
 
-    const storageAdapters = new Map()
-
-    const getScopeStorageAdapter = (scopeName) => {
-      if (!scopeName) return null
-      const resource = api.resources?.[scopeName] || scopes?.[scopeName]
-      const schemaInfo = resource?.vars?.schemaInfo
-      if (!schemaInfo) return null
-
-      const cached = storageAdapters.get(scopeName)
-      if (cached && cached.schemaInfo === schemaInfo) {
-        return cached.adapter
-      }
-
-      const adapter = createStorageAdapter({ knex, schemaInfo })
-      storageAdapters.set(scopeName, { adapter, schemaInfo })
-      if (resource?.vars) {
-        resource.vars.storageAdapter = adapter
-      }
-      return adapter
-    }
+    const getScopeStorageAdapter = createStorageAdapterLookup({
+      knex,
+      getResource: scopeName => api.resources?.[scopeName] || scopes?.[scopeName]
+    })
 
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
     helpers.getStorageAdapter = getScopeStorageAdapter
+
+    addHook('scope:added', 'validate-knex-storage-columns', { afterFunction: 'compileResourceSchemas' }, ({ context }) => {
+      assertWritableKnexColumns(context.vars.schemaInfo.storageInfo)
+    })
+
+    /** @type {import('./lib/storage/storage-types.js').DataRelatedIdsQuery} */
+    helpers.dataRelatedIdsQuery = async ({ context, relDef }) => {
+      const pivotScope = scopes[relDef.through]
+      const pivotAdapter = getScopeStorageAdapter(relDef.through)
+      if (!pivotScope || !pivotAdapter || !relDef.foreignKey || !relDef.otherKey) {
+        throw new RestApiResourceError('Invalid many-to-many pivot definition', { subtype: 'pivot_table_not_found' })
+      }
+      const tableName = pivotAdapter.getTableName()
+      const pivotContext = {
+        ...context,
+        method: 'query',
+        scopeName: relDef.through,
+        schemaInfo: pivotScope.vars.schemaInfo,
+        storageAdapter: pivotAdapter,
+        queryParams: {}
+      }
+      await pivotScope.checkPermissions({ method: 'query', originalContext: pivotContext })
+      const query = pivotAdapter.buildBaseQuery({ transaction: context.transaction })
+        .where(`${tableName}.${pivotAdapter.translateColumn(relDef.foreignKey)}`, pivotAdapter.translateFilterValue(relDef.foreignKey, context.id))
+      const state = await pivotScope.applyQueryFilters({
+        query,
+        filters: undefined,
+        scopeName: relDef.through,
+        tableName,
+        db: context.db,
+        schemaInfo: pivotScope.vars.schemaInfo,
+        storageAdapter: pivotAdapter,
+        queryPurpose: 'collection'
+      }, pivotContext)
+      return {
+        query: unwrapQueryBuilderState(state, query).clearSelect().select(`${tableName}.${pivotAdapter.translateColumn(relDef.otherKey)}`)
+      }
+    }
 
     const buildScopeTableSchema = (vars = {}) => {
       const schemaStructure = vars.schemaInfo?.schemaStructure || {}
@@ -107,22 +134,31 @@ export const RestApiKnexPlugin = {
       }
     }
 
-    const buildLegacySortDescriptors = ({
+    const buildLegacySortDescriptors = async ({
       query,
       sort,
       schemaInfo,
       sortableFields,
       storageAdapter,
       defaultSort,
+      scopeName,
+      context,
       before = false,
       queryFieldRuntimeByField = new Map()
     }) => {
-      const effectiveSort = buildEffectiveSortList(sort, { defaultSort, idField: 'id' })
+      const effectiveSort = buildEffectiveSortList(sort, { defaultSort, idField: 'id', schemaInfo })
       const descriptors = []
+      const referenceColumns = await prepareReferenceSortColumns({
+        query,
+        fields: effectiveSort.map(entry => parseSortEntry(entry).field).filter(field =>
+          !queryFieldRuntimeByField.has(field) && (field === 'id' || !sortableFields?.length || sortableFields.includes(field))),
+        scopeName,
+        tableAlias: storageAdapter.getTableName(),
+        context
+      }, { scopes, knex, getStorageAdapter: getScopeStorageAdapter })
 
       for (const sortEntry of effectiveSort) {
         const { field, direction, sqlDirection } = parseSortEntry(sortEntry)
-        const queryDirection = before ? (direction === 'asc' ? 'desc' : 'asc') : direction
 
         if (field !== 'id' && sortableFields?.length > 0 && !sortableFields.includes(field)) {
           log.warn(`Ignoring non-sortable field: ${field}`)
@@ -131,7 +167,7 @@ export const RestApiKnexPlugin = {
 
         const queryFieldRuntime = queryFieldRuntimeByField.get(field)
         if (queryFieldRuntime) {
-          applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), before ? 'first' : 'last')
+          applySortDescriptorOrder(query, { queryFieldRuntime, direction }, { before })
           descriptors.push({
             field,
             direction: sqlDirection,
@@ -142,27 +178,27 @@ export const RestApiKnexPlugin = {
           continue
         }
 
-        let dbField = field
+        const dbField = resolveSortField(field, schemaInfo)
         const searchField = schemaInfo.searchSchemaStructure?.[field]
-        if (searchField?.actualField) {
-          dbField = searchField.actualField
-        }
 
         const storageColumn = storageAdapter?.translateColumn
           ? storageAdapter.translateColumn(dbField)
           : dbField
-        const translatedField = storageColumn.includes('.')
+        const reference = referenceColumns.get(field)
+        const translatedField = reference?.column || (storageColumn.includes('.')
           ? storageColumn
-          : `${storageAdapter?.getTableName?.() || schemaInfo.tableName}.${storageColumn}`
+          : `${storageAdapter?.getTableName?.() || schemaInfo.tableName}.${storageColumn}`)
 
-        query.orderByRaw(`?? IS NULL ${before ? 'DESC' : 'ASC'}`, [translatedField])
-        query.orderBy(translatedField, queryDirection)
+        applySortDescriptorOrder(query, { column: translatedField, direction }, { before })
         descriptors.push({
           field,
           direction: sqlDirection,
           column: translatedField,
-          definition: schemaInfo.schemaStructure?.[field] || { type: field === 'id' ? 'id' : undefined },
-          isRelationship: Boolean(searchField?.isRelationship)
+          actualField: dbField,
+          resultColumn: field === 'id' ? 'id' : storageColumn,
+          ...(reference || {}),
+          definition: schemaInfo.schemaStructure?.[dbField] || { type: field === 'id' ? 'id' : undefined },
+          isRelationship: Boolean(schemaInfo.schemaStructure?.[dbField]?.belongsTo || (dbField !== field && searchField?.isRelationship))
         })
       }
 
@@ -180,20 +216,13 @@ export const RestApiKnexPlugin = {
       return descriptors
     }
 
-    // Check database capabilities
-    const hasWindowFunctions = await supportsWindowFunctions(knex)
-    const dbInfo = await getDatabaseInfo(knex)
-
-    // Store capabilities in API instance for access throughout
-    api.knex.capabilities = {
-      windowFunctions: hasWindowFunctions,
-      dbInfo
-    }
+    api.knex.capabilities = await getDatabaseCapabilities(knex, log)
+    const { dbInfo, windowFunctions } = api.knex.capabilities
 
     log.info('Database capabilities detected:', {
       database: dbInfo.client,
       version: dbInfo.version,
-      windowFunctions: hasWindowFunctions
+      windowFunctions
     })
 
     // Cross-table search functions are now imported directly and used with full signatures
@@ -284,13 +313,14 @@ export const RestApiKnexPlugin = {
       await alterKnexFields(
         api.knex.instance,
         vars.schemaInfo.tableName,
-        params.fields,
-        { ...params.options, idProperty: vars.schemaInfo.idProperty }
+        { structure: params.fields },
+        { storage: vars.schemaInfo.storage, ...params.options, idProperty: vars.schemaInfo.idProperty }
       )
     })
 
     // Helper scope method to add a field to an existing table
     addScopeMethod('addKnexFields', async ({ vars, scope, scopeName, scopeOptions, runHooks, params }) => {
+      assertFieldNameMap(params.fields, `added fields in '${scopeName}'`)
       // Create schema object from filtered fields
       const partialTableSchema = createSchema(params.fields)
 
@@ -298,13 +328,12 @@ export const RestApiKnexPlugin = {
         api.knex.instance,
         vars.schemaInfo.tableName,
         partialTableSchema,
-        { idProperty: vars.schemaInfo.idProperty }
+        { storage: vars.schemaInfo.storage, idProperty: vars.schemaInfo.idProperty }
       )
     })
 
-    helpers.newTransaction = async () => {
-      return knex.transaction()
-    }
+    /** @type {import('../../lib/transaction-types.js').TransactionFactory} */
+    helpers.newTransaction = context => createKnexTransaction(knex, context)
 
     /* ╔═════════════════════════════════════════════════════════════════════╗
      * ║                    DATA OPERATION METHODS                           ║
@@ -324,6 +353,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<boolean>} True if the resource exists, false otherwise
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataWriteHelpers['dataExists']} */
     helpers.dataExists = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
@@ -367,6 +397,7 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object>} JSON:API formatted response with data and optional included resources
      * @throws {RestApiResourceError} When the resource is not found
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataReadHelpers['dataGet']} */
     helpers.dataGet = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
@@ -422,7 +453,7 @@ export const RestApiKnexPlugin = {
       })
       query = selectionState.query
 
-      const record = await query.first()
+      const record = await applyDatabaseReadOptions(query).first()
 
       if (!record) {
         throw new RestApiResourceError(
@@ -444,7 +475,8 @@ export const RestApiKnexPlugin = {
         log,
         scopes,
         knex,
-        context
+        context,
+        api
       })
 
       // Build and return response
@@ -464,9 +496,12 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.db - Database connection (knex instance or transaction)
      * @returns {Promise<Object|null>} JSON:API formatted resource with belongsTo relationships, or null if not found
      */
+    // Supplying ids returns minimal records for the caller's bounded validation batch.
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataReadHelpers['dataGetMinimal']} */
     helpers.dataGetMinimal = async ({
       scopeName,
       context,
+      ids,
       runHooks,
       applyQueryFilters,
       filters = context.queryParams?.filters,
@@ -487,12 +522,10 @@ export const RestApiKnexPlugin = {
       // Build query.
       // Single-record lookups still go through knexQueryFiltering when hooks are available,
       // so resource scoping plugins can treat GET/PUT/PATCH/DELETE the same way as collections.
-      let query = db(tableName).where(idProperty, id)
-
-      // Add alias if idProperty is not 'id'
-      if (idProperty !== 'id') {
-        query = query.select('*', `${idProperty} as id`)
-      }
+      let query = ids === undefined
+        ? db(tableName).where(idProperty, id)
+        : db(tableName).whereIn(idProperty, ids.map(value => storageAdapter.translateFilterValue('id', value)))
+          .distinct(`${tableName}.${idProperty}`)
 
       if (typeof applyQueryFilters === 'function') {
         const scopedQueryState = await applyQueryFilters({
@@ -506,8 +539,7 @@ export const RestApiKnexPlugin = {
         })
         query = unwrapQueryBuilderState(scopedQueryState, query)
       } else if (runHooks) {
-        const previousKnexQuery = context.knexQuery
-        context.knexQuery = {
+        const filteredState = await withQueryFilteringContext(context, {
           query,
           filters,
           schemaInfo: context.schemaInfo,
@@ -517,22 +549,24 @@ export const RestApiKnexPlugin = {
           queryPurpose,
           adapter: storageAdapter,
           storageAdapter,
-        }
-
-        try {
+        }, async () => {
           await runHooks('knexQueryFiltering')
-          query = context.knexQuery?.query || query
-        } finally {
-          if (previousKnexQuery === undefined) {
-            delete context.knexQuery
-          } else {
-            context.knexQuery = previousKnexQuery
-          }
-        }
+        })
+        query = filteredState.query
       }
 
+      const identityFields = new Set([...context.schemaInfo.foreignKeyFields, 'id'])
+      const identities = Object.fromEntries([...identityFields].map(field => {
+        const column = storageAdapter.translateColumn(field)
+        return [field === 'id' ? 'id' : column, databaseIdentityExpression(db, `${tableName}.${column}`)]
+      }))
       // Execute query
-      const record = await query.first()
+      if (ids !== undefined) {
+        // Deduplicate policy joins by ID, without comparing JSON or other row values.
+        const records = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: db }).whereIn(idProperty, query).select(`${tableName}.*`, identities))
+        return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
+      }
+      const record = await applyDatabaseReadOptions(query.select(`${tableName}.*`, identities)).first()
 
       if (!record) {
         return null
@@ -570,6 +604,7 @@ export const RestApiKnexPlugin = {
      * @param {Function} params.runHooks - Function to run hooks (e.g., 'knexQueryFiltering')
      * @returns {Promise<Object>} JSON:API formatted response with data array, optional included resources, and pagination meta/links
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataReadHelpers['dataQuery']} */
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
@@ -583,7 +618,7 @@ export const RestApiKnexPlugin = {
       const sortableFields = context.sortableFields
 
       log.trace('[DATA-QUERY] Starting dataQuery', { scopeName })
-      log.debug(`[Knex] QUERY ${tableName}`, queryParams)
+      log.debug(`[Knex] QUERY ${tableName}`)
 
       // Build field selection for sparse fieldsets
       // This determines which fields to SELECT from database
@@ -600,6 +635,7 @@ export const RestApiKnexPlugin = {
 
       // Start building query with table prefix (for JOIN support)
       let query = db(tableName)
+      applyQueryConstraint({ query, context, scopeName, storageAdapter, tableName })
 
       const selectionState = await applyFieldSelectionToQuery({
         query,
@@ -631,168 +667,48 @@ export const RestApiKnexPlugin = {
 
       log.trace('[DATA-QUERY] Storing query data in context before calling runHooks')
 
-      // YOU ARE HERE: pass 'sesrchSchemaInstance' in the context below
-
-      // Store the query data in context where hooks can access it
-      // This is the proper way to share data between methods and hooks
-      if (context) {
-        context.knexQuery = {
-          query,
-          filters: queryParams.filters,
-          schemaInfo,
-          scopeName,
-          tableName,
-          db,
-          queryPurpose: 'collection',
-          adapter: storageAdapter,
-          storageAdapter,
-        }
-
-        log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery, filters: queryParams.filters })
-      }
-
-      await runHooks('knexQueryFiltering')
-
-      // Clean up after hook execution
-      if (context && context.knexQuery) {
-        delete context.knexQuery
-      }
+      const filteredState = await withQueryFilteringContext(context, {
+        query,
+        filters: queryParams.filters,
+        schemaInfo,
+        scopeName,
+        tableName,
+        db,
+        queryPurpose: 'collection',
+        adapter: storageAdapter,
+        storageAdapter,
+      }, async () => {
+        log.trace('[DATA-QUERY] Stored data in context', { hasStoredData: !!context.knexQuery })
+        await runHooks('knexQueryFiltering')
+      })
+      query = filteredState.query
 
       log.trace('[DATA-QUERY] Finished knexQueryFiltering hook')
 
-      const sortDescriptors = buildLegacySortDescriptors({
+      const sortDescriptors = await buildLegacySortDescriptors({
         query,
         sort: queryParams.sort,
         schemaInfo,
         sortableFields,
         defaultSort: scope.vars.defaultSort,
+        scopeName,
+        context,
         before: Boolean(queryParams.page?.before),
         storageAdapter,
         queryFieldRuntimeByField
       })
 
-      // Apply pagination
-      // Check if page object has any actual pagination parameters
-      const hasPageParams = queryParams.page &&
-        (queryParams.page.size !== undefined ||
-         queryParams.page.number !== undefined ||
-         queryParams.page.after !== undefined ||
-         queryParams.page.before !== undefined)
-
-      const requestedSize = queryParams.page?.size || scope.vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
-      const pageSize = Math.min(
-        requestedSize,
-        scope.vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-      )
-
-      if (hasPageParams) {
-        // Validate page size
-        if (requestedSize <= 0) {
-          throw new RestApiValidationError(
-            'Page size must be greater than 0',
-            {
-              fields: ['page.size'],
-              violations: [{
-                field: 'page.size',
-                rule: 'min_value',
-                message: 'Page size must be a positive number'
-              }]
-            }
-          )
-        }
-
-        // Offset-based pagination
-        if (queryParams.page.number !== undefined) {
-          const pageNumber = queryParams.page.number || 1
-          query
-            .limit(pageSize)
-            .offset((pageNumber - 1) * pageSize)
-        } else if (queryParams.page.after || queryParams.page.before) {
-          // Fetch one extra record to determine if there are more
-          query.limit(pageSize + 1)
-
-          if (queryParams.page.after) {
-            let cursorData
-            try {
-              cursorData = parseCursor(queryParams.page.after)
-            } catch (error) {
-              throw new RestApiValidationError(
-                'Invalid cursor format in page[after] parameter',
-                {
-                  fields: ['page.after'],
-                  violations: [{
-                    field: 'page.after',
-                    rule: 'invalid_cursor',
-                    message: 'The cursor value is not valid'
-                  }]
-                }
-              )
-            }
-
-            cursorData = validateCursorValues(sortDescriptors, cursorData, 'after')
-            applyCursorPredicate(
-              query,
-              sortDescriptors,
-              cursorData,
-              (direction) => (direction === 'DESC' ? '<' : '>'),
-              (builder, descriptor, operator, value) => builder.where(
-                descriptor.column,
-                operator,
-                storageAdapter?.translateFilterValue
-                  ? storageAdapter.translateFilterValue(descriptor.field, value)
-                  : value
-              ),
-              {
-                onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
-              }
-            )
-          } else if (queryParams.page.before) {
-            let cursorData
-            try {
-              cursorData = parseCursor(queryParams.page.before)
-            } catch (error) {
-              throw new RestApiValidationError(
-                'Invalid cursor format in page[before] parameter',
-                {
-                  fields: ['page.before'],
-                  violations: [{
-                    field: 'page.before',
-                    rule: 'invalid_cursor',
-                    message: 'The cursor value is not valid'
-                  }]
-                }
-              )
-            }
-
-            cursorData = validateCursorValues(sortDescriptors, cursorData, 'before')
-            applyCursorPredicate(
-              query,
-              sortDescriptors,
-              cursorData,
-              (direction) => (direction === 'DESC' ? '>' : '<'),
-              (builder, descriptor, operator, value) => builder.where(
-                descriptor.column,
-                operator,
-                storageAdapter?.translateFilterValue
-                  ? storageAdapter.translateFilterValue(descriptor.field, value)
-                  : value
-              ),
-              {
-                onMissingValue: (fieldName) => log.warn(`Cursor missing value for sort field: ${fieldName}`)
-              }
-            )
-          }
-        } else {
-          // Fetch one extra to detect hasMore
-          query.limit(pageSize + 1)
-        }
-      } else {
-        // No pagination params provided - apply default limit
-        query.limit(pageSize)
-      }
+      const paginationInfo = applyPaginationToQuery({
+        query,
+        page: queryParams.page,
+        vars: scope.vars,
+        sortDescriptors,
+        storageAdapter
+      })
+      const { pageSize } = paginationInfo
 
       // Execute query
-      const records = await query
+      const records = await applyDatabaseReadOptions(query)
 
       // Initialize returnMeta namespace for thread-safe metadata
       context.returnMeta = context.returnMeta || {}
@@ -800,18 +716,18 @@ export const RestApiKnexPlugin = {
       context.returnMeta.queryString = queryString ? `?${queryString}` : ''
 
       // Execute count query for pagination if offset-based pagination is used
-      if (queryParams.page?.number !== undefined || (queryParams.page?.size !== undefined && !queryParams.page?.after && !queryParams.page?.before)) {
-        const page = parseInt(queryParams.page?.number) || 1
+      if (paginationInfo.mode === 'offset') {
+        const { page } = paginationInfo
 
         // Only execute count query if enabled
         if (scope.vars.enablePaginationCounts) {
           // Build count query with same filters as main query
           let countQuery = db(tableName)
+          applyQueryConstraint({ query: countQuery, context, scopeName, storageAdapter, tableName })
 
           // Mandatory server-side filters must also run when the client supplied no filters.
           // Otherwise pagination metadata can disclose or count rows excluded from the page.
-          const previousKnexQuery = context.knexQuery
-          context.knexQuery = {
+          const filteredState = await withQueryFilteringContext(context, {
             query: countQuery,
             filters: queryParams.filters,
             scopeName,
@@ -821,21 +737,14 @@ export const RestApiKnexPlugin = {
             queryPurpose: 'count',
             adapter: storageAdapter,
             storageAdapter
-          }
-
-          try {
+          }, async () => {
             await runHooks('knexQueryFiltering')
-            countQuery = context.knexQuery?.query || countQuery
-          } finally {
-            if (previousKnexQuery === undefined) {
-              delete context.knexQuery
-            } else {
-              context.knexQuery = previousKnexQuery
-            }
-          }
+          })
+          countQuery = filteredState.query
 
           // Get total count
-          const countResult = await countQuery.count('* as total').first()
+          const countResult = await countQuery.clearSelect().clearOrder()
+            .countDistinct({ total: `${tableName}.${storageAdapter.getIdColumn()}` }).first()
           const total = parseInt(countResult.total)
 
           // Calculate pagination metadata with total
@@ -859,10 +768,8 @@ export const RestApiKnexPlugin = {
         )
       }
 
-      // Handle cursor-based pagination meta
-      // Generate cursor metadata when using cursor parameters OR when only size is specified (no page number)
-      if (queryParams.page?.after || queryParams.page?.before ||
-          (queryParams.page?.size && queryParams.page?.number === undefined)) {
+      const referenceSortDescriptors = sortDescriptors.filter(descriptor => descriptor.referenceField)
+      if (paginationInfo.mode === 'cursor') {
         // Check if there are more records
         // We fetched pageSize + 1 records to detect if there are more
         const hasMore = records.length > pageSize
@@ -871,22 +778,29 @@ export const RestApiKnexPlugin = {
         if (hasMore) {
           records.pop()
         }
-        if (queryParams.page?.before) records.reverse()
+        if (paginationInfo.before) records.reverse()
 
         const sortFields = sortDescriptors.map((descriptor) => descriptor.field)
+        const cursorRecords = records.map(record => {
+          const cursorRecord = { ...record }
+          for (const { field, resultColumn } of sortDescriptors) {
+            if (resultColumn) cursorRecord[field] = record[resultColumn]
+          }
+          return cursorRecord
+        })
         const cursorOptions = {
           schemaInfo,
           definitions: Object.fromEntries(sortDescriptors.map(({ field, definition }) => [field, definition])),
-          before: Boolean(queryParams.page?.before)
+          before: paginationInfo.before
         }
 
-        context.returnMeta.paginationMeta = buildCursorMeta(records, pageSize, hasMore, sortFields, cursorOptions)
+        context.returnMeta.paginationMeta = buildCursorMeta(cursorRecords, pageSize, hasMore, sortFields, cursorOptions)
         const urlPrefix = getUrlPrefix(context, scope)
         context.returnMeta.paginationLinks = generateCursorPaginationLinks(
           urlPrefix,
           scopeName,
           queryParams,
-          records,
+          cursorRecords,
           pageSize,
           hasMore,
           sortFields,
@@ -894,6 +808,9 @@ export const RestApiKnexPlugin = {
         )
       }
 
+      for (const record of records) {
+        for (const { resultColumn } of referenceSortDescriptors) delete record[resultColumn]
+      }
       // Load relationship identifiers for all hasMany relationships
       await loadRelationshipIdentifiers(records, scopeName, scopes, db, context)
 
@@ -926,6 +843,7 @@ export const RestApiKnexPlugin = {
      * @param {Object} params.context.inputRecord.data.attributes - The resource attributes to insert
      * @returns {Promise<string|number>} The ID of the newly created resource
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataWriteHelpers['dataPost']} */
     helpers.dataPost = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
@@ -936,7 +854,7 @@ export const RestApiKnexPlugin = {
       const db = context.db || api.knex.instance
       const inputRecord = context.inputRecord
 
-      log.debug(`[Knex] POST ${tableName}`, inputRecord)
+      log.debug(`[Knex] POST ${tableName}`)
 
       // Extract attributes from JSON:API format.
       // POST may legitimately provide a resource id when the table uses a custom primary key
@@ -958,7 +876,7 @@ export const RestApiKnexPlugin = {
       const explicitId = dbAttributes[idProperty] ?? inputRecord.data.id
 
       // Insert and get the new ID
-      const result = await db(tableName).insert(dbAttributes).returning(idProperty)
+      const result = await applyDatabaseReadOptions(applyInsertReturning(db(tableName).insert(dbAttributes), { [idProperty]: databaseIdentityExpression(db, idProperty) }))
 
       // Extract the ID value. Some dialects ignore .returning() for inserts and can
       // yield 0 even when the caller explicitly supplied the primary key.
@@ -997,12 +915,12 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<void>} Resolves when the operation is complete
      * @throws {RestApiResourceError} When updating and the resource is not found
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataWriteHelpers['dataPut']} */
     helpers.dataPut = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName]
       const id = context.id
       const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
       const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
@@ -1012,18 +930,16 @@ export const RestApiKnexPlugin = {
 
       log.debug(`[Knex] PUT ${tableName}/${id} (isCreate: ${context.isCreate})`)
 
-      // Extract attributes and process relationships using helper
+      // Core has already merged relationship values and applied setters.
       const attributes = inputRecord.data.attributes || {}
-      const foreignKeyUpdates = processBelongsToRelationships(scope, { context })
-      const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
 
       // Strip non-database fields (computed and virtual) before database operation
       const finalAttributes = storageAdapter?.toStorageRow
-        ? storageAdapter.toStorageRow(mergedAttributes, {
+        ? storageAdapter.toStorageRow(attributes, {
           context,
           operation: 'put'
         })
-        : mergedAttributes
+        : attributes
 
       // Map 'id' to actual idProperty if needed (for PUT with specific ID)
       if (idProperty !== 'id' && inputRecord.data.id) {
@@ -1086,12 +1002,12 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<void>} Resolves when the update is complete
      * @throws {RestApiResourceError} When the resource is not found
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataWriteHelpers['dataPatch']} */
     helpers.dataPatch = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const scope = api.resources[scopeName]
       const id = context.id
       const tableName = storageAdapter?.getTableName?.() || context.schemaInfo.tableName
       const idProperty = storageAdapter?.getIdColumn?.() || context.schemaInfo.idProperty
@@ -1116,20 +1032,18 @@ export const RestApiKnexPlugin = {
         )
       }
 
-      // Extract attributes and process relationships using helper
+      // Core has already merged relationship values and applied setters.
       const attributes = inputRecord.data.attributes || {}
-      const foreignKeyUpdates = processBelongsToRelationships(scope, { context })
-      const mergedAttributes = { ...attributes, ...foreignKeyUpdates }
 
       // Strip non-database fields (computed and virtual) before database operation
       const finalAttributes = storageAdapter?.toStorageRow
-        ? storageAdapter.toStorageRow(mergedAttributes, {
+        ? storageAdapter.toStorageRow(attributes, {
           context,
           operation: 'patch'
         })
-        : mergedAttributes
+        : attributes
 
-      log.debug('[Knex] PATCH finalAttributes:', finalAttributes)
+      log.debug(`[Knex] PATCH attributes prepared for ${tableName}`)
 
       // Remove the idProperty from attributes to prevent updating the primary key
       delete finalAttributes[idProperty]
@@ -1156,6 +1070,7 @@ export const RestApiKnexPlugin = {
      * @returns {Promise<Object>} Returns { success: true } when deletion is successful
      * @throws {RestApiResourceError} When the resource is not found
      */
+    /** @type {import('./lib/storage/storage-types.js').OrdinaryDataWriteHelpers['dataDelete']} */
     helpers.dataDelete = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
@@ -1186,9 +1101,11 @@ export const RestApiKnexPlugin = {
       }
 
       // Delete the record
+      await invalidateDeletedPivotTargets(api, scopeName, context)
       await db(tableName)
         .where(idProperty, id)
         .delete()
+      await deletePivotReferences(api, scopeName, context)
 
       return { success: true }
     }

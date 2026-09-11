@@ -133,7 +133,7 @@ describe('Your Feature Name (Template Example)', () => {
     // IMPORTANT: Context is SECOND parameter, not inside first parameter!
     const createResult = await api.resources.countries.post({
       inputRecord: doc,
-      simplified: false
+      format: 'jsonapi'
     }, { /* optional context goes here */ })
 
     // Validate the creation response
@@ -147,7 +147,7 @@ describe('Your Feature Name (Template Example)', () => {
     // Retrieve the country we just created
     const getResult = await api.resources.countries.get({
       id: createResult.data.id,
-      simplified: false
+      format: 'jsonapi'
     })
 
     // Validate the retrieved country

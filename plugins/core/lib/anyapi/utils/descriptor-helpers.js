@@ -1,6 +1,3 @@
-import { RestApiValidationError } from '../../../../../lib/rest-api-errors.js'
-import { normalizeValueForDatabaseStorage } from '../../querying-writing/database-value-normalizers.js'
-
 export const normalizeId = (value) => (value === null || value === undefined ? null : String(value))
 
 export const findSchemaFieldByAlias = (descriptor, alias) => {
@@ -60,65 +57,4 @@ export const resolveFieldInfo = (descriptor, field) => {
   }
 
   return null
-}
-
-export const coerceValueForDefinition = (value, definition, { isRelationship } = {}) => {
-  if (value === null || value === undefined) return null
-
-  if (isRelationship) {
-    return normalizeId(value)
-  }
-
-  const type = definition?.type || definition?.dataType
-  if (!type) {
-    return value
-  }
-
-  if (['number', 'integer', 'float', 'decimal'].includes(type)) {
-    const numeric = Number(value)
-    return Number.isNaN(numeric) ? value : numeric
-  }
-
-  if (type === 'boolean') {
-    if (typeof value === 'boolean') return value
-    if (typeof value === 'string') {
-      if (value.toLowerCase() === 'true') return true
-      if (value.toLowerCase() === 'false') return false
-    }
-    return Boolean(value)
-  }
-
-  if (['string', 'text', 'uuid', 'email'].includes(type)) {
-    return String(value)
-  }
-
-  if (['date', 'dateTime', 'time'].includes(type)) {
-    return normalizeValueForDatabaseStorage(value, type, {
-      temporalPrecision: definition?.temporalPrecision
-    })
-  }
-
-  return value
-}
-
-export const normalizeFilterValues = (rawValue, definition, options) => {
-  if (Array.isArray(rawValue)) {
-    return rawValue.map((item) => coerceValueForDefinition(item, definition, options))
-  }
-  return [coerceValueForDefinition(rawValue, definition, options)]
-}
-
-export const ensureFilterableField = (descriptor, field) => {
-  const fieldInfo = resolveFieldInfo(descriptor, field)
-  if (!fieldInfo?.column) {
-    throw new RestApiValidationError('Invalid filter field', {
-      fields: [`filters.${field}`],
-      violations: [{
-        field: `filters.${field}`,
-        rule: 'unknown_field',
-        message: `Filter on '${field}' is not supported in AnyAPI mode`,
-      }],
-    })
-  }
-  return fieldInfo
 }

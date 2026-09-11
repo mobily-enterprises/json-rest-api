@@ -16,9 +16,12 @@ describe('Pagination boundary audit', () => {
     await cleanTables(knex, ['temporal_events', 'temporal_people'])
     ids = []
     for (let index = 0; index < 8; index++) {
-      const result = await api.resources.events.post({ inputRecord: createJsonApiDocument('events', {
-        name: `Event ${index}`, occurredAt: `2026-09-01T10:20:3${index}.000Z`
-      }), simplified: false })
+      const result = await api.resources.events.post({
+        inputRecord: createJsonApiDocument('events', {
+          name: `Event ${index}`, occurredAt: `2026-09-01T10:20:3${index}.000Z`
+        }),
+        format: 'jsonapi'
+      })
       ids.push(result.data.id)
     }
   })
@@ -28,21 +31,27 @@ describe('Pagination boundary audit', () => {
       { size: 0 }, { size: -1 }, { size: 0.5 }, { number: 0 }, { number: -1 }, { number: 1.5 },
       { after: '' }, { after: 'id:1', before: 'id:8' }, { number: 1, after: 'id:1' }
     ]) {
-      await assert.rejects(api.resources.events.query({ queryParams: { page }, simplified: false }), {
+      await assert.rejects(api.resources.events.query({ queryParams: { page }, format: 'jsonapi' }), {
         code: 'REST_API_VALIDATION'
       }, JSON.stringify(page))
     }
   })
 
   it('returns the adjacent page before a cursor rather than restarting at the beginning', async () => {
-    const result = await api.resources.events.query({ queryParams: {
-      sort: ['id'], page: { size: 2, before: `id:${ids[6]}` }
-    }, simplified: false })
+    const result = await api.resources.events.query({
+      queryParams: {
+        sort: ['id'], page: { size: 2, before: `id:${ids[6]}` }
+      },
+      format: 'jsonapi'
+    })
     assert.deepEqual(result.data.map(entry => entry.id), ids.slice(4, 6))
     assert.equal(result.meta.pagination.hasMore, true)
-    const next = await api.resources.events.query({ queryParams: {
-      sort: ['id'], page: { size: 2, before: result.meta.pagination.cursor.next }
-    }, simplified: false })
+    const next = await api.resources.events.query({
+      queryParams: {
+        sort: ['id'], page: { size: 2, before: result.meta.pagination.cursor.next }
+      },
+      format: 'jsonapi'
+    })
     assert.deepEqual(next.data.map(entry => entry.id), ids.slice(2, 4))
     assert.equal(new URL(result.links.next, 'https://api.test').searchParams.get('page[before]'), result.meta.pagination.cursor.next)
   })
@@ -51,7 +60,7 @@ describe('Pagination boundary audit', () => {
     const original = api.resources.events.vars.queryDefaultLimit
     api.resources.events.vars.queryDefaultLimit = 20
     try {
-      assert.equal((await api.resources.events.query({ simplified: false })).data.length, 3)
+      assert.equal((await api.resources.events.query({ format: 'jsonapi' })).data.length, 3)
     } finally {
       api.resources.events.vars.queryDefaultLimit = original
     }
@@ -69,9 +78,11 @@ describe('Pagination boundary audit', () => {
   it('generates usable cursors when a sort field is repeated', async () => {
     const sort = ['name', 'name', 'id', 'id']
     const first = await api.resources.events.query({ queryParams: { sort, page: { size: 2 } } })
-    const second = await api.resources.events.query({ queryParams: {
-      sort, page: { size: 2, after: first.meta.pagination.cursor.next }
-    } })
+    const second = await api.resources.events.query({
+      queryParams: {
+        sort, page: { size: 2, after: first.meta.pagination.cursor.next }
+      }
+    })
     assert.deepEqual(second.data.map(entry => entry.id), ids.slice(2, 4))
   })
 
@@ -103,9 +114,11 @@ describe('Pagination boundary audit', () => {
     try {
       const result = await api.resources.events.query({ queryParams: { page: { number: 1, size: 2 } } })
       const last = new URL(result.links.last, 'https://api.test')
-      const finalPage = await api.resources.events.query({ queryParams: {
-        page: { number: last.searchParams.get('page[number]'), size: last.searchParams.get('page[size]') }
-      } })
+      const finalPage = await api.resources.events.query({
+        queryParams: {
+          page: { number: last.searchParams.get('page[number]'), size: last.searchParams.get('page[size]') }
+        }
+      })
       assert.deepEqual(finalPage.data, [])
     } finally {
       api.resources.events.vars.enablePaginationCounts = original
@@ -115,17 +128,26 @@ describe('Pagination boundary audit', () => {
   for (const sort of [['occurredAt'], ['-occurredAt']]) {
     it(`traverses null sort values exactly once in both directions with sort=${sort}`, async () => {
       for (const id of [ids[1], ids[4], ids[6]]) {
-        await api.resources.events.patch({ id, inputRecord: { data: {
-          type: 'events', id, attributes: { occurredAt: null }
-        } }, simplified: false })
+        await api.resources.events.patch({
+          id,
+          inputRecord: {
+            data: {
+              type: 'events', id, attributes: { occurredAt: null }
+            }
+          },
+          format: 'jsonapi'
+        })
       }
       const seen = []
       let after
       const pages = []
       for (let index = 0; index < 6; index++) {
-        const page = await api.resources.events.query({ queryParams: {
-          sort, page: { size: 2, ...(after ? { after } : {}) }
-        }, simplified: false })
+        const page = await api.resources.events.query({
+          queryParams: {
+            sort, page: { size: 2, ...(after ? { after } : {}) }
+          },
+          format: 'jsonapi'
+        })
         pages.push(page)
         seen.push(...page.data.map(entry => entry.id))
         after = page.meta.pagination.cursor?.next
@@ -142,7 +164,7 @@ describe('Pagination boundary audit', () => {
       let before = createCursor({ id: firstOfLast.id, ...firstOfLast.attributes }, ['occurredAt', 'id'])
       const reversed = [...pages.at(-1).data.map(entry => entry.id)]
       for (let index = 0; index < 6; index++) {
-        const page = await api.resources.events.query({ queryParams: { sort, page: { size: 2, before } }, simplified: false })
+        const page = await api.resources.events.query({ queryParams: { sort, page: { size: 2, before } }, format: 'jsonapi' })
         reversed.unshift(...page.data.map(entry => entry.id))
         before = page.meta.pagination.cursor?.next
         if (!before) break

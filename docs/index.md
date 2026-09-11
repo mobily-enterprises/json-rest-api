@@ -42,7 +42,7 @@ JSON REST API is a lightweight, plugin-based framework that makes building REST 
   
   <div class="feature-card">
     <h3>📦 Multiple Storage Options</h3>
-    <p>Start with in-memory storage for development, switch to MySQL for production. Same API, no code changes.</p>
+    <p>Use ordinary resource tables or canonical storage on the verified SQLite, PostgreSQL and MySQL combinations. Review backend-specific limits before moving data.</p>
   </div>
   
   <div class="feature-card">

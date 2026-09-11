@@ -5,6 +5,13 @@
  * and support flexible URL prefix override capabilities.
  */
 
+import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
+
+export const buildJsonApiLink = (baseUrl, queryParams, page) => {
+  const queryString = serializeJsonApiQuery(queryParams, { page })
+  return queryString ? `${baseUrl}?${queryString}` : baseUrl
+}
+
 /**
  * Get the complete URL prefix, handling all calculation and override logic
  *
@@ -63,7 +70,7 @@ export function getUrlPrefix (context, scope) {
  */
 export function buildResourceUrl (context, scope, scopeName, id) {
   const urlPrefix = getUrlPrefix(context, scope)
-  return `${urlPrefix}/${scopeName}/${id}`
+  return `${urlPrefix}/${scopeName}/${encodeURIComponent(id)}`
 }
 
 /**
@@ -87,11 +94,11 @@ export function buildResourceUrl (context, scope, scopeName, id) {
  * // Returns: "https://api.example.com/api/books/1/author"
  */
 export function buildRelationshipUrl (context, scope, scopeName, id, relationshipName, isRelationshipEndpoint = false) {
-  const urlPrefix = getUrlPrefix(context, scope)
+  const resourceUrl = buildResourceUrl(context, scope, scopeName, id)
   if (isRelationshipEndpoint) {
-    return `${urlPrefix}/${scopeName}/${id}/relationships/${relationshipName}`
+    return `${resourceUrl}/relationships/${relationshipName}`
   }
-  return `${urlPrefix}/${scopeName}/${id}/${relationshipName}`
+  return `${resourceUrl}/${relationshipName}`
 }
 
 /**

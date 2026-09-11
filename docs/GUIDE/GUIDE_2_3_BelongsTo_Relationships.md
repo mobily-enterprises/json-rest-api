@@ -1,491 +1,174 @@
-# 2.3 `belongsTo` Relationships
+# 2.3 `belongsTo` relationships
 
-`belongsTo` relationships represent a one-to-one or many-to-one association where the current resource "belongs to" another resource. For example, a `book` belongs to an `author`, or an `author` belongs to a `country`. These relationships are typically managed by a **foreign key** on the "belonging" resource's table.
+A publisher belongs to a country. In table-backed storage, the publisher holds
+the foreign key; several publishers can reference the same country. Use the
+[starting script](GUIDE_2_1_The_Starting_Point.md), and insert the JavaScript
+blocks below in order before the server starts. Start with a fresh database.
 
-Let's expand our schema definitions to include `publishers` and link them to `countries`. These schemas will be defined **once** here and reused throughout this section.
+## Define resources and create records
 
 ```javascript
-// Define countries resource
 await api.addResource('countries', {
   schema: {
-    name: { type: 'string', required: true, max: 100, search: true },
-    code: { type: 'string', max: 2, unique: true, search: true, indexed: true },
+    name: { type: 'string', required: true, max: 100 },
+    code: { type: 'string', max: 2, unique: true, indexed: true }
   }
-});
-await api.resources.countries.createKnexTable();
-
-// Define publishers resource
+})
 await api.addResource('publishers', {
   schema: {
     name: { type: 'string', required: true, max: 255 },
     country_id: { type: 'id', belongsTo: 'countries', as: 'country', nullable: true }
   },
-  // searchSchema completely defines all filterable fields for this resource
   searchSchema: {
-    name: { type: 'string' },
     country: { type: 'id', actualField: 'country_id', nullable: true },
     countryCode: { type: 'string', actualField: 'countries.code' }
   }
-});
-await api.resources.publishers.createKnexTable();
-```
+})
+await api.resources.countries.createKnexTable()
+await api.resources.publishers.createKnexTable()
 
-Now, let's add some data. Use the relationship name `country` when linking a publisher to a country in simplified mode.
-
-```javascript
-const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-
-// Create publishers linking via the relationship name (simplified syntax)
+const france = await api.resources.countries.post({
+  inputRecord: { name: 'France', code: 'FR' }
+})
+const uk = await api.resources.countries.post({
+  inputRecord: { name: 'United Kingdom', code: 'GB' }
+})
 const frenchPublisher = await api.resources.publishers.post({
-  name: 'French Books Inc.',
-  country: france.id
-});
-
-const germanPublisher = await api.resources.publishers.post({
-  name: 'German Press GmbH',
-  country: germany.id
-});
-
-const ukPublisher = await api.resources.publishers.post({
-  name: 'UK Books Ltd.',
-  country: uk.id
-});
-
-const internationalPublisher = await api.resources.publishers.post({
-  name: 'Global Publishing',
-  country: null
-});
-
-
-console.log('Added French Publisher:', inspect(frenchPublisher));
-console.log('Added German Publisher:', inspect(germanPublisher));
-console.log('Added UK Publisher:', inspect(ukPublisher));
-console.log('Added International Publisher:', inspect(internationalPublisher));
+  inputRecord: { name: 'French Books Inc.', country: france.id }
+})
+await api.resources.publishers.post({
+  inputRecord: { name: 'Another French Publisher', country: france.id }
+})
+const britishPublisher = await api.resources.publishers.post({
+  inputRecord: { name: 'UK Books Ltd.', country: uk.id }
+})
+await api.resources.publishers.post({
+  inputRecord: { name: 'Global Publishing', country: null }
+})
 ```
 
-**Using Relationship Names:**
+Plain writes use the relationship alias `country` inside `inputRecord`.
+Do not supply the foreign-key field `country_id` as a public relationship input.
+Without an include, the plain response contains `country: { id: france.id }`;
+an unassigned to-one relationship is omitted from plain output. JSON:API
+represents its linkage with `data: null`.
 
-When defining a `belongsTo` relationship with an `as` alias (e.g., `country_id: { ..., as: 'country' }`), use the relationship name `country` when providing the related resource's ID during `post`, `put`, or `patch` operations in **simplified mode**:
+`country_id` is the logical schema field. Its physical column can differ with
+storage configuration. Hooks must follow their stage's context contract instead
+of assuming that logical relationship fields are already SQL columns.
 
-* Use the **relationship name** (the `as` value) directly with the ID of the related resource (e.g., `country: france.id`). This provides clarity and aligns with the relationship concept.
-* Foreign key field names (e.g., `country_id`) are no longer supported for relationship input to maintain consistency across all relationship types.
-
-**Field Visibility and Database-First Design:**
-
-Note that while the schema defines `country_id` (the actual database column), the API layer abstracts this away:
-- **API Input**: Use `country` (the relationship name)
-- **API Output**: Returns `country: { id: '1' }` (relationship object)
-- **Internal/Hooks**: Work with `country_id` (actual database field via `context.belongsToUpdates`)
-
-This separation ensures API consumers never see database implementation details like foreign key fields, while backend developers retain full control over the database structure.
-
-**Expected Output (Illustrative, IDs may vary):**
-
-```text
-Added French Publisher: { id: '1', name: 'French Books Inc.', country: { id: '1' } }
-Added German Publisher: { id: '2', name: 'German Press GmbH', country: { id: '2' } }
-Added UK Publisher: { id: '3', name: 'UK Books Ltd.', country: { id: '3' } }
-Added International Publisher: { id: '4', name: 'Global Publishing', country: null }
-```
-
-## Including `belongsTo` Records (`include`)
-
-To retrieve related `belongsTo` resources, use the `include` query parameter.
-
-When fetching data programmatically, `simplified` mode is `true` by default. This means that instead of a separate `included` array (as in full JSON:API), related `belongsTo` resources are **denormalized and embedded directly** within the main resource's object structure, providing a very convenient and flat data structure for immediate use.
-
-### Programmatic Usage:
+## Include related records
 
 ```javascript
-// Re-add data for a fresh start (schemas are reused from above)
-const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
+const includedPublisher = await api.resources.publishers.get({
+  id: frenchPublisher.id,
+  queryParams: { include: ['country'] }
+})
+console.log('Included country:', includedPublisher.country)
 
-await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
-await api.resources.publishers.post({ name: 'Another French Books Inc.', country: france.id });
-await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country: null });
+const plainCollection = await api.resources.publishers.query({
+  queryParams: { include: ['country'], sort: ['id'] }
+})
+console.log('Publishers:', plainCollection.data)
 
-await api.resources.publishers.post({ 
-  name: 'UK Books Ltd.', 
-  country: uk.id 
-});
-
-
-// Get a publisher and include its country (simplified mode output)
-const publisherWithCountry = await api.resources.publishers.get({
-  id: '1', // ID of French Books Inc.
-  queryParams: {
-    include: ['country'] // Use the 'as' alias defined in the schema
-  }
-});
-console.log('Publisher with Country:', inspect(publisherWithCountry));
-
-// Query all publishers and include their countries (simplified mode output)
-const allPublishersWithCountries = await api.resources.publishers.query({
-  queryParams: {
-    include: ['country']
-  }
-});
-// HTTP: GET /api/publishers?include=country
-// Returns (simplified): [
-//   { id: '1', name: 'French Books Inc.', country: { id: '1', name: 'France', code: 'FR' } },
-//   { id: '2', name: 'German Press GmbH', country: { id: '2', name: 'Germany', code: 'DE' } },
-//   { id: '3', name: 'UK Books Ltd.', country: { id: '3', name: 'United Kingdom', code: 'UK' } },
-//   { id: '4', name: 'Global Publishing', country: null }
-// ]
-
-console.log('All Publishers with Countries:', inspect(allPublishersWithCountries));
-// Note: allPublishersWithCountries contains { data, meta, links }
-
-// Query all publishers and include their countries (JSON:API format)
-const allPublishersWithCountriesNotSimplified = await api.resources.publishers.query({
-  queryParams: {
-    include: ['country']
-  },
-  simplified: false
-});
-// HTTP: GET /api/publishers?include=country
-// Returns (JSON:API): {
-//   data: [
-//     { type: 'publishers', id: '1', attributes: { name: 'French Books Inc.' }, 
-//       relationships: { country: { data: { type: 'countries', id: '1' } } } },
-//     { type: 'publishers', id: '2', attributes: { name: 'German Press GmbH' }, 
-//       relationships: { country: { data: { type: 'countries', id: '2' } } } },
-//     { type: 'publishers', id: '3', attributes: { name: 'UK Books Ltd.' }, 
-//       relationships: { country: { data: { type: 'countries', id: '3' } } } },
-//     { type: 'publishers', id: '4', attributes: { name: 'Global Publishing' }, 
-//       relationships: { country: { data: null } } }
-//   ],
-//   included: [
-//     { type: 'countries', id: '1', attributes: { name: 'France', code: 'FR' } },
-//     { type: 'countries', id: '2', attributes: { name: 'Germany', code: 'DE' } },
-//     { type: 'countries', id: '3', attributes: { name: 'United Kingdom', code: 'UK' } }
-//   ]
-// }
-
-console.log('All Publishers with Countries (not simplified):', inspect(allPublishersWithCountriesNotSimplified));
+const jsonapiCollection = await api.resources.publishers.query({
+  format: 'jsonapi',
+  queryParams: { include: ['country'], sort: ['id'] }
+})
+console.log('JSON:API collection:', jsonapiCollection)
 ```
 
-Here is the expected output. Notice how the last call shows the non-simplified version of the response, which is muc more verbose. However, it has one _major_ advantage: it only includes the information about France _once_. It might seem like a small gain here, but when you have complex queries where the `belongsTo` table has a lot of data, the saving is much more evident.
+`includedPublisher.country.name` is `France`. Plain collections still have a
+`data` array; included records are embedded into their corresponding parent
+objects. JSON:API collections put related records in `included` and keep
+identifiers under each primary record's `relationships.country.data`. The two
+French publishers share one France entry in that document's `included` array.
+The unassigned publisher retains null linkage.
 
-**Expected Output**
-
-```text
-Publisher with Country: {
-  id: '1',
-  name: 'French Books Inc.',
-  country: { id: '1', name: 'France', code: 'FR' }
-}
-All Publishers with Countries: {
-  data: [
-    {
-      id: '1',
-      name: 'French Books Inc.',
-      country: { id: '1', name: 'France', code: 'FR' }
-    },
-    {
-      id: '2',
-      name: 'Another French Books Inc.',
-      country: { id: '1', name: 'France', code: 'FR' }
-    },
-    {
-      id: '3',
-      name: 'UK Books Ltd.',
-      country: { id: '3', name: 'United Kingdom', code: 'UK' }
-    },
-    {
-      id: '4',
-      name: 'German Press GmbH',
-      country: { id: '2', name: 'Germany', code: 'DE' }
-    },
-    { id: '5', name: 'Global Publishing' }
-  ],
-  meta: {...},
-  links: {...}
-}
-All Publishers with Countries (not simplified): {
-  data: [
-    {
-      type: 'publishers',
-      id: '1',
-      attributes: { name: 'French Books Inc.' },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: '1' },
-          links: {
-            self: '/api/publishers/1/relationships/country',
-            related: '/api/publishers/1/country'
-          }
-        }
-      },
-      links: { self: '/api/publishers/1' }
-    },
-    {
-      type: 'publishers',
-      id: '2',
-      attributes: { name: 'Another French Books Inc.' },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: '1' },
-          links: {
-            self: '/api/publishers/2/relationships/country',
-            related: '/api/publishers/2/country'
-          }
-        }
-      },
-      links: { self: '/api/publishers/2' }
-    },
-    {
-      type: 'publishers',
-      id: '3',
-      attributes: { name: 'UK Books Ltd.' },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: '3' },
-          links: {
-            self: '/api/publishers/3/relationships/country',
-            related: '/api/publishers/3/country'
-          }
-        }
-      },
-      links: { self: '/api/publishers/3' }
-    },
-    {
-      type: 'publishers',
-      id: '4',
-      attributes: { name: 'German Press GmbH' },
-      relationships: {
-        country: {
-          data: { type: 'countries', id: '2' },
-          links: {
-            self: '/api/publishers/4/relationships/country',
-          related: '/api/publishers/4/country'
-        }
-      },
-      links: { self: '/api/publishers/4' }
-    },
-    {
-      type: 'publishers',
-      id: '5',
-      attributes: { name: 'Global Publishing' },
-      relationships: {
-        country: {
-          data: null,
-          links: {
-            self: '/api/publishers/5/relationships/country',
-            related: '/api/publishers/5/country'
-          }
-        }
-      },
-      links: { self: '/api/publishers/5' }
-    }
-  ],
-  included: [
-    {
-      type: 'countries',
-      id: '1',
-      attributes: { name: 'France', code: 'FR' },
-      relationships: {},
-      links: { self: '/api/countries/1' }
-    },
-    {
-      type: 'countries',
-      id: '3',
-      attributes: { name: 'United Kingdom', code: 'UK' },
-      relationships: {},
-      links: { self: '/api/countries/3' }
-    },
-    {
-      type: 'countries',
-      id: '2',
-      attributes: { name: 'Germany', code: 'DE' },
-      relationships: {},
-      links: { self: '/api/countries/2' }
-    }
-  ],
-  links: { self: '/api/publishers?include=country' }
-}
-```
-
----
-
-## Sparse Fieldsets with `belongsTo` Relations
-
-You can apply **sparse fieldsets** not only to the primary resource but also to the included `belongsTo` resources. This is powerful for fine-tuning your API responses and reducing payload sizes.
-
-### Programmatic Usage:
+## Select sparse fields
 
 ```javascript
-// Re-add data for a fresh start (schemas are reused from above)
-
-const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-
-await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
-await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country: null });
-
-
-// Get a publisher, include its country, but only retrieve publisher name and country code
 const sparsePublisher = await api.resources.publishers.get({
-  id: '1',
+  id: frenchPublisher.id,
   queryParams: {
     include: ['country'],
-    fields: {
-      publishers: 'name',       // Only name for publishers
-      countries: 'code'         // Only code for countries
-    }
+    fields: { publishers: 'name,country', countries: 'code' }
   }
-  // simplified: true is default for programmatic fetches
-});
-console.log('Sparse Publisher and Country:', inspect(sparsePublisher));
-
-
-// Query all publishers, include their countries, but only retrieve publisher name and country code
-const sparsePublishersQuery = await api.resources.publishers.query({
-  queryParams: {
-    include: ['country'],
-    fields: {
-      publishers: 'name',       // Only name for publishers
-      countries: 'code,name'    // BOTH code and name for countries
-    }
-  }
-  // simplified: true is default for programmatic fetches
-});
-// HTTP: GET /api/publishers?include=country&fields[publishers]=name&fields[countries]=code,name
-// Returns (simplified): [
-//   { id: '1', name: 'French Books Inc.', country: { id: '1', code: 'FR', name: 'France' } },
-//   { id: '2', name: 'German Press GmbH', country: { id: '2', code: 'DE', name: 'Germany' } },
-//   { id: '3', name: 'UK Books Ltd.', country: { id: '3', code: 'UK', name: 'United Kingdom' } },
-//   { id: '4', name: 'Global Publishing', country: null }
-// ]
-console.log('Sparse Publishers Query (all results):', inspect(sparsePublishersQuery));
+})
+console.log('Sparse country:', sparsePublisher.country)
 ```
 
-Note that you can specify multiple fields for countries, and that they need to be comma separated.
+Include the `country` relationship in the publisher's fieldset when its linkage
+must appear. The related country has its ID and code `FR`, without its name.
+Sparse fields select output; they are not an authorization policy.
 
-**Important Note on Sparse Fieldsets for Related Resources:**
-When you specify `fields: { countries: ['code'] }`, this instruction applies to *all* `country` resources present in the API response, whether `country` is the primary resource you are querying directly, or if it's included as a related resource. This ensures consistent data representation across the entire response.
-
-**Expected Output (Sparse Publisher and Country - Illustrative, IDs may vary):**
-
-```text
-{
-  id: '1',
-  name: 'French Books Inc.',
-  country: { id: '1', code: 'FR' }
-}
-Sparse Publishers Query (all results): {
-  data: [
-    {
-      id: '1',
-      name: 'French Books Inc.',
-      country: { id: '1', code: 'FR', name: 'France' }
-    },
-    {
-      id: '2',
-      name: 'UK Books Ltd.',
-      country: { id: '3', code: 'UK', name: 'United Kingdom' }
-    },
-    {
-      id: '3',
-      name: 'German Press GmbH',
-      country: { id: '2', code: 'DE', name: 'Germany' }
-    },
-    { id: '4', name: 'Global Publishing' }
-  ],
-  meta: {...},
-  links: {...}
-}
-```
-
-## Filtering by `belongsTo` Relationships
-
-You can filter resources based on conditions applied to their `belongsTo` relationships. This is achieved by defining filterable fields in the `searchSchema` that map to either the foreign key or fields on the related resource.
-
-The `searchSchema` offers a clean way to define filters, abstracting away the underlying database structure and relationship navigation from the client. Clients simply use the filter field names defined in `searchSchema` (e.g., `countryCode` instead of `country.code`).
-
-### Programmatic Usage:
+## Filter by a relationship
 
 ```javascript
-// Re-add data for a fresh start (schemas are reused from above)
-const france = await api.resources.countries.post({ name: 'France', code: 'FR' });
-const germany = await api.resources.countries.post({ name: 'Germany', code: 'DE' });
-const uk = await api.resources.countries.post({ name: 'United Kingdom', code: 'UK' });
-
-await api.resources.publishers.post({ name: 'French Books Inc.', country: france.id });
-await api.resources.publishers.post({ name: 'UK Books Ltd.', country: uk.id });
-await api.resources.publishers.post({ name: 'German Press GmbH', country: germany.id });
-await api.resources.publishers.post({ name: 'Global Publishing', country: null });
-
-
-// Programmatic search: Find publishers from France using the country ID alias in searchSchema
-const publishersFromFrance = await api.resources.publishers.query({
-  queryParams: {
-    filters: {
-      country: france.id // Using 'country' filter field defined in searchSchema
-    }
-  }
-  // simplified: true is default for programmatic fetches
-});
-// HTTP: GET /api/publishers?filter[country]=1
-// Returns: {
-//   data: [{ id: '1', name: 'French Books Inc.', country_id: '1' }]
-// }
-
-console.log('Publishers from France (by country ID):', inspect(publishersFromFrance));
-// Note: publishersFromFrance contains { data, meta, links }
-// Note: publishersFromFrance contains { data, meta, links } - access publishersFromFrance.data for the array
-
-// Programmatic search: Find publishers with no associated country
-const publishersNoCountry = await api.resources.publishers.query({
-  queryParams: {
-    filters: {
-      country: null // Filtering by null for the 'country' ID filter
-    }
-  }
-  // simplified: true is default for programmatic fetches
-});
-// HTTP: GET /api/publishers?filter[country]=null
-// Returns: {
-//   data: [{ id: '4', name: 'Global Publishing', country_id: null }]
-// }
-
-console.log('Publishers with No Country (by country ID: null):', inspect(publishersNoCountry));
-// Note: publishersNoCountry contains { data, meta, links }
-
-// Programmatic search: Find publishers where the associated country's code is 'UK'
-const publishersFromUK = await api.resources.publishers.query({
-  queryParams: {
-    filters: {
-      countryCode: 'UK' // Using 'countryCode' filter field defined in searchSchema
-    }
-  }
-  // simplified: true is default for programmatic fetches
-});
-// HTTP: GET /api/publishers?filter[countryCode]=UK
-// Returns: {
-//   data: [{ id: '3', name: 'UK Books Ltd.', country_id: '3' }]
-// }
-
-console.log('Publishers from UK (by countryCode):', inspect(publishersFromUK));
+const fromFrance = await api.resources.publishers.query({
+  queryParams: { filters: { country: france.id } }
+})
+const fromUK = await api.resources.publishers.query({
+  queryParams: { filters: { countryCode: 'GB' } }
+})
+const unassigned = await api.resources.publishers.query({
+  queryParams: { filters: { country: null } }
+})
+console.log('French publishers:', fromFrance.data)
+console.log('British publishers:', fromUK.data)
+console.log('Unassigned publishers:', unassigned.data)
 ```
 
-**Expected Output**
+The declared `country` filter selects two French publishers, `countryCode`
+selects UK Books Ltd., and null selects Global Publishing. `actualField` maps
+these public filter names to the ID field or the related resource's code.
+Cross-table filtering requires the related code field to declare `indexed: true`.
+Filtering does not automatically include the related record's attributes.
 
-```text
-Publishers from France (by country ID): [ { id: '1', name: 'French Books Inc.', country: { id: '1' } } ]
-Publishers with No Country (by country ID: null): [ { id: '4', name: 'Global Publishing' } ]
-Publishers from UK (by countryCode): [ { id: '2', name: 'UK Books Ltd.', country: { id: '3' } } ]
+## Change or clear the relationship
+
+```javascript
+await api.resources.publishers.patch({
+  id: britishPublisher.id,
+  inputRecord: { country: france.id },
+  returning: 'none'
+})
+await api.resources.publishers.patchRelationship({
+  id: britishPublisher.id,
+  relationshipName: 'country',
+  relationshipData: null
+})
+const cleared = await api.resources.publishers.getRelationship({
+  id: britishPublisher.id, relationshipName: 'country'
+})
+console.log('Cleared linkage:', cleared.data)
 ```
 
----
+PATCH can update an attribute and relationship in the same record operation.
+`patchRelationship` takes linkage in `relationshipData`, changes only the named
+relationship and returns undefined.
+Clearing it requires the relationship to allow null. The example ends with
+`cleared.data === null`; linkage reads return a JSON:API linkage document.
 
-[Previous: 2.2 Manipulating and searching tables with no relationships](./GUIDE_2_2_Manipulating_And_Searching_Tables.md) | [Back to Guide](./README.md) | [Next: 2.4 hasMany records](./GUIDE_2_4_HasMany_Records.md)
+## HTTP calls
+
+Generated routes use JSON:API. With the server running and the example's fresh
+records, these read commands exercise includes, fieldsets and related filtering.
+Use the IDs returned by your server for a persistent database.
+
+```bash
+curl --globoff 'http://localhost:3000/api/publishers/1?include=country'
+curl --globoff 'http://localhost:3000/api/publishers?include=country&fields[publishers]=name,country&fields[countries]=code'
+curl --globoff 'http://localhost:3000/api/publishers?filter[countryCode]=FR'
+
+curl -X PATCH http://localhost:3000/api/publishers/1/relationships/country \
+  -H 'Content-Type: application/vnd.api+json' \
+  -d '{"data":{"type":"countries","id":"2"}}'
+```
+
+The relationship endpoint body is a linkage document, distinct from a resource
+PATCH body with `data.type`, `data.id` and `data.relationships`. See the
+[API reference](../API.md) for both forms and their error/transaction contracts.
+
+[Previous: searching](GUIDE_2_2_Manipulating_And_Searching_Tables.md) |
+[Guide index](index.md) | [Next: hasMany](GUIDE_2_4_HasMany_Records.md)

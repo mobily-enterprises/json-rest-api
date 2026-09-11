@@ -1,8 +1,9 @@
 import { validateRelationships } from './lib/querying-writing/scope-validations.js'
+import { transactionMethod, withAvailableContext, withWriteOutcome } from '../../lib/error-context.js'
 
 // Import hook functions
 import compileResourceSchemas from './rest-api-plugin-hooks/compile-resource-schemas.js'
-import validateIncludeConfigurations from './rest-api-plugin-hooks/validate-include-configurations.js'
+import { validateIncludeConfigurations } from './rest-api-plugin-hooks/validate-include-configurations.js'
 import turnScopeInitIntoVars from './rest-api-plugin-hooks/turn-scope-init-into-vars.js'
 import registerScopeRoutes from './rest-api-plugin-hooks/register-scope-routes.js'
 import registerRelationshipRoutes from './rest-api-plugin-hooks/register-relationship-routes.js'
@@ -21,7 +22,7 @@ import addRouteMethod from './rest-api-plugin-methods/add-route.js'
 import releaseMethod from './rest-api-plugin-methods/release.js'
 import { defaultDataHelpers } from './lib/querying-writing/default-data-helpers.js'
 import { DEFAULT_QUERY_LIMIT, DEFAULT_MAX_QUERY_LIMIT, DEFAULT_INCLUDE_DEPTH_LIMIT } from './lib/querying-writing/knex-constants.js'
-import { normalizeReturnRecordSetting } from './lib/querying-writing/return-record-settings.js'
+import { rejectRemovedOptions, resolveFormat, resolveReturning } from './lib/querying-writing/response-options.js'
 
 import getRelatedMethod from './rest-api-plugin-methods/get-related.js'
 import postRelationshipMethod from './rest-api-plugin-methods/post-relationship.js'
@@ -29,11 +30,12 @@ import getRelationshipMethod from './rest-api-plugin-methods/get-relationship.js
 import patchRelationshipMethod from './rest-api-plugin-methods/patch-relationship.js'
 import deleteRelationshipMethod from './rest-api-plugin-methods/delete-relationship.js'
 import { defaultNormalizeResourceId } from './lib/querying-writing/resource-id-normalization.js'
+import { buildResourceUrl } from './lib/querying/url-helpers.js'
 
 export const RestApiPlugin = {
   name: 'rest-api',
 
-  install ({ helpers, addScopeMethod, addApiMethod, vars, addHook, runHooks, apiOptions, pluginOptions, api, setScopeAlias, scopes, log, on }) {
+  install ({ helpers, addScopeMethod, addApiMethod, vars, addHook, pluginOptions, api, setScopeAlias }) {
     // **************
     // Initial setup
     // **************
@@ -50,36 +52,22 @@ export const RestApiPlugin = {
 
     // Initialize default vars for the plugin from pluginOptions
     const restApiOptions = pluginOptions || {}
+    rejectRemovedOptions(restApiOptions)
 
     // These will be used as default fallbacks by the vars proxy if
     // they are not set in the scope options
     vars.queryDefaultLimit = restApiOptions.queryDefaultLimit || DEFAULT_QUERY_LIMIT
     vars.queryMaxLimit = restApiOptions.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
     vars.includeDepthLimit = restApiOptions.includeDepthLimit || DEFAULT_INCLUDE_DEPTH_LIMIT
-    vars.enablePaginationCounts = restApiOptions.enablePaginationCounts || true
+    vars.enablePaginationCounts = restApiOptions.enablePaginationCounts ?? true
 
-    // New simplified settings
-    vars.simplifiedTransport = restApiOptions.simplifiedTransport !== undefined
-      ? restApiOptions.simplifiedTransport
-      : false // Default false for JSON:API compliance over the wire
-
-    vars.simplifiedApi = restApiOptions.simplifiedApi !== undefined
-      ? restApiOptions.simplifiedApi
-      : true // Default true for better DX in programmatic API
+    vars.format = resolveFormat(restApiOptions.format)
+    vars.returning = resolveReturning(restApiOptions.returning)
 
     vars.idProperty = restApiOptions.idProperty || 'id'
     vars.normalizeId = typeof restApiOptions.normalizeId === 'function'
       ? restApiOptions.normalizeId
       : defaultNormalizeResourceId
-
-    // Return record configuration for API and Transport.
-    // Preferred values are 'no', 'minimal', and 'full'; booleans are normalized
-    // for backwards compatibility.
-    vars.returnRecordApi = normalizeReturnRecordSetting(restApiOptions.returnRecordApi, 'full')
-    vars.returnRecordTransport = normalizeReturnRecordSetting(restApiOptions.returnRecordTransport, 'no')
-
-    log.debug('returnRecordApi configuration:', vars.returnRecordApi)
-    log.debug('returnRecordTransport configuration:', vars.returnRecordTransport)
 
     // Schema cache vars
     vars.schemaProcessed = false
@@ -91,7 +79,7 @@ export const RestApiPlugin = {
 
     addHook('scope:added', 'validateRelationships', {}, validateRelationships)
     addHook('scope:added', 'compileResourceSchemas', {}, compileResourceSchemas)
-    addHook('scope:added', 'validateIncludeConfigurations', {}, validateIncludeConfigurations)
+    addHook('schema:compiled', 'validateIncludeConfigurations', {}, validateIncludeConfigurations)
     addHook('scope:added', 'turnScopeInitIntoVars', {}, turnScopeInitIntoVars)
 
     // *********
@@ -101,21 +89,22 @@ export const RestApiPlugin = {
     addApiMethod('addRoute', addRouteMethod)
 
     addApiMethod('release', releaseMethod)
+    addApiMethod('transaction', withWriteOutcome(transactionMethod))
 
     // Main REST methods
-    addScopeMethod('query', queryMethod)
-    addScopeMethod('get', getMethod)
-    addScopeMethod('post', postMethod)
-    addScopeMethod('put', putMethod)
-    addScopeMethod('patch', patchMethod)
-    addScopeMethod('delete', deleteMethod)
+    addScopeMethod('query', withAvailableContext(queryMethod))
+    addScopeMethod('get', withAvailableContext(getMethod))
+    addScopeMethod('post', withWriteOutcome(postMethod))
+    addScopeMethod('put', withWriteOutcome(putMethod))
+    addScopeMethod('patch', withWriteOutcome(patchMethod))
+    addScopeMethod('delete', withWriteOutcome(deleteMethod))
 
     // Relationship methods
-    addScopeMethod('getRelationship', getRelationshipMethod)
-    addScopeMethod('getRelated', getRelatedMethod)
-    addScopeMethod('postRelationship', postRelationshipMethod)
-    addScopeMethod('patchRelationship', patchRelationshipMethod)
-    addScopeMethod('deleteRelationship', deleteRelationshipMethod)
+    addScopeMethod('getRelationship', withAvailableContext(getRelationshipMethod))
+    addScopeMethod('getRelated', withAvailableContext(getRelatedMethod))
+    addScopeMethod('postRelationship', withWriteOutcome(postRelationshipMethod))
+    addScopeMethod('patchRelationship', withWriteOutcome(patchRelationshipMethod))
+    addScopeMethod('deleteRelationship', withWriteOutcome(deleteRelationshipMethod))
 
     addHook('scope:added', 'registerRelationshipRoutes', {}, registerRelationshipRoutes)
     addHook('scope:added', 'registerScopeRoutes', {}, registerScopeRoutes)
@@ -136,6 +125,6 @@ export const RestApiPlugin = {
 
     // Add default getLocation helper for generating resource URLs
     // This can be overridden by storage plugins if needed
-    helpers.getLocation = ({ scopeName, id }) => `/${scopeName}/${id}`
+    helpers.getLocation = ({ scopeName, id }) => buildResourceUrl(null, null, scopeName, id)
   }
 }

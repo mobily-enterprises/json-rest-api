@@ -1,5 +1,6 @@
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { parseJsonApiQuery } from '../lib/querying-writing/connectors-query-parser.js'
+import { writePrecondition } from '../rest-api-plugin-methods/common.js'
 
 export default async function registerScopeRoutes ({ context, api, vars, log }) {
   const { scopeName } = context
@@ -7,7 +8,7 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
 
   // Helper to create route handlers
   const createRouteHandler = (scopeName, methodName) => {
-    return async ({ queryString, headers, params, body, context }) => {
+    return async ({ queryString, headers, params, body, context, transaction, precondition }) => {
       const scope = api.scopes[scopeName]
       if (!scope) {
         throw new RestApiResourceError(
@@ -21,7 +22,10 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
       }
 
       // Build parameters for the scope method
-      const methodParams = {}
+      const methodParams = { format: 'jsonapi' }
+      // Only the connector supplies this handle; HTTP input cannot select an owner.
+      if (transaction !== undefined) methodParams.transaction = transaction
+      if (precondition !== undefined) methodParams[writePrecondition] = precondition
 
       // Add ID for single-resource operations
       if (['get', 'put', 'patch', 'delete'].includes(methodName)) {
@@ -31,13 +35,12 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
       // Parse query parameters for read operations
       if (['query', 'get'].includes(methodName)) {
         methodParams.queryParams = parseJsonApiQuery(queryString)
-        methodParams.isTransport = true
       }
 
       // Add body for write operations
       if (['post', 'put', 'patch'].includes(methodName)) {
         methodParams.inputRecord = body
-        methodParams.isTransport = true
+        methodParams.returning = 'full'
 
         // Add query params for includes/fields on write operations
         if (queryString) {

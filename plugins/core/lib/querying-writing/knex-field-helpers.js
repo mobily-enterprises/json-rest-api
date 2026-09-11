@@ -1,213 +1,101 @@
+// @ts-check
+/** @import { FieldSelection, SelectedQuery, SelectionContext, SelectionQueryRequest, SelectionSchema, SelectionScope } from './field-selection-types.js' */
+/** @import { StorageFieldDefinition } from '../storage/storage-types.js' */
 import { buildQuerySelection } from '../querying/knex-query-helpers-base.js'
 import { createSelectTranslator } from '../storage/storage-adapter.js'
-import { buildQueryFieldRuntimes } from './query-field-helpers.js'
+import { buildQueryFieldRuntimes, normalizeStructuredSelect } from './query-field-helpers.js'
 import { RestApiFieldsetError } from '../../../../lib/rest-api-errors.js'
+import { getResourceFieldset, parseFieldset } from './field-utils.js'
+import { databaseIdentityExpression } from './database-value-normalizers.js'
+import { findRelationshipDefinition } from './relationship-contracts.js'
+import { wrapUnexpectedError } from '../../../../lib/error-context.js'
+import { getFieldDependencyClosure } from './schema-helpers.js'
+import { resolveSortField } from '../querying/query-field-sort-helpers.js'
 
+/** @param {SelectionContext} context @param {Record<string, SelectionScope>} scopes */
 export const validateRequestedFieldsets = async (context, scopes) => {
   for (const scopeName of Object.keys(context.queryParams?.fields || {})) {
-    if (!scopes[scopeName]?.vars?.schemaInfo) continue
+    if (!Object.hasOwn(scopes, scopeName) || !scopes[scopeName]?.vars?.schemaInfo) {
+      throw new RestApiFieldsetError({ resourceType: scopeName })
+    }
     await buildFieldSelection(scopes[scopeName], {
-      context: { scopeName, queryParams: { fields: context.queryParams.fields } }
+      context: { scopeName, queryParams: { fields: context.queryParams?.fields } }
     })
   }
 }
 
 /**
- * Checks if a field exists only in code, not in the database
- *
- * @param {string} fieldName - The field name to check
- * @param {Object} schemaInfo - Schema info with computed fields and structure
- * @returns {boolean} True if field is computed or virtual
- *
- * @example
- * // Input: Check computed field
- * const schemaInfo = {
- *   computed: { profit_margin: { (definition) } },
- *   schemaStructure: { price: { type: 'number' } }
- * };
- * isNonDatabaseField('profit_margin', schemaInfo);
- * // Output: true (it's computed, not stored)
- *
- * @example
- * // Input: Check virtual field
- * const schemaInfo = {
- *   computed: {},
- *   schemaStructure: {
- *     temp_password: { type: 'string', virtual: true }
- *   }
- * };
- * isNonDatabaseField('temp_password', schemaInfo);
- * // Output: true (it's virtual, not stored)
- *
- * @description
- * Used by:
- * - buildFieldSelection to exclude from SELECT queries
- * - dataPost/dataPatch to skip non-database fields
- * - enrichAttributes to identify computed fields
- *
- * Purpose:
- * - Prevents SQL errors by excluding non-existent columns
- * - Identifies fields that need computation or special handling
- * - Supports virtual fields for temporary/input-only data
+ * Computed and virtual fields have no database column; absent fields return undefined.
+ * @param {string} fieldName
+ * @param {SelectionSchema} schemaInfo
+ * @returns {boolean | undefined}
  */
 export const isNonDatabaseField = (fieldName, schemaInfo) => {
   const { computed = {}, schemaStructure = {} } = schemaInfo
-  if (fieldName in computed) return true
+  if (Object.hasOwn(computed, fieldName)) return true
   const fieldDef = schemaStructure[fieldName]
   return fieldDef && fieldDef.virtual === true
 }
 
 /**
- * Builds the field selection list for database queries with sparse fieldset support
- *
- * @param {Object} scope - Resource scope with schema information
- * @param {Object} deps - Dependencies object
- * @param {Object} deps.context - Request context with queryParams and schemaInfo
- * @returns {Promise<Object>} Field selection information
- *
- * @example
- * // Input: Basic sparse fieldset request
- * const deps = {
- *   context: {
- *     scopeName: 'articles',
- *     queryParams: { fields: { articles: 'title,body' } },
- *     schemaInfo: { idProperty: 'id', ...  }
- *   }
- * };
- * const result = await buildFieldSelection(scope, deps);
- *
- * // Output: Includes requested fields plus required fields
- * // {
- * //   fieldsToSelect: ['id', 'title', 'body', 'author_id', 'category_id'],
- * //   requestedFields: ['title', 'body'],
- * //   computedDependencies: [],
- * //   idProperty: 'id'
- * // }
- * // Note: Foreign keys (author_id, category_id) always included for relationships
- *
- * @example
- * // Input: Computed field with hidden dependencies
- * const schemaInfo = {
- *   computed: {
- *     profit_margin: {
- *       compute: (record) => (record.price - record.cost) / record.price,
- *       dependencies: ['price', 'cost']
- *     }
- *   },
- *   schemaStructure: {
- *     name: { type: 'string' },
- *     price: { type: 'number' },
- *     cost: { type: 'number', normallyHidden: true }
- *   }
- * };
- * const deps = {
- *   context: {
- *     queryParams: { fields: { products: 'name,profit_margin' } }
- *   }
- * };
- *
- * // Output: Fetches hidden dependency for computation
- * // {
- * //   fieldsToSelect: ['id', 'name', 'price', 'cost'],
- * //   requestedFields: ['name', 'profit_margin'],
- * //   computedDependencies: ['cost'], // Will be removed after computation
- * //   idProperty: 'id'
- * // }
- *
- * @example
- * // Input: No sparse fieldsets (returns all visible fields)
- * const deps = {
- *   context: {
- *     queryParams: {}, // No fields parameter
- *     schemaInfo: { ... }
- *   }
- * };
- *
- * // Output: All non-hidden, non-virtual fields
- * // {
- * //   fieldsToSelect: ['id', 'title', 'body', 'published_at', 'author_id'],
- * //   requestedFields: null,
- * //   computedDependencies: [],
- * //   idProperty: 'id'
- * // }
- *
- * @description
- * Used by:
- * - dataGet to build SELECT query
- * - dataQuery to build SELECT query
- * - buildQuerySelection as the main field resolver
- *
- * Purpose:
- * - Implements JSON:API sparse fieldsets specification
- * - Ensures relationships work by including foreign keys
- * - Handles computed field dependencies intelligently
- * - Respects field visibility rules (hidden/normallyHidden)
- * - Supports custom ID column names
- *
- * Data flow:
- * 1. Always includes ID (with aliasing if needed)
- * 2. Parses requested fields from query string
- * 3. Validates requested fields exist in schema
- * 4. Adds dependencies for computed fields
- * 5. Includes all foreign keys for relationships
- * 6. Returns complete field list for SQL SELECT
+ * Resolve public fieldsets to logical storage/projection names and read dependencies.
+ * Always fetch the logical ID and visible relationship backing fields. Fetch sort
+ * values needed by cursors and hidden dependencies needed by selected callbacks;
+ * response formatting owns removal of values that were only read dependencies.
+ * This prepares selection metadata without executing a query or completing a transaction.
+ * @param {SelectionScope | null | undefined} scope
+ * @param {{ context: SelectionContext }} deps
+ * @returns {Promise<FieldSelection>}
  */
 export const buildFieldSelection = async (scope, deps) => {
+  /** @type {Set<string>} */
   const fieldsToSelect = new Set()
+  /** @type {Set<string>} */
   const computedDependencies = new Set()
 
   // Extract values from scope
   const scopeSchemaInfo = scope?.vars?.schemaInfo || {}
   const {
-    schemaInstance,
+    schemaStructure = {},
     computed: computedFields = {},
     idProperty = 'id'
   } = scopeSchemaInfo
-  let schemaStructure = scopeSchemaInfo.schemaStructure
-  const queryFields = scope?.vars?.queryFields || {}
+  const queryFields = scope?.vars?.schemaInfo?.queryFields || {}
 
   // Extract values from deps
   const { context } = deps
   const scopeName = context.scopeName
-  const requestedFields = context.queryParams?.fields?.[scopeName]
+  const requestedFields = getResourceFieldset(context.queryParams?.fields, scopeName)
 
   // Always include the logical ID field - the storage adapter translates it.
   fieldsToSelect.add('id')
 
-  // Handle both Schema objects and plain objects
-  if (!schemaStructure) {
-    schemaStructure = schemaInstance?.structure || schemaInstance || {}
-  }
-
   // Get computed fields and virtual fields from schema
   const computedFieldNames = new Set(Object.keys(computedFields))
   const queryFieldNames = new Set(Object.keys(queryFields))
+  /** @type {Set<string>} */
   const queryFieldsToSelect = new Set()
 
   // Find fields marked as virtual in the schema
-  const virtualFieldNames = new Set()
+  /** @type {Map<string, StorageFieldDefinition>} */
+  const virtualFields = new Map()
   Object.entries(schemaStructure).forEach(([fieldName, fieldDef]) => {
     if (fieldDef.virtual === true) {
-      virtualFieldNames.add(fieldName)
+      virtualFields.set(fieldName, fieldDef)
     }
   })
 
-  const nonDatabaseFields = new Set([...computedFieldNames, ...virtualFieldNames])
+  const nonDatabaseFields = new Set([...computedFieldNames, ...virtualFields.keys()])
 
   // Parse requested fields
-  const requested = requestedFields
-    ? (
-        typeof requestedFields === 'string'
-          ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
-          : requestedFields
-      )
-    : null
+  const requested = parseFieldset(requestedFields)
 
-  if (requested && requested.length > 0) {
+  if (requested !== null) {
     // Sparse fieldsets requested - only select specified fields
     // Example: ?fields[products]=name,price,profit_margin
     requested.forEach(field => {
       if (field === 'id' || field === idProperty) return
+      if (findRelationshipDefinition(scopeSchemaInfo, field)) return
 
       if (queryFieldNames.has(field)) {
         if (queryFields[field]?.hidden === true) return
@@ -238,43 +126,6 @@ export const buildFieldSelection = async (scope, deps) => {
 
       fieldsToSelect.add(field)
     })
-
-    // Handle computed field dependencies - fetch fields needed for calculations
-    // Example: User requests 'profit_margin' which depends on 'price' and 'cost'
-    // We need to fetch price and cost from DB even if not explicitly requested
-    const requestedComputedFields = requested.filter(f => computedFieldNames.has(f))
-    for (const computedField of requestedComputedFields) {
-      const fieldDef = computedFields[computedField]
-      if (fieldDef.dependencies) {
-        for (const dep of fieldDef.dependencies) {
-          const depFieldDef = schemaStructure[dep]
-          // Only add dependency if it exists and isn't hidden
-          if (depFieldDef && depFieldDef.hidden !== true) {
-            fieldsToSelect.add(dep)
-            // Track dependencies that weren't explicitly requested
-            // These will be removed from the final response
-            if (!requested.includes(dep)) {
-              computedDependencies.add(dep)
-            }
-          }
-        }
-      }
-    }
-
-    // Still handle normallyHidden fields for backward compatibility
-    if (requestedComputedFields.length > 0) {
-      Object.entries(schemaStructure).forEach(([field, fieldDef]) => {
-        if (fieldDef.normallyHidden === true && fieldDef.hidden !== true) {
-          // Only add if not already handled by dependencies
-          if (!fieldsToSelect.has(field)) {
-            fieldsToSelect.add(field)
-            if (!requested.includes(field)) {
-              computedDependencies.add(field)
-            }
-          }
-        }
-      })
-    }
   } else {
     // No sparse fieldsets - return all visible fields
     // This is the default behavior when no ?fields parameter is provided
@@ -298,26 +149,6 @@ export const buildFieldSelection = async (scope, deps) => {
       fieldsToSelect.add(field)
     })
 
-    // When no sparse fieldsets, we compute all computed fields
-    // So we need to include their dependencies even if normallyHidden
-    // Example: profit_margin depends on 'cost' which is normallyHidden
-    // We fetch 'cost' for calculation but don't return it in response
-    for (const [, fieldDef] of Object.entries(computedFields)) {
-      if (fieldDef.dependencies) {
-        for (const dep of fieldDef.dependencies) {
-          const depFieldDef = schemaStructure[dep]
-          if (depFieldDef && depFieldDef.hidden !== true) {
-            fieldsToSelect.add(dep)
-            // Track normallyHidden dependencies for later removal
-            // These are fetched for computation but not returned
-            if (depFieldDef.normallyHidden === true) {
-              computedDependencies.add(dep)
-            }
-          }
-        }
-      }
-    }
-
     for (const [fieldName, fieldDef] of Object.entries(queryFields)) {
       if (fieldDef.hidden === true || fieldDef.normallyHidden === true) continue
       queryFieldsToSelect.add(fieldName)
@@ -330,7 +161,7 @@ export const buildFieldSelection = async (scope, deps) => {
 
   for (const sortField of sortFields) {
     if (typeof sortField !== 'string') continue
-    const normalizedField = sortField.startsWith('-') ? sortField.slice(1) : sortField
+    const normalizedField = resolveSortField(sortField.startsWith('-') ? sortField.slice(1) : sortField, scopeSchemaInfo)
 
     if (queryFieldNames.has(normalizedField)) {
       queryFieldsToSelect.add(normalizedField)
@@ -351,15 +182,35 @@ export const buildFieldSelection = async (scope, deps) => {
 
   // Always include polymorphic type and id fields from relationships
   try {
-    const relationships = scope.vars.schemaInfo.schemaRelationships
+    const relationships = scopeSchemaInfo.schemaRelationships
     Object.entries(relationships || {}).forEach(([relName, relDef]) => {
       if (relDef.belongsToPolymorphic) {
-        if (relDef.typeField) fieldsToSelect.add(relDef.typeField)
-        if (relDef.idField) fieldsToSelect.add(relDef.idField)
+        fieldsToSelect.add(relDef.belongsToPolymorphic.typeField)
+        fieldsToSelect.add(relDef.belongsToPolymorphic.idField)
       }
     })
-  } catch (e) {
-    // Scope might not have relationships
+  } catch (error) {
+    throw wrapUnexpectedError(error, {
+      message: `Failed to select relationship fields for '${scopeName}'`,
+      context: { scopeName, phase: 'relationshipMetadata' }
+    })
+  }
+
+  const selectedFields = new Set([
+    ...fieldsToSelect,
+    ...queryFieldsToSelect,
+    ...getRequestedComputedFields(scopeName, requestedFields, computedFields)
+  ])
+  for (const [field, definition] of virtualFields) {
+    if (definition.hidden !== true && (requested === null ? definition.normallyHidden !== true : requested.includes(field))) {
+      selectedFields.add(field)
+    }
+  }
+  for (const field of getFieldDependencyClosure(scopeSchemaInfo, selectedFields)) {
+    if (field === 'id' || field === idProperty || nonDatabaseFields.has(field)) continue
+    if (queryFieldNames.has(field)) queryFieldsToSelect.add(field)
+    else if (Object.hasOwn(schemaStructure, field)) fieldsToSelect.add(field)
+    if (!selectedFields.has(field)) computedDependencies.add(field)
   }
 
   // Return detailed information about field selection
@@ -376,6 +227,7 @@ export const buildFieldSelection = async (scope, deps) => {
   }
 }
 
+/** @param {SelectionQueryRequest} options @returns {Promise<SelectedQuery>} */
 export const applyFieldSelectionToQuery = async ({
   query,
   scope,
@@ -388,18 +240,34 @@ export const applyFieldSelectionToQuery = async ({
   scopeName = ''
 }) => {
   const selectTranslator = createSelectTranslator(storageAdapter)
+  const schemaInfo = scope?.vars?.schemaInfo || {}
+  const foreignKeyFields = schemaInfo.foreignKeyFields
+  /** @param {string} field @param {string | null} [alias] */
+  const translateColumn = (field, alias) => {
+    const translated = selectTranslator?.(field, alias) || (alias ? `${alias}.${field}` : field)
+    if (db && !storageAdapter?.isCanonical() && (field === 'id' || foreignKeyFields?.has(field))) {
+      const column = storageAdapter?.translateColumn(field) || field
+      const outputName = field === 'id' ? 'id' : column
+      const qualifiedColumn = alias ? `${alias}.${column}` : column
+      return { [outputName]: databaseIdentityExpression(db, qualifiedColumn) }
+    }
+    const expression = normalizeStructuredSelect(translated, scope?.vars?.schemaInfo?.schemaStructure?.[field], db)
+    if (expression === translated) return translated
+    const outputName = storageAdapter?.translateColumn(field) || field
+    return { [outputName]: expression }
+  }
 
   const selectedQuery = buildQuerySelection(
     query,
     tableName,
     fieldSelectionInfo?.fieldsToSelect || [],
     useTablePrefix,
-    selectTranslator ? { translateColumn: selectTranslator } : undefined
+    { translateColumn }
   )
 
   const queryFieldRuntimeByField = await buildQueryFieldRuntimes({
     queryFieldNames: fieldSelectionInfo?.queryFieldsToSelect || [],
-    queryFields: scope?.vars?.queryFields || {},
+    queryFields: scope?.vars?.schemaInfo?.queryFields || {},
     schemaInfo: scope?.vars?.schemaInfo || {},
     tableName,
     storageAdapter,
@@ -419,72 +287,27 @@ export const applyFieldSelectionToQuery = async ({
 }
 
 /**
- * Determines which computed fields to calculate based on sparse fieldsets
- *
- * @param {string} scopeName - Resource name (e.g., 'products')
- * @param {Array<string>|string} requestedFields - Requested fields from query
- * @param {Object} computedFields - Computed field definitions from schema
- * @returns {Array<string>} Names of computed fields to calculate
- *
- * @example
- * // Input: No sparse fieldsets (calculate all computed fields)
- * const computed = {
- *   full_name: { compute: (r) => `${r.first} ${r.last}` },
- *   age: { compute: (r) => new Date().getFullYear() - r.birth_year }
- * };
- * getRequestedComputedFields('users', null, computed);
- * // Output: ['full_name', 'age'] (all computed fields)
- *
- * @example
- * // Input: Sparse fieldsets with some computed fields
- * const requestedFields = 'first_name,full_name,email';
- * const computed = {
- *   full_name: { compute: (r) => `${r.first} ${r.last}` },
- *   age: { compute: (r) => new Date().getFullYear() - r.birth_year }
- * };
- * getRequestedComputedFields('users', requestedFields, computed);
- * // Output: ['full_name'] (only requested computed field)
- *
- * @example
- * // Input: Sparse fieldsets with no computed fields
- * const requestedFields = ['first_name', 'email'];
- * const computed = {
- *   full_name: { compute: (r) => `${r.first} ${r.last}` }
- * };
- * getRequestedComputedFields('users', requestedFields, computed);
- * // Output: [] (no computed fields requested)
- *
- * @description
- * Used by:
- * - enrichAttributes to determine which computations to run
- * - Applied after fetching data from database
- *
- * Purpose:
- * - Optimizes performance by only computing requested fields
- * - Supports JSON:API sparse fieldsets for computed fields
- * - Handles both string and array input formats
- *
- * Data flow:
- * 1. Checks if sparse fieldsets are specified
- * 2. If not, returns all computed field names
- * 3. If yes, filters to only requested computed fields
- * 4. Normalizes string input to array format
+ * Select visible computed fields in request order, or declaration order when
+ * no fieldset is supplied. Explicit selection includes normally-hidden fields.
+ * @param {string} scopeName
+ * @param {string | readonly string[] | null | undefined} requestedFields
+ * @param {Record<string, { hidden?: boolean, normallyHidden?: boolean }> | undefined} computedFields
+ * @returns {string[]}
  */
 export const getRequestedComputedFields = (scopeName, requestedFields, computedFields) => {
   if (!computedFields) return []
 
-  const allComputedFields = Object.keys(computedFields)
-
-  if (!requestedFields || requestedFields.length === 0) {
-    // No sparse fieldsets - return all computed fields
-    return allComputedFields
+  const requested = parseFieldset(requestedFields)
+  if (requested === null) {
+    return Object.entries(computedFields).filter(([, definition]) => {
+      return definition.hidden !== true && definition.normallyHidden !== true
+    }).map(([field]) => field)
   }
 
-  // Parse requested fields if it's a string
-  const requested = typeof requestedFields === 'string'
-    ? requestedFields.split(',').map(f => f.trim()).filter(f => f)
-    : requestedFields
-
-  // Return only requested computed fields that exist
-  return requested.filter(field => allComputedFields.includes(field))
+  return requested.filter(field => {
+    if (!Object.hasOwn(computedFields, field)) return false
+    const definition = computedFields[field]
+    if (!definition) throw new Error(`Missing compiled computed definition '${scopeName}.${field}'`)
+    return definition.hidden !== true
+  })
 }

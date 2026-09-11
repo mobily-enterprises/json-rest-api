@@ -32,7 +32,7 @@ describe('Nested Include Operations', () => {
     await api.use(RestApiPlugin, {
       queryDefaultLimit: 10,
       queryMaxLimit: 50,
-      simplified: false
+      format: 'jsonapi'
     })
 
     await api.use(RestApiKnexPlugin, {
@@ -150,62 +150,62 @@ describe('Nested Include Operations', () => {
   describe('Bidirectional Many-to-Many Relationships', () => {
     beforeEach(async () => {
       // Create test data
-      const country = await api.resources.countries.post({
+      const country = (await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', {
           name: 'USA',
           code: 'US'
         })
-      })
+      })).data
 
-      const publisher = await api.resources.publishers.post({
+      const publisher = (await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Test Publisher'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
       // Create authors
-      const author1 = await api.resources.authors.post({
+      const author1 = (await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author 1'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
-      const author2 = await api.resources.authors.post({
+      const author2 = (await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author 2'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
       // Create books
-      const book1 = await api.resources.books.post({
+      const book1 = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 1'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
         })
-      })
+      })).data
 
-      const book2 = await api.resources.books.post({
+      const book2 = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 2'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
         })
-      })
+      })).data
 
-      const book3 = await api.resources.books.post({
+      const book3 = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book 3'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
         })
-      })
+      })).data
 
       // Create relationships
       // Book 1 - Author 1 only
@@ -244,7 +244,7 @@ describe('Nested Include Operations', () => {
         queryParams: {
           include: ['books', 'books.authors']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, { isCollection: true })
@@ -254,9 +254,9 @@ describe('Nested Include Operations', () => {
       const books = result.included.filter(r => r.type === 'books')
       assert.equal(books.length, 3, 'Should include 3 books')
 
-      // Check that authors are included (for the books.authors include)
+      // Reverse linkage resolves to the authors already in primary data.
       const includedAuthors = result.included.filter(r => r.type === 'authors')
-      assert.equal(includedAuthors.length, 2, 'Should include 2 authors')
+      assert.equal(includedAuthors.length, 0, 'Primary authors must not be repeated in included')
 
       // Verify each book has its authors relationship populated
       books.forEach(book => {
@@ -278,21 +278,21 @@ describe('Nested Include Operations', () => {
 
     it('should work with window strategy limits', async () => {
       // Create more books to test window limits
-      const publisher = await api.resources.publishers.query({ simplified: false })
+      const publisher = await api.resources.publishers.query({ format: 'jsonapi' })
       const publisherId = publisher.data[0].id
 
       // Get the first author
-      const authorsResult = await api.resources.authors.query({ simplified: false })
+      const authorsResult = await api.resources.authors.query({ format: 'jsonapi' })
       const authorId = authorsResult.data[0].id
 
       for (let i = 4; i <= 10; i++) {
-        const book = await api.resources.books.post({
+        const book = (await api.resources.books.post({
           inputRecord: createJsonApiDocument('books', {
             title: `Book ${i}`
           }, {
             publisher: createRelationship({ type: 'publishers', id: publisherId })
           })
-        })
+        })).data
 
         // Associate all new books with Author 1
         await api.resources.book_authors.post({
@@ -308,7 +308,7 @@ describe('Nested Include Operations', () => {
           include: ['books', 'books.authors'],
           filters: { name: 'Author 1' }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       const author1 = result.data[0]
@@ -338,53 +338,53 @@ describe('Nested Include Operations', () => {
   describe('Deep Nested Includes', () => {
     beforeEach(async () => {
       // Create hierarchical test data
-      const usa = await api.resources.countries.post({
+      const usa = (await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
-      })
+      })).data
 
-      const uk = await api.resources.countries.post({
+      const uk = (await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
-      })
+      })).data
 
-      const publisher1 = await api.resources.publishers.post({
+      const publisher1 = (await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'US Publisher'
         }, {
           country: createRelationship({ type: 'countries', id: String(usa.id) })
         })
-      })
+      })).data
 
-      const publisher2 = await api.resources.publishers.post({
+      const publisher2 = (await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'UK Publisher'
         }, {
           country: createRelationship({ type: 'countries', id: String(uk.id) })
         })
-      })
+      })).data
 
-      const author = await api.resources.authors.post({
+      const author = (await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'International Author'
         }, {
           country: createRelationship({ type: 'countries', id: String(usa.id) })
         })
-      })
+      })).data
 
-      const book1 = await api.resources.books.post({
+      const book1 = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'US Book'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher1.id) })
         })
-      })
+      })).data
 
-      const book2 = await api.resources.books.post({
+      const book2 = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'UK Book'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher2.id) })
         })
-      })
+      })).data
 
       // Associate both books with the author
       await api.resources.book_authors.post({
@@ -407,7 +407,7 @@ describe('Nested Include Operations', () => {
         queryParams: {
           include: ['books', 'books.publisher', 'books.publisher.country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, { isCollection: true })
@@ -419,6 +419,7 @@ describe('Nested Include Operations', () => {
 
       assert.equal(books.length, 2, 'Should include 2 books')
       assert.equal(publishers.length, 2, 'Should include 2 publishers')
+      assert.equal(countries.length, 2, 'Should include 2 countries')
       // All defined relationships will be included when requested via ?include=
 
       // Verify nested relationships are populated
@@ -436,7 +437,7 @@ describe('Nested Include Operations', () => {
         queryParams: {
           include: ['books', 'books.authors', 'books.authors.country', 'country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, { isCollection: true })
@@ -458,33 +459,33 @@ describe('Nested Include Operations', () => {
   describe('Nested Includes with Sparse Fieldsets', () => {
     beforeEach(async () => {
       // Create test data with reviews
-      const country = await api.resources.countries.post({
+      const country = (await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
-      })
+      })).data
 
-      const publisher = await api.resources.publishers.post({
+      const publisher = (await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Publisher'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
-      const author = await api.resources.authors.post({
+      const author = (await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
-      const book = await api.resources.books.post({
+      const book = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book with Reviews'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
         })
-      })
+      })).data
 
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {}, {
@@ -518,12 +519,12 @@ describe('Nested Include Operations', () => {
         queryParams: {
           include: ['books', 'books.reviews'],
           fields: {
-            authors: 'name',
-            books: 'title',
+            authors: 'name,books',
+            books: 'title,reviews',
             reviews: 'rating'
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, { isCollection: true })
@@ -551,33 +552,33 @@ describe('Nested Include Operations', () => {
   describe('Circular Include Handling', () => {
     beforeEach(async () => {
       // Create simple circular relationship data
-      const country = await api.resources.countries.post({
+      const country = (await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
-      })
+      })).data
 
-      const publisher = await api.resources.publishers.post({
+      const publisher = (await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', {
           name: 'Publisher'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
-      const author = await api.resources.authors.post({
+      const author = (await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', {
           name: 'Author'
         }, {
           country: createRelationship({ type: 'countries', id: String(country.id) })
         })
-      })
+      })).data
 
-      const book = await api.resources.books.post({
+      const book = (await api.resources.books.post({
         inputRecord: createJsonApiDocument('books', {
           title: 'Book'
         }, {
           publisher: createRelationship({ type: 'publishers', id: String(publisher.id) })
         })
-      })
+      })).data
 
       await api.resources.book_authors.post({
         inputRecord: createJsonApiDocument('book_authors', {}, {
@@ -592,7 +593,7 @@ describe('Nested Include Operations', () => {
         queryParams: {
           include: ['authors', 'authors.books', 'authors.books.authors']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, { isCollection: true })

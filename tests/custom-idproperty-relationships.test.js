@@ -10,7 +10,6 @@ import {
   createJsonApiDocument,
   createRelationship,
   createToManyRelationship,
-  assertResourceAttributes,
   assertResourceRelationship
 } from './helpers/test-utils.js'
 import { storageMode } from './helpers/storage-mode.js'
@@ -96,7 +95,7 @@ describe('Custom idProperty Relationship Operations', () => {
         }
       })
 
-      // With returnRecordApi.patch = 'full', we should get the complete record
+      // With returning: 'full', we should get the complete record
       validateJsonApiStructure(patchResult, false)
       assert.equal(patchResult.data.attributes.name, 'USA')
       assert.equal(patchResult.data.attributes.code, 'US') // Original value preserved
@@ -357,7 +356,6 @@ describe('Custom idProperty Relationship Operations', () => {
   describe('Polymorphic Relationships with custom idProperty', () => {
     let bookId
     let authorId
-    let publisherId
 
     beforeEach(async () => {
       await cleanTables(knex, [
@@ -383,10 +381,9 @@ describe('Custom idProperty Relationship Operations', () => {
       })
       authorId = author.data.id
 
-      const publisher = await api.resources.publishers.post({
+      await api.resources.publishers.post({
         inputRecord: createJsonApiDocument('publishers', { name: 'Test Publisher' })
       })
-      publisherId = publisher.data.id
     })
 
     it('should create polymorphic review for book with custom IDs', async () => {
@@ -395,15 +392,17 @@ describe('Custom idProperty Relationship Operations', () => {
           rating: 5,
           title: 'Great book!',
           content: 'Excellent read.',
-          reviewer_name: 'John Doe',
-          reviewable_type: 'books',
-          reviewable_id: bookId
+          reviewer_name: 'John Doe'
+        }, {
+          reviewable: createRelationship(resourceIdentifier('books', bookId))
         })
       })
 
       validateJsonApiStructure(review)
-      assert.equal(review.data.attributes.reviewable_type, 'books')
-      assert.equal(String(review.data.attributes.reviewable_id), bookId)
+      assertResourceRelationship(review.data, 'reviewable', resourceIdentifier('books', bookId))
+      assert.deepEqual((await api.resources.books.getRelationship({ id: bookId, relationshipName: 'reviews' })).data,
+        [resourceIdentifier('reviews', review.data.id)])
+      assert.equal((await api.resources.reviews.getRelated({ id: review.data.id, relationshipName: 'reviewable' })).data.id, bookId)
 
       if (!storageMode.isAnyApi()) {
         const dbReview = await knex('custom_id_reviews').first()
@@ -419,14 +418,16 @@ describe('Custom idProperty Relationship Operations', () => {
           rating: 4,
           title: 'Talented author',
           content: 'Great writing style.',
-          reviewer_name: 'Jane Doe',
-          reviewable_type: 'authors',
-          reviewable_id: authorId
+          reviewer_name: 'Jane Doe'
+        }, {
+          reviewable: createRelationship(resourceIdentifier('authors', authorId))
         })
       })
 
-      assert.equal(review.data.attributes.reviewable_type, 'authors')
-      assert.equal(String(review.data.attributes.reviewable_id), authorId)
+      assertResourceRelationship(review.data, 'reviewable', resourceIdentifier('authors', authorId))
+      assert.deepEqual((await api.resources.authors.getRelationship({ id: authorId, relationshipName: 'reviews' })).data,
+        [resourceIdentifier('reviews', review.data.id)])
+      assert.equal((await api.resources.reviews.getRelated({ id: review.data.id, relationshipName: 'reviewable' })).data.id, authorId)
     })
 
     it('should query polymorphic reviews by type', async () => {
@@ -436,9 +437,9 @@ describe('Custom idProperty Relationship Operations', () => {
           rating: 5,
           title: 'Book review',
           content: 'Great book',
-          reviewer_name: 'Reader',
-          reviewable_type: 'books',
-          reviewable_id: bookId
+          reviewer_name: 'Reader'
+        }, {
+          reviewable: createRelationship(resourceIdentifier('books', bookId))
         })
       })
 
@@ -447,9 +448,9 @@ describe('Custom idProperty Relationship Operations', () => {
           rating: 4,
           title: 'Author review',
           content: 'Great author',
-          reviewer_name: 'Fan',
-          reviewable_type: 'authors',
-          reviewable_id: authorId
+          reviewer_name: 'Fan'
+        }, {
+          reviewable: createRelationship(resourceIdentifier('authors', authorId))
         })
       })
 
@@ -460,7 +461,7 @@ describe('Custom idProperty Relationship Operations', () => {
         }
       })
       assert.equal(bookReviews.data.length, 1, `Expected 1 book review, got ${bookReviews.data.length}`)
-      assert.equal(bookReviews.data[0].attributes.reviewable_type, 'books')
+      assertResourceRelationship(bookReviews.data[0], 'reviewable', resourceIdentifier('books', bookId))
     })
   })
 
@@ -489,7 +490,7 @@ describe('Custom idProperty Relationship Operations', () => {
         inputRecord: createJsonApiDocument('authors', { name: 'Test Author' })
       })
 
-      const book = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
@@ -543,7 +544,7 @@ describe('Custom idProperty Relationship Operations', () => {
         )
       })
 
-      const book = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
@@ -670,7 +671,7 @@ describe('Custom idProperty Relationship Operations', () => {
         )
       })
 
-      const book = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
@@ -858,11 +859,9 @@ describe('Custom idProperty Relationship Operations', () => {
         assert(error.message.includes('not found') || error.message.includes('404'))
       }
 
-      // The REST API correctly does NOT cascade delete pivot records
-      // This is intentional - automatic cascade deletion would be dangerous
-      // Pivot records remain and should be cleaned up by application logic if needed
+      // Deletion removes declared membership rows, preserving related resources.
       const pivotCount = await countRecords(knex, 'custom_id_book_authors')
-      assert.equal(pivotCount, 1, 'Pivot record should still exist')
+      assert.equal(pivotCount, 0, 'Deleted book must not retain membership rows')
 
       // Verify author still exists
       const authorStillExists = await api.resources.authors.get({ id: author.data.id })

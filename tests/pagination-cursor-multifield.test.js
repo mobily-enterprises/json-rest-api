@@ -56,7 +56,7 @@ describe('Multi-field Cursor Pagination', () => {
         price: 10,
         sku: 'CLEAN-001'
       }),
-      simplified: false
+      format: 'jsonapi'
     })
 
     await api.resources.items.post({
@@ -66,7 +66,7 @@ describe('Multi-field Cursor Pagination', () => {
         category: 'Cleanup',
         type: 'fixture'
       }),
-      simplified: false
+      format: 'jsonapi'
     })
 
     assert.equal(await countAnyRecords('products'), 1)
@@ -101,7 +101,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const product of products) {
         await api.resources.products.post({
           inputRecord: createJsonApiDocument('products', product),
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -123,7 +123,7 @@ describe('Multi-field Cursor Pagination', () => {
             },
             sort: ['category', 'name']
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         validateJsonApiStructure(result, true)
@@ -160,7 +160,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 3 },
           sort: ['-category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       const secondPage = await api.resources.products.query({
@@ -171,7 +171,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['-category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // First page should have vegetables (category DESC)
@@ -194,7 +194,7 @@ describe('Multi-field Cursor Pagination', () => {
           price: 2.50,
           sku: 'GG-003'
         }),
-        simplified: false
+        format: 'jsonapi'
       })
 
       const pageSize = 2
@@ -212,7 +212,7 @@ describe('Multi-field Cursor Pagination', () => {
             },
             sort: ['category', 'brand', 'name']
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         allProducts.push(...result.data)
@@ -247,7 +247,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 3 },
           sort: ['price', 'category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // The cheapest item is Carrot at 1.00
@@ -263,7 +263,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['price', 'category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Verify prices are non-decreasing across pages
@@ -306,7 +306,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const product of products) {
         await api.resources.products.post({
           inputRecord: createJsonApiDocument('products', product),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -315,7 +315,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 2 },
           sort: ['-createdAt']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.equal(firstPage.data.length, 2)
@@ -330,7 +330,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['-createdAt']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.deepEqual(
@@ -353,7 +353,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 3 },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Check that cursor is present
@@ -376,7 +376,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 4 },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       const secondPage = await api.resources.products.query({
@@ -387,7 +387,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Now go backwards from the second page
@@ -399,7 +399,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Verify we got different records going backwards
@@ -428,7 +428,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const product of products) {
         await api.resources.products.post({
           inputRecord: createJsonApiDocument('products', product),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -446,7 +446,7 @@ describe('Multi-field Cursor Pagination', () => {
             },
             sort: ['category', 'brand', 'name']
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         allProducts.push(...result.data)
@@ -481,7 +481,7 @@ describe('Multi-field Cursor Pagination', () => {
           price: 10,
           sku: 'GEN-001'
         }),
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Get the first (and only) page
@@ -490,7 +490,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 5 },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.equal(firstPage.data.length, 1)
@@ -509,7 +509,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const product of products) {
         await api.resources.products.post({
           inputRecord: createJsonApiDocument('products', product),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -519,7 +519,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 1 },
           sort: ['category', 'brand', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(firstPage.meta.pagination.cursor?.next, 'Should have cursor')
@@ -533,7 +533,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['category', 'brand', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.equal(secondPage.data.length, 1)
@@ -553,7 +553,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const item of items) {
         await api.resources.items.post({
           inputRecord: createJsonApiDocument('items', item),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -563,7 +563,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 2 },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Should use 'item_id' as the ID field in responses
@@ -580,7 +580,7 @@ describe('Multi-field Cursor Pagination', () => {
             },
             sort: ['category', 'name']
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         assert(secondPage.data.length > 0, 'Should get results on second page')
@@ -602,7 +602,7 @@ describe('Multi-field Cursor Pagination', () => {
       for (const product of products) {
         await api.resources.products.post({
           inputRecord: createJsonApiDocument('products', product),
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -612,7 +612,7 @@ describe('Multi-field Cursor Pagination', () => {
           page: { size: 3 },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.equal(firstPage.data.length, 3)
@@ -628,7 +628,7 @@ describe('Multi-field Cursor Pagination', () => {
           },
           sort: ['category', 'name']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       const secondPageNames = secondPage.data.map(p => p.attributes.name)

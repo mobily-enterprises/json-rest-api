@@ -35,7 +35,7 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
           sku: `PAGE-${index}`,
           createdAt: new Date(Date.UTC(2026, 8, 1, 0, 0, Math.floor(index / 3))).toISOString()
         }),
-        simplified: false
+        format: 'jsonapi'
       })
     }
   })
@@ -52,7 +52,7 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
           fields: { products: 'name' },
           page: { size: 100, ...(cursor ? { after: cursor } : {}) }
         },
-        simplified: false
+        format: 'jsonapi'
       })
       for (const record of result.data) {
         assert.deepEqual(Object.keys(record.attributes), ['name'])
@@ -86,7 +86,7 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
               ...(mode === 'offset' ? { number: page } : cursor ? { after: cursor } : {})
             }
           },
-          simplified: false
+          format: 'jsonapi'
         })
         ids.push(...result.data.map(record => record.id))
         assert.equal(result.data.length, page < 3 ? 100 : 5)
@@ -110,7 +110,7 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
       for (const cursor of ['id:1', 'createdAt:2026-09-01T00%3A00%3A00.000Z']) {
         await assert.rejects(api.resources.products.query({
           queryParams: { page: { size: 100, [direction]: cursor } },
-          simplified: false
+          format: 'jsonapi'
         }), (error) => {
           assert.equal(error.code, 'REST_API_VALIDATION')
           assert.match(error.message, /Cursor.*missing.*sort field/i)

@@ -1,18 +1,17 @@
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { findRelationshipDefinition } from './common.js'
+import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { buildRelationshipUrl } from '../lib/querying/url-helpers.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
- * GET RELATIONSHIP
- * Retrieves relationship linkage data (just resource identifiers)
- * GET /api/articles/1/relationships/author
- *
- * @param {string} id - The ID of the resource
- * @param {string} relationshipName - The name of the relationship
- * @returns {Promise<object>} Relationship linkage with links
+ * Read authorized relationship linkage for params.id/relationshipName.
+ * This returns a JSON:API linkage document regardless of resource format;
+ * to-many linkage must not be truncated by ordinary include limits.
  */
-export default async function getRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
+export default async function getRelationshipMethod ({ params, context, vars, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
+  rejectRemovedOptions(params)
+  if (params.format !== undefined) resolveFormat(params.format)
   context.method = 'getRelationship'
   context.id = requireExistingResourceId(params.id, {
     scopeOptions,
@@ -21,6 +20,8 @@ export default async function getRelationshipMethod ({ params, context, vars, he
   })
   context.relationshipName = params.relationshipName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  context.transaction = params.transaction
+  context.db = context.transaction || api.knex.instance
 
   // Validate the relationship exists
   const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName)
@@ -36,16 +37,15 @@ export default async function getRelationshipMethod ({ params, context, vars, he
   await runHooks('checkPermissions')
   await runHooks('checkPermissionsGetRelationship')
 
-  // Reuse existing get method with minimal fields
+  // Keep parent attributes available to its GET permission hooks.
   const fullRecord = await scope.get({
     id: context.id,
     queryParams: {
-      include: [context.relationshipName],
-      fields: { [scopeName]: vars.idProperty || 'id' }
+      // To-many linkage is loaded independently; include limits must not truncate it.
+      include: relDef.type === 'hasMany' || relDef.type === 'manyToMany' ? [] : [context.relationshipName]
     },
     transaction: context.transaction,
-    simplified: false,
-    isTransport: params.isTransport
+    format: 'jsonapi',
   }, { ...context })
 
   if (!fullRecord || !fullRecord.data) {

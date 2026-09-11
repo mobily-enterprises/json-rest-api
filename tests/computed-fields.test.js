@@ -1,7 +1,7 @@
 import { describe, it, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
-import { cleanTables } from './helpers/test-utils.js'
+import { assertWriteFailure, cleanTables } from './helpers/test-utils.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { createComputedFieldsApi } from './fixtures/api-configs.js'
 import {
@@ -44,39 +44,43 @@ describe('Computed Fields and Sparse Fieldsets', () => {
   })
 
   beforeEach(async () => {
-    await cleanTables(knex, ['test_products', 'test_reviews'])
+    await cleanTables(knex, ['test_products', 'test_reviews', 'test_faulty_products', 'test_failing_async_products'])
 
     // Create test data
-    const product = await api.resources.products.post({
-      name: 'Premium Widget',
-      price: 99.99,
-      cost: 45.00,
-      internal_notes: 'Supplier: ABC Corp'
-    })
+    const product = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'Premium Widget', price: 99.99, cost: 45.00, internal_notes: 'Supplier: ABC Corp' } })
     testData.product = product
 
-    const review1 = await api.resources.reviews.post({
-      product: product.id,
-      reviewer_name: 'Alice',
-      rating: 5,
-      comment: 'Excellent product!',
-      helpful_votes: 45,
-      total_votes: 50,
-      spam_score: 0.1
-    })
+    const review1 = await api.resources.reviews.post({ format: 'plain', inputRecord: { product: product.id, reviewer_name: 'Alice', rating: 5, comment: 'Excellent product!', helpful_votes: 45, total_votes: 50, spam_score: 0.1 } })
     testData.review1 = review1
 
-    const review2 = await api.resources.reviews.post({
-      product: product.id,
-      reviewer_name: 'Bob',
-      rating: 4,
-      comment: 'Good value',
-      helpful_votes: 8,
-      total_votes: 20,
-      spam_score: 0.2
-    })
+    const review2 = await api.resources.reviews.post({ format: 'plain', inputRecord: { product: product.id, reviewer_name: 'Bob', rating: 4, comment: 'Good value', helpful_votes: 8, total_votes: 20, spam_score: 0.2 } })
     testData.review2 = review2
   })
+
+  for (const method of ['post', 'put', 'patch']) {
+    it(`rejects computed-field ${method} input without changing stored records`, async () => {
+      const before = await api.resources.products.query({})
+      await assert.rejects(api.resources.products[method]({
+        ...(method === 'post' ? {} : { id: testData.product.id }),
+        format: 'jsonapi',
+        inputRecord: {
+          data: {
+            type: 'products',
+            attributes: {
+              name: 'Rejected change', price: 100, cost: 50, internal_notes: 'Unchanged', profit_margin: 987654321
+            }
+          }
+        }
+      }), error => {
+        assert.equal(error.transactionOutcome, 'rolledBack')
+        assert.equal(error.code, 'REST_API_VALIDATION')
+        assert.deepEqual(error.details.fields, ['data.attributes.profit_margin'])
+        assert.equal(error.details.violations[0].rule, 'FIELD_NOT_ALLOWED')
+        return true
+      })
+      assert.deepEqual(await api.resources.products.query({}), before)
+    })
+  }
 
   describe('Basic Computed Fields', () => {
     it('should compute fields automatically when fetching', async () => {
@@ -112,11 +116,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     })
 
     it('should handle division by zero in computed fields', async () => {
-      const freeProduct = await api.resources.products.post({
-        name: 'Free Sample',
-        price: 0,
-        cost: 0
-      })
+      const freeProduct = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'Free Sample', price: 0, cost: 0 } })
 
       const fetched = await api.resources.products.get({ id: freeProduct.id })
       assert.equal(fetched.profit_margin, 0)
@@ -124,14 +124,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     })
 
     it('should handle null values in computed fields', async () => {
-      const review = await api.resources.reviews.post({
-        product: testData.product.id,
-        reviewer_name: 'Charlie',
-        rating: 3,
-        comment: 'Average',
-        helpful_votes: 0,
-        total_votes: 0
-      })
+      const review = await api.resources.reviews.post({ format: 'plain', inputRecord: { product: testData.product.id, reviewer_name: 'Charlie', rating: 3, comment: 'Average', helpful_votes: 0, total_votes: 0 } })
 
       const fetched = await api.resources.reviews.get({ id: review.id })
       assert.equal(fetched.helpfulness_score, null)
@@ -236,7 +229,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         queryParams: {
           include: ['reviews'],
           fields: {
-            products: 'name',
+            products: 'name,reviews',
             reviews: 'reviewer_name,rating,helpfulness_score'
           }
         }
@@ -264,7 +257,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         queryParams: {
           include: ['reviews'],
           fields: {
-            products: 'name',
+            products: 'name,reviews',
             reviews: 'is_helpful' // Depends on helpful_votes, total_votes, spam_score
           }
         }
@@ -309,7 +302,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
         queryParams: {
           include: ['reviews'],
           fields: {
-            products: 'name',
+            products: 'name,reviews',
             reviews: 'rating,helpfulness_score'
           }
         }
@@ -328,11 +321,11 @@ describe('Computed Fields and Sparse Fieldsets', () => {
   })
 
   describe('Relationship Fields', () => {
-    it('should always include minimal relationship objects regardless of sparse fieldsets', async () => {
+    it('should include minimal relationship objects when selected in sparse fieldsets', async () => {
       const product = await api.resources.products.get({
         id: testData.product.id,
         queryParams: {
-          fields: { products: 'name' }
+          fields: { products: 'name,reviews' }
         }
       })
 
@@ -347,16 +340,12 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     })
 
     it('should include empty arrays for empty relationships', async () => {
-      const newProduct = await api.resources.products.post({
-        name: 'New Product',
-        price: 50,
-        cost: 25
-      })
+      const newProduct = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'New Product', price: 50, cost: 25 } })
 
       const fetched = await api.resources.products.get({
         id: newProduct.id,
         queryParams: {
-          fields: { products: 'name' }
+          fields: { products: 'name,reviews' }
         }
       })
 
@@ -366,33 +355,22 @@ describe('Computed Fields and Sparse Fieldsets', () => {
   })
 
   describe('Error Handling', () => {
-    it('should handle errors in compute functions gracefully', async () => {
-      // Add a product resource with a faulty computed field
-      await api.addResource('faulty_products', {
-        schema: {
-          id: { type: 'id' },
-          value: { type: 'number' },
-          bad_compute: {
-            type: 'string',
-            computed: true,
-            dependencies: ['value'],
-            compute: ({ attributes }) => {
-              throw new Error('Computation failed')
-            }
-          }
-        },
-        tableName: 'test_faulty_products'
-      })
-      await api.resources.faulty_products.createKnexTable()
-      if (storageMode.isAnyApi()) {
-        storageMode.registerTable('test_faulty_products', 'faulty_products')
+    it('should reject compute errors and roll back full-response writes', async () => {
+      const resource = api.resources.faulty_products
+      const inputRecord = { data: { type: 'faulty_products', attributes: { value: 42 } } }
+      const rejectsCompute = error => {
+        assert.equal(error.cause.message, 'Computation failed')
+        assert.deepEqual(error.context, { scopeName: 'faulty_products', fieldName: 'bad_compute', phase: 'computed' })
+        return true
       }
+      await assert.rejects(resource.post({ format: 'jsonapi', inputRecord }), error => {
+        assertWriteFailure(error, { outcome: 'rolledBack' })
+        return rejectsCompute(error.cause)
+      })
+      assert.equal((await resource.query({ format: 'jsonapi' })).data.length, 0)
 
-      const faulty = await api.resources.faulty_products.post({ value: 42 })
-      const fetched = await api.resources.faulty_products.get({ id: faulty.id })
-
-      assert.equal(fetched.value, 42)
-      assert.equal(fetched.bad_compute, null) // Error results in null
+      const record = await resource.post({ format: 'jsonapi', returning: 'minimal', inputRecord })
+      await assert.rejects(resource.get({ id: record.data.id, format: 'jsonapi' }), rejectsCompute)
     })
 
     it('should reject unknown fields in sparse fieldsets', async () => {
@@ -426,11 +404,7 @@ describe('Computed Fields and Sparse Fieldsets', () => {
     })
 
     it('should preserve fieldset errors from empty included relationships', async () => {
-      const productWithoutReviews = await api.resources.products.post({
-        name: 'No Reviews',
-        price: 25,
-        cost: 10
-      })
+      const productWithoutReviews = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'No Reviews', price: 25, cost: 10 } })
 
       await assert.rejects(
         api.resources.products.get({
@@ -503,47 +477,32 @@ describe('Computed Fields and Sparse Fieldsets', () => {
       })
       await api.resources.async_products.createKnexTable()
       if (storageMode.isAnyApi()) {
-        storageMode.registerTable('test_async_products', 'async_products')
+        storageMode.registerTable(knex, 'test_async_products', 'async_products', api.anyapi.tenantId)
       }
 
-      const product = await api.resources.async_products.post({
-        name: 'Async Product',
-        external_id: 'ext-123'
-      })
+      const product = await api.resources.async_products.post({ format: 'plain', inputRecord: { name: 'Async Product', external_id: 'ext-123' } })
 
       const fetched = await api.resources.async_products.get({ id: product.id })
       assert.equal(fetched.external_data, 'fetched-ext-123')
       assert.equal(fetched.computed_name, 'ASYNC PRODUCT')
     })
 
-    it('should handle errors in async compute functions', async () => {
-      // Add a resource with failing async computed field
-      await api.addResource('failing_async_products', {
-        schema: {
-          id: { type: 'id' },
-          value: { type: 'number' },
-          failing_async: {
-            type: 'string',
-            computed: true,
-            dependencies: ['value'],
-            compute: async ({ attributes }) => {
-              await new Promise(resolve => setTimeout(resolve, 5))
-              throw new Error('Async computation failed')
-            }
-          }
-        },
-        tableName: 'test_failing_async_products'
-      })
-      await api.resources.failing_async_products.createKnexTable()
-      if (storageMode.isAnyApi()) {
-        storageMode.registerTable('test_failing_async_products', 'failing_async_products')
+    it('should reject async compute errors and roll back full-response writes', async () => {
+      const resource = api.resources.failing_async_products
+      const inputRecord = { data: { type: 'failing_async_products', attributes: { value: 42 } } }
+      const rejectsCompute = error => {
+        assert.equal(error.cause.message, 'Async computation failed')
+        assert.deepEqual(error.context, { scopeName: 'failing_async_products', fieldName: 'failing_async', phase: 'computed' })
+        return true
       }
+      await assert.rejects(resource.post({ format: 'jsonapi', inputRecord }), error => {
+        assertWriteFailure(error, { outcome: 'rolledBack' })
+        return rejectsCompute(error.cause)
+      })
+      assert.equal((await resource.query({ format: 'jsonapi' })).data.length, 0)
 
-      const product = await api.resources.failing_async_products.post({ value: 42 })
-      const fetched = await api.resources.failing_async_products.get({ id: product.id })
-
-      assert.equal(fetched.value, 42)
-      assert.equal(fetched.failing_async, null) // Error results in null
+      const record = await resource.post({ format: 'jsonapi', returning: 'minimal', inputRecord })
+      await assert.rejects(resource.get({ id: record.data.id, format: 'jsonapi' }), rejectsCompute)
     })
   })
 

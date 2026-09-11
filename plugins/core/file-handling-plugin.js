@@ -33,15 +33,16 @@
  */
 
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
-import { isRestApiError } from '../../lib/error-context.js'
+import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../lib/error-context.js'
+import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 
 export const FileHandlingPlugin = {
   name: 'file-handling',
   dependencies: ['rest-api'],
 
-  install ({ addHook, helpers, scopes, log, vars, on, api }) {
+  install ({ addHook, scopes, log, api }) {
     // Track which scopes have file fields
-    const fileScopes = new Map() // scopeName -> fileField[]
+    const fileScopes = new WeakMap() // compiled schema -> fileField[]
 
     // Registry of file detectors from various protocols
     const detectorRegistry = []
@@ -70,17 +71,29 @@ export const FileHandlingPlugin = {
       if (!context.fileHandlingUploads) {
         context.fileHandlingUploads = []
       }
-      context.fileHandlingUploads.push(upload)
+      context.fileHandlingUploads.push({ ...upload, transaction: context.transaction })
     }
 
-    const cleanupParsedFiles = async (files = {}) => {
-      for (const file of Object.values(files)) {
+    const recordCleanupFailure = async (context, phase, field, error) => {
+      const errors = context.cleanupErrors ||= []
+      errors.push({ phase, field, error })
+      try {
+        await createEnhancedLogger(log, { schemaInfo: context.schemaInfo }).warn('File cleanup failed', {
+          ...getOperationDiagnosticContext(context, { phase }), field, error
+        })
+      } catch (error) {
+        errors.push({ phase: 'logging', during: phase, field, error })
+      }
+    }
+
+    const cleanupParsedFiles = async (files = {}, context) => {
+      for (const [field, file] of Object.entries(files)) {
         if (!file?.cleanup) continue
 
         try {
           await file.cleanup()
         } catch (error) {
-          log.warn('Failed to cleanup temp file:', error)
+          await recordCleanupFailure(context, 'temporaryFileCleanup', field, error)
         }
       }
     }
@@ -89,66 +102,49 @@ export const FileHandlingPlugin = {
       const uploads = context.fileHandlingUploads
       if (!uploads || uploads.length === 0) return
 
-      context.fileHandlingUploads = []
+      const remaining = []
       for (const upload of uploads) {
-        if (!upload?.url || typeof upload.storage?.delete !== 'function') {
+        if (upload.transaction !== context.transaction || !upload.url || typeof upload.storage?.delete !== 'function') {
+          remaining.push(upload)
           continue
         }
 
         try {
           await upload.storage.delete(upload.url)
         } catch (error) {
-          log.warn(`Failed to cleanup uploaded file '${upload.url}' after rollback:`, error)
+          remaining.push(upload)
+          await recordCleanupFailure(context, 'uploadedFileCleanup', upload.field, error)
         }
       }
+      context.fileHandlingUploads = remaining
     }
 
-    /**
-     * Analyze a scope's schema to find file fields
-     */
-    const analyzeScopeSchema = (scopeName, scopeOptions) => {
-      const schema = scopeOptions?.schema
-      if (!schema) return
+    const getFileFields = scopeName => {
+      const schemaInfo = scopes[scopeName]?.vars?.schemaInfo
+      if (!schemaInfo) return []
+      const cached = fileScopes.get(schemaInfo)
+      if (cached) return cached
 
       const fileFields = []
-
-      // Look for fields with type: 'file'
-      for (const [fieldName, fieldConfig] of Object.entries(schema)) {
-        if (fieldConfig && fieldConfig.type === 'file') {
+      for (const [fieldName, fieldConfig] of Object.entries(schemaInfo.schemaStructure)) {
+        if (fieldConfig?.type === 'file') {
           fileFields.push({
             field: fieldName,
             storage: fieldConfig.storage,
             accepts: fieldConfig.accepts || ['*'],
-            maxSize: fieldConfig.maxSize,
-            required: fieldConfig.required || false
+            maxSize: fieldConfig.maxSize
           })
         }
       }
-
-      if (fileFields.length > 0) {
-        fileScopes.set(scopeName, fileFields)
-        log.info(`Scope '${scopeName}' has ${fileFields.length} file field(s): ${fileFields.map(f => f.field).join(', ')}`)
-      }
+      fileScopes.set(schemaInfo, fileFields)
+      return fileFields
     }
-
-    // Analyze existing scopes
-    for (const [scopeName, scope] of Object.entries(scopes)) {
-      if (scope._scopeOptions) {
-        analyzeScopeSchema(scopeName, scope._scopeOptions)
-      }
-    }
-
-    // Listen for new scopes being added
-    addHook('scope:added', 'analyzeFileFields', {}, ({ context }) => {
-      const { scopeName, scopeOptions } = context
-      analyzeScopeSchema(scopeName, scopeOptions)
-    })
 
     /**
      * Process files for a scope if it has file fields
      */
     const processFiles = async (scopeName, params, context) => {
-      const fileFields = fileScopes.get(scopeName)
+      const fileFields = getFileFields(scopeName)
       if (!fileFields || fileFields.length === 0) {
         return // This scope doesn't have file fields
       }
@@ -158,61 +154,45 @@ export const FileHandlingPlugin = {
       let detectorUsed = null
 
       for (const detector of detectorRegistry) {
+        let matched
         try {
-          if (await detector.detect(params, context)) {
-            log.debug(`Detector '${detector.name}' matched for scope '${scopeName}'`)
-            parsed = await detector.parse(params, context)
-            detectorUsed = detector.name
-            break
-          }
+          matched = await detector.detect(params, context)
         } catch (error) {
-          if (isRestApiError(error)) throw error
-          log.warn(`Detector '${detector.name}' failed:`, error)
+          throw wrapUnexpectedError(error, {
+            message: `File detector '${detector.name}' failed`,
+            context: { scopeName, detector: detector.name, phase: 'fileDetection' }
+          })
         }
-      }
-
-      if (!parsed) {
-        // No files detected - check if any were required
-        for (const fieldConfig of fileFields) {
-          if (fieldConfig.required && !params.inputRecord?.data?.attributes?.[fieldConfig.field]) {
-            throw new RestApiValidationError(
-              `Required file field '${fieldConfig.field}' is missing`,
-              {
-                fields: [fieldConfig.field],
-                violations: [{
-                  field: fieldConfig.field,
-                  message: 'This field is required'
-                }]
-              }
-            )
+        if (matched) {
+          log.debug(`Detector '${detector.name}' matched for scope '${scopeName}'`)
+          try {
+            parsed = await detector.parse(params, context)
+          } catch (error) {
+            throw wrapUnexpectedError(error, {
+              message: `File parser '${detector.name}' failed`,
+              context: { scopeName, detector: detector.name, phase: 'fileParsing' }
+            })
           }
+          detectorUsed = detector.name
+          break
         }
-        return
       }
 
-      log.debug(`Processing files with detector '${detectorUsed}'`)
+      if (!parsed) return
+
       const { fields = {}, files = {} } = parsed
 
       try {
+        log.debug(`Processing files with detector '${detectorUsed}'`)
+        const fileNames = new Set(fileFields.map(config => config.field))
+        for (const name of Object.keys(files)) {
+          if (!fileNames.has(name)) throw new RestApiValidationError(`Unknown file field '${name}'`, { fields: [name] })
+        }
         // Process each file field defined in schema
         for (const fieldConfig of fileFields) {
           const file = files[fieldConfig.field]
 
-          if (!file) {
-            if (fieldConfig.required) {
-              throw new RestApiValidationError(
-                `Required file field '${fieldConfig.field}' is missing`,
-                {
-                  fields: [fieldConfig.field],
-                  violations: [{
-                    field: fieldConfig.field,
-                    message: 'This field is required'
-                  }]
-                }
-              )
-            }
-            continue
-          }
+          if (!file) continue
 
           // Validate mime type
           if (fieldConfig.accepts[0] !== '*') {
@@ -240,7 +220,7 @@ export const FileHandlingPlugin = {
           }
 
           // Validate file size
-          if (fieldConfig.maxSize) {
+          if (fieldConfig.maxSize !== undefined) {
             const maxBytes = parseSize(fieldConfig.maxSize)
             if (file.size > maxBytes) {
               throw new RestApiValidationError(
@@ -263,43 +243,26 @@ export const FileHandlingPlugin = {
 
           try {
             const storedUrl = await fieldConfig.storage.upload(file)
-            fields[fieldConfig.field] = storedUrl
+            Object.defineProperty(fields, fieldConfig.field, { value: storedUrl, enumerable: true, writable: true, configurable: true })
             trackUploadedFile(context, {
               field: fieldConfig.field,
               storage: fieldConfig.storage,
               url: storedUrl
             })
-            log.debug(`Uploaded file for field '${fieldConfig.field}' to: ${storedUrl}`)
+            log.debug(`Uploaded file for field '${fieldConfig.field}'`)
           } catch (error) {
-            if (isRestApiError(error)) throw error
-            throw new RestApiValidationError(
-              `Failed to upload file for field '${fieldConfig.field}': ${error.message}`,
-              {
-                fields: [fieldConfig.field],
-                violations: [{
-                  field: fieldConfig.field,
-                  message: error.message
-                }]
-              }
-            )
+            throw wrapUnexpectedError(error, {
+              message: `Failed to upload file for field '${fieldConfig.field}'`,
+              context: { scopeName, field: fieldConfig.field, phase: 'fileUpload' }
+            })
           }
         }
 
-        // Replace inputRecord with processed data
-        if (!params.inputRecord) {
-          params.inputRecord = { data: { attributes: {} } }
-        }
-        if (!params.inputRecord.data) {
-          params.inputRecord.data = { attributes: {} }
-        }
-        if (!params.inputRecord.data.attributes) {
-          params.inputRecord.data.attributes = {}
-        }
-
-        // Merge fields into attributes
-        Object.assign(params.inputRecord.data.attributes, fields)
+        // Work on the canonical document, including calls using the plain format.
+        context.inputRecord.data ||= { attributes: {} }
+        context.inputRecord.data.attributes = { ...context.inputRecord.data.attributes, ...fields }
       } finally {
-        await cleanupParsedFiles(files)
+        await cleanupParsedFiles(files, context)
       }
     }
 
@@ -324,6 +287,12 @@ export const FileHandlingPlugin = {
       await cleanupUploadedFiles(context)
     })
 
+    addHook('afterCommit', 'releaseUploadedFiles', {}, ({ context }) => {
+      if (context.fileHandlingUploads) {
+        context.fileHandlingUploads = context.fileHandlingUploads.filter(upload => upload.transaction !== context.transaction)
+      }
+    })
+
     log.info('File handling plugin initialized successfully')
   }
 }
@@ -334,6 +303,7 @@ export const FileHandlingPlugin = {
  * @returns {number} Size in bytes
  */
 function parseSize (size) {
+  if (typeof size === 'number' && Number.isFinite(size) && size >= 0) return size
   const units = {
     b: 1,
     kb: 1024,

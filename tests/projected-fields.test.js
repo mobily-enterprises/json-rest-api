@@ -46,7 +46,7 @@ describe('Query Projections', () => {
     for (const payload of authorPayloads) {
       const result = await api.resources.authors.post({
         inputRecord: createJsonApiDocument('authors', payload),
-        simplified: false
+        format: 'jsonapi'
       })
       testData.authors.push(result.data)
     }
@@ -64,7 +64,7 @@ describe('Query Projections', () => {
         { title: 'Derived Fields Handbook' },
         { author: createRelationship(resourceIdentifier('authors', testData.authors[0].id)) }
       ),
-      simplified: false
+      format: 'jsonapi'
     })
 
     const bookTwo = await api.resources.books.post({
@@ -73,7 +73,7 @@ describe('Query Projections', () => {
         { title: 'Cursor Patterns' },
         { author: createRelationship(resourceIdentifier('authors', testData.authors[2].id)) }
       ),
-      simplified: false
+      format: 'jsonapi'
     })
 
     testData.books = [bookOne.data, bookTwo.data]
@@ -86,13 +86,8 @@ describe('Query Projections', () => {
     })
 
     await api.use(RestApiPlugin, {
-      simplifiedApi: true,
-      simplifiedTransport: true,
-      returnRecordApi: {
-        post: true,
-        put: true,
-        patch: true
-      }
+      format: 'plain',
+      returning: 'full'
     })
     await api.use(QueryProjectionsPlugin)
     await api.use(RestApiKnexPlugin, { knex })
@@ -108,7 +103,7 @@ describe('Query Projections', () => {
         last_name: 'Simone',
         full_name: 'Injected Value'
       }),
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(created)
@@ -118,7 +113,7 @@ describe('Query Projections', () => {
 
     const fetched = await api.resources.authors.get({
       id: created.data.id,
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(fetched)
@@ -133,7 +128,7 @@ describe('Query Projections', () => {
           authors: 'first_name,full_name'
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(result)
@@ -152,7 +147,7 @@ describe('Query Projections', () => {
           authors: 'full_name'
         }
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(result)
@@ -184,7 +179,7 @@ describe('Query Projections', () => {
             ...(nextCursor ? { after: nextCursor } : {})
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -219,7 +214,7 @@ describe('Query Projections', () => {
       queryParams: {
         sort: ['sort_name']
       },
-      simplified: false
+      format: 'jsonapi'
     })
 
     validateJsonApiStructure(result, true)
@@ -257,7 +252,7 @@ describe('Query Projections', () => {
     await assert.rejects(
       () => stringApi.resources.string_projection_authors.query({
         queryParams: {},
-        simplified: false
+        format: 'jsonapi'
       }),
       /Query field expressions must return knex raw, knex ref, or a knex query builder/
     )
@@ -292,8 +287,8 @@ describe('Query Projections', () => {
     })
 
     await labeledApi.use(RestApiPlugin, {
-      simplifiedApi: true,
-      simplifiedTransport: true
+      format: 'plain',
+
     })
     await labeledApi.use(LabelPlugin)
     await labeledApi.use(QueryProjectionsPlugin)

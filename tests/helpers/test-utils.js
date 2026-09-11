@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict'
 import { storageMode } from './storage-mode.js'
+import { RestApiWriteError } from '../../lib/rest-api-errors.js'
+
+export function assertWriteFailure (error, options = {}) {
+  assert.ok(error instanceof RestApiWriteError)
+  if (options.outcome !== undefined) assert.equal(error.transactionOutcome, options.outcome)
+  let cause = error
+  while (cause instanceof RestApiWriteError) cause = cause.cause
+  if (Object.hasOwn(options, 'cause')) assert.equal(cause, options.cause)
+  if (options.type) assert.ok(cause instanceof options.type)
+  return true
+}
 
 /**
  * Validates that a response follows JSON:API structure
@@ -36,6 +47,13 @@ export function validateJsonApiStructure (response, isCollection = false) {
       assert(resource.type && resource.id, 'Included resources should have type and id')
     })
   }
+
+  const identities = new Set()
+  for (const resource of [...resources, ...(response.included || [])]) {
+    const identity = JSON.stringify([resource.type, resource.id])
+    assert(!identities.has(identity), `Duplicate resource in compound document: ${identity}`)
+    identities.add(identity)
+  }
 }
 
 /**
@@ -48,14 +66,14 @@ export function resourceIdentifier (type, id) {
 /**
  * Cleans all records from the given tables
  */
-export async function cleanTables (knex, tableNames) {
-  if (storageMode.isAnyApi()) {
+export async function cleanTables (knex, tableNames, { storage = storageMode.mode } = {}) {
+  if (storage === 'anyapi') {
     const resourceGroups = new Map()
 
     for (const table of tableNames) {
-      const resource = storageMode.getResourceForTable(table)
+      const resource = storageMode.getResourceForTable(knex, table)
       if (!resource) continue
-      const tenantId = storageMode.getTenantForTable(table)
+      const tenantId = storageMode.getTenantForTable(knex, table)
       const key = `${tenantId}::${resource}`
       if (!resourceGroups.has(key)) {
         resourceGroups.set(key, { resource, tenantId })
@@ -69,7 +87,7 @@ export async function cleanTables (knex, tableNames) {
     }
 
     for (const table of tableNames) {
-      const linkInfo = storageMode.getLinkInfo(table)
+      const linkInfo = storageMode.getLinkInfo(knex, table)
       if (linkInfo) {
         const tenantId = linkInfo.tenantId || storageMode.defaultTenant
         const relationshipKey = linkInfo.relationshipKey ||
@@ -85,12 +103,11 @@ export async function cleanTables (knex, tableNames) {
             }
           })
           .delete()
-          .catch(() => {})
       }
-      try {
+      if (await knex.schema.hasTable(table)) {
         await knex(table).delete()
-      } catch (error) {
-        // Ignore missing tables in anyapi mode
+      } else if (!storageMode.getResourceForTable(knex, table) && !linkInfo) {
+        throw new Error(`Cannot clean unregistered fixture table '${table}'`)
       }
     }
   } else {
@@ -103,11 +120,11 @@ export async function cleanTables (knex, tableNames) {
 /**
  * Counts records in a table
  */
-export async function countRecords (knex, tableName) {
-  if (storageMode.isAnyApi()) {
-    const resource = storageMode.getResourceForTable(tableName)
-    const linkInfo = storageMode.getLinkInfo(tableName)
-    const tenantId = storageMode.getTenantForTable(tableName)
+export async function countRecords (knex, tableName, { storage = storageMode.mode } = {}) {
+  if (storage === 'anyapi') {
+    const resource = storageMode.getResourceForTable(knex, tableName)
+    const linkInfo = storageMode.getLinkInfo(knex, tableName)
+    const tenantId = storageMode.getTenantForTable(knex, tableName)
     if (linkInfo) {
       const relationshipKey = linkInfo.relationshipKey ||
         `${tenantId}:${linkInfo.ownerResource}:${linkInfo.relationshipName}`
@@ -131,12 +148,8 @@ export async function countRecords (knex, tableName) {
         .first()
       return parseInt(result.count)
     }
-    try {
-      const result = await knex(tableName).count('* as count').first()
-      return parseInt(result?.count || 0)
-    } catch (error) {
-      return 0
-    }
+    const result = await knex(tableName).count('* as count').first()
+    return parseInt(result?.count || 0)
   }
 
   const result = await knex(tableName).count('* as count').first()

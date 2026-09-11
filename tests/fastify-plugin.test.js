@@ -1,13 +1,8 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { Api } from 'hooked-api'
-import { RestApiPlugin, FastifyPlugin } from '../index.js'
+import fastify from 'fastify'
+import { createFastifySchemaApi } from './fixtures/api-configs.js'
 import { getRequestContracts } from '../plugins/core/lib/querying-writing/request-contracts.js'
-import {
-  FakeFastifyApp,
-  FakeReply,
-  findFastifyRoute
-} from './helpers/fake-fastify.js'
 
 function resolveSchemaNode (rootSchema, schemaNode) {
   if (!schemaNode || !Array.isArray(schemaNode.allOf) || schemaNode.allOf.length !== 1) {
@@ -23,59 +18,28 @@ function resolveSchemaNode (rootSchema, schemaNode) {
   return rootSchema?.definitions?.[definitionName] || schemaNode
 }
 
-async function createFastifyConnectorApi () {
-  const app = new FakeFastifyApp()
-  const api = new Api({
-    name: 'fastify-connector-test-api',
-    log: { level: process.env.LOG_LEVEL || 'silent' }
-  })
-
-  await api.use(RestApiPlugin, {
-    simplifiedApi: false,
-    simplifiedTransport: false
-  })
-
-  await api.use(FastifyPlugin, {
-    app,
-    mountPath: '/api'
-  })
-
-  await api.addResource('users', {
-    schema: {
-      id: { type: 'id' },
-      name: { type: 'string', required: true }
-    }
-  })
-
-  await api.addResource('articles', {
-    schema: {
-      id: { type: 'id' },
-      title: { type: 'string', required: true },
-      body: { type: 'string' },
-      author_id: { type: 'id', belongsTo: 'users', as: 'author' },
-      internal_summary: { type: 'string', computed: true }
-    }
-  })
-
-  return { api, app }
-}
-
 describe('Fastify Plugin', () => {
   let api
   let app
+  const routes = []
+  const findFastifyRoute = (method, url) => routes.find(route => route.method === method && route.url === url)
 
-  beforeEach(async () => {
-    ({ api, app } = await createFastifyConnectorApi())
+  before(async () => {
+    app = fastify()
+    app.addHook('onRoute', route => { routes.push(route) })
+    api = await createFastifySchemaApi(app)
+    await app.ready()
   })
+  after(async () => { await app?.close() })
 
   it('registers Fastify write routes with schema-backed JSON:API body validation', () => {
-    const postRoute = findFastifyRoute(app, 'POST', '/api/articles')
-    const putRoute = findFastifyRoute(app, 'PUT', '/api/articles/:id')
-    const patchRoute = findFastifyRoute(app, 'PATCH', '/api/articles/:id')
-    const getRoute = findFastifyRoute(app, 'GET', '/api/articles/:id')
-    const postRelationshipRoute = findFastifyRoute(app, 'POST', '/api/articles/:id/relationships/:relationshipName')
-    const patchRelationshipRoute = findFastifyRoute(app, 'PATCH', '/api/articles/:id/relationships/:relationshipName')
-    const deleteRelationshipRoute = findFastifyRoute(app, 'DELETE', '/api/articles/:id/relationships/:relationshipName')
+    const postRoute = findFastifyRoute('POST', '/api/articles')
+    const putRoute = findFastifyRoute('PUT', '/api/articles/:id')
+    const patchRoute = findFastifyRoute('PATCH', '/api/articles/:id')
+    const getRoute = findFastifyRoute('GET', '/api/articles/:id')
+    const postRelationshipRoute = findFastifyRoute('POST', '/api/articles/:id/relationships/:relationshipName')
+    const patchRelationshipRoute = findFastifyRoute('PATCH', '/api/articles/:id/relationships/:relationshipName')
+    const deleteRelationshipRoute = findFastifyRoute('DELETE', '/api/articles/:id/relationships/:relationshipName')
     const relationshipContracts = getRequestContracts({
       scopeName: 'articles',
       schemaInfo: api.resources.articles.vars.schemaInfo,
@@ -138,46 +102,22 @@ describe('Fastify Plugin', () => {
     )
   })
 
-  it('registers the JSON:API content-type parser and rejects unsupported write content types before the route handler', async () => {
-    const parser = app.parsers.find((entry) => entry.contentType === 'application/vnd.api+json')
-    assert.ok(parser, 'Fastify connector should register the JSON:API parser')
-    assert.deepEqual(parser.options, { parseAs: 'string' })
-
-    const postRoute = findFastifyRoute(app, 'POST', '/api/articles')
-    const reply = new FakeReply()
-
-    await postRoute.preValidation(
-      { headers: { 'content-type': 'text/plain' } },
-      reply
-    )
-
-    assert.equal(reply.statusCode, 415)
-    assert.equal(reply.contentType, 'application/vnd.api+json')
-    assert.deepEqual(reply.payload, {
-      errors: [{
-        status: '415',
-        title: 'Unsupported Media Type',
-        detail: 'Content-Type must be application/vnd.api+json or application/json'
-      }]
-    })
-
-    const multipartReply = new FakeReply()
-    await postRoute.preValidation(
-      { headers: { 'content-type': 'multipart/form-data; boundary=test' } },
-      multipartReply
-    )
-
-    assert.equal(multipartReply.statusCode, 415)
+  it('parses both JSON media types and rejects unsupported write content types', async () => {
+    for (const contentType of ['application/json', 'application/vnd.api+json']) {
+      const response = await app.inject({ method: 'POST', url: '/api/custom-endpoint', payload: { ok: true }, headers: { 'content-type': contentType } })
+      assert.equal(response.statusCode, 201)
+      assert.deepEqual(response.json(), { echo: { ok: true } })
+    }
+    for (const contentType of ['text/plain', 'multipart/form-data; boundary=test']) {
+      const response = await app.inject({ method: 'POST', url: '/api/articles', payload: 'unsupported', headers: { 'content-type': contentType } })
+      assert.equal(response.statusCode, 415)
+      assert.equal(response.headers['content-type'], 'application/vnd.api+json')
+      assert.equal(response.json().errors[0].title, 'Unsupported Media Type')
+    }
   })
 
   it('leaves custom routes unschematized when they do not provide route metadata', async () => {
-    await api.addRoute({
-      method: 'POST',
-      path: '/api/custom-endpoint',
-      handler: async () => ({ ok: true })
-    })
-
-    const customRoute = findFastifyRoute(app, 'POST', '/api/custom-endpoint')
+    const customRoute = findFastifyRoute('POST', '/api/custom-endpoint')
     assert.ok(customRoute)
     assert.equal(customRoute.schema, undefined)
   })

@@ -2,7 +2,14 @@
  * @file Creates Knex table definitions and migration plans from json-rest-schema definitions
  */
 
-import { buildStorageInfo } from './storage/storage-mapping.js'
+import { assertWritableKnexColumns, buildStorageInfo } from './storage/storage-mapping.js'
+import { introspectKnexColumnConstraints } from './dbIntrospection.js'
+import { createKnexTransaction } from '../../../lib/knex-transaction.js'
+import { transactionMethod, withWriteOutcome } from '../../../lib/error-context.js'
+import { assertFieldNameMap } from './querying-writing/field-utils.js'
+import { getSchemaCapabilities } from './querying-writing/database-capabilities.js'
+
+const runOwnedTransaction = withWriteOutcome(transactionMethod)
 
 const MYSQL_DIALECT_PATTERN = /mysql/i
 
@@ -46,7 +53,8 @@ function formatCodeLiteral (value) {
     return quoteJsString(value)
   }
 
-  if (typeof value === 'number' || typeof value === 'bigint') {
+  if (typeof value === 'bigint') return `${value}n`
+  if (typeof value === 'number') {
     return String(value)
   }
 
@@ -94,24 +102,55 @@ function ensureStringArray (value, label) {
   return normalized
 }
 
+function escapeEnumValues (values, dialect) {
+  // Knex's enum compiler interpolates its values without escaping SQL literals.
+  return values.map(value => {
+    const text = String(value)
+    return (isMysqlDialect(dialect) ? text.replace(/\\/g, '\\\\') : text).replace(/'/g, "''")
+  })
+}
+
+function quotePostgresString (value) {
+  const text = String(value).replace(/'/g, "''")
+  // Keep literal question marks away from Knex's PostgreSQL binding-position pass.
+  return text.includes('?') ? `U&'${text.replace(/\\/g, '\\005c').replace(/\?/g, '\\003f')}'` : `'${text}'`
+}
+
+function defaultStringValue (definition) {
+  if (!hasStaticDefault(definition)) return null
+  if (typeof definition.defaultTo === 'string') return definition.defaultTo
+  if (['array', 'object', 'serialize'].includes(definition.type) && definition.defaultTo !== null) return JSON.stringify(definition.defaultTo)
+  return null
+}
+
+function hasJsonDefault (definition) {
+  return ['array', 'object', 'serialize'].includes(definition.type) && hasStaticDefault(definition) && definition.defaultTo !== null
+}
+
+function columnDefaultLiteral (definition, dialect) {
+  const text = defaultStringValue(definition)
+  if (text === null) return null
+  const literal = ['pg', 'postgresql'].includes(dialect) ? quotePostgresString(text) : `'${escapeEnumValues([text], dialect)[0]}'`
+  if (hasJsonDefault(definition)) return `(${literal})`.replace(/\?/g, '\\?')
+  return ['pg', 'postgresql'].includes(dialect) && text.includes('?') ? literal : null
+}
+
 function buildSetColumnType (values = []) {
   const normalized = values.map((value) => normalizeText(value)).filter(Boolean)
   if (normalized.length < 1) {
     throw new Error('setValues must contain at least one value.')
   }
 
-  return `set(${normalized.map((value) => quoteJsString(value)).join(', ')})`
+  return `set(${escapeEnumValues(normalized, 'mysql2').map(value => `'${value}'`).join(', ')})`
 }
 
 function createTableBuilderContext (schemaStructure = {}, idColumn = 'id', storage = undefined) {
+  const storageInfo = buildStorageInfo({ schemaStructure, idProperty: idColumn, storage })
+  assertWritableKnexColumns(storageInfo)
   return {
     schemaStructure,
     idProperty: idColumn,
-    storageInfo: buildStorageInfo({
-      schemaStructure,
-      idProperty: idColumn,
-      storage
-    })
+    storageInfo
   }
 }
 
@@ -288,6 +327,7 @@ function normalizeColumnShape (definition = {}) {
   }
 
   switch (definition.type) {
+    case 'integer':
     case 'id':
       return 'integer'
     case 'number':
@@ -302,7 +342,7 @@ function normalizeColumnShape (definition = {}) {
       return 'time'
     case 'epochMilliseconds':
     case 'epochSeconds':
-      return 'integer'
+      return 'bigint'
     case 'array':
     case 'object':
     case 'serialize':
@@ -326,6 +366,7 @@ function normalizeDesiredTypeKind (definition = {}) {
   }
 
   switch (definition.type) {
+    case 'integer':
     case 'id':
       return 'integer'
     case 'number':
@@ -355,11 +396,19 @@ function normalizeDesiredTypeKind (definition = {}) {
   }
 }
 
-function normalizeComparableDefault (value) {
+function normalizeComparableDefault (value, type) {
   if (value === undefined) return undefined
   if (typeof value === 'boolean') return value ? '1' : '0'
   if (value === null) return null
   if (typeof value === 'object') return JSON.stringify(value)
+  if (['number', 'integer', 'id', 'epochMilliseconds', 'epochSeconds'].includes(type)) {
+    const parts = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value))
+    if (parts) {
+      const whole = parts[2].replace(/^0+(?=\d)/, '')
+      const fraction = (parts[3] || '').replace(/0+$/, '')
+      return `${whole === '0' && !fraction ? '' : parts[1]}${whole}${fraction ? `.${fraction}` : ''}`
+    }
+  }
   return String(value)
 }
 
@@ -381,15 +430,15 @@ function normalizeDesiredColumn (tableContext, fieldName, definition, options = 
     typeKind: normalizeDesiredTypeKind(definition),
     nullable,
     required: definition.required === true,
-    hasDefault: hasStaticDefault(definition),
-    defaultValue: hasStaticDefault(definition)
-      ? normalizeComparableDefault(definition.defaultTo)
+    hasDefault: hasStaticDefault(definition) && definition.defaultTo !== null,
+    defaultValue: hasStaticDefault(definition) && definition.defaultTo !== null
+      ? normalizeComparableDefault(definition.defaultTo, definition.type)
       : undefined,
     unsigned: definition.type === 'id' ? definition.unsigned !== false : definition.unsigned === true,
-    maxLength: definition.maxLength ?? null,
+    maxLength: shape === 'string' ? (definition.maxLength || 255) : null,
     numericPrecision: definition.precision ?? null,
     numericScale: definition.scale ?? null,
-    datetimePrecision: definition.temporalPrecision ?? null,
+    datetimePrecision: ['datetime', 'time'].includes(shape) ? (definition.temporalPrecision ?? 6) : null,
     enumValues: Array.isArray(definition.enum) ? definition.enum.map((value) => String(value)) : [],
     setValues: Array.isArray(definition.setValues) ? definition.setValues.map((value) => String(value)) : [],
     autoIncrement: options.autoIncrement === true
@@ -406,20 +455,56 @@ function buildImplicitIdDefinition (idColumn) {
   }
 }
 
+function assertNativeSetSupport ({ schemaStructure }, dialect) {
+  if (getSchemaCapabilities(dialect).setValues) return
+  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+    if (Array.isArray(definition?.setValues) && definition.setValues.length > 0) {
+      throw new Error(`Field '${fieldName}' uses setValues, which requires a MySQL-compatible knex client.`)
+    }
+  }
+}
+
 function resolveTableSchemaContext (schemaLike, options = {}) {
-  const schemaStructure = schemaLike?.structure || schemaLike || {}
+  const schemaStructure = schemaLike?.structure
+  if (!schemaStructure || typeof schemaStructure !== 'object' || Array.isArray(schemaStructure)) {
+    throw new Error('Table schema must provide a structure field map. Wrap field definitions as { structure: fields }.')
+  }
+  assertFieldNameMap(schemaStructure, 'table schema structure')
+  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+      throw new Error(`Field '${fieldName}' must have an object definition. Wrap bare field maps as { structure: fields }.`)
+    }
+  }
+  const dialect = normalizeText(options.dialect).toLowerCase()
+  const { temporalColumnFractionDigits } = getSchemaCapabilities(dialect)
+  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
+    if (!['time', 'dateTime'].includes(definition?.type)) continue
+    const precision = definition.temporalPrecision ?? 6
+    if (!Number.isInteger(precision) || precision < 0) {
+      throw new Error(`Field '${fieldName}' temporalPrecision must be a non-negative integer.`)
+    }
+    if (temporalColumnFractionDigits !== null && precision > temporalColumnFractionDigits) {
+      throw new Error(`Field '${fieldName}' temporalPrecision exceeds the native maximum of ${temporalColumnFractionDigits} for '${dialect}'. Use a text column with an appropriate storage mapping for finer precision.`)
+    }
+    if (!dialect && precision > 6) {
+      throw new Error(`Field '${fieldName}' temporalPrecision above 6 requires an explicit migration dialect.`)
+    }
+  }
   const configuredIdColumn = options.idProperty || schemaStructure.id?.storage?.column || 'id'
   const storage = options.storage ?? schemaLike?.storage
   const tableContext = createTableBuilderContext(schemaStructure, configuredIdColumn, storage)
 
   let resourceIdField = null
-  for (const [fieldName, definition] of Object.entries(schemaStructure)) {
-    if (definition?.type !== 'id') continue
+  for (const fieldName of Object.keys(schemaStructure)) {
     const columnName = getColumnNameForDefinition(tableContext, fieldName)
     if (columnName === configuredIdColumn) {
       resourceIdField = fieldName
       break
     }
+  }
+  const resourceIdDefinition = resourceIdField ? schemaStructure[resourceIdField] : null
+  if (resourceIdDefinition && resourceIdDefinition.primary !== true && options.autoIncrement !== false && !['id', 'integer'].includes(resourceIdDefinition.type)) {
+    throw new Error(`Cannot create an implicit auto-increment column for '${resourceIdDefinition.type}' resource ID '${resourceIdField}'. Declare primary: true for application-supplied IDs, or set autoIncrement: false.`)
   }
 
   const implicitIndexes = normalizeFieldIndexes(schemaStructure, options.tableName || 'table', tableContext)
@@ -432,9 +517,7 @@ function resolveTableSchemaContext (schemaLike, options = {}) {
     schemaStructure,
     idColumn: configuredIdColumn,
     resourceIdField,
-    hasPrimaryIdField: resourceIdField
-      ? schemaStructure[resourceIdField]?.primary === true
-      : false,
+    hasPrimaryIdField: resourceIdDefinition?.primary === true,
     tableContext,
     indexes: dedupeBySignature(
       [...implicitIndexes, ...explicitIndexes],
@@ -454,6 +537,12 @@ function resolveTableSchemaContext (schemaLike, options = {}) {
   }
 }
 
+function timeColumnType (definition) {
+  const precision = definition.temporalPrecision ?? 6
+  if (!Number.isInteger(precision) || precision < 0) throw new Error('Time column precision must be a non-negative integer.')
+  return `time(${precision})`
+}
+
 function mapTypeToKnex (table, columnName, definition, options = {}) {
   const {
     precision,
@@ -467,16 +556,15 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
   const dialect = normalizeText(options.dialect).toLowerCase()
 
   if (setValues.length > 0) {
-    if (!isMysqlDialect(dialect)) {
-      throw new Error(`Field '${columnName}' uses setValues, which requires a MySQL-compatible knex client.`)
-    }
     return table.specificType(columnName, buildSetColumnType(setValues))
   }
 
   switch (definition.type) {
     case 'string':
       if (enumValues.length > 0) {
-        return table.enu(columnName, enumValues)
+        if (options.alter === true && (['pg', 'postgresql'].includes(dialect) || isSqliteDialectName(dialect))) return table.text(columnName)
+        if (['pg', 'postgresql'].includes(dialect)) return table.specificType(columnName, `text check (${buildEnumCheckClause(columnName, enumValues, dialect)})`)
+        return table.enu(columnName, escapeEnumValues(enumValues, dialect))
       }
       return maxLength ? table.string(columnName, maxLength) : table.string(columnName)
 
@@ -485,6 +573,9 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
         return table.decimal(columnName, precision, scale)
       }
       return table.float(columnName)
+
+    case 'integer':
+      return unsigned === true ? table.integer(columnName).unsigned() : table.integer(columnName)
 
     case 'id': {
       const col = table.integer(columnName)
@@ -498,14 +589,11 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
       return table.date(columnName)
 
     case 'dateTime':
-      return temporalPrecision != null
-        ? table.datetime(columnName, { precision: temporalPrecision })
-        : table.datetime(columnName)
+      return table.datetime(columnName, { precision: temporalPrecision ?? 6 })
 
     case 'time':
-      return temporalPrecision != null
-        ? table.time(columnName, { precision: temporalPrecision })
-        : table.time(columnName)
+      // Knex's PostgreSQL time builder ignores its precision argument.
+      return table.specificType(columnName, timeColumnType(definition))
 
     case 'epochMilliseconds':
     case 'epochSeconds':
@@ -514,6 +602,7 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
     case 'array':
     case 'object':
     case 'serialize':
+      if (hasJsonDefault(definition)) return table.specificType(columnName, 'json')
       return table.json(columnName)
 
     case 'blob':
@@ -526,7 +615,7 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
   }
 }
 
-function applyColumnConstraints (column, definition) {
+function applyColumnConstraints (column, definition, knex, dialect) {
   if (definition.nullable === true) {
     column.nullable()
   } else if (definition.required === true || definition.nullable === false) {
@@ -534,7 +623,8 @@ function applyColumnConstraints (column, definition) {
   }
 
   if (hasStaticDefault(definition)) {
-    column.defaultTo(definition.defaultTo)
+    const literal = columnDefaultLiteral(definition, dialect)
+    column.defaultTo(literal === null ? definition.defaultTo : knex.raw(literal))
   }
 
   if (definition.primary === true) {
@@ -546,7 +636,7 @@ function applyColumnConstraints (column, definition) {
   }
 }
 
-function applyTableMetadata (table, tableSchemaContext) {
+function applyTableMetadata (table, tableSchemaContext, knex) {
   for (const index of tableSchemaContext.indexes) {
     if (index.unique) {
       table.unique(index.columns, index.name)
@@ -574,7 +664,7 @@ function applyTableMetadata (table, tableSchemaContext) {
   }
 
   for (const constraint of tableSchemaContext.checkConstraints) {
-    table.check(constraint.clause, [], constraint.name)
+    table.check(constraint.clause, [], knex.raw('??', [constraint.name]).toQuery())
   }
 }
 
@@ -582,18 +672,28 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
   const dialect = normalizeText(options.dialect).toLowerCase()
   const enumValues = Array.isArray(definition.enum) ? definition.enum : []
   const setValues = Array.isArray(definition.setValues) ? definition.setValues : []
+  if (!dialect && (enumValues.some(value => /[\\?]/.test(String(value))) || defaultStringValue(definition)?.includes('?') || (hasJsonDefault(definition) && /[\\']/.test(defaultStringValue(definition))))) {
+    throw new Error(`Field '${columnName}' requires an explicit migration dialect for SQL-sensitive enum/default values.`)
+  }
   let line = ''
 
   if (setValues.length > 0) {
-    if (dialect && !isMysqlDialect(dialect)) {
+    if (!dialect) {
+      throw new Error(`Field '${columnName}' uses setValues and requires an explicit migration dialect.`)
+    }
+    if (!isMysqlDialect(dialect)) {
       throw new Error(`Field '${columnName}' uses setValues, which requires a MySQL-compatible migration target.`)
     }
     line = `table.specificType(${quoteJsString(columnName)}, ${quoteJsString(buildSetColumnType(setValues))})`
   } else {
     switch (definition.type) {
       case 'string':
-        if (enumValues.length > 0) {
-          line = `table.enu(${quoteJsString(columnName)}, ${formatArrayLiteral(enumValues)})`
+        if (enumValues.length > 0 && options.alter === true && (['pg', 'postgresql'].includes(dialect) || isSqliteDialectName(dialect))) {
+          line = `table.text(${quoteJsString(columnName)})`
+        } else if (enumValues.length > 0 && ['pg', 'postgresql'].includes(dialect)) {
+          line = `table.specificType(${quoteJsString(columnName)}, ${quoteJsString(`text check (${buildEnumCheckClause(columnName, enumValues, dialect)})`)})`
+        } else if (enumValues.length > 0) {
+          line = `table.enu(${quoteJsString(columnName)}, ${formatArrayLiteral(escapeEnumValues(enumValues, dialect))})`
         } else {
           line = definition.maxLength
             ? `table.string(${quoteJsString(columnName)}, ${definition.maxLength})`
@@ -607,6 +707,11 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
         } else {
           line = `table.float(${quoteJsString(columnName)})`
         }
+        break
+
+      case 'integer':
+        line = `table.integer(${quoteJsString(columnName)})`
+        if (definition.unsigned === true) line += '.unsigned()'
         break
 
       case 'id':
@@ -625,19 +730,11 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
         break
 
       case 'dateTime':
-        if (definition.temporalPrecision != null) {
-          line = `table.datetime(${quoteJsString(columnName)}, { precision: ${definition.temporalPrecision} })`
-        } else {
-          line = `table.datetime(${quoteJsString(columnName)})`
-        }
+        line = `table.datetime(${quoteJsString(columnName)}, { precision: ${definition.temporalPrecision ?? 6} })`
         break
 
       case 'time':
-        if (definition.temporalPrecision != null) {
-          line = `table.time(${quoteJsString(columnName)}, { precision: ${definition.temporalPrecision} })`
-        } else {
-          line = `table.time(${quoteJsString(columnName)})`
-        }
+        line = `table.specificType(${quoteJsString(columnName)}, ${quoteJsString(timeColumnType(definition))})`
         break
 
       case 'epochMilliseconds':
@@ -648,7 +745,7 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
       case 'array':
       case 'object':
       case 'serialize':
-        line = `table.json(${quoteJsString(columnName)})`
+        line = hasJsonDefault(definition) ? `table.specificType(${quoteJsString(columnName)}, 'json')` : `table.json(${quoteJsString(columnName)})`
         break
 
       case 'blob':
@@ -669,7 +766,8 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
   }
 
   if (hasStaticDefault(definition)) {
-    line += `.defaultTo(${formatCodeLiteral(definition.defaultTo)})`
+    const literal = columnDefaultLiteral(definition, dialect)
+    line += `.defaultTo(${literal === null ? formatCodeLiteral(definition.defaultTo) : `knex.raw(${quoteJsString(literal)})`})`
   }
 
   if (definition.primary === true && options.includePrimary !== false) {
@@ -716,7 +814,7 @@ function buildForeignKeyLine (foreignKey) {
 }
 
 function buildCheckConstraintLine (constraint) {
-  return `table.check(${quoteJsString(constraint.clause)}, [], ${quoteJsString(constraint.name)})`
+  return `table.check(${quoteJsString(constraint.clause)}, [], knex.raw('??', [${quoteJsString(constraint.name)}]).toQuery())`
 }
 
 function buildDesiredColumnsMap (tableSchemaContext, options = {}) {
@@ -755,7 +853,11 @@ function valuesEqual (left, right) {
 
 function normalizeSnapshotDefaultValue (column = {}) {
   if (!column.hasDefault) return undefined
-  return normalizeComparableDefault(column.defaultValue)
+  if (column.typeKind === 'boolean') {
+    if (String(column.defaultValue).toLowerCase() === 'true') return '1'
+    if (String(column.defaultValue).toLowerCase() === 'false') return '0'
+  }
+  return normalizeComparableDefault(column.defaultValue, column.typeKind)
 }
 
 function collectDestructiveColumnWarnings (currentColumn, desiredColumn) {
@@ -789,6 +891,9 @@ function collectDestructiveColumnWarnings (currentColumn, desiredColumn) {
   ) {
     warnings.push(`Column '${columnName}' reduces numeric scale from ${currentColumn.numericScale} to ${desiredColumn.numericScale}.`)
   }
+  if (currentColumn.datetimePrecision != null && desiredColumn.datetimePrecision != null && desiredColumn.datetimePrecision < currentColumn.datetimePrecision) {
+    warnings.push(`Column '${columnName}' reduces temporal precision from ${currentColumn.datetimePrecision} to ${desiredColumn.datetimePrecision}.`)
+  }
 
   if (!valuesEqual(currentColumn.enumValues || [], desiredColumn.enumValues || [])) {
     warnings.push(`Column '${columnName}' changes enum values and may invalidate existing data.`)
@@ -809,19 +914,22 @@ function columnNeedsAlter (currentColumn, desiredColumn, options = {}) {
   const currentNumericShape = (() => {
     const dataType = normalizeText(currentColumn.dataType)
     if (dataType === 'decimal' || dataType === 'numeric') return 'decimal'
-    if (dataType === 'float' || dataType === 'double' || dataType === 'real') return 'float'
+    if (['float', 'double', 'double precision', 'real'].includes(dataType)) return 'float'
     return ''
   })()
   const compareUnsigned = isMysqlDialect(normalizeText(options.dialect).toLowerCase())
+  const sqlite = isSqliteDialectName(options.dialect)
 
   return (
     normalizeText(currentColumn.typeKind) !== normalizeText(desiredColumn.typeKind) ||
-    (desiredColumn.typeKind === 'number' && currentNumericShape && currentNumericShape !== normalizeText(desiredColumn.shape)) ||
+    (!sqlite && desiredColumn.typeKind === 'number' && currentNumericShape && currentNumericShape !== normalizeText(desiredColumn.shape)) ||
+    (desiredColumn.typeKind === 'integer' && (currentColumn.dataType === 'bigint') !== (desiredColumn.shape === 'bigint')) ||
     Boolean(currentColumn.nullable) !== Boolean(desiredColumn.nullable) ||
     (compareUnsigned && Boolean(currentColumn.unsigned) !== Boolean(desiredColumn.unsigned)) ||
-    (currentColumn.maxLength ?? null) !== (desiredColumn.maxLength ?? null) ||
-    (currentColumn.numericPrecision ?? null) !== (desiredColumn.numericPrecision ?? null) ||
-    (currentColumn.numericScale ?? null) !== (desiredColumn.numericScale ?? null) ||
+    (desiredColumn.shape === 'string' && (currentColumn.maxLength ?? null) !== desiredColumn.maxLength) ||
+    (!sqlite && desiredColumn.shape === 'decimal' && (currentColumn.numericPrecision ?? null) !== desiredColumn.numericPrecision) ||
+    (!sqlite && desiredColumn.shape === 'decimal' && (currentColumn.numericScale ?? null) !== desiredColumn.numericScale) ||
+    (!sqlite && ['datetime', 'time'].includes(desiredColumn.shape) && (currentColumn.datetimePrecision ?? null) !== desiredColumn.datetimePrecision) ||
     normalizeSnapshotDefaultValue(currentColumn) !== desiredColumn.defaultValue ||
     Boolean(currentColumn.hasDefault) !== Boolean(desiredColumn.hasDefault) ||
     !valuesEqual(currentColumn.enumValues || [], desiredColumn.enumValues || []) ||
@@ -843,6 +951,7 @@ function createEmptyDiffPlan () {
     addForeignKeys: [],
     dropForeignKeys: [],
     addCheckConstraints: [],
+    dropCheckConstraints: [],
     warnings: []
   }
 }
@@ -866,13 +975,22 @@ function isSqliteDialectName (dialect = '') {
 }
 
 function normalizeConstraintClause (clause = '') {
-  return normalizeText(clause)
-    .replace(/[`"]/g, '')
-    .replace(/\s*\(\s*/g, '(')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/\s*,\s*/g, ',')
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
+  const tokens = normalizeText(clause).match(/'(?:''|[^'])*'|`(?:``|[^`])*`|"(?:""|[^"])*"|[\w.]+|<>|!=|>=|<=|[^\s]/g) || []
+  while (tokens[0] === '(' && tokens.at(-1) === ')') {
+    let depth = 0
+    if (tokens.some((token, index) => {
+      if (token === '(') depth++
+      if (token === ')') depth--
+      return depth === 0 && index < tokens.length - 1
+    })) break
+    tokens.shift()
+    tokens.pop()
+  }
+  return tokens.map(token => {
+    if (token.startsWith("'")) return token
+    if (token.startsWith('"') || token.startsWith('`')) return token.slice(1, -1)
+    return token.toLowerCase()
+  }).join(' ')
 }
 
 function isInlineEnumCheckConstraint (currentCheck = {}, desiredColumn = {}) {
@@ -880,15 +998,41 @@ function isInlineEnumCheckConstraint (currentCheck = {}, desiredColumn = {}) {
     return false
   }
 
-  const expectedClause = `${desiredColumn.name} in (${desiredColumn.enumValues.map((value) => quoteJsString(value)).join(', ')})`
+  const expectedClause = buildEnumCheckClause(desiredColumn.name, desiredColumn.enumValues)
   return normalizeConstraintClause(currentCheck.clause) === normalizeConstraintClause(expectedClause)
+}
+
+function buildEnumCheckClause (columnName, enumValues, dialect = '') {
+  const values = ['pg', 'postgresql'].includes(dialect)
+    ? enumValues.map(quotePostgresString)
+    : escapeEnumValues(enumValues, 'pg').map(value => `'${value}'`)
+  return `"${columnName.replace(/"/g, '""')}" in (${values.join(', ')})`
+}
+
+function planEnumAlteration (plan, tableName, currentColumn, desiredColumn, currentChecks, dialect) {
+  if (valuesEqual(currentColumn.enumValues || [], desiredColumn.enumValues)) return true
+  if (isSqliteDialectName(dialect)) {
+    plan.warnings.push(`Skipping enum alteration for column '${desiredColumn.name}': SQLite requires a table rebuild that replaces the old check constraint. Knex column ALTER retains that check.`)
+    return false
+  }
+  if (['pg', 'postgresql'].includes(dialect)) {
+    const previousChecks = currentChecks.filter(check => isInlineEnumCheckConstraint(check, currentColumn))
+    plan.dropCheckConstraints.push(...previousChecks)
+    if (desiredColumn.enumValues.length > 0) {
+      plan.addCheckConstraints.push({
+        name: previousChecks[0]?.name || `${tableName.split('.').at(-1)}_${desiredColumn.name}_check`,
+        clause: buildEnumCheckClause(desiredColumn.name, desiredColumn.enumValues, dialect)
+      })
+    }
+  }
+  return true
 }
 
 /**
  * Creates a Knex table from a json-rest-schema definition
  * @param {object} knex - The Knex instance
  * @param {object} schemaInfo - Resource schema metadata
- * @param {object} tableSchemaInstance - The json-rest-schema instance or schema-like table metadata object
+ * @param {object} tableSchemaInstance - A json-rest-schema instance or { structure: fields, ...metadata } object
  * @param {object} [options={}] - Additional options
  * @param {boolean} [options.autoIncrement=true] - Whether to use auto-incrementing IDs
  * @param {boolean} [options.timestamps=false] - Whether to add created_at/updated_at columns
@@ -899,10 +1043,13 @@ export async function createKnexTable (knex, schemaInfo, tableSchemaInstance, op
   const tableName = schemaInfo.tableName
   const dialect = detectKnexDialect(knex)
   const tableSchemaContext = resolveTableSchemaContext(tableSchemaInstance, {
+    autoIncrement,
     idProperty: schemaInfo.idProperty,
     storage: schemaInfo.storage,
-    tableName
+    tableName,
+    dialect
   })
+  assertNativeSetSupport(tableSchemaContext, dialect)
 
   return knex.schema.createTable(tableName, (table) => {
     if (!tableSchemaContext.hasPrimaryIdField && autoIncrement) {
@@ -916,10 +1063,10 @@ export async function createKnexTable (knex, schemaInfo, tableSchemaInstance, op
 
       const columnName = getColumnNameForDefinition(tableSchemaContext.tableContext, fieldName)
       const column = mapTypeToKnex(table, columnName, definition, { dialect })
-      applyColumnConstraints(column, definition)
+      applyColumnConstraints(column, definition, knex, dialect)
     }
 
-    applyTableMetadata(table, tableSchemaContext)
+    applyTableMetadata(table, tableSchemaContext, knex)
 
     if (timestamps) {
       table.timestamps(true, true)
@@ -933,42 +1080,113 @@ export async function addKnexFields (knex, tableName, schema, options = {}) {
   const tableSchemaContext = resolveTableSchemaContext(schema, {
     storage: options.storage,
     ...options,
-    tableName
+    tableName,
+    dialect
   })
+  assertNativeSetSupport(tableSchemaContext, dialect)
 
   return knex.schema.alterTable(tableName, (table) => {
     for (const [fieldName, definition] of Object.entries(tableSchemaContext.schemaStructure)) {
       const columnName = getColumnNameForDefinition(tableSchemaContext.tableContext, fieldName)
       const column = mapTypeToKnex(table, columnName, definition, { dialect })
-      applyColumnConstraints(column, definition)
+      applyColumnConstraints(column, definition, knex, dialect)
     }
   })
+}
+
+async function runSqliteAlteration (knex, execute) {
+  const connection = await knex.client.acquireConnection()
+  const db = {
+    client: knex.client,
+    raw: (...args) => knex.raw(...args).connection(connection),
+    get schema () { return knex.schema.connection(connection) }
+  }
+  let foreignKeys
+  try {
+    foreignKeys = (await db.raw('PRAGMA foreign_keys'))[0].foreign_keys
+    return await execute(db)
+  } catch (error) {
+    try {
+      // A rejected rebuild COMMIT can leave its transaction and FK setting active.
+      if (connection.inTransaction === true) await db.raw('ROLLBACK')
+      if (connection.inTransaction !== false || foreignKeys === undefined) {
+        connection.__knex__disposed = error || true
+      } else await db.raw(`PRAGMA foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+    } catch (cleanupError) {
+      connection.__knex__disposed = cleanupError || true
+      throw new AggregateError([error, cleanupError], 'SQLite alteration and connection cleanup failed', { cause: error })
+    }
+    throw error
+  } finally {
+    await knex.client.releaseConnection(connection)
+  }
 }
 
 // Helper function to alter multiple fields in an existing table
 export async function alterKnexFields (knex, tableName, fields, options = {}) {
   assertNoTopLevelTableMetadata(fields, 'alterKnexFields')
   const dialect = detectKnexDialect(knex)
+  const capabilities = getSchemaCapabilities(dialect)
   const tableSchemaContext = resolveTableSchemaContext(fields, {
     storage: options.storage,
     ...options,
-    tableName
+    tableName,
+    dialect
   })
+  assertNativeSetSupport(tableSchemaContext, dialect)
 
-  return knex.schema.alterTable(tableName, (table) => {
-    for (const [fieldName, definition] of Object.entries(tableSchemaContext.schemaStructure)) {
-      const columnName = getColumnNameForDefinition(tableSchemaContext.tableContext, fieldName)
-      const column = mapTypeToKnex(table, columnName, definition, { dialect })
-      column.alter()
-      applyColumnConstraints(column, definition)
+  const execute = async db => {
+    const plan = createEmptyDiffPlan()
+    if (isSqliteDialectName(dialect) || ['pg', 'postgresql'].includes(dialect)) {
+      const current = await introspectKnexColumnConstraints(db, tableName)
+      for (const [fieldName, definition] of Object.entries(tableSchemaContext.schemaStructure)) {
+        const desired = normalizeDesiredColumn(tableSchemaContext.tableContext, fieldName, definition)
+        const previous = current.columns.find(column => column.name === desired.name)
+        if (!previous) throw new Error(`Cannot alter missing column '${desired.name}' in '${tableName}'.`)
+        if (!planEnumAlteration(plan, tableName, previous, desired, current.checkConstraints, dialect)) {
+          throw new Error(plan.warnings.at(-1))
+        }
+      }
     }
+    for (const check of plan.dropCheckConstraints) {
+      await db.raw('ALTER TABLE ?? DROP CONSTRAINT ??', [tableName, check.name])
+    }
+    await db.schema.alterTable(tableName, table => {
+      for (const [fieldName, definition] of Object.entries(tableSchemaContext.schemaStructure)) {
+        const columnName = getColumnNameForDefinition(tableSchemaContext.tableContext, fieldName)
+        const column = mapTypeToKnex(table, columnName, definition, { dialect, alter: true })
+        column.alter()
+        applyColumnConstraints(column, definition, db, dialect)
+      }
+    })
+    for (const check of plan.addCheckConstraints) {
+      await db.schema.alterTable(tableName, table => table.check(check.clause, [], db.raw('??', [check.name]).toQuery()))
+    }
+  }
+  if (capabilities.fieldAlteration === 'standalone') {
+    if (knex.isTransaction) throw new Error('MySQL field alterations cannot run in a caller transaction because DDL implicitly commits it.')
+    return execute(knex)
+  }
+  if (capabilities.fieldAlteration === 'sqlite-rebuild') {
+    if (knex.isTransaction && (await knex.raw('PRAGMA foreign_keys'))[0].foreign_keys === 1) {
+      throw new Error('SQLite field alterations in a caller transaction require foreign_keys=OFF before that transaction starts. A rebuild cannot disable foreign keys inside a transaction.')
+    }
+    // Keep Knex's rebuild lease until any unfinished transaction is cleaned up.
+    return knex.isTransaction ? execute(knex) : runSqliteAlteration(knex, execute)
+  }
+  // On a transaction Knex creates a savepoint; the caller still owns the outer commit.
+  if (knex.isTransaction) return knex.transaction(execute)
+  return runOwnedTransaction({
+    params: execute,
+    context: {},
+    helpers: { newTransaction: ownerContext => createKnexTransaction(knex, ownerContext) }
   })
 }
 
 /**
  * Generates a Knex migration string from a json-rest-schema definition
  * @param {string} tableName - The name of the table
- * @param {object} schema - The json-rest-schema instance or schema-like table metadata object
+ * @param {object} schema - A json-rest-schema instance or { structure: fields, ...metadata } object
  * @param {object} [options={}] - Additional options
  * @returns {string} The migration code as a string
  */
@@ -1028,7 +1246,7 @@ exports.down = function(knex) {
  * Generates a deterministic Knex alter migration by diffing a live table snapshot against a desired schema.
  * @param {string} tableName - The table name being diffed
  * @param {object} currentSnapshot - The normalized table snapshot returned by introspection
- * @param {object} schema - The desired schema-like table metadata object
+ * @param {object} schema - The desired { structure: fields, ...metadata } object
  * @param {object} [options={}] - Diff options
  * @param {boolean} [options.autoIncrement=true] - Whether the resource expects an implicit auto-increment id column
  * @param {boolean} [options.allowDropColumns=false] - Whether removed columns should be dropped automatically
@@ -1045,7 +1263,8 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   const tableSchemaContext = resolveTableSchemaContext(schema, {
     ...options,
     storage: options.storage,
-    tableName
+    tableName,
+    dialect: resolvedDialect
   })
   const desiredColumns = buildDesiredColumnsMap(tableSchemaContext, { autoIncrement })
   const currentColumns = mapByName(currentSnapshot?.columns || [])
@@ -1088,6 +1307,8 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       continue
     }
 
+    if (!planEnumAlteration(plan, tableName, currentColumn, desiredColumn, [...currentChecks.values()], resolvedDialect)) continue
+
     plan.alterColumns.push(desiredColumn)
     plan.warnings.push(...collectDestructiveColumnWarnings(currentColumn, desiredColumn))
   }
@@ -1108,7 +1329,8 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
 
   for (const desiredIndex of desiredIndexes.values()) {
     const currentIndex = currentIndexes.get(desiredIndex.name)
-    const sameIndexType = normalizeText(currentIndex?.indexType).toUpperCase() === desiredIndex.indexType
+    const currentIndexType = normalizeText(currentIndex?.indexType).toUpperCase()
+    const sameIndexType = currentIndexType === desiredIndex.indexType || (!desiredIndex.indexType && currentIndexType === 'BTREE')
     const indexChanged = Boolean(currentIndex) && (
       !valuesEqual(currentIndex.columns, desiredIndex.columns) ||
       Boolean(currentIndex.unique) !== Boolean(desiredIndex.unique) ||
@@ -1125,6 +1347,10 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
 
   for (const currentIndex of currentIndexes.values()) {
     if (!desiredIndexes.has(currentIndex.name)) {
+      const supportsForeignKey = !currentIndex.unique && isMysqlDialect(resolvedDialect) && [...desiredForeignKeys.values()].some(foreignKey =>
+        foreignKey.columns.every((column, index) => currentIndex.columns[index] === column)
+      )
+      if (supportsForeignKey) continue
       plan.dropIndexes.push(currentIndex)
     }
   }
@@ -1140,25 +1366,38 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       desiredForeignKey.referencedColumns
     )
     const sameTable = normalizeText(currentForeignKey?.referencedTableName) === desiredForeignKey.referencedTableName
-    const sameDeleteRule = normalizeText(currentForeignKey?.deleteRule).toUpperCase() === desiredForeignKey.deleteRule
-    const sameUpdateRule = normalizeText(currentForeignKey?.updateRule).toUpperCase() === desiredForeignKey.updateRule
+    const defaultRule = isMysqlDialect(resolvedDialect) ? 'RESTRICT' : 'NO ACTION'
+    const sameDeleteRule = normalizeText(currentForeignKey?.deleteRule).toUpperCase() === (desiredForeignKey.deleteRule || defaultRule)
+    const sameUpdateRule = normalizeText(currentForeignKey?.updateRule).toUpperCase() === (desiredForeignKey.updateRule || defaultRule)
 
     if (!currentForeignKey || !sameColumns || !sameReferencedColumns || !sameTable || !sameDeleteRule || !sameUpdateRule) {
       plan.addForeignKeys.push(desiredForeignKey)
+      if (currentForeignKey) plan.dropForeignKeys.push(currentForeignKey)
     }
   }
 
   for (const currentForeignKey of currentForeignKeys.values()) {
     if (!desiredForeignKeys.has(currentForeignKey.name)) {
       plan.dropForeignKeys.push(currentForeignKey)
+    } else if (isMysqlDialect(resolvedDialect) && !plan.dropForeignKeys.some(key => key.name === currentForeignKey.name)) {
+      const dropsSupportingIndex = plan.dropIndexes.some(index =>
+        currentForeignKey.columns.every((column, position) => index.columns[position] === column.name)
+      )
+      if (dropsSupportingIndex) {
+        // MySQL forbids dropping a supporting index while its foreign key exists.
+        plan.dropForeignKeys.push(currentForeignKey)
+        plan.addForeignKeys.push(desiredForeignKeys.get(currentForeignKey.name))
+      }
     }
   }
 
   for (const desiredCheck of desiredChecks.values()) {
     const currentCheck = currentChecks.get(desiredCheck.name)
-    if (currentCheck?.clause === desiredCheck.clause) {
+    if (currentCheck && normalizeConstraintClause(currentCheck.clause) === normalizeConstraintClause(desiredCheck.clause)) {
       continue
     }
+
+    if (currentCheck) continue
 
     if (isSqliteDialectName(resolvedDialect)) {
       plan.warnings.push(buildUnsupportedConstraintWarning('check constraint', desiredCheck.name, resolvedDialect))
@@ -1169,6 +1408,7 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   }
 
   for (const currentCheck of currentChecks.values()) {
+    if (plan.dropCheckConstraints.some(check => check.name === currentCheck.name)) continue
     const matchesDesiredEnum = [...desiredColumns.values()].some((desiredColumn) => {
       return isInlineEnumCheckConstraint(currentCheck, desiredColumn)
     })
@@ -1181,7 +1421,7 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       continue
     }
 
-    if (desiredChecks.get(currentCheck.name)?.clause !== currentCheck.clause) {
+    if (normalizeConstraintClause(desiredChecks.get(currentCheck.name)?.clause) !== normalizeConstraintClause(currentCheck.clause)) {
       plan.warnings.push(buildUnsupportedConstraintWarning('check constraint alteration', currentCheck.name, resolvedDialect))
     }
   }
@@ -1194,9 +1434,14 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   plan.addForeignKeys.sort(compareByName)
   plan.dropForeignKeys.sort(compareByName)
   plan.addCheckConstraints.sort(compareByName)
+  plan.dropCheckConstraints.sort(compareByName)
   plan.warnings = [...new Set(plan.warnings)]
 
   const blocks = []
+
+  for (const check of plan.dropCheckConstraints) {
+    blocks.push(`  await knex.raw('ALTER TABLE ?? DROP CONSTRAINT ??', [${quoteJsString(tableName)}, ${quoteJsString(check.name)}]);`)
+  }
 
   const addOrAlterColumnLines = [
     ...plan.addColumns.map((column) => buildColumnBuilderCode(column.name, column.definition, { dialect: resolvedDialect })),

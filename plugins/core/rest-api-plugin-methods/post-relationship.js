@@ -1,29 +1,33 @@
+import { lockRelationshipParent } from '../lib/writing/relationship-processor.js'
+import { advanceResourceVersion } from '../lib/writing/resource-version.js'
+import { beginWriteTransaction } from '../../../lib/error-context.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import {
   commitOwnedTransaction,
-  findRelationshipDefinition,
   getVisibleRelationshipParent,
   handleWriteMethodError,
+  validateRelationshipAccess,
   validateRelationshipRoutePayload
 } from './common.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
+import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
+import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import {
   normalizeRelationshipIdentifiers,
   requireExistingResourceId
 } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
-   * POST RELATIONSHIP
-   * Adds members to a to-many relationship
-   * POST /api/articles/1/relationships/tags
-   *
-   * @param {string} id - The ID of the resource
-   * @param {string} relationshipName - The name of the relationship
-   * @param {array} relationshipData - Array of resource identifiers to add
-   * @returns {Promise<void>} 204 No Content
-  */
+ * Add the identifiers in params.relationshipData to a to-many relationship.
+ * Authorization and parent/version locking precede mutation. The method
+ * returns no resource and completes only an owned transaction.
+ */
 export default async function postRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+  rejectRemovedOptions(params)
+  if (params.format !== undefined) resolveFormat(params.format)
   context.method = 'postRelationship'
+  context.scopeName = scopeName
   context.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
@@ -33,10 +37,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
 
   // Transaction handling
-  context.transaction = params.transaction ||
-  (helpers.newTransaction && !params.transaction ? await helpers.newTransaction() : null)
-  context.shouldCommit = !params.transaction && !!context.transaction
-
+  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction || api.knex.instance
 
   try {
@@ -80,6 +81,18 @@ export default async function postRelationshipMethod ({ params, context, vars, h
     if (!parentRecord) {
       throw new RestApiResourceError('Resource not found', { subtype: 'not_found' })
     }
+    context.minimalRecord = parentRecord
+    context.originalMinimalRecord = parentRecord
+
+    await runHooks('beforeDataCall')
+    await runHooks('beforeDataCallPostRelationship')
+
+    const revision = await advanceResourceVersion({ scopeName, context, helpers, expectedVersion: params.expectedVersion })
+    if (revision === undefined) await lockRelationshipParent({ context, helpers, scopeName })
+
+    await validateRelationshipAccess(context, {
+      data: { relationships: { [context.relationshipName]: { data: params.relationshipData } } }
+    }, helpers, api)
 
     // Add relationships
     if (relDef?.through) {
@@ -92,38 +105,19 @@ export default async function postRelationshipMethod ({ params, context, vars, h
           relData: params.relationshipData,
         })
       } else {
-        await createPivotRecords(api, context.id, {
-          through: relDef.through,
-          foreignKey: relDef.foreignKey,
-          otherKey: relDef.otherKey
-        }, params.relationshipData, context.transaction, context)
+        await createPivotRecords(api, context.id, relDef, params.relationshipData, context.transaction)
       }
     } else if (relDef.type === 'hasMany') {
-      // Update foreign keys for hasMany
-      const targetType = relDef.target
-      for (const identifier of params.relationshipData) {
-        await api.resources[targetType].patch({
-          id: identifier.id,
-          inputRecord: {
-            data: {
-              type: targetType,
-              id: identifier.id,
-              attributes: { [relDef.foreignKey]: context.id }
-            }
-          },
-          transaction: context.transaction,
-          simplified: false
-        }, { ...context })
-      }
+      await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData: params.relationshipData, operation: 'add' })
     }
 
     await runHooks('finish')
     await runHooks('finishPostRelationship')
 
-    await commitOwnedTransaction(context, runHooks)
+    await commitOwnedTransaction(context)
 
     // 204 No Content
   } catch (error) {
-    await handleWriteMethodError(error, context, 'POST_RELATIONSHIP', scopeName, log, runHooks)
+    await handleWriteMethodError(error, context, 'POST_RELATIONSHIP', scopeName, log)
   }
 };

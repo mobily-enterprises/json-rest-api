@@ -51,7 +51,7 @@ describe('Enhanced Pagination Features', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
       countryId = countryResult.data.id
 
@@ -63,18 +63,18 @@ describe('Enhanced Pagination Features', () => {
         )
         await api.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
 
     it('should add self links to individual resources', async () => {
-      const list = await api.resources.books.query({ simplified: false })
+      const list = await api.resources.books.query({ format: 'jsonapi' })
       const firstId = list.data[0]?.id
 
       const result = await api.resources.books.get({
         id: firstId,
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, false)
@@ -87,7 +87,7 @@ describe('Enhanced Pagination Features', () => {
     it('should add self links to collection resources', async () => {
       const result = await api.resources.books.query({
         queryParams: {},
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -109,7 +109,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           include: ['country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -126,7 +126,7 @@ describe('Enhanced Pagination Features', () => {
       // URLs are now always relative unless overridden via context
       const result = await api.resources.books.query({
         queryParams: {},
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -148,13 +148,13 @@ describe('Enhanced Pagination Features', () => {
             country: countryId
           },
           fields: {
-            books: 'title,country_id',
+            books: 'title,country',
             countries: 'name,code'
           },
           include: ['country'],
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -168,7 +168,7 @@ describe('Enhanced Pagination Features', () => {
       assert.deepEqual(selfQuery.include, ['country'])
       assert.deepEqual(selfQuery.sort, ['title'])
       assert.deepEqual(selfQuery.fields, {
-        books: 'title,country_id',
+        books: 'title,country',
         countries: 'name,code'
       })
     })
@@ -184,7 +184,7 @@ describe('Enhanced Pagination Features', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create 10 books for pagination testing
@@ -195,7 +195,7 @@ describe('Enhanced Pagination Features', () => {
         )
         await api.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -205,7 +205,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 2, size: 3 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -225,7 +225,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 4, size: 3 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert.equal(result.meta.pagination.hasMore, false)
@@ -238,7 +238,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 2, size: 3 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.links, 'Response should have links')
@@ -260,7 +260,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 1, size: 3 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.links.first)
@@ -273,7 +273,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 4, size: 3 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.links.first)
@@ -287,7 +287,7 @@ describe('Enhanced Pagination Features', () => {
           page: { number: 2, size: 3 },
           sort: ['-title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.links, 'Should have links')
@@ -308,7 +308,7 @@ describe('Enhanced Pagination Features', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create books
@@ -321,7 +321,7 @@ describe('Enhanced Pagination Features', () => {
         )
         await api.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -333,7 +333,7 @@ describe('Enhanced Pagination Features', () => {
           page: { size: 5 },
           sort: ['-id']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(firstPage, true)
@@ -350,7 +350,7 @@ describe('Enhanced Pagination Features', () => {
           },
           sort: ['-id']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(secondPage, true)
@@ -367,7 +367,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { size: 5 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.links)
@@ -391,7 +391,7 @@ describe('Enhanced Pagination Features', () => {
               ...(currentCursor && { after: currentCursor })
             }
           },
-          simplified: false
+          format: 'jsonapi'
         })
 
         if (result.meta.pagination.cursor?.next) {
@@ -416,7 +416,7 @@ describe('Enhanced Pagination Features', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create books
@@ -427,7 +427,7 @@ describe('Enhanced Pagination Features', () => {
         )
         await api.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -437,7 +437,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 1, size: 5 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.meta.pagination.total !== undefined)
@@ -455,7 +455,7 @@ describe('Enhanced Pagination Features', () => {
         queryParams: {
           page: { number: 1, size: 5 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       assert(result.meta.pagination)
@@ -484,7 +484,7 @@ describe('Enhanced Pagination Features', () => {
         const doc = createJsonApiDocument('countries', { name: `Country ${code}`, code })
         const result = await api.resources.countries.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
         countries.push(result.data)
         if (code === 'US') {
@@ -502,7 +502,7 @@ describe('Enhanced Pagination Features', () => {
           )
           await api.resources.books.post({
             inputRecord: doc,
-            simplified: false
+            format: 'jsonapi'
           })
         }
       }
@@ -516,13 +516,13 @@ describe('Enhanced Pagination Features', () => {
             country: parseInt(usCountryId)
           },
           fields: {
-            books: 'title,country_id',
+            books: 'title,country',
             countries: 'name,code'
           },
           include: ['country'],
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -554,7 +554,7 @@ describe('Enhanced Pagination Features', () => {
       assert.deepEqual(nextQuery.include, ['country'])
       assert.deepEqual(nextQuery.sort, ['title'])
       assert.deepEqual(nextQuery.fields, {
-        books: 'title,country_id',
+        books: 'title,country',
         countries: 'name,code'
       })
       assert.deepEqual(nextQuery.page, { number: 2, size: 5 })

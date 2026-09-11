@@ -1,138 +1,81 @@
-/**
- * Formidable File Detector for HTTP Multipart Uploads
- *
- * This detector handles multipart/form-data uploads using the formidable library.
- * Unlike busboy, formidable saves files to disk temporarily, which is better
- * for large files.
- *
- * Features:
- * - Disk-based storage (better for large files)
- * - Automatic temp file cleanup
- * - Progress tracking support
- * - Built-in file type detection
- *
- * Usage:
- * ```javascript
- * import { createFormidableDetector } from 'jsonrestapi/plugins/core/lib/formidable-detector.js';
- *
- * api.use(ExpressPlugin, {
- *   fileParser: 'formidable',
- *   fileParserOptions: {
- *     uploadDir: './uploads/temp',
- *     keepExtensions: true,
- *     maxFileSize: 200 * 1024 * 1024 // 200MB
- *   }
- * });
- * ```
- */
-
 import { requirePackage } from 'hooked-api'
-import { promises as fs } from 'fs'
-import path from 'path'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import { tmpdir } from 'node:os'
+import { RestApiPayloadError } from '../../../../lib/rest-api-errors.js'
+import { isMultipartContentType } from './transport-http-helpers.js'
+import { addMultipartField, multipartLimits } from './multipart-helpers.js'
 
 let formidable
-try {
-  formidable = (await import('formidable')).default
-} catch (e) {
-  requirePackage('formidable', 'express/http-connector',
-    'Formidable is required for multipart/form-data file uploads with disk storage. This is a peer dependency.')
+try { formidable = (await import('formidable')).default } catch {
+  requirePackage('formidable', 'express-connector', 'Formidable is required for multipart uploads. Install the optional formidable peer.')
 }
 
-/**
- * Creates a formidable-based file detector
- *
- * @param {Object} options - Formidable configuration options
- * @param {string} options.uploadDir - Directory for temporary files
- * @param {boolean} options.keepExtensions - Keep file extensions
- * @param {number} options.maxFileSize - Max file size in bytes
- * @param {boolean} options.multiples - Allow multiple files per field
- * @returns {Object} Detector object with detect() and parse() methods
- */
+/** Buffer completed uploads, then remove this request's temporary directory. */
 export function createFormidableDetector (options = {}) {
-  // Set default upload directory
-  const uploadDir = options.uploadDir || path.join(process.cwd(), 'uploads', 'temp')
-
+  const uploadDir = path.resolve(options.uploadDir || tmpdir())
   return {
     name: 'formidable-multipart',
-
-    /**
-     * Check if this detector can handle the request
-     * @param {Object} params - Request parameters
-     * @returns {boolean} True if this is a multipart request
-     */
-    detect: (params) => {
-      const req = params._httpReq || params._expressReq
-      if (!req || !req.headers) return false
-
-      const contentType = req.headers['content-type'] || ''
-      return contentType.includes('multipart/form-data')
-    },
-
-    /**
-     * Parse multipart data from the request
-     * @param {Object} params - Request parameters
-     * @returns {Promise<{fields: Object, files: Object}>} Parsed data
-     */
+    detect: params => isMultipartContentType((params._httpReq || params._expressReq)?.headers?.['content-type']),
     parse: async (params) => {
       const req = params._httpReq || params._expressReq
-
-      // Ensure upload directory exists
-      await fs.mkdir(uploadDir, { recursive: true })
-
-      // Create form parser
-      const form = formidable({
-        uploadDir,
-        keepExtensions: true,
-        ...options
-      })
-
-      // Parse the request
-      const [fields, fileUploads] = await form.parse(req)
-
-      // Normalize formidable's file format to our standard format
-      const files = {}
-
-      for (const [fieldname, uploadedFiles] of Object.entries(fileUploads)) {
-        // Formidable returns arrays for multiple files
-        const fileArray = Array.isArray(uploadedFiles) ? uploadedFiles : [uploadedFiles]
-
-        // For now, just take the first file (TODO: handle multiple files per field)
-        const file = fileArray[0]
-
-        if (file) {
-          // Read file data into memory (for small files)
-          // For large files, you might want to keep them on disk
-          const data = await fs.readFile(file.filepath)
-
-          files[fieldname] = {
+      if (!req?.on || req.aborted) throw new RestApiPayloadError('Multipart request is unavailable or aborted')
+      let directory, failure, rejectParsing, result
+      const onAborted = () => rejectParsing?.(new RestApiPayloadError('Multipart request aborted'))
+      req.once('aborted', onAborted)
+      try {
+        await fs.mkdir(uploadDir, { recursive: true })
+        directory = await fs.mkdtemp(path.join(uploadDir, 'json-rest-upload-'))
+        if (req.aborted) throw new RestApiPayloadError('Multipart request aborted')
+        const form = formidable({
+          maxFileSize: multipartLimits.fileSize,
+          maxTotalFileSize: multipartLimits.fileSize * multipartLimits.files,
+          maxFiles: multipartLimits.files,
+          maxFields: multipartLimits.fields,
+          maxFieldsSize: multipartLimits.fieldSize * multipartLimits.fields,
+          allowEmptyFiles: true,
+          minFileSize: 0,
+          ...options,
+          uploadDir: directory
+        })
+        const entries = []
+        const uploads = []
+        form.on('field', (name, value) => entries.push([name, value]))
+        form.on('file', (name, file) => uploads.push([name, file]))
+        await new Promise((resolve, reject) => {
+          rejectParsing = reject
+          // Callback mode avoids an unobserved internal promise on early abort.
+          form.parse(req, error => error ? reject(error) : resolve()).catch(reject)
+        })
+        const fields = new Map()
+        const files = new Map()
+        for (const [name, value] of entries) addMultipartField(fields, name, value)
+        for (const [name, file] of uploads) {
+          if (files.has(name)) throw new RestApiPayloadError(`Multiple files for field '${name}' are not supported`, { path: name })
+          files.set(name, {
             filename: file.originalFilename || 'unknown',
             mimetype: file.mimetype || 'application/octet-stream',
             size: file.size,
-            data,
-            filepath: file.filepath, // Keep for reference
-
-            // Cleanup function to remove temp file
-            cleanup: async () => {
-              try {
-                await fs.unlink(file.filepath)
-              } catch (error) {
-                // File might already be deleted, ignore
-                if (error.code !== 'ENOENT') {
-                  throw error
-                }
-              }
-            }
+            data: await fs.readFile(file.filepath)
+          })
+        }
+        result = { fields: Object.fromEntries(fields), files: Object.fromEntries(files) }
+      } catch (error) {
+        failure = [400, 413].includes(error.httpCode)
+          ? new RestApiPayloadError(error.message, { statusCode: error.httpCode, cause: error })
+          : error
+      } finally {
+        req.removeListener('aborted', onAborted)
+        if (failure) req.resume()
+        if (directory) {
+          try { await fs.rm(directory, { recursive: true, force: true }) } catch (error) {
+            if (failure) failure.cleanupError = error
+            else failure = error
           }
         }
       }
-
-      // Normalize fields (formidable returns arrays for repeated fields)
-      const normalizedFields = {}
-      for (const [key, value] of Object.entries(fields)) {
-        normalizedFields[key] = Array.isArray(value) && value.length === 1 ? value[0] : value
-      }
-
-      return { fields: normalizedFields, files }
+      if (failure) throw failure
+      return result
     }
   }
 }

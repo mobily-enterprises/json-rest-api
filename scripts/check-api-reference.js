@@ -1,0 +1,49 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '')
+const require = createRequire(`${root}/package.json`)
+const { Api } = await import(pathToFileURL(require.resolve('hooked-api')))
+const { default: knexFactory } = await import(pathToFileURL(require.resolve('knex')))
+const library = await import(pathToFileURL(`${root}/index.js`))
+const { ensureAnyApiSchema } = await import(pathToFileURL(`${root}/plugins/core/lib/anyapi/schema-utils.js`))
+const source = await readFile(`${root}/docs/API.md`, 'utf8')
+const blocks = [...source.matchAll(/```javascript\n([\s\S]*?)\n```/g)].map(match => match[1])
+const schema = blocks.find(code => code.includes("await api.addResource('articles'"))
+const trimHook = blocks.find(code => code.includes("functionName: 'trim-article-title'"))
+const validationHook = blocks.find(code => code.includes("functionName: 'validate-article-title'"))
+assert.ok(schema && trimHook && validationHook)
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+const evaluate = (code, api) => new AsyncFunction('api', 'RestApiValidationError', code.replace(/^import .*;\n/m, ''))(api, library.RestApiValidationError)
+for (const mode of ['knex', 'anyapi']) {
+  const knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  try {
+    const api = new Api({ name: `reference-${mode}`, logging: { level: 'error' } })
+    await api.use(library.RestApiPlugin, { format: 'plain', returning: 'full' })
+    if (mode === 'anyapi') {
+      await ensureAnyApiSchema(knex)
+      await api.use(library.RestApiAnyapiKnexPlugin, { knex, tenantId: 'reference' })
+    } else await api.use(library.RestApiKnexPlugin, { knex })
+    await evaluate(schema, api)
+    await evaluate(trimHook, api)
+    const created = await api.resources.articles.post({ inputRecord: { title: '  A documented title  ', content: 'two words' } })
+    assert.equal(created.title, 'A documented title')
+    const computed = await api.resources.articles.get({ id: created.id, queryParams: { fields: { articles: 'title,word_count' } } })
+    assert.equal(computed.word_count, 2)
+    const found = await api.resources.articles.query({ queryParams: { filters: { titleContains: 'documented' }, page: { number: 1, size: 10 } } })
+    assert.deepEqual(found.meta.pagination, { page: 1, pageSize: 10, pageCount: 1, total: 1, hasMore: false })
+    assert.equal(found.data.length, 1)
+    const minimal = await api.resources.articles.put({ id: created.id, inputRecord: { title: 'Replacement title', content: 'three short words' }, returning: 'minimal' })
+    assert.deepEqual(minimal, { type: 'articles', id: created.id })
+    assert.equal(await api.resources.articles.patch({ id: created.id, inputRecord: { title: 'Updated title' }, returning: 'none' }), undefined)
+    await evaluate(validationHook, api)
+    await assert.rejects(api.resources.articles.post({ inputRecord: { title: 'Short', content: 'Rejected content' } }), error => {
+      assert.equal(error.cause instanceof library.RestApiValidationError, true)
+      assert.equal(error.transactionOutcome, 'rolledBack')
+      return true
+    })
+    console.log(`Reference schema, hooks, computed field, filtering, pagination, target ID and return modes passed: ${mode}`)
+  } finally { await knex.destroy() }
+}

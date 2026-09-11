@@ -7,8 +7,7 @@ import {
   resourceIdentifier,
   cleanTables,
   createJsonApiDocument,
-  createRelationship,
-  createToManyRelationship
+  createRelationship
 } from './helpers/test-utils.js'
 
 // Create Knex instance for tests
@@ -74,7 +73,7 @@ describe('Bulk Operations', () => {
       })
 
       // Verify via API query
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 3, 'Should have 3 records via query')
     })
 
@@ -96,7 +95,7 @@ describe('Bulk Operations', () => {
       }
 
       // Verify no records were created via API
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 0, 'Should have no records due to rollback')
     })
 
@@ -127,7 +126,7 @@ describe('Bulk Operations', () => {
       assert(result.errors[0].error.message.includes('validation failed') || result.errors[0].error.message.includes('required'))
 
       // Verify via API
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 3)
     })
 
@@ -135,7 +134,7 @@ describe('Bulk Operations', () => {
       // First create a country
       const countryResult = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
-        simplified: false
+        format: 'jsonapi'
       })
 
       const records = [
@@ -204,15 +203,15 @@ describe('Bulk Operations', () => {
       const authors = await Promise.all([
         api.resources.authors.post({
           inputRecord: createJsonApiDocument('authors', { name: 'Author One' }),
-          simplified: false
+          format: 'jsonapi'
         }),
         api.resources.authors.post({
           inputRecord: createJsonApiDocument('authors', { name: 'Author Two' }),
-          simplified: false
+          format: 'jsonapi'
         }),
         api.resources.authors.post({
           inputRecord: createJsonApiDocument('authors', { name: 'Author Three' }),
-          simplified: false
+          format: 'jsonapi'
         })
       ])
 
@@ -255,7 +254,7 @@ describe('Bulk Operations', () => {
       // Verify via API
       const author1 = await api.resources.authors.get({
         id: testData.authorIds[0],
-        simplified: false
+        format: 'jsonapi'
       })
       assert.equal(author1.data.attributes.name, 'Updated Author One')
     })
@@ -328,7 +327,7 @@ describe('Bulk Operations', () => {
       // Get original name via API
       const originalAuthor = await api.resources.authors.get({
         id: testData.authorIds[0],
-        simplified: false
+        format: 'jsonapi'
       })
 
       const operations = [
@@ -363,7 +362,7 @@ describe('Bulk Operations', () => {
       // Verify no changes were made via API
       const author = await api.resources.authors.get({
         id: testData.authorIds[0],
-        simplified: false
+        format: 'jsonapi'
       })
       assert.equal(author.data.attributes.name, originalAuthor.data.attributes.name, 'Name should not have changed')
     })
@@ -382,7 +381,7 @@ describe('Bulk Operations', () => {
         Array.from({ length: 5 }, (_, i) =>
           api.resources.authors.post({
             inputRecord: createJsonApiDocument('authors', { name: `Author ${i + 1}` }),
-            simplified: false
+            format: 'jsonapi'
           })
         )
       )
@@ -404,7 +403,7 @@ describe('Bulk Operations', () => {
       assert.deepEqual(result.meta.deleted, idsToDelete)
 
       // Verify via API query
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 2, 'Should have 2 remaining records')
 
       // Verify specific records were deleted
@@ -438,7 +437,7 @@ describe('Bulk Operations', () => {
       assert.equal(result.errors[1].id, '888888')
 
       // Verify correct records were deleted via API
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 2)
     })
 
@@ -460,7 +459,7 @@ describe('Bulk Operations', () => {
       }
 
       // Verify no records were deleted via API
-      const queryResult = await api.resources.authors.query({ simplified: false })
+      const queryResult = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(queryResult.data.length, 5, 'Should still have all 5 records')
     })
 
@@ -479,7 +478,7 @@ describe('Bulk Operations', () => {
       // Create country and publishers with relationship
       const country = await api.resources.countries.post({
         inputRecord: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
-        simplified: false
+        format: 'jsonapi'
       })
 
       const publishers = await Promise.all([
@@ -488,19 +487,19 @@ describe('Bulk Operations', () => {
             { name: 'Publisher 1' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
           ),
-          simplified: false
+          format: 'jsonapi'
         }),
         api.resources.publishers.post({
           inputRecord: createJsonApiDocument('publishers',
             { name: 'Publisher 2' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
           ),
-          simplified: false
+          format: 'jsonapi'
         })
       ])
 
       // Create books referencing publishers
-      const book = await api.resources.books.post({
+      await api.resources.books.post({
         inputRecord: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
@@ -508,7 +507,7 @@ describe('Bulk Operations', () => {
             publisher: createRelationship(resourceIdentifier('publishers', publishers[0].data.id))
           }
         ),
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Try to delete publisher that has books
@@ -548,7 +547,7 @@ describe('Bulk Operations', () => {
 
       // Verify via API with increased page size
       const queryResult = await api.resources.authors.query({
-        simplified: false,
+        format: 'jsonapi',
         queryParams: { page: { size: 100 } }
       })
       assert.equal(queryResult.data.length, 50)
@@ -608,7 +607,7 @@ describe('Bulk Operations', () => {
       assert.equal(deleteResult.meta.succeeded, 2)
 
       // Verify final state via API
-      const finalQuery = await api.resources.authors.query({ simplified: false })
+      const finalQuery = await api.resources.authors.query({ format: 'jsonapi' })
       assert.equal(finalQuery.data.length, 3)
 
       // Check for senior authors
@@ -647,7 +646,7 @@ describe('Bulk Operations', () => {
 
       // Verify relationships were set correctly via API
       const allPublishers = await api.resources.publishers.query({
-        simplified: false
+        format: 'jsonapi'
       })
       const usPublisher = allPublishers.data.find(p => p.attributes.name === 'US Publisher')
       assert(usPublisher, 'Should find US Publisher')

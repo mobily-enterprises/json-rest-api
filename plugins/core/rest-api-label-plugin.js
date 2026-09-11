@@ -1,3 +1,5 @@
+import { getForeignKeyFields } from './lib/querying-writing/field-utils.js'
+
 export const LabelPlugin = {
   name: 'rest-api-label',
   dependencies: ['rest-api'],
@@ -15,57 +17,42 @@ export const LabelPlugin = {
       ...pluginOptions
     }
 
-    function pickLabelFieldFromFields (fields, searchSchema) {
-      const byGlobal = Object.keys(searchSchema || {}).find(k => searchSchema[k]?.globalSearch)
-      if (byGlobal) return byGlobal
-      for (const key of opts.preferNameFields) {
-        if (fields?.[key]?.type === 'string') return key
+    function labelFields (fields, searchSchema, idProperty, relationships) {
+      const relationshipFields = getForeignKeyFields(fields, relationships)
+      const publicField = name => {
+        const field = fields[name]
+        return Object.hasOwn(fields, name) && name !== idProperty && !relationshipFields.has(name) && !field.hidden && !field.normallyHidden && !field.virtual
       }
-      const firstString = Object.entries(fields || {}).find(([_, def]) => def?.type === 'string')?.[0]
-      if (firstString) return firstString
-      return null
+      const byGlobal = Object.entries(searchSchema || {})
+        .filter(([, field]) => field.globalSearch)
+        .map(([name, field]) => field.actualField || name)
+        .find(publicField)
+      const strings = Object.keys(fields).filter(name => publicField(name) && fields[name].type === 'string')
+      return [...new Set([byGlobal, ...opts.preferNameFields.filter(name => strings.includes(name)), strings[0]].filter(Boolean))]
     }
 
-    // Inject as a computed field AFTER schemas are compiled,
-    // so it lives in schemaInfo.computed and not in schemaStructure
     addHook(
-      'scope:added',
+      'computedSchema:enrich',
       'rest-api-label:inject-computed',
-      { afterFunction: 'compileResourceSchemas' },
-      ({ context, scopes }) => {
+      {},
+      ({ context }) => {
         if (opts.disable) return
-        const { scopeName } = context
-        const scope = scopes?.[scopeName]
-        const schemaInfo = scope?.vars?.schemaInfo
-        if (!schemaInfo) return
+        const { fields, schemaStructure, searchSchemaStructure, schemaRelationships, idProperty } = context
 
         // Respect explicit label already defined by resource
-        if (schemaInfo.computed?.label || schemaInfo.schemaStructure?.label) {
-          // If label accidentally made it into schemaStructure, remove it
-          if (schemaInfo.schemaStructure?.label) delete schemaInfo.schemaStructure.label
-          return
-        }
+        if (Object.hasOwn(fields, 'label') || Object.hasOwn(schemaStructure, 'label')) return
 
-        const structure = schemaInfo.schemaStructure || {}
-        const searchStruct = schemaInfo.searchSchemaStructure || {}
-        const idProp = schemaInfo.idProperty || 'id'
+        const candidates = labelFields(schemaStructure, searchSchemaStructure, idProperty, schemaRelationships)
 
-        const pick = pickLabelFieldFromFields(structure, searchStruct)
-
-        schemaInfo.computed = schemaInfo.computed || {}
-        schemaInfo.computed.label = {
+        fields.label = {
           type: 'string',
           computed: true,
-          ...(pick ? { dependencies: [pick] } : {}),
-          compute: ({ attributes }) => {
-            if (pick) {
-              const v = attributes?.[pick]
-              if (v != null) return String(v)
+          dependencies: candidates,
+          compute: ({ attributes, id }) => {
+            for (const field of candidates) {
+              if (attributes?.[field] != null) return String(attributes[field])
             }
-            for (const k of opts.preferNameFields) {
-              if (attributes?.[k] != null) return String(attributes[k])
-            }
-            return String(attributes?.[idProp] ?? '')
+            return String(id ?? '')
           }
         }
       }

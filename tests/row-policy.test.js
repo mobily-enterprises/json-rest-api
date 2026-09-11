@@ -39,7 +39,7 @@ const postProject = async (name, accessGroup, context = adminContext()) => {
       name,
       access_group: accessGroup
     }),
-    simplified: false
+    format: 'jsonapi'
   }, context)
 }
 
@@ -55,7 +55,7 @@ const postTask = async ({ title, accessGroup, projectId, context = adminContext(
       title,
       access_group: accessGroup
     }, relationships),
-    simplified: false
+    format: 'jsonapi'
   }, context)
 }
 
@@ -126,7 +126,7 @@ describe('RowPolicy Plugin', () => {
         sort: ['id'],
         page: { number: 1, size: 2 }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     validateJsonApiStructure(firstPage, true)
@@ -143,7 +143,7 @@ describe('RowPolicy Plugin', () => {
         sort: ['id'],
         page: { number: 2, size: 2 }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -159,7 +159,7 @@ describe('RowPolicy Plugin', () => {
 
     const result = await api.resources.policy_projects.query({
       queryParams: { sort: ['id'] },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -180,7 +180,7 @@ describe('RowPolicy Plugin', () => {
         sort: ['name'],
         page: { size: 2 }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -198,7 +198,7 @@ describe('RowPolicy Plugin', () => {
           after: firstPage.meta.pagination.cursor.next
         }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -235,14 +235,14 @@ describe('RowPolicy Plugin', () => {
 
     const visibleRecord = await api.resources.policy_projects.get({
       id: allowed.data.id,
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
     assert.equal(visibleRecord.data.attributes.name, 'Allowed')
 
     await assert.rejects(
       api.resources.policy_projects.get({
         id: hidden.data.id,
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
@@ -257,7 +257,7 @@ describe('RowPolicy Plugin', () => {
             attributes: { name: 'Changed' }
           }
         },
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
@@ -265,14 +265,14 @@ describe('RowPolicy Plugin', () => {
     await assert.rejects(
       api.resources.policy_projects.delete({
         id: hidden.data.id,
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
 
     const stillPresent = await api.resources.policy_projects.get({
       id: hidden.data.id,
-      simplified: false
+      format: 'jsonapi'
     }, adminContext())
     assert.equal(stillPresent.data.attributes.name, 'Hidden')
   })
@@ -294,7 +294,7 @@ describe('RowPolicy Plugin', () => {
     const result = await api.resources.policy_projects.get({
       id: project.data.id,
       queryParams: { include: ['tasks'] },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(result.data.relationships.tasks.data, [
@@ -311,7 +311,7 @@ describe('RowPolicy Plugin', () => {
     const relationship = await api.resources.policy_projects.getRelationship({
       id: project.data.id,
       relationshipName: 'tasks',
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(relationship.data, [
@@ -330,7 +330,7 @@ describe('RowPolicy Plugin', () => {
 
     const result = await api.resources.policy_tasks.query({
       queryParams: { include: ['project'], sort: ['id'] },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.equal(result.data.length, 1)
@@ -362,7 +362,7 @@ describe('RowPolicy Plugin', () => {
       id: project.data.id,
       relationshipName: 'shared_tasks',
       relationshipData: [resourceIdentifier('policy_tasks', visibleTask.data.id)],
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     await assert.rejects(
@@ -370,12 +370,60 @@ describe('RowPolicy Plugin', () => {
         id: project.data.id,
         relationshipName: 'shared_tasks',
         relationshipData: [resourceIdentifier('policy_tasks', hiddenTask.data.id)],
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
 
     assert.equal(await countRecords(knex, 'row_policy_project_tasks'), 1)
+  })
+
+  it('preserves caller visibility while replacing many-to-many membership', async () => {
+    const parent = await postProject('Visible parent', 'group-a')
+    const task = await postTask({ title: 'Visible task', accessGroup: 'group-a' })
+    await api.resources.policy_projects.patchRelationship({
+      id: parent.data.id,
+      relationshipName: 'shared_tasks',
+      relationshipData: [resourceIdentifier('policy_tasks', task.data.id)]
+    }, groupContext('group-a'))
+    const result = await api.resources.policy_projects.getRelationship({ id: parent.data.id, relationshipName: 'shared_tasks' }, groupContext('group-a'))
+    assert.deepEqual(result.data, [resourceIdentifier('policy_tasks', task.data.id)])
+    const related = await api.resources.policy_projects.getRelated({ id: parent.data.id, relationshipName: 'shared_tasks' }, groupContext('group-a'))
+    assert.deepEqual(related.data.map(record => ({ type: record.type, id: record.id })), result.data)
+    const included = await api.resources.policy_projects.get({ id: parent.data.id, queryParams: { include: ['shared_tasks'] } }, groupContext('group-a'))
+    assert.deepEqual(included.included.map(record => ({ type: record.type, id: record.id })), result.data)
+  })
+
+  it('rejects partial replacement of a relationship containing hidden children', async () => {
+    const parent = await postProject('Visible parent', 'group-a')
+    const visible = await postTask({ title: 'Visible child', accessGroup: 'group-a', projectId: parent.data.id })
+    const hidden = await postTask({ title: 'Hidden child', accessGroup: 'group-b', projectId: parent.data.id })
+    await assert.rejects(api.resources.policy_projects.patchRelationship({
+      id: parent.data.id, relationshipName: 'tasks', relationshipData: []
+    }, groupContext('group-a')), error => {
+      assert.equal(error.code, 'REST_API_RESOURCE')
+      assert.equal(error.subtype, 'forbidden')
+      assert.equal(error.message.includes(`policy_tasks/${hidden.data.id}`), false)
+      assert.equal(error.details.resourceId, undefined)
+      assert.equal(error.cause.code, 'REST_API_RESOURCE')
+      return true
+    })
+    const result = await api.resources.policy_projects.getRelationship({ id: parent.data.id, relationshipName: 'tasks' }, adminContext())
+    assert.deepEqual(result.data.map(record => record.id).sort(), [visible.data.id, hidden.data.id].sort())
+  })
+
+  it('applies child visibility when adding and removing hasMany linkage', async () => {
+    const parent = await postProject('Visible parent', 'group-a')
+    const visible = await postTask({ title: 'Visible child', accessGroup: 'group-a' })
+    const hidden = await postTask({ title: 'Hidden child', accessGroup: 'group-b', projectId: parent.data.id })
+    await api.resources.policy_projects.postRelationship({
+      id: parent.data.id, relationshipName: 'tasks', relationshipData: [resourceIdentifier('policy_tasks', visible.data.id)]
+    }, groupContext('group-a'))
+    await assert.rejects(api.resources.policy_projects.deleteRelationship({
+      id: parent.data.id, relationshipName: 'tasks', relationshipData: [resourceIdentifier('policy_tasks', visible.data.id), resourceIdentifier('policy_tasks', hidden.data.id)]
+    }, groupContext('group-a')), { code: 'REST_API_RESOURCE', subtype: 'not_found' })
+    const result = await api.resources.policy_projects.getRelationship({ id: parent.data.id, relationshipName: 'tasks' }, adminContext())
+    assert.deepEqual(result.data.map(record => record.id).sort(), [visible.data.id, hidden.data.id].sort())
   })
 
   it('does not expose relationship routes for a hidden parent', async () => {
@@ -386,7 +434,7 @@ describe('RowPolicy Plugin', () => {
         id: hiddenProject.data.id,
         relationshipName: 'tasks',
         queryParams: {},
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
@@ -395,7 +443,7 @@ describe('RowPolicy Plugin', () => {
       api.resources.policy_projects.getRelationship({
         id: hiddenProject.data.id,
         relationshipName: 'tasks',
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
@@ -405,7 +453,7 @@ describe('RowPolicy Plugin', () => {
         id: hiddenProject.data.id,
         relationshipName: 'tasks',
         relationshipData: [],
-        simplified: false
+        format: 'jsonapi'
       }, groupContext('group-a')),
       (error) => error.code === 'REST_API_RESOURCE'
     )
@@ -415,6 +463,10 @@ describe('RowPolicy Plugin', () => {
 
   it('filters related children before pagination and keeps target filters off the parent lookup', async () => {
     const project = await postProject('Visible project', 'group-a')
+    const otherProject = await postProject('Other visible project', 'group-a')
+    await postTask({ title: 'Other parent', accessGroup: 'group-a', projectId: otherProject.data.id })
+    const otherWorkspace = await postProject('Other workspace', 'group-a', adminContext('workspace-b'))
+    await postTask({ title: 'Other workspace task', accessGroup: 'group-a', projectId: otherWorkspace.data.id, context: adminContext('workspace-b') })
     await postTask({ title: 'Allowed 1', accessGroup: 'group-a', projectId: project.data.id })
     await postTask({ title: 'Hidden 1', accessGroup: 'group-b', projectId: project.data.id })
     await postTask({ title: 'Allowed 2', accessGroup: 'group-a', projectId: project.data.id })
@@ -428,7 +480,7 @@ describe('RowPolicy Plugin', () => {
         sort: ['id'],
         page: { number: 1, size: 2 }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -436,6 +488,7 @@ describe('RowPolicy Plugin', () => {
       ['Allowed 1', 'Allowed 2']
     )
     assert.equal(firstPage.meta.pagination.total, 3)
+    assert.equal(new URL(firstPage.links.next, 'https://api.example.test').pathname, `/policy_projects/${project.data.id}/tasks`)
 
     const filtered = await api.resources.policy_projects.getRelated({
       id: project.data.id,
@@ -444,7 +497,7 @@ describe('RowPolicy Plugin', () => {
         filters: { title: 'Allowed 3' },
         page: { number: 1, size: 2 }
       },
-      simplified: false
+      format: 'jsonapi'
     }, groupContext('group-a'))
 
     assert.deepEqual(
@@ -459,7 +512,7 @@ describe('RowPolicy Plugin', () => {
 
     const result = await api.resources.policy_projects.query({
       queryParams: { page: { number: 1, size: 10 } },
-      simplified: false
+      format: 'jsonapi'
     }, { scopeValues: { workspaceId: 'workspace-a' } })
 
     assert.deepEqual(result.data, [])
@@ -468,7 +521,7 @@ describe('RowPolicy Plugin', () => {
 
   it('fails closed when a policy does not return an explicit decision', async () => {
     await assert.rejects(
-      api.resources.policy_broken.query({ simplified: false }),
+      api.resources.policy_broken.query({ format: 'jsonapi' }),
       (error) => error.code === 'REST_API_ROW_POLICY_CONTRACT'
     )
   })

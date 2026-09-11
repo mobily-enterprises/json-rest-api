@@ -1,45 +1,35 @@
+import { createCanonicalLinkStore } from './lib/anyapi/canonical-link-store.js'
+import {
+  createCanonicalRelationshipReader,
+  decorateResourceLinks,
+  getAllowedQueryFieldNames,
+} from './lib/anyapi/canonical-relationship-reader.js'
+import { createKnexTransaction } from '../../lib/knex-transaction.js'
 import { ensureAnyApiSchema } from './lib/anyapi/schema-utils.js'
 import { AnyapiRegistry } from './lib/anyapi/anyapi-registry.js'
-import { RestApiValidationError } from '../../lib/rest-api-errors.js'
-import { createSchema } from 'json-rest-schema'
-import {
-  DEFAULT_QUERY_LIMIT,
-  DEFAULT_MAX_QUERY_LIMIT,
-  COMPUTED_DEPENDENCIES_KEY,
-} from './lib/querying-writing/knex-constants.js'
+import { applyQueryConstraint } from './lib/querying/query-constraint.js'
+import { RestApiResourceError } from '../../lib/rest-api-errors.js'
+import { compileSchemas } from './lib/querying-writing/compile-schemas.js'
+import { snapshotResourceConfiguration } from './lib/querying-writing/schema-helpers.js'
+import { assertFieldNameMap } from './lib/querying-writing/field-utils.js'
 import {
   calculatePaginationMeta,
   generatePaginationLinks,
   generateCursorPaginationLinks,
   buildCursorMeta,
-  parseCursor,
+  applyPaginationToQuery,
 } from './lib/querying/knex-pagination-helpers.js'
-import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl } from './lib/querying/url-helpers.js'
-import {
-  normalizeId,
-  resolveFieldInfo,
-  normalizeFilterValues,
-  ensureFilterableField,
-} from './lib/anyapi/utils/descriptor-helpers.js'
-import {
-  AnyapiQueryAdapter,
-  preloadRelatedDescriptors,
-} from './lib/anyapi/query/anyapi-query-adapter.js'
-import {
-  ensureSearchFieldsAreIndexed,
-  generateSearchSchemaFromSchema,
-} from './lib/querying-writing/schema-helpers.js'
+import { getUrlPrefix, buildJsonApiLink } from './lib/querying/url-helpers.js'
+import { normalizeId, resolveFieldInfo } from './lib/anyapi/utils/descriptor-helpers.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from './lib/querying-writing/knex-field-helpers.js'
+import { applyDatabaseReadOptions } from './lib/querying-writing/database-value-normalizers.js'
 import {
   polymorphicFiltersHook,
   crossTableFiltersHook,
   basicFiltersHook,
-  resolveSearchOperator,
-  applyWhereForOperator,
+  prepareReferenceSortColumns,
 } from './lib/querying/knex-query-helpers.js'
-import {
-  createStorageAdapter,
-} from './lib/storage/storage-adapter.js'
+import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
 import {
   translateCanonicalAttributesForStorage,
   getCanonicalResourceId,
@@ -47,24 +37,22 @@ import {
   translateCanonicalRecordFromStorage,
 } from './lib/storage/canonical-storage-mapping.js'
 import {
-  applyCursorPredicate,
-  validateCursorValues,
-  applyQueryFieldOrder,
+  applySortDescriptorOrder,
   buildEffectiveSortList,
-  parseSortEntry
+  parseSortEntry,
+  resolveSortField,
 } from './lib/querying/query-field-sort-helpers.js'
-import { unwrapQueryBuilderState } from './lib/querying/query-builder-utils.js'
+import { unwrapQueryBuilderState, withQueryFilteringContext } from './lib/querying/query-builder-utils.js'
+import { applyInsertReturning, getDatabaseCapabilities } from './lib/querying-writing/database-capabilities.js'
 import { serializeJsonApiQuery } from './lib/querying-writing/connectors-query-parser.js'
-import { normalizeValueForDatabaseStorage } from './lib/querying-writing/database-value-normalizers.js'
 
 const DEFAULT_TENANT = 'default'
-const LINKS_TABLE = 'any_links'
 
 export const RestApiAnyapiKnexPlugin = {
   name: 'rest-api-anyapi-knex',
   dependencies: ['rest-api'],
 
-  async install ({ helpers, vars, pluginOptions, api, log, addHook, addScopeMethod, scopes }) {
+  async install ({ helpers, pluginOptions, api, log, addHook, addScopeMethod, scopes }) {
     const options = pluginOptions || {}
     const knex = options.knex
     const tenantId = options.tenantId || DEFAULT_TENANT
@@ -83,35 +71,21 @@ export const RestApiAnyapiKnexPlugin = {
     api.knex = {
       instance: knex,
       helpers: {},
+      capabilities: await getDatabaseCapabilities(knex, log),
     }
 
-    const storageAdapterCache = new Map()
-
-    const getScopeStorageAdapter = (scopeName) => {
-      if (!scopeName) return null
-      const resource = api.resources?.[scopeName] || scopes?.[scopeName]
-      const schemaInfo = resource?.vars?.schemaInfo
-      if (!schemaInfo) return null
-
-      const cached = storageAdapterCache.get(scopeName)
-      if (cached && cached.schemaInfo === schemaInfo) {
-        return cached.adapter
-      }
-
-      const adapter = createStorageAdapter({ knex, schemaInfo })
-      storageAdapterCache.set(scopeName, { adapter, schemaInfo })
-      if (resource?.vars) {
-        resource.vars.storageAdapter = adapter
-      }
-      return adapter
-    }
+    const getScopeStorageAdapter = createStorageAdapterLookup({
+      knex,
+      getResource: scopeName => api.resources?.[scopeName] || scopes?.[scopeName]
+    })
 
     api.knex.helpers.getStorageAdapter = getScopeStorageAdapter
     helpers.getStorageAdapter = getScopeStorageAdapter
 
     const scopeOptionsRegistry = new Map()
 
-    helpers.newTransaction = async () => knex.transaction()
+    /** @type {import('../../lib/transaction-types.js').TransactionFactory} */
+    helpers.newTransaction = context => createKnexTransaction(knex, context)
 
     addHook('release', 'anyapi-knex-release', {}, async ({ api }) => {
       if (api.knex?.instance) {
@@ -119,138 +93,34 @@ export const RestApiAnyapiKnexPlugin = {
       }
     })
 
-    const getDescriptor = async (scopeName) => {
-      const descriptor = await registry.getDescriptor(tenantId, scopeName)
+    const getDescriptor = (scopeName) => {
+      const descriptor = api.resources?.[scopeName]?.vars?.schemaInfo?.descriptor
       if (!descriptor) {
         throw new Error(`Descriptor not found for resource '${scopeName}'`)
       }
-      const scope = api.resources?.[scopeName] || scopes?.[scopeName]
-      const stored = scopeOptionsRegistry.get(scopeName) || {}
-      descriptor.idProperty = stored.idProperty ||
-        scope?.vars?.schemaInfo?.idProperty ||
-        scope?.scopeOptions?.idProperty ||
-        descriptor.idProperty ||
-        vars.idProperty ||
-        'id'
       return descriptor
     }
 
-    const decorateResourceLinks = ({ resource, scope, scopeName, context }) => {
-      if (!resource || !scope || !scopeName || !context) return
-
-      resource.links = resource.links || {}
-      resource.links.self = buildResourceUrl(context, scope, scopeName, resource.id)
-
-      if (!resource.relationships || typeof resource.relationships !== 'object') {
-        return
-      }
-
-      for (const [relationshipName, relationshipObject] of Object.entries(resource.relationships)) {
-        if (!relationshipObject || typeof relationshipObject !== 'object') {
-          continue
-        }
-
-        relationshipObject.links = {
-          self: buildRelationshipUrl(context, scope, scopeName, resource.id, relationshipName, true),
-          related: buildRelationshipUrl(context, scope, scopeName, resource.id, relationshipName, false),
-        }
-      }
-    }
-
-    const getAllowedQueryFieldNames = (scopeName) => (
-      Object.keys(api.resources?.[scopeName]?.vars?.queryFields || {})
-    )
-
-    const getLogicalResourceIdColumn = (descriptor) => getCanonicalResourceIdColumn(descriptor)
-
-    const getLogicalResourceId = (row, descriptor) => getCanonicalResourceId(row, descriptor)
-
-    const applyFiltersToQuery = ({ query, filters, descriptor, searchSchema, adapter }) => {
-      if (!filters || Object.keys(filters).length === 0) return
-
-      const normalizeValue = (field, value) => {
-        if (!adapter?.translateFilterValue) {
-          return value
-        }
-        if (Array.isArray(value)) {
-          return value.map((entry) => adapter.translateFilterValue(field, entry))
-        }
-        return adapter.translateFilterValue(field, value)
-      }
-
-      for (const [filterKey, rawValue] of Object.entries(filters)) {
-        const fieldDef = searchSchema?.[filterKey]
-
-        if (fieldDef?.polymorphicField) {
-          continue
-        }
-
-        if (fieldDef?.actualField?.includes('.')) {
-          continue
-        }
-
-        if (fieldDef?.oneOf?.some((field) => field.includes('.'))) {
-          continue
-        }
-
-        if (fieldDef?.oneOf && Array.isArray(fieldDef.oneOf)) {
-          continue
-        }
-
-        if (fieldDef?.applyFilter && typeof fieldDef.applyFilter === 'function') {
-          continue
-        }
-
-        const actualField = fieldDef?.actualField || filterKey
-        const fieldInfo = ensureFilterableField(descriptor, filterKey)
-        const columnRef = adapter ? adapter.translateColumn(actualField) : fieldInfo.column
-        const operator = resolveSearchOperator(fieldDef || fieldInfo.definition)
-        const values = normalizeFilterValues(rawValue, fieldInfo.definition, {
-          isRelationship: fieldInfo.isRelationship,
-        })
-        const normalizedValues = values.map((value) => normalizeValue(actualField, value))
-        const nonNullValues = normalizedValues.filter((value) => value !== null)
-        const hasNull = normalizedValues.length !== nonNullValues.length
-
-        if (nonNullValues.length === 0 && hasNull) {
-          query.whereNull(columnRef)
-          continue
-        }
-        if (nonNullValues.length === 1 && !hasNull) {
-          applyWhereForOperator({
-            builder: query,
-            columnRef,
-            operator,
-            value: nonNullValues[0],
-            knex,
-          })
-          continue
-        }
-        if (nonNullValues.length > 1 && !hasNull) {
-          query.whereIn(columnRef, nonNullValues)
-          continue
-        }
-        if (nonNullValues.length > 0 && hasNull) {
-          query.where(function anyApiNullFilterGroup () {
-            this.whereIn(columnRef, nonNullValues).orWhereNull(columnRef)
-          })
-        }
-      }
-    }
-
-    const applySortingToQuery = ({ query, sort, descriptor, scope, adapter, before = false, queryFieldRuntimeByField = new Map() }) => {
+    const applySortingToQuery = async ({ query, sort, descriptor, scope, tableAlias, context, before = false, queryFieldRuntimeByField = new Map() }) => {
       const effectiveSort = buildEffectiveSortList(sort, {
         defaultSort: scope?.vars?.defaultSort,
+        schemaInfo: scope.vars.schemaInfo,
         idField: 'id'
       })
       const descriptors = []
+      const referenceColumns = await prepareReferenceSortColumns({
+        query,
+        fields: effectiveSort.map(entry => parseSortEntry(entry).field).filter(field => !queryFieldRuntimeByField.has(field)),
+        scopeName: descriptor.resource,
+        tableAlias,
+        context
+      }, { scopes: api.resources, knex, getStorageAdapter: getScopeStorageAdapter })
 
       for (const entry of effectiveSort) {
         const { field, direction } = parseSortEntry(entry)
-        const queryDirection = before ? (direction === 'asc' ? 'desc' : 'asc') : direction
         const queryFieldRuntime = queryFieldRuntimeByField.get(field)
         if (queryFieldRuntime) {
-          applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), before ? 'first' : 'last')
+          applySortDescriptorOrder(query, { queryFieldRuntime, direction }, { before })
           descriptors.push({
             field,
             direction,
@@ -261,15 +131,20 @@ export const RestApiAnyapiKnexPlugin = {
           continue
         }
 
-        const fieldInfo = resolveFieldInfo(descriptor, field)
+        const reference = referenceColumns.get(field)
+        const actualField = resolveSortField(field, scope.vars.schemaInfo)
+        const fieldInfo = resolveFieldInfo(descriptor, actualField)
         if (!fieldInfo?.column) continue
-        query.orderByRaw(`?? IS NULL ${before ? 'DESC' : 'ASC'}`, [adapter.translateColumn(fieldInfo.column)])
-        query.orderBy(fieldInfo.column, queryDirection)
+        const column = reference?.column || `${tableAlias}.${fieldInfo.column}`
+        applySortDescriptorOrder(query, { column, direction }, { before })
         descriptors.push({
           field,
-          column: fieldInfo.column,
+          column,
+          resultColumn: fieldInfo.column,
+          actualField,
+          ...(reference || {}),
           direction,
-          definition: fieldInfo.definition || null,
+          definition: scope.vars.schemaInfo.schemaStructure[actualField] || fieldInfo.definition || null,
           isRelationship: fieldInfo.isRelationship || false,
         })
       }
@@ -287,715 +162,23 @@ export const RestApiAnyapiKnexPlugin = {
       return descriptors
     }
 
-    const applyPaginationToQuery = ({
-      query,
-      scope,
-      queryParams,
-      sortDescriptors,
-      adapter,
-    }) => {
-      const pageParams = queryParams?.page || {}
-      const scopeVars = scope?.vars || {}
-      const defaultLimit = scopeVars.queryDefaultLimit || DEFAULT_QUERY_LIMIT
-      const maxLimit = scopeVars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT
-
-      const descriptors = (sortDescriptors && sortDescriptors.length > 0)
-        ? sortDescriptors
-        : [{
-            field: 'id',
-            column: 'id',
-            direction: 'asc',
-            definition: { type: 'id' },
-            isRelationship: false,
-          }]
-
-      const hasCursorParam = pageParams.after !== undefined || pageParams.before !== undefined
-      const hasPageSize = pageParams.size !== undefined
-      const hasPageNumber = pageParams.number !== undefined
-
-      const parseCursorOrThrow = (rawCursor, paramName) => {
-        try {
-          return parseCursor(rawCursor)
-        } catch (error) {
-          throw new RestApiValidationError(
-            `Invalid cursor format in ${paramName} parameter`,
-            {
-              fields: [`page.${paramName}`],
-              violations: [{
-                field: `page.${paramName}`,
-                rule: 'invalid_cursor',
-                message: error.message,
-              }],
-            }
-          )
-        }
-      }
-
-      const applyRawCursorPredicate = (cursorValues, operatorSelector) => {
-        applyCursorPredicate(
-          query,
-          descriptors,
-          cursorValues,
-          operatorSelector,
-          (builder, descriptor, operator, value) => builder.where(
-            descriptor.column,
-            operator,
-            normalizeValueForDatabaseStorage(
-              value, descriptor.isRelationship ? null : descriptor.definition?.type,
-              { temporalPrecision: descriptor.definition?.temporalPrecision }
-            )
-          )
-        )
-      }
-
-      const ensurePageSize = () => {
-        const requestedSize = Number(pageParams.size ?? defaultLimit)
-        if (!Number.isFinite(requestedSize) || requestedSize <= 0) {
-          throw new RestApiValidationError('Page size must be greater than 0', {
-            fields: ['page.size'],
-            violations: [{
-              field: 'page.size',
-              rule: 'min_value',
-              message: 'Page size must be a positive number',
-            }],
-          })
-        }
-        return Math.min(Math.trunc(requestedSize), maxLimit)
-      }
-
-      if (hasCursorParam || (hasPageSize && !hasPageNumber)) {
-        if (pageParams.after && pageParams.before) {
-          throw new RestApiValidationError(
-            'page[after] and page[before] cannot be used together',
-            {
-              fields: ['page.after', 'page.before'],
-              violations: [{
-                field: 'page.after',
-                rule: 'conflict',
-                message: 'Provide either page[after] or page[before], not both',
-              }],
-            }
-          )
-        }
-
-        const pageSize = ensurePageSize()
-        query.limit(pageSize + 1)
-
-        if (pageParams.after) {
-          const cursorMap = parseCursorOrThrow(pageParams.after, 'after')
-          const cursorValues = validateCursorValues(descriptors, cursorMap, 'after')
-          applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '<' : '>'))
-        } else if (pageParams.before) {
-          const cursorMap = parseCursorOrThrow(pageParams.before, 'before')
-          const cursorValues = validateCursorValues(descriptors, cursorMap, 'before')
-          applyRawCursorPredicate(cursorValues, (direction) => (direction === 'desc' ? '>' : '<'))
-        }
-
-        return {
-          mode: 'cursor',
-          pageSize,
-          sortDescriptors: descriptors,
-        }
-      }
-
-      if (hasPageSize || hasPageNumber) {
-        const pageSize = ensurePageSize()
-        const pageNumber = Math.trunc(Number(pageParams.number ?? 1))
-        const safePageNumber = Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1
-        const offset = (safePageNumber - 1) * pageSize
-
-        query.limit(pageSize).offset(offset)
-
-        return {
-          mode: 'offset',
-          page: safePageNumber,
-          pageSize,
-          sortDescriptors: descriptors,
-        }
-      }
-
-      query.limit(Math.min(defaultLimit, maxLimit))
-      return {
-        mode: 'default',
-        page: 1,
-        pageSize: Math.min(defaultLimit, maxLimit),
-        sortDescriptors: descriptors,
-      }
-    }
-
-    const canonicalizeLinkPair = ({
-      tenantId,
-      relationshipKey,
-      inverseRelationshipKey,
-      leftResource,
-      leftId,
-      rightResource,
-      rightId,
-    }) => {
-      const normalizedLeftId = normalizeId(leftId)
-      const normalizedRightId = normalizeId(rightId)
-
-      if (normalizedLeftId == null || normalizedRightId == null) {
-        return null
-      }
-
-      if (inverseRelationshipKey && inverseRelationshipKey < relationshipKey) {
-        return {
-          tenant_id: tenantId,
-          relationship: inverseRelationshipKey,
-          inverse_relationship: relationshipKey,
-          left_resource: rightResource,
-          left_id: normalizedRightId,
-          right_resource: leftResource,
-          right_id: normalizedLeftId,
-        }
-      }
-
-      return {
-        tenant_id: tenantId,
-        relationship: relationshipKey,
-        inverse_relationship: inverseRelationshipKey || null,
-        left_resource: leftResource,
-        left_id: normalizedLeftId,
-        right_resource: rightResource,
-        right_id: normalizedRightId,
-      }
-    }
-
-    const buildLinkIdentity = (canonicalRow) => ({
-      tenant_id: canonicalRow.tenant_id,
-      relationship: canonicalRow.relationship,
-      left_resource: canonicalRow.left_resource,
-      left_id: canonicalRow.left_id,
-      right_resource: canonicalRow.right_resource,
-      right_id: canonicalRow.right_id,
+    const linkStore = createCanonicalLinkStore({ api, getDescriptor, getScopeStorageAdapter })
+    api.anyapi.links = linkStore.methods
+    helpers.dataRelatedIdsQuery = linkStore.dataRelatedIdsQuery
+    const { buildIncludes, attachReverseRelationships, attachManyToManyRelationships } = createCanonicalRelationshipReader({
+      api, knex, getDescriptor, getScopeStorageAdapter, linkStore
     })
 
-    const findInverseManyToMany = async ({ descriptor, relInfo }) => {
-      if (!relInfo?.target) return null
-
-      let targetDescriptor
-      try {
-        targetDescriptor = await getDescriptor(relInfo.target)
-      } catch (error) {
-        return null
-      }
-
-      const entries = Object.entries(targetDescriptor.manyToMany || {})
-      for (const [candidateName, candidateInfo] of entries) {
-        const candidateTarget = candidateInfo.target || descriptor.resource
-        if (candidateTarget !== descriptor.resource) continue
-
-        if (relInfo.through && candidateInfo.through && relInfo.through !== candidateInfo.through) {
-          continue
-        }
-
-        if (
-          relInfo.foreignKey && relInfo.otherKey &&
-          candidateInfo.foreignKey && candidateInfo.otherKey
-        ) {
-          const foreignMatches = relInfo.foreignKey === candidateInfo.otherKey
-          const otherMatches = relInfo.otherKey === candidateInfo.foreignKey
-          if (!foreignMatches || !otherMatches) continue
-        }
-
-        const relationshipKey = candidateInfo.relationship ||
-          `${targetDescriptor.tenant}:${targetDescriptor.resource}:${candidateName}`
-
-        return {
-          descriptor: targetDescriptor,
-          relName: candidateName,
-          relInfo: candidateInfo,
-          relationshipKey,
-        }
-      }
-
-      return null
-    }
-
-    const getManyToManyInfo = async (scopeName, relName) => {
-      const descriptor = await getDescriptor(scopeName)
-      const relInfo = descriptor.manyToMany?.[relName]
-      if (!relInfo) return null
-      const relationshipKey = relInfo.relationship || `${descriptor.tenant}:${descriptor.resource}:${relName}`
-      const inverse = await findInverseManyToMany({ descriptor, relInfo })
-      const inverseRelationshipKey = inverse?.relationshipKey || null
-      return { descriptor, relInfo, relationshipKey, inverseRelationshipKey }
-    }
-
-    const loadLinkRowsForResource = async ({ descriptor, relationshipKey, resourceId, db }) => {
-      const ownerId = normalizeId(resourceId)
-      if (ownerId == null) return new Map()
-
-      const rows = await db(LINKS_TABLE)
-        .where('tenant_id', descriptor.tenant)
-        .andWhere((builder) => {
-          builder
-            .where((q) => {
-              q.where('relationship', relationshipKey)
-                .andWhere('left_resource', descriptor.resource)
-                .andWhere('left_id', ownerId)
-            })
-            .orWhere((q) => {
-              q.where('inverse_relationship', relationshipKey)
-                .andWhere('right_resource', descriptor.resource)
-                .andWhere('right_id', ownerId)
-            })
-        })
-        .select('id', 'relationship', 'inverse_relationship', 'left_resource', 'left_id', 'right_resource', 'right_id')
-
-      const map = new Map()
-
-      for (const row of rows) {
-        let relatedResource
-        let relatedId
-        let otherKey = null
-
-        if (row.relationship === relationshipKey && row.left_resource === descriptor.resource) {
-          relatedResource = row.right_resource
-          relatedId = normalizeId(row.right_id)
-          otherKey = row.inverse_relationship || null
-        } else if (row.inverse_relationship === relationshipKey && row.right_resource === descriptor.resource) {
-          relatedResource = row.left_resource
-          relatedId = normalizeId(row.left_id)
-          otherKey = row.relationship || null
-        } else {
-          continue
-        }
-
-        if (relatedId == null) continue
-
-        const canonical = canonicalizeLinkPair({
-          tenantId: descriptor.tenant,
-          relationshipKey,
-          inverseRelationshipKey: otherKey,
-          leftResource: descriptor.resource,
-          leftId: ownerId,
-          rightResource: relatedResource,
-          rightId: relatedId,
-        })
-
-        if (!canonical) continue
-
-        map.set(relatedId, {
-          rowId: row.id,
-          relatedResource,
-          canonical,
-          otherKey,
-        })
-      }
-
-      return map
-    }
-
-    const fetchLinksForParents = async ({ descriptor, relationshipKey, parentIds, db }) => {
-      const normalizedIds = parentIds
-        .map((id) => normalizeId(id))
-        .filter((id) => id !== null)
-
-      if (normalizedIds.length === 0) return []
-
-      const rows = await db(LINKS_TABLE)
-        .where('tenant_id', descriptor.tenant)
-        .andWhere((builder) => {
-          builder
-            .where((q) => {
-              q.where('relationship', relationshipKey)
-                .andWhere('left_resource', descriptor.resource)
-                .whereIn('left_id', normalizedIds)
-            })
-            .orWhere((q) => {
-              q.where('inverse_relationship', relationshipKey)
-                .andWhere('right_resource', descriptor.resource)
-                .whereIn('right_id', normalizedIds)
-            })
-        })
-        .select('relationship', 'inverse_relationship', 'left_resource', 'left_id', 'right_resource', 'right_id')
-
-      const results = []
-
-      for (const row of rows) {
-        let parentId
-        let childId
-        let childType
-
-        if (row.relationship === relationshipKey && row.left_resource === descriptor.resource) {
-          parentId = normalizeId(row.left_id)
-          childId = normalizeId(row.right_id)
-          childType = row.right_resource
-        } else if (row.inverse_relationship === relationshipKey && row.right_resource === descriptor.resource) {
-          parentId = normalizeId(row.right_id)
-          childId = normalizeId(row.left_id)
-          childType = row.left_resource
-        } else {
-          continue
-        }
-
-        if (parentId == null || childId == null) continue
-
-        results.push({ parentId, childId, childType })
-      }
-
-      return results
-    }
-
-    const applyTargetScopeFilters = async ({
-      query,
-      resourceName,
-      tableName,
-      context,
-      filters,
-      queryPurpose = 'include'
-    }) => {
-      const targetScope = api.resources?.[resourceName]
-      if (!targetScope?.applyQueryFilters) {
-        return { query }
-      }
-
-      const storageAdapter = getScopeStorageAdapter(resourceName)
-      const queryState = await targetScope.applyQueryFilters({
-        query,
-        filters,
-        schemaInfo: targetScope.vars?.schemaInfo,
-        scopeName: resourceName,
-        tableName,
-        db: context.db || context.transaction || api.knex.instance,
-        isAnyApi: true,
-        queryPurpose,
-        storageAdapter
-      }, {
-        ...context,
-        scopeName: resourceName,
-        schemaInfo: targetScope.vars?.schemaInfo,
-        storageAdapter
-      })
-
-      return {
-        query: unwrapQueryBuilderState(queryState, query)
-      }
-    }
-
-    const filterVisibleIdentifiers = async ({ identifiers, context }) => {
-      if (!identifiers || identifiers.length === 0) return []
-
-      const db = context.db || context.transaction || api.knex.instance
-      const identifiersByType = new Map()
-
-      for (const identifier of identifiers) {
-        if (!identifier?.type || identifier.id === undefined || identifier.id === null) continue
-        if (!identifiersByType.has(identifier.type)) {
-          identifiersByType.set(identifier.type, new Set())
-        }
-        identifiersByType.get(identifier.type).add(normalizeId(identifier.id))
-      }
-
-      const visibleKeys = new Set()
-
-      for (const [resourceName, idSet] of identifiersByType.entries()) {
-        const descriptor = await getDescriptor(resourceName)
-        const idColumn = getLogicalResourceIdColumn(descriptor)
-        let query = db(descriptor.canonical.tableName)
-          .where(descriptor.canonical.tenantColumn, descriptor.tenant)
-          .where(descriptor.canonical.resourceColumn, descriptor.resource)
-          .whereIn(idColumn, [...idSet])
-          .select(idColumn)
-
-        const scopedQueryState = await applyTargetScopeFilters({
-          query,
-          resourceName,
-          tableName: descriptor.canonical.tableName,
-          context,
-          queryPurpose: 'relationship-identifiers'
-        })
-        query = scopedQueryState.query
-
-        const rows = await query
-        for (const row of rows) {
-          visibleKeys.add(`${resourceName}:${String(getLogicalResourceId(row, descriptor))}`)
-        }
-      }
-
-      return identifiers.filter((identifier) => (
-        visibleKeys.has(`${identifier.type}:${String(identifier.id)}`)
-      ))
-    }
-
-    const ensureTargetsExist = async ({ relInfo, relData, context }) => {
-      const relArray = Array.isArray(relData) ? relData : []
-      if (relArray.length === 0) return
-      const targetScope = api.resources[relInfo.target]
-      if (!targetScope) {
-        throw new Error(`Target resource '${relInfo.target}' not found`)
-      }
-      for (const identifier of relArray) {
-        if (identifier?.id === undefined || identifier.id === null) {
-          throw new Error('Relationship data requires resource identifier with id')
-        }
-        if (identifier.type && identifier.type !== relInfo.target) {
-          throw new Error(`Relationship expects type '${relInfo.target}' but received '${identifier.type}'`)
-        }
-        await targetScope.get({
-          id: identifier.id,
-          transaction: context.transaction,
-          simplified: false
-        }, { ...context })
-      }
-    }
-
-    const attachLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
-      const relArray = Array.isArray(relData) ? relData : []
-      if (relArray.length === 0) return
-
-      for (const identifier of relArray) {
-        const rightId = normalizeId(identifier.id)
-        if (rightId == null) continue
-
-        const canonical = canonicalizeLinkPair({
-          tenantId: descriptor.tenant,
-          relationshipKey,
-          inverseRelationshipKey,
-          leftResource: descriptor.resource,
-          leftId,
-          rightResource: relInfo.target,
-          rightId,
-        })
-
-        if (!canonical) continue
-
-        const identity = buildLinkIdentity(canonical)
-
-        const existing = await db(LINKS_TABLE)
-          .where(identity)
-          .first()
-
-        if (existing) {
-          if (!existing.inverse_relationship && canonical.inverse_relationship) {
-            await db(LINKS_TABLE)
-              .where({ id: existing.id })
-              .update({
-                inverse_relationship: canonical.inverse_relationship,
-                updated_at: db.fn.now(),
-              })
-          }
-          continue
-        }
-
-        await db(LINKS_TABLE).insert({
-          ...canonical,
-          payload: null,
-          created_at: db.fn.now(),
-          updated_at: db.fn.now(),
-        })
-      }
-    }
-
-    api.anyapi.links = {
-      attachMany: async ({ context, scopeName, relName, relDef, relData }) => {
-        const info = await getManyToManyInfo(scopeName, relName)
-        if (!info) {
-          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`)
-        }
-        const db = context.transaction || context.db || api.knex.instance
-        const leftId = normalizeId(context.id)
-        await ensureTargetsExist({ relInfo: info.relInfo, relData, context })
-        await attachLinks({
-          descriptor: info.descriptor,
-          relInfo: info.relInfo,
-          relationshipKey: info.relationshipKey,
-          inverseRelationshipKey: info.inverseRelationshipKey,
-          leftId,
-          relData,
-          db,
-        })
-      },
-      syncMany: async ({ context, scopeName, relName, relDef, relData, isUpdate }) => {
-        const info = await getManyToManyInfo(scopeName, relName)
-        if (!info) {
-          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`)
-        }
-        const db = context.transaction || context.db || api.knex.instance
-        const leftId = normalizeId(context.id)
-        await ensureTargetsExist({ relInfo: info.relInfo, relData, context })
-        if (isUpdate) {
-          await syncLinks({
-            descriptor: info.descriptor,
-            relInfo: info.relInfo,
-            relationshipKey: info.relationshipKey,
-            inverseRelationshipKey: info.inverseRelationshipKey,
-            leftId,
-            relData,
-            db,
-          })
-        } else {
-          await attachLinks({
-            descriptor: info.descriptor,
-            relInfo: info.relInfo,
-            relationshipKey: info.relationshipKey,
-            inverseRelationshipKey: info.inverseRelationshipKey,
-            leftId,
-            relData,
-            db,
-          })
-        }
-      },
-      removeMany: async ({ context, scopeName, relName, relData }) => {
-        const info = await getManyToManyInfo(scopeName, relName)
-        if (!info) {
-          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`)
-        }
-        const db = context.transaction || context.db || api.knex.instance
-        const leftId = normalizeId(context.id)
-        await removeLinks({
-          descriptor: info.descriptor,
-          relInfo: info.relInfo,
-          relationshipKey: info.relationshipKey,
-          inverseRelationshipKey: info.inverseRelationshipKey,
-          leftId,
-          relData,
-          db,
-        })
-      },
-      listMany: async ({ context, scopeName, relName }) => {
-        const info = await getManyToManyInfo(scopeName, relName)
-        if (!info) {
-          throw new Error(`Many-to-many relationship '${relName}' not found on '${scopeName}'`)
-        }
-        const db = context.transaction || context.db || api.knex.instance
-        const leftId = normalizeId(context.id)
-        const identifiers = await listLinks({
-          descriptor: info.descriptor,
-          relInfo: info.relInfo,
-          relationshipKey: info.relationshipKey,
-          inverseRelationshipKey: info.inverseRelationshipKey,
-          leftId,
-          db,
-        })
-        return filterVisibleIdentifiers({
-          identifiers,
-          context
-        })
-      },
-      fetchManyToManyRows: async ({ scopeName, relName, parentIds, context }) => {
-        const info = await getManyToManyInfo(scopeName, relName)
-        if (!info) return []
-        const db = context.db || context.transaction || api.knex.instance
-        return fetchLinksForParents({
-          descriptor: info.descriptor,
-          relationshipKey: info.relationshipKey,
-          parentIds,
-          db,
-        })
-      },
-    }
-
-    const syncLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
-      const relArray = Array.isArray(relData) ? relData : []
-      const existingMap = await loadLinkRowsForResource({
-        descriptor,
-        relationshipKey,
-        resourceId: leftId,
-        db,
-      })
-
-      const desired = new Set(
-        relArray
-          .map((identifier) => normalizeId(identifier.id))
-          .filter((id) => id !== null)
-      )
-
-      const existingIds = new Set(existingMap.keys())
-
-      const toAdd = [...desired].filter((id) => !existingIds.has(id))
-      const toRemove = [...existingIds].filter((id) => !desired.has(id))
-
-      if (toAdd.length > 0) {
-        const data = toAdd.map((id) => ({ id }))
-        await attachLinks({
-          descriptor,
-          relInfo,
-          relationshipKey,
-          inverseRelationshipKey,
-          leftId,
-          relData: data,
-          db,
-        })
-      }
-
-      if (toRemove.length > 0) {
-        for (const id of toRemove) {
-          const entry = existingMap.get(id)
-          if (!entry?.canonical) continue
-          await db(LINKS_TABLE)
-            .where(buildLinkIdentity(entry.canonical))
-            .delete()
-        }
-      }
-    }
-
-    const removeLinks = async ({ descriptor, relInfo, relationshipKey, inverseRelationshipKey, leftId, relData, db }) => {
-      const relArray = Array.isArray(relData) ? relData : []
-      if (relArray.length === 0) return
-
-      const existingMap = await loadLinkRowsForResource({
-        descriptor,
-        relationshipKey,
-        resourceId: leftId,
-        db,
-      })
-
-      for (const identifier of relArray) {
-        const relatedId = normalizeId(identifier.id)
-        if (relatedId == null) continue
-
-        const entry = existingMap.get(relatedId)
-        if (entry?.canonical) {
-          await db(LINKS_TABLE)
-            .where(buildLinkIdentity(entry.canonical))
-            .delete()
-          continue
-        }
-
-        const canonical = canonicalizeLinkPair({
-          tenantId: descriptor.tenant,
-          relationshipKey,
-          inverseRelationshipKey,
-          leftResource: descriptor.resource,
-          leftId,
-          rightResource: relInfo.target,
-          rightId: relatedId,
-        })
-
-        if (!canonical) continue
-
-        await db(LINKS_TABLE)
-          .where(buildLinkIdentity(canonical))
-          .delete()
-      }
-    }
-
-    const listLinks = async ({ descriptor, relInfo, relationshipKey, leftId, db }) => {
-      const existingMap = await loadLinkRowsForResource({
-        descriptor,
-        relationshipKey,
-        resourceId: leftId,
-        db,
-      })
-
-      return [...existingMap.entries()].map(([relatedId, entry]) => ({
-        type: entry.relatedResource || relInfo.target,
-        id: relatedId,
-      }))
-    }
-
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataWriteHelpers['dataExists']} */
     helpers.dataExists = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
 
       const row = await context.db(canonical.tableName)
         .select('id')
@@ -1007,18 +190,19 @@ export const RestApiAnyapiKnexPlugin = {
       return !!row
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataWriteHelpers['dataPost']} */
     helpers.dataPost = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
-      const explicitId = context.inputRecord?.data?.id
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
+      const explicitId = normalizeId(context.inputRecord?.data?.id)
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
-        ? storageAdapter.toStorageRow(attributes)
+        ? storageAdapter.toStorageRow(attributes, { context, operation: 'post' })
         : translateCanonicalAttributesForStorage(attributes, descriptor)
 
       if (explicitId !== undefined && explicitId !== null) {
@@ -1028,9 +212,7 @@ export const RestApiAnyapiKnexPlugin = {
       row[canonical.tenantColumn] = descriptor.tenant
       row[canonical.resourceColumn] = descriptor.resource
 
-      const result = await context.db(canonical.tableName)
-        .insert(row)
-        .returning('id')
+      const result = await applyInsertReturning(context.db(canonical.tableName).insert(row), 'id')
 
       const inserted = Array.isArray(result) ? result[0] : result
       const insertedRowId = inserted && typeof inserted === 'object' && 'id' in inserted
@@ -1054,18 +236,19 @@ export const RestApiAnyapiKnexPlugin = {
       return generatedLogicalId
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataWriteHelpers['dataPut']} */
     helpers.dataPut = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
-        ? storageAdapter.toStorageRow(attributes)
+        ? storageAdapter.toStorageRow(attributes, { context, operation: 'put' })
         : translateCanonicalAttributesForStorage(attributes, descriptor)
 
       row[canonical.resourceColumn] = descriptor.resource
@@ -1096,18 +279,19 @@ export const RestApiAnyapiKnexPlugin = {
       return result
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataWriteHelpers['dataPatch']} */
     helpers.dataPatch = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
       const attributes = context.inputRecord?.data?.attributes || {}
       const row = storageAdapter?.toStorageRow
-        ? storageAdapter.toStorageRow(attributes)
+        ? storageAdapter.toStorageRow(attributes, { context, operation: 'patch' })
         : translateCanonicalAttributesForStorage(attributes, descriptor)
 
       const updateRow = Object.fromEntries(
@@ -1127,28 +311,35 @@ export const RestApiAnyapiKnexPlugin = {
       return result
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataWriteHelpers['dataDelete']} */
     helpers.dataDelete = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
 
+      await linkStore.invalidateDeletedLinkTargets(scopeName, context)
       const result = await context.db(canonical.tableName)
         .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
         .delete()
 
+      await linkStore.deleteResourceLinks({ descriptor, scopeName, id, db: context.db })
+
       return result
     }
 
+    // Supplying ids returns minimal records for the caller's bounded validation batch.
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataReadHelpers['dataGetMinimal']} */
     helpers.dataGetMinimal = async ({
       scopeName,
       context,
+      ids,
       runHooks,
       applyQueryFilters,
       filters = context.queryParams?.filters,
@@ -1158,16 +349,20 @@ export const RestApiAnyapiKnexPlugin = {
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
       const scope = api.resources?.[scopeName]
 
       let query = context.db(canonical.tableName)
-        .where(logicalIdColumn, id)
         .where(canonical.resourceColumn, descriptor.resource)
         .where(canonical.tenantColumn, descriptor.tenant)
+      if (ids === undefined) query.where(logicalIdColumn, id)
+      else {
+        query.whereIn(logicalIdColumn, ids.map(value => storageAdapter.translateFilterValue('id', value)))
+          .distinct(`${canonical.tableName}.${logicalIdColumn}`)
+      }
 
       if (typeof applyQueryFilters === 'function') {
         const scopedQueryState = await applyQueryFilters({
@@ -1182,8 +377,7 @@ export const RestApiAnyapiKnexPlugin = {
         })
         query = unwrapQueryBuilderState(scopedQueryState, query)
       } else if (runHooks) {
-        const previousKnexQuery = context.knexQuery
-        context.knexQuery = {
+        const filteredState = await withQueryFilteringContext(context, {
           query,
           filters,
           schemaInfo: context.schemaInfo,
@@ -1194,667 +388,46 @@ export const RestApiAnyapiKnexPlugin = {
           isAnyApi: true,
           adapter: storageAdapter,
           storageAdapter,
-        }
-
-        try {
+        }, async () => {
           await applyBuiltInAnyApiQueryFilters(context)
           await runHooks('knexQueryFiltering')
-          query = context.knexQuery?.query || query
-        } finally {
-          if (previousKnexQuery === undefined) {
-            delete context.knexQuery
-          } else {
-            context.knexQuery = previousKnexQuery
-          }
-        }
-      }
-
-      const row = await query.first()
-
-      if (!row) return null
-      const translated = translateCanonicalRecordFromStorage(
-        row,
-        descriptor,
-        { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
-      )
-      const resourceId = getLogicalResourceId(row, descriptor)
-      const minimal = {
-        type: descriptor.resource,
-        id: resourceId,
-        attributes: translated.attributes,
-        relationships: translated.relationships,
-      }
-      if (scope) {
-        decorateResourceLinks({ resource: minimal, scope, scopeName, context })
-      }
-      return minimal
-    }
-
-    const parseIncludeTree = (includeParam) => {
-      const tree = {}
-      if (!includeParam) return tree
-
-      const pushPath = (raw) => {
-        if (!raw) return
-        const segments = raw.split('.').map((segment) => segment.trim()).filter(Boolean)
-        if (segments.length === 0) return
-        let node = tree
-        for (const segment of segments) {
-          node[segment] = node[segment] || {}
-          node = node[segment]
-        }
-      }
-
-      if (Array.isArray(includeParam)) {
-        for (const entry of includeParam) {
-          String(entry).split(',').forEach((part) => pushPath(part.trim()))
-        }
-      } else {
-        String(includeParam).split(',').forEach((part) => pushPath(part.trim()))
-      }
-
-      return tree
-    }
-
-    const applyIncludeFieldSelection = async ({ query, resourceName, tableName, context }) => {
-      const targetScope = api.resources?.[resourceName]
-      if (!targetScope) {
-        return { query, fieldSelectionInfo: null }
-      }
-
-      const storageAdapter = getScopeStorageAdapter(resourceName)
-      const fieldSelectionInfo = await buildFieldSelection(targetScope, {
-        context: {
-          ...context,
-          scopeName: resourceName,
-          schemaInfo: targetScope.vars.schemaInfo,
-          storageAdapter,
-        }
-      })
-
-      const selectionState = await applyFieldSelectionToQuery({
-        query,
-        scope: targetScope,
-        fieldSelectionInfo,
-        tableName,
-        useTablePrefix: false,
-        storageAdapter,
-        db: context.db || context.transaction || api.knex.instance,
-        context,
-        scopeName: resourceName
-      })
-
-      return {
-        query: selectionState.query,
-        fieldSelectionInfo
-      }
-    }
-
-    const buildIncludedResource = ({ row, descriptor, context, fieldSelectionInfo = null }) => {
-      const translated = translateCanonicalRecordFromStorage(
-        row,
-        descriptor,
-        { allowedExtraFields: getAllowedQueryFieldNames(descriptor.resource) }
-      )
-      const resourceId = getLogicalResourceId(row, descriptor)
-      const includeResource = {
-        type: descriptor.resource,
-        id: resourceId,
-        attributes: translated.attributes,
-      }
-
-      if (translated.relationships && Object.keys(translated.relationships).length > 0) {
-        includeResource.relationships = translated.relationships
-      }
-
-      if (fieldSelectionInfo?.computedDependencies?.length) {
-        includeResource[COMPUTED_DEPENDENCIES_KEY] = fieldSelectionInfo.computedDependencies
-      }
-
-      const targetScope = api.resources?.[descriptor.resource]
-      if (targetScope) {
-        decorateResourceLinks({
-          resource: includeResource,
-          scope: targetScope,
-          scopeName: descriptor.resource,
-          context,
         })
+        query = filteredState.query
       }
 
-      return includeResource
-    }
-
-    const collectIncludes = async ({ descriptor, resources, includeTree, context, includes, seen }) => {
-      const entries = Object.entries(includeTree || {})
-      if (entries.length === 0 || !resources || resources.length === 0) return
-
-      const db = context.db || context.transaction || api.knex.instance
-
-      for (const [relName, childTree] of entries) {
-        const childKeys = Object.keys(childTree || {})
-
-        const belongsToInfo = descriptor.belongsTo?.[relName]
-        if (belongsToInfo) {
-          const ids = [...new Set(resources
-            .map((resource) => resource.relationships?.[relName]?.data?.id)
-            .filter((id) => id !== undefined && id !== null))]
-
-          if (ids.length === 0) continue
-
-          const targetDescriptor = await registry.getDescriptor(tenantId, belongsToInfo.target)
-          if (!targetDescriptor) continue
-
-          let query = db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn(getLogicalResourceIdColumn(targetDescriptor), ids)
-          const selectionState = await applyIncludeFieldSelection({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = selectionState.query
-          const scopedQueryState = await applyTargetScopeFilters({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = scopedQueryState.query
-          const rows = await query
-
-          const newResources = []
-          for (const row of rows) {
-            const includeId = getLogicalResourceId(row, targetDescriptor)
-            const includeKey = `${targetDescriptor.resource}:${includeId}`
-            if (seen.has(includeKey)) continue
-            seen.add(includeKey)
-            const includeResource = buildIncludedResource({
-              row,
-              descriptor: targetDescriptor,
-              context,
-              fieldSelectionInfo: selectionState.fieldSelectionInfo
-            })
-            includes.push(includeResource)
-            newResources.push(includeResource)
-          }
-
-          if (childKeys.length > 0 && newResources.length > 0) {
-            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await collectIncludes({
-              descriptor: targetDescriptor,
-              resources: newResources,
-              includeTree: childTree,
-              context,
-              includes,
-              seen,
-            })
-          }
-          continue
-        }
-
-        const polymorphicInfo = descriptor.polymorphicBelongsTo?.[relName]
-        if (polymorphicInfo) {
-          const typeToIds = new Map()
-          for (const resource of resources) {
-            const relData = resource.relationships?.[relName]?.data
-            if (!relData?.type || relData?.id == null) continue
-            const targetType = String(relData.type)
-            const targetId = normalizeId(relData.id)
-            if (targetId == null) continue
-            if (!typeToIds.has(targetType)) {
-              typeToIds.set(targetType, new Set())
-            }
-            typeToIds.get(targetType).add(targetId)
-          }
-
-          const newResources = []
-          for (const [targetType, idSet] of typeToIds.entries()) {
-            if (idSet.size === 0) continue
-            let targetDescriptor
-            try {
-              targetDescriptor = await getDescriptor(targetType)
-            } catch (error) {
-              continue
-            }
-
-            let query = db(targetDescriptor.canonical.tableName)
-              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-              .whereIn(getLogicalResourceIdColumn(targetDescriptor), [...idSet])
-            const selectionState = await applyIncludeFieldSelection({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = selectionState.query
-            const scopedQueryState = await applyTargetScopeFilters({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = scopedQueryState.query
-            const rows = await query
-
-            for (const row of rows) {
-              const includeId = getLogicalResourceId(row, targetDescriptor)
-              const includeKey = `${targetDescriptor.resource}:${includeId}`
-              if (seen.has(includeKey)) continue
-              seen.add(includeKey)
-              const includeResource = buildIncludedResource({
-                row,
-                descriptor: targetDescriptor,
-                context,
-                fieldSelectionInfo: selectionState.fieldSelectionInfo
-              })
-              includes.push(includeResource)
-              newResources.push(includeResource)
-            }
-          }
-
-          if (childKeys.length > 0 && newResources.length > 0) {
-            const resourcesByType = new Map()
-            for (const includeResource of newResources) {
-              if (!resourcesByType.has(includeResource.type)) {
-                resourcesByType.set(includeResource.type, [])
-              }
-              resourcesByType.get(includeResource.type).push(includeResource)
-            }
-
-            for (const [targetType, groupedResources] of resourcesByType.entries()) {
-              let targetDescriptor
-              try {
-                targetDescriptor = await getDescriptor(targetType)
-              } catch (error) {
-                continue
-              }
-
-              await attachHasManyRelationships({ resources: groupedResources, descriptor: targetDescriptor, context })
-              await attachManyToManyRelationships({ resources: groupedResources, descriptor: targetDescriptor, context })
-              await collectIncludes({
-                descriptor: targetDescriptor,
-                resources: groupedResources,
-                includeTree: childTree,
-                context,
-                includes,
-                seen,
-              })
-            }
-          }
-
-          continue
-        }
-
-        const hasManyInfo = descriptor.relationships?.[relName]
-        if (hasManyInfo?.type === 'hasMany' && hasManyInfo.target && (hasManyInfo.foreignKey || hasManyInfo.via)) {
-          let targetDescriptor
-          try {
-            targetDescriptor = await getDescriptor(hasManyInfo.target)
-          } catch (error) {
-            continue
-          }
-
-          const parentIds = resources
-            .map((resource) => normalizeId(resource.id))
-            .filter((id) => id !== null)
-
-          if (parentIds.length === 0) continue
-
-          const queryIds = Array.from(new Set([
-            ...parentIds,
-            ...parentIds
-              .map((id) => {
-                const numeric = Number(id)
-                return Number.isFinite(numeric) ? numeric : null
-              })
-              .filter((value) => value !== null),
-          ]))
-
-          let rows = []
-          let groupingColumn = null
-          let fieldSelectionInfo = null
-
-          if (hasManyInfo.foreignKey) {
-            const foreignField = targetDescriptor.fields?.[hasManyInfo.foreignKey]
-            if (!foreignField?.slot) {
-              continue
-            }
-            groupingColumn = foreignField.slot
-            let query = db(targetDescriptor.canonical.tableName)
-              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-              .whereIn(groupingColumn, parentIds)
-            const selectionState = await applyIncludeFieldSelection({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = selectionState.query
-            const scopedQueryState = await applyTargetScopeFilters({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = scopedQueryState.query
-            fieldSelectionInfo = selectionState.fieldSelectionInfo
-            rows = await query
-          } else if (hasManyInfo.via) {
-            const polyInfo = targetDescriptor.polymorphicBelongsTo?.[hasManyInfo.via]
-            if (!polyInfo?.idColumn || !polyInfo?.typeColumn) {
-              continue
-            }
-            groupingColumn = polyInfo.idColumn
-            let query = db(targetDescriptor.canonical.tableName)
-              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-              .where(polyInfo.typeColumn, descriptor.resource)
-              .whereIn(groupingColumn, queryIds)
-            const selectionState = await applyIncludeFieldSelection({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = selectionState.query
-            const scopedQueryState = await applyTargetScopeFilters({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = scopedQueryState.query
-            fieldSelectionInfo = selectionState.fieldSelectionInfo
-            rows = await query
-          }
-
-          if (!groupingColumn || rows.length === 0) {
-            continue
-          }
-
-          const newResources = []
-          for (const row of rows) {
-            const includeId = getLogicalResourceId(row, targetDescriptor)
-            const includeKey = `${targetDescriptor.resource}:${includeId}`
-            if (seen.has(includeKey)) continue
-            seen.add(includeKey)
-            const includeResource = buildIncludedResource({
-              row,
-              descriptor: targetDescriptor,
-              context,
-              fieldSelectionInfo
-            })
-            includes.push(includeResource)
-            newResources.push(includeResource)
-          }
-
-          if (childKeys.length > 0 && newResources.length > 0) {
-            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await collectIncludes({
-              descriptor: targetDescriptor,
-              resources: newResources,
-              includeTree: childTree,
-              context,
-              includes,
-              seen,
-            })
-          }
-
-          continue
-        }
-
-        const manyInfo = descriptor.manyToMany?.[relName]
-        if (manyInfo) {
-          const info = await getManyToManyInfo(descriptor.resource, relName)
-          if (!info) continue
-          const linkRows = await fetchLinksForParents({
-            descriptor: info.descriptor,
-            relationshipKey: info.relationshipKey,
-            parentIds: resources.map((resource) => resource.id),
-            db,
-          })
-
-          const childIds = [...new Set(linkRows.map((row) => row.childId))]
-          if (childIds.length === 0) continue
-
-          const targetDescriptor = await registry.getDescriptor(tenantId, info.relInfo.target)
-          if (!targetDescriptor) continue
-
-          let query = db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn(getLogicalResourceIdColumn(targetDescriptor), childIds)
-          const selectionState = await applyIncludeFieldSelection({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = selectionState.query
-          const scopedQueryState = await applyTargetScopeFilters({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = scopedQueryState.query
-          const rows = await query
-
-          const newResources = []
-          for (const row of rows) {
-            const includeId = getLogicalResourceId(row, targetDescriptor)
-            const includeKey = `${targetDescriptor.resource}:${includeId}`
-            if (seen.has(includeKey)) continue
-            seen.add(includeKey)
-            const includeResource = buildIncludedResource({
-              row,
-              descriptor: targetDescriptor,
-              context,
-              fieldSelectionInfo: selectionState.fieldSelectionInfo
-            })
-            includes.push(includeResource)
-            newResources.push(includeResource)
-          }
-
-          if (childKeys.length > 0 && newResources.length > 0) {
-            await attachHasManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await attachManyToManyRelationships({ resources: newResources, descriptor: targetDescriptor, context })
-            await collectIncludes({
-              descriptor: targetDescriptor,
-              resources: newResources,
-              includeTree: childTree,
-              context,
-              includes,
-              seen,
-            })
-          }
-        }
-      }
-    }
-
-    const buildIncludes = async ({ parentResources, descriptor, context }) => {
-      const includeTree = parseIncludeTree(context.queryParams?.include)
-      if (Object.keys(includeTree).length === 0) return []
-
-      const includes = []
-      const seen = new Set()
-
-      await collectIncludes({
-        descriptor,
-        resources: parentResources,
-        includeTree,
-        context,
-        includes,
-        seen,
-      })
-
-      return includes
-    }
-
-    const attachHasManyRelationships = async ({ resources, descriptor, context }) => {
-      if (!resources || resources.length === 0) return
-      const hasManyEntries = Object.entries(descriptor.relationships || {})
-        .filter(([, relDef]) => relDef?.type === 'hasMany' && relDef.target && (relDef.foreignKey || relDef.via))
-
-      if (hasManyEntries.length === 0) return
-
-      const db = context.db || context.transaction || api.knex.instance
-      const parentIds = resources.map((resource) => resource.id)
-      const normalizedParentIds = parentIds
-        .map((id) => normalizeId(id))
-        .filter((id) => id !== null)
-
-      if (normalizedParentIds.length === 0) return
-
-      for (const [relName, relDef] of hasManyEntries) {
-        let targetDescriptor
-        try {
-          targetDescriptor = await getDescriptor(relDef.target)
-        } catch (error) {
-          continue
-        }
-
-        if (relDef.foreignKey) {
-          const foreignField = targetDescriptor.fields?.[relDef.foreignKey]
-          if (!foreignField?.slot) continue
-          const column = foreignField.slot
-
-          let query = db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn(column, normalizedParentIds)
-          const scopedQueryState = await applyTargetScopeFilters({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context,
-            queryPurpose: 'relationship-identifiers'
-          })
-          query = scopedQueryState.query
-          const rows = await query
-
-          const grouped = rows.reduce((acc, row) => {
-            const parentId = row[column]
-            if (parentId == null) return acc
-            const key = String(parentId)
-            acc[key] = acc[key] || []
-            acc[key].push({ type: targetDescriptor.resource, id: getLogicalResourceId(row, targetDescriptor) })
-            return acc
-          }, {})
-
-          for (const resource of resources) {
-            resource.relationships = resource.relationships || {}
-            const related = grouped[String(resource.id)] || []
-            resource.relationships[relName] = { data: related }
-          }
-
-          continue
-        }
-
-        if (relDef.via) {
-          const polyInfo = targetDescriptor.polymorphicBelongsTo?.[relDef.via]
-          if (!polyInfo?.idColumn || !polyInfo?.typeColumn) continue
-
-          const queryIds = Array.from(new Set([
-            ...normalizedParentIds,
-            ...normalizedParentIds
-              .map((id) => {
-                const numeric = Number(id)
-                return Number.isFinite(numeric) ? numeric : null
-              })
-              .filter((value) => value !== null),
-          ]))
-
-          let query = db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .where(polyInfo.typeColumn, descriptor.resource)
-            .whereIn(polyInfo.idColumn, queryIds)
-          const scopedQueryState = await applyTargetScopeFilters({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context,
-            queryPurpose: 'relationship-identifiers'
-          })
-          query = scopedQueryState.query
-          const rows = await query
-
-          const grouped = rows.reduce((acc, row) => {
-            const parentId = row[polyInfo.idColumn]
-            if (parentId == null) return acc
-            const key = String(parentId)
-            acc[key] = acc[key] || []
-            acc[key].push({ type: targetDescriptor.resource, id: getLogicalResourceId(row, targetDescriptor) })
-            return acc
-          }, {})
-
-          for (const resource of resources) {
-            resource.relationships = resource.relationships || {}
-            const related = grouped[String(resource.id)] || []
-            resource.relationships[relName] = { data: related }
-          }
-        }
-      }
-    }
-
-    const attachManyToManyRelationships = async ({ resources, descriptor, context }) => {
-      if (!resources || resources.length === 0) return
-      const manyEntries = Object.entries(descriptor.manyToMany || {})
-      if (manyEntries.length === 0) return
-
-      const db = context.db || context.transaction || api.knex.instance
-      const parentIds = resources.map((resource) => resource.id)
-
-      for (const [relName] of manyEntries) {
-        const info = await getManyToManyInfo(descriptor.resource, relName)
-        if (!info) continue
-        let rows = await fetchLinksForParents({
-          descriptor: info.descriptor,
-          relationshipKey: info.relationshipKey,
-          parentIds,
-          db,
-        })
-
-        const visibleIdentifiers = await filterVisibleIdentifiers({
-          identifiers: rows.map((row) => ({ type: row.childType, id: row.childId })),
-          context
-        })
-        const visibleKeys = new Set(
-          visibleIdentifiers.map((identifier) => `${identifier.type}:${String(identifier.id)}`)
+      const toMinimal = row => {
+        const translated = translateCanonicalRecordFromStorage(
+          row,
+          descriptor,
+          { allowedExtraFields: getAllowedQueryFieldNames(api, scopeName) }
         )
-        rows = rows.filter((row) => visibleKeys.has(`${row.childType}:${String(row.childId)}`))
-
-        const grouped = rows.reduce((acc, row) => {
-          const key = String(row.parentId)
-          acc[key] = acc[key] || []
-          acc[key].push({ type: row.childType, id: String(row.childId) })
-          return acc
-        }, {})
-
-        for (const resource of resources) {
-          const related = grouped[resource.id] || []
-          resource.relationships = resource.relationships || {}
-          resource.relationships[relName] = { data: related }
+        const minimal = {
+          type: descriptor.resource,
+          id: getCanonicalResourceId(row, descriptor),
+          attributes: translated.attributes,
+          relationships: translated.relationships,
         }
+        if (scope) decorateResourceLinks({ resource: minimal, scope, scopeName, context })
+        return minimal
       }
+      if (ids !== undefined) {
+        const rows = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: context.db }).whereIn(logicalIdColumn, query))
+        return rows.map(toMinimal)
+      }
+      const row = await applyDatabaseReadOptions(query).first()
+      return row ? toMinimal(row) : null
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataReadHelpers['dataGet']} */
     helpers.dataGet = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const { canonical } = descriptor
       const id = context.id
-      const logicalIdColumn = getLogicalResourceIdColumn(descriptor)
+      const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
       const scope = api.resources?.[scopeName]
 
       let fieldSelectionInfo = null
@@ -1885,16 +458,16 @@ export const RestApiAnyapiKnexPlugin = {
         query = selectionState.query
       }
 
-      const row = await query.first()
+      const row = await applyDatabaseReadOptions(query).first()
 
       if (!row) return null
 
       const record = translateCanonicalRecordFromStorage(
         row,
         descriptor,
-        { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
+        { allowedExtraFields: getAllowedQueryFieldNames(api, scopeName) }
       )
-      const resourceId = getLogicalResourceId(row, descriptor)
+      const resourceId = getCanonicalResourceId(row, descriptor)
       const data = {
         type: descriptor.resource,
         id: resourceId,
@@ -1905,7 +478,7 @@ export const RestApiAnyapiKnexPlugin = {
         data.relationships = record.relationships
       }
 
-      await attachHasManyRelationships({
+      await attachReverseRelationships({
         resources: [data],
         descriptor,
         context,
@@ -1924,13 +497,13 @@ export const RestApiAnyapiKnexPlugin = {
       })
 
       const response = { data }
-      if (included.length > 0) {
+      if (included.length > 0 || context.queryParams?.include !== undefined) {
         response.included = included
       }
 
       if (scope) {
         decorateResourceLinks({ resource: data, scope, scopeName, context })
-        response.links = { self: data.links.self }
+        response.links = { self: buildJsonApiLink(data.links.self, context.queryParams) }
       }
 
       if (included.length > 0) {
@@ -1949,118 +522,38 @@ export const RestApiAnyapiKnexPlugin = {
       return response
     }
 
-    const rehydrateSchemaInfo = async (scopeName) => {
-      const scope = api.resources?.[scopeName] || scopes?.[scopeName] || {}
-      const storedOptions = scopeOptionsRegistry.get(scopeName) || {}
-      const rawSchema = scope.scopeOptions?.schema || storedOptions.schema || {}
-
-      if (!scope.scopeOptions) {
-        scope.scopeOptions = {
-          schema: rawSchema,
-          relationships: storedOptions.relationships || {},
-          searchSchema: storedOptions.searchSchema || null,
-          tableName: storedOptions.tableName || scopeName,
-          idProperty: storedOptions.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
-          canonicalFieldsMap: storedOptions.canonicalFieldsMap || {},
-        }
-      }
-
+    const refreshStorageDescriptor = async (scopeName, compiledSchemaInfo) => {
+      const scope = api.resources[scopeName]
+      const schemaInfo = compiledSchemaInfo || scope.vars.schemaInfo
       const descriptor = await registry.getDescriptor(tenantId, scopeName)
-      if (!descriptor) return
-
-      const existingInfo = scope.vars?.schemaInfo || {}
-
-      const mergedSchema = { ...(existingInfo.schemaInstance?.structure || {}) }
-      const computed = { ...(existingInfo.computed || {}) }
-      for (const [fieldName, definition] of Object.entries(descriptor.schema || {})) {
-        if (definition?.computed) {
-          if (!computed[fieldName]) {
-            computed[fieldName] = { ...definition }
-          }
-          continue
-        }
-        mergedSchema[fieldName] = {
-          ...(mergedSchema[fieldName] || {}),
-          ...definition,
-        }
-      }
-
-      if (!mergedSchema.id) {
-        mergedSchema.id = { type: 'id' }
-      }
-
-      const schemaInstance = createSchema(mergedSchema)
-
-      const rawSearchFields = generateSearchSchemaFromSchema(
-        mergedSchema,
-        scope.scopeOptions?.searchSchema || storedOptions.searchSchema || null
-      )
-      if (rawSearchFields) {
-        ensureSearchFieldsAreIndexed(rawSearchFields)
-      }
-      const searchSchemaInstance = createSchema(rawSearchFields || {})
-
-      const tableName = storedOptions.tableName ||
-        existingInfo.tableName ||
-        scope.scopeOptions?.tableName ||
-        scopeName
-
-      const idProperty = storedOptions.idProperty ||
-        existingInfo.idProperty ||
-        scope.scopeOptions?.idProperty ||
-        scope.vars?.idProperty ||
-        vars.idProperty ||
-        'id'
-      descriptor.idProperty = idProperty
-
+      if (!descriptor) throw new Error(`Descriptor not found for resource '${scopeName}'`)
+      descriptor.idProperty = schemaInfo.idProperty
       scope.vars.schemaInfo = {
-        ...existingInfo,
-        schemaInstance,
-        schemaStructure: schemaInstance.structure,
-        searchSchemaInstance,
-        searchSchemaStructure: searchSchemaInstance.structure,
-        schemaRelationships: descriptor.relationships ||
-          scope.scopeOptions?.relationships ||
-          storedOptions.relationships ||
-          existingInfo.schemaRelationships ||
-          {},
-        computed,
-        tableName,
-        idProperty,
+        ...schemaInfo,
         descriptor,
-        canonicalFieldMap: descriptor.canonicalFieldMap || {},
+        canonicalFieldMap: descriptor.canonicalFieldMap,
       }
-
       getScopeStorageAdapter(scopeName)
-
-      scope.scopeOptions = {
-        ...(scope.scopeOptions || {}),
-        canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
-      }
-
       scopeOptionsRegistry.set(scopeName, {
-        schema: storedOptions.schema || scope.scopeOptions?.schema || {},
-        relationships: storedOptions.relationships || scope.scopeOptions?.relationships || {},
-        searchSchema: scope.scopeOptions?.searchSchema || storedOptions.searchSchema || null,
-        tableName,
-        idProperty,
-        canonicalFieldsMap: descriptor.canonicalFieldMap || {},
+        ...scopeOptionsRegistry.get(scopeName),
+        canonicalFieldsMap: descriptor.canonicalFieldMap,
       })
     }
 
-    const buildTableNameMaps = () => {
-      const resourceToTableName = new Map()
-      const tableNameToResource = new Map()
-      for (const [resourceName, resourceScope] of Object.entries(api.resources || {})) {
-        const tableName = resourceScope?.vars?.schemaInfo?.tableName
-        if (!tableName) continue
-        resourceToTableName.set(resourceName, tableName)
-        tableNameToResource.set(tableName, resourceName)
+    const buildSearchMembershipQuery = ({ sourceScopeName, relationshipName, targetScopeName, foreignKey, otherKey, db }) => {
+      const info = linkStore.getManyToManyInfo(sourceScopeName, relationshipName)
+      if (!info) throw new RestApiResourceError(`Relationship '${sourceScopeName}.${relationshipName}' not found`, { subtype: 'related_type_not_found' })
+      const links = linkStore.buildRelatedLinkQuery({ ...info, db, allParents: true })
+      const pivotAdapter = getScopeStorageAdapter(targetScopeName)
+      return {
+        query: db.select({
+          [pivotAdapter.translateColumn(foreignKey)]: 'parentId',
+          [pivotAdapter.translateColumn(otherKey)]: 'childId'
+        }).from(links.as('search_membership'))
       }
-      return { resourceToTableName, tableNameToResource }
     }
 
-    const queryHookDependencies = { log, scopes: api.resources, knex, getStorageAdapter: getScopeStorageAdapter }
+    const queryHookDependencies = { log, scopes: api.resources, knex, getStorageAdapter: getScopeStorageAdapter, buildSearchMembershipQuery }
 
     const applyBuiltInAnyApiQueryFilters = async (context) => {
       const hookParams = { context }
@@ -2069,12 +562,13 @@ export const RestApiAnyapiKnexPlugin = {
       await basicFiltersHook(hookParams, queryHookDependencies)
     }
 
+    /** @type {import('./lib/storage/storage-types.js').CanonicalDataReadHelpers['dataQuery']} */
     helpers.dataQuery = async ({ scopeName, context, runHooks }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const db = context.db || context.transaction || api.knex.instance
       const scope = api.resources?.[scopeName]
       const queryParams = context.queryParams || {}
@@ -2087,32 +581,14 @@ export const RestApiAnyapiKnexPlugin = {
         context.computedDependencies = []
       }
 
-      const { resourceToTableName, tableNameToResource } = buildTableNameMaps()
-      context.resourceToTableName = resourceToTableName
-      const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor })
-      const adapter = new AnyapiQueryAdapter({
-        descriptor,
-        db,
-        registry,
-        descriptorsMap,
-        resourceToTableName,
-        tableNameToResource,
-        log,
-      })
-      const queryBuilder = adapter.query
+      const tableAlias = scope.vars.schemaInfo.tableName || descriptor.resource
+      let queryBuilder = storageAdapter.buildBaseQuery({ transaction: db, tableAlias })
+      applyQueryConstraint({ query: queryBuilder, context, scopeName, storageAdapter, tableName: tableAlias })
 
       const schemaInfo = scope?.vars?.schemaInfo
-      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias
+      const tableNameForHooks = schemaInfo?.tableName || descriptor.resource
 
-      applyFiltersToQuery({
-        query: queryBuilder,
-        filters: queryParams.filters,
-        descriptor,
-        searchSchema: schemaInfo?.searchSchemaStructure,
-        adapter,
-      })
-
-      context.knexQuery = {
+      const filteredState = await withQueryFilteringContext(context, {
         query: queryBuilder,
         filters: queryParams.filters,
         schemaInfo,
@@ -2121,17 +597,13 @@ export const RestApiAnyapiKnexPlugin = {
         db,
         queryPurpose: 'collection',
         isAnyApi: true,
-        adapter,
+        adapter: storageAdapter,
         storageAdapter,
-      }
-
-      await applyBuiltInAnyApiQueryFilters(context)
-
-      if (runHooks) {
-        await runHooks('knexQueryFiltering')
-      }
-
-      delete context.knexQuery
+      }, async () => {
+        await applyBuiltInAnyApiQueryFilters(context)
+        if (runHooks) await runHooks('knexQueryFiltering')
+      })
+      queryBuilder = filteredState.query
 
       const countQuery = queryBuilder.clone()
 
@@ -2141,8 +613,8 @@ export const RestApiAnyapiKnexPlugin = {
           query: queryBuilder,
           scope,
           fieldSelectionInfo,
-          tableName: adapter.tableAlias,
-          useTablePrefix: false,
+          tableName: tableAlias,
+          useTablePrefix: true,
           storageAdapter,
           db,
           context,
@@ -2150,39 +622,40 @@ export const RestApiAnyapiKnexPlugin = {
         })
       }
 
-      const sortDescriptors = applySortingToQuery({
+      const sortDescriptors = await applySortingToQuery({
         query: selectionState.query,
         sort: queryParams.sort,
         descriptor,
         scope,
-        adapter,
+        tableAlias,
+        context,
         before: Boolean(queryParams.page?.before),
         queryFieldRuntimeByField: selectionState.queryFieldRuntimeByField
       })
 
       const paginationInfo = applyPaginationToQuery({
         query: queryBuilder,
-        scope,
-        queryParams,
+        page: queryParams.page,
+        vars: scope.vars,
         sortDescriptors,
-        adapter,
+        storageAdapter,
       })
 
-      let rows = await queryBuilder
+      let rows = await applyDatabaseReadOptions(queryBuilder)
       let cursorRecords = null
       let hasMore = false
 
       if (paginationInfo.mode === 'cursor') {
-        const { pageSize, sortDescriptors: cursorDescriptors } = paginationInfo
+        const { pageSize } = paginationInfo
         cursorRecords = rows.map((row) => {
           const record = {}
-          for (const descriptorEntry of cursorDescriptors) {
+          for (const descriptorEntry of sortDescriptors) {
             if (descriptorEntry.field === 'id') {
-              record.id = getLogicalResourceId(row, descriptor)
+              record.id = getCanonicalResourceId(row, descriptor)
             } else if (descriptorEntry.queryFieldRuntime) {
               record[descriptorEntry.field] = row[descriptorEntry.field]
             } else if (descriptorEntry.column) {
-              record[descriptorEntry.field] = row[descriptorEntry.column]
+              record[descriptorEntry.field] = row[descriptorEntry.resultColumn || descriptorEntry.column]
             }
           }
           return record
@@ -2193,19 +666,24 @@ export const RestApiAnyapiKnexPlugin = {
           rows = rows.slice(0, pageSize)
           cursorRecords = cursorRecords.slice(0, pageSize)
         }
-        if (queryParams.page?.before) {
+        if (paginationInfo.before) {
           rows.reverse()
           cursorRecords.reverse()
         }
       }
 
+      for (const row of rows) {
+        for (const { referenceField, resultColumn } of sortDescriptors) {
+          if (referenceField) delete row[resultColumn]
+        }
+      }
       const data = rows.map((row) => {
         const translated = translateCanonicalRecordFromStorage(
           row,
           descriptor,
-          { allowedExtraFields: getAllowedQueryFieldNames(scopeName) }
+          { allowedExtraFields: getAllowedQueryFieldNames(api, scopeName) }
         )
-        const resourceId = getLogicalResourceId(row, descriptor)
+        const resourceId = getCanonicalResourceId(row, descriptor)
         const resource = {
           type: descriptor.resource,
           id: resourceId,
@@ -2224,7 +702,7 @@ export const RestApiAnyapiKnexPlugin = {
         return resource
       })
 
-      await attachHasManyRelationships({
+      await attachReverseRelationships({
         resources: data,
         descriptor,
         context,
@@ -2243,7 +721,7 @@ export const RestApiAnyapiKnexPlugin = {
       })
 
       const response = { data }
-      if (included.length > 0) {
+      if (included.length > 0 || context.queryParams?.include !== undefined) {
         response.included = included
       }
 
@@ -2271,7 +749,8 @@ export const RestApiAnyapiKnexPlugin = {
         let paginationMeta
 
         if (scope?.vars?.enablePaginationCounts) {
-          const countResult = await countQuery.count({ count: '*' }).first()
+          const countResult = await countQuery.clearSelect().clearOrder()
+            .countDistinct({ count: `${tableAlias}.${getCanonicalResourceIdColumn(descriptor)}` }).first()
           const total = Number(countResult?.count ?? countResult?.total ?? 0)
           paginationMeta = calculatePaginationMeta(total, page, pageSize)
         } else {
@@ -2287,11 +766,11 @@ export const RestApiAnyapiKnexPlugin = {
           paginationMeta
         )
       } else if (paginationInfo.mode === 'cursor' && cursorRecords) {
-        const cursorFields = paginationInfo.sortDescriptors.map((descriptorEntry) => descriptorEntry.field)
+        const cursorFields = sortDescriptors.map((descriptorEntry) => descriptorEntry.field)
         const cursorOptions = {
           schemaInfo,
-          definitions: Object.fromEntries(paginationInfo.sortDescriptors.map(({ field, definition }) => [field, definition])),
-          before: Boolean(queryParams.page?.before)
+          definitions: Object.fromEntries(sortDescriptors.map(({ field, definition }) => [field, definition])),
+          before: paginationInfo.before
         }
         const paginationMeta = buildCursorMeta(
           cursorRecords,
@@ -2332,34 +811,24 @@ export const RestApiAnyapiKnexPlugin = {
       return response
     }
 
+    /** @type {import('./lib/storage/storage-types.js').DataQueryCount} */
     helpers.dataQueryCount = async ({ scopeName, context }) => {
       const storageAdapter = getScopeStorageAdapter(scopeName)
       if (storageAdapter) {
         context.storageAdapter = storageAdapter
       }
-      const descriptor = await getDescriptor(scopeName)
+      const descriptor = getDescriptor(scopeName)
       const db = context.db || context.transaction || api.knex.instance
-      const { resourceToTableName, tableNameToResource } = buildTableNameMaps()
-      const descriptorsMap = await preloadRelatedDescriptors({ registry, descriptor })
-      const adapter = new AnyapiQueryAdapter({
-        descriptor,
-        db,
-        registry,
-        descriptorsMap,
-        resourceToTableName,
-        tableNameToResource,
-        log,
-      })
-
       // Apply the same filter hooks as dataQuery for consistent counts
       const scope = api.resources?.[scopeName]
       const schemaInfo = scope?.vars?.schemaInfo
-      const tableNameForHooks = schemaInfo?.tableName || adapter.tableAlias
+      const tableNameForHooks = schemaInfo?.tableName || descriptor.resource
 
+      const query = storageAdapter.buildBaseQuery({ transaction: db, tableAlias: tableNameForHooks })
       const countContext = {
         ...context,
         knexQuery: {
-          query: adapter.query,
+          query,
           filters: context.queryParams?.filters,
           schemaInfo,
           scopeName,
@@ -2367,7 +836,7 @@ export const RestApiAnyapiKnexPlugin = {
           db,
           queryPurpose: 'count',
           isAnyApi: true,
-          adapter,
+          adapter: storageAdapter,
           storageAdapter,
         }
       }
@@ -2378,184 +847,70 @@ export const RestApiAnyapiKnexPlugin = {
       await basicFiltersHook(hookParams, queryHookDependencies)
       await api.runHooks('knexQueryFiltering', countContext)
 
-      const countQuery = countContext.knexQuery?.query || adapter.query
+      const countQuery = countContext.knexQuery?.query || query
       const [{ count }] = await countQuery.count({ count: '*' })
       return Number(count)
     }
 
     addHook('scope:added', 'anyapi-register-resource', { sequence: 50 }, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context
-      const scope = api.scopes?.[scopeName] || scopes?.[scopeName]
-      const stored = scopeOptionsRegistry.get(scopeName) || {}
-
-      const baseSchema = scopeOptions.schema || scope?.scopeOptions?.schema || stored.schema || {}
-      const relationships = scopeOptions.relationships || scope?.scopeOptions?.relationships || stored.relationships || {}
-      const searchSchemaDef = scopeOptions.searchSchema || scope?.scopeOptions?.searchSchema || stored.searchSchema || null
-      const tableName = scopeOptions.tableName || scope?.scopeOptions?.tableName || stored.tableName || scopeName
-      const idProperty = scopeOptions.idProperty || scope?.scopeOptions?.idProperty || stored.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id'
-      const canonicalFieldsMap = scope?.scopeOptions?.canonicalFieldsMap || stored.canonicalFieldsMap || null
-
-      const schema = { ...baseSchema }
-      if (idProperty && idProperty !== 'id' && !schema[idProperty]) {
-        schema[idProperty] = { type: 'number' }
-      }
-
-      scopeOptionsRegistry.set(scopeName, {
-        schema,
-        relationships,
-        searchSchema: searchSchemaDef,
-        tableName,
-        idProperty,
-        canonicalFieldsMap,
-      })
-
+      const scope = api.resources[scopeName]
+      const { schemaStructure, computed, schemaRelationships, idProperty } = scope.vars.schemaInfo
       const descriptor = await registry.registerResource({
         tenant: tenantId,
         resource: scopeName,
-        schema,
-        relationships,
-        canonicalFieldMap: canonicalFieldsMap,
-        idProperty,
+        schema: { ...schemaStructure, ...computed },
+        relationships: schemaRelationships,
+        canonicalFieldMap: scopeOptions.canonicalFieldsMap || null,
+        idProperty
       })
-
-      const updatedStored = scopeOptionsRegistry.get(scopeName) || {}
-      updatedStored.canonicalFieldsMap = descriptor.canonicalFieldMap || updatedStored.canonicalFieldsMap || null
-      scopeOptionsRegistry.set(scopeName, updatedStored)
-
-      if (scope) {
-        scope.scopeOptions = {
-          ...(scope.scopeOptions || {}),
-          schema,
-          relationships,
-          searchSchema: searchSchemaDef || undefined,
-          tableName,
-          idProperty,
-          canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
-        }
-      }
-
-      await rehydrateSchemaInfo(scopeName)
+      scopeOptionsRegistry.set(scopeName, snapshotResourceConfiguration({
+        ...scopeOptions,
+        idProperty,
+        canonicalFieldsMap: descriptor.canonicalFieldMap
+      }))
+      await refreshStorageDescriptor(scopeName)
     })
 
-    addScopeMethod('createKnexTable', async ({ scopeName, scopeOptions }) => {
-      const scope = api.resources?.[scopeName] || scopes?.[scopeName]
-      const schemaInput = scopeOptions?.schema || scope?.scopeOptions?.schema || {}
-      const relationshipInput = scopeOptions?.relationships || scope?.scopeOptions?.relationships || {}
-      const storedBefore = scopeOptionsRegistry.get(scopeName) || {}
-      const idProperty = scopeOptions?.idProperty ||
-        scope?.scopeOptions?.idProperty ||
-        storedBefore.idProperty ||
-        scope?.vars?.schemaInfo?.idProperty ||
-        vars.idProperty ||
-        'id'
-
-      const effectiveSchema = { ...schemaInput }
-      if (idProperty && idProperty !== 'id' && !effectiveSchema[idProperty]) {
-        effectiveSchema[idProperty] = { type: 'number' }
-      }
-
-      if (scope) {
-        const existingOptions = scope.scopeOptions || {}
-        scope.scopeOptions = {
-          ...existingOptions,
-          schema: {
-            ...(existingOptions.schema || {}),
-            ...schemaInput,
-            ...(idProperty && idProperty !== 'id' && !schemaInput[idProperty] ? { [idProperty]: { type: 'number' } } : {}),
-          },
-          relationships: {
-            ...(existingOptions.relationships || {}),
-            ...relationshipInput,
-          },
-          searchSchema: existingOptions.searchSchema || scopeOptions?.searchSchema,
-        }
-      }
-      scopeOptionsRegistry.set(scopeName, {
-        schema: scope?.scopeOptions?.schema || effectiveSchema || storedBefore.schema || {},
-        relationships: scope?.scopeOptions?.relationships || relationshipInput || storedBefore.relationships || {},
-        searchSchema: scope?.scopeOptions?.searchSchema || scopeOptions?.searchSchema || storedBefore.searchSchema || null,
-        tableName: scope?.scopeOptions?.tableName || scopeOptions?.tableName || storedBefore.tableName || scopeName,
-        idProperty: scope?.scopeOptions?.idProperty || scopeOptions?.idProperty || storedBefore.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
-        canonicalFieldsMap: storedBefore.canonicalFieldsMap || null,
-      })
-      const descriptor = await registry.registerResource({
-        tenant: tenantId,
-        resource: scopeName,
-        schema: effectiveSchema,
-        relationships: relationshipInput,
-        canonicalFieldMap: scopeOptions?.canonicalFieldsMap ||
-          scope?.scopeOptions?.canonicalFieldsMap ||
-          null,
-        idProperty,
-      })
-      if (scope) {
-        scope.scopeOptions = {
-          ...(scope.scopeOptions || {}),
-          canonicalFieldsMap: descriptor.canonicalFieldMap || scope.scopeOptions?.canonicalFieldsMap || {},
-        }
-      }
-      const storedAfter = scopeOptionsRegistry.get(scopeName) || {}
-      storedAfter.canonicalFieldsMap = descriptor.canonicalFieldMap || storedAfter.canonicalFieldsMap || null
-      scopeOptionsRegistry.set(scopeName, storedAfter)
-      await rehydrateSchemaInfo(scopeName)
+    addScopeMethod('createKnexTable', async ({ scopeName }) => {
+      await ensureAnyApiSchema(knex)
+      await refreshStorageDescriptor(scopeName)
     })
 
     addScopeMethod('addKnexFields', async ({ scopeName, params }) => {
-      if (!params?.fields) return
-      const scope = api.resources?.[scopeName] || scopes?.[scopeName]
-      if (scope) {
-        const existingOptions = scope.scopeOptions || {}
-        scope.scopeOptions = {
-          ...existingOptions,
-          schema: {
-            ...(existingOptions.schema || {}),
-          },
-          relationships: existingOptions.relationships || {},
-          searchSchema: existingOptions.searchSchema,
-        }
+      if (!params?.fields || typeof params.fields !== 'object' || Array.isArray(params.fields)) {
+        throw new Error('fields parameter is required for addKnexFields')
       }
+      assertFieldNameMap(params.fields, `added fields in '${scopeName}'`)
+      assertFieldNameMap(params.searchSchema, `added search schema in '${scopeName}'`)
+      assertFieldNameMap(params.canonicalFieldsMap, `added canonical fields in '${scopeName}'`)
+      const scope = api.resources[scopeName]
       const storedBefore = scopeOptionsRegistry.get(scopeName) || {}
-      const canonicalEntries = params.canonicalFieldsMap ? { ...params.canonicalFieldsMap } : null
-      let latestDescriptor = null
-      for (const [fieldName, definition] of Object.entries(params.fields)) {
-        if (scope) {
-          scope.scopeOptions.schema[fieldName] = definition
-        }
-        const canonicalEntry = canonicalEntries ? canonicalEntries[fieldName] : null
-        if (canonicalEntries) {
-          delete canonicalEntries[fieldName]
-        }
-        latestDescriptor = await registry.allocateField({
-          tenant: tenantId,
-          resource: scopeName,
-          fieldName,
-          definition,
-          canonicalField: canonicalEntry,
-        })
-      }
-      if (canonicalEntries && Object.keys(canonicalEntries).length > 0) {
-        const unknown = Object.keys(canonicalEntries).join(', ')
+      const unknown = Object.keys(params.canonicalFieldsMap || {}).filter(field => !Object.hasOwn(params.fields, field))
+      if (unknown.length) {
         throw new Error(`canonicalFieldsMap contains unknown fields for addKnexFields: ${unknown}`)
       }
-      if (scope && latestDescriptor?.canonicalFieldMap) {
-        scope.scopeOptions.canonicalFieldsMap = latestDescriptor.canonicalFieldMap
-      }
-      if (scope && params.searchSchema) {
-        scope.scopeOptions.searchSchema = {
-          ...(scope.scopeOptions.searchSchema || {}),
-          ...params.searchSchema,
+      const updatedStored = snapshotResourceConfiguration({
+        ...storedBefore,
+        schema: { ...storedBefore.schema, ...params.fields },
+        searchSchema: { ...storedBefore.searchSchema, ...params.searchSchema }
+      })
+      const compiled = { scopeOptions: updatedStored, vars: { idProperty: scope.vars.idProperty } }
+      await compileSchemas(compiled, { context: { scopeName }, runHooks: (name, context) => api.runHooks(name, context) })
+      await api.transaction(async transaction => {
+        for (const fieldName of Object.keys(params.fields)) {
+          await registry.allocateField({
+            tenant: tenantId,
+            resource: scopeName,
+            fieldName,
+            definition: compiled.vars.schemaInfo.schemaStructure[fieldName] || compiled.vars.schemaInfo.computed[fieldName],
+            canonicalField: params.canonicalFieldsMap?.[fieldName]
+          }, { transaction })
         }
-      }
-      const updatedStored = {
-        schema: scope?.scopeOptions?.schema || storedBefore.schema || {},
-        relationships: scope?.scopeOptions?.relationships || storedBefore.relationships || {},
-        searchSchema: scope?.scopeOptions?.searchSchema || storedBefore.searchSchema || null,
-        tableName: scope?.scopeOptions?.tableName || storedBefore.tableName || scopeName,
-        idProperty: scope?.scopeOptions?.idProperty || storedBefore.idProperty || scope?.vars?.idProperty || vars.idProperty || 'id',
-        canonicalFieldsMap: scope?.scopeOptions?.canonicalFieldsMap || storedBefore.canonicalFieldsMap || null,
-      }
+      })
+      registry.invalidateDescriptor(tenantId, scopeName)
       scopeOptionsRegistry.set(scopeName, updatedStored)
-      await rehydrateSchemaInfo(scopeName)
+      await refreshStorageDescriptor(scopeName, compiled.vars.schemaInfo)
     })
 
     addScopeMethod('alterKnexFields', async () => {

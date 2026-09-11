@@ -6,12 +6,9 @@ import {
   validateJsonApiStructure,
   resourceIdentifier,
   cleanTables,
-  countRecords,
   createJsonApiDocument,
   createRelationship,
-  createToManyRelationship,
-  assertResourceAttributes,
-  assertResourceRelationship
+  createToManyRelationship
 } from './helpers/test-utils.js'
 
 // Create Knex instance for tests
@@ -55,7 +52,7 @@ describe('Query Operations', () => {
         const doc = createJsonApiDocument('countries', { name, code })
         const result = await basicApi.resources.countries.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
         countries.push(result.data)
       }
@@ -72,7 +69,7 @@ describe('Query Operations', () => {
           )
           const result = await basicApi.resources.publishers.post({
             inputRecord: doc,
-            simplified: false
+            format: 'jsonapi'
           })
           publishers.push({ ...result.data, countryId: country.id })
         }
@@ -85,7 +82,7 @@ describe('Query Operations', () => {
         const doc = createJsonApiDocument('authors', { name })
         const result = await basicApi.resources.authors.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
         authors.push(result.data)
       }
@@ -116,7 +113,7 @@ describe('Query Operations', () => {
         )
         const result = await basicApi.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
         testData.books.push(result.data)
       }
@@ -127,7 +124,7 @@ describe('Query Operations', () => {
         queryParams: {
           filters: { country: testData.countries[0].id }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -151,7 +148,7 @@ describe('Query Operations', () => {
             publisher: testData.publishers[0].id
           }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -164,7 +161,7 @@ describe('Query Operations', () => {
         queryParams: {
           filters: { country: 99999 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -178,7 +175,7 @@ describe('Query Operations', () => {
             queryParams: {
               filters: { invalid_field: 'test' }
             },
-            simplified: false
+            format: 'jsonapi'
           })
         },
         (err) => {
@@ -199,7 +196,7 @@ describe('Query Operations', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create books with different titles
@@ -213,7 +210,7 @@ describe('Query Operations', () => {
         })
         await basicApi.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -223,7 +220,7 @@ describe('Query Operations', () => {
         queryParams: {
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -238,7 +235,7 @@ describe('Query Operations', () => {
         queryParams: {
           sort: ['-title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -255,12 +252,12 @@ describe('Query Operations', () => {
 
       const country1Result = await basicApi.resources.countries.post({
         inputRecord: countryDoc1,
-        simplified: false
+        format: 'jsonapi'
       })
 
       const country2Result = await basicApi.resources.countries.post({
         inputRecord: countryDoc2,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create books
@@ -278,7 +275,7 @@ describe('Query Operations', () => {
         )
         await basicApi.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
 
@@ -287,7 +284,7 @@ describe('Query Operations', () => {
         queryParams: {
           sort: ['country', '-title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       // We expect 8 books total (4 from beforeEach + 4 from this test)
@@ -335,7 +332,7 @@ describe('Query Operations', () => {
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
         inputRecord: countryDoc,
-        simplified: false
+        format: 'jsonapi'
       })
 
       // Create 10 books
@@ -346,7 +343,7 @@ describe('Query Operations', () => {
         )
         await basicApi.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -358,7 +355,7 @@ describe('Query Operations', () => {
           page: { number: 1, size: 3 },
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(page1, true)
@@ -373,7 +370,7 @@ describe('Query Operations', () => {
           page: { number: 2, size: 3 },
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(page2, true)
@@ -394,7 +391,7 @@ describe('Query Operations', () => {
           page: { number: 4, size: 3 },
           sort: ['title']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(lastPage, true)
@@ -407,7 +404,7 @@ describe('Query Operations', () => {
         queryParams: {
           page: { number: 10, size: 5 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(emptyPage, true)
@@ -420,7 +417,7 @@ describe('Query Operations', () => {
         queryParams: {
           page: { number: 1, size: 200 } // Request more than max
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -446,7 +443,7 @@ describe('Query Operations', () => {
         })
         const result = await extendedApi.resources.countries.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
         countries.push(result.data)
       }
@@ -471,7 +468,7 @@ describe('Query Operations', () => {
         )
         await extendedApi.resources.books.post({
           inputRecord: doc,
-          simplified: false
+          format: 'jsonapi'
         })
       }
     })
@@ -483,7 +480,7 @@ describe('Query Operations', () => {
           sort: ['-price'],
           page: { number: 1, size: 2 }
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)
@@ -500,7 +497,7 @@ describe('Query Operations', () => {
           filters: { language: 'fr' },
           include: ['country']
         },
-        simplified: false
+        format: 'jsonapi'
       })
 
       validateJsonApiStructure(result, true)

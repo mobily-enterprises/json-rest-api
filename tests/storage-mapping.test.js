@@ -47,19 +47,10 @@ describe('Storage mapping', () => {
     })
 
     await api.use(RestApiPlugin, {
-      simplifiedApi: false,
-      simplifiedTransport: false,
+      format: 'jsonapi',
       sortableFields: ['id', 'displayName', 'loginCount', 'lastSeenAt', 'countryId', 'externalRef'],
-      returnRecordApi: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      },
-      returnRecordTransport: {
-        post: 'full',
-        put: 'full',
-        patch: 'full'
-      }
+      returning: 'full',
+
     })
     await api.use(RestApiKnexPlugin, { knex })
 
