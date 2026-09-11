@@ -95,3 +95,19 @@ Positioning remains experimental with documented concurrency limits; the S3
 adapter remains a documented demo/mock, not an actual upload implementation.
 This verification does not remove those limits. Development history and this
 review stay in `old/`, outside the published package.
+
+## Archived goal audit
+
+The automatic goal still refers to the former root plan and its original
+188-item compatibility-preserving scope. The maintained instructions subsequently
+allowed breaking API changes, expanded the plan to 214 items, paused consumers
+and positioning, and explicitly stopped library goal execution at the library-only
+Part B checkpoint. The plan now lives at `old/library-improvement-plan.md`.
+Its historical ledger records 138 checked items and 76 open items; these are not
+a fresh claim that all later release work has been reconciled item by item.
+
+The separately authorized runtime removal, repository cleanup, documentation and
+release verification are complete. They do not prove the remaining cross-repository
+migration and final acceptance items. Keep those items open and do not mark the
+full execution goal complete or restart paused work from an automatic continuation.
+No tests or consumer operations were run for this read-only scope audit.
