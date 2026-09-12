@@ -23,6 +23,10 @@ export function resolveReturning (value, fallback = 'full') {
 
 /** @param {object} options @returns {void} */
 export function rejectRemovedOptions (options) {
+  const removedInput = ['inputRecord', 'inputRecords'].filter(name => Object.hasOwn(options, name))
+  if (removedInput.length) {
+    throw new RestApiValidationError(`Removed input options: ${removedInput.join(', ')}. Use data or document.`, { fields: removedInput })
+  }
   const fields = ['simplified', 'simplifiedApi', 'simplifiedTransport', 'returnFullRecord', 'returnRecordApi', 'returnRecordTransport', 'isTransport']
     .filter(name => Object.hasOwn(options, name))
   if (fields.length) {

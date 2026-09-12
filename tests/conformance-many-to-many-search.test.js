@@ -38,7 +38,7 @@ describe(`Many-to-many search (${storageMode.mode})`, () => {
   })
   beforeEach(async () => { await fixture.reset() })
   after(async () => { await fixture?.close() })
-  const post = (scope, attributes) => fixture.api.resources[scope].post({ format: 'jsonapi', inputRecord: { data: { type: scope, attributes } } })
+  const post = (scope, attributes) => fixture.api.resources[scope].post({ format: 'jsonapi', document: { data: { type: scope, attributes } } })
 
   it('filters parents through an aliased membership and counts each parent once', async () => {
     const group = await post('groups', { name: 'Selected' })

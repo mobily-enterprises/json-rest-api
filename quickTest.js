@@ -54,21 +54,21 @@ await api.addResource('authors', {
 })
 await api.resources.authors.createKnexTable()
 
-// Plain records keep data inside inputRecord.
-const penguinResult = await api.resources.publishers.post({ format: 'plain', inputRecord: { name: 'Penguin Random House' } })
+// Plain resource values belong in the data argument.
+const penguinResult = await api.resources.publishers.post({ format: 'plain', data: { name: 'Penguin Random House' } })
 console.log('Created publisher:', inspect(penguinResult))
 
 // Calls can use the plugin defaults.
 const harperResult = await api.resources.publishers.post({
-  inputRecord: {
+  data: {
     name: 'HarperCollins'
   }
 })
 console.log('Created second publisher:', inspect(harperResult))
 
-// Select JSON:API explicitly for document input and output.
+// The document argument selects input; format independently selects output.
 const oxfordResult = await api.resources.publishers.post({
-  inputRecord: {
+  document: {
     data: {
       type: 'publishers',
       attributes: {
@@ -81,7 +81,7 @@ const oxfordResult = await api.resources.publishers.post({
 console.log('JSON:API response:', inspect(oxfordResult))
 
 // Plain relationship input uses the relationship name.
-const authorResult = await api.resources.authors.post({ format: 'plain', inputRecord: { name: 'George', surname: 'Orwell', publisher: penguinResult.id } })
+const authorResult = await api.resources.authors.post({ format: 'plain', data: { name: 'George', surname: 'Orwell', publisher: penguinResult.id } })
 console.log('Created author:', inspect(authorResult))
 
 // Get all publishers
@@ -102,7 +102,7 @@ const searchResult = await api.resources.authors.query({
 console.log('Search results:', inspect(searchResult))
 
 // Update an author
-const updateResult = await api.resources.authors.patch({ id: authorResult.id, format: 'plain', inputRecord: { surname: 'Orwell (Eric Blair)' } })
+const updateResult = await api.resources.authors.patch({ id: authorResult.id, format: 'plain', data: { surname: 'Orwell (Eric Blair)' } })
 console.log('Updated author:', inspect(updateResult))
 
 const app = express()

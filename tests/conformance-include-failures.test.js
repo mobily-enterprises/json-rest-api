@@ -112,7 +112,7 @@ describe(`Include projection failure boundaries (${storageMode.mode})`, () => {
           try {
             await assert.rejects(fixture.api.resources[relationship.source].patch({
               id: records[relationship.source].id,
-              inputRecord: format === 'plain' ? { name: 'Changed' } : { data: { type: relationship.source, id: records[relationship.source].id, attributes: { name: 'Changed' } } },
+              [format === 'plain' ? 'data' : 'document']: format === 'plain' ? { name: 'Changed' } : { data: { type: relationship.source, id: records[relationship.source].id, attributes: { name: 'Changed' } } },
               format,
               returning: 'full',
               queryParams: borrowed ? queryParams : { include: [relationship.include] },

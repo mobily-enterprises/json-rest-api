@@ -40,12 +40,12 @@ describe(`Stored file handles (${storageMode.mode})`, () => {
       const attributes = { title: 'Document', attachment: '/uploads/été-😀.png' }
       const input = () => format === 'plain' ? { ...attributes } : { data: { type: 'documents', attributes: { ...attributes } } }
       const fields = result => format === 'plain' ? result : result.data.attributes
-      const created = await resource.post({ inputRecord: input(), format })
+      const created = await resource.post({ [format === 'plain' ? 'data' : 'document']: input(), format })
       const id = format === 'plain' ? created.id : created.data.id
       assert.deepEqual(fields(created).attachment, attributes.attachment)
       for (const method of ['patch', 'put']) {
         attributes.attachment = `/uploads/${method}-日本語.png`
-        assert.equal(fields(await resource[method]({ id, inputRecord: input(), format })).attachment, attributes.attachment)
+        assert.equal(fields(await resource[method]({ id, [format === 'plain' ? 'data' : 'document']: input(), format })).attachment, attributes.attachment)
         assert.equal(fields(await resource.get({ id, format })).attachment, attributes.attachment)
         const records = (await resource.query({ format })).data
         assert.equal((format === 'plain' ? records[0] : records[0].attributes).attachment, attributes.attachment)
@@ -142,7 +142,7 @@ describe(`File cleanup diagnostic previews (${storageMode.mode})`, () => {
         const context = {}
         writeFailure = failed
         const operation = fixture.api.resources.documents.post({
-          format, inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
+          format, [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
         }, context)
         if (failed) await assert.rejects(operation, error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
         else await operation
@@ -271,7 +271,7 @@ describe(`File cleanup failure boundaries (${storageMode.mode})`, () => {
     detectorState.payload = { fields: { title: 'Document' }, files }
   }
   const post = (format, context, transaction) => fixture.api.resources.documents.post({
-    inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }, format, transaction
+    [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }, format, transaction
   }, context)
   const failWarnings = t => {
     const warn = fixture.api.log.warn
@@ -303,7 +303,7 @@ describe(`File cleanup failure boundaries (${storageMode.mode})`, () => {
                 id,
                 transaction,
                 format,
-                inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
+                [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
               }, contexts[0])
             } else id = idOf(await post(format, contexts[0], transaction))
             await prepare('second-')
@@ -312,7 +312,7 @@ describe(`File cleanup failure boundaries (${storageMode.mode})`, () => {
               id,
               transaction,
               format,
-              inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
+              [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
             }, contexts[1])
             if (outcome === 'caught write failure') {
               await assert.rejects(patch, error => assertWriteFailure(error, { cause: primary, outcome: 'pending' }))
@@ -404,7 +404,7 @@ describe(`File cleanup failure boundaries (${storageMode.mode})`, () => {
             id,
             transaction,
             format,
-            inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
+            [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
           }, contexts[index])
         }
         await fixture.api.resources.documents.delete({ id, transaction }, contexts[2])
@@ -629,16 +629,16 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
       for (const commit of [false, true]) {
         it(`${format} retains shared committed files after ${method} ${commit ? 'commit' : 'rollback'}`, async () => {
           detectorState.payload = payload('shared committed bytes')
-          const first = await fixture.api.resources.documents.post({ inputRecord: inputRecord(), format })
+          const first = await fixture.api.resources.documents.post({ [format === 'plain' ? 'data' : 'document']: inputRecord(), format })
           const id = idOf(first)
           detectorState.payload = null
           const second = await fixture.api.resources.documents.post({
-            inputRecord: inputRecord({ title: 'Second owner', attachment: '/uploads/shared.png' }), format
+            [format === 'plain' ? 'data' : 'document']: inputRecord({ title: 'Second owner', attachment: '/uploads/shared.png' }), format
           })
           if (method !== 'delete') detectorState.payload = payload('replacement bytes')
           const context = {}
           const work = fixture.api.transaction(async transaction => {
-            await fixture.api.resources.documents[method]({ id, transaction, format, ...(method === 'delete' ? {} : { inputRecord: inputRecord() }) }, context)
+            await fixture.api.resources.documents[method]({ id, transaction, format, ...(method === 'delete' ? {} : { [format === 'plain' ? 'data' : 'document']: inputRecord() }) }, context)
             assert.equal(await readFile(join(directory, 'shared.png'), 'utf8'), 'shared committed bytes')
             if (method !== 'delete') assert.equal(await readFile(join(directory, 'shared_1.png'), 'utf8'), 'replacement bytes')
             if (!commit) throw primary
@@ -667,7 +667,7 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
     }
 
     it(`${format} cleans a new upload after the real document insert rejects a duplicate ID`, async () => {
-      const original = await fixture.api.resources.documents.post({ inputRecord: inputRecord({ title: 'Existing' }), format })
+      const original = await fixture.api.resources.documents.post({ [format === 'plain' ? 'data' : 'document']: inputRecord({ title: 'Existing' }), format })
       detectorState.payload = payload('failed duplicate bytes')
       const record = inputRecord()
       if (format === 'plain') record.id = idOf(original)
@@ -677,7 +677,7 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
       const context = {}
       fixture.knex.on('query-error', capture)
       try {
-        await assert.rejects(fixture.api.resources.documents.post({ inputRecord: record, format }, context), error => {
+        await assert.rejects(fixture.api.resources.documents.post({ [format === 'plain' ? 'data' : 'document']: record, format }, context), error => {
           assert.ok(databaseError, 'The failure must come from an executed SQL statement')
           assert.equal(originalCause(error), databaseError)
           return assertWriteFailure(error, { outcome: 'rolledBack' })
@@ -696,7 +696,7 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
         : { data: { type: 'documents', attributes: {}, relationships: { notes: { data: [{ type: 'notes', id: note.id }] } } } }
       failRelationship = true
       const context = {}
-      await assert.rejects(fixture.api.resources.documents.post({ inputRecord: record, format }, context), error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
+      await assert.rejects(fixture.api.resources.documents.post({ [format === 'plain' ? 'data' : 'document']: record, format }, context), error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
       assert.ok(changedNote?.data?.id, 'The child relationship was written before its finish hook rejected')
       assert.equal(await fixture.count('documents'), 0)
       assert.equal(await fixture.count('notes'), 1)
@@ -709,14 +709,14 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
       it(`${format} preserves committed bytes when a filename collision precedes ${writeFailure ? 'write' : 'callback'} rollback`, async t => {
         const inputRecord = () => format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
         detectorState.payload = payload('committed bytes')
-        const original = await fixture.api.resources.documents.post({ inputRecord: inputRecord(), format })
+        const original = await fixture.api.resources.documents.post({ [format === 'plain' ? 'data' : 'document']: inputRecord(), format })
         const id = format === 'plain' ? original.id : original.data.id
         detectorState.payload = payload('replacement bytes')
         // Model a competing upload claiming the filename after its availability check.
         t.mock.method(storage, 'generateFilename', async () => 'shared.png')
         const context = { failReplacement: writeFailure }
         await assert.rejects(fixture.api.transaction(async transaction => {
-          await fixture.api.resources.documents.patch({ id, inputRecord: inputRecord(), format, transaction }, context)
+          await fixture.api.resources.documents.patch({ id, [format === 'plain' ? 'data' : 'document']: inputRecord(), format, transaction }, context)
           throw primary
         }), error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
         assert.equal(await readFile(join(directory, 'shared.png'), 'utf8'), 'committed bytes')
@@ -791,7 +791,7 @@ describe(`Bulk file cleanup (${storageMode.mode})`, () => {
     }
     originalIds = []
     for (let index = 0; index < 3; index++) {
-      const record = await fixture.api.resources.documents.post({ format: 'plain', inputRecord: { title: `Original ${index}` } })
+      const record = await fixture.api.resources.documents.post({ format: 'plain', data: { title: `Original ${index}` } })
       originalIds.push(record.id)
     }
   })
@@ -831,7 +831,14 @@ describe(`Bulk file cleanup (${storageMode.mode})`, () => {
           await prepare()
           const ids = method === 'bulkPost' ? ['91', '92', '93'] : originalIds
           const records = ids.map((id, index) => format === 'plain' ? { id, title: `Changed ${index}` } : { type: 'documents', id, attributes: { title: `Changed ${index}` } })
-          const params = method === 'bulkPost' ? { inputRecords: records } : { operations: records.map((data, index) => ({ id: ids[index], data })) }
+          const params = method === 'bulkPost'
+            ? (format === 'plain' ? { data: records } : { document: { data: records } })
+            : {
+                operations: records.map((data, index) => ({
+                  id: ids[index],
+                  ...(format === 'plain' ? { data } : { document: { data } })
+                }))
+              }
           const context = { cleanupErrors: [{ phase: 'stale' }] }
           const result = await fixture.api.resources.documents[method]({ ...params, format, atomic: false }, context)
           const failed = scenario !== 'warnings'
@@ -876,7 +883,7 @@ describe(`Bulk file cleanup (${storageMode.mode})`, () => {
           const retained = [...(context.fileHandlingUploads || [])]
           probe = {}
           payloads = []
-          await fixture.api.resources.documents.bulkPost({ inputRecords: [{ id: '999', title: 'Recovery' }], format: 'plain', atomic: false }, context)
+          await fixture.api.resources.documents.bulkPost({ data: [{ id: '999', title: 'Recovery' }], format: 'plain', atomic: false }, context)
           assert.equal(context.cleanupErrors, undefined)
           assert.deepEqual(context.fileHandlingUploads || [], retained)
           for (const upload of retained) assert.equal(await exists(upload.url), true)

@@ -39,7 +39,7 @@ export default async function registerScopeRoutes ({ context, api, vars, log }) 
 
       // Add body for write operations
       if (['post', 'put', 'patch'].includes(methodName)) {
-        methodParams.inputRecord = body
+        methodParams.document = body
         methodParams.returning = 'full'
 
         // Add query params for includes/fields on write operations

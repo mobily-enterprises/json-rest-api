@@ -44,13 +44,13 @@ describe('Temporal storage and response boundaries', () => {
 
   it('rejects submillisecond writes without inserting or changing data', async () => {
     const precise = '2026-09-01T10:20:30.123456Z'
-    await assert.rejects(api.resources.events.post({ inputRecord: document({ occurredAt: precise }) }), assertValidationError)
+    await assert.rejects(api.resources.events.post({ document: document({ occurredAt: precise }) }), assertValidationError)
     assert.equal((await api.resources.events.query()).data.length, 0)
-    const created = await api.resources.events.post({ inputRecord: document({ occurredAt: '2026-09-01T10:20:30.123000Z' }) })
+    const created = await api.resources.events.post({ document: document({ occurredAt: '2026-09-01T10:20:30.123000Z' }) })
     for (const method of ['put', 'patch']) {
       const inputRecord = document({ occurredAt: precise })
       inputRecord.data.id = created.data.id
-      await assert.rejects(api.resources.events[method]({ id: created.data.id, inputRecord }), assertValidationError)
+      await assert.rejects(api.resources.events[method]({ id: created.data.id, document: inputRecord }), assertValidationError)
       const result = await api.resources.events.get({ id: created.data.id })
       assert.equal(result.data.attributes.occurredAt, '2026-09-01T10:20:30.123Z')
     }
@@ -75,7 +75,7 @@ describe('Temporal storage and response boundaries', () => {
 
   it('normalizes temporal query projections and follows their cursors', async () => {
     for (let index = 0; index < 4; index++) {
-      await api.resources.events.post({ inputRecord: document({ occurredAt: `2026-09-01T10:20:3${index}.123Z` }) })
+      await api.resources.events.post({ document: document({ occurredAt: `2026-09-01T10:20:3${index}.123Z` }) })
     }
     const queryParams = { sort: ['projectedAt'], fields: { events: 'projectedAt' }, page: { size: 2 } }
     const first = await api.resources.events.query({ queryParams })
@@ -90,7 +90,7 @@ describe('Temporal storage and response boundaries', () => {
 
   it('uses a custom serializer consistently for writes and filters', async () => {
     const value = '2026-09-01T10:20:30.123456Z'
-    const created = await api.resources.events.post({ inputRecord: document({ serializedAt: value }) })
+    const created = await api.resources.events.post({ document: document({ serializedAt: value }) })
     assert.equal(created.data.attributes.serializedAt, value)
     const filtered = await api.resources.events.query({ queryParams: { filters: { serializedAt: value } } })
     assert.deepEqual(filtered.data.map(entry => entry.id), [created.data.id])
@@ -99,7 +99,7 @@ describe('Temporal storage and response boundaries', () => {
   it('validates included fieldsets even when the relationship or collection is empty', async () => {
     const queryParams = { include: ['person'], fields: { people: 'missingField' } }
     await assert.rejects(api.resources.events.query({ queryParams }), { code: 'REST_API_FIELDSET_INVALID' })
-    const created = await api.resources.events.post({ inputRecord: document() })
+    const created = await api.resources.events.post({ document: document() })
     await assert.rejects(api.resources.events.get({ id: created.data.id, queryParams }), { code: 'REST_API_FIELDSET_INVALID' })
   })
 
@@ -130,7 +130,7 @@ describe('Temporal storage and response boundaries', () => {
   })
 
   it('preserves typed API errors thrown by computed fields', async () => {
-    const created = await api.resources.events.post({ inputRecord: document() })
+    const created = await api.resources.events.post({ document: document() })
     const definition = api.resources.events.vars.schemaInfo.computed.producedAt
     const original = definition.compute
     const error = new RestApiTemporalDataError({ field: 'producedAt', resourceType: 'events', fieldType: 'dateTime', source: 'response' })
@@ -143,7 +143,7 @@ describe('Temporal storage and response boundaries', () => {
   })
 
   it('preserves typed API errors thrown by getters', async () => {
-    const created = await api.resources.events.post({ inputRecord: document() })
+    const created = await api.resources.events.post({ document: document() })
     const schemaInfo = api.resources.events.vars.schemaInfo
     const originalGetters = schemaInfo.fieldGetters
     const originalOrder = schemaInfo.sortedGetterFields
@@ -195,15 +195,15 @@ describe('Temporal storage and response boundaries', () => {
   for (const simplified of [false, true]) {
     for (const method of ['post', 'put', 'patch']) {
       it(`normalizes ${method} finish values and included resources with simplified=${simplified}`, async () => {
-        const person = await api.resources.people.post({ inputRecord: createJsonApiDocument('people', { name: 'Person' }) })
+        const person = await api.resources.people.post({ document: createJsonApiDocument('people', { name: 'Person' }) })
         const inputRecord = document()
         inputRecord.data.relationships = { person: { data: { type: 'people', id: person.data.id } } }
-        const created = method === 'post' ? null : await api.resources.events.post({ inputRecord })
+        const created = method === 'post' ? null : await api.resources.events.post({ document: inputRecord })
         if (created) inputRecord.data.id = created.data.id
         finishValue = new Date('2026-09-08T11:22:33.987Z')
         const result = await api.resources.events[method]({
           ...(created ? { id: created.data.id } : {}),
-          inputRecord: simplified ? { ...inputRecord.data.attributes, person: person.data.id } : inputRecord,
+          [simplified ? 'data' : 'document']: simplified ? { ...inputRecord.data.attributes, person: person.data.id } : inputRecord,
           queryParams: { include: ['person'] },
           format: (simplified) ? 'plain' : 'jsonapi'
         })
@@ -213,7 +213,7 @@ describe('Temporal storage and response boundaries', () => {
     }
     it(`rejects invalid finish values with simplified=${simplified}`, async () => {
       finishValue = 'not-a-date'
-      await assert.rejects(api.resources.events.post({ inputRecord: simplified ? { name: 'Event' } : document(), format: simplified ? 'plain' : 'jsonapi' }), (error) => {
+      await assert.rejects(api.resources.events.post({ [simplified ? 'data' : 'document']: simplified ? { name: 'Event' } : document(), format: simplified ? 'plain' : 'jsonapi' }), (error) => {
         assert.equal(error.code, 'REST_API_TEMPORAL_DATA_INVALID')
         assert.equal(mapRestApiErrorToHttp(error).status, 500)
         return true

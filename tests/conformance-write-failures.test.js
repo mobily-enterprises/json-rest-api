@@ -41,7 +41,7 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
   for (const operation of operations) {
     it(`${operation.name} reports none for validation before accepting a transaction, even with reused context`, async () => {
       const context = {}
-      await fixture.api.resources.items.post({ inputRecord: structuredClone(inputRecord) }, context)
+      await fixture.api.resources.items.post({ document: structuredClone(inputRecord) }, context)
       assert.equal(context.transactionCommitted, true)
       await assert.rejects(fixture.api.resources.items[operation.method]({ format: 'invalid' }, context), error =>
         assertWriteFailure(error, { type: RestApiValidationError, outcome: 'none' }))
@@ -55,14 +55,14 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
     phase = 'finish'
     let pending
     await assert.rejects(fixture.api.transaction(async transaction => {
-      await assert.rejects(fixture.api.resources.items.post({ inputRecord: structuredClone(inputRecord), transaction }), error => {
+      await assert.rejects(fixture.api.resources.items.post({ document: structuredClone(inputRecord), transaction }), error => {
         pending = error
         return assertWriteFailure(error, { cause: primary, outcome: 'pending' })
       })
       assert.equal(transaction.isCompleted(), false)
       assert.equal((await transaction(fixture.storage === 'anyapi' ? 'any_records' : 'conformance_items')).length, 1)
     }), error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord: structuredClone(inputRecord) }), error => {
+    await assert.rejects(fixture.api.resources.items.post({ document: structuredClone(inputRecord) }), error => {
       assert.notEqual(error, pending)
       return assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' })
     })
@@ -77,7 +77,7 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
       t.mock.method(transaction, 'rollback', (...args) => { rollbacks++; return rollback(...args) })
     }
     phase = 'afterCommit'
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord: structuredClone(inputRecord) }), error =>
+    await assert.rejects(fixture.api.resources.items.post({ document: structuredClone(inputRecord) }), error =>
       assertWriteFailure(error, { cause: primary, outcome: 'committed' }))
     assert.equal(rollbacks, 0, 'post-commit errors must not attempt rollback')
     assert.equal(await fixture.count('items'), 1)
@@ -85,7 +85,7 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
 
   it('keeps an atomic child pending snapshot below the outer rollback snapshot', async () => {
     phase = 'finish'
-    await assert.rejects(fixture.api.resources.items.bulkPost({ inputRecords: [structuredClone(inputRecord.data)] }), error => {
+    await assert.rejects(fixture.api.resources.items.bulkPost({ document: { data: [structuredClone(inputRecord.data)] } }), error => {
       assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' })
       return assertWriteFailure(error.cause, { cause: primary, outcome: 'pending' })
     })
@@ -95,7 +95,7 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
   it('rejects an already-completed raw handle before acceptance without completing it again', async () => {
     const transaction = await fixture.knex.transaction()
     await transaction.rollback()
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord: structuredClone(inputRecord), transaction }), error =>
+    await assert.rejects(fixture.api.resources.items.post({ document: structuredClone(inputRecord), transaction }), error =>
       assertWriteFailure(error, { type: RestApiValidationError, outcome: 'none' }))
     assert.equal(await fixture.count('items'), 0)
   })
@@ -148,12 +148,12 @@ if (databaseClient === 'pg') {
         const params = operation.relationship
           ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
           : operation.method === 'bulkPost'
-            ? { inputRecords: [record('99', 'Changed'), record('100', 'Changed')] }
+            ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
             : operation.method === 'bulkPatch'
-              ? { operations: [item.id, other.id].map(id => ({ id, data: record(id, 'Changed') })) }
+              ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
               : operation.method === 'bulkDelete'
                 ? { ids: [item.id, other.id] }
-                : { id, inputRecord: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
+                : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
         const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']
         const context = {}
         enabled = true
@@ -233,12 +233,12 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
           const params = operation.relationship
             ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
             : operation.method === 'bulkPost'
-              ? { inputRecords: [record('99', 'Changed'), record('100', 'Changed')] }
+              ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
               : operation.method === 'bulkPatch'
-                ? { operations: [item.id, other.id].map(id => ({ id, data: record(id, 'Changed') })) }
+                ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
                 : operation.method === 'bulkDelete'
                   ? { ids: [item.id, other.id] }
-                  : { id, inputRecord: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
+                  : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
           const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']
           const context = {}
           enabled = true
@@ -324,12 +324,12 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
         const params = operation.relationship
           ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
           : operation.method === 'bulkPost'
-            ? { inputRecords: [record('99', 'Changed'), record('100', 'Changed')] }
+            ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
             : operation.method === 'bulkPatch'
-              ? { operations: [item.id, other.id].map(id => ({ id, data: record(id, 'Changed') })) }
+              ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
               : operation.method === 'bulkDelete'
                 ? { ids: [item.id, other.id] }
-                : { id, inputRecord: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
+                : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
         const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']
         enabled = true
         await assert.rejects(resource[operation.method](params, context), error => {
@@ -364,7 +364,7 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
       enabled = true
       try {
         await child('managed_transaction_audit').insert({ message: 'Raw savepoint work' })
-        await assert.rejects(fixture.api.resources.items.post({ inputRecord: { data: record('99', 'Rejected work') }, transaction: child }), error => assertWriteFailure(error, { type: RestApiValidationError, outcome: 'none' }))
+        await assert.rejects(fixture.api.resources.items.post({ document: { data: record('99', 'Rejected work') }, transaction: child }), error => assertWriteFailure(error, { type: RestApiValidationError, outcome: 'none' }))
         assert.equal(child.isCompleted(), false)
         assert.equal(commits, 0)
         assert.equal(rollbacks, 0)
@@ -472,7 +472,7 @@ describe(`Secondary write failures (${storageMode.mode})`, () => {
               }
             : {
                 id,
-                inputRecord: { data: { type: 'items', id, attributes: { name: 'Changed', ...(operation.method === 'put' ? { active: true, score: 0 } : {}) } } },
+                document: { data: { type: 'items', id, attributes: { name: 'Changed', ...(operation.method === 'put' ? { active: true, score: 0 } : {}) } } },
                 format: 'jsonapi',
                 returning: 'full'
               }

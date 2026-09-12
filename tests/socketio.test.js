@@ -108,7 +108,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -119,7 +119,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
 
         const createResult = await api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         })
 
@@ -160,7 +160,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -174,7 +174,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
 
         await api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         })
 
@@ -231,7 +231,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -288,7 +288,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
 
         await assert.rejects(api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         }))
 
@@ -327,7 +327,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -344,7 +344,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         )
 
         const createResult = await api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         })
 
@@ -373,7 +373,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
 
         const country = await api.resources.countries.post({
-          inputRecord: createJsonApiDocument('countries', {
+          document: createJsonApiDocument('countries', {
             name: 'Original Country',
             code: 'OC'
           }),
@@ -381,7 +381,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
 
         const nextCountry = await api.resources.countries.post({
-          inputRecord: createJsonApiDocument('countries', {
+          document: createJsonApiDocument('countries', {
             name: 'Next Country',
             code: 'NC'
           }),
@@ -389,7 +389,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         })
 
         const book = await api.resources.books.post({
-          inputRecord: createJsonApiDocument(
+          document: createJsonApiDocument(
             'books',
             { title: 'Relationship Patch Broadcast' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
@@ -448,16 +448,16 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         // Create a country first (required for books)
         const countryDoc = createJsonApiDocument('countries', { name: 'Multi Test Country', code: 'MT' })
-        const countryResult = await api.resources.countries.post({ inputRecord: countryDoc, format: 'jsonapi' })
+        const countryResult = await api.resources.countries.post({ document: countryDoc, format: 'jsonapi' })
 
         const bookDoc = createJsonApiDocument('books',
           { title: 'Multi Test Book' },
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
-        await api.resources.books.post({ inputRecord: bookDoc, format: 'jsonapi' })
+        await api.resources.books.post({ document: bookDoc, format: 'jsonapi' })
 
         const countryDoc2 = createJsonApiDocument('countries', { name: 'Multi Test Country 2', code: 'MT2' })
-        await api.resources.countries.post({ inputRecord: countryDoc2, format: 'jsonapi' })
+        await api.resources.countries.post({ document: countryDoc2, format: 'jsonapi' })
 
         // Flush server packets after the writes
         await drainSocketEvents(socket)
@@ -498,7 +498,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -510,7 +510,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           { title: 'After Unsub Book' },
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
-        await api.resources.books.post({ inputRecord: bookDoc, format: 'jsonapi' })
+        await api.resources.books.post({ document: bookDoc, format: 'jsonapi' })
 
         // Should not receive notification
         await drainSocketEvents(socket)
@@ -540,7 +540,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -550,7 +550,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         const createResult = await api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         })
         const bookId = createResult.data.id
@@ -571,7 +571,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
 
         await api.resources.books.patch({
           id: bookId,
-          inputRecord: patchDoc,
+          document: patchDoc,
           format: 'jsonapi'
         })
 
@@ -604,7 +604,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           code: 'TC'
         })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -614,7 +614,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         const createResult = await api.resources.books.post({
-          inputRecord: bookDoc,
+          document: bookDoc,
           format: 'jsonapi'
         })
         const bookId = createResult.data.id
@@ -655,7 +655,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
         // Create test data
         const countryDoc = createJsonApiDocument('countries', { name: 'Filter Country', code: 'FC' })
         const countryResult = await api.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -664,7 +664,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         const publisherResult = await api.resources.publishers.post({
-          inputRecord: publisherDoc,
+          document: publisherDoc,
           format: 'jsonapi'
         })
 
@@ -685,7 +685,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           }
         )
         await api.resources.books.post({
-          inputRecord: matchingBookDoc,
+          document: matchingBookDoc,
           format: 'jsonapi'
         })
 
@@ -699,7 +699,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         const otherPublisherResult = await api.resources.publishers.post({
-          inputRecord: otherPublisherDoc,
+          document: otherPublisherDoc,
           format: 'jsonapi'
         })
 
@@ -714,7 +714,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
           }
         )
         await api.resources.books.post({
-          inputRecord: nonMatchingBookDoc,
+          document: nonMatchingBookDoc,
           format: 'jsonapi'
         })
 

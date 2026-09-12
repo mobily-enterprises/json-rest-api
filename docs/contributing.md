@@ -64,6 +64,62 @@ servers and sockets. They do not operate on application databases. Consumer chec
 require an explicit path and command; library verification does not establish an
 application migration.
 
+## Resource stress checks
+
+`npm run test:stress` runs a bounded workload in both SQLite storage modes,
+separately from the full suite. It repeats authorized, paginated `tasks` and
+`shared_tasks` relationship reads with polymorphic `subject` includes. The
+fixture contains equal visible, policy-hidden and foreign-workspace groups;
+every response must contain exactly the expected visible records and includes.
+
+Four sequential write scenarios check owned and managed commit/rollback,
+persisted values and exact completion-hook counts. SQL is attributed to each
+operation with `AsyncLocalStorage`; fixed per-operation query ceilings and zero
+runtime metadata lookups are enforced. SQL attribution failures fail the run.
+
+To save one JSON report directly:
+
+```sh
+node scripts/stress-resources.js > /tmp/json-rest-api-stress-knex.json
+JSON_REST_API_STORAGE=anyapi node scripts/stress-resources.js > /tmp/json-rest-api-stress-anyapi.json
+```
+
+Store reports outside the tracked source tree. The report includes configuration,
+environment, per-scenario query counts, latency p50/p95/p99, throughput and memory
+samples. Timing includes correctness checks; writes include a persisted-state
+read. There are no machine-dependent latency or memory pass thresholds.
+
+| Environment variable | Default | Allowed values |
+| --- | ---: | --- |
+| `JSON_REST_API_STRESS_ROWS` | 100 | 1–1000 per visibility group |
+| `JSON_REST_API_STRESS_READS` | 200 | 2–100000 per batch |
+| `JSON_REST_API_STRESS_WRITES` | 32 | 4–20000 per batch, alternating four scenarios |
+| `JSON_REST_API_STRESS_CONCURRENCY` | 4 | 1–32 overlapping read operations |
+| `JSON_REST_API_STRESS_BATCHES` | 1 | 1–100 repetitions against the same fixture |
+| `JSON_REST_API_STRESS_PAGE_SIZE` | 20 | 1–100 |
+
+Totals across batches are capped at 100000 reads and 20000 writes. Defaults seed
+300 linked tasks plus a project and a task used as a polymorphic subject.
+Each independent operation receives fresh context. SQLite uses one in-memory
+connection, so overlapping reads queue their SQL; this does not test concurrent
+SQLite writers. Writes are sequential on every backend.
+
+For a longer bounded run with explicit retained-heap sampling:
+
+```sh
+JSON_REST_API_STRESS_BATCHES=10 node --expose-gc scripts/stress-resources.js > /tmp/json-rest-api-stress-soak.json
+```
+
+Without `--expose-gc`, memory samples describe ordinary heap/RSS fluctuations.
+With it, samples additionally record heap retained after requested garbage
+collection. Both are observations; a bounded run cannot establish leak freedom.
+The driver-aware fixture also supports native checks through the existing runner:
+
+```sh
+node scripts/test-databases.js pg scripts/stress-resources.js
+node scripts/test-databases.js mysql2 scripts/stress-resources.js
+```
+
 ## Real databases and Redis
 
 The database runner starts disposable servers and creates isolated test databases.

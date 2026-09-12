@@ -13,6 +13,8 @@ export type * from './types/autofilter.js'
 
 export { JsonRestApi } from './types/runtime.js'
 export type * from './types/runtime.js'
+export type * from './types/resource-schema.js'
+export type * from './types/hook-context.js'
 import type { LibraryPlugin } from './types/runtime.js'
 
 export const RestApiPlugin: LibraryPlugin<'rest-api'>

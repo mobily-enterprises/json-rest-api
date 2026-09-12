@@ -123,7 +123,7 @@ describe(`Stored relationship metadata (${storageMode.mode})`, () => {
       const inputRecord = format === 'plain'
         ? { subject: { _type: 'items', id: records.other.id } }
         : { data: { type: 'items', id: records.item.id, relationships: { subject: { data: { type: 'items', id: records.other.id } } } } }
-      await assert.rejects(fixture.api.resources.items.patch({ id: records.item.id, format, inputRecord }), { code: 'REST_API_VALIDATION' })
+      await assert.rejects(fixture.api.resources.items.patch({ id: records.item.id, format, [format === 'plain' ? 'data' : 'document']: inputRecord }), { code: 'REST_API_VALIDATION' })
     })
 
     for (const borrowed of [false, true]) {
@@ -134,7 +134,7 @@ describe(`Stored relationship metadata (${storageMode.mode})`, () => {
         corruptWrite = true
         try {
           const inputRecord = format === 'plain' ? { name: 'Changed' } : { data: { type: 'items', id: records.item.id, attributes: { name: 'Changed' } } }
-          await assert.rejects(fixture.api.resources.items.patch({ id: records.item.id, inputRecord, format, returning: 'full', transaction }, context), assertStoredTypeError)
+          await assert.rejects(fixture.api.resources.items.patch({ id: records.item.id, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning: 'full', transaction }, context), assertStoredTypeError)
           assert.equal(corruptions, 1)
           assert.equal(context.transactionCommitted, false)
           assert.equal(context.transaction.isCompleted(), !borrowed)

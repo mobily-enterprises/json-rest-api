@@ -31,7 +31,7 @@ describe(`Serializable connector transaction foundation (${storageMode.mode})`, 
       if (++arrivals === 2) barrier.resolve()
       await barrier.promise
       await fixture.api.resources.items.patch({
-        id, transaction, format: 'plain', returning: 'none', inputRecord: { name: 'Consumed' }
+        id, transaction, format: 'plain', returning: 'none', data: { name: 'Consumed' }
       })
     }, { [serializableTransaction]: true }).catch(error => {
       barrier.resolve()

@@ -19,10 +19,10 @@ for (const transport of ['websocket', 'polling']) {
     const nodes = []
     const clients = new Set()
     const post = (node, name, accessGroup = 'group-a', context = seeded.admin) => nodes[node].api.resources.policy_projects.post({
-      format: 'plain', inputRecord: { name, access_group: accessGroup }
+      format: 'plain', data: { name, access_group: accessGroup }
     }, context)
     const patch = (node, id, attributes) => nodes[node].api.resources.policy_projects.patch({
-      id, format: 'plain', inputRecord: attributes
+      id, format: 'plain', data: attributes
     }, seeded.admin)
     const connect = async (node, token = 'viewer') => {
       const socket = ioClient(`http://127.0.0.1:${nodes[node].server.address().port}`, {
@@ -146,7 +146,7 @@ for (const transport of ['websocket', 'polling']) {
           const events = await subscribe(await connect(1 - writer))
           failBulkIndex = 1
           const records = Array.from({ length: 3 }, (_, index) => ({ name: `Bulk ${index}`, access_group: 'group-a' }))
-          const params = method === 'bulkPost' ? { inputRecords: records } : method === 'bulkPatch' ? { operations: records.map((data, index) => ({ id: ids[index], data })) } : { ids }
+          const params = method === 'bulkPost' ? { data: records } : method === 'bulkPatch' ? { operations: records.map((data, index) => ({ id: ids[index], data })) } : { ids }
           const context = { ...seeded.admin }
           const result = await nodes[writer].api.resources.policy_projects[method]({ ...params, atomic: false, format: 'plain' }, context)
           assert.deepEqual(result.errors.map(entry => [entry.index, entry.error.message]), [[1, bulkError.message]])
@@ -225,7 +225,7 @@ for (const transport of ['websocket', 'polling']) {
       it(`delivers a committed ${method} to the remote parent subscription`, async () => {
         const events = await subscribe(await connect(1))
         const task = await nodes[0].api.resources.policy_tasks.post({
-          format: 'plain', inputRecord: { title: 'Additional task', access_group: 'group-a' }
+          format: 'plain', data: { title: 'Additional task', access_group: 'group-a' }
         }, seeded.admin)
         await nodes[0].api.resources.policy_projects[method]({
           id: seeded.project.id,

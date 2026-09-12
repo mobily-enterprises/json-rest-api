@@ -35,7 +35,7 @@ const groupContext = (...groups) => ({
 
 const postProject = async (name, accessGroup, context = adminContext()) => {
   return api.resources.policy_projects.post({
-    inputRecord: createJsonApiDocument('policy_projects', {
+    document: createJsonApiDocument('policy_projects', {
       name,
       access_group: accessGroup
     }),
@@ -51,7 +51,7 @@ const postTask = async ({ title, accessGroup, projectId, context = adminContext(
       }
 
   return api.resources.policy_tasks.post({
-    inputRecord: createJsonApiDocument('policy_tasks', {
+    document: createJsonApiDocument('policy_tasks', {
       title,
       access_group: accessGroup
     }, relationships),
@@ -250,7 +250,7 @@ describe('RowPolicy Plugin', () => {
     await assert.rejects(
       api.resources.policy_projects.patch({
         id: hidden.data.id,
-        inputRecord: {
+        document: {
           data: {
             type: 'policy_projects',
             id: hidden.data.id,

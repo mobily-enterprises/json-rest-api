@@ -139,11 +139,11 @@ const acmeContext = { session: { workspaceId: 'acme' } }
 const otherContext = { session: { workspaceId: 'other' } }
 for (const title of ['Alpha', 'Beta']) {
   await api.resources.documents.post({
-    inputRecord: { title, workspace_id: 'acme' }, returning: 'none'
+    data: { title, workspace_id: 'acme' }, returning: 'none'
   }, acmeContext)
 }
 await api.resources.documents.post({
-  inputRecord: { title: 'Other workspace', workspace_id: 'other' }, returning: 'none'
+  data: { title: 'Other workspace', workspace_id: 'other' }, returning: 'none'
 }, otherContext)
 
 const acmePage = await api.resources.documents.query({

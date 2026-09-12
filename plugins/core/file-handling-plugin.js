@@ -13,12 +13,14 @@
  *
  * Usage:
  * ```javascript
+ * import { LocalStorage } from 'json-rest-api';
+ *
  * // 1. Define schema with file fields
  * const imageSchema = {
  *   title: { type: 'string' },
  *   uploadedImage: {
  *     type: 'file',
- *     storage: S3Storage,
+ *     storage: new LocalStorage({ directory: './uploads' }),
  *     accepts: ['image/jpeg', 'image/png']
  *   }
  * };

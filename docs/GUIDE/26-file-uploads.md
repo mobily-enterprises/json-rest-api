@@ -196,8 +196,8 @@ and lists it followed by cleanup failures in `errors`; the destination may
 remain for reconciliation. The adapter does not retry a write or rerun a custom
 name generator after partial failure. Only an occupied-name reservation is retried.
 
-The included `S3Storage` is a mock/demo URL generator and does not upload bytes
-to Amazon S3; provide a real adapter for that service.
+For remote object storage, provide an adapter implementing the same `upload`
+and `delete` methods. The library includes `LocalStorage` only.
 
 Custom detectors can still return `file.cleanup()`. `FileHandlingPlugin` awaits
 those callbacks after processing, including validation failures. Built-in

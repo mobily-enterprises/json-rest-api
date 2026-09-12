@@ -67,8 +67,8 @@ const guides = {
   },
   hooks: {
     filename: '13-hooks-and-lifecycle.md',
-    names: 'fullNote, minimalNote, fullEvents, minimalEvents',
-    blockCount: 3
+    names: 'fullNote, minimalNote, fullEvents, minimalEvents, noteContext, permissionContext, editedNote, lookupsAfterEdit, editableNote, readOnlyNote, notifications, notificationsBeforeCommit, notificationsAfterCommit',
+    blockCount: 6
   },
   autofilter: {
     filename: '16-autofiltering.md',
@@ -102,7 +102,7 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         await ensureAnyApiSchema(knex)
         await api.use(library.RestApiAnyapiKnexPlugin, { knex, tenantId: 'guide' })
       } else if (knex) await api.use(library.RestApiKnexPlugin, { knex })
-      const result = await new AsyncFunction('api', 'console', 'RestApiValidationError', 'AutoFilterPlugin', 'JsonRestApi', 'RestApiPlugin', 'BulkOperationsPlugin', 'fastify', 'FastifyPlugin', 'QueryProjectionsPlugin', 'RowPolicyPlugin', `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`)(api, { log () {} }, library.RestApiValidationError, library.AutoFilterPlugin, JsonRestApi, library.RestApiPlugin, BulkOperationsPlugin, fastify, library.FastifyPlugin, library.QueryProjectionsPlugin, library.RowPolicyPlugin)
+      const result = await new AsyncFunction('api', 'console', 'RestApiValidationError', 'RestApiResourceError', 'AutoFilterPlugin', 'JsonRestApi', 'RestApiPlugin', 'BulkOperationsPlugin', 'fastify', 'FastifyPlugin', 'QueryProjectionsPlugin', 'RowPolicyPlugin', `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`)(api, { log () {} }, library.RestApiValidationError, library.RestApiResourceError, library.AutoFilterPlugin, JsonRestApi, library.RestApiPlugin, BulkOperationsPlugin, fastify, library.FastifyPlugin, library.QueryProjectionsPlugin, library.RowPolicyPlugin)
       const namesOf = collection => collection.data.map(record => record.name)
       if (guide === 'policies') {
         assert.deepEqual(result.acmePage.data.map(record => record.attributes.title), ['Alpha'])
@@ -184,7 +184,7 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         assert.equal(result.replacedProject.workspace_id, 'acme')
         assert.equal(result.replacedProject.name, 'Updated roadmap')
         assert.deepEqual(namesOf(result.otherPage), ['Other workspace'])
-        await assert.rejects(api.resources.projects.post({ inputRecord: { name: 'Mismatch', workspace_id: 'other' } }, { session: { workspaceId: 'acme' } }), error => error.cause instanceof library.RestApiValidationError && error.transactionOutcome === 'rolledBack')
+        await assert.rejects(api.resources.projects.post({ data: { name: 'Mismatch', workspace_id: 'other' } }, { session: { workspaceId: 'acme' } }), error => error.cause instanceof library.RestApiValidationError && error.transactionOutcome === 'rolledBack')
         await assert.rejects(api.resources.projects.query({}), { code: 'REST_API_AUTOFILTER_CONTEXT' })
         const after = await api.resources.projects.query({}, { session: { workspaceId: 'acme' } })
         assert.deepEqual(namesOf(after), ['Updated roadmap'])
@@ -194,6 +194,32 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         assert.deepEqual(result.minimalEvents, ['validate:post', 'write:post', 'finish:post', 'commit:post'])
         assert.deepEqual(result.minimalNote, { type: 'notes', id: result.minimalNote.id })
         assert.ok(result.minimalNote.id)
+        assert.equal(result.noteContext.savedNoteId, result.fullNote.id)
+        assert.equal(result.editedNote.title, 'Edited note')
+        assert.deepEqual(result.permissionContext.notePermissions, { canEdit: true })
+        assert.equal(result.lookupsAfterEdit, 1)
+        assert.equal(result.editableNote.canEdit, true)
+        assert.equal(result.readOnlyNote.canEdit, false)
+        assert.equal(result.notificationsBeforeCommit, 0)
+        assert.deepEqual(result.notificationsAfterCommit, [{ id: result.fullNote.id, title: 'Ready to share' }])
+        const sparse = await api.resources.notes.get({
+          id: result.fullNote.id, queryParams: { fields: { notes: 'title' } }
+        }, { auth: { userId: 'editor' } })
+        assert.deepEqual(sparse, { id: result.fullNote.id, title: 'Ready to share' })
+        const deniedContext = { auth: { userId: 'reader' } }
+        await assert.rejects(api.resources.notes.patch({
+          id: result.fullNote.id, data: { title: 'Denied edit' }
+        }, deniedContext), error => error.cause instanceof library.RestApiResourceError && error.subtype === 'forbidden' && error.transactionOutcome === 'rolledBack')
+        assert.deepEqual(deniedContext.notePermissions, { canEdit: false })
+        const cancellation = new Error('Cancel the notification example')
+        await assert.rejects(api.transaction(async transaction => {
+          await api.resources.notes.patch({
+            id: result.fullNote.id, data: { title: 'Rolled back edit' }, transaction
+          }, { auth: { userId: 'editor' } })
+          throw cancellation
+        }), error => error.cause === cancellation && error.transactionOutcome === 'rolledBack')
+        assert.deepEqual(result.notifications, result.notificationsAfterCommit)
+        assert.equal((await api.resources.notes.get({ id: result.fullNote.id })).title, 'Ready to share')
         const stored = await api.resources.notes.get({ id: result.minimalNote.id })
         assert.equal(stored.title, 'Second note')
       } else if (guide === 'transformations') {
@@ -211,7 +237,7 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         const adapter = api.knex.helpers.getStorageAdapter('products')
         const stored = await adapter.buildBaseQuery().select({ storedName: adapter.translateColumn('name'), storedCode: adapter.translateColumn('code') }).first()
         assert.deepEqual(stored, { storedName: 'Widget', storedCode: 'W01' })
-        await assert.rejects(api.resources.products.post({ inputRecord: { name: 'Rejected', code: 'R', price: 1, cost: 0, previewLabel: 'x'.repeat(21) } }), error => error.cause instanceof library.RestApiValidationError && error.transactionOutcome === 'rolledBack')
+        await assert.rejects(api.resources.products.post({ data: { name: 'Rejected', code: 'R', price: 1, cost: 0, previewLabel: 'x'.repeat(21) } }), error => error.cause instanceof library.RestApiValidationError && error.transactionOutcome === 'rolledBack')
       } else if (guide === 'relationship-urls') {
         assert.equal(result.linkage.data.length, 2)
         assert.deepEqual(namesOf(result.related), ['Peter Straub', 'Stephen King'])

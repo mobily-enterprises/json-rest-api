@@ -34,7 +34,9 @@ for (const format of ['jsonapi', 'plain']) {
       : {
           operations: [first, second].map(record => ({
             id: record.id,
-            data: format === 'plain' ? { name: 'Changed' } : { type: 'items', attributes: { name: 'Changed' } }
+            ...(format === 'plain'
+              ? { data: { name: 'Changed' } }
+              : { document: { data: { type: 'items', attributes: { name: 'Changed' } } } })
           }))
         }
 
@@ -111,9 +113,11 @@ for (const format of ['jsonapi', 'plain']) {
       for (const method of ['bulkPatch', 'bulkDelete']) {
         await assert.rejects(items[method]({ ...paramsFor(method), format, expectedVersion: 'token' }), error => error.code === 'REST_API_VALIDATION')
       }
-      const inputRecords = [format === 'plain' ? { name: 'Third' } : { type: 'items', attributes: { name: 'Third' } }]
+      const input = format === 'plain'
+        ? { data: [{ name: 'Third' }] }
+        : { document: { data: [{ type: 'items', attributes: { name: 'Third' } }] } }
       for (const condition of [{ expectedVersion: 'token' }, { expectedVersions: ['token'] }]) {
-        await assert.rejects(items.bulkPost({ inputRecords, format, ...condition }), error => error.code === 'REST_API_VALIDATION')
+        await assert.rejects(items.bulkPost({ ...input, format, ...condition }), error => error.code === 'REST_API_VALIDATION')
       }
       assert.equal(await fixture.count('items'), 2)
     })

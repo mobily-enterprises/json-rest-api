@@ -32,7 +32,7 @@ describe('Custom ID POST fallback when insert returning is unusable', () => {
       })
       try {
         const created = await fixture.api.resources.items.post({
-          inputRecord: format === 'plain'
+          [format === 'plain' ? 'data' : 'document']: format === 'plain'
             ? { id: '8', name: 'Created' }
             : { data: { type: 'items', id: '8', attributes: { name: 'Created' } } },
           format,

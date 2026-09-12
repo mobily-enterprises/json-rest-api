@@ -76,7 +76,7 @@ for (const strategy of ['standard', 'window']) {
           const result = await fixture.api.resources.items.post({
             format,
             returning,
-            inputRecord: format === 'plain'
+            [format === 'plain' ? 'data' : 'document']: format === 'plain'
               ? { id, name: 'Created', group: first, groups: [first, second] }
               : { data: { type: 'items', id, attributes: { name: 'Created' }, relationships: { group: { data: { type: 'groups', id: first } }, groups: { data: [first, second].map(id => ({ type: 'groups', id })) } } } }
           })
@@ -90,13 +90,13 @@ for (const strategy of ['standard', 'window']) {
     it('updates both adjacent targets without collapsing locks or pivot membership', async () => {
       const items = fixture.api.resources.items
       for (let attempt = 0; attempt < 2; attempt++) {
-        await items.patch({ id: owner, format: 'plain', inputRecord: { groups: [first, second], group: second } })
+        await items.patch({ id: owner, format: 'plain', data: { groups: [first, second], group: second } })
         const result = await items.get({ id: owner })
         assert.equal(result.data.relationships.group.data.id, second)
         assert.deepEqual(result.data.relationships.groups.data.map(row => row.id).sort(), [first, second])
       }
       assert.equal(await fixture.count('memberships'), 2)
-      await items.put({ id: owner, format: 'plain', inputRecord: { name: 'Replaced', active: true, score: 0, group: first, groups: [second] } })
+      await items.put({ id: owner, format: 'plain', data: { name: 'Replaced', active: true, score: 0, group: first, groups: [second] } })
       assert.deepEqual((await items.get({ id: owner })).data.relationships.groups.data, [{ type: 'groups', id: second }])
       await items.delete({ id: owner })
       assert.equal(await fixture.count('items'), 0)
@@ -125,7 +125,7 @@ for (const strategy of ['standard', 'window']) {
       const unit = await holdManagedTransaction(fixture.api)
       const transaction = unit.transaction
       try {
-        const pending = await fixture.api.resources.items.patch({ id: owner, transaction, format: 'plain', inputRecord: { name: 'Pending', groups: [second] } })
+        const pending = await fixture.api.resources.items.patch({ id: owner, transaction, format: 'plain', data: { name: 'Pending', groups: [second] } })
         assert.equal(pending.id, owner)
         const fetched = await fixture.api.resources.items.get({ id: owner, transaction, queryParams: { include: ['groups'] } })
         assert.deepEqual(fetched.data.relationships.groups.data, [{ type: 'groups', id: second }])
@@ -172,7 +172,7 @@ if (!storageMode.isAnyApi()) {
     for (const format of ['jsonapi', 'plain']) {
       for (const returning of ['minimal', 'full']) {
         it(`returns exact generated IDs (${format}, ${returning})`, async () => {
-          const result = await fixture.api.resources.items.post({ format, returning, inputRecord: format === 'plain' ? { name: 'Generated' } : { data: { type: 'items', attributes: { name: 'Generated' } } } })
+          const result = await fixture.api.resources.items.post({ format, returning, [format === 'plain' ? 'data' : 'document']: format === 'plain' ? { name: 'Generated' } : { data: { type: 'items', attributes: { name: 'Generated' } } } })
           const id = (format === 'plain' ? result : result.data).id
           assert.ok(BigInt(id) > BigInt(previous))
           const textType = fixture.knex.client.config.client === 'mysql2' ? 'char' : 'text'

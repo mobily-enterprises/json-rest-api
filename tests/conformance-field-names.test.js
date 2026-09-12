@@ -37,13 +37,13 @@ for (const naming of ['snake_case', 'exact']) {
     for (const name of names) {
       for (const format of ['jsonapi', 'plain']) {
         it(`round-trips ${name} through POST/PATCH/PUT and sparse GET (${format})`, async () => {
-          const created = await items.post({ format, returning: 'full', inputRecord: input({ name: 'Record', [name]: 'Original' }, format) })
+          const created = await items.post({ format, returning: 'full', [format === 'plain' ? 'data' : 'document']: input({ name: 'Record', [name]: 'Original' }, format) })
           const id = format === 'plain' ? created.id : created.data.id
           assert.equal(attributes(created, format)[name], 'Original')
           assert.equal(Object.hasOwn(attributes(created, format), name), true)
           for (const method of ['patch', 'put']) {
             const value = `After ${method}`
-            const changed = await items[method]({ id, format, returning: 'full', inputRecord: input({ name: 'Record', [name]: value }, format) })
+            const changed = await items[method]({ id, format, returning: 'full', [format === 'plain' ? 'data' : 'document']: input({ name: 'Record', [name]: value }, format) })
             assert.equal(attributes(changed, format)[name], value)
             const fetched = await items.get({ id, format, queryParams: { fields: { items: name } } })
             assert.equal(attributes(fetched, format)[name], value)
@@ -95,7 +95,7 @@ describe(`Prototype-named callback fields (${storageMode.mode})`, () => {
       const created = await items.post({
         format,
         returning: 'full',
-        inputRecord: input({ name: 'Record', constructor: 'source', toString: 'input' }, format),
+        [format === 'plain' ? 'data' : 'document']: input({ name: 'Record', constructor: 'source', toString: 'input' }, format),
         queryParams: { fields: { items: 'name,toString,valueOf' } }
       })
       assert.equal(attributes(created, format).toString, 'virtual:input')
@@ -104,7 +104,7 @@ describe(`Prototype-named callback fields (${storageMode.mode})`, () => {
       assert.equal(Object.hasOwn(attributes(created, format), 'constructor'), false)
     })
     it(`does not run getters for inherited or unselected values (${format})`, async () => {
-      const created = await items.post({ returning: 'none', inputRecord: createJsonApiDocument('items', { name: 'Record', constructor: 'source' }) })
+      const created = await items.post({ returning: 'none', document: createJsonApiDocument('items', { name: 'Record', constructor: 'source' }) })
       assert.equal(created, undefined)
       calls.length = 0
       const result = await items.query({ format, queryParams: { fields: { items: 'name' } } })
@@ -156,7 +156,7 @@ describe(`Prototype-named setters (${storageMode.mode})`, () => {
   after(async () => fixture?.close())
   for (const format of ['jsonapi', 'plain']) {
     it(`runs supplied setters with own values (${format})`, async () => {
-      const result = await items.post({ format, returning: 'full', inputRecord: input({ name: 'Record', constructor: 'input', toString: 'supplied' }, format) })
+      const result = await items.post({ format, returning: 'full', [format === 'plain' ? 'data' : 'document']: input({ name: 'Record', constructor: 'input', toString: 'supplied' }, format) })
       assert.equal(attributes(result, format).constructor, 'INPUT')
       assert.equal(attributes(result, format).toString, 'supplied')
       assert.deepEqual(calls, [['constructor', 'input', 'input'], ['toString', 'supplied', 'supplied']])
@@ -165,7 +165,7 @@ describe(`Prototype-named setters (${storageMode.mode})`, () => {
       const created = await fixture.seed('items', { name: 'Record' })
       assert.deepEqual(calls, [['toString', undefined, undefined]])
       calls.length = 0
-      const result = await items.patch({ id: created.id, format, returning: 'full', inputRecord: input({ name: 'Updated' }, format) })
+      const result = await items.patch({ id: created.id, format, returning: 'full', [format === 'plain' ? 'data' : 'document']: input({ name: 'Updated' }, format) })
       assert.equal(attributes(result, format).constructor, null)
       assert.equal(attributes(result, format).toString, 'derived')
       assert.deepEqual(calls, [['toString', undefined, undefined]])
@@ -185,7 +185,7 @@ describe(`Prototype-named configuration (${storageMode.mode})`, () => {
         else {
           await createFixture()
           const created = await fixture.seed('items', { name: 'Record', [name]: 'Before' })
-          const changed = await fixture.api.resources.items.patch({ id: created.id, returning: 'full', inputRecord: createJsonApiDocument('items', { [name]: 'After' }) })
+          const changed = await fixture.api.resources.items.patch({ id: created.id, returning: 'full', document: createJsonApiDocument('items', { [name]: 'After' }) })
           assert.equal(changed.data.attributes[name], 'After')
         }
       } finally { await fixture?.close() }
@@ -267,7 +267,7 @@ describe(`Overlapping logical and physical field mappings (${storageMode.mode})`
           id: created.id,
           format,
           returning: 'full',
-          inputRecord: input({ name: 'Record', first: 'One', second: 'Two' }, format)
+          [format === 'plain' ? 'data' : 'document']: input({ name: 'Record', first: 'One', second: 'Two' }, format)
         })
         assert.equal(minimal.attributes.first, 'One')
         assert.equal(minimal.attributes.second, 'Two')

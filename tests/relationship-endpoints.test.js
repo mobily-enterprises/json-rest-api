@@ -107,7 +107,7 @@ describe('Relationship Endpoints Plugin', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       countryId = countryResult.data.id
@@ -118,7 +118,7 @@ describe('Relationship Endpoints Plugin', () => {
         { country: createRelationship(resourceIdentifier('countries', countryId)) }
       )
       const bookResult = await api.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
       book1Id = bookResult.data.id
@@ -126,21 +126,21 @@ describe('Relationship Endpoints Plugin', () => {
       // Create authors
       const author1Doc = createJsonApiDocument('authors', { name: 'Author One' })
       const author1Result = await api.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
       author1Id = author1Result.data.id
 
       const author2Doc = createJsonApiDocument('authors', { name: 'Author Two' })
       const author2Result = await api.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
       author2Id = author2Result.data.id
 
       const author3Doc = createJsonApiDocument('authors', { name: 'Author Three' })
       const author3Result = await api.resources.authors.post({
-        inputRecord: author3Doc,
+        document: author3Doc,
         format: 'jsonapi'
       })
       author3Id = author3Result.data.id
@@ -393,7 +393,7 @@ describe('Relationship Endpoints Plugin', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       countryId = countryResult.data.id
@@ -404,7 +404,7 @@ describe('Relationship Endpoints Plugin', () => {
         { country: createRelationship(resourceIdentifier('countries', countryId)) }
       )
       const publisherResult = await api.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
       publisherId = publisherResult.data.id
@@ -418,7 +418,7 @@ describe('Relationship Endpoints Plugin', () => {
         }
       )
       await api.resources.books.post({
-        inputRecord: book1Doc,
+        document: book1Doc,
         format: 'jsonapi'
       })
 
@@ -430,7 +430,7 @@ describe('Relationship Endpoints Plugin', () => {
         }
       )
       await api.resources.books.post({
-        inputRecord: book2Doc,
+        document: book2Doc,
         format: 'jsonapi'
       })
     })
@@ -462,7 +462,7 @@ describe('Relationship Endpoints Plugin', () => {
 
     it('persists hasMany changes through real HTTP relationship routes', async () => {
       const created = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books', { title: 'New member' }, {
+        document: createJsonApiDocument('books', { title: 'New member' }, {
           country: createRelationship(resourceIdentifier('countries', countryId))
         }),
         format: 'jsonapi'
@@ -482,7 +482,7 @@ describe('Relationship Endpoints Plugin', () => {
 
     it('follows real HTTP pagination links within the same parent relationship', async () => {
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books', { title: 'Unrelated' }, {
+        document: createJsonApiDocument('books', { title: 'Unrelated' }, {
           country: createRelationship(resourceIdentifier('countries', countryId))
         }),
         format: 'jsonapi'
@@ -516,13 +516,13 @@ describe('Relationship Endpoints Plugin', () => {
       ])
 
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
         format: 'jsonapi'
       })
       countryId = country.data.id
 
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument(
+        document: createJsonApiDocument(
           'books',
           { title: 'Cardinality Book' },
           { country: createRelationship(resourceIdentifier('countries', countryId)) }
@@ -532,7 +532,7 @@ describe('Relationship Endpoints Plugin', () => {
       bookId = book.data.id
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Author One' }),
+        document: createJsonApiDocument('authors', { name: 'Author One' }),
         format: 'jsonapi'
       })
       authorId = author.data.id
@@ -643,19 +643,19 @@ describe('Relationship Endpoints Plugin', () => {
       ])
 
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
         format: 'jsonapi'
       })
       countryId = country.data.id
 
       const secondCountry = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Canada', code: 'CA' }),
+        document: createJsonApiDocument('countries', { name: 'Canada', code: 'CA' }),
         format: 'jsonapi'
       })
       secondCountryId = secondCountry.data.id
 
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument(
+        document: createJsonApiDocument(
           'books',
           { title: 'Hook Book' },
           { country: createRelationship(resourceIdentifier('countries', countryId)) }
@@ -665,7 +665,7 @@ describe('Relationship Endpoints Plugin', () => {
       bookId = book.data.id
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Hook Author' }),
+        document: createJsonApiDocument('authors', { name: 'Hook Author' }),
         format: 'jsonapi'
       })
       authorId = author.data.id

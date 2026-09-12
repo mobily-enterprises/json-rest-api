@@ -20,7 +20,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
     const created = []
     const post = async (type, name, relationships = {}, hidden = false) => {
       const record = (await fixture.api.resources[type].post({
-        inputRecord: { data: { type, attributes: { name, note: null, access_group: hidden ? 'group-b' : 'group-a' }, relationships } }
+        document: { data: { type, attributes: { name, note: null, access_group: hidden ? 'group-b' : 'group-a' }, relationships } }
       }, admin)).data
       if (hidden) created.push(record)
       return record
@@ -289,7 +289,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
     })
     it('stores and filters scalar ID attributes and retains canonical slot positions after reload', async () => {
       const note = (await fixture.api.resources.notes.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'notes', attributes: { name: 'External seven', access_group: 'group-a', external_id: 7 }, relationships: { subject: linkage(group) }
           }
@@ -342,7 +342,7 @@ for (const connector of ['express', 'fastify']) {
     beforeEach(async () => {
       await fixture.reset()
       const group = (await fixture.api.resources.groups.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'groups', attributes: { name: 'Hidden group', access_group: 'group-b' }
           }
@@ -351,7 +351,7 @@ for (const connector of ['express', 'fastify']) {
       hiddenGroupId = group.id
       for (const [type, relationship] of [['items', 'group'], ['notes', 'subject']]) {
         await fixture.api.resources[type].post({
-          inputRecord: {
+          document: {
             data: {
               type, attributes: { name: 'Primary match', access_group: 'group-a' }, relationships: { [relationship]: linkage(group) }
             }
@@ -415,8 +415,8 @@ describe('Regular reference column collation', () => {
   beforeEach(async () => { await fixture.reset() })
   after(async () => { await fixture?.close() })
   it('preserves database collation when filtering a visible reference', async () => {
-    const group = (await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id: 'Case-sensitive', attributes: { name: 'Group' } } } })).data
-    const item = (await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: 'item', attributes: { name: 'Item' }, relationships: { group: linkage(group) } } } })).data
+    const group = (await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id: 'Case-sensitive', attributes: { name: 'Group' } } } })).data
+    const item = (await fixture.api.resources.items.post({ document: { data: { type: 'items', id: 'item', attributes: { name: 'Item' }, relationships: { group: linkage(group) } } } })).data
     const result = await fixture.api.resources.items.query({ queryParams: { filters: { group: 'case-sensitive' } } })
     assert.deepEqual(result.data.map(row => row.id), [item.id])
   })

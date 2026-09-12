@@ -1,7 +1,7 @@
 import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDatabase, databaseClient } from './helpers/test-database.js'
-import { introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
+import { introspectKnexColumnConstraints, introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
 import { addKnexFields, alterKnexFields, createKnexTable, generateKnexMigration, generateKnexMigrationDiff } from '../plugins/core/lib/dbTablesOperations.js'
 import { createRegularSchemaApi } from './fixtures/api-configs.js'
 import { cleanTables, createJsonApiDocument } from './helpers/test-utils.js'
@@ -84,7 +84,7 @@ for (const naming of ['snake_case', 'exact']) {
         assert.deepEqual(current.indexes[0].columns, ['legacy_name', columnName])
         assertEmptyPlan(await items.generateKnexMigrationDiff())
         assert.equal(defaultCalls, 0)
-        const result = await items.post({ inputRecord: createJsonApiDocument('items', { displayName: 'Public' }) })
+        const result = await items.post({ document: createJsonApiDocument('items', { displayName: 'Public' }) })
         assert.equal(typeof result.data.id, 'string')
         assert.equal(result.data.attributes.loginCount, 0)
         assert.equal(result.data.attributes.runtimeLabel, 'Generated')
@@ -153,6 +153,13 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
   }
 
   if (databaseClient === 'mysql2') {
+    for (const columns of ['label(10)', '(lower(label))', 'label DESC']) {
+      it(`rejects an unrepresentable MySQL index on ${columns}`, async () => {
+        await create({ structure: { label: { type: 'string' } } })
+        await db.raw(`CREATE INDEX guarded_label ON ${tableName} (${columns})`)
+        await assert.rejects(snapshot(), /Index 'guarded_label'.*simple column-index snapshot/)
+      })
+    }
     for (const method of ['direct', 'generated']) {
       it(`creates, inspects and alters a native SET with escaped values (${method})`, async () => {
         const schema = { structure: { flags: { type: 'string', setValues: ['featured', "O'Brien", 'Path\\Leaf'], defaultTo: 'featured' } } }
@@ -185,14 +192,14 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
     }
   })
 
-  const createCompositeSchema = async () => {
+  const createCompositeSchema = async ({ unique = false } = {}) => {
     await createKnexTable(db, { tableName: 'schema_parents' }, {
       structure: { tenantKey: { type: 'integer', required: true }, userKey: { type: 'integer', required: true } },
       indexes: [{ name: 'uq_schema_parent_pair', columns: ['tenantKey', 'userKey'], unique: true }]
     })
     const schema = {
       structure: { tenantRef: { type: 'integer' }, userRef: { type: 'integer' }, label: { type: 'string' } },
-      indexes: [{ name: 'idx_schema_child_pair', columns: ['tenantRef', 'userRef'] }],
+      indexes: [{ name: 'idx_schema_child_pair', columns: ['tenantRef', 'userRef'], unique }],
       foreignKeys: [{ name: 'fk_schema_parent_pair', columns: ['tenantRef', 'userRef'], referencedTableName: 'schema_parents', referencedColumns: ['tenant_key', 'user_key'], deleteRule: 'RESTRICT', updateRule: 'CASCADE' }]
     }
     await create(schema)
@@ -201,12 +208,134 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
     return schema
   }
 
+  it('preserves undeclared uniqueness and foreign keys instead of treating a resource as the whole table', async () => {
+    const initial = await createCompositeSchema({ unique: true })
+    const current = await snapshot()
+    const change = diff(current, { structure: initial.structure })
+    assert.deepEqual(change.plan.dropIndexes, [])
+    assert.deepEqual(change.plan.dropForeignKeys, [])
+    assert.ok(change.warnings.some(warning => /Index 'idx_schema_child_pair'.*Skipping automatic drop/.test(warning)))
+    assert.ok(change.warnings.some(warning => /Foreign key 'fk_schema_parent_pair'.*Skipping automatic drop/.test(warning)))
+    await loadMigration(change.migration).up(db)
+    assert.deepEqual(await snapshot(), current)
+    await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 10, label: 'Duplicate' }))
+    await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 20, label: 'Orphan' }))
+  })
+
+  it('only removes undeclared constraints with their explicit drop options', async () => {
+    const initial = await createCompositeSchema({ unique: true })
+    const change = generateKnexMigrationDiff(tableName, await snapshot(), { structure: initial.structure }, {
+      ...schemaOptions, allowDropIndexes: true, allowDropForeignKeys: true
+    })
+    assert.deepEqual(change.plan.dropIndexes.map(index => index.name), ['idx_schema_child_pair'])
+    assert.deepEqual(change.plan.dropForeignKeys.map(key => key.name), ['fk_schema_parent_pair'])
+    assert.ok(change.warnings.some(warning => /allowDropIndexes=true/.test(warning)))
+    assert.ok(change.warnings.some(warning => /allowDropForeignKeys=true/.test(warning)))
+    await loadMigration(change.migration).up(db)
+    await db(tableName).insert([{ tenant_ref: 1, user_ref: 10 }, { tenant_ref: 1, user_ref: 20 }])
+    assert.equal((await db(tableName)).length, 3)
+  })
+
+  it('can remove an undeclared unique index while retaining an undeclared foreign key', async () => {
+    const initial = await createCompositeSchema({ unique: true })
+    const change = generateKnexMigrationDiff(tableName, await snapshot(), { structure: initial.structure }, {
+      ...schemaOptions, allowDropIndexes: true
+    })
+    assert.ok(change.warnings.some(warning => /Foreign key 'fk_schema_parent_pair'.*Skipping automatic drop/.test(warning)))
+    await loadMigration(change.migration).up(db)
+    await db(tableName).insert({ tenant_ref: 1, user_ref: 10, label: 'Duplicate now allowed' })
+    await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 20, label: 'Still an orphan' }))
+    assert.equal((await snapshot()).foreignKeys[0].name, 'fk_schema_parent_pair')
+  })
+
+  it('requires explicit removal of preserved dependencies before dropping their columns', async () => {
+    await createCompositeSchema()
+    const current = await snapshot()
+    const desired = { structure: { label: { type: 'string' } } }
+    assert.throws(() => generateKnexMigrationDiff(tableName, current, desired, {
+      ...schemaOptions, allowDropColumns: true
+    }), /Cannot drop column.*retaining index/)
+    assert.throws(() => generateKnexMigrationDiff(tableName, current, desired, {
+      ...schemaOptions, allowDropColumns: true, allowDropIndexes: true
+    }), /Cannot drop column.*retaining foreign key/)
+    for (const dependency of [
+      { indexes: [{ name: 'replacement_index', columns: ['tenant_ref'] }] },
+      { foreignKeys: [{ name: 'replacement_key', columns: ['user_ref'], referencedTableName: 'schema_parents', referencedColumns: ['user_key'] }] }
+    ]) {
+      assert.throws(() => generateKnexMigrationDiff(tableName, current, { ...desired, ...dependency }, {
+        ...schemaOptions, allowDropColumns: true, allowDropIndexes: true, allowDropForeignKeys: true
+      }), /Cannot drop column.*retaining (?:index|foreign key) 'replacement_/)
+    }
+    assert.deepEqual(await snapshot(), current)
+  })
+
+  it('protects target columns used by retained or new self-referential foreign keys', async () => {
+    const foreignKey = { name: 'fk_schema_parent_code', columns: ['parentCode'], referencedTableName: tableName, referencedColumns: ['code'] }
+    await create({
+      structure: { code: { type: 'string' }, parentCode: { type: 'string' } },
+      indexes: [{ name: 'uq_schema_code', columns: ['code'], unique: true }],
+      foreignKeys: [foreignKey]
+    })
+    await db(tableName).insert({ code: 'parent' })
+    await db(tableName).insert({ code: 'child', parent_code: 'parent' })
+    const current = await snapshot()
+    const desired = { structure: { parentCode: { type: 'string' } } }
+    const options = { ...schemaOptions, allowDropColumns: true, allowDropIndexes: true }
+    assert.throws(() => generateKnexMigrationDiff(tableName, current, desired, options), /Cannot drop column 'code'.*foreign key 'fk_schema_parent_code'/)
+    assert.throws(() => generateKnexMigrationDiff(tableName, current, {
+      ...desired, foreignKeys: [{ ...foreignKey, name: 'replacement_key' }]
+    }, { ...options, allowDropForeignKeys: true }), /Cannot drop column 'code'.*foreign key 'replacement_key'/)
+    assert.deepEqual(await snapshot(), current)
+    assert.equal((await db(tableName)).length, 2)
+  })
+
+  it('warns about adding a required column without a usable database default', async () => {
+    const initial = { structure: { label: { type: 'string' } } }
+    await create(initial)
+    await db(tableName).insert({ label: 'Existing' })
+    const current = await snapshot()
+    for (const defaultTo of [undefined, null, () => 'Only at runtime']) {
+      const change = diff(current, { structure: { ...initial.structure, requiredLabel: { type: 'string', required: true, defaultTo } } })
+      assert.deepEqual(change.plan.addColumns.map(column => column.name), ['required_label'])
+      assert.ok(change.warnings.some(warning => /required_label.*no static non-null default.*backfill/.test(warning)))
+    }
+    for (const defaultTo of ['', 'Filled']) {
+      const change = diff(current, { structure: { ...initial.structure, requiredLabel: { type: 'string', required: true, defaultTo } } })
+      assert.deepEqual(change.warnings, [])
+    }
+    assert.deepEqual(await db(tableName).first(), { record_key: 1, label: 'Existing' })
+  })
+
+  it('rejects generated columns from full snapshots without restricting the field-only reader', async () => {
+    await db.raw(`CREATE TABLE ${tableName} (${idColumn} INTEGER PRIMARY KEY, amount INTEGER, doubled INTEGER GENERATED ALWAYS AS (amount * 2) STORED)`)
+    await assert.rejects(snapshot(), /Column 'doubled'.*generated.*snapshot/)
+    if (databaseClient !== 'mysql2') {
+      const current = await introspectKnexColumnConstraints(db, tableName)
+      assert.ok(current.columns.some(column => column.name === 'amount'))
+    }
+  })
+
+  if (databaseClient !== 'better-sqlite3') {
+    it('warns before narrowing a bigint column to integer', async () => {
+      await db.schema.createTable(tableName, table => {
+        table.increments(idColumn).primary()
+        table.bigInteger('count')
+      })
+      await db(tableName).insert({ count: '2147483648' })
+      const change = diff(await snapshot(), { structure: { count: { type: 'integer' } } })
+      assert.deepEqual(change.plan.alterColumns.map(column => column.name), ['count'])
+      assert.ok(change.warnings.some(warning => /count.*narrows bigint to integer.*overflow/.test(warning)))
+      assert.equal(String((await db(tableName).first()).count), '2147483648')
+    })
+  }
+
   it('replaces a supporting composite index while retaining foreign-key enforcement', async () => {
     const initial = await createCompositeSchema()
     assertEmptyPlan(diff(await snapshot(), initial))
     const desired = { ...initial, indexes: [{ ...initial.indexes[0], columns: ['tenantRef', 'userRef', 'label'] }] }
     const change = diff(await snapshot(), desired)
     assert.deepEqual(change.plan.dropIndexes.map(index => index.name), ['idx_schema_child_pair'])
+    assert.ok(change.warnings.some(warning => /Index 'idx_schema_child_pair'.*dropped and recreated/.test(warning)))
     await loadMigration(change.migration).up(db)
     assert.deepEqual(await db(tableName).first(), { record_key: 1, tenant_ref: 1, user_ref: 10, label: 'Preserved' })
     await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 20 }))
@@ -220,7 +349,9 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
     const current = await snapshot()
     assert.deepEqual(current.foreignKeys[0].columns, [{ name: 'tenant_ref', referencedName: 'tenant_key' }, { name: 'user_ref', referencedName: 'user_key' }])
     const desired = { ...initial, foreignKeys: [{ ...initial.foreignKeys[0], deleteRule: 'CASCADE' }] }
-    await loadMigration(diff(current, desired).migration).up(db)
+    const change = diff(current, desired)
+    assert.ok(change.warnings.some(warning => /Foreign key 'fk_schema_parent_pair'.*dropped and recreated/.test(warning)))
+    await loadMigration(change.migration).up(db)
     await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 20 }))
     await db('schema_parents').where({ tenant_key: 2 }).delete()
     assert.equal((await db(tableName)).length, 1)
@@ -249,7 +380,7 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
     await loadMigration(diff(await snapshot(), unique).migration).up(db)
     await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 10, label: 'Duplicate' }))
     const desired = { ...initial, indexes: [] }
-    await loadMigration(diff(await snapshot(), desired).migration).up(db)
+    await loadMigration(generateKnexMigrationDiff(tableName, await snapshot(), desired, { ...schemaOptions, allowDropIndexes: true }).migration).up(db)
     await db(tableName).insert({ tenant_ref: 1, user_ref: 10, label: 'Allowed' })
     await assert.rejects(db(tableName).insert({ tenant_ref: 1, user_ref: 20 }))
     assertEmptyPlan(diff(await snapshot(), desired))
@@ -258,7 +389,9 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
   it('drops composite dependencies before explicitly dropping their columns', async () => {
     await createCompositeSchema()
     const desired = { structure: { label: { type: 'string' } } }
-    const change = generateKnexMigrationDiff(tableName, await snapshot(), desired, { ...schemaOptions, allowDropColumns: true })
+    const change = generateKnexMigrationDiff(tableName, await snapshot(), desired, {
+      ...schemaOptions, allowDropColumns: true, allowDropIndexes: true, allowDropForeignKeys: true
+    })
     await loadMigration(change.migration).up(db)
     assert.deepEqual(await db(tableName).first(), { record_key: 1, label: 'Preserved' })
     assert.equal((await db('schema_parents')).length, 2)

@@ -40,7 +40,7 @@ describe(`Compiled upload metadata (${storageMode.mode})`, () => {
   after(async () => { try { await database?.close() } finally { storageMode.clearRegistry(database?.knex) } })
   const upload = (mimetype, field = 'attachment') => {
     detectorState.payload = { fields: { title: 'Upload' }, files: { [field]: file(mimetype) } }
-    return api.resources.documents.post({ inputRecord: createJsonApiDocument('documents', {}) })
+    return api.resources.documents.post({ document: createJsonApiDocument('documents', {}) })
   }
 
   it('retains the supplied backend identity and method receiver', async () => {
@@ -100,7 +100,7 @@ describe(`Late upload plugin installation (${storageMode.mode})`, () => {
   after(async () => { try { await database?.close() } finally { storageMode.clearRegistry(database?.knex) } })
   it('uses already compiled resource fields', async () => {
     payload = { fields: { name: 'Late' }, files: { attachment: file('image/png') } }
-    const result = await api.resources.items.post({ inputRecord: createJsonApiDocument('items', {}) })
+    const result = await api.resources.items.post({ document: createJsonApiDocument('items', {}) })
     assert.equal(uploads, 1)
     assert.equal(result.data.attributes.attachment, '/uploads/late')
   })
@@ -120,14 +120,14 @@ if (storageMode.mode === 'anyapi') {
     beforeEach(async () => { await cleanTables(database.knex, ['schema_enrichment_items']); uploads = 0; payload = null })
     after(async () => { try { await database?.close() } finally { storageMode.clearRegistry(database?.knex) } })
     it('replaces the empty file list when the compiled owner changes', async () => {
-      await api.resources.items.post({ inputRecord: createJsonApiDocument('items', { name: 'Before' }) })
+      await api.resources.items.post({ document: createJsonApiDocument('items', { name: 'Before' }) })
       await api.resources.items.addKnexFields({
         fields: {
           attachment: { type: 'file', storage, accepts: ['image/png'], nullable: true }
         }
       })
       payload = { fields: { name: 'After' }, files: { attachment: file('image/png') } }
-      const result = await api.resources.items.post({ inputRecord: createJsonApiDocument('items', {}) })
+      const result = await api.resources.items.post({ document: createJsonApiDocument('items', {}) })
       assert.equal(uploads, 1)
       assert.equal(result.data.attributes.attachment, '/uploads/added')
     })

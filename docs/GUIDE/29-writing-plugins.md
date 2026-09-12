@@ -66,7 +66,7 @@ The custom method is available on each resource, with resource-specific state.
 const authorDescription = await api.resources.authors.describeExample()
 const publisherDescription = await api.resources.publishers.describeExample()
 const createdAuthor = await api.resources.authors.post({
-  format: 'plain', inputRecord: { name: '  Ada  ' }
+  format: 'plain', data: { name: '  Ada  ' }
 })
 console.log(authorDescription, publisherDescription, createdAuthor)
 ```

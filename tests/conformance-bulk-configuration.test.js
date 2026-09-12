@@ -61,8 +61,8 @@ describe(`Bulk limits and write lifecycle (${storageMode.mode})`, () => {
     it(`enforces the configured limit before ${method} starts any record`, async () => {
       const ids = ['1', '2', '3']
       const params = method === 'bulkPost'
-        ? { inputRecords: ids.map(id => record(id, 'Too many')) }
-        : method === 'bulkPatch' ? { operations: ids.map(id => ({ id, data: record(id, 'Too many').data })) } : { ids }
+        ? { document: { data: ids.map(id => record(id, 'Too many').data) } }
+        : method === 'bulkPatch' ? { operations: ids.map(id => ({ id, document: record(id, 'Too many') })) } : { ids }
       await assert.rejects(fixture.api.resources.items[method](params), { code: 'REST_API_VALIDATION' })
       assert.deepEqual(writes, [])
       assert.equal(await fixture.count('items'), 0)
@@ -70,7 +70,7 @@ describe(`Bulk limits and write lifecycle (${storageMode.mode})`, () => {
   }
 
   it('uses the configured non-atomic default and preserves validation, hooks and failure indexes', async () => {
-    const result = await fixture.api.resources.items.bulkPost({ inputRecords: [record('1', 'First'), record('2')] })
+    const result = await fixture.api.resources.items.bulkPost({ document: { data: [record('1', 'First').data, record('2').data] } })
     assert.deepEqual(result.meta, { total: 2, succeeded: 1, failed: 1, atomic: false })
     assert.deepEqual(writes, [0, 1])
     assert.equal(result.data[0].attributes.name, 'First from hook')
@@ -81,7 +81,7 @@ describe(`Bulk limits and write lifecycle (${storageMode.mode})`, () => {
 
   it('allows a call to select atomic rollback over the configured default', async () => {
     await assert.rejects(fixture.api.resources.items.bulkPost({
-      atomic: true, inputRecords: [record('1', 'First'), record('2')]
+      atomic: true, document: { data: [record('1', 'First').data, record('2').data] }
     }), { code: 'REST_API_VALIDATION' })
     assert.deepEqual(writes, [0, 1])
     assert.equal(await fixture.count('items'), 0)

@@ -53,7 +53,7 @@ try {
   await api.resources.countries.createKnexTable()
 
   const country = await api.resources.countries.post({
-    inputRecord: { name: 'United States', code: 'US' }
+    data: { name: 'United States', code: 'US' }
   })
   const refetched = await api.resources.countries.get({ id: country.id })
   console.log('Country:', refetched)
@@ -69,7 +69,7 @@ try {
 
   const changed = await api.resources.countries.patch({
     id: country.id,
-    inputRecord: { name: 'United States of America' },
+    data: { name: 'United States of America' },
     returning: 'minimal'
   })
   console.log('Changed identifier:', changed)
@@ -151,8 +151,9 @@ limits. Other Knex clients and server versions are unverified.
 ## Method arguments and response options
 
 Call resources through `api.resources.countries`. Methods accept operation
-parameters first and optional application context second. Write records always
-go in `inputRecord`; the target ID, transaction handle and response options
+parameters first and optional application context second. Plain write records
+go in `data`; JSON:API write documents go in `document`. Supply exactly one of
+these keys. The target ID, transaction handle and response options
 remain outside the record. Query selection goes in `queryParams`.
 
 | Option | Values | Programmatic default |
@@ -160,10 +161,10 @@ remain outside the record. Query selection goes in `queryParams`.
 | `format` | `'plain'`, `'jsonapi'` | `'plain'` |
 | `returning` | `'none'`, `'minimal'`, `'full'` | `'full'` |
 
-`format` selects both input and output representation. Plain `get` returns a
-record; plain `query` returns a collection whose `data` contains records.
-JSON:API calls accept documents under `inputRecord` and return documents with
-`data`. Record attributes never become top-level method parameters.
+`format` selects the output representation independently of input. Plain `get`
+returns a record; plain `query` returns a collection whose `data` contains
+records. JSON:API output is a document with `data`. Either output can be requested
+with either input key. Record attributes never become top-level method parameters.
 
 For POST, PUT and PATCH, `returning: 'minimal'` returns `{ type, id }` in plain
 format or `{ data: { type, id } }` in JSON:API format. `returning: 'none'` returns
@@ -182,7 +183,7 @@ await api.addResource('countries', {
   schema: { name: { type: 'string', required: true } }
 })
 const result = await api.resources.countries.post({
-  inputRecord: { name: 'Canada' },
+  data: { name: 'Canada' },
   returning: 'none'
 })
 // result is undefined
@@ -247,8 +248,8 @@ page options use the default collection cap without pagination metadata.
 
 For table-backed resources, `idProperty` defines the physical primary-key column. The API surface still uses the logical resource id.
 
-- plain writes use `inputRecord.id`
-- JSON:API writes use `inputRecord.data.id`
+- plain writes use `data.id`
+- JSON:API writes use `document.data.id`
 - responses expose `id` or `data.id`
 - the resource id is not part of `attributes`
 

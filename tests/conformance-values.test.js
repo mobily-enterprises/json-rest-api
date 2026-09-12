@@ -20,7 +20,7 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
       const id = 901 + index
       const inputRecord = createJsonApiDocument('items', { name: `Explicit ${id}` })
       inputRecord.data.id = index % 2 ? String(id) : id
-      const result = await items.post({ inputRecord, format: 'jsonapi', returning })
+      const result = await items.post({ document: inputRecord, format: 'jsonapi', returning })
       if (returning !== 'none') assert.equal(result.data.id, String(id))
       const fetched = await items.get({ id: String(id), format: 'jsonapi' })
       assert.equal(fetched.data.id, String(id))
@@ -35,7 +35,7 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
         const inputRecord = format === 'plain'
           ? { id, name: 'Rejected' }
           : { data: { type: 'items', id, attributes: { name: 'Rejected' } } }
-        await assert.rejects(items.post({ format, inputRecord }), { code: 'REST_API_VALIDATION' })
+        await assert.rejects(items.post({ format, [format === 'plain' ? 'data' : 'document']: inputRecord }), { code: 'REST_API_VALIDATION' })
         assert.equal(await fixture.count('items'), 0)
       }
     }
@@ -100,18 +100,18 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
     assert.equal(created.attributes.active, true)
     assert.equal(created.attributes.score, 0)
     const result = await items.patch({
-      id: created.id, format: 'jsonapi', inputRecord: createJsonApiDocument('items', { name: 'Changed' })
+      id: created.id, format: 'jsonapi', document: createJsonApiDocument('items', { name: 'Changed' })
     })
     assert.equal(result.data.attributes.note, 'keep')
     assert.equal(result.data.attributes.rank, 5)
     await assert.rejects(items.patch({
-      id: created.id, format: 'jsonapi', inputRecord: createJsonApiDocument('items', { note: undefined })
+      id: created.id, format: 'jsonapi', document: createJsonApiDocument('items', { note: undefined })
     }), { code: 'REST_API_VALIDATION' })
     assert.equal((await items.get({ id: created.id, format: 'jsonapi' })).data.attributes.note, 'keep')
     const cleared = await items.patch({
       id: created.id,
       format: 'jsonapi',
-      inputRecord: createJsonApiDocument('items', { note: null, rank: null })
+      document: createJsonApiDocument('items', { note: null, rank: null })
     })
     assert.equal(cleared.data.attributes.note, null)
     assert.equal(cleared.data.attributes.rank, null)
@@ -121,13 +121,13 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
   it('rejects missing, undefined and null required values without changing stored records', async () => {
     for (const attributes of [{}, { name: undefined }, { name: null }]) {
       await assert.rejects(items.post({
-        format: 'jsonapi', inputRecord: createJsonApiDocument('items', attributes)
+        format: 'jsonapi', document: createJsonApiDocument('items', attributes)
       }), { code: 'REST_API_VALIDATION' })
       assert.equal(await fixture.count('items'), 0)
     }
     const created = await fixture.seed('items', { name: 'Unchanged', note: 'keep' })
     await assert.rejects(items.patch({
-      id: created.id, format: 'jsonapi', inputRecord: createJsonApiDocument('items', { name: null })
+      id: created.id, format: 'jsonapi', document: createJsonApiDocument('items', { name: null })
     }), { code: 'REST_API_VALIDATION' })
     const fetched = await items.get({ id: created.id, format: 'jsonapi' })
     assert.equal(fetched.data.attributes.name, 'Unchanged')
@@ -139,7 +139,7 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
     for (const returning of ['none', 'minimal', 'full']) {
       it(`preserves ${returning} write returns with simplified=${simplified}`, async () => {
         const inputRecord = simplified ? { name: 'Created' } : createJsonApiDocument('items', { name: 'Created' })
-        const result = await items.post({ inputRecord, format: (simplified) ? 'plain' : 'jsonapi', returning })
+        const result = await items.post({ [simplified ? 'data' : 'document']: inputRecord, format: (simplified) ? 'plain' : 'jsonapi', returning })
         const stored = (await items.query({ format: 'jsonapi' })).data
         assert.equal(stored.length, 1)
         const id = stored[0].id
@@ -161,10 +161,10 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
       group: { data: { type: 'groups', id: group.id } }
     })
     inputRecord.data.id = id
-    const created = await items.put({ id, format: 'jsonapi', inputRecord })
+    const created = await items.put({ id, format: 'jsonapi', document: inputRecord })
     assert.equal(created.data.id, id)
     await assert.rejects(items.put({
-      id, format: 'jsonapi', inputRecord: createJsonApiDocument('items', { name: 'Incomplete' })
+      id, format: 'jsonapi', document: createJsonApiDocument('items', { name: 'Incomplete' })
     }), { code: 'REST_API_VALIDATION' })
     const unchanged = await items.get({ id, format: 'jsonapi' })
     assert.equal(unchanged.data.attributes.name, 'Created')
@@ -172,7 +172,7 @@ describe(`Shared value and write conformance (${storageMode.mode})`, () => {
     const replaced = await items.put({
       id,
       format: 'jsonapi',
-      inputRecord: createJsonApiDocument('items', { name: 'Replacement', note: null, active: true, score: 0 }, {
+      document: createJsonApiDocument('items', { name: 'Replacement', note: null, active: true, score: 0 }, {
         group: { data: null }
       })
     })

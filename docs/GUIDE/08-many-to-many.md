@@ -59,14 +59,14 @@ columns. Each pivot record has its own resource ID.
 ## Create records with membership
 
 ```javascript
-const neil = await api.resources.authors.post({ inputRecord: { name: 'Neil Gaiman' } })
-const terry = await api.resources.authors.post({ inputRecord: { name: 'Terry Pratchett' } })
+const neil = await api.resources.authors.post({ data: { name: 'Neil Gaiman' } })
+const terry = await api.resources.authors.post({ data: { name: 'Terry Pratchett' } })
 const goodOmens = await api.resources.books.post({
-  inputRecord: { title: 'Good Omens', authors: [neil.id, terry.id] }
+  data: { title: 'Good Omens', authors: [neil.id, terry.id] }
 })
 const americanGods = await api.resources.books.post({
   format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'books',
       attributes: { title: 'American Gods' },
@@ -76,7 +76,7 @@ const americanGods = await api.resources.books.post({
 })
 ```
 
-The plain record uses an ID array under `inputRecord.authors`; JSON:API uses
+The plain record uses an ID array under `data.authors`; JSON:API uses
 identifier linkage under `data.relationships.authors.data`. These operations
 create the necessary pivot connections. Do not also create direct pivot records
 for those same connections.
@@ -114,17 +114,17 @@ Neil alone.
 
 ```javascript
 const colorOfMagic = await api.resources.books.post({
-  inputRecord: { title: 'The Color of Magic' }
+  data: { title: 'The Color of Magic' }
 })
 const contribution = await api.resources.book_authors.post({
-  inputRecord: { book: colorOfMagic.id, author: terry.id, contribution: 'primary' }
+  data: { book: colorOfMagic.id, author: terry.id, contribution: 'primary' }
 })
 const omensPivots = await api.resources.book_authors.query({
   queryParams: { filters: { book: goodOmens.id } }
 })
 for (const pivot of omensPivots.data) {
   await api.resources.book_authors.patch({
-    id: pivot.id, inputRecord: { contribution: 'co-author' }, returning: 'none'
+    id: pivot.id, data: { contribution: 'co-author' }, returning: 'none'
   })
 }
 const updatedPivots = await api.resources.book_authors.query({
@@ -135,7 +135,7 @@ console.log('Updated contributions:', updatedPivots.data)
 ```
 
 The pivot is a resource: use its public relationship aliases `book` and `author`
-in `inputRecord`. Its declared `book` filter finds the two Good Omens connection
+in `data`. Its declared `book` filter finds the two Good Omens connection
 records. Updating their attributes changes contribution metadata without
 replacing membership. Query the pivot resource to retrieve these attributes;
 a book's author include does not automatically attach pivot attributes to authors.
@@ -165,7 +165,7 @@ console.log('Author remains:', terryStillExists.name)
 The Good Omens connection to Terry is removed, including that pivot record's
 contribution metadata. Neil's connection and Terry's author record remain.
 The relationship method returns undefined and takes identifiers in
-`relationshipData`. A resource PATCH with `inputRecord: { authors: [...] }`
+`relationshipData`. A resource PATCH with `data: { authors: [...] }`
 replaces the membership set; use relationship POST/DELETE for incremental changes.
 
 ## HTTP endpoints

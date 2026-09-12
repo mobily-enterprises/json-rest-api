@@ -14,7 +14,7 @@ describe(`Managed transactions (${storageMode.mode})`, () => {
   const secondary = new Error('Completion hook failed')
   const input = (id, name) => ({ data: { type: 'items', id, attributes: { name } } })
   const post = (transaction, id, marker = id, context = { marker }) => fixture.api.resources.items.post({
-    inputRecord: input(id, `Item ${id}`), transaction, format: 'jsonapi'
+    document: input(id, `Item ${id}`), transaction, format: 'jsonapi'
   }, context)
   before(async () => {
     fixture = await createConformanceFixture({
@@ -93,12 +93,12 @@ describe(`Managed transactions (${storageMode.mode})`, () => {
   it('commits mixed resource, relationship, bulk and raw SQL work before ordered completion hooks', async () => {
     const result = await fixture.api.transaction(async transaction => {
       const created = await post(transaction, '99', 'create')
-      await fixture.api.resources.items.patch({ id: item.id, inputRecord: input(item.id, 'Patched'), transaction }, { marker: 'patch' })
+      await fixture.api.resources.items.patch({ id: item.id, document: input(item.id, 'Patched'), transaction }, { marker: 'patch' })
       await fixture.api.resources.items.postRelationship({
         id: '99', relationshipName: 'groups', relationshipData: [{ type: 'groups', id: group.id }], transaction
       }, { marker: 'link' })
       await fixture.api.resources.items.bulkPost({
-        inputRecords: ['100', '101'].map(id => input(id, `Bulk ${id}`).data), transaction
+        document: { data: ['100', '101'].map(id => input(id, `Bulk ${id}`).data) }, transaction
       }, { marker: 'bulk' })
       await transaction('managed_transaction_audit').insert({ message: 'Created and linked' })
       assert.equal(transaction.isCompleted(), false)
@@ -133,7 +133,7 @@ describe(`Managed transactions (${storageMode.mode})`, () => {
     let child
     await assert.rejects(fixture.api.transaction(async transaction => {
       await post(transaction, '99')
-      await assert.rejects(fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: '100', attributes: {} } }, transaction }), error => {
+      await assert.rejects(fixture.api.resources.items.post({ document: { data: { type: 'items', id: '100', attributes: {} } }, transaction }), error => {
         child = error
         return assertWriteFailure(error, { outcome: 'pending' })
       })

@@ -50,7 +50,7 @@ describe('Simplified POST with explicit resource ids', () => {
   })
 
   it('persists the provided resource id when posting simplified records to a custom-id resource', async () => {
-    const created = await api.resources.user_settings.post({ format: 'plain', inputRecord: { id: '7', theme: 'dark' } })
+    const created = await api.resources.user_settings.post({ format: 'plain', data: { id: '7', theme: 'dark' } })
 
     assert.equal(created.id, '7')
     assert.equal(created.theme, 'dark')

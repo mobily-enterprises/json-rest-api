@@ -68,10 +68,10 @@ request context.
 
 ```javascript
 const acmeProject = await api.resources.projects.post({
-  inputRecord: { name: 'Roadmap' }, format: 'plain'
+  data: { name: 'Roadmap' }, format: 'plain'
 }, workspaceContext('acme'))
 await api.resources.projects.post({
-  inputRecord: { name: 'Other workspace' }, format: 'plain'
+  data: { name: 'Other workspace' }, format: 'plain'
 }, workspaceContext('other'))
 const acmePage = await api.resources.projects.query({
   format: 'jsonapi', queryParams: { page: { number: 1, size: 10 } }
@@ -84,7 +84,7 @@ and its total is 1, even though another workspace has a stored project.
 
 ```javascript
 const replacedProject = await api.resources.projects.put({
-  id: acmeProject.id, inputRecord: { name: 'Updated roadmap' }, format: 'plain'
+  id: acmeProject.id, data: { name: 'Updated roadmap' }, format: 'plain'
 }, workspaceContext('acme'))
 const otherPage = await api.resources.projects.query({ format: 'plain' }, workspaceContext('other'))
 console.log(replacedProject.workspace_id, otherPage.data.map(project => project.name))
@@ -316,7 +316,7 @@ Example:
 
 ```js
 await api.resources.projects.post({
-  inputRecord: {
+  document: {
     data: {
       type: 'projects',
       attributes: {
@@ -361,7 +361,7 @@ So this will fail if the referenced project is outside scope:
 
 ```js
 await api.resources.tasks.post({
-  inputRecord: {
+  document: {
     data: {
       type: 'tasks',
       attributes: { title: 'Cross-scope task' },

@@ -30,7 +30,7 @@ for (const [name, code] of [
   ['France', 'FR'], ['Germany', 'DE'], ['Austria', 'AT'],
   ['Italy', 'IT'], ['United Kingdom', 'GB']
 ]) {
-  await api.resources.countries.post({ inputRecord: { name, code }, returning: 'none' })
+  await api.resources.countries.post({ data: { name, code }, returning: 'none' })
 }
 ```
 

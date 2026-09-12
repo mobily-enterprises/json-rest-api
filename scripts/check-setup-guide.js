@@ -30,9 +30,9 @@ try {
     .replace('const result =', 'await api.resources.countries.createKnexTable()\nconst result =')
   const result = await new AsyncFunction('api', 'knex', 'RestApiPlugin', 'RestApiKnexPlugin', `${executable}\nreturn result`)(api, database, RestApiPlugin, RestApiKnexPlugin)
   assert.equal(result, undefined)
-  const full = await api.resources.countries.post({ inputRecord: { name: 'France' } })
+  const full = await api.resources.countries.post({ data: { name: 'France' } })
   assert.equal(full.name, 'France')
-  const minimal = await api.resources.countries.post({ inputRecord: { name: 'Italy' }, returning: 'minimal' })
+  const minimal = await api.resources.countries.post({ data: { name: 'Italy' }, returning: 'minimal' })
   assert.deepEqual(minimal, { type: 'countries', id: minimal.id })
   assert.equal((await api.resources.countries.query({})).data.length, 3)
 } finally { await database.destroy() }

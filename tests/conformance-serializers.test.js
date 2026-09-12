@@ -71,7 +71,7 @@ describe(`Custom scalar serialization (${storageMode.mode})`, () => {
         const response = await items[method]({
           ...(id ? { id } : {}),
           format,
-          inputRecord: format === 'plain' ? attributes : createJsonApiDocument('items', attributes)
+          [format === 'plain' ? 'data' : 'document']: format === 'plain' ? attributes : createJsonApiDocument('items', attributes)
         })
         id = format === 'plain' ? response.id : response.data.id
         assert.equal((format === 'plain' ? response : response.data.attributes).coded, coded)
@@ -151,7 +151,7 @@ describe(`Custom scalar serialization (${storageMode.mode})`, () => {
         await assert.rejects(items[method]({
           ...(method === 'post' ? {} : { id: item.id }),
           returning: 'none',
-          inputRecord: createJsonApiDocument('items', { coded: 'replacement' })
+          document: createJsonApiDocument('items', { coded: 'replacement' })
         }), /storage\.serialize.*synchronous/)
         assert.equal(await fixture.count('items'), 1)
         assert.equal((await items.get({ id: item.id })).data.attributes.coded, 'original')

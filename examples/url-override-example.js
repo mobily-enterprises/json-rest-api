@@ -38,7 +38,7 @@ await api.addResource('items', {
   }
 })
 await api.resources.items.createKnexTable()
-await api.resources.items.post({ inputRecord: { name: 'Test Item 1', description: 'This is a test item' } })
+await api.resources.items.post({ data: { name: 'Test Item 1', description: 'This is a test item' } })
 
 const app = express()
 api.http.express.mount(app)

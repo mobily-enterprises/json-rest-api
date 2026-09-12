@@ -74,10 +74,10 @@ The expression uses `concat` for MySQL and `||` for SQLite/PostgreSQL. `column`
 resolves logical fields to the selected storage representation.
 
 ```javascript
-const jane = await api.resources.authors.post({ format: 'plain', inputRecord: { first_name: 'Jane', last_name: 'Doe' } })
-await api.resources.authors.post({ format: 'plain', inputRecord: { first_name: 'John', last_name: 'Adams' } })
-await api.resources.authors.post({ format: 'plain', inputRecord: { first_name: 'Jane', last_name: 'Smith' } })
-const book = await api.resources.books.post({ format: 'plain', inputRecord: { title: 'Projection example', author: jane.id } })
+const jane = await api.resources.authors.post({ format: 'plain', data: { first_name: 'Jane', last_name: 'Doe' } })
+await api.resources.authors.post({ format: 'plain', data: { first_name: 'John', last_name: 'Adams' } })
+await api.resources.authors.post({ format: 'plain', data: { first_name: 'Jane', last_name: 'Smith' } })
+const book = await api.resources.books.post({ format: 'plain', data: { title: 'Projection example', author: jane.id } })
 ```
 
 `select()` is called at query time. It can return:

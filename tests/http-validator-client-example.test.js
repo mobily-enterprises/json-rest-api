@@ -73,7 +73,7 @@ for (const connector of ['express', 'fastify']) {
       await fixture.api.resources.items.patch({
         id: item.id,
         format: 'plain',
-        inputRecord: { name: '<Selected & original>' }
+        data: { name: '<Selected & original>' }
       })
       const selected = await fetch(`${baseUrl}/api/items/${item.id}`)
       assert.equal(selected.status, 200)

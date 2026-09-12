@@ -61,12 +61,12 @@ describe(`Atomic bulk failure cleanup (${storageMode.mode})`, () => {
     const record = (id, name) => ({
       type: 'items', id, attributes: { name }, relationships: { groups: { data: [identifier(group)] } }
     })
-    if (method === 'post') return { inputRecords: [record('91', 'Created first'), record('92', 'Created second')] }
+    if (method === 'post') return { document: { data: [record('91', 'Created first'), record('92', 'Created second')] } }
     if (method === 'patch') {
       return {
         operations: [
-          { id: item.id, data: record(item.id, 'Changed first') },
-          { id: other.id, data: record(other.id, 'Changed second') }
+          { id: item.id, document: { data: record(item.id, 'Changed first') } },
+          { id: other.id, document: { data: record(other.id, 'Changed second') } }
         ]
       }
     }
@@ -99,9 +99,9 @@ describe(`Atomic bulk failure cleanup (${storageMode.mode})`, () => {
           try {
             await assert.rejects(fixture.api.resources.items[bulkMethod]({ ...params, atomic: true }, context), error => {
               if (failure === 'invalid-operation') {
-                assertWriteFailure(error, { type: RestApiValidationError })
-                assert.equal(error.message, 'Invalid operation structure')
-                assert.deepEqual(error.details.fields, ['operations[1]'])
+                assertWriteFailure(error, { type: RestApiValidationError, outcome: failRollback ? 'unknown' : 'rolledBack' })
+                assert.equal(error.message, 'Supply exactly one of data or document')
+                assert.deepEqual(error.details.fields, ['data', 'document'])
               } else assertWriteFailure(error, { cause: primary, outcome: committed || failRollback ? 'unknown' : 'rolledBack' })
               assert.equal(context.error, error.cause)
               return true
@@ -192,7 +192,9 @@ describe(`Bulk child cleanup diagnostics (${storageMode.mode})`, () => {
         rollbackRejection = failure === 'rollback'
         const ids = method === 'bulkPost' ? ['91', '92', '93', '94'] : records.map(record => record.id)
         const input = ids.map((id, index) => ({ type: 'items', id, attributes: { name: `Changed ${index}` }, relationships: { groups: { data: [identifier(group)] } } }))
-        const params = method === 'bulkPost' ? { inputRecords: input } : method === 'bulkPatch' ? { operations: input.map(data => ({ id: data.id, data })) } : { ids }
+        const params = method === 'bulkPost'
+          ? { document: { data: input } }
+          : method === 'bulkPatch' ? { operations: input.map(data => ({ id: data.id, document: { data } })) } : { ids }
         const context = { error: primary[0], cleanupErrors: [{ phase: 'stale' }] }
         enabled = true
         const result = await fixture.api.resources.items[method]({ ...params, atomic: false }, context)
@@ -234,7 +236,7 @@ describe(`Bulk child cleanup diagnostics (${storageMode.mode})`, () => {
         await assert.rejects(fixture.api.resources.items[method]({}, context), error => assertWriteFailure(error, { type: RestApiValidationError, outcome: 'none' }))
         assert.ok(context.error instanceof RestApiValidationError)
         assert.equal(context.cleanupErrors, undefined)
-        await fixture.api.resources.items.bulkPost({ inputRecords: [{ type: 'items', id: '999', attributes: { name: 'Recovered' } }], atomic: false }, context)
+        await fixture.api.resources.items.bulkPost({ document: { data: [{ type: 'items', id: '999', attributes: { name: 'Recovered' } }] }, atomic: false }, context)
         assert.equal(context.cleanupErrors, undefined)
       })
     }
@@ -301,8 +303,16 @@ describe(`Managed bulk transactions (${storageMode.mode})`, () => {
     const record = (id, name) => format === 'plain'
       ? { id, name, groups: [group.id] }
       : { type: 'items', id, attributes: { name }, relationships: { groups: { data: [identifier(group)] } } }
-    if (method === 'bulkPost') return { format, inputRecords: [record('91', 'First'), record('92', 'Second')] }
-    if (method === 'bulkPatch') return { format, operations: [{ id: item.id, data: record(item.id, 'First') }, { id: other.id, data: record(other.id, 'Second') }] }
+    if (method === 'bulkPost') {
+      const records = [record('91', 'First'), record('92', 'Second')]
+      return format === 'plain' ? { format, data: records } : { format, document: { data: records } }
+    }
+    if (method === 'bulkPatch') {
+      const operations = [[item.id, 'First'], [other.id, 'Second']].map(([id, name]) => format === 'plain'
+        ? { id, data: record(id, name) }
+        : { id, document: { data: record(id, name) } })
+      return { format, operations }
+    }
     return { ids: [item.id, other.id] }
   }
   const expected = (method, count = 2) => ({
@@ -345,7 +355,7 @@ describe(`Managed bulk transactions (${storageMode.mode})`, () => {
             assert.deepEqual(trace.map(({ phase, index }) => `${phase}:${index}`), ['afterDataCall:0', 'finish:0', 'afterDataCall:1', 'finish:1'])
             assert.deepEqual(await snapshot(observed.transaction), expected(method))
             assert.deepEqual(await snapshot(), initial)
-            await fixture.api.resources.groups.patch({ id: group.id, format: 'plain', inputRecord: { name: 'Same outer transaction' }, transaction: observed.transaction })
+            await fixture.api.resources.groups.patch({ id: group.id, format: 'plain', data: { name: 'Same outer transaction' }, transaction: observed.transaction })
             if (outcome === 'rollback') throw rollbackRequested
           })
           if (outcome === 'rollback') await assert.rejects(pending, error => assertWriteFailure(error, { cause: rollbackRequested, outcome: 'rolledBack' }))

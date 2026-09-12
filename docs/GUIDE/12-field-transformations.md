@@ -76,9 +76,9 @@ Review what a derived value reveals about its inputs.
 ## Create and refetch
 
 ```javascript
-const category = await api.resources.categories.post({ inputRecord: { name: 'Equipment' } })
+const category = await api.resources.categories.post({ data: { name: 'Equipment' } })
 const created = await api.resources.products.post({
-  inputRecord: {
+  data: {
     name: '  Widget  ', code: '  W01  ', price: 20, cost: 5,
     privateNote: 'Internal only', previewLabel: 'Preview', category: category.id
   }
@@ -124,7 +124,7 @@ const included = await api.resources.categories.get({
   }
 })
 const minimal = await api.resources.products.patch({
-  id: created.id, inputRecord: { price: 25 }, returning: 'minimal'
+  id: created.id, data: { price: 25 }, returning: 'minimal'
 })
 const afterPriceChange = await api.resources.products.get({
   id: created.id, queryParams: { fields: { products: 'marginPercent' } }

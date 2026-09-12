@@ -35,7 +35,7 @@ for (const transport of ['websocket', 'polling']) {
     }
     const subscribe = (socket, payload) => socket.timeout(3000).emitWithAck('subscribe', payload)
     const record = async (resource, attributes, relationships) => (await api.resources[resource].post({
-      inputRecord: createJsonApiDocument(resource, attributes, relationships), format: 'jsonapi'
+      document: createJsonApiDocument(resource, attributes, relationships), format: 'jsonapi'
     })).data
     const bookFixture = async () => {
       const country = await record('countries', { name: 'Country', code: 'AA' })
@@ -545,9 +545,9 @@ for (const transport of ['websocket', 'polling']) {
       const events = notifications(socket)
       await record('countries', { name: 'Posted', code: 'AA' })
       for (const name of ['PUT-created', 'PUT-replaced']) {
-        await api.resources.countries.put({ id: '701', inputRecord: createJsonApiDocument('countries', { name }), format: 'jsonapi' })
+        await api.resources.countries.put({ id: '701', document: createJsonApiDocument('countries', { name }), format: 'jsonapi' })
       }
-      await api.resources.countries.patch({ id: '701', inputRecord: createJsonApiDocument('countries', { name: 'Patched' }), format: 'jsonapi' })
+      await api.resources.countries.patch({ id: '701', document: createJsonApiDocument('countries', { name: 'Patched' }), format: 'jsonapi' })
       await api.resources.countries.delete({ id: '701' })
       await drainSocketEvents(socket)
       assert.deepEqual(events.map(event => [event.type, event.action]), [
@@ -574,7 +574,7 @@ for (const transport of ['websocket', 'polling']) {
       await subscribe(socket, { resource: 'books', filters: { title: 'Book' } })
       const events = notifications(socket)
       for (const title of ['Other', 'Book']) {
-        await api.resources.books.patch({ id: book.id, inputRecord: createJsonApiDocument('books', { title }), format: 'jsonapi' })
+        await api.resources.books.patch({ id: book.id, document: createJsonApiDocument('books', { title }), format: 'jsonapi' })
         await drainSocketEvents(socket)
       }
       assert.deepEqual(events.map(event => [String(event.id), event.action]), [[book.id, 'patch'], [book.id, 'patch']])

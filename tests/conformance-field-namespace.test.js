@@ -300,7 +300,7 @@ describe(`Resource-name contract (${storageMode.mode})`, () => {
         fixture = await createConformanceFixture({ createApi: createSchemaEnrichmentApi, tables: { [resourceName]: 'schema_enrichment_items' }, apiOptions: { resourceName } })
         const created = await fixture.seed(resourceName, { name: 'Original' })
         const items = fixture.api.resources[resourceName]
-        await items.patch({ id: created.id, inputRecord: createJsonApiDocument(resourceName, { name: 'Updated' }) })
+        await items.patch({ id: created.id, document: createJsonApiDocument(resourceName, { name: 'Updated' }) })
         const result = await items.query({ queryParams: { fields: { [resourceName]: 'name' } } })
         assert.equal(result.data[0].type, resourceName)
         assert.deepEqual(result.data[0].attributes, { name: 'Updated' })
@@ -395,7 +395,7 @@ describe(`Prototype-named foreign-key attributes (${storageMode.mode})`, () => {
   beforeEach(async () => fixture.reset())
   after(async () => fixture?.close())
   it('rejects direct foreign-key attributes instead of silently omitting them', async () => {
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord: createJsonApiDocument('items', { name: 'Record', constructor: '1' }) }), error => assertWriteFailure(error, { type: RestApiValidationError, outcome: 'rolledBack' }))
+    await assert.rejects(fixture.api.resources.items.post({ document: createJsonApiDocument('items', { name: 'Record', constructor: '1' }) }), error => assertWriteFailure(error, { type: RestApiValidationError, outcome: 'rolledBack' }))
     assert.equal(await fixture.count('items'), 0)
   })
 })
@@ -427,7 +427,7 @@ for (const alias of ['constructor', 'toString', 'prototype']) {
           id: parent.id,
           format: 'jsonapi',
           returning: 'none',
-          inputRecord: { data: { type: 'items', id: parent.id, relationships: { [alias]: { data: { type: 'items', id: root.id } } } } }
+          document: { data: { type: 'items', id: parent.id, relationships: { [alias]: { data: { type: 'items', id: root.id } } } } }
         })
         const result = await fixture.api.resources.items.get({ id: child.id, format: 'jsonapi', queryParams: { include: [`${alias}.${alias}`] } })
         assert.deepEqual(result.included.map(row => row.attributes.name).sort(), ['Parent', 'Root'])
@@ -472,10 +472,10 @@ describe(`Nested JSON property names (${storageMode.mode})`, () => {
       const payload = JSON.parse('{"__proto__":{"nested":true},"constructor":{"prototype":{"x":1}},"toString":"literal"}')
       const data = { name: 'Record', payload, entries: [payload] }
       const inputRecord = format === 'plain' ? data : createJsonApiDocument('items', data)
-      const created = await fixture.api.resources.items.post({ format, returning: 'full', inputRecord })
+      const created = await fixture.api.resources.items.post({ format, returning: 'full', [format === 'plain' ? 'data' : 'document']: inputRecord })
       const id = format === 'plain' ? created.id : created.data.id
       for (const method of ['get', 'patch', 'put']) {
-        const result = await fixture.api.resources.items[method]({ id, format, returning: 'full', ...(method === 'get' ? {} : { inputRecord }) })
+        const result = await fixture.api.resources.items[method]({ id, format, returning: 'full', ...(method === 'get' ? {} : { [format === 'plain' ? 'data' : 'document']: inputRecord }) })
         const attributes = format === 'plain' ? result : result.data.attributes
         assert.deepEqual(attributes.payload, payload)
         assert.deepEqual(attributes.entries, [payload])

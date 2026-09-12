@@ -14,52 +14,13 @@ try {
  */
 
 /**
- * Calculate position for a new/moved item based on beforeId
- * @param {Array} items - Array of items with position field
- * @param {string} beforeId - ID to position before (null = last)
- * @param {string} idField - Name of the ID field
- * @param {string} positionField - Name of the position field
+ * Generate a key between already-selected neighboring position strings.
+ * @param {string | null | undefined} previousPosition - Lower bound, or the beginning
+ * @param {string | null | undefined} nextPosition - Upper bound, or the end
  * @returns {string} New position key
  */
-export function calculatePosition (items, beforeId, idField, positionField) {
-  // Sort items by position using simple string comparison
-  // Important: fractional-indexing expects ASCII/Unicode ordering, not locale-specific
-  const sorted = [...items].sort((a, b) => {
-    const posA = a[positionField] || ''
-    const posB = b[positionField] || ''
-    return posA < posB ? -1 : posA > posB ? 1 : 0
-  })
-
-  // If no items, start in the middle
-  if (sorted.length === 0) {
-    return generateKeyBetween(null, null) // Returns 'a0'
-  }
-
-  // Position at end
-  if (beforeId === null || beforeId === undefined) {
-    const lastItem = sorted[sorted.length - 1]
-    return generateKeyBetween(lastItem[positionField], null)
-  }
-
-  // Find the item to position before
-  const beforeIndex = sorted.findIndex(item => String(item[idField]) === String(beforeId))
-
-  // If beforeId not found, position at end
-  if (beforeIndex === -1) {
-    const lastItem = sorted[sorted.length - 1]
-    return generateKeyBetween(lastItem[positionField], null)
-  }
-
-  // Position before the found item
-  const beforeItem = sorted[beforeIndex]
-  const prevItem = beforeIndex > 0 ? sorted[beforeIndex - 1] : null
-
-  const result = generateKeyBetween(
-    prevItem ? prevItem[positionField] : null,
-    beforeItem[positionField]
-  )
-
-  return result
+export function calculatePosition (previousPosition, nextPosition) {
+  return generateKeyBetween(previousPosition ?? null, nextPosition ?? null)
 }
 
 /**
@@ -123,8 +84,11 @@ export function isValidPosition (position) {
     return false
   }
 
-  // Fractional keys should match pattern: lowercase letters and digits
-  return /^[a-z0-9]+$/i.test(position)
+  if (!/^[a-z0-9]+$/i.test(position)) return false
+  try {
+    generateKeyBetween(position, null)
+    return true
+  } catch { return false }
 }
 
 /**

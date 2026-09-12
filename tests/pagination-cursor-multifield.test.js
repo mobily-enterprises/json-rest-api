@@ -49,7 +49,7 @@ describe('Multi-field Cursor Pagination', () => {
     await cleanTables(knex, ['cursor_products', 'cursor_items'])
 
     await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
+      document: createJsonApiDocument('products', {
         name: 'Cleanup Product',
         category: 'Cleanup',
         brand: 'Fixture',
@@ -60,7 +60,7 @@ describe('Multi-field Cursor Pagination', () => {
     })
 
     await api.resources.items.post({
-      inputRecord: createJsonApiDocument('items', {
+      document: createJsonApiDocument('items', {
         code: 'CLEAN',
         name: 'Cleanup Item',
         category: 'Cleanup',
@@ -100,7 +100,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const product of products) {
         await api.resources.products.post({
-          inputRecord: createJsonApiDocument('products', product),
+          document: createJsonApiDocument('products', product),
           format: 'jsonapi'
         })
       }
@@ -187,7 +187,7 @@ describe('Multi-field Cursor Pagination', () => {
     it('should handle three-field sorting with multiple duplicate values', async () => {
       // Add more products with duplicate category AND brand
       await api.resources.products.post({
-        inputRecord: createJsonApiDocument('products', {
+        document: createJsonApiDocument('products', {
           name: 'Zucchini',
           category: 'Vegetable',
           brand: 'Green Gardens',
@@ -305,7 +305,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const product of products) {
         await api.resources.products.post({
-          inputRecord: createJsonApiDocument('products', product),
+          document: createJsonApiDocument('products', product),
           format: 'jsonapi'
         })
       }
@@ -427,7 +427,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const product of products) {
         await api.resources.products.post({
-          inputRecord: createJsonApiDocument('products', product),
+          document: createJsonApiDocument('products', product),
           format: 'jsonapi'
         })
       }
@@ -474,7 +474,7 @@ describe('Multi-field Cursor Pagination', () => {
     it('should handle empty results with multi-field cursor', async () => {
       // Create one product
       await api.resources.products.post({
-        inputRecord: createJsonApiDocument('products', {
+        document: createJsonApiDocument('products', {
           name: 'Single Product',
           category: 'Misc',
           brand: 'Generic',
@@ -508,7 +508,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const product of products) {
         await api.resources.products.post({
-          inputRecord: createJsonApiDocument('products', product),
+          document: createJsonApiDocument('products', product),
           format: 'jsonapi'
         })
       }
@@ -552,7 +552,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const item of items) {
         await api.resources.items.post({
-          inputRecord: createJsonApiDocument('items', item),
+          document: createJsonApiDocument('items', item),
           format: 'jsonapi'
         })
       }
@@ -601,7 +601,7 @@ describe('Multi-field Cursor Pagination', () => {
 
       for (const product of products) {
         await api.resources.products.post({
-          inputRecord: createJsonApiDocument('products', product),
+          document: createJsonApiDocument('products', product),
           format: 'jsonapi'
         })
       }

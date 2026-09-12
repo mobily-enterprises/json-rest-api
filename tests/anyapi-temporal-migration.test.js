@@ -178,7 +178,7 @@ describe(`Existing AnyAPI temporal migration (${databaseClient}, canonical stora
           assert.deepEqual(reversed, ['1', '2', '3'])
           assert.equal(before, undefined)
         }
-        await events.post({ format: 'plain', inputRecord: { id: '5', name: 'New write', day: '2024-03-02', atTime: '00:00:00.123456', occurredAt: '2024-03-02T00:00:00.123Z' } })
+        await events.post({ format: 'plain', data: { id: '5', name: 'New write', day: '2024-03-02', atTime: '00:00:00.123456', occurredAt: '2024-03-02T00:00:00.123Z' } })
         const created = await events.get({ id: '5', format: 'plain' })
         assert.equal(created.atTime, '00:00:00.123456')
         assert.equal(created.occurredAt, '2024-03-02T00:00:00.123Z')

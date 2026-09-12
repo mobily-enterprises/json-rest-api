@@ -74,7 +74,7 @@ for (const defaultReturning of ['none', 'minimal', 'full']) {
               const result = await items[method]({
                 ...params,
                 id,
-                inputRecord,
+                [simplified ? 'data' : 'document']: inputRecord,
                 ...(overrideReturn === undefined ? {} : { returning: overrideReturn })
               })
               const stored = (await items.query({ format: 'jsonapi' })).data

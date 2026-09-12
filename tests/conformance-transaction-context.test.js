@@ -47,8 +47,8 @@ describe(`Reused write context transaction ownership (${storageMode.mode})`, () 
 
   it('validates PUT omissions against this request after an earlier complete payload', async () => {
     const context = {}
-    await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', inputRecord: { name: 'Original', active: false, score: 7 } }, context)
-    await assert.rejects(fixture.api.resources.items.put({ id: item.id, format: 'plain', inputRecord: { name: 'Incomplete', group: group.id } }, context), error => {
+    await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', data: { name: 'Original', active: false, score: 7 } }, context)
+    await assert.rejects(fixture.api.resources.items.put({ id: item.id, format: 'plain', data: { name: 'Incomplete', group: group.id } }, context), error => {
       assert.equal(error.code, 'REST_API_VALIDATION')
       assert.deepEqual(error.details.fields, ['data.attributes.active', 'data.attributes.score'])
       return true
@@ -61,8 +61,8 @@ describe(`Reused write context transaction ownership (${storageMode.mode})`, () 
 
   it('does not require a previous record\'s populated fields during PUT-create', async () => {
     const context = {}
-    await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', inputRecord: { name: 'Original' } }, context)
-    const created = await fixture.api.resources.items.put({ id: '99', format: 'plain', inputRecord: { name: 'New' } }, context)
+    await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', data: { name: 'Original' } }, context)
+    const created = await fixture.api.resources.items.put({ id: '99', format: 'plain', data: { name: 'New' } }, context)
     assert.equal(created.id, '99')
     assert.equal(created.name, 'New')
     assert.equal(created.active, true)
@@ -75,13 +75,13 @@ describe(`Reused write context transaction ownership (${storageMode.mode})`, () 
     for (const managed of [false, true]) {
       it(`${method} ${managed ? 'defers rollback to the helper' : 'rolls back its transaction'} after a previous committed call`, async () => {
         const context = {}
-        await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', inputRecord: { name: 'Original' } }, context)
+        await fixture.api.resources.items.patch({ id: item.id, format: 'plain', returning: 'none', data: { name: 'Original' } }, context)
         assert.equal(context.transactionCommitted, true)
         const previous = context.transaction
         const related = method.endsWith('Relationship')
         const params = related
           ? { id: group.id, relationshipName: 'items', relationshipData: [{ type: item.type, id: method === 'deleteRelationship' ? item.id : other.id }] }
-          : { id: method === 'post' ? undefined : item.id, format: 'plain', returning: 'none', inputRecord: { name: 'Changed', ...(method === 'post' ? { id: '99' } : {}), ...(method === 'put' ? { active: true, score: 0, group: group.id } : {}) } }
+          : { id: method === 'post' ? undefined : item.id, format: 'plain', returning: 'none', data: { name: 'Changed', ...(method === 'post' ? { id: '99' } : {}), ...(method === 'put' ? { active: true, score: 0, group: group.id } : {}) } }
         failMethod = method
         try {
           const checkFailure = async transaction => {

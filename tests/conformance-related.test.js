@@ -168,7 +168,7 @@ for (const searchable of [false, true]) {
       const transaction = unit.transaction
       try {
         await fixture.api.resources.items.patch({
-          id: expected[0].id, inputRecord: { group: second.id }, format: 'plain', returning: 'none', transaction
+          id: expected[0].id, data: { group: second.id }, format: 'plain', returning: 'none', transaction
         })
         const result = await related({ sort: ['rank'] }, { transaction })
         assert.deepEqual(result.data.map(item => item.id), expected.slice(1).map(item => item.id))

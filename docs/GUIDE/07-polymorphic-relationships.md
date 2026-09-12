@@ -71,20 +71,20 @@ the corresponding parent type.
 
 ```javascript
 const publisher = await api.resources.publishers.post({
-  inputRecord: { id: '1', name: 'French Books' }
+  data: { id: '1', name: 'French Books' }
 })
 const author = await api.resources.authors.post({
-  inputRecord: { id: '1', name: 'Victor Hugo' }
+  data: { id: '1', name: 'Victor Hugo' }
 })
 const publisherReview = await api.resources.reviews.post({
-  inputRecord: {
+  data: {
     rating: 4, comment: 'Reliable publisher',
     reviewable: { _type: 'publishers', id: publisher.id }
   }
 })
 const authorReviewDocument = await api.resources.reviews.post({
   format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'reviews',
       attributes: { rating: 5, comment: 'Excellent author' },

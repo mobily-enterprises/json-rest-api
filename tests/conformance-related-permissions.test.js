@@ -54,9 +54,9 @@ async function installReadHooks (api) {
 
 async function seedRelated (fixture) {
   await fixture.reset()
-  await fixture.api.resources.groups.post({ format: 'plain', inputRecord: { id: 0, name: 'Group' } })
+  await fixture.api.resources.groups.post({ format: 'plain', data: { id: 0, name: 'Group' } })
   await fixture.api.resources.items.post({
-    format: 'plain', inputRecord: { id: 0, name: 'Item', group: 0, subject: { _type: 'groups', id: 0 } }
+    format: 'plain', data: { id: 0, name: 'Item', group: 0, subject: { _type: 'groups', id: 0 } }
   })
 }
 
@@ -125,7 +125,7 @@ describe(`To-one related permission conformance (${storageMode.mode})`, () => {
       const transaction = unit.transaction
       try {
         await fixture.api.resources[target].patch({
-          id: 0, format: 'plain', returning: 'none', transaction, inputRecord: { name: 'Uncommitted name' }
+          id: 0, format: 'plain', returning: 'none', transaction, data: { name: 'Uncommitted name' }
         })
         const result = await fixture.api.resources[parent].getRelated({ id: 0, relationshipName: name, transaction, format: 'plain' }, {
           relatedRead: { target, transaction }

@@ -86,7 +86,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
         await fixture.api.resources.items[method]({
           ...(method === 'post' ? {} : { id: ownerId }),
           returning: 'none',
-          inputRecord: { data: { type: 'items', id: ownerId, attributes: { name: 'Written owner' }, relationships: { groups: { data: ids } } } }
+          document: { data: { type: 'items', id: ownerId, attributes: { name: 'Written owner' }, relationships: { groups: { data: ids } } } }
         }, request)
       }
       assert.equal(request.validationProbe.queries.length, 3)
@@ -157,7 +157,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
     await fixture.api.resources.items.patch({
       id: '1',
       returning: 'none',
-      inputRecord: {
+      document: {
         data: {
           type: 'items',
           relationships: {
@@ -239,7 +239,7 @@ describe(`Structured target rows (${storageMode.mode})`, () => {
   it('validates resources containing native JSON without requiring equality over the JSON column', async () => {
     const group = await fixture.seed('groups', { name: 'JSON target', payload })
     const item = await fixture.seed('items', { name: 'Owner' })
-    await fixture.api.resources.items.patch({ id: item.id, returning: 'none', inputRecord: { data: { type: 'items', relationships: { group: { data: { type: 'groups', id: group.id } } } } } })
+    await fixture.api.resources.items.patch({ id: item.id, returning: 'none', document: { data: { type: 'items', relationships: { group: { data: { type: 'groups', id: group.id } } } } } })
     assert.deepEqual((await fixture.api.resources.groups.get({ id: group.id })).data.attributes.payload, payload)
     assert.equal((await fixture.api.resources.items.get({ id: item.id })).data.relationships.group.data.id, group.id)
   })

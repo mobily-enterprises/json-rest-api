@@ -27,7 +27,7 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
     await cleanTables(knex, ['cursor_products'])
     for (let index = 0; index < recordCount; index++) {
       await api.resources.products.post({
-        inputRecord: createJsonApiDocument('products', {
+        document: createJsonApiDocument('products', {
           name: `Product ${index}`,
           category: 'Fixture',
           brand: 'Fixture',

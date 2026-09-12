@@ -17,7 +17,7 @@ describe('Pagination boundary audit', () => {
     ids = []
     for (let index = 0; index < 8; index++) {
       const result = await api.resources.events.post({
-        inputRecord: createJsonApiDocument('events', {
+        document: createJsonApiDocument('events', {
           name: `Event ${index}`, occurredAt: `2026-09-01T10:20:3${index}.000Z`
         }),
         format: 'jsonapi'
@@ -130,7 +130,7 @@ describe('Pagination boundary audit', () => {
       for (const id of [ids[1], ids[4], ids[6]]) {
         await api.resources.events.patch({
           id,
-          inputRecord: {
+          document: {
             data: {
               type: 'events', id, attributes: { occurredAt: null }
             }

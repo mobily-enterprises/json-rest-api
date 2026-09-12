@@ -70,10 +70,10 @@ describe(`Version backfill example (${storageMode.mode})`, () => {
     const foreignRows = () => fixture.knex('any_records').where(builder => builder.whereNot('tenant_id', fixture.api.anyapi.tenantId).orWhereNot('resource', 'items')).orderBy('id')
     if (fixture.storage === 'anyapi') {
       const neighbor = await createAnyApiFieldEvolutionApi(fixture.knex, { tenantId: 'backfill_neighbor', fields, canonicalFieldsMap: { name: nameColumn, revision: plan.versionColumn } })
-      await neighbor.resources.items.post({ format: 'plain', inputRecord: { id: '1', name: 'Selected', revision: 'neighbor-token' } })
-      await neighbor.resources.groups.post({ format: 'plain', inputRecord: { id: '1', name: 'Selected' } })
+      await neighbor.resources.items.post({ format: 'plain', data: { id: '1', name: 'Selected', revision: 'neighbor-token' } })
+      await neighbor.resources.groups.post({ format: 'plain', data: { id: '1', name: 'Selected' } })
       const sameTenant = await createAnyApiTemporalMigrationApi(fixture.knex, { tenantId: fixture.api.anyapi.tenantId })
-      await sameTenant.resources.people.post({ format: 'plain', inputRecord: { id: '1', name: 'Selected' } })
+      await sameTenant.resources.people.post({ format: 'plain', data: { id: '1', name: 'Selected' } })
       foreignBefore = await foreignRows()
     }
     assert.deepEqual(await fixture.knex.transaction(transaction => backfillResourceVersions(transaction, selectedPlan)), { scanned: 1, initialized: 1 })
@@ -107,10 +107,10 @@ describe(`Version-field allocation and restart (${storageMode.mode})`, () => {
     const items = api.resources.items
     const current = await items.get({ id: first.id, format: 'plain' })
     assert.match(current.revision, /^[0-9a-f-]{36}$/)
-    const updated = await items.patch({ id: first.id, inputRecord: { name: 'After migration' }, format: 'plain', returning: 'full', expectedVersion: current.revision })
+    const updated = await items.patch({ id: first.id, data: { name: 'After migration' }, format: 'plain', returning: 'full', expectedVersion: current.revision })
     assert.notEqual(updated.revision, current.revision)
-    await assert.rejects(items.patch({ id: first.id, inputRecord: { name: 'Stale' }, format: 'plain', expectedVersion: current.revision }), error => error.code === 'REST_API_VERSION_CONFLICT')
-    const created = await items.post({ inputRecord: { name: 'New row' }, format: 'plain', returning: 'full' })
+    await assert.rejects(items.patch({ id: first.id, data: { name: 'Stale' }, format: 'plain', expectedVersion: current.revision }), error => error.code === 'REST_API_VERSION_CONFLICT')
+    const created = await items.post({ data: { name: 'New row' }, format: 'plain', returning: 'full' })
     assert.match(created.revision, /^[0-9a-f-]{36}$/)
   })
 })

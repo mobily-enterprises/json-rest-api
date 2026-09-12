@@ -52,7 +52,7 @@ describe('Include/Sideloading Operations', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       testData.country = countryResult.data
@@ -62,7 +62,7 @@ describe('Include/Sideloading Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
@@ -70,11 +70,11 @@ describe('Include/Sideloading Operations', () => {
       const author1Doc = createJsonApiDocument('authors', { name: 'Author One' })
       const author2Doc = createJsonApiDocument('authors', { name: 'Author Two' })
       const author1Result = await basicApi.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
       const author2Result = await basicApi.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
       testData.authors = [author1Result.data, author2Result.data]
@@ -91,7 +91,7 @@ describe('Include/Sideloading Operations', () => {
         }
       )
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
       testData.book = bookResult.data
@@ -224,7 +224,7 @@ describe('Include/Sideloading Operations', () => {
       // Create hierarchy: Country -> Publisher -> Book
       const countryDoc = createJsonApiDocument('countries', { name: 'Nested Country', code: 'NC' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       testData.country = countryResult.data
@@ -234,7 +234,7 @@ describe('Include/Sideloading Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
@@ -247,7 +247,7 @@ describe('Include/Sideloading Operations', () => {
         }
       )
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
       testData.book = bookResult.data
@@ -284,7 +284,7 @@ describe('Include/Sideloading Operations', () => {
       // Create an author to have more relationships
       const authorDoc = createJsonApiDocument('authors', { name: 'Nested Author' })
       const authorResult = await basicApi.resources.authors.post({
-        inputRecord: authorDoc,
+        document: authorDoc,
         format: 'jsonapi'
       })
 
@@ -302,7 +302,7 @@ describe('Include/Sideloading Operations', () => {
       }
       await basicApi.resources.books.patch({
         id: testData.book.id,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -346,7 +346,7 @@ describe('Include/Sideloading Operations', () => {
         currency: 'FTC'
       })
       const countryResult = await extendedApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       testData.country = countryResult.data
@@ -361,7 +361,7 @@ describe('Include/Sideloading Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
       )
       const publisherResult = await extendedApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
@@ -380,7 +380,7 @@ describe('Include/Sideloading Operations', () => {
         }
       )
       const bookResult = await extendedApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
       testData.book = bookResult.data

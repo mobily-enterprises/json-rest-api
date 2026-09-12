@@ -124,7 +124,7 @@ describe(`Resource write lifecycle (${storageMode.mode})`, () => {
     const inputRecord = format === 'plain' ? { ...identifier, ...attributes } : { data: { type: 'items', ...identifier, attributes } }
     operationContext = context
     enabled = true
-    return fixture.api.resources.items[operation.method]({ ...identifier, inputRecord, format, returning, transaction }, operationContext)
+    return fixture.api.resources.items[operation.method]({ ...identifier, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning, transaction }, operationContext)
   }
 
   for (const format of ['jsonapi', 'plain']) {
@@ -365,9 +365,9 @@ describe(`Composed bulk lifecycle (${storageMode.mode})`, () => {
   after(async () => { await fixture?.close() })
 
   const bulkInput = method => method === 'post'
-    ? { inputRecords: records.map((record, index) => ({ type: 'items', id: String(10 + index), attributes: { name: `Changed ${10 + index}` } })) }
+    ? { document: { data: records.map((record, index) => ({ type: 'items', id: String(10 + index), attributes: { name: `Changed ${10 + index}` } })) } }
     : method === 'patch'
-      ? { operations: records.map(({ id }, index) => ({ id, data: { type: 'items', id, attributes: { name: `Changed ${index}` } } })) }
+      ? { operations: records.map(({ id }, index) => ({ id, document: { data: { type: 'items', id, attributes: { name: `Changed ${index}` } } } })) }
       : { ids: records.map(({ id }) => id) }
 
   for (const method of ['post', 'patch', 'delete']) {

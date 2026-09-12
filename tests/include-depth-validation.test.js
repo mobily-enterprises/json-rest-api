@@ -31,7 +31,7 @@ describe('Include Depth Validation', () => {
     ])
 
     const country = await api.resources.countries.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'countries',
           attributes: { name: 'USA', code: 'US' }
@@ -40,7 +40,7 @@ describe('Include Depth Validation', () => {
     })
 
     const publisher = await api.resources.publishers.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'publishers',
           attributes: { name: 'Test Publisher' },
@@ -52,7 +52,7 @@ describe('Include Depth Validation', () => {
     })
 
     await api.resources.authors.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'authors',
           attributes: { name: 'Test Author' },
@@ -64,7 +64,7 @@ describe('Include Depth Validation', () => {
     })
 
     await api.resources.books.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'books',
           attributes: { title: 'Test Book' },
@@ -207,7 +207,7 @@ describe('Include Depth Validation', () => {
       ])
 
       const country = await limitedApi.resources.countries.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'countries',
             attributes: { name: 'Limited Country', code: 'LC' }
@@ -216,7 +216,7 @@ describe('Include Depth Validation', () => {
       })
 
       const publisher = await limitedApi.resources.publishers.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'publishers',
             attributes: { name: 'Limited Publisher' },
@@ -228,7 +228,7 @@ describe('Include Depth Validation', () => {
       })
 
       await limitedApi.resources.authors.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'authors',
             attributes: { name: 'Limited Author' },
@@ -272,7 +272,7 @@ describe('Include Depth Validation', () => {
 
     it('should handle single-level paths correctly', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'countries',
             attributes: { name: 'Single Level Country', code: `S${Date.now().toString().slice(-2)}` }
@@ -281,7 +281,7 @@ describe('Include Depth Validation', () => {
       })
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'publishers',
             attributes: { name: 'Single Level Publisher' },
@@ -293,7 +293,7 @@ describe('Include Depth Validation', () => {
       })
 
       await api.resources.books.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'books',
             attributes: { title: 'Single Level Book' },

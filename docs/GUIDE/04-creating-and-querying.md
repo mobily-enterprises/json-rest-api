@@ -55,20 +55,20 @@ are an allowlist and input-validation contract, not arbitrary client-supplied SQ
 
 ```javascript
 const france = await api.resources.countries.post({
-  inputRecord: { name: 'France', code: 'FR', population: 68 }
+  data: { name: 'France', code: 'FR', population: 68 }
 })
 const italy = await api.resources.countries.post({
-  inputRecord: { name: 'Italyy', code: 'IT', population: 59 }
+  data: { name: 'Italyy', code: 'IT', population: 59 }
 })
 const germany = await api.resources.countries.post({
-  inputRecord: { name: 'Germ', code: 'DE', population: 84 }
+  data: { name: 'Germ', code: 'DE', population: 84 }
 })
 await api.resources.countries.patch({
-  id: germany.id, inputRecord: { name: 'Germany' }, returning: 'none'
+  id: germany.id, data: { name: 'Germany' }, returning: 'none'
 })
 const patched = await api.resources.countries.get({ id: germany.id })
 const replaced = await api.resources.countries.put({
-  id: italy.id, inputRecord: { name: 'Italy', code: null, population: null }
+  id: italy.id, data: { name: 'Italy', code: null, population: null }
 })
 console.log('Patched:', patched)
 console.log('Replaced:', replaced)
@@ -81,19 +81,19 @@ PUT replaces Italy's record and explicitly clears its nullable fields. A
 replacement must include attributes that already have values; omitting them
 rejects with a complete-replacement validation error. Use null explicitly when
 the schema permits clearing a value. PUT can also create a missing target. DELETE returns
-undefined. Writes always place record attributes inside `inputRecord`.
+undefined. Writes always place record attributes inside `data`.
 
 ## Query and filter
 
 ```javascript
 await api.resources.countries.post({
-  inputRecord: { name: 'United States', code: 'US', population: 330 }
+  data: { name: 'United States', code: 'US', population: 330 }
 })
 await api.resources.countries.post({
-  inputRecord: { name: 'United Kingdom', code: 'GB', population: 67 }
+  data: { name: 'United Kingdom', code: 'GB', population: 67 }
 })
 await api.resources.countries.post({
-  inputRecord: { name: 'Austria', code: 'AT', population: 9 }
+  data: { name: 'Austria', code: 'AT', population: 9 }
 })
 const exact = await api.resources.countries.query({
   queryParams: { filters: { name: 'France' } }

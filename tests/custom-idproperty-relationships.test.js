@@ -52,7 +52,7 @@ describe('Custom idProperty Relationship Operations', () => {
       })
 
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc
+        document: countryDoc
       })
 
       // Verify response has 'id' not 'country_id'
@@ -77,14 +77,14 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should handle PATCH updates returning full record', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', {
+        document: createJsonApiDocument('countries', {
           name: 'United States',
           code: 'US'
         })
       })
 
       const patchResult = await api.resources.countries.patch({
-        inputRecord: {
+        document: {
           data: {
             type: 'countries',
             id: country.data.id,
@@ -118,7 +118,7 @@ describe('Custom idProperty Relationship Operations', () => {
       })
 
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc
+        document: countryDoc
       })
 
       // Create publisher with country relationship
@@ -132,7 +132,7 @@ describe('Custom idProperty Relationship Operations', () => {
       )
 
       const publisherResult = await api.resources.publishers.post({
-        inputRecord: publisherDoc
+        document: publisherDoc
       })
 
       // Verify response
@@ -173,16 +173,16 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should update belongsTo relationship via PATCH', async () => {
       // Create two countries
       const country1 = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const country2 = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
+        document: createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
       })
 
       // Create publisher with first country
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', country1.data.id)) }
         )
@@ -200,7 +200,7 @@ describe('Custom idProperty Relationship Operations', () => {
       }
 
       const patchResult = await api.resources.publishers.patch({
-        inputRecord: patchDoc
+        document: patchDoc
       })
 
       // Verify we get full record back
@@ -234,12 +234,12 @@ describe('Custom idProperty Relationship Operations', () => {
 
       // Setup test data
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
       countryId = country.data.id
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', countryId)) }
         )
@@ -247,12 +247,12 @@ describe('Custom idProperty Relationship Operations', () => {
       publisherId = publisher.data.id
 
       const author1 = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Author One' })
+        document: createJsonApiDocument('authors', { name: 'Author One' })
       })
       author1Id = author1.data.id
 
       const author2 = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Author Two' })
+        document: createJsonApiDocument('authors', { name: 'Author Two' })
       })
       author2Id = author2.data.id
     })
@@ -272,7 +272,7 @@ describe('Custom idProperty Relationship Operations', () => {
       )
 
       const bookResult = await api.resources.books.post({
-        inputRecord: bookDoc
+        document: bookDoc
       })
 
       bookId = bookResult.data.id
@@ -307,7 +307,7 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should handle PATCH updates to many-to-many relationships', async () => {
       // Create book with one author
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', countryId)),
@@ -331,7 +331,7 @@ describe('Custom idProperty Relationship Operations', () => {
       }
 
       const patchResult = await api.resources.books.patch({
-        inputRecord: patchDoc,
+        document: patchDoc,
         queryParams: {
           include: ['authors']
         }
@@ -365,11 +365,11 @@ describe('Custom idProperty Relationship Operations', () => {
 
       // Create test resources
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
@@ -377,18 +377,18 @@ describe('Custom idProperty Relationship Operations', () => {
       bookId = book.data.id
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Test Author' })
+        document: createJsonApiDocument('authors', { name: 'Test Author' })
       })
       authorId = author.data.id
 
       await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers', { name: 'Test Publisher' })
+        document: createJsonApiDocument('publishers', { name: 'Test Publisher' })
       })
     })
 
     it('should create polymorphic review for book with custom IDs', async () => {
       const review = await api.resources.reviews.post({
-        inputRecord: createJsonApiDocument('reviews', {
+        document: createJsonApiDocument('reviews', {
           rating: 5,
           title: 'Great book!',
           content: 'Excellent read.',
@@ -414,7 +414,7 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should create polymorphic review for author with custom IDs', async () => {
       const review = await api.resources.reviews.post({
-        inputRecord: createJsonApiDocument('reviews', {
+        document: createJsonApiDocument('reviews', {
           rating: 4,
           title: 'Talented author',
           content: 'Great writing style.',
@@ -433,7 +433,7 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should query polymorphic reviews by type', async () => {
       // Create reviews for different types
       await api.resources.reviews.post({
-        inputRecord: createJsonApiDocument('reviews', {
+        document: createJsonApiDocument('reviews', {
           rating: 5,
           title: 'Book review',
           content: 'Great book',
@@ -444,7 +444,7 @@ describe('Custom idProperty Relationship Operations', () => {
       })
 
       await api.resources.reviews.post({
-        inputRecord: createJsonApiDocument('reviews', {
+        document: createJsonApiDocument('reviews', {
           rating: 4,
           title: 'Author review',
           content: 'Great author',
@@ -476,22 +476,22 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should handle nested includes through custom ID relationships', async () => {
       // Create hierarchy: Country -> Publisher -> Book -> Authors
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
       })
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Test Author' })
+        document: createJsonApiDocument('authors', { name: 'Test Author' })
       })
 
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -527,25 +527,25 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should handle 3+ levels of nested includes', async () => {
       // Create deeper hierarchy
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors',
+        document: createJsonApiDocument('authors',
           { name: 'Test Author' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
       })
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
       })
 
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -583,12 +583,12 @@ describe('Custom idProperty Relationship Operations', () => {
 
       // Create test data
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
+        document: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       })
       testData.country = country.data
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
         )
@@ -596,12 +596,12 @@ describe('Custom idProperty Relationship Operations', () => {
       testData.publisher = publisher.data
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Test Author', biography: 'A great author' })
+        document: createJsonApiDocument('authors', { name: 'Test Author', biography: 'A great author' })
       })
       testData.author = author.data
 
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book', isbn: '1234567890', pages: 300 },
           {
             country: createRelationship(resourceIdentifier('countries', testData.country.id)),
@@ -654,25 +654,25 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should enforce include depth limits', async () => {
       // Create deep hierarchy
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Test Publisher' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
       })
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors',
+        document: createJsonApiDocument('authors',
           { name: 'Test Author' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
       })
 
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -713,23 +713,23 @@ describe('Custom idProperty Relationship Operations', () => {
     it('should handle complex queries with filters, includes, and custom IDs', async () => {
       // Create multiple countries
       const usa = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const uk = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
+        document: createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
       })
 
       // Create publishers in different countries
       const usPublisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'US Publisher' },
           { country: createRelationship(resourceIdentifier('countries', usa.data.id)) }
         )
       })
 
       const ukPublisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'UK Publisher' },
           { country: createRelationship(resourceIdentifier('countries', uk.data.id)) }
         )
@@ -737,16 +737,16 @@ describe('Custom idProperty Relationship Operations', () => {
 
       // Create authors
       const author1 = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Author One' })
+        document: createJsonApiDocument('authors', { name: 'Author One' })
       })
 
       const author2 = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Author Two' })
+        document: createJsonApiDocument('authors', { name: 'Author Two' })
       })
 
       // Create books
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'US Book 1' },
           {
             country: createRelationship(resourceIdentifier('countries', usa.data.id)),
@@ -757,7 +757,7 @@ describe('Custom idProperty Relationship Operations', () => {
       })
 
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'UK Book 1' },
           {
             country: createRelationship(resourceIdentifier('countries', uk.data.id)),
@@ -791,21 +791,21 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should handle bulk operations with custom IDs', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       // Create multiple authors
       const authors = []
       for (let i = 1; i <= 3; i++) {
         const author = await api.resources.authors.post({
-          inputRecord: createJsonApiDocument('authors', { name: `Author ${i}` })
+          document: createJsonApiDocument('authors', { name: `Author ${i}` })
         })
         authors.push(author.data)
       }
 
       // Create book with all authors
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Multi-author Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -831,15 +831,15 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should handle DELETE operations with custom IDs', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const author = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', { name: 'Test Author' })
+        document: createJsonApiDocument('authors', { name: 'Test Author' })
       })
 
       const book = await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -870,11 +870,11 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should handle PUT operations with custom IDs', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       const publisher = await api.resources.publishers.post({
-        inputRecord: createJsonApiDocument('publishers',
+        document: createJsonApiDocument('publishers',
           { name: 'Original Publisher' },
           { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
         )
@@ -882,7 +882,7 @@ describe('Custom idProperty Relationship Operations', () => {
 
       // PUT to completely replace the publisher
       const putResult = await api.resources.publishers.put({
-        inputRecord: {
+        document: {
           data: {
             type: 'publishers',
             id: publisher.data.id,
@@ -905,12 +905,12 @@ describe('Custom idProperty Relationship Operations', () => {
 
     it('should reject PUT when an existing persisted attribute is omitted', async () => {
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
+        document: createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       })
 
       await assert.rejects(
         async () => api.resources.countries.put({
-          inputRecord: {
+          document: {
             data: {
               type: 'countries',
               id: country.data.id,

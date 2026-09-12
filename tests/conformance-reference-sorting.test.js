@@ -19,7 +19,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
   describe(`Reference sorting hidden by ${hiddenBy} (${storageMode.mode})`, () => {
     let fixture
     const post = async (type, id, name, relationships = {}, hidden = false) => fixture.api.resources[type].post({
-      inputRecord: { data: { type, id, attributes: { name, access_group: hidden ? 'group-b' : 'group-a' }, relationships } }
+      document: { data: { type, id, attributes: { name, access_group: hidden ? 'group-b' : 'group-a' }, relationships } }
     }, admin)
     before(async () => {
       fixture = await createConformanceFixture({ createApi: createSearchPolicyApi, tables })
@@ -241,11 +241,11 @@ for (const connector of ['express', 'fastify']) {
     })
     beforeEach(async () => {
       await fixture.reset()
-      await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id: '900', attributes: { name: 'Hidden group', access_group: 'group-b' } } } }, admin)
+      await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id: '900', attributes: { name: 'Hidden group', access_group: 'group-b' } } } }, admin)
       for (const [type, relationship] of [['items', 'group'], ['notes', 'subject']]) {
         for (const [id, target] of [['101', '900'], ['102', null]]) {
           await fixture.api.resources[type].post({
-            inputRecord: {
+            document: {
               data: {
                 type, id, attributes: { name: `Visible ${id}`, access_group: 'group-a' }, relationships: target ? { [relationship]: linkage('groups', target) } : {}
               }
@@ -293,11 +293,11 @@ describe(`Reference sort defaults and result names (${storageMode.mode})`, () =>
   beforeEach(async () => {
     await fixture.reset()
     for (const [id, name, access] of [['100', 'Visible group', 'group-a'], ['900', 'Hidden group', 'group-b']]) {
-      await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id, attributes: { name, access_group: access } } } }, admin)
+      await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id, attributes: { name, access_group: access } } } }, admin)
     }
     for (const [id, group] of [['101', '900'], ['102', '100'], ['103', null]]) {
       await fixture.api.resources.items.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'items',
             id,
@@ -345,9 +345,9 @@ describe('Regular reference sorting preserves database collation', () => {
   })
   beforeEach(async () => {
     await fixture.reset()
-    for (const id of ['a', 'B', 'H']) await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id, attributes: { name: id } } } })
+    for (const id of ['a', 'B', 'H']) await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id, attributes: { name: id } } } })
     for (const [id, group] of [['1', 'a'], ['2', 'H'], ['3', 'B'], ['4', null]]) {
-      await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id, attributes: { name: id }, relationships: group ? { group: linkage('groups', group) } : {} } } })
+      await fixture.api.resources.items.post({ document: { data: { type: 'items', id, attributes: { name: id }, relationships: group ? { group: linkage('groups', group) } : {} } } })
     }
   })
   after(async () => { await fixture?.close() })

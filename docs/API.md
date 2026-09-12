@@ -11,17 +11,51 @@ This reference provides comprehensive documentation for all methods, parameters,
 This reference describes the v2 API. See the [migration guide](GUIDE/33-migrating-to-v2.md) and
 [backend limits](GUIDE/30-backend-capabilities.md) before upgrading.
 
-Pass method controls in the first `params` object and application-owned
-identity/authentication data in the optional second context object. Write data
-belongs under `inputRecord`; direct attribute shorthand is not accepted.
+Pass method controls in the first `params` object and application information in
+the optional second context object. POST/PUT/PATCH accept exactly one input key:
+`data` for plain resource values, or `document` for a JSON:API document. Both keys
+together are rejected, even if one value is undefined. Direct attribute shorthand
+and the removed `inputRecord` parameter are rejected. A plain field named `data`
+belongs inside the `data` argument and does not select JSON:API input.
 
-`format: 'plain' | 'jsonapi'` selects the input/output representation.
+`format: 'plain' | 'jsonapi'` selects only the output representation.
 Programmatic calls default to `plain`. POST/PUT/PATCH use
 `returning: 'none' | 'minimal' | 'full'`, defaulting to `full`. Per-call options
 override configured resource/plugin defaults. The built-in HTTP connectors
 select JSON:API with full write responses independently of these defaults;
 resource deletion and relationship mutations return no content.
 Boolean representation/return aliases are removed and rejected.
+
+The input key and output format are independent:
+
+```javascript
+// Plain input and a plain result: an ordinary repository needs no JSON:API types.
+async function renameArticle (id, title, context) {
+  return api.resources.articles.patch({ id, data: { title } }, context)
+}
+
+// Plain input with a JSON:API response.
+const wireResponse = await api.resources.articles.patch({
+  id: '42', data: { title: 'Revised' }, format: 'jsonapi'
+})
+
+// JSON:API input with a plain response.
+const plainResult = await api.resources.articles.patch({
+  id: '42',
+  document: { data: { type: 'articles', id: '42', attributes: { title: 'Revised' } } },
+  format: 'plain'
+})
+```
+
+All combinations use the same permissions, validation, hooks, storage and
+transaction lifecycle. Full-response preparation still runs before a write
+commits. The HTTP connectors pass JSON:API request bodies as `document` and
+select JSON:API output; there is no separate programmatic CRUD implementation.
+
+Write documents may contain object-valued top-level `meta`, `links` and `jsonapi`
+members. Hooks can inspect them on the normalized `context.inputRecord`; they
+are not stored attributes. `errors` and `included` are rejected for writes:
+compound writes and JSON:API extensions are not enabled by accepting a document.
 
 On a resource configured with `versionField`, PUT/PATCH/DELETE and relationship
 writes accept an `expectedVersion` string; unconditional writes may omit it.
@@ -106,6 +140,96 @@ resources without their own local override.
 Await setup sequentially. Setup failure is not rolled back; discard that instance
 and correct its configuration before starting again. Registration and
 `customize()` do not migrate stored data or rebuild arbitrary schema mutations.
+
+### TypeScript resources and hooks
+
+The existing registration call infers ordinary attribute types on its returned
+resource. Install the REST/storage plugins first, as in JavaScript:
+
+```ts
+const books = await api.addResource('books', {
+  schema: {
+    title: { type: 'string', required: true },
+    pages: { type: 'number', nullable: true }
+  }
+})
+
+await books.patch({ id: '1', data: { pages: 412 } })
+// Type error: pages is numeric, not a string.
+// await books.patch({ id: '1', data: { pages: 'long' } })
+
+const book = await books.get({ id: '1' })
+// title: string | undefined; visibility and sparse fieldsets can omit it.
+const title = book.title
+```
+
+`ResourceSchema` describes built-in field declarations. For reusable schemas,
+retain literal options with `as const satisfies ResourceSchema`.
+`InferInput<typeof schema>` and `InferOutput<typeof schema>` can replace manually
+duplicated attribute interfaces. Input properties remain optional: defaults and
+hooks can supply required persisted fields. Computed fields are excluded from
+input, and hidden fields from inferred output. Resource result types keep output
+properties optional for permissions and projections. The public resource ID is
+always `id`; inferred registration also omits a declared physical `idProperty`.
+An ID property known only as a dynamic string needs an explicit resource model.
+Optional stored fields without `required: true` or `nullable: false` also include
+SQL `null` in their output type. Input `null` still requires `nullable: true`.
+
+```ts
+import type { ResourceSchema, InferInput, InferOutput } from 'json-rest-api'
+
+const schema = {
+  title: { type: 'string', required: true },
+  pages: { type: 'number' }
+} as const satisfies ResourceSchema
+
+type BookInput = InferInput<typeof schema>
+type BookFields = InferOutput<typeof schema>
+```
+
+Inference describes built-in CRUD with the standard API defaults (`plain`,
+`full`). Literal resource-level `format` and `returning` options are inferred,
+as are per-call overrides. Arbitrary plugin installations, API-level defaults,
+`vars` mutations and replaced methods are not inferred. Keep an explicit resource
+map when using those features, dynamic schema enrichment, relationship fields or
+custom transformations:
+
+```ts
+import { JsonRestApi } from 'json-rest-api'
+import type { ResourceCoreMethods } from 'json-rest-api'
+
+interface BookFields { title: string; displayTitle: string }
+interface BookInput { title?: string }
+type Books = ResourceCoreMethods<BookFields, BookInput, 'books', 'jsonapi'>
+const api = new JsonRestApi<{ books: Books }>()
+```
+
+The explicit map remains authoritative for both returned handles and
+`api.resources`. Awaited registration does not grow the static type of an existing
+`api.resources` registry. Without an explicit map, keep the inferred returned
+handle. Resource-local method overrides use the general runtime declarations
+instead of pretending the overridden methods still perform built-in CRUD.
+
+Attribute inference omits inline belongs-to backing fields; it does not generate
+relationship result trees. Use the existing `RelationshipMethods` and explicit
+input/output fields for relationships, separately declared polymorphic backing
+fields and managed version-field input restrictions. Callback/serializer output
+is `unknown` unless supplied explicitly. Inferred values describe public
+representations, not every accepted coercion or every database constraint.
+Nested object schemas use existing schema instances, not a new nested-schema DSL.
+
+`RuntimeResourceOptions` describes built-in resource settings. Plugin extensions
+can declare an intersection with their own option interface and pass that typed
+configuration, retaining a precise resource map where the plugin changes fields
+or methods. This does not require a runtime wrapper.
+
+Known hooks receive phase-specific editor guidance, including library-owned
+read-only fields and permission/enrichment context references. Use
+`RuntimeCustomization<AppContext>` or the optional second `JsonRestApi` type
+argument to describe custom application state. `HookHandler<Event, AppContext>`
+types an individual known hook; `RuntimeHook<PluginContext>` describes a custom
+plugin hook. These declarations do not freeze context or replace runtime
+validation. See the [hook recipes and editor guidance](GUIDE/13-hooks-and-lifecycle.md).
 
 ## Core API Methods
 
@@ -480,7 +604,8 @@ const result = await api.resources[resourceType].post(params, context)
 
 ```javascript
 {
-  inputRecord: Object,      // Required: Resource data (JSON:API or plain)
+  data: Object,            // Plain resource values; choose data OR document
+  document: Object,        // JSON:API document; never supply both
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
@@ -493,13 +618,14 @@ const result = await api.resources[resourceType].post(params, context)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `inputRecord` | Object | Yes | Resource data to create |
-| `inputRecord.id` | String | No (plain) | Optional explicit logical resource ID |
-| `inputRecord.data` | Object | Yes (JSON:API) | Resource data container |
-| `inputRecord.data.id` | String | No (JSON:API) | Optional explicit logical resource ID |
-| `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
-| `inputRecord.data.attributes` | Object | No | Resource attributes, subject to schema requirements/defaults |
-| `inputRecord.data.relationships` | Object | No | Related resources |
+| `data` | Object | One input key required | Resource data to create as plain values; excludes `document` |
+| `document` | Object | One input key required | JSON:API input document; excludes `data` |
+| `data.id` | String | No (plain) | Optional explicit logical resource ID |
+| `document.data` | Object | Yes (JSON:API) | Resource data container |
+| `document.data.id` | String | No (JSON:API) | Optional explicit logical resource ID |
+| `document.data.type` | String | Yes (JSON:API) | Resource type |
+| `document.data.attributes` | Object | No | Resource attributes, subject to schema requirements/defaults |
+| `document.data.relationships` | Object | No | Related resources |
 | `queryParams` | Object | No | For includes/fields in response |
 | `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
@@ -551,7 +677,7 @@ Accept: application/vnd.api+json
 ```javascript
 // Create article with plain input (default mode)
 const result = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'New Article',
     content: 'Article content...',
     status: 'draft',
@@ -566,7 +692,7 @@ const result = await api.resources.articles.post({
 ```javascript
 // Create article with JSON:API format
 const result = await api.resources.articles.post({
-  inputRecord: {
+  document: {
     data: {
       type: 'articles',
       attributes: {
@@ -590,7 +716,7 @@ const result = await api.resources.articles.post({
 // With normalizeId configured to trim and uppercase ids,
 // this record is stored as ARTICLE-42
 const result = await api.resources.articles.post({
-  inputRecord: {
+  document: {
     data: {
       type: 'articles',
       id: '  article-42  ',
@@ -608,7 +734,7 @@ const result = await api.resources.articles.post({
 ```javascript
 // Create article with author and tags (plain)
 const result = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'New Article',
     content: 'Article content...',
     author: '10',
@@ -624,7 +750,7 @@ const result = await api.resources.articles.post({
 ```javascript
 // Create and return only ID
 const result = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'New Article',
     content: 'Article content...'
   },
@@ -642,7 +768,7 @@ const result = await api.resources.articles.post({
 ```javascript
 // Create without returning data to this programmatic caller
 const result = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'New Article',
     content: 'Article content...'
   },
@@ -670,8 +796,9 @@ const result = await api.resources[resourceType].put(params, context)
 
 ```javascript
 {
-  id: String|Number|BigInt, // Target ID; may instead be supplied in inputRecord
-  inputRecord: Object,      // Required: Complete resource data
+  id: String|Number|BigInt, // Target ID; may instead be supplied in data.id or document.data.id
+  data: Object,            // Complete plain resource values; choose data OR document
+  document: Object,        // Complete JSON:API resource document
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
@@ -684,19 +811,20 @@ const result = await api.resources[resourceType].put(params, context)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `inputRecord` | Object | Yes | Complete resource data |
+| `data` | Object | One input key required | Complete resource data as plain values; excludes `document` |
+| `document` | Object | One input key required | JSON:API input document; excludes `data` |
 | `id` | String\|Number\|BigInt | Conditional | Target ID; required if the input document does not supply one |
-| `inputRecord.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
-| `inputRecord.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
-| `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
-| `inputRecord.data.attributes` | Object | Yes (JSON:API) | All resource attributes |
-| `inputRecord.data.relationships` | Object | No | All relationships (missing ones are nulled) |
+| `data.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
+| `document.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
+| `document.data.type` | String | Yes (JSON:API) | Resource type |
+| `document.data.attributes` | Object | Yes (JSON:API) | All resource attributes |
+| `document.data.relationships` | Object | No | All relationships (missing ones are nulled) |
 | `queryParams` | Object | No | For response formatting |
 | `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
 | `returning` | String | No | `'none'`, `'minimal'` or `'full'`; booleans are rejected |
 
-`inputRecord.id` and `inputRecord.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
+`data.id` and `document.data.id` always refer to the logical resource id. `idProperty` and storage mapping affect the backing column name, not the API field name, and the resource id is not part of `attributes`.
 
 If both the URL id and body id are present, both are normalized before the equality check. If either id normalizes to an empty value, the operation fails before storage is touched.
 
@@ -735,7 +863,7 @@ Accept: application/vnd.api+json
 ```javascript
 // Replace entire article (plain mode)
 const result = await api.resources.articles.put({
-  inputRecord: {
+  data: {
     id: '1',
     title: 'Completely New Title',
     content: 'Entirely new content',
@@ -750,7 +878,7 @@ const result = await api.resources.articles.put({
 ```javascript
 // Replace article with JSON:API format
 const result = await api.resources.articles.put({
-  inputRecord: {
+  document: {
     data: {
       type: 'articles',
       id: '1',
@@ -777,7 +905,7 @@ const result = await api.resources.articles.put({
 ```javascript
 // Replace and explicitly remove relationships
 const result = await api.resources.articles.put({
-  inputRecord: {
+  data: {
     id: '1',
     title: 'Article Without Author',
     content: 'Content...',
@@ -803,8 +931,9 @@ const result = await api.resources[resourceType].patch(params, context)
 
 ```javascript
 {
-  id: String|Number|BigInt, // Target ID; may instead be supplied in inputRecord
-  inputRecord: Object,      // Required: Partial resource data
+  id: String|Number|BigInt, // Target ID; may instead be supplied in data.id or document.data.id
+  data: Object,            // Partial plain resource values; choose data OR document
+  document: Object,        // Partial JSON:API resource document
   queryParams: {
     include: Array,         // For response formatting
     fields: Object          // For response formatting
@@ -817,13 +946,14 @@ const result = await api.resources[resourceType].patch(params, context)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `inputRecord` | Object | Yes | Partial resource data |
+| `data` | Object | One input key required | Partial resource data as plain values; excludes `document` |
+| `document` | Object | One input key required | JSON:API input document; excludes `data` |
 | `id` | String\|Number\|BigInt | Conditional | Target ID; required if the input document does not supply one |
-| `inputRecord.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
-| `inputRecord.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
-| `inputRecord.data.type` | String | Yes (JSON:API) | Resource type |
-| `inputRecord.data.attributes` | Object | No | Attributes to update |
-| `inputRecord.data.relationships` | Object | No | Relationships to update |
+| `data.id` | String\|Number | Conditional (plain) | Target ID when top-level `id` is omitted |
+| `document.data.id` | String\|Number | Conditional (JSON:API) | Target ID when top-level `id` is omitted |
+| `document.data.type` | String | Yes (JSON:API) | Resource type |
+| `document.data.attributes` | Object | No | Attributes to update |
+| `document.data.relationships` | Object | No | Relationships to update |
 | `queryParams` | Object | No | For response formatting |
 | `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
@@ -859,7 +989,7 @@ Accept: application/vnd.api+json
 ```javascript
 // Update only the status (plain mode)
 const result = await api.resources.articles.patch({
-  inputRecord: {
+  data: {
     id: '1',
     status: 'published'
   }
@@ -872,7 +1002,7 @@ const result = await api.resources.articles.patch({
 ```javascript
 // Update title and content
 const result = await api.resources.articles.patch({
-  inputRecord: {
+  data: {
     id: '1',
     title: 'Updated Title',
     content: 'Updated content only',
@@ -885,7 +1015,7 @@ const result = await api.resources.articles.patch({
 ```javascript
 // Update with JSON:API format
 const result = await api.resources.articles.patch({
-  inputRecord: {
+  document: {
     data: {
       type: 'articles',
       id: '1',
@@ -908,7 +1038,7 @@ const result = await api.resources.articles.patch({
 ```javascript
 // Change author and add tags (plain)
 const result = await api.resources.articles.patch({
-  inputRecord: {
+  data: {
     id: '1',
     author: '30',
     tags: ['3', '4', '5']
@@ -920,7 +1050,7 @@ const result = await api.resources.articles.patch({
 ```javascript
 // Set featured_image to null
 const result = await api.resources.articles.patch({
-  inputRecord: {
+  data: {
     id: '1',
     featured_image_id: null
   }
@@ -1427,12 +1557,25 @@ for those contracts rather than extrapolating POST's stages.
 
 ### Hook Context Objects
 
+Ordinary operation hooks share the caller's mutable context. They may add custom
+properties for later hooks and change documented write values at the appropriate
+stage. Mutations remain visible to the caller after completion. Use a separate
+context for every independent operation, especially concurrent calls.
+
+Ordinary CRUD permission hooks receive a wrapper whose `originalContext` points
+to that operation context. Relationship permission hooks receive the operation
+directly. Read-enrichment wrappers expose the read context as `parentContext`.
+Library-created nested calls generally use a shallow copy: top-level replacements
+are local to the child, while referenced application objects and caches remain
+shared. This is not deep isolation. See the [complete hook contract](GUIDE/13-hooks-and-lifecycle.md)
+for precise hook arguments, inheritance and reserved fields.
+
 Context availability is stage-specific:
 
 | Stage | Fields and use |
 | --- | --- |
-| Write processing/schema validation | `method`, `scopeName`, `inputRecord`, `format`, `returning`, `queryParams`, `schemaInfo`, `transaction`, `db`; plain input has been converted to an internal JSON:API `inputRecord`. Modify `inputRecord.data.attributes` before validation when preparing input. |
-| After attribute validation | `inputRecord.data.attributes` contains validated values; setters run later. `originalInputAttributes` retains the pre-validation attribute snapshot. |
+| Write processing/schema validation | `method`, `scopeName`, `inputRecord`, `format`, `returning`, `queryParams`, `schemaInfo`, `transaction`, `db`; either public input becomes the normalized JSON:API `context.inputRecord`. Modify `context.inputRecord.data.attributes` before validation when preparing input. |
+| After attribute validation | `context.inputRecord.data.attributes` contains validated values; setters run later. `originalInputAttributes` retains the pre-validation attribute snapshot. |
 | After storage write | POST has assigned its storage ID; after-data hooks see transformed input attributes. Method-specific PUT/PATCH behavior remains visible. |
 | Read enrichment/finish | `record` is the internal JSON:API document. Final normalization/field filtering and plain conversion happen after finish. |
 | Write finish | `responseRecord` holds the selected output; minimal stored data is separately available. A full response may already have run nested GET hooks. |
@@ -1812,7 +1955,7 @@ await api.addResource('users', {
 });
 ```
 
-`idProperty` names the physical primary-key column for table-backed resources. At the API layer, the resource id remains `id`, so writes use `inputRecord.id` or `inputRecord.data.id`, reads return `id` or `data.id`, and the resource id is not part of `attributes`.
+`idProperty` names the physical primary-key column for table-backed resources. At the API layer, the resource id remains `id`, so writes use `data.id` or `document.data.id`, reads return `id` or `data.id`, and the resource id is not part of `attributes`.
 
 #### Resource ID Normalization
 
@@ -2026,7 +2169,7 @@ Await every operation and use a separate context object per enlisted operation.
 ```javascript
 // Automatic transaction (recommended)
 const result = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'New Article',
     content: 'Content...'
   }
@@ -2037,7 +2180,7 @@ const result = await api.resources.articles.post({
 const article = await api.transaction(async transaction => {
   // Create article
   const article = await api.resources.articles.post({
-    inputRecord: {
+    data: {
       title: 'New Article',
       content: 'Content...'
     },
@@ -2048,7 +2191,7 @@ const article = await api.transaction(async transaction => {
   // Create related comments
   for (const commentData of comments) {
     await api.resources.comments.post({
-      inputRecord: {
+      data: {
         content: commentData.content,
         article_id: article.id
       },
@@ -2107,6 +2250,16 @@ Important boundaries:
 - `addKnexFields()` and `alterKnexFields()` are field-only helpers
 - indexes, foreign keys, and check constraints belong on the full table schema surface
 
+Generated migrations are drafts for review. By default, the diff preserves
+undeclared columns, indexes and foreign keys and reports them in `warnings`.
+Intentional removals require the corresponding boolean under `options`:
+`allowDropColumns`, `allowDropIndexes` or `allowDropForeignKeys`. Changing an
+explicitly named index or foreign key can still replace it; inspect `plan` and
+`warnings` before execution. A column drop cannot retain a dependent index or
+foreign key. Full snapshots reject generated columns and SQLite partial or
+expression indexes; the guide lists further dialect restrictions. Diff migrations do not generate a working
+`down`; write the recovery steps as part of the migration review.
+
 For full examples and dialect notes, see [Knex Schema and Migrations](GUIDE/21-schema-and-migrations.md).
 
 ### Batch Operations
@@ -2120,7 +2273,7 @@ const createArticles = async (articlesData) => {
     const results = [];
     for (const data of articlesData) {
       const result = await api.resources.articles.post({
-        inputRecord: data,
+        data,
         transaction,
         format: 'plain',
         returning: 'minimal'
@@ -2138,7 +2291,7 @@ const updateArticles = async (updates) => {
     for (const { id, data } of updates) {
       await api.resources.articles.patch({
         id,
-        inputRecord: data,
+        data,
         transaction,
         format: 'plain',
         returning: 'none'

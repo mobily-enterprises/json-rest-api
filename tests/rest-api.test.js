@@ -53,7 +53,7 @@ describe('REST API Tests', () => {
         })
 
         const result = await basicApi.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -93,7 +93,7 @@ describe('REST API Tests', () => {
         })
 
         const countryResult = await basicApi.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -108,7 +108,7 @@ describe('REST API Tests', () => {
         )
 
         const publisherResult = await basicApi.resources.publishers.post({
-          inputRecord: publisherDoc,
+          document: publisherDoc,
           format: 'jsonapi'
         })
 
@@ -153,7 +153,7 @@ describe('REST API Tests', () => {
         await assert.rejects(
           async () => {
             await basicApi.resources.countries.post({
-              inputRecord: invalidDoc,
+              document: invalidDoc,
               format: 'jsonapi',
               returning: 'none'
             })
@@ -179,7 +179,7 @@ describe('REST API Tests', () => {
         })
 
         const createResult = await basicApi.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -224,7 +224,7 @@ describe('REST API Tests', () => {
         for (const country of countries) {
           const doc = createJsonApiDocument('countries', country)
           await basicApi.resources.countries.post({
-            inputRecord: doc,
+            document: doc,
             format: 'jsonapi'
           })
         }
@@ -252,7 +252,7 @@ describe('REST API Tests', () => {
         })
 
         const createResult = await basicApi.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 
@@ -269,7 +269,7 @@ describe('REST API Tests', () => {
 
         await basicApi.resources.countries.patch({
           id: createResult.data.id,
-          inputRecord: updateDoc,
+          document: updateDoc,
           format: 'jsonapi'
         })
 
@@ -295,7 +295,7 @@ describe('REST API Tests', () => {
         })
 
         const createResult = await basicApi.resources.countries.post({
-          inputRecord: countryDoc,
+          document: countryDoc,
           format: 'jsonapi'
         })
 

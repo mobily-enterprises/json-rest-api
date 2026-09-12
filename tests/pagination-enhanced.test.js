@@ -50,7 +50,7 @@ describe('Enhanced Pagination Features', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       countryId = countryResult.data.id
@@ -62,7 +62,7 @@ describe('Enhanced Pagination Features', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         await api.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -183,7 +183,7 @@ describe('Enhanced Pagination Features', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -194,7 +194,7 @@ describe('Enhanced Pagination Features', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         await api.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -307,7 +307,7 @@ describe('Enhanced Pagination Features', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -320,7 +320,7 @@ describe('Enhanced Pagination Features', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         await api.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -415,7 +415,7 @@ describe('Enhanced Pagination Features', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await api.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -426,7 +426,7 @@ describe('Enhanced Pagination Features', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         await api.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -483,7 +483,7 @@ describe('Enhanced Pagination Features', () => {
       for (const code of ['US', 'UK', 'FR']) {
         const doc = createJsonApiDocument('countries', { name: `Country ${code}`, code })
         const result = await api.resources.countries.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         countries.push(result.data)
@@ -501,7 +501,7 @@ describe('Enhanced Pagination Features', () => {
             { country: createRelationship(resourceIdentifier('countries', country.id)) }
           )
           await api.resources.books.post({
-            inputRecord: doc,
+            document: doc,
             format: 'jsonapi'
           })
         }

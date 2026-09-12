@@ -164,7 +164,7 @@ for (const kind of ['belongsTo', 'polymorphic']) {
           const context = { hideRows: true, includeProbe }
           try {
             const operation = write
-              ? fixture.api.resources.groups.patch({ id: rootId, returning: 'full', inputRecord: { data: { type: 'groups', attributes: { name: 'Changed' } } }, queryParams: { include: [pathFor(kind)] } }, context)
+              ? fixture.api.resources.groups.patch({ id: rootId, returning: 'full', document: { data: { type: 'groups', attributes: { name: 'Changed' } } }, queryParams: { include: [pathFor(kind)] } }, context)
               : read(fixture, kind, { transaction }, context)
             await assert.rejects(operation, error => write ? assertWriteFailure(error, { cause: includeProbe.failure, outcome: 'rolledBack' }) : error === includeProbe.failure)
             assert.equal(includeProbe.queries.length, phase === 'permission' ? 2 : 1)

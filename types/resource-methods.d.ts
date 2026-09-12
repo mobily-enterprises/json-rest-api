@@ -7,7 +7,7 @@ import type {
 
 export type RemovedResourceOptions = {
   [Key in 'simplified' | 'simplifiedApi' | 'simplifiedTransport' | 'returnFullRecord' |
-  'returnRecordApi' | 'returnRecordTransport' | 'isTransport']?: never
+  'returnRecordApi' | 'returnRecordTransport' | 'isTransport' | 'inputRecord' | 'inputRecords']?: never
 }
 export interface SelectionParams {
   include?: string[]
@@ -33,16 +33,26 @@ export interface JsonApiWriteDocument<Input extends object, Type extends string>
     attributes?: Partial<Input>
     relationships?: Record<string, { data: InputResourceIdentifier | InputResourceIdentifier[] | null }>
   }
+  meta?: Record<string, unknown>
+  links?: Record<string, unknown>
+  jsonapi?: Record<string, unknown>
+  included?: never
+  errors?: never
 }
-export type ResourceWriteInput<Format extends ResourceFormat, Input extends object, Type extends string> =
-  Format extends 'plain' ? Partial<Input> & { id?: InputResourceId } : JsonApiWriteDocument<Input, Type>
-export type ResourceWriteTarget<Format extends ResourceFormat, Input extends object, Type extends string> =
-  { id: DirectResourceId; inputRecord: ResourceWriteInput<Format, Input, Type> } |
+export type ResourceWriteInput<Input extends object, Type extends string> =
+  { data: Partial<Input> & { id?: InputResourceId }; document?: never } |
+  { data?: never; document: JsonApiWriteDocument<Input, Type> }
+export type ResourceWriteTarget<Input extends object, Type extends string> =
+  ({ id: DirectResourceId } & ResourceWriteInput<Input, Type>) |
   {
     id?: never
-    inputRecord: Format extends 'plain'
-      ? Partial<Input> & { id: InputResourceId }
-      : JsonApiWriteDocument<Input, Type> & { data: { id: InputResourceId } }
+    data: Partial<Input> & { id: InputResourceId }
+    document?: never
+  } |
+  {
+    id?: never
+    data?: never
+    document: JsonApiWriteDocument<Input, Type> & { data: { id: InputResourceId } }
   }
 export type ReadOptions<Format extends ResourceFormat> = RemovedResourceOptions & TransactionParam & {
   format?: Format
@@ -52,7 +62,7 @@ export type WriteOptions<Format extends ResourceFormat, Returning extends WriteR
   returning?: Returning
 }
 
-// Defaults are the configured resource defaults, not inferred from an input body.
+// Format selects output only; data and document select the input representation.
 // Output fields and writable input fields can differ (computed/read-only fields).
 export interface ResourceCoreMethods<
   Fields extends object = Record<string, unknown>,
@@ -69,16 +79,15 @@ export interface ResourceCoreMethods<
     params?: RemovedResourceOptions & TransactionParam & { format?: Format; queryParams?: QueryParams }, context?: Context
   ): Promise<CollectionResult<Format, Fields, Type>>
   post<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
-    params: WriteOptions<Format, Returning> & {
-      inputRecord: ResourceWriteInput<NoInfer<Format>, Input, Type>
+    params: WriteOptions<Format, Returning> & ResourceWriteInput<Input, Type> & {
       expectedVersion?: never
     }, context?: Context
   ): Promise<WriteResult<Format, Returning, Fields, Type>>
   put<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
-    params: WriteOptions<Format, Returning> & ResourceWriteTarget<NoInfer<Format>, Input, Type> & { expectedVersion?: string }, context?: Context
+    params: WriteOptions<Format, Returning> & ResourceWriteTarget<Input, Type> & { expectedVersion?: string }, context?: Context
   ): Promise<WriteResult<Format, Returning, Fields, Type>>
   patch<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
-    params: WriteOptions<Format, Returning> & ResourceWriteTarget<NoInfer<Format>, Input, Type> & { expectedVersion?: string }, context?: Context
+    params: WriteOptions<Format, Returning> & ResourceWriteTarget<Input, Type> & { expectedVersion?: string }, context?: Context
   ): Promise<WriteResult<Format, Returning, Fields, Type>>
   delete(
     params: RemovedResourceOptions & ManagedTransactionParam & { id: DirectResourceId; format?: ResourceFormat; expectedVersion?: string }, context?: Context

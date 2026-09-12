@@ -329,7 +329,7 @@ for (const direction of ['unpaired', 'forward', 'inverse']) {
             transaction,
             format: 'jsonapi',
             returning: 'full',
-            inputRecord: { data: { type: ownerType, id: '100000', attributes: { name: 'Pending' } } }
+            document: { data: { type: ownerType, id: '100000', attributes: { name: 'Pending' } } }
           }, { injectLinkPageFailure: true }), error => assertWriteFailure(error, { cause: failure, outcome: borrowed ? 'pending' : 'rolledBack' }))
           assert.equal(attempts, 2)
           assert.equal(observed.isCompleted(), !borrowed)

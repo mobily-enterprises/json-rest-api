@@ -34,26 +34,26 @@ await api.resources.countries.createKnexTable()
 await api.resources.publishers.createKnexTable()
 
 const france = await api.resources.countries.post({
-  inputRecord: { name: 'France', code: 'FR' }
+  data: { name: 'France', code: 'FR' }
 })
 const uk = await api.resources.countries.post({
-  inputRecord: { name: 'United Kingdom', code: 'GB' }
+  data: { name: 'United Kingdom', code: 'GB' }
 })
 const frenchPublisher = await api.resources.publishers.post({
-  inputRecord: { name: 'French Books Inc.', country: france.id }
+  data: { name: 'French Books Inc.', country: france.id }
 })
 await api.resources.publishers.post({
-  inputRecord: { name: 'Another French Publisher', country: france.id }
+  data: { name: 'Another French Publisher', country: france.id }
 })
 const britishPublisher = await api.resources.publishers.post({
-  inputRecord: { name: 'UK Books Ltd.', country: uk.id }
+  data: { name: 'UK Books Ltd.', country: uk.id }
 })
 await api.resources.publishers.post({
-  inputRecord: { name: 'Global Publishing', country: null }
+  data: { name: 'Global Publishing', country: null }
 })
 ```
 
-Plain writes use the relationship alias `country` inside `inputRecord`.
+Plain writes use the relationship alias `country` inside `data`.
 Do not supply the foreign-key field `country_id` as a public relationship input.
 Without an include, the plain response contains `country: { id: france.id }`;
 an unassigned to-one relationship is omitted from plain output. JSON:API
@@ -136,7 +136,7 @@ Filtering does not automatically include the related record's attributes.
 ```javascript
 await api.resources.publishers.patch({
   id: britishPublisher.id,
-  inputRecord: { country: france.id },
+  data: { country: france.id },
   returning: 'none'
 })
 await api.resources.publishers.patchRelationship({

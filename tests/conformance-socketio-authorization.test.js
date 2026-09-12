@@ -37,10 +37,10 @@ for (const transport of ['websocket', 'polling']) {
       return events
     }
     const post = (name, group = 'group-a', context = seeded.admin, transaction) => api.resources.policy_projects.post({
-      format: 'plain', returning: 'full', inputRecord: { name, access_group: group }, transaction
+      format: 'plain', returning: 'full', data: { name, access_group: group }, transaction
     }, context)
     const patch = (id, inputRecord, context = seeded.admin, transaction) => api.resources.policy_projects.patch({
-      id, format: 'plain', returning: 'none', inputRecord, transaction
+      id, format: 'plain', returning: 'none', data: inputRecord, transaction
     }, context)
 
     before(async () => {
@@ -336,7 +336,7 @@ for (const transport of ['websocket', 'polling']) {
         const hidden = await post('Hidden', hiddenGroup, hiddenContext)
         for (const [record, context, group] of [[visible, seeded.admin, 'group-a'], [hidden, hiddenContext, hiddenGroup]]) {
           await patch(record.id, { name: 'Changed' }, context)
-          await api.resources.policy_projects.put({ id: record.id, format: 'plain', returning: 'none', inputRecord: { name: 'Replaced', access_group: group } }, context)
+          await api.resources.policy_projects.put({ id: record.id, format: 'plain', returning: 'none', data: { name: 'Replaced', access_group: group } }, context)
           await api.resources.policy_projects.delete({ id: record.id }, context)
         }
         await drainSocketEvents(socket)
@@ -395,7 +395,7 @@ for (const transport of ['websocket', 'polling']) {
       const events = await subscribe(socket)
       const context = { ...seeded.admin }
       const created = await api.resources.policy_projects.put({
-        id: '90', format: 'plain', inputRecord: { name: 'Created by PUT', access_group: 'group-a' }
+        id: '90', format: 'plain', data: { name: 'Created by PUT', access_group: 'group-a' }
       }, context)
       await patch(created.id, { access_group: 'group-b' }, context)
       await api.resources.policy_projects.delete({ id: created.id }, context)
@@ -411,7 +411,7 @@ for (const transport of ['websocket', 'polling']) {
       const result = await api.resources.policy_projects.bulkPost({
         atomic: false,
         format: 'plain',
-        inputRecords: [
+        data: [
           { name: 'Visible bulk', access_group: 'group-a' },
           { name: 'Hidden bulk', access_group: 'group-b' },
           { access_group: 'group-a' }
@@ -427,7 +427,7 @@ for (const transport of ['websocket', 'polling']) {
       const socket = await connect()
       const events = await subscribe(socket)
       await assert.rejects(api.resources.policy_projects.bulkPost({
-        atomic: true, format: 'plain', inputRecords: [{ name: 'Rolled back', access_group: 'group-a' }, { access_group: 'group-a' }]
+        atomic: true, format: 'plain', data: [{ name: 'Rolled back', access_group: 'group-a' }, { access_group: 'group-a' }]
       }, seeded.admin))
       await drainSocketEvents(socket)
       assert.deepEqual(events, [])
@@ -447,7 +447,7 @@ for (const transport of ['websocket', 'polling']) {
           failBulkIndex = 1
           failBulkCleanup = cleanupFailure
           const records = ids.map((id, index) => ({ id, name: `Changed ${index}`, access_group: groups[index] }))
-          const params = method === 'bulkPost' ? { inputRecords: records } : method === 'bulkPatch' ? { operations: records.map(data => ({ id: data.id, data })) } : { ids }
+          const params = method === 'bulkPost' ? { data: records } : method === 'bulkPatch' ? { operations: records.map(data => ({ id: data.id, data })) } : { ids }
           const context = { ...seeded.admin }
           const result = await api.resources.policy_projects[method]({ ...params, format: 'plain', atomic: false }, context)
           assert.equal(result.meta.succeeded, 3)
@@ -554,11 +554,11 @@ for (const transport of ['websocket', 'polling']) {
     })
     beforeEach(async () => {
       await cleanTables(knex, ['conformance_memberships', 'conformance_items', 'conformance_groups'])
-      group = (await api.resources.groups.post({ inputRecord: { data: { type: 'groups', attributes: { name: 'First' } } } })).data
+      group = (await api.resources.groups.post({ document: { data: { type: 'groups', attributes: { name: 'First' } } } })).data
       rows = []
       for (const record of input) {
         rows.push((await api.resources.items.post({
-          inputRecord: { data: { type: 'items', attributes: record, relationships: { group: { data: { type: 'groups', id: group.id } } } } }
+          document: { data: { type: 'items', attributes: record, relationships: { group: { data: { type: 'groups', id: group.id } } } } }
         })).data)
       }
       socket = ioClient(`http://127.0.0.1:${server.address().port}`, { path: '/api/socket.io', transports: [transport], reconnection: false, autoConnect: false })
@@ -593,7 +593,7 @@ for (const transport of ['websocket', 'polling']) {
         assert.equal(subscribed.success, true, JSON.stringify(subscribed))
         const events = []
         socket.on('subscription.update', event => events.push([event.id, event.type]))
-        for (const row of rows) await api.resources.items.patch({ id: row.id, returning: 'none', inputRecord: { data: { type: 'items', attributes: { active: false } } } })
+        for (const row of rows) await api.resources.items.patch({ id: row.id, returning: 'none', document: { data: { type: 'items', attributes: { active: false } } } })
         for (const row of rows) await api.resources.items.delete({ id: row.id })
         await drainSocketEvents(socket)
         assert.deepEqual(events, [

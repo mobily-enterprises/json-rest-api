@@ -74,10 +74,10 @@ Append this code before starting the HTTP server:
 
 ```javascript
 const publisher = await api.resources.publishers.post({
-  inputRecord: { name: 'Penguin Random House' }
+  data: { name: 'Penguin Random House' }
 })
 const author = await api.resources.authors.post({
-  inputRecord: { name: 'George', surname: 'Orwell', publisher: publisher.id }
+  data: { name: 'George', surname: 'Orwell', publisher: publisher.id }
 })
 
 const found = await api.resources.authors.query({
@@ -98,14 +98,14 @@ console.log('Publisher and included authors:', withAuthors)
 
 const updated = await api.resources.authors.patch({
   id: author.id,
-  inputRecord: { surname: 'Orwell (Eric Blair)' },
+  data: { surname: 'Orwell (Eric Blair)' },
   returning: 'minimal'
 })
 console.log('Updated identifier:', updated)
 
 const document = await api.resources.publishers.post({
   format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'publishers',
       attributes: { name: 'Oxford University Press' }
@@ -116,7 +116,8 @@ console.log('JSON:API publisher:', document.data)
 ```
 
 Programmatic calls default to `format: 'plain'` and `returning: 'full'`.
-Writes always place record data in `inputRecord`. Read selection, filtering,
+Writes accept either plain resource values in `data` or a JSON:API document in
+`document`, never both. Read selection, filtering,
 sorting and pagination go in `queryParams`; identifiers and response options
 remain method parameters.
 
@@ -124,7 +125,9 @@ Plain reads return a record for `get`, and a collection with `data` for `query`.
 The filtered query above returns George and pagination metadata with `total: 1`.
 The PATCH returns `{ type: 'authors', id: author.id }` because it selects
 `returning: 'minimal'`. Use `returning: 'none'` for an undefined write result.
-`format: 'jsonapi'` selects JSON:API input and output documents for that call.
+`format` selects only the output. You can request JSON:API output from plain
+`data`, or plain output from a JSON:API `document`. The input key selects the
+input contract; the library does not guess from its contents.
 
 ## Start the HTTP server
 

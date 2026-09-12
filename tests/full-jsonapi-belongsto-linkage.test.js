@@ -35,7 +35,7 @@ describe('Full JSON:API belongsTo linkage', () => {
 
   const createCountry = async () => {
     return api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', {
+      document: createJsonApiDocument('countries', {
         name: 'United States'
       }),
       format: 'jsonapi'
@@ -44,7 +44,7 @@ describe('Full JSON:API belongsTo linkage', () => {
 
   const createPublisher = async (countryId = null) => {
     return api.resources.publishers.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'publishers',
         { name: 'Mapped Publisher' },
         {
@@ -123,7 +123,7 @@ describe('Full JSON:API belongsTo linkage', () => {
 
     const patched = await api.resources.publishers.patch({
       id: publisher.data.id,
-      inputRecord: {
+      document: {
         data: {
           type: 'publishers',
           id: publisher.data.id,

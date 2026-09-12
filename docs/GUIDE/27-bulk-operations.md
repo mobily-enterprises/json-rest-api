@@ -11,7 +11,7 @@ run through their normal resource lifecycle, sequentially. A bulk request can
 reduce network overhead; it does not turn resource writes into one batched SQL
 statement or skip permissions, validation, setters and hooks.
 
-POST/PATCH use the same `format` and `returning` options as individual writes.
+POST/PATCH use the same output-only `format` and `returning` options as individual writes.
 Results contain `meta`, optional indexed `errors`, and `data` for full/minimal
 responses. `returning: 'none'` omits data. DELETE returns its summary and deleted
 IDs in `meta.deleted`.
@@ -35,16 +35,17 @@ await api.resources.books.createKnexTable()
 
 ```javascript
 const created = await api.resources.books.bulkPost({
-  inputRecords: [{ title: 'Alpha' }, { title: 'Beta' }], format: 'plain'
+  data: [{ title: 'Alpha' }, { title: 'Beta' }], format: 'plain'
 })
 console.log(created.data, created.meta)
 ```
 
 The two records are returned in input order. The summary is
 `{ total: 2, succeeded: 2, failed: 0, atomic: true }`.
-For JSON:API bulk creation, each input may be a resource object
-`{ type, attributes, relationships }` or a document `{ data: ... }`.
-Individual resource POST still requires a document when selecting JSON:API.
+For JSON:API bulk creation, pass `document: { data: [...] }`, where each array
+entry is a JSON:API resource object with `type`, attributes and relationships.
+Supply either the plain `data` array or `document`, never both. Input selection
+does not determine the output format.
 
 ```javascript
 const updated = await api.resources.books.bulkPatch({
@@ -54,13 +55,14 @@ const updated = await api.resources.books.bulkPatch({
 console.log(updated.data, updated.meta)
 ```
 
-PATCH entries are `{ id, data }`; `data` is the plain input record in this
-example. For `format: 'jsonapi'`, it is the JSON:API resource object, including
-its type/ID and attributes/relationships. Minimal output contains identifiers.
+PATCH entries select input individually: `{ id, data: plainValues }` or
+`{ id, document: { data: resourceObject } }`. Each entry accepts exactly one input
+key; a batch may contain both kinds. `format` selects output for the batch.
+Minimal output contains identifiers.
 
 ```javascript
 const partial = await api.resources.books.bulkPost({
-  inputRecords: [{ title: 'Gamma' }, {}], format: 'plain', atomic: false
+  data: [{ title: 'Gamma' }, {}], format: 'plain', atomic: false
 })
 console.log(partial.data, partial.errors, partial.meta)
 ```
@@ -74,7 +76,7 @@ input slots. Use the indexed errors to identify rejected inputs.
 let atomicError
 try {
   await api.resources.books.bulkPost({
-    inputRecords: [{ title: 'Not retained' }, {}], format: 'plain', atomic: true
+    data: [{ title: 'Not retained' }, {}], format: 'plain', atomic: true
   })
 } catch (error) { atomicError = error }
 const afterAtomicFailure = await api.resources.books.query({ format: 'plain' })

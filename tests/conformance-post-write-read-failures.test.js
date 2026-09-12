@@ -76,7 +76,7 @@ describe(`Post-write refresh failures (${storageMode.mode})`, () => {
             const transaction = unit?.transaction
             const context = {}
             failure = { error: original, calls: 0 }
-            const write = transaction => fixture.api.resources.items[operation.method]({ id, inputRecord, format, returning, transaction }, context)
+            const write = transaction => fixture.api.resources.items[operation.method]({ id, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning, transaction }, context)
             try {
               await assert.rejects(write(transaction), error => {
                 assertWriteFailure(error, { outcome: borrowed ? 'pending' : 'rolledBack' })

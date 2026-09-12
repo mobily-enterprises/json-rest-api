@@ -61,7 +61,7 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
     }
     try {
       await targetScope.patch({
-        id, inputRecord: { data }, transaction: context.transaction, format: 'jsonapi', returning: 'none'
+        id, document: { data }, transaction: context.transaction, format: 'jsonapi', returning: 'none'
       }, { ...context })
     } catch (error) {
       if (!linked && operation === 'replace' && error.code === 'REST_API_RESOURCE' && ['not_found', 'forbidden'].includes(error.subtype)) {

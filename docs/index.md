@@ -17,7 +17,7 @@ records without an HTTP round trip:
 
 ```javascript
 const author = await api.resources.authors.post({
-  inputRecord: { name: 'George', surname: 'Orwell' }
+  data: { name: 'George', surname: 'Orwell' }
 })
 
 const books = await api.resources.books.query({
@@ -45,8 +45,9 @@ complete runnable setup, including the database, schemas and HTTP server.
 | Extensions | Resource methods, sequential hooks and focused plugins | [Writing plugins](GUIDE/29-writing-plugins.md) |
 | Storage | Ordinary resource tables or canonical storage through Knex | [Backend capabilities and limits](GUIDE/30-backend-capabilities.md) |
 
-Programmatic calls default to plain records. Use `format: 'jsonapi'` for JSON:API
-documents; the HTTP connectors select that representation explicitly. Database
+Programmatic calls default to plain records. Supply plain writes in `data` or
+JSON:API input in `document`. Use `format: 'jsonapi'` for JSON:API output; the HTTP
+connectors select that representation explicitly. Database
 behavior, file cleanup and notification delivery have specific limits documented
 in their chapters.
 

@@ -45,7 +45,7 @@ describe('Query Projections', () => {
     testData.authors = []
     for (const payload of authorPayloads) {
       const result = await api.resources.authors.post({
-        inputRecord: createJsonApiDocument('authors', payload),
+        document: createJsonApiDocument('authors', payload),
         format: 'jsonapi'
       })
       testData.authors.push(result.data)
@@ -59,7 +59,7 @@ describe('Query Projections', () => {
     ]
 
     const bookOne = await api.resources.books.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'books',
         { title: 'Derived Fields Handbook' },
         { author: createRelationship(resourceIdentifier('authors', testData.authors[0].id)) }
@@ -68,7 +68,7 @@ describe('Query Projections', () => {
     })
 
     const bookTwo = await api.resources.books.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'books',
         { title: 'Cursor Patterns' },
         { author: createRelationship(resourceIdentifier('authors', testData.authors[2].id)) }
@@ -97,7 +97,7 @@ describe('Query Projections', () => {
 
   it('should return query projection fields by default and ignore query projection input on writes', async () => {
     const created = await api.resources.authors.post({
-      inputRecord: createJsonApiDocument('authors', {
+      document: createJsonApiDocument('authors', {
         first_name: 'Nina',
         last_name: 'Simone',
         full_name: 'Injected Value'

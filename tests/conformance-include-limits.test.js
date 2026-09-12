@@ -18,7 +18,7 @@ const configurations = [
 ]
 
 async function seedIncludeLimits (fixture) {
-  const post = async (type, id, name, relationships = {}) => fixture.api.resources[type].post({ inputRecord: { data: { type, id, attributes: { name }, relationships } } })
+  const post = async (type, id, name, relationships = {}) => fixture.api.resources[type].post({ document: { data: { type, id, attributes: { name }, relationships } } })
   await fixture.reset()
   for (const type of ['groups', 'items']) {
     await post(type, '100', 'Parent')
@@ -90,10 +90,10 @@ for (const strategy of ['standard', 'window']) {
       })
       beforeEach(async () => {
         await fixture.reset()
-        await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id: '100', attributes: { name: 'Parent' } } } })
+        await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id: '100', attributes: { name: 'Parent' } } } })
         for (let id = 10; id < 32; id++) {
           await fixture.api.resources.items.post({
-            inputRecord: {
+            document: {
               data: {
                 type: 'items', id: String(id), attributes: { name: `Child ${id}` }, relationships: { group: relation('groups', '100') }
               }
@@ -129,10 +129,10 @@ describe(`Reference visibility inside limited includes (${storageMode.mode})`, (
   })
   beforeEach(async () => {
     await fixture.reset()
-    for (const [id, name] of [['100', 'Parent'], ['900', 'Hidden group']]) await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id, attributes: { name } } } })
+    for (const [id, name] of [['100', 'Parent'], ['900', 'Hidden group']]) await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id, attributes: { name } } } })
     for (const [id, group] of [['101', null], ['102', '900'], ['103', '100']]) {
       await fixture.api.resources.items.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'items',
             id,
@@ -222,7 +222,7 @@ for (const include of configurations) {
           await fixture.knex('any_links').insert(row)
         } else {
           await fixture.api.resources.memberships.post({
-            inputRecord: {
+            document: {
               data: {
                 type: 'memberships', relationships: { item: relation('items', '100'), group: relation('groups', '102') }
               }

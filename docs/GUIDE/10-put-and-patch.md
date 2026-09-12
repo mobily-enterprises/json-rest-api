@@ -36,13 +36,13 @@ await api.addResource('books', {
 })
 await api.resources.publishers.createKnexTable()
 await api.resources.books.createKnexTable()
-const publisher = await api.resources.publishers.post({ inputRecord: { name: 'Example Press' } })
+const publisher = await api.resources.publishers.post({ data: { name: 'Example Press' } })
 const book = await api.resources.books.post({
-  inputRecord: { title: 'First edition', note: 'Keep me', publisher: publisher.id }
+  data: { title: 'First edition', note: 'Keep me', publisher: publisher.id }
 })
 ```
 
-The plain create calls still put data inside `inputRecord`, and refer to the
+The plain create calls still put data inside `data`, and refer to the
 relationship by its public name `publisher`, not its backing column.
 
 ## PATCH retains omitted values
@@ -50,7 +50,7 @@ relationship by its public name `publisher`, not its backing column.
 ```javascript
 const patched = await api.resources.books.patch({
   id: book.id, format: 'jsonapi',
-  inputRecord: { data: { type: 'books', id: book.id, attributes: { title: 'Second edition' } } }
+  document: { data: { type: 'books', id: book.id, attributes: { title: 'Second edition' } } }
 })
 console.log(patched.data.attributes, patched.data.relationships.publisher.data)
 ```
@@ -67,7 +67,7 @@ let incompletePutError
 try {
   await api.resources.books.put({
     id: book.id, format: 'jsonapi',
-    inputRecord: { data: { type: 'books', id: book.id, attributes: { title: 'Rejected edition' } } }
+    document: { data: { type: 'books', id: book.id, attributes: { title: 'Rejected edition' } } }
   })
 } catch (error) {
   incompletePutError = error
@@ -85,7 +85,7 @@ remaining examples run.
 ```javascript
 const replaced = await api.resources.books.put({
   id: book.id, format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'books', id: book.id,
       attributes: { title: 'Third edition', note: null },
@@ -107,12 +107,12 @@ persisted replacement values; ordinary required-field validation still applies.
 ```javascript
 await api.resources.publishers.put({
   id: publisher.id, format: 'jsonapi',
-  inputRecord: { data: { type: 'publishers', id: publisher.id, attributes: { name: 'Renamed Press' } } }
+  document: { data: { type: 'publishers', id: publisher.id, attributes: { name: 'Renamed Press' } } }
 })
 const retainedBooks = await api.resources.publishers.getRelationship({ id: publisher.id, relationshipName: 'books' })
 await api.resources.publishers.put({
   id: publisher.id, format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'publishers', id: publisher.id, attributes: { name: 'Empty Press' },
       relationships: {}
@@ -140,7 +140,7 @@ have different storage behavior; see [many-to-many relationships](08-many-to-man
 ```javascript
 await api.resources.publishers.patch({
   id: publisher.id, format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'publishers', id: publisher.id,
       relationships: { books: { data: [{ type: 'books', id: book.id }] } }
@@ -158,7 +158,7 @@ Omitted PATCH attributes and relationships remain unchanged.
 
 ## Plain input and choosing the method
 
-Plain calls use `inputRecord: { title, note, publisher, ... }`. Supplying public
+Plain calls use `data: { title, note, publisher, ... }`. Supplying public
 relationship names causes their conversion into JSON:API relationship entries.
 A PUT that supplies one relationship can therefore clear other omitted
 collections. Use PATCH for a partial update, or explicitly include every

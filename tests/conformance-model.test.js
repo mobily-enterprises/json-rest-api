@@ -47,7 +47,7 @@ class ItemCommand {
       assert.equal(model.records.has(created.id), false)
       model.records.set(created.id, { attributes: { ...this.value }, group: null })
     } else if (this.kind === 'patch') {
-      await items.patch({ id: selected, format: 'jsonapi', inputRecord: createJsonApiDocument('items', this.value) })
+      await items.patch({ id: selected, format: 'jsonapi', document: createJsonApiDocument('items', this.value) })
       Object.assign(model.records.get(selected).attributes, this.value)
     } else if (this.kind === 'relate') {
       const relationshipData = this.value === null ? null : { type: 'groups', id: real.groups[this.value].id }
@@ -59,7 +59,7 @@ class ItemCommand {
       await assert.rejects(items.get({ id: selected, format: 'jsonapi' }), { code: 'REST_API_RESOURCE', subtype: 'not_found' })
     } else if (this.kind === 'reject') {
       await assert.rejects(items.post({
-        format: 'jsonapi', inputRecord: createJsonApiDocument('items', { name: this.value })
+        format: 'jsonapi', document: createJsonApiDocument('items', { name: this.value })
       }), { code: 'REST_API_VALIDATION' })
     } else if (this.kind === 'query') {
       const response = await items.query({

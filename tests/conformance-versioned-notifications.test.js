@@ -56,7 +56,7 @@ for (const transport of ['websocket', 'polling']) {
         await groups.patchRelationship({ id: parent.id, expectedVersion: parent.revision, relationshipName: 'members', relationshipData: [], transaction })
         const changed = await groups.get({ id: parent.id, transaction, format: 'plain' })
         assert.notEqual(changed.revision, parent.revision)
-        await groups.patch({ id: parent.id, expectedVersion: parent.revision, inputRecord: { name: 'Stale' }, format: 'plain', transaction })
+        await groups.patch({ id: parent.id, expectedVersion: parent.revision, data: { name: 'Stale' }, format: 'plain', transaction })
       }), error => error.code === 'REST_API_VERSION_CONFLICT')
       await drainSocketEvents(socket)
       assert.deepEqual(events, [])
@@ -94,7 +94,7 @@ for (const transport of ['websocket', 'polling']) {
           format: 'plain',
           ...(method.endsWith('Relationship')
             ? { relationshipName: 'members', relationshipData: method === 'patchRelationship' ? [] : [{ type: 'items', id: child.id }] }
-            : method === 'delete' ? {} : { inputRecord: { name: 'Updated' } })
+            : method === 'delete' ? {} : { data: { name: 'Updated' } })
         })
         await assert.rejects(mutate('stale-token'), error => error.code === 'REST_API_VERSION_CONFLICT')
         await drainSocketEvents(socket)

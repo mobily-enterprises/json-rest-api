@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url)
 for (const peer of ['express', 'socket.io', 'redis', 'formidable', 'busboy', 'fractional-indexing']) {
   assert.throws(() => require.resolve(peer), { code: 'MODULE_NOT_FOUND' })
 }
-assert.equal(Object.keys(library).length, 29)
+assert.equal(Object.keys(library).length, 28)
 assert.equal((await import('json-rest-api/plugins/core/connectors/express-plugin.js')).ExpressPlugin, library.ExpressPlugin)
 assert.equal((await import('json-rest-api/plugins/storage/local-storage.js')).LocalStorage, library.LocalStorage)
 
@@ -31,11 +31,11 @@ if (process.argv[2] === 'core') {
       } else await api.use(library.RestApiKnexPlugin, { knex })
       await api.addResource('items', { schema: { name: { type: 'string', required: true } }, tableName: 'package_items' })
       await api.resources.items.createKnexTable()
-      const created = await api.resources.items.post({ inputRecord: { data: { type: 'items', attributes: { name: 'Created' } } } })
+      const created = await api.resources.items.post({ document: { data: { type: 'items', attributes: { name: 'Created' } } } })
       const id = created.data.id
       assert.equal(created.data.attributes.name, 'Created')
       assert.equal((await api.resources.items.get({ id, format: 'plain' })).name, 'Created')
-      await api.resources.items.patch({ id, format: 'plain', returning: 'none', inputRecord: { name: 'Updated' } })
+      await api.resources.items.patch({ id, format: 'plain', returning: 'none', data: { name: 'Updated' } })
       assert.equal((await api.resources.items.query()).data[0].attributes.name, 'Updated')
       await api.resources.items.delete({ id })
       assert.deepEqual((await api.resources.items.query()).data, [])

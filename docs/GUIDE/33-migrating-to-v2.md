@@ -66,17 +66,29 @@ local values only, rather than combining inherited defaults.
 Await plugin and resource setup sequentially. Discard an instance after a setup failure;
 plugin installation is not transactional. Finish setup before serving requests.
 
-TypeScript applications can give `JsonRestApi` an explicit resource map, using the
-existing `ResourceCoreMethods`, relationship and bulk method interfaces. The runtime
-does not infer TypeScript fields from resource schemas.
+TypeScript applications can keep an explicit `JsonRestApi` resource map using the
+existing resource, relationship and bulk method interfaces. Ordinary literal
+schemas also infer attribute types on the handle returned by `addResource()`;
+see [resource and hook typing](../API.md#typescript-resources-and-hooks).
+
+## Remove the S3 demo adapter
+
+`S3Storage` and `S3StorageOptions` have been removed, including the direct
+`plugins/storage/s3-storage.js` import. The old adapter generated mock URLs;
+it did not upload to S3. There is no replacement export or compatibility mode.
+
+Use the application's existing storage integration through the `FileStorage`
+`upload`/`delete` contract, or use `LocalStorage` for local files. Remote-provider
+credentials, clients and storage policy belong to the application. See
+[file handling](26-file-uploads.md) for the adapter contract.
 
 ## Start with the common changes
 
 For an ordinary repository/app migration, work through these first:
 
 1. [Replace the API host](#replace-the-api-host), then [update Node](#runtime-requirement) and [rename the two response options](#rename-the-two-response-options).
-2. [Keep write data inside `inputRecord`](#keep-data-inside-inputrecord) and
-   [port calls that mixed input and output formats](#port-calls-that-mixed-jsonapi-input-with-plain-output).
+2. [Replace `inputRecord` with `data` or `document`](#replace-inputrecord-with-data-or-document) and
+   [select input and output independently](#port-calls-that-mixed-jsonapi-input-with-plain-output).
 3. [Update configuration and consumers together](#update-configuration-and-consumers-together),
    then check [result shapes](#result-shapes) and [request context](#arguments-and-request-context).
 4. Review [relationship writes](#review-relationship-writes) and
@@ -146,7 +158,7 @@ require replacing ordinary repository code with a new ORM.
 | `returnFullRecord: 'minimal'` | `returning: 'minimal'` |
 | `returnFullRecord: 'no'` or `false` | `returning: 'none'` |
 
-`format` chooses representation. `returning` chooses how much a write returns.
+`format` chooses output representation. `returning` chooses how much a write returns.
 Boolean aliases and the old option names are removed, not deprecated aliases.
 
 ```js
@@ -174,47 +186,51 @@ const document = await api.resources.books.query({
 })
 ```
 
-## Keep data inside inputRecord
+## Replace inputRecord with data or document
 
-Every resource write uses the existing explicit container.
-Fields inside `inputRecord` are data; options outside it control the operation.
+Resource POST/PUT/PATCH accept exactly one input key: `data` for plain resource
+values, or `document` for a JSON:API document. The old `inputRecord` parameter is
+removed. Both keys together are rejected, including a key set to `undefined`.
+Fields inside `data` are resource values; options outside it control the operation.
 
 ```js
-// Before: shorthand mixes field values and operation controls
-await api.resources.books.post({
-  title: 'Dune',
-  returnFullRecord: true
-})
-
-// After: plain input remains convenient and has a clear boundary
+// Before: plain resource values were inside inputRecord
 await api.resources.books.post({
   inputRecord: { title: 'Dune' },
   format: 'plain',
   returning: 'full'
 })
+
+// After: plain input remains convenient and has a clear boundary
+await api.resources.books.post({
+  data: { title: 'Dune' },
+  format: 'plain',
+  returning: 'full'
+})
 ```
 
-Fields named `format`, `returning`, `queryParams`, or `data` belong inside
-`inputRecord`; they are ordinary data there. Plain input is never autodetected as
-a JSON:API document. `inputRecord.id` is the record identity: on PATCH/PUT it must
+Fields named `format`, `returning`, `queryParams`, `document`, or `data` belong
+inside `data`; they are ordinary data there. Plain input is never autodetected as
+a JSON:API document. `data.id` is the record identity: on PATCH/PUT it must
 match the target `id`, and cannot redirect the operation to another record. Keep the target ID outside the
 patch data:
 
 ```js
 await api.resources.books.patch({
   id: '42',
-  inputRecord: { title: 'Updated title' },
+  data: { title: 'Updated title' },
   format: 'plain',
   returning: 'none'
 })
 ```
 
-When using JSON:API input, retain its document structure:
+When using JSON:API input, rename the parameter to `document` and retain its
+document structure. `format` independently selects the response:
 
 ```js
 await api.resources.books.patch({
   id: '42',
-  inputRecord: {
+  document: {
     data: {
       type: 'books',
       id: '42',
@@ -228,10 +244,12 @@ await api.resources.books.patch({
 
 ## Port calls that mixed JSON:API input with plain output
 
-The old plain mode also accepted a JSON:API input document by detecting
-`inputRecord.data.type`. Repositories relying on that behavior need an input
-conversion as well as an option rename. A rename alone is insufficient for those calls. If the repository
-expects a plain result, supply plain input too:
+Older versions detected JSON:API documents inside `inputRecord`; the intermediate
+v2 contract instead coupled input to `format`. Both are replaced by explicit
+input keys. `format` now selects only output, so a JSON:API `document` can return
+plain output and plain `data` can return a JSON:API document.
+
+Ordinary repositories can remove JSON:API builders entirely:
 
 ```js
 // Before: JSON:API input was autodetected under the plain default.
@@ -243,17 +261,39 @@ const profile = await profiles.patch({
 // After: record data, target ID, and transaction are explicit.
 const profile = await profiles.patch({
   id: userId,
-  inputRecord: { displayName },
+  data: { displayName },
   format: 'plain',
   transaction: trx
 }, requestContext)
 ```
 
 For a belongs-to relationship, plain input uses the relationship name and ID,
-for example `inputRecord: { name: 'Team', owner: userId }`. Remove the old
-JSON:API document/linkage builders from these plain repositories. Keep their
-existing domain normalization. Repositories intentionally using JSON:API
-documents should select `format: 'jsonapi'`.
+for example `data: { name: 'Team', owner: userId }`. Keep existing domain
+normalization. A repository intentionally consuming JSON:API documents can keep
+its document builder instead:
+
+```js
+const profile = await profiles.patch({
+  id: userId,
+  document: createJsonApiInputRecord('userProfiles', { displayName }, { id: userId }),
+  format: 'plain',
+  transaction: trx
+}, requestContext)
+```
+
+There is one resource method implementation, not a separate `api.jsonapi` API.
+HTTP connectors submit their request body through `document` and request JSON:API
+output. Validation, permissions, hooks and transaction behavior are shared.
+Full-response preparation still happens before commit.
+
+Write documents accept optional object-valued top-level `meta`, `links` and
+`jsonapi` members. They remain available to hooks on `context.inputRecord` and
+are not stored attributes. `errors` and `included` are rejected: accepting
+documents does not enable compound writes or JSON:API extensions.
+
+The hook field `context.inputRecord` remains the normalized operation document
+for both input kinds. Do not mechanically rename that field when migrating
+public call parameters. See the [hook context contract](13-hooks-and-lifecycle.md).
 
 ## Update configuration and consumers together
 
@@ -571,7 +611,7 @@ every method's parameter parser. A transaction belongs in the first argument:
 ```js
 await api.resources.books.patch({
   id: bookId,
-  inputRecord: { title: 'Updated' },
+  data: { title: 'Updated' },
   format: 'plain',
   returning: 'full',
   transaction: trx,
@@ -729,7 +769,7 @@ await knex.transaction(transaction => changeBooks(transaction))
 // After: the library owns writes, raw SQL and deferred completion hooks.
 await api.transaction(async transaction => {
   const book = await api.resources.books.patch({
-    id: '42', inputRecord: { title: 'Updated title' }, format: 'plain', transaction
+    id: '42', data: { title: 'Updated title' }, format: 'plain', transaction
   })
   await transaction('audit_entries').insert({ book_id: book.id })
   return book
@@ -773,7 +813,7 @@ the original class with `instanceof` must inspect the cause instead.
 import { RestApiWriteError } from 'json-rest-api'
 
 try {
-  await api.resources.books.post({ inputRecord, format: 'jsonapi' })
+  await api.resources.books.post({ document, format: 'jsonapi' })
 } catch (error) {
   if (!(error instanceof RestApiWriteError)) throw error
   console.error(error.code, error.transactionOutcome, error.cause)
@@ -954,14 +994,27 @@ imports for option and resource interfaces. No runtime files live under the
 declaration `types/` directory. TypeScript consumers need Node and Knex types for
 the current declaration surface. Framework peers are still optional at runtime.
 
-These interfaces do not infer resources from runtime registration or
-automatically validate its plugin options. Apply `satisfies` to option objects
-and type resource boundaries explicitly. Match the interface's format/returning
-defaults to the resource's actual configuration. Existing JavaScript setup and
-call syntax do not change because declarations are present. The library's
-`npm run test:public-types` checks a packed consumer. Use the `JsonRestApi`
-resource-map generic to type the registered resources explicitly; schema-driven
-TypeScript inference is not provided.
+For ordinary literal schemas, retain the handle returned by `addResource()` to
+infer attribute names and value types. `ResourceSchema`, `InferInput` and
+`InferOutput` also support reusable definitions. Existing JavaScript setup and
+call syntax stay the same. The library's `npm run test:public-types` checks these
+declarations through a packed consumer.
+
+An explicit `JsonRestApi` resource map remains the choice for typed central
+registries, relationships, dynamic enrichment, method replacements and custom
+API-level defaults. Match its format/returning generics to the actual resource
+configuration. Plugin installation itself does not infer options or methods;
+use `satisfies` with the plugin's option interface. Literal resource registration
+checks built-in field and resource options. Custom plugin configuration uses an
+explicit intersection with its own interface. See the
+[typing contract and limits](../API.md#typescript-resources-and-hooks).
+
+Known hooks now describe phase-specific input and library-owned fields. This
+does not change mutable context at runtime. If a hook receives an ownership type
+error, inspect the documented mutation phase rather than casting it away.
+Use `HookHandler<Event, AppContext>` for known hooks and
+`RuntimeHook<PluginContext>` for arbitrary plugin events; see the
+[hook guide](13-hooks-and-lifecycle.md).
 
 ## Object and array attributes
 
@@ -1360,6 +1413,23 @@ application has any.
 
 ## Schema migration helpers
 
+`generateKnexMigrationDiff()` now preserves undeclared indexes and foreign keys
+by default, as it already did for columns. A resource declaration need not
+describe every constraint in an application's database. Check `warnings` for
+preserved metadata. For an intentional removal, pass the corresponding boolean
+in `options`: `allowDropColumns`, `allowDropIndexes` or `allowDropForeignKeys`.
+These options reject non-boolean values. Explicit changes to a named index or
+foreign key can still produce a replacement, with a warning.
+
+Column drops reject when their plan retains a dependent index or foreign key.
+Full snapshots also reject generated columns and SQLite partial/expression
+indexes, instead of reporting an incomplete comparison of those features.
+Use an authored migration for database features outside the snapshot model.
+Review warnings about required-column backfills and narrowing integer ranges.
+Generation does not execute DDL; keep migration execution/history in the app's
+Knex workflow and write recovery steps deliberately. See
+[diff migrations](21-schema-and-migrations.md#diff-migrations).
+
 Regular `addKnexFields` and `alterKnexFields` now honor resource-level
 `storage.naming`. Under `naming: 'exact'`, `loginCount` addresses that exact
 column. Inspect tables previously changed through these helpers for unintended
@@ -1631,7 +1701,7 @@ For example, this now rejects without changing record `42`:
 await api.resources.books.patch({
   id: '42',
   format: 'plain',
-  inputRecord: { id: 0, title: 'Wrong target' }
+  data: { id: 0, title: 'Wrong target' }
 })
 ```
 
@@ -2135,12 +2205,21 @@ sequential loop, and the optimization hook never ran. Removing the loop setting
 also removes its invalid-value hang/skip paths. Bulk operations still execute
 the normal resource methods, including validation, permission checks and hooks.
 Atomic requests use one transaction; non-atomic requests complete each record's
-transaction separately. Method arguments, output shapes and per-record indexes
-are unchanged by this configuration cleanup. No stored-data migration is needed.
+transaction separately. No stored-data migration is needed.
 
-Bulk POST/PATCH now honor `format` and `returning`, including resource defaults.
-Keep `format: 'jsonapi'` on callers that supply JSON:API records; plain callers
-pass record fields directly. Bulk results retain their `meta`/`errors` envelope:
+Bulk POST replaces `inputRecords` with either `data: plainRecords` or
+`document: { data: jsonApiResources }`. Bulk PATCH entries use either
+`{ id, data: plainValues }` or `{ id, document: { data: jsonApiResource } }`.
+Do not put a JSON:API resource directly inside an operation's `data` field.
+Each entry explicitly selects its input; neither bulk method infers it from
+`format`. The documented bulk HTTP bodies keep their wire shapes: POST uses
+`{ data: [resourceObject, ...] }` and PATCH uses `{ operations: [...] }`.
+The connector translates them into these method arguments. Remove raw-array
+bulk POST shorthand and arrays of individually wrapped documents; send one
+document containing the resource array instead.
+
+Bulk POST/PATCH honor output-only `format` and `returning`, including resource
+defaults. Bulk results retain their `meta`/`errors` envelope:
 `returning: 'full'` supplies complete records in `data`, `minimal` supplies
 identifiers, and `none` omits `data`. Bulk PATCH no longer performs an extra GET
 to override a minimal/none return choice.
@@ -2876,8 +2955,40 @@ before upgrading applications. Run their actual workflows against the intended
 package set. Library-side verification does not establish consumer compatibility.
 
 The local dispatcher preserves null/undefined throws; see [transaction outcomes](20-transaction-outcomes.md).
-[Positioning](31-positioning.md) remains experimental: concurrent reordering is
-not guaranteed safe. Its chapter documents the interface and current limits.
+[Positioning](31-positioning.md) now coordinates writes through database locks;
+its chapter describes tested concurrency and remaining storage requirements.
+
+### Positioning coordination and retired placeholders
+
+Existing resource calls using `beforeId`, `null` for append and `'FIRST'` continue
+to work. PostgreSQL and MySQL writers serialize through a transaction-owned
+coordinator row, including empty groups and moves between groups. SQLite can
+report busy conflicts; stale transaction snapshots can reject. Applications must
+retry a failed move in a fresh operation/transaction when appropriate.
+
+Installation creates `json_rest_api_positioning_locks` if absent. Provision the
+table before deployment when the runtime account lacks DDL permission, and keep
+all cooperating writers on the same table. The [positioning guide](31-positioning.md)
+contains its schema and collation requirements.
+
+- Changing a group without `beforeId` now places the record at the configured
+  beginning/end of its destination group instead of retaining a potentially
+  duplicate key. Same-group updates preserve their position.
+- PUT creates receive positions, and PUT replacements preserve or recalculate
+  their managed position. Other persisted fields still follow complete PUT
+  replacement rules.
+- Missing/out-of-group targets append; a self-targeted move stays in place.
+  Explicit targets now use normal GET permissions and visibility.
+- Default query ordering uses the supported query hook. Bytewise collation on
+  position columns is required for ordinary sorting and cursor pagination;
+  the allocator's binary comparisons do not change those query semantics.
+- Remove `rebalanceThreshold`; it never caused automatic rebalancing and now
+  rejects. The no-op `api.positioning.reorder()` method has been removed. Use
+  ordinary PATCH calls or atomic bulk PATCH for actual changes.
+- Existing keys must be valid fractional keys. Key exhaustion rejects before
+  exceeding declared storage length; migrate/rebalance the data deliberately.
+- Deep imports of `calculatePosition()` now take `(previousPosition, nextPosition)`
+  string bounds. The former array/ID arguments are no longer supported.
 
 ## Native query builders and explicit custom-filter translation
 

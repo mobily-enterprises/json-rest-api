@@ -15,7 +15,7 @@ to every participating operation; the library does not infer ambient ownership.
 ```js
 const result = await api.transaction(async transaction => {
   const book = await api.resources.books.post({
-    inputRecord: { title: 'New book' },
+    data: { title: 'New book' },
     format: 'plain',
     transaction
   })
@@ -155,6 +155,16 @@ Real polling/WebSocket tests deliberately pause the first enlisted write so the
 second finishes first, and verify both distinct orders.
 
 ## Nesting and application ownership
+
+An application-created Knex transaction is unmanaged from this library's point
+of view: the application decides when it finally commits or rolls back. That
+final outcome controls after-commit hooks and rollback cleanup, so passing an
+arbitrary Knex transaction into resource writes is rejected. Use
+`api.transaction` to group resource operations and raw SQL under one owner.
+
+A savepoint is a rollback checkpoint inside an outer transaction. Releasing it
+does not commit that outer transaction. Resource writes therefore cannot treat
+savepoint success as permission to send notifications or run after-commit hooks.
 
 Every `api.transaction` call starts an independent top-level unit. There is no
 implicit joining or nested callback overload. To compose work within one unit,

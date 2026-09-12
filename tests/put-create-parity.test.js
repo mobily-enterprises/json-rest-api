@@ -133,7 +133,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
   it('creates a missing resource through PUT with the default id property', async () => {
     const created = await api.resources.profiles.put({
       id: '101',
-      inputRecord: {
+      document: {
         data: {
           type: 'profiles',
           id: '101',
@@ -157,7 +157,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
   it('creates and then replaces a missing resource through PUT with a custom id property', async () => {
     const created = await api.resources.accounts.put({
       id: '501',
-      inputRecord: {
+      document: {
         data: {
           type: 'accounts',
           id: '501',
@@ -177,7 +177,7 @@ describe(`PUT create parity (${storageMode.mode})`, () => {
 
     const replaced = await api.resources.accounts.put({
       id: '501',
-      inputRecord: {
+      document: {
         data: {
           type: 'accounts',
           id: '501',

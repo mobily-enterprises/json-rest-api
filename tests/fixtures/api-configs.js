@@ -1029,7 +1029,7 @@ export async function createFixtureIsolationApis (sharedDb, separateDb) {
   const first = await createBasicApi(sharedDb, { tablePrefix: 'isolation_left', tenantId: 'isolation_first' })
   await first.resources.countries.post({
     format: 'jsonapi',
-    inputRecord: { data: { type: 'countries', attributes: { name: 'Before another API' } } }
+    document: { data: { type: 'countries', attributes: { name: 'Before another API' } } }
   })
   const second = await createBasicApi(sharedDb, { tablePrefix: 'isolation_right', tenantId: 'isolation_second' })
   const third = await createBasicApi(separateDb, { tablePrefix: 'isolation_left', tenantId: 'isolation_third' })
@@ -1041,7 +1041,7 @@ export async function seedFixtureIsolationApis ({ first, second, third }) {
   for (const [api, name] of [[first, 'First'], [second, 'Second'], [third, 'Third']]) {
     await api.resources.countries.post({
       format: 'jsonapi',
-      inputRecord: { data: { type: 'countries', attributes: { name } } }
+      document: { data: { type: 'countries', attributes: { name } } }
     })
   }
 }
@@ -1236,7 +1236,7 @@ export async function seedIncludeTraversalApi (api) {
   const post = async (type, name, relationships = {}) => {
     const result = await api.resources[type].post({
       format: 'jsonapi',
-      inputRecord: { data: { type, attributes: { name }, relationships } }
+      document: { data: { type, attributes: { name }, relationships } }
     })
     return { type, id: result.data.id }
   }
@@ -1292,7 +1292,7 @@ export async function createReverseRelationshipApi (knex, { childIdProperty = 'i
 
 export async function seedReverseRelationshipRecord (api, type, name, relationships) {
   return (await api.resources[type].post({
-    inputRecord: { data: { type, attributes: { name }, ...(relationships ? { relationships } : {}) } },
+    document: { data: { type, attributes: { name }, ...(relationships ? { relationships } : {}) } },
     format: 'jsonapi',
     returning: 'full'
   })).data
@@ -2865,7 +2865,7 @@ export async function seedQueryPolicyApi (api, size) {
   const admin = { visibility: { all: true }, scopeValues: { workspaceId: 'workspace-a' } }
   const viewer = { visibility: { groups: ['group-a'] }, scopeValues: { workspaceId: 'workspace-a' } }
   const post = async (type, attributes, relationships) => (await api.resources[type].post({
-    format: 'jsonapi', returning: 'full', inputRecord: { data: { type, attributes, relationships } }
+    format: 'jsonapi', returning: 'full', document: { data: { type, attributes, relationships } }
   }, admin)).data
   const project = await post('policy_projects', { name: `Workload ${size}`, access_group: 'group-a' })
   const subject = await post('policy_tasks', { title: 'Task subject', access_group: 'group-a' })
@@ -2902,7 +2902,7 @@ export async function seedPolicyConformanceApi (api, { hiddenBy = 'policy' } = {
   const admin = { visibility: { all: true }, scopeValues: { workspaceId: 'workspace-a' } }
   const viewer = { visibility: { groups: ['group-a'] }, scopeValues: { workspaceId: 'workspace-a' } }
   const post = async (type, attributes, relationships) => (await api.resources[type].post({
-    format: 'jsonapi', returning: 'full', inputRecord: { data: { type, attributes, ...(relationships ? { relationships } : {}) } }
+    format: 'jsonapi', returning: 'full', document: { data: { type, attributes, ...(relationships ? { relationships } : {}) } }
   }, admin)).data
   const project = await post('policy_projects', { name: 'Visible parent', access_group: 'group-a' })
   const hiddenProject = await post('policy_projects', { name: 'Hidden parent', access_group: 'group-b' })
@@ -2918,7 +2918,7 @@ export async function seedPolicyConformanceApi (api, { hiddenBy = 'policy' } = {
     for (const record of [hiddenTask, hiddenParentTask]) {
       await api.resources.policy_tasks.patch({
         id: record.id,
-        inputRecord: { data: { type: record.type, id: record.id, relationships: { subject: { data: { type: hiddenProject.type, id: hiddenProject.id } } } } }
+        document: { data: { type: record.type, id: record.id, relationships: { subject: { data: { type: hiddenProject.type, id: hiddenProject.id } } } } }
       }, admin)
     }
   }
@@ -2953,6 +2953,7 @@ export async function createPositioningApi (knex, pluginOptions = {}) {
 
   await api.use(RestApiPlugin, restApiOptions)
   await useStoragePlugin(api, knex)
+  await pluginOptions.beforeResources?.(api)
 
   // Categories (for grouping tasks)
   await api.addResource('categories', {
@@ -2971,7 +2972,7 @@ export async function createPositioningApi (knex, pluginOptions = {}) {
       id: { type: 'id' },
       title: { type: 'string', required: true, max: 200 },
       category_id: { type: 'number', nullable: true, belongsTo: 'categories', as: 'category', search: true },
-      position: { type: 'string', max: 255, nullable: true },
+      position: { type: 'string', max: 255, nullable: true, ...pluginOptions.positionFieldOptions },
       beforeId: { type: 'string', virtual: true }, // Virtual field for positioning
       deleted_at: { type: 'dateTime', nullable: true, search: true }, // For soft delete tests
       version: { type: 'number', defaultTo: 1, search: true } // For versioning tests

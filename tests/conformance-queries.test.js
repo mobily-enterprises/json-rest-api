@@ -147,8 +147,8 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
     for (const sort of ['sortLabel', '-sortLabel']) {
       it(`orders distinct parents by bound nullable projection ${sort} with sparse pages (${format})`, async () => {
         const groups = fixture.api.resources.groups
-        await groups.patch({ id: '3', format: 'plain', inputRecord: { name: 'Other' } })
-        await items.patch({ id: '6', format: 'plain', inputRecord: { name: 'Alpha', group: '3' } })
+        await groups.patch({ id: '3', format: 'plain', data: { name: 'Other' } })
+        await items.patch({ id: '6', format: 'plain', data: { name: 'Alpha', group: '3' } })
         const params = { sort: [sort], filters: { childName: 'Alpha' }, fields: { groups: 'name' } }
         const counted = await groups.query({ format, queryParams: { ...params, page: { number: 1, size: 1 } } })
         assert.equal(counted.meta.pagination.total, 3)
@@ -227,7 +227,7 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
       const attributes = { name: 'Created', rank: 3, displayName: 'Injected' }
       const result = await items.post({
         format,
-        inputRecord: format === 'plain' ? { id: '100', ...attributes } : { data: { ...createJsonApiDocument('items', attributes).data, id: '100' } }
+        [format === 'plain' ? 'data' : 'document']: format === 'plain' ? { id: '100', ...attributes } : { data: { ...createJsonApiDocument('items', attributes).data, id: '100' } }
       })
       assert.equal(format === 'plain' ? result.displayName : result.data.attributes.displayName, 'created ·')
       for (const queryParams of [

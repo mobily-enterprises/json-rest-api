@@ -78,7 +78,7 @@ describe(`Cold canonical descriptors on one connection (${databaseClient})`, () 
             ? { id: group.id, relationshipName: 'members', relationshipData: [identifier(method === 'deleteRelationship' ? item : other)] }
             : {
                 id,
-                inputRecord: format === 'jsonapi'
+                [format === 'jsonapi' ? 'document' : 'data']: format === 'jsonapi'
                   ? { data: { type: 'items', id, attributes, relationships } }
                   : { id, ...attributes, group: group.id, subject: { id: group.id, _type: group.type }, groups: [group.id] },
                 queryParams: { include: ['group.items', 'groups.members.subject', 'subject.firstItem'] }
@@ -155,7 +155,7 @@ describe(`Cold canonical descriptors on one connection (${databaseClient})`, () 
         transaction,
         format: 'jsonapi',
         returning: 'none',
-        inputRecord: { data: { type: 'items', id: '99', attributes: { name: 'Original' } } }
+        document: { data: { type: 'items', id: '99', attributes: { name: 'Original' } } }
       })
       assert.equal(await count(), 2)
       assert.equal(transaction.isCompleted(), false)
@@ -175,7 +175,7 @@ describe(`Cold canonical descriptors on one connection (${databaseClient})`, () 
             format: 'jsonapi',
             returning,
             transaction,
-            inputRecord: { data: { type: 'items', id: '99', attributes: { name: 'New' } } }
+            document: { data: { type: 'items', id: '99', attributes: { name: 'New' } } }
           })
           if (returning === 'none') assert.equal(result, undefined)
           else assert.equal(result.data.attributes.name, 'New')
@@ -208,7 +208,7 @@ describe(`Cold canonical descriptors on one connection (${databaseClient})`, () 
           transaction,
           format: 'plain',
           returning: 'full',
-          inputRecord: { name: 'Changed', groups: [] },
+          data: { name: 'Changed', groups: [] },
           queryParams: { include: ['group'] }
         }, context), error => error === failFinish || error.cause === failFinish)
         assert.equal(context.transaction.isCompleted(), !managed)

@@ -51,7 +51,7 @@ describe('Query Operations', () => {
       for (const [name, code] of [['United States', 'US'], ['United Kingdom', 'UK'], ['France', 'FR']]) {
         const doc = createJsonApiDocument('countries', { name, code })
         const result = await basicApi.resources.countries.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         countries.push(result.data)
@@ -68,7 +68,7 @@ describe('Query Operations', () => {
             { country: createRelationship(resourceIdentifier('countries', country.id)) }
           )
           const result = await basicApi.resources.publishers.post({
-            inputRecord: doc,
+            document: doc,
             format: 'jsonapi'
           })
           publishers.push({ ...result.data, countryId: country.id })
@@ -81,7 +81,7 @@ describe('Query Operations', () => {
       for (const name of ['Author One', 'Author Two', 'Author Three']) {
         const doc = createJsonApiDocument('authors', { name })
         const result = await basicApi.resources.authors.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         authors.push(result.data)
@@ -112,7 +112,7 @@ describe('Query Operations', () => {
           }
         )
         const result = await basicApi.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         testData.books.push(result.data)
@@ -195,7 +195,7 @@ describe('Query Operations', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -209,7 +209,7 @@ describe('Query Operations', () => {
           country: createRelationship(resourceIdentifier('countries', countryResult.data.id))
         })
         await basicApi.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -251,12 +251,12 @@ describe('Query Operations', () => {
       const countryDoc2 = createJsonApiDocument('countries', { name: 'Country B', code: 'CB' })
 
       const country1Result = await basicApi.resources.countries.post({
-        inputRecord: countryDoc1,
+        document: countryDoc1,
         format: 'jsonapi'
       })
 
       const country2Result = await basicApi.resources.countries.post({
-        inputRecord: countryDoc2,
+        document: countryDoc2,
         format: 'jsonapi'
       })
 
@@ -274,7 +274,7 @@ describe('Query Operations', () => {
           { country: createRelationship(resourceIdentifier('countries', bookData.countryId)) }
         )
         await basicApi.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -331,7 +331,7 @@ describe('Query Operations', () => {
       // Create test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -342,7 +342,7 @@ describe('Query Operations', () => {
           { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
         )
         await basicApi.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }
@@ -442,7 +442,7 @@ describe('Query Operations', () => {
           currency: code === 'US' ? 'USD' : code === 'GB' ? 'GBP' : 'EUR'
         })
         const result = await extendedApi.resources.countries.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         countries.push(result.data)
@@ -467,7 +467,7 @@ describe('Query Operations', () => {
           { country: createRelationship(resourceIdentifier('countries', data.countryId)) }
         )
         await extendedApi.resources.books.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
       }

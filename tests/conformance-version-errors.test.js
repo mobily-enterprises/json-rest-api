@@ -49,7 +49,7 @@ describe(`Version conflict visibility (${storageMode.mode})`, () => {
   after(async () => { await fixture?.close() })
 
   it('runs the observed success and commit hooks for an accepted conditional write', async () => {
-    await fixture.api.resources.items.patch({ id: item.id, expectedVersion: item.attributes.revision, format: 'plain', inputRecord: { name: 'Accepted' } })
+    await fixture.api.resources.items.patch({ id: item.id, expectedVersion: item.attributes.revision, format: 'plain', data: { name: 'Accepted' } })
     assert.ok(successfulWrites.includes('patch'))
     assert.ok(commits.includes('patch'))
   })
@@ -59,7 +59,7 @@ describe(`Version conflict visibility (${storageMode.mode})`, () => {
       id,
       expectedVersion,
       format: 'jsonapi',
-      ...(method.endsWith('Relationship') ? { relationshipName: 'children', relationshipData: [] } : method === 'delete' ? {} : { inputRecord: { data: { type: 'items', attributes: { name: 'Changed' } } } })
+      ...(method.endsWith('Relationship') ? { relationshipName: 'children', relationshipData: [] } : method === 'delete' ? {} : { document: { data: { type: 'items', attributes: { name: 'Changed' } } } })
     }, context)
 
     it(`identifies a visible ${method} version conflict without exposing revision values`, async () => {

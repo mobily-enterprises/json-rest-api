@@ -21,7 +21,7 @@ for (const phase of ['beforeProcessing', 'finish', 'afterCommit']) {
         const context = {}
         const loggingError = new Error('Diagnostic logger failed')
         if (failLogging) t.mock.method(fixture.api.log, 'error', () => { throw loggingError })
-        await assert.rejects(fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: '1', attributes: { name: 'Item' } } } }, context), error => {
+        await assert.rejects(fixture.api.resources.items.post({ document: { data: { type: 'items', id: '1', attributes: { name: 'Item' } } } }, context), error => {
           assert.equal(error.transactionOutcome, phase === 'afterCommit' ? 'committed' : 'rolledBack')
           let cause = error
           while (cause && typeof cause === 'object' && Object.hasOwn(cause, 'cause')) cause = cause.cause

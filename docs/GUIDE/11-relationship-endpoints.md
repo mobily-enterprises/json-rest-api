@@ -42,9 +42,9 @@ await api.addResource('authors', {
 })
 await api.resources.publishers.createKnexTable()
 await api.resources.authors.createKnexTable()
-const publisher = await api.resources.publishers.post({ inputRecord: { name: 'Scribner' } })
-const stephen = await api.resources.authors.post({ inputRecord: { name: 'Stephen King' } })
-const peter = await api.resources.authors.post({ inputRecord: { name: 'Peter Straub' } })
+const publisher = await api.resources.publishers.post({ data: { name: 'Scribner' } })
+const stephen = await api.resources.authors.post({ data: { name: 'Stephen King' } })
+const peter = await api.resources.authors.post({ data: { name: 'Peter Straub' } })
 ```
 
 The inverse relationships are explicitly declared. A `belongsTo` field does not
@@ -75,7 +75,7 @@ console.log('Records:', related.data)
 
 Linkage contains `{ type: 'authors', id }` identifiers. Related records contain
 IDs and names, ordered Peter then Stephen. Relationship-only writes take
-`relationshipData`, not `inputRecord`; HTTP wraps that linkage in a `data` member.
+`relationshipData`, not `data`; HTTP wraps that linkage in a `data` member.
 POST adds members and DELETE removes specified members; both apply only to
 supported to-many relationships. PATCH replaces a to-many set or a to-one target.
 All three relationship write methods return undefined.

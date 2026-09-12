@@ -1,6 +1,6 @@
 import type { ManagedTransaction } from './transactions.js'
 import type { TransactionOutcome } from './errors.js'
-import type { DirectResourceId, JsonApiResource, PlainResource, ResourceFormat, ResourceIdentifier, WriteReturning } from './representations.js'
+import type { DirectResourceId, InputResourceId, JsonApiResource, PlainResource, ResourceFormat, ResourceIdentifier, WriteReturning } from './representations.js'
 import type { JsonApiWriteDocument, RemovedResourceOptions, ResourceWriteInput, WriteOptions } from './resource-methods.js'
 
 export type BulkTransactionOptions<DefaultAtomic extends boolean = true> =
@@ -27,12 +27,12 @@ export interface BulkDeleteResult {
   meta: BulkMeta & { deleted: DirectResourceId[] }
   errors?: BulkError[]
 }
-export type BulkPostInput<Format extends ResourceFormat, Input extends object, Type extends string> =
-  Format extends 'jsonapi' ? JsonApiWriteDocument<Input, Type> | JsonApiWriteDocument<Input, Type>['data'] : ResourceWriteInput<Format, Input, Type>
-export type BulkPatchInput<Format extends ResourceFormat, Input extends object, Type extends string> = {
+export type BulkPostInput<Input extends object, Type extends string> =
+  { data: Array<Partial<Input> & { id?: InputResourceId }>; document?: never } |
+  { data?: never; document: Omit<JsonApiWriteDocument<Input, Type>, 'data'> & { data: JsonApiWriteDocument<Input, Type>['data'][] } }
+export type BulkPatchInput<Input extends object, Type extends string> = {
   id: DirectResourceId
-  data: Format extends 'jsonapi' ? JsonApiWriteDocument<Input, Type>['data'] : Partial<Input>
-}
+} & ResourceWriteInput<Input, Type>
 export interface BulkResourceMethods<
   Fields extends object = Record<string, unknown>, Input extends object = Fields,
   Type extends string = string, DefaultFormat extends ResourceFormat = 'plain',
@@ -40,15 +40,14 @@ export interface BulkResourceMethods<
   Context extends object = object
 > {
   bulkPost<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
-    params: Omit<WriteOptions<Format, Returning>, 'queryParams'> & BulkTransactionOptions<DefaultAtomic> & {
-      inputRecords: BulkPostInput<NoInfer<Format>, Input, Type>[]
+    params: Omit<WriteOptions<Format, Returning>, 'queryParams'> & BulkTransactionOptions<DefaultAtomic> & BulkPostInput<Input, Type> & {
       expectedVersion?: never
       expectedVersions?: never
     }, context?: Context
   ): Promise<BulkWriteResult<Format, Returning, Fields, Type>>
   bulkPatch<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
     params: Omit<WriteOptions<Format, Returning>, 'queryParams'> & BulkTransactionOptions<DefaultAtomic> & {
-      operations: BulkPatchInput<NoInfer<Format>, Input, Type>[]
+      operations: BulkPatchInput<Input, Type>[]
       expectedVersion?: never
       expectedVersions?: string[]
     }, context?: Context

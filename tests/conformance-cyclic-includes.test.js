@@ -139,7 +139,7 @@ for (const strategy of ['standard', 'window']) {
             id,
             transaction,
             returning: 'full',
-            inputRecord: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 }, relationships: { group: { data: { type: 'groups', id: '1' } }, subject: { data: { type: 'groups', id: '1' } }, groups: { data: [{ type: 'groups', id: '1' }] } } } },
+            document: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 }, relationships: { group: { data: { type: 'groups', id: '1' } }, subject: { data: { type: 'groups', id: '1' } }, groups: { data: [{ type: 'groups', id: '1' }] } } } },
             queryParams: { fields, include: ['group.items'] }
           })
           check(document)

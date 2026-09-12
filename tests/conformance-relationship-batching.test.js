@@ -108,7 +108,7 @@ describe('Relationship locks with database ID equality', () => {
   after(async () => { await fixture?.close() })
 
   it('accepts differently spelled IDs that match the actual column collation', async () => {
-    await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: 'alpha', attributes: { name: 'Item' } } } })
+    await fixture.api.resources.items.post({ document: { data: { type: 'items', id: 'alpha', attributes: { name: 'Item' } } } })
     const transaction = await fixture.knex.transaction()
     try {
       const targets = await lockRelationshipTargets(fixture.api, transaction, [

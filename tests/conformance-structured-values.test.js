@@ -60,7 +60,7 @@ for (const type of ['object', 'array']) {
             const response = await items[method]({
               ...(id ? { id } : {}),
               format,
-              inputRecord: format === 'plain' ? input : createJsonApiDocument('items', input)
+              [format === 'plain' ? 'data' : 'document']: format === 'plain' ? input : createJsonApiDocument('items', input)
             })
             const attributes = format === 'plain' ? response : response.data.attributes
             id = format === 'plain' ? response.id : response.data.id
@@ -100,7 +100,7 @@ for (const type of ['object', 'array']) {
               await assert.rejects(items[method]({
                 ...(method === 'post' ? {} : { id: item.id }),
                 returning: 'none',
-                inputRecord: createJsonApiDocument('items', { payload: replacement })
+                document: createJsonApiDocument('items', { payload: replacement })
               }), error => {
                 assertWriteFailure(error, { outcome: 'rolledBack' })
                 assert.ok(error.cause.cause instanceof TypeError)
@@ -118,7 +118,7 @@ for (const type of ['object', 'array']) {
           it('adds structured fields and reloads their JSON slot metadata', async () => {
             const item = await fixture.seed('items', { payload: original })
             await items.addKnexFields({ fields: { extra: { type, nullable: true } } })
-            await items.patch({ id: item.id, inputRecord: createJsonApiDocument('items', { extra: replacement }) })
+            await items.patch({ id: item.id, document: createJsonApiDocument('items', { extra: replacement }) })
             const registry = fixture.api.anyapi.registry
             registry.invalidateDescriptor('schema_enrichment', 'items')
             const descriptor = await registry.getDescriptor('schema_enrichment', 'items')

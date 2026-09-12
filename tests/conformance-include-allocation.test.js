@@ -158,7 +158,7 @@ for (const [strategy, limit] of [['standard', 20], ['window', 20], ['standard', 
             await assert.rejects(fixture.api.resources.items.patch({
               id: parents[0],
               transaction,
-              inputRecord: { data: { type: 'items', attributes: { name: 'Changed' } } },
+              document: { data: { type: 'items', attributes: { name: 'Changed' } } },
               queryParams: { fields: { items: 'name,groups', groups: 'name' }, include: ['groups'] }
             }, { hideRows: true, injectMappingFailure: true }), error => assertWriteFailure(error, { cause: failure, outcome: borrowed ? 'pending' : 'rolledBack' }))
             assert.equal(attempts, 2)

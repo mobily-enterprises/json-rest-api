@@ -33,13 +33,13 @@ for (const format of ['jsonapi', 'plain']) {
 
     it('initializes revisions and prevents a stale PATCH from overwriting a newer write', async () => {
       const body = input('Original')
-      const created = await items.post({ inputRecord: body, format, returning: 'full' })
+      const created = await items.post({ [format === 'plain' ? 'data' : 'document']: body, format, returning: 'full' })
       const first = attributes(created).revision
       assert.match(first, /^[0-9a-f-]{36}$/)
       assert.equal(format === 'plain' ? body.revision : body.data.attributes.revision, undefined)
-      const updated = await items.patch({ id: id(created), inputRecord: input('Updated'), expectedVersion: first, format, returning: 'full' })
+      const updated = await items.patch({ id: id(created), [format === 'plain' ? 'data' : 'document']: input('Updated'), expectedVersion: first, format, returning: 'full' })
       assert.notEqual(attributes(updated).revision, first)
-      await assert.rejects(items.patch({ id: id(created), inputRecord: input('Stale'), expectedVersion: first, format }), error => error.subtype === 'conflict')
+      await assert.rejects(items.patch({ id: id(created), [format === 'plain' ? 'data' : 'document']: input('Stale'), expectedVersion: first, format }), error => error.subtype === 'conflict')
       const stored = await items.get({ id: id(created), format })
       assert.equal(completedPatches, 1)
       assert.equal(attributes(stored).name, 'Updated')
@@ -47,9 +47,9 @@ for (const format of ['jsonapi', 'plain']) {
     })
 
     it('advances unconditional PUT and requires a current token for conditional DELETE', async () => {
-      const created = await items.put({ id: '1', inputRecord: input('Created'), format, returning: 'full' })
+      const created = await items.put({ id: '1', [format === 'plain' ? 'data' : 'document']: input('Created'), format, returning: 'full' })
       const first = attributes(created).revision
-      const replaced = await items.put({ id: '1', inputRecord: input('Replaced'), format, returning: 'full' })
+      const replaced = await items.put({ id: '1', [format === 'plain' ? 'data' : 'document']: input('Replaced'), format, returning: 'full' })
       assert.notEqual(attributes(replaced).revision, first)
       await assert.rejects(items.delete({ id: '1', expectedVersion: first }), error => error.subtype === 'conflict')
       assert.equal(await fixture.count('items'), 1)
@@ -58,19 +58,19 @@ for (const format of ['jsonapi', 'plain']) {
     })
 
     it('keeps the generated token authoritative and rolls it back with a failed write', async () => {
-      const created = await items.post({ inputRecord: input('Original'), format, returning: 'full' })
+      const created = await items.post({ [format === 'plain' ? 'data' : 'document']: input('Original'), format, returning: 'full' })
       const first = attributes(created).revision
-      await assert.rejects(items.patch({ id: id(created), inputRecord: input('Failed'), expectedVersion: first, format }, { failWrite: true }), /Reject versioned write/)
+      await assert.rejects(items.patch({ id: id(created), [format === 'plain' ? 'data' : 'document']: input('Failed'), expectedVersion: first, format }, { failWrite: true }), /Reject versioned write/)
       const unchanged = await items.get({ id: id(created), format })
       assert.equal(attributes(unchanged).revision, first)
       assert.equal(attributes(unchanged).name, 'Original')
-      const updated = await items.patch({ id: id(created), inputRecord: input('Updated'), expectedVersion: first, format, returning: 'full' }, { changeVersion: true })
+      const updated = await items.patch({ id: id(created), [format === 'plain' ? 'data' : 'document']: input('Updated'), expectedVersion: first, format, returning: 'full' }, { changeVersion: true })
       assert.match(attributes(updated).revision, /^[0-9a-f-]{36}$/)
       assert.notEqual(attributes(updated).revision, first)
     })
 
     it('allows only one simultaneous public PATCH with the same revision', async () => {
-      const created = await items.post({ inputRecord: input('Original'), format, returning: 'full' })
+      const created = await items.post({ [format === 'plain' ? 'data' : 'document']: input('Original'), format, returning: 'full' })
       let arrivals = 0
       let release
       const ready = new Promise(resolve => { release = resolve })
@@ -78,7 +78,7 @@ for (const format of ['jsonapi', 'plain']) {
         if (++arrivals === 2) release()
         await ready
       }
-      const update = name => items.patch({ id: id(created), inputRecord: input(name), expectedVersion: attributes(created).revision, format, returning: 'full' }, { synchronize })
+      const update = name => items.patch({ id: id(created), [format === 'plain' ? 'data' : 'document']: input(name), expectedVersion: attributes(created).revision, format, returning: 'full' }, { synchronize })
       const outcomes = await Promise.allSettled([update('First client'), update('Second client')])
       const succeeded = outcomes.filter(outcome => outcome.status === 'fulfilled')
       const failed = outcomes.filter(outcome => outcome.status === 'rejected')
@@ -95,22 +95,22 @@ for (const format of ['jsonapi', 'plain']) {
     })
 
     it('rotates unchanged-value writes and consumes each transaction revision once', async () => {
-      const created = await items.post({ inputRecord: input('Original'), format, returning: 'full' })
+      const created = await items.post({ [format === 'plain' ? 'data' : 'document']: input('Original'), format, returning: 'full' })
       const original = attributes(created).revision
       const recordId = id(created)
-      const unchanged = await items.patch({ id: recordId, inputRecord: input('Original'), expectedVersion: original, format, returning: 'full' })
+      const unchanged = await items.patch({ id: recordId, [format === 'plain' ? 'data' : 'document']: input('Original'), expectedVersion: original, format, returning: 'full' })
       const current = attributes(unchanged).revision
       assert.notEqual(current, original)
       assert.equal(attributes(unchanged).name, 'Original')
       const failure = new Error('Rollback successive revisions')
       const revisions = [original, current]
       await assert.rejects(fixture.api.transaction(async transaction => {
-        const first = await items.patch({ id: recordId, inputRecord: input('First'), expectedVersion: current, transaction, format, returning: 'full' })
+        const first = await items.patch({ id: recordId, [format === 'plain' ? 'data' : 'document']: input('First'), expectedVersion: current, transaction, format, returning: 'full' })
         revisions.push(attributes(first).revision)
-        const second = await items.patch({ id: recordId, inputRecord: input('Second'), expectedVersion: attributes(first).revision, transaction, format, returning: 'full' })
+        const second = await items.patch({ id: recordId, [format === 'plain' ? 'data' : 'document']: input('Second'), expectedVersion: attributes(first).revision, transaction, format, returning: 'full' })
         revisions.push(attributes(second).revision)
         assert.equal(new Set(revisions).size, revisions.length)
-        await assert.rejects(items.patch({ id: recordId, inputRecord: input('Stale'), expectedVersion: attributes(first).revision, transaction, format }), error => error.code === 'REST_API_VERSION_CONFLICT')
+        await assert.rejects(items.patch({ id: recordId, [format === 'plain' ? 'data' : 'document']: input('Stale'), expectedVersion: attributes(first).revision, transaction, format }), error => error.code === 'REST_API_VERSION_CONFLICT')
         const stored = await items.get({ id: recordId, transaction, format })
         assert.equal(attributes(stored).revision, attributes(second).revision)
         assert.equal(attributes(stored).name, 'Second')
@@ -123,8 +123,8 @@ for (const format of ['jsonapi', 'plain']) {
     })
 
     it('rejects supplied revision attributes and conditional creation', async () => {
-      await assert.rejects(items.post({ inputRecord: input('Forged', 'caller-token'), format }), /version field is managed/)
-      await assert.rejects(items.put({ id: '1', inputRecord: input('Missing'), expectedVersion: 'old-token', format }), error => error.subtype === 'not_found')
+      await assert.rejects(items.post({ [format === 'plain' ? 'data' : 'document']: input('Forged', 'caller-token'), format }), /version field is managed/)
+      await assert.rejects(items.put({ id: '1', [format === 'plain' ? 'data' : 'document']: input('Missing'), expectedVersion: 'old-token', format }), error => error.subtype === 'not_found')
       assert.equal(await fixture.count('items'), 0)
     })
   })

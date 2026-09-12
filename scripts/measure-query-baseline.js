@@ -69,7 +69,7 @@ try {
   const api = await createBasicApi(knex)
   const post = (resource, attributes, relationships = {}) => api.resources[resource].post({
     format: 'jsonapi',
-    inputRecord: { data: { type: resource, attributes, relationships } }
+    document: { data: { type: resource, attributes, relationships } }
   })
   const country = (await post('countries', { name: 'Baseline country', code: 'BC' })).data
   const publisher = (await post('publishers', { name: 'Baseline publisher' }, {
@@ -93,8 +93,8 @@ try {
     ['sparse', () => api.resources.books.query({ format: 'jsonapi', queryParams: { fields: { books: 'title' } } }), 10],
     ['nested-includes', () => api.resources.books.query({ format: 'jsonapi', queryParams: { include: ['publisher.country', 'authors'] } }), 10],
     ['many-to-many-related', () => api.resources.books.getRelated({ format: 'jsonapi', id: books[0].id, relationshipName: 'authors' }), 3],
-    ['patch-full', () => api.resources.books.patch({ format: 'jsonapi', returning: 'full', id: books[0].id, inputRecord: { data: { type: 'books', id: books[0].id, attributes: { title: 'Updated' } } } }), 1],
-    ['patch-nested-includes', () => api.resources.books.patch({ format: 'jsonapi', returning: 'full', id: books[0].id, inputRecord: { data: { type: 'books', id: books[0].id, attributes: { title: 'Updated' } } }, queryParams: { include: ['publisher.country', 'authors'] } }), 1]
+    ['patch-full', () => api.resources.books.patch({ format: 'jsonapi', returning: 'full', id: books[0].id, document: { data: { type: 'books', id: books[0].id, attributes: { title: 'Updated' } } } }), 1],
+    ['patch-nested-includes', () => api.resources.books.patch({ format: 'jsonapi', returning: 'full', id: books[0].id, document: { data: { type: 'books', id: books[0].id, attributes: { title: 'Updated' } } }, queryParams: { include: ['publisher.country', 'authors'] } }), 1]
   ]
   for (const [name, operation, expectedRecords] of scenarios) {
     await measure(name, operation, expectedRecords)
@@ -150,12 +150,10 @@ try {
     // The 101-target case crosses the write-query batch boundary, not the bulk request limit.
     if (size > 40) continue
     for (const atomic of [true, false]) {
-      const inputRecords = Array.from({ length: size }, (_, index) => ({
-        data: {
-          type: 'policy_tasks',
-          attributes: { title: `Bulk ${index}`, access_group: 'group-a' },
-          relationships: { project: { data: linkage(project) } }
-        }
+      const resources = Array.from({ length: size }, (_, index) => ({
+        type: 'policy_tasks',
+        attributes: { title: `Bulk ${index}`, access_group: 'group-a' },
+        relationships: { project: { data: linkage(project) } }
       }))
       const checkBulk = result => {
         assert.equal(result.meta.succeeded, size)
@@ -163,7 +161,7 @@ try {
         assert.equal(result.meta.atomic, atomic)
       }
       const created = await measure('bulk-post-full', () => tasks.bulkPost({
-        format: 'jsonapi', returning: 'full', atomic, inputRecords
+        format: 'jsonapi', returning: 'full', atomic, document: { data: resources }
       }, viewer), size, { size, atomic }, result => {
         checkBulk(result)
         assert.equal(new Set(result.data.map(row => row.id)).size, size)
@@ -177,7 +175,7 @@ try {
         format: 'jsonapi',
         returning: 'full',
         atomic,
-        operations: ids.map(id => ({ id, data: { type: 'policy_tasks', id, attributes: { title: 'Bulk updated' } } }))
+        operations: ids.map(id => ({ id, document: { data: { type: 'policy_tasks', id, attributes: { title: 'Bulk updated' } } } }))
       }, viewer), size, { size, atomic }, result => {
         checkBulk(result)
         assert.deepEqual(result.data.map(row => row.id), ids)

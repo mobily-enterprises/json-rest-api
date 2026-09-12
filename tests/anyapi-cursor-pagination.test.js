@@ -45,12 +45,12 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
     ])
 
     const country = await api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', { name: 'Cursorland', code: 'CL' }),
+      document: createJsonApiDocument('countries', { name: 'Cursorland', code: 'CL' }),
       format: 'jsonapi',
     })
 
     const publisher = await api.resources.publishers.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'publishers',
         { name: 'Cursor Press' },
         { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
@@ -61,7 +61,7 @@ maybeDescribe('AnyAPI Cursor Pagination', () => {
     const titles = ['Book A', 'Book B', 'Book C', 'Book D', 'Book E', 'Book F']
     for (const title of titles) {
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument(
+        document: createJsonApiDocument(
           'books',
           { title },
           {

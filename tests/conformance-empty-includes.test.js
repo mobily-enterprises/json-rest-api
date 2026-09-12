@@ -99,7 +99,7 @@ describe(`Empty include documents (${storageMode.mode})`, () => {
         const transaction = unit?.transaction
         try {
           const id = method === 'post' ? '3' : '2'
-          const document = await fixture.api.resources.items[method]({ id, transaction, returning: 'full', inputRecord: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 } } }, queryParams: { include: ['groups'], fields: { items: 'name' } } })
+          const document = await fixture.api.resources.items[method]({ id, transaction, returning: 'full', document: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 } } }, queryParams: { include: ['groups'], fields: { items: 'name' } } })
           assertIncluded(document, true)
           assert.equal(document.data.attributes.name, 'Written')
           if (transaction) assert.equal(transaction.isCompleted(), false)
@@ -116,7 +116,7 @@ describe(`Empty include documents (${storageMode.mode})`, () => {
     const related = await fixture.api.resources.items.getRelated({ id: '2', relationshipName: 'group', format: 'plain', queryParams: { include: [] } })
     assert.equal(related, null)
     for (const returning of ['minimal', 'none']) {
-      const document = await fixture.api.resources.groups.patch({ id: '1', returning, inputRecord: { data: { type: 'groups', id: '1', attributes: { name: 'Empty' } } }, queryParams: { include: [] } })
+      const document = await fixture.api.resources.groups.patch({ id: '1', returning, document: { data: { type: 'groups', id: '1', attributes: { name: 'Empty' } } }, queryParams: { include: [] } })
       assert.deepEqual(document, returning === 'none' ? undefined : { data: { type: 'groups', id: '1' } })
     }
   })

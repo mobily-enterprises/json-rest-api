@@ -800,8 +800,8 @@ async function introspectSqliteColumns (knex, tableName) {
     tableEntries.map((entry) => [readLeadingIdentifier(entry), entry])
   )
 
-  const columnRows = normalizeRows(await knex.raw(`PRAGMA table_xinfo(${quotedTableName})`))
-    .filter((row) => Number(row.hidden || 0) === 0)
+  const allColumnRows = normalizeRows(await knex.raw(`PRAGMA table_xinfo(${quotedTableName})`))
+  const columnRows = allColumnRows.filter((row) => Number(row.hidden || 0) === 0)
   if (columnRows.length < 1) {
     throw new Error(`Could not introspect table "${tableName}".`)
   }
@@ -842,11 +842,12 @@ async function introspectSqliteColumns (knex, tableName) {
     .sort((left, right) => Number(left.pk) - Number(right.pk))
     .map((row) => normalizeText(row.name))
 
-  return { columns, primaryKeyColumns, parsedConstraints }
+  return { columns, primaryKeyColumns, parsedConstraints, hiddenColumns: allColumnRows.filter(row => Number(row.hidden || 0) !== 0) }
 }
 
 async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
-  const { columns, primaryKeyColumns, parsedConstraints } = await introspectSqliteColumns(knex, tableName)
+  const { columns, primaryKeyColumns, parsedConstraints, hiddenColumns } = await introspectSqliteColumns(knex, tableName)
+  if (hiddenColumns.length) throw new Error(`Column '${hiddenColumns[0].name}' is generated or hidden and cannot be represented by this table snapshot.`)
   const quotedTableName = quoteSqliteIdentifier(tableName)
 
   const indexListRows = normalizeRows(await knex.raw(`PRAGMA index_list(${quotedTableName})`))
@@ -858,7 +859,11 @@ async function introspectSqliteTableSnapshot (knex, { tableName, idColumn }) {
 
     const indexName = normalizeText(row.name)
     const quotedIndexName = quoteSqliteIdentifier(indexName)
-    const columnsForIndex = normalizeRows(await knex.raw(`PRAGMA index_info(${quotedIndexName})`))
+    const columnsForIndex = normalizeRows(await knex.raw(`PRAGMA index_xinfo(${quotedIndexName})`))
+      .filter(column => Number(column.key) === 1)
+    if (Number(row.partial) === 1 || columnsForIndex.some(column => Number(column.cid) < 0 || !column.name || Number(column.desc) === 1 || (column.coll && column.coll !== 'BINARY'))) {
+      throw new Error(`Index '${indexName}' cannot be represented by a simple column-index snapshot.`)
+    }
 
     for (const columnRow of columnsForIndex) {
       indexRows.push({
@@ -957,6 +962,8 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
   if (columnRows.length < 1) {
     throw new Error(`Could not introspect table "${tableName}" in schema "${schemaName}".`)
   }
+  const generatedColumn = columnRows.find(row => /\b(?:virtual|stored) generated\b/i.test(row.extra || ''))
+  if (generatedColumn) throw new Error(`Column '${generatedColumn.columnName}' is generated and cannot be represented by this table snapshot.`)
 
   const primaryRows = normalizeRows(
     await knex.raw(
@@ -986,6 +993,8 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
           s.non_unique AS nonUnique,
           s.index_type AS indexType,
           s.column_name AS columnName,
+          s.sub_part AS subPart,
+          s.collation AS collation,
           s.seq_in_index AS seqInIndex
         FROM information_schema.statistics s
         WHERE s.table_schema = ?
@@ -996,6 +1005,9 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
       [schemaName, tableName]
     )
   )
+
+  const unsupportedIndex = indexRows.find(row => !row.columnName || row.subPart != null || (row.collation && row.collation !== 'A'))
+  if (unsupportedIndex) throw new Error(`Index '${unsupportedIndex.indexName}' cannot be represented by a simple column-index snapshot.`)
 
   const foreignKeyRows = normalizeRows(
     await knex.raw(
@@ -1151,11 +1163,12 @@ async function introspectPostgresColumns (knex, tableName, explicitSchema) {
     // PostgreSQL rewrites Knex's inline IN check to ANY; retain its logical form.
     constraint.clause = `"${column.name.replace(/"/g, '""')}" in (${literals.map(literal => `'${literal[1]}'`).join(', ')})`
   }
-  return { schemaName, columns, constraints }
+  return { schemaName, columns, constraints, generatedColumns: columnRows.filter(row => row.is_generated === 'ALWAYS') }
 }
 
 async function introspectPostgresTableSnapshot (knex, { tableName, idColumn }) {
-  const { schemaName, columns, constraints } = await introspectPostgresColumns(knex, tableName)
+  const { schemaName, columns, constraints, generatedColumns } = await introspectPostgresColumns(knex, tableName)
+  if (generatedColumns.length) throw new Error(`Column '${generatedColumns[0].column_name}' is generated and cannot be represented by this table snapshot.`)
   const indexRows = normalizeRows(await knex.raw(`
     SELECT idx.relname AS "indexName", CASE WHEN i.indisunique THEN 0 ELSE 1 END AS "nonUnique",
       am.amname AS "indexType", a.attname AS "columnName", k.position AS "seqInIndex",

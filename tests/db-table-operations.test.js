@@ -528,6 +528,33 @@ describe('dbTablesOperations.generateKnexMigrationDiff', () => {
     await db.destroy()
   })
 
+  it('requires explicit booleans for destructive options', () => {
+    for (const name of ['allowDropColumns', 'allowDropIndexes', 'allowDropForeignKeys']) {
+      for (const value of ['false', 'true', 1, null]) {
+        assert.throws(() => generateKnexMigrationDiff('items', { columns: [] }, { structure: {} }, {
+          [name]: value
+        }), new RegExp(`${name} must be a boolean`))
+      }
+    }
+  })
+
+  it('keeps multiline database identifiers inside generated warning comments', async () => {
+    await db.schema.createTable('items', table => {
+      table.increments('id').primary()
+      table.string('title')
+    })
+    const indexName = 'legacy\r\nthrow new Error("escaped warning");\u2028throw new Error("escaped unicode warning");\u2029trailing'
+    await db.raw('CREATE INDEX ?? ON ?? (??)', [indexName, 'items', 'title'])
+    const current = await introspectKnexTableSnapshot(db, { tableName: 'items' })
+    const change = generateKnexMigrationDiff('items', current, { structure: { title: { type: 'string' } } })
+    assert.ok(change.warnings.some(warning => warning.includes(indexName)))
+    const migration = {}
+    // eslint-disable-next-line no-new-func -- Verify generated warnings cannot escape their comments.
+    new Function('exports', change.migration)(migration)
+    await migration.up(db)
+    assert.deepEqual(await introspectKnexTableSnapshot(db, { tableName: 'items' }), current)
+  })
+
   it('generates additive alter migrations from a live snapshot', async () => {
     await db.raw('PRAGMA foreign_keys = ON')
     await db.raw(`

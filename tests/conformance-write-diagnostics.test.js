@@ -24,7 +24,7 @@ describe(`Compiled write diagnostic visibility (${storageMode.mode})`, () => {
 
   it('uses published field visibility while preserving rollback and the caller input', async () => {
     const inputRecord = { data: { type: 'items', attributes: { name: 'Visible name', accessKey: 'PRIVATE_COMPILED_ACCESS', privateNote: 'PRIVATE_COMPILED_NOTE' } } }
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord, format: 'jsonapi' }), /Deliberate write failure/)
+    await assert.rejects(fixture.api.resources.items.post({ document: inputRecord, format: 'jsonapi' }), /Deliberate write failure/)
     const diagnostic = calls.find(args => args[0].includes('Error in POST method'))
     assert.ok(diagnostic)
     assert.equal(diagnostic[1].phase, 'writeFailure')
@@ -42,7 +42,7 @@ describe(`Compiled write diagnostic visibility (${storageMode.mode})`, () => {
   })
   it('redacts hidden values when malformed input fails before transaction setup', async () => {
     const inputRecord = [{ accessKey: 'PRIVATE_EARLY_ACCESS', privateNote: 'PRIVATE_EARLY_NOTE' }]
-    await assert.rejects(fixture.api.resources.items.post({ inputRecord, format: 'jsonapi' }), /inputRecord must be a record object/)
+    await assert.rejects(fixture.api.resources.items.post({ document: inputRecord, format: 'jsonapi' }), /document must be an object/)
     const diagnostic = calls.find(args => args[0].includes('Error in POST method'))
     assert.ok(diagnostic)
     assert.ok(!JSON.stringify(diagnostic).includes('PRIVATE_EARLY_'))

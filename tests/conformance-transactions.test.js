@@ -51,7 +51,7 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
     id: record.id, relationshipName, transaction: trx
   })).data
   const patch = (record, attributes, trx, context = {}) => fixture.api.resources[record.type].patch({
-    id: record.id, inputRecord: document(record.type, record.id, attributes), transaction: trx
+    id: record.id, document: document(record.type, record.id, attributes), transaction: trx
   }, context)
   const compete = async (firstWrite, secondWrite) => {
     const first = await transaction()
@@ -152,7 +152,7 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
         assert.ok(!inner.parentTransaction)
         assert.notEqual(await inner.client.acquireConnection(), await outer.client.acquireConnection())
         return fixture.api.resources.items.post({
-          transaction: inner, inputRecord: document('items', '99', { name: 'Independent inner write' })
+          transaction: inner, document: document('items', '99', { name: 'Independent inner write' })
         })
       })
       assert.equal(created.data.id, '99')
@@ -171,10 +171,10 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
       const observer = await transaction()
       assert.notEqual(await writer.transaction.client.acquireConnection(), await observer.transaction.client.acquireConnection())
       const newGroup = (await fixture.api.resources.groups.post({
-        inputRecord: document('groups', '99', { name: 'Uncommitted group' }), transaction: writer.transaction
+        document: document('groups', '99', { name: 'Uncommitted group' }), transaction: writer.transaction
       })).data
       const created = (await fixture.api.resources.items.post({
-        inputRecord: document('items', '99', { name: 'Uncommitted item' }, { group: { data: identifier(newGroup) } }),
+        document: document('items', '99', { name: 'Uncommitted item' }, { group: { data: identifier(newGroup) } }),
         queryParams: { include: ['group'] },
         transaction: writer.transaction
       }))
@@ -303,7 +303,7 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
         const relationshipName = reverse ? 'items' : 'groups'
         const replace = (record, trx) => fixture.api.resources[owner.type][method]({
           id: owner.id,
-          inputRecord: document(owner.type, owner.id,
+          document: document(owner.type, owner.id,
             method === 'put' ? { name: 'Replacement', ...(reverse ? {} : { active: true, score: 1 }) } : undefined,
             { [relationshipName]: { data: [identifier(record)] }, ...(reverse ? { firstItem: { data: identifier(record) } } : {}) }),
           transaction: trx
@@ -406,7 +406,7 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
           callback => { beforePatch = callback && ((context, scopeName) => context.pause && scopeName === 'items' ? callback(context) : undefined) },
           () => fixture.api.resources.items[method]({
             id,
-            inputRecord: document('items', id, { name: 'Changed', ...(method === 'put' ? { active: true, score: 1 } : {}) }, {
+            document: document('items', id, { name: 'Changed', ...(method === 'put' ? { active: true, score: 1 } : {}) }, {
               [relationshipName]: { data: identifier(group) }
             }),
             transaction: writer.transaction
@@ -493,7 +493,7 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
         () => fixture.api.resources.items.bulkPatch({
           atomic: true,
           operations: [item, other].map(record => ({
-            id: record.id, data: document('items', record.id, { score: 9 }).data
+            id: record.id, document: document('items', record.id, { score: 9 })
           }))
         }),
         async context => {
@@ -523,7 +523,7 @@ describe(`Concurrent generated IDs on ${databaseClient} (${storageMode.mode})`, 
     it(`keeps generated identities consistent when the first writer ${commit ? 'commits' : 'rolls back'}`, async () => {
       const transactions = []
       const post = async (name, transaction) => (await fixture.api.resources.items.post({
-        inputRecord: { data: { type: 'items', attributes: { name } } }, transaction
+        document: { data: { type: 'items', attributes: { name } } }, transaction
       })).data
       try {
         const first = await holdManagedTransaction(fixture.api)

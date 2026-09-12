@@ -136,7 +136,7 @@ The resource id is not part of `attributes`:
 ```js
 await api.resources.profiles.post({
   format: 'jsonapi',
-  inputRecord: {
+  document: {
     data: {
       type: 'profiles',
       id: '42',
@@ -456,7 +456,9 @@ It includes the same table metadata as `createKnexTable()`:
 
 ## Diff Migrations
 
-Use `generateKnexMigrationDiff()` to compare the desired schema against the live table snapshot:
+Use `generateKnexMigrationDiff()` to draft a migration by comparing one resource's
+desired schema against its live table snapshot. Review the plan, warnings and
+generated code before placing the file in your application's Knex migrations:
 
 ```js
 const diff = await api.resources.memberships.generateKnexMigrationDiff()
@@ -491,6 +493,33 @@ The generated migration is intentionally additive-first:
 - recreate changed indexes when needed
 - add missing foreign keys, or drop and recreate a changed named foreign key
 - add supported check constraints
+
+Columns, indexes and foreign keys omitted from the resource schema are preserved
+by default, with warnings. A resource may describe only part of an application's
+database contract. To remove omitted metadata deliberately, pass explicit booleans:
+
+```js
+const diff = await api.resources.memberships.generateKnexMigrationDiff({
+  options: {
+    allowDropColumns: true,
+    allowDropIndexes: true,
+    allowDropForeignKeys: true
+  }
+})
+```
+
+Enable only the removals you have reviewed. These flags cover every omitted item
+of that kind in this table, so review each planned removal. A changed definition
+under an existing index or foreign-key name is an explicit replacement and adds
+a warning without needing a drop flag. Dropping a column while retaining its
+index or foreign key rejects generation; remove that dependency explicitly too.
+Necessary MySQL indexes supporting declared foreign keys remain preserved.
+
+New not-null columns without a static non-null database default produce a
+backfill warning, even when an application hook or function default would supply
+values for future writes. Bigint-to-integer changes on native databases warn
+about overflow. Generation does not inspect existing row values to prove either
+change will succeed.
 
 The diff compares effective storage declarations, including the default string
 length and temporal precision. Native integer/float/binary metadata does not
@@ -545,17 +574,26 @@ It answers:
 
 - what the table looks like now
 - what the resource says it should look like
-- what Knex migration can safely move the table toward that shape
+- what Knex migration changes it can propose for review
 
 It does not answer:
 
 - what changed since a previous migration file
 - how to reconstruct migration history
+- whether the proposed change is safe for all existing data and application code
+- how to synchronize an entire database from a resource schema
 
 Other important limits:
 
 - destructive changes are surfaced as warnings
-- dropped columns are skipped unless explicitly allowed by diff options
+- omitted columns, indexes and foreign keys are preserved unless their respective
+  drop option is explicitly enabled
+- partial and expression indexes cannot be represented by the simple SQLite or
+  PostgreSQL snapshot and reject introspection instead of producing a false match
+- SQLite descending or non-binary-collation indexes, and MySQL expression,
+  prefix or descending indexes, also reject full snapshots
+- generated columns reject full table snapshots on SQLite, MySQL and PostgreSQL;
+  the narrower reader used by direct field alterations remains separate
 - SQLite check-constraint add/drop/alter support is warning-only
 - changing/removing an existing named check is warning-only on all dialects;
   PostgreSQL inline-enum replacements are handled separately
@@ -572,6 +610,11 @@ default expressions, complex dependencies from other tables, native PostgreSQL
 enum types and manual SQLite enum rebuilds remain outside its verified surface. Review the
 generated SQL and warnings for the actual database. See
 [contributing](../contributing.md#real-databases-and-redis) for native test commands.
+
+PostgreSQL index sort direction, operator classes and collation details are not
+fully represented by this snapshot. Inspect those definitions separately before
+replacing an index; a successful snapshot is not a complete dependency or SQL
+feature audit.
 
 ## When to Use Which Helper
 

@@ -170,7 +170,7 @@ describe(`Sparse relationship hydration (${storageMode.mode})`, () => {
       try {
         const value = await fixture.api.resources.groups.patch({
           id: '1',
-          inputRecord: createJsonApiDocument('groups', { name: 'Changed' }),
+          document: createJsonApiDocument('groups', { name: 'Changed' }),
           transaction,
           returning: 'full',
           format: 'jsonapi',
@@ -191,7 +191,7 @@ describe(`Sparse relationship hydration (${storageMode.mode})`, () => {
       try {
         await assert.rejects(fixture.api.resources.groups.patch({
           id: '1',
-          inputRecord: createJsonApiDocument('groups', { name: 'Changed' }),
+          document: createJsonApiDocument('groups', { name: 'Changed' }),
           transaction,
           returning: 'full',
           format: 'jsonapi',

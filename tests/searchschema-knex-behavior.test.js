@@ -38,7 +38,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     const context = {}
 
     await api.resources.users.post({
-      inputRecord: createJsonApiDocument('users', {
+      document: createJsonApiDocument('users', {
         username: 'ann',
         email: 'ann@example.com',
         bio: 'Writes API guides'
@@ -46,7 +46,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     }, context)
 
     await api.resources.users.post({
-      inputRecord: createJsonApiDocument('users', {
+      document: createJsonApiDocument('users', {
         username: 'anna',
         email: 'anna@example.com',
         bio: 'Writing API tutorials'
@@ -79,7 +79,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     const context = {}
 
     await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
+      document: createJsonApiDocument('products', {
         name: 'Widget A',
         description: 'A great widget',
         price: 50,
@@ -89,7 +89,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     }, context)
 
     await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
+      document: createJsonApiDocument('products', {
         name: 'Widget B',
         description: 'Another widget',
         price: 150,
@@ -143,7 +143,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     const context = {}
 
     await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
+      document: createJsonApiDocument('products', {
         name: 'Widget Alpha',
         description: 'The great all-purpose widget',
         price: 50,
@@ -153,7 +153,7 @@ maybeDescribe('SearchSchema Merge Behavior (Knex execution)', () => {
     }, context)
 
     await api.resources.products.post({
-      inputRecord: createJsonApiDocument('products', {
+      document: createJsonApiDocument('products', {
         name: 'Widget Beta',
         description: 'A quiet replacement unit',
         price: 60,

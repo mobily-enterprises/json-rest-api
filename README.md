@@ -10,10 +10,10 @@ A JSON:API library and mini-ORM for Node.js 24+. Define resources once, call the
 * **Relationship Support** - `belongsTo`, `hasMany`, and many-to-many relationships, including polymorphic
 * **Advanced Querying** - Filtering, sorting, pagination, and field selection (sparse fieldsets)
 * **Server-Side Row Policies** - Apply mandatory visibility rules before pagination, counts, and relationship loading
-* **File Uploads** - Built-in support for file handling with local storage and a mock S3-style demo adapter
+* **File Uploads** - File handling with local storage and custom storage adapters
 * **Framework Agnostic** - Includes Express and Fastify connectors
 * **Validation** - Schema-based validation with detailed error messages and custom rules
-* **Plain Records** - Programmatic calls use plain objects; choose `format: 'jsonapi'` for documents
+* **Plain Records** - Write plain values with `data` or JSON:API documents with `document`; choose output independently with `format`
 * **Extensible** - Resource methods, sequential hooks and explicit plugin installation
 
 ## Installation
@@ -98,3 +98,9 @@ The full gate includes types, package contracts, query budgets, both SQLite
 storage suites, Express 4, lint and the documentation build. Native database,
 Redis and fresh-install checks are separate commands described in contributing.
 Use `npm run docs:dev -- --no-open` to serve the documentation locally.
+
+## License
+
+Choose either the [MIT license](LICENSE-MIT) or the
+[GNU GPL version 3 or later](LICENSE-GPL-3.0). See [LICENSE](LICENSE) for the
+dual-license notice. Dependencies retain their own licenses.

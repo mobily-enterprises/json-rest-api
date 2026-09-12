@@ -26,6 +26,19 @@ Local properties override those defaults. The internal operation argument names
 The operation handlers live in `plugins/core/rest-api-plugin-methods/`. They validate
 requests, run permission/lifecycle hooks and call storage helpers.
 
+Writes select plain input with `data` or JSON:API input with `document`.
+`request-contracts.js` validates that selection; plain conversion produces the
+normalized `context.inputRecord` used by the existing write lifecycle. `format`
+controls output only. Both input forms run through the same resource operation,
+including response preparation before transaction completion. Connectors submit
+documents through this same boundary.
+
+Hooks deliberately share mutable operation context for caches, added information
+and phase-specific field changes. The caller observes those mutations. See the
+[hook contract](GUIDE/13-hooks-and-lifecycle.md) for wrapper hooks, nested calls,
+writable values and library-owned bookkeeping. Independent calls use separate
+contexts; this is not an immutable-context API.
+
 `plugins/core/lib/querying-writing/compile-schemas.js` compiles resource declarations.
 Its neighboring modules own response options, field selection, ID normalization and
 representation conversion. The JSON schema package remains a separate dependency;

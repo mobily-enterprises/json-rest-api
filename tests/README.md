@@ -28,6 +28,7 @@ prerequisites, including Ruby/Bundler for documentation.
 | `npm run test:conformance` | Shared conformance suites in both storage modes |
 | `npm run test:connectors` | Express 5, Express 4, Fastify, multipart, CORS, HTTP validators/conditional client, bulk revision bodies and Socket.IO selections in both modes |
 | `npm run test:query-budgets` | Enforced query-count and behavior budgets; elapsed time and heap readings are informational |
+| `npm run test:stress` | Bounded repeated authorized relationship reads and owned/managed commit/rollback workloads in both SQLite storage modes; per-operation SQL ceilings, result/completion checks and observational timing/memory reports; see [stress configuration](../docs/contributing.md#resource-stress-checks) |
 | `npm run test:databases` | Disposable SQLite, PostgreSQL and MySQL integration selections in both modes |
 | `npm run test:redis` | Separate real Redis/Socket.IO integration selection |
 | `npm run lint` | Maintained runtime, tests and scripts |
@@ -85,7 +86,7 @@ asserting returned attributes. Context remains the second method argument.
 
 ```javascript
 const created = await api.resources.books.post({
-  inputRecord: createJsonApiDocument('books', { title: 'My Book' }, {
+  document: createJsonApiDocument('books', { title: 'My Book' }, {
     country: createRelationship(resourceIdentifier('countries', countryId))
   }),
   format: 'jsonapi',

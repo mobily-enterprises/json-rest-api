@@ -46,7 +46,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
           id: seeded.hiddenParentTask.id,
           format: 'plain',
           returning: 'none',
-          inputRecord: { subject: { _type: 'policy_tasks', id: seeded.task.id } }
+          data: { subject: { _type: 'policy_tasks', id: seeded.task.id } }
         }, seeded.admin)
         for (const fields of [{}, { policy_tasks: 'title' }]) {
           const params = { id: seeded.hiddenParentTask.id, relationshipName: 'subject', format, queryParams: { fields } }
@@ -79,7 +79,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
           id: seeded.hiddenParentTask.id,
           format,
           returning: 'full',
-          inputRecord: format === 'plain' ? attributes : { data: { type: 'policy_tasks', id: seeded.hiddenParentTask.id, attributes } }
+          [format === 'plain' ? 'data' : 'document']: format === 'plain' ? attributes : { data: { type: 'policy_tasks', id: seeded.hiddenParentTask.id, attributes } }
         }, seeded.viewer)
         for (const name of ['project', 'subject']) {
           assert.equal(format === 'plain' ? result[name] : result.data.relationships[name].data, format === 'plain' ? undefined : null)
@@ -107,7 +107,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
         const transaction = unit.transaction
         try {
           await fixture.api.resources.policy_projects.patch({
-            id: seeded.project.id, transaction, format: 'plain', returning: 'none', inputRecord: { access_group: 'group-b' }
+            id: seeded.project.id, transaction, format: 'plain', returning: 'none', data: { access_group: 'group-b' }
           }, seeded.admin)
           const result = await fixture.api.resources.policy_tasks.get({ id: seeded.task.id, transaction, format }, seeded.viewer)
           assert.equal(format === 'plain' ? result.project : result.data.relationships.project.data, format === 'plain' ? undefined : null)

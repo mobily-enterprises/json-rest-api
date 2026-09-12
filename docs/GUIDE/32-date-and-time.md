@@ -80,14 +80,14 @@ The API validates and normalizes date/time inputs:
 
 ```javascript
 const januaryArticle = await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'January', publishedDate: '2024-01-15',
     createdAt: '2024-01-15T22:30:00+08:00', dailyPostTime: '14:30:00',
     publishedEpoch: '1705329000000'
   }
 })
 await api.resources.articles.post({
-  inputRecord: {
+  data: {
     title: 'February', publishedDate: '2024-02-01',
     createdAt: '2024-02-01T00:00:00Z', dailyPostTime: null,
     publishedEpoch: 1706745600000

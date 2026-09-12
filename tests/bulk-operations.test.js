@@ -49,7 +49,7 @@ describe('Bulk Operations', () => {
       ]
 
       const result = await api.resources.authors.bulkPost({
-        inputRecords: records,
+        document: { data: records.map(record => record.data) },
         atomic: true
       })
 
@@ -86,7 +86,7 @@ describe('Bulk Operations', () => {
 
       try {
         await api.resources.authors.bulkPost({
-          inputRecords: records,
+          document: { data: records.map(record => record.data) },
           atomic: true
         })
         assert.fail('Should have thrown error')
@@ -108,7 +108,7 @@ describe('Bulk Operations', () => {
       ]
 
       const result = await api.resources.authors.bulkPost({
-        inputRecords: records,
+        document: { data: records.map(record => record.data) },
         atomic: false
       })
 
@@ -133,7 +133,7 @@ describe('Bulk Operations', () => {
     it('should create records with relationships', async () => {
       // First create a country
       const countryResult = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
+        document: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
         format: 'jsonapi'
       })
 
@@ -149,7 +149,7 @@ describe('Bulk Operations', () => {
       ]
 
       const result = await api.resources.publishers.bulkPost({
-        inputRecords: records
+        document: { data: records.map(record => record.data) }
       })
 
       assert.equal(result.data.length, 2)
@@ -165,7 +165,7 @@ describe('Bulk Operations', () => {
 
       try {
         await api.resources.authors.bulkPost({
-          inputRecords: tooManyRecords
+          document: { data: tooManyRecords.map(record => record.data) }
         })
         assert.fail('Should have thrown error')
       } catch (error) {
@@ -181,7 +181,7 @@ describe('Bulk Operations', () => {
 
       // Override default atomic mode
       const result = await api.resources.authors.bulkPost({
-        inputRecords: records,
+        document: { data: records.map(record => record.data) },
         atomic: false // Override to non-atomic
       })
 
@@ -202,15 +202,15 @@ describe('Bulk Operations', () => {
       // Create test data via API
       const authors = await Promise.all([
         api.resources.authors.post({
-          inputRecord: createJsonApiDocument('authors', { name: 'Author One' }),
+          document: createJsonApiDocument('authors', { name: 'Author One' }),
           format: 'jsonapi'
         }),
         api.resources.authors.post({
-          inputRecord: createJsonApiDocument('authors', { name: 'Author Two' }),
+          document: createJsonApiDocument('authors', { name: 'Author Two' }),
           format: 'jsonapi'
         }),
         api.resources.authors.post({
-          inputRecord: createJsonApiDocument('authors', { name: 'Author Three' }),
+          document: createJsonApiDocument('authors', { name: 'Author Three' }),
           format: 'jsonapi'
         })
       ])
@@ -222,18 +222,22 @@ describe('Bulk Operations', () => {
       const operations = [
         {
           id: testData.authorIds[0],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[0],
-            attributes: { name: 'Updated Author One' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[0],
+              attributes: { name: 'Updated Author One' }
+            }
           }
         },
         {
           id: testData.authorIds[1],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[1],
-            attributes: { name: 'Updated Author Two' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[1],
+              attributes: { name: 'Updated Author Two' }
+            }
           }
         }
       ]
@@ -263,26 +267,32 @@ describe('Bulk Operations', () => {
       const operations = [
         {
           id: testData.authorIds[0],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[0],
-            attributes: { name: 'Updated' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[0],
+              attributes: { name: 'Updated' }
+            }
           }
         },
         {
           id: '999999', // Non-existent
-          data: {
-            type: 'authors',
-            id: '999999',
-            attributes: { name: 'Should Fail' }
+          document: {
+            data: {
+              type: 'authors',
+              id: '999999',
+              attributes: { name: 'Should Fail' }
+            }
           }
         },
         {
           id: testData.authorIds[2],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[2],
-            attributes: { name: 'Also Updated' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[2],
+              attributes: { name: 'Also Updated' }
+            }
           }
         }
       ]
@@ -301,13 +311,15 @@ describe('Bulk Operations', () => {
     it('should validate operation structure', async () => {
       const invalidOperations = [
         { id: testData.authorIds[0] }, // Missing data
-        { data: { type: 'authors', attributes: { name: 'Test' } } }, // Missing id
+        { document: { data: { type: 'authors', attributes: { name: 'Test' } } } }, // Missing id
         {
           id: testData.authorIds[1],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[1],
-            attributes: { name: 'Valid' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[1],
+              attributes: { name: 'Valid' }
+            }
           }
         }
       ]
@@ -319,8 +331,12 @@ describe('Bulk Operations', () => {
 
       assert.equal(result.meta.succeeded, 1)
       assert.equal(result.meta.failed, 2)
-      assert.equal(result.errors[0].error.code, 'INVALID_OPERATION')
+      assert.equal(result.errors[0].index, 0)
+      assert.equal(result.errors[0].error.code, 'REST_API_VALIDATION')
+      assert.equal(result.errors[0].error.transactionOutcome, 'none')
+      assert.equal(result.errors[1].index, 1)
       assert.equal(result.errors[1].error.code, 'INVALID_OPERATION')
+      assert.equal(result.errors[1].error.transactionOutcome, 'none')
     })
 
     it('should rollback all updates on error in atomic mode', async () => {
@@ -333,18 +349,22 @@ describe('Bulk Operations', () => {
       const operations = [
         {
           id: testData.authorIds[0],
-          data: {
-            type: 'authors',
-            id: testData.authorIds[0],
-            attributes: { name: 'Should Be Rolled Back' }
+          document: {
+            data: {
+              type: 'authors',
+              id: testData.authorIds[0],
+              attributes: { name: 'Should Be Rolled Back' }
+            }
           }
         },
         {
           id: '999999', // Will fail
-          data: {
-            type: 'authors',
-            id: '999999',
-            attributes: { name: 'Non-existent' }
+          document: {
+            data: {
+              type: 'authors',
+              id: '999999',
+              attributes: { name: 'Non-existent' }
+            }
           }
         }
       ]
@@ -380,7 +400,7 @@ describe('Bulk Operations', () => {
       const authors = await Promise.all(
         Array.from({ length: 5 }, (_, i) =>
           api.resources.authors.post({
-            inputRecord: createJsonApiDocument('authors', { name: `Author ${i + 1}` }),
+            document: createJsonApiDocument('authors', { name: `Author ${i + 1}` }),
             format: 'jsonapi'
           })
         )
@@ -477,20 +497,20 @@ describe('Bulk Operations', () => {
     it('should respect relationships when deleting', async () => {
       // Create country and publishers with relationship
       const country = await api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
+        document: createJsonApiDocument('countries', { name: 'Test Country', code: 'TC' }),
         format: 'jsonapi'
       })
 
       const publishers = await Promise.all([
         api.resources.publishers.post({
-          inputRecord: createJsonApiDocument('publishers',
+          document: createJsonApiDocument('publishers',
             { name: 'Publisher 1' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
           ),
           format: 'jsonapi'
         }),
         api.resources.publishers.post({
-          inputRecord: createJsonApiDocument('publishers',
+          document: createJsonApiDocument('publishers',
             { name: 'Publisher 2' },
             { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
           ),
@@ -500,7 +520,7 @@ describe('Bulk Operations', () => {
 
       // Create books referencing publishers
       await api.resources.books.post({
-        inputRecord: createJsonApiDocument('books',
+        document: createJsonApiDocument('books',
           { title: 'Test Book' },
           {
             country: createRelationship(resourceIdentifier('countries', country.data.id)),
@@ -537,7 +557,7 @@ describe('Bulk Operations', () => {
       )
 
       const result = await api.resources.authors.bulkPost({
-        inputRecords: records,
+        document: { data: records.map(record => record.data) },
         atomic: true
       })
 
@@ -568,7 +588,7 @@ describe('Bulk Operations', () => {
       )
 
       const createResult = await api.resources.authors.bulkPost({
-        inputRecords: authorRecords
+        document: { data: authorRecords.map(record => record.data) }
       })
 
       const authorIds = createResult.data.map(a => a.id)
@@ -577,18 +597,22 @@ describe('Bulk Operations', () => {
       const updateOperations = [
         {
           id: authorIds[0],
-          data: {
-            type: 'authors',
-            id: authorIds[0],
-            attributes: { name: 'Senior Author 1' }
+          document: {
+            data: {
+              type: 'authors',
+              id: authorIds[0],
+              attributes: { name: 'Senior Author 1' }
+            }
           }
         },
         {
           id: authorIds[2],
-          data: {
-            type: 'authors',
-            id: authorIds[2],
-            attributes: { name: 'Senior Author 3' }
+          document: {
+            data: {
+              type: 'authors',
+              id: authorIds[2],
+              attributes: { name: 'Senior Author 3' }
+            }
           }
         }
       ]
@@ -618,10 +642,12 @@ describe('Bulk Operations', () => {
     it('should maintain data integrity with relationships', async () => {
       // Create countries
       const countryResult = await api.resources.countries.bulkPost({
-        inputRecords: [
-          createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
-          createJsonApiDocument('countries', { name: 'UK', code: 'GB' })
-        ]
+        document: {
+          data: [
+            createJsonApiDocument('countries', { name: 'USA', code: 'US' }).data,
+            createJsonApiDocument('countries', { name: 'UK', code: 'GB' }).data
+          ]
+        }
       })
 
       const countryIds = countryResult.data.map(c => c.id)
@@ -639,7 +665,7 @@ describe('Bulk Operations', () => {
       ]
 
       const publisherResult = await api.resources.publishers.bulkPost({
-        inputRecords: publisherRecords
+        document: { data: publisherRecords.map(record => record.data) }
       })
 
       assert.equal(publisherResult.data.length, 2)

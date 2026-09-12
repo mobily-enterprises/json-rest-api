@@ -77,7 +77,7 @@ for (const connector of ['express', 'fastify']) {
                     id: child.id,
                     transaction: context.transaction,
                     format: 'plain',
-                    inputRecord: { name: 'Provisional child' }
+                    data: { name: 'Provisional child' }
                   })
                 }
               }
@@ -139,7 +139,7 @@ for (const connector of ['express', 'fastify']) {
         path: '/api/unchecked-items/:id',
         routeMeta: { kind: 'resource', scopeName: 'items', operation: 'patch' },
         handler: async ({ params, body, transaction, context }) => fixture.api.resources.items.patch({
-          id: params.id, inputRecord: body, transaction, format: 'jsonapi', returning: 'full'
+          id: params.id, document: body, transaction, format: 'jsonapi', returning: 'full'
         }, context)
       })
     })
@@ -240,7 +240,7 @@ for (const connector of ['express', 'fastify']) {
       const current = await send('GET', url)
       assert.equal(current.status, 200)
       assert.equal(JSON.parse(current.text).data.attributes.childrenSummary, 'Child')
-      await fixture.api.resources.items.patch({ id: child.id, format: 'plain', inputRecord: { name: 'Changed child' } })
+      await fixture.api.resources.items.patch({ id: child.id, format: 'plain', data: { name: 'Changed child' } })
       const body = { data: { type: 'items', id: parent.id, attributes: { name: 'Updated parent' } } }
       const stale = await send('PATCH', url, body, { 'if-match': current.headers.etag })
       assert.equal(stale.status, 412)
@@ -282,7 +282,7 @@ for (const connector of ['express', 'fastify']) {
     it('changes the tag when included child attributes change', async () => {
       const url = `/api/items/${parent.id}?include=children`
       const first = await send('GET', url)
-      await fixture.api.resources.items.patch({ id: child.id, format: 'plain', inputRecord: { name: 'Changed child' } })
+      await fixture.api.resources.items.patch({ id: child.id, format: 'plain', data: { name: 'Changed child' } })
       const second = await send('GET', url)
       assert.equal(first.status, 200)
       assert.equal(second.status, 200)
@@ -448,7 +448,7 @@ for (const connector of ['express', 'fastify']) {
       it(`rejects stale included data on strong ${method}`, async () => {
         const url = `/api/items/${parent.id}?include=children`
         const current = await send('GET', url)
-        await fixture.api.resources.items.patch({ id: child.id, format: 'plain', inputRecord: { name: 'Changed dependency' } })
+        await fixture.api.resources.items.patch({ id: child.id, format: 'plain', data: { name: 'Changed dependency' } })
         const body = method === 'DELETE' ? undefined : { data: { type: 'items', id: parent.id, attributes: { name: 'Rejected' } } }
         const result = await send(method, url, body, { 'if-match': current.headers.etag })
         assert.equal(result.status, 412)

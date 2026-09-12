@@ -51,7 +51,7 @@ describe('AnyAPI Knex Plugin - Basic Attributes', () => {
 
   it('creates and retrieves records', async () => {
     const result = await api.resources.countries.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'countries',
           attributes: {

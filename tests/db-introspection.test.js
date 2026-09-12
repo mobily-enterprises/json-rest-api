@@ -2,7 +2,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import knexLib from 'knex'
 
-import { introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
+import { introspectKnexColumnConstraints, introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
 import { createKnexTable } from '../plugins/core/lib/dbTablesOperations.js'
 import { createBasicApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
@@ -287,6 +287,30 @@ describe('dbIntrospection.introspectKnexTableSnapshot (sqlite)', () => {
       }
     ])
   })
+
+  for (const indexSql of [
+    'CREATE UNIQUE INDEX guarded_email ON contacts(email) WHERE parent_id IS NOT NULL',
+    'CREATE INDEX guarded_email ON contacts(lower(email))',
+    'CREATE INDEX guarded_email ON contacts(email DESC)',
+    'CREATE INDEX guarded_email ON contacts(email COLLATE NOCASE)'
+  ]) {
+    it(`rejects an unrepresentable SQLite index: ${indexSql}`, async () => {
+      await db.raw('CREATE TABLE contacts (id INTEGER PRIMARY KEY, email VARCHAR(255), parent_id INTEGER)')
+      await db.raw(indexSql)
+      await assert.rejects(introspectKnexTableSnapshot(db, { tableName: 'contacts' }), /Index 'guarded_email'.*simple column-index snapshot/)
+      const columns = await introspectKnexColumnConstraints(db, 'contacts')
+      assert.deepEqual(columns.columns.map(column => column.name), ['id', 'email', 'parent_id'])
+    })
+  }
+
+  for (const storage of ['VIRTUAL', 'STORED']) {
+    it(`rejects a SQLite ${storage} generated column from the full snapshot`, async () => {
+      await db.raw(`CREATE TABLE contacts (id INTEGER PRIMARY KEY, email VARCHAR(255), folded_email TEXT GENERATED ALWAYS AS (lower(email)) ${storage})`)
+      await assert.rejects(introspectKnexTableSnapshot(db, { tableName: 'contacts' }), /Column 'folded_email'.*generated.*snapshot/)
+      const columns = await introspectKnexColumnConstraints(db, 'contacts')
+      assert.deepEqual(columns.columns.map(column => column.name), ['id', 'email'])
+    })
+  }
 
   it('throws for empty, invalid, missing, and unsupported introspection inputs', async () => {
     await assert.rejects(

@@ -46,7 +46,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
         it(`${method} preserves hidden records and ${atomic ? 'rolls back' : 'commits'} allowed operations`, async () => {
           const ids = [seeded.task.id, seeded.hiddenTask.id, seeded.hiddenParentTask.id]
           const params = method === 'bulkPatch'
-            ? { operations: ids.map(id => ({ id, data: inputRecord('Updated', id).data })), atomic }
+            ? { operations: ids.map(id => ({ id, document: inputRecord('Updated', id) })), atomic }
             : { ids, atomic }
           const operation = fixture.api.resources.policy_tasks[method](params, seeded.viewer)
           if (atomic) {
@@ -78,7 +78,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
       it(`bulkPost rejects hidden relationship targets (atomic=${atomic})`, async () => {
         const denied = inputRecord('Denied relationship')
         denied.data.relationships = { project: { data: { type: 'policy_projects', id: seeded.hiddenProject.id } } }
-        const operation = fixture.api.resources.policy_tasks.bulkPost({ inputRecords: [inputRecord('Allowed'), denied], atomic }, seeded.viewer)
+        const operation = fixture.api.resources.policy_tasks.bulkPost({ document: { data: [inputRecord('Allowed').data, denied.data] }, atomic }, seeded.viewer)
         if (atomic) await assert.rejects(operation, { code: 'REST_API_RESOURCE', subtype: 'not_found' })
         else {
           const result = await operation
@@ -99,10 +99,10 @@ for (const hiddenBy of ['policy', 'workspace']) {
           for (const returning of ['none', 'minimal', 'full']) {
             it(`${method} selects ${format}/${returning} without exposing hidden linkage`, async () => {
               const record = inputRecord('Written', method === 'bulkPatch' ? seeded.hiddenParentTask.id : undefined)
-              const data = format === 'jsonapi' ? record.data : record.data.attributes
+              const input = format === 'plain' ? { data: record.data.attributes } : { document: record }
               const params = method === 'bulkPost'
-                ? { inputRecords: [format === 'jsonapi' ? record : data] }
-                : { operations: [{ id: seeded.hiddenParentTask.id, data }] }
+                ? format === 'plain' ? { data: [record.data.attributes] } : { document: { data: [record.data] } }
+                : { operations: [{ id: seeded.hiddenParentTask.id, ...input }] }
               const result = await fixture.api.resources.policy_tasks[method]({ ...params, format, returning }, seeded.viewer)
               assert.equal(result.meta.succeeded, 1)
               if (returning === 'none') assert.equal(Object.hasOwn(result, 'data'), false)
@@ -129,9 +129,9 @@ for (const hiddenBy of ['policy', 'workspace']) {
           it(`${method} applies each write permission (atomic=${atomic})`, async () => {
             const ids = [seeded.task.id, seeded.hiddenTask.id, seeded.hiddenParentTask.id]
             const params = method === 'bulkPost'
-              ? { inputRecords: [inputRecord('Allowed'), inputRecord('Denied'), inputRecord('Allowed later')] }
+              ? { document: { data: ['Allowed', 'Denied', 'Allowed later'].map(title => inputRecord(title).data) } }
               : method === 'bulkPatch'
-                ? { operations: ids.map(id => ({ id, data: inputRecord('Updated', id).data })) }
+                ? { operations: ids.map(id => ({ id, document: inputRecord('Updated', id) })) }
                 : { ids }
             const operation = fixture.api.resources.policy_tasks[method]({ ...params, atomic }, { ...seeded.admin, denyIndex: 1 })
             if (atomic) await assert.rejects(operation, { code: 'WRITE_DENIED' })
@@ -158,7 +158,7 @@ for (const hiddenBy of ['policy', 'workspace']) {
 
       for (const atomic of [null, 'false', 0]) {
         it(`rejects non-boolean atomic=${JSON.stringify(atomic)} before executing a batch`, async () => {
-          await assert.rejects(fixture.api.resources.policy_tasks.bulkPost({ inputRecords: [inputRecord('Unwritten')], atomic }, seeded.viewer), { code: 'REST_API_VALIDATION' })
+          await assert.rejects(fixture.api.resources.policy_tasks.bulkPost({ document: { data: [inputRecord('Unwritten').data] }, atomic }, seeded.viewer), { code: 'REST_API_VALIDATION' })
           assert.equal((await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data.length, 3)
         })
       }
@@ -174,8 +174,8 @@ describe(`Bulk zero ID (${storageMode.mode})`, () => {
   beforeEach(async () => { await fixture.reset() })
   after(async () => { await fixture?.close() })
   it('accepts zero when the declared ID schema allows it', async () => {
-    await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: '0', attributes: { name: 'Zero' } } } })
-    const result = await fixture.api.resources.items.bulkPatch({ operations: [{ id: 0, data: { type: 'items', id: '0', attributes: { name: 'Updated zero' } } }] })
+    await fixture.api.resources.items.post({ document: { data: { type: 'items', id: '0', attributes: { name: 'Zero' } } } })
+    const result = await fixture.api.resources.items.bulkPatch({ operations: [{ id: 0, document: { data: { type: 'items', id: '0', attributes: { name: 'Updated zero' } } } }] })
     assert.equal(result.data[0].id, '0')
     assert.equal(result.data[0].attributes.name, 'Updated zero')
   })

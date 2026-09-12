@@ -16,7 +16,7 @@ import {
 } from './common.js'
 
 /**
- * Create a resource from params.inputRecord, normalized from the selected format.
+ * Create a resource from plain data or a JSON:API document.
  * Supplied IDs and existing-resource linkage are validated before writing.
  * Prepare the selected returning result before completing an owned transaction.
  */

@@ -53,7 +53,7 @@ describe('Relationship Operations', () => {
       })
 
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -68,7 +68,7 @@ describe('Relationship Operations', () => {
       )
 
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
@@ -100,12 +100,12 @@ describe('Relationship Operations', () => {
       const ukDoc = createJsonApiDocument('countries', { name: 'United Kingdom', code: 'UK' })
 
       const usResult = await basicApi.resources.countries.post({
-        inputRecord: usDoc,
+        document: usDoc,
         format: 'jsonapi'
       })
 
       const ukResult = await basicApi.resources.countries.post({
-        inputRecord: ukDoc,
+        document: ukDoc,
         format: 'jsonapi'
       })
 
@@ -116,7 +116,7 @@ describe('Relationship Operations', () => {
       )
 
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
@@ -133,7 +133,7 @@ describe('Relationship Operations', () => {
 
       await basicApi.resources.publishers.patch({
         id: publisherResult.data.id,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -153,7 +153,7 @@ describe('Relationship Operations', () => {
       // Create country and publisher
       const countryDoc = createJsonApiDocument('countries', { name: 'France', code: 'FR' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -163,7 +163,7 @@ describe('Relationship Operations', () => {
       )
 
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
@@ -180,7 +180,7 @@ describe('Relationship Operations', () => {
 
       await basicApi.resources.publishers.patch({
         id: publisherResult.data.id,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -206,7 +206,7 @@ describe('Relationship Operations', () => {
       // Create country for book
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -215,12 +215,12 @@ describe('Relationship Operations', () => {
       const author2Doc = createJsonApiDocument('authors', { name: 'Peter Straub' })
 
       const author1Result = await basicApi.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
 
       const author2Result = await basicApi.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
 
@@ -239,7 +239,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -273,7 +273,7 @@ describe('Relationship Operations', () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -282,7 +282,7 @@ describe('Relationship Operations', () => {
       for (const name of ['Author 1', 'Author 2', 'Author 3', 'Author 4']) {
         const doc = createJsonApiDocument('authors', { name })
         const result = await basicApi.resources.authors.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         authors.push(result.data)
@@ -303,7 +303,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -330,7 +330,7 @@ describe('Relationship Operations', () => {
       }
       await basicApi.resources.books.put({
         id: bookResult.data.id,
-        inputRecord: putDoc,
+        document: putDoc,
         format: 'jsonapi',
         returning: 'none'
       })
@@ -354,7 +354,7 @@ describe('Relationship Operations', () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -363,7 +363,7 @@ describe('Relationship Operations', () => {
       for (const name of ['Author A', 'Author B', 'Author C', 'Author D']) {
         const doc = createJsonApiDocument('authors', { name })
         const result = await basicApi.resources.authors.post({
-          inputRecord: doc,
+          document: doc,
           format: 'jsonapi'
         })
         authors.push(result.data)
@@ -385,7 +385,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -406,7 +406,7 @@ describe('Relationship Operations', () => {
 
       await basicApi.resources.books.patch({
         id: bookResult.data.id,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -430,7 +430,7 @@ describe('Relationship Operations', () => {
       // Create country
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -439,12 +439,12 @@ describe('Relationship Operations', () => {
       const author2Doc = createJsonApiDocument('authors', { name: 'Author Two' })
 
       const author1Result = await basicApi.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
 
       const author2Result = await basicApi.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
 
@@ -463,7 +463,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -484,7 +484,7 @@ describe('Relationship Operations', () => {
 
       await basicApi.resources.books.patch({
         id: bookResult.data.id,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -515,7 +515,7 @@ describe('Relationship Operations', () => {
       // Create supporting resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -524,18 +524,18 @@ describe('Relationship Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
       const author1Doc = createJsonApiDocument('authors', { name: 'Main Author' })
       const author2Doc = createJsonApiDocument('authors', { name: 'Co-Author' })
       const author1Result = await basicApi.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
       const author2Result = await basicApi.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
 
@@ -555,7 +555,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -591,7 +591,7 @@ describe('Relationship Operations', () => {
       // Create resources
       const countryDoc = createJsonApiDocument('countries', { name: 'USA', code: 'US' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
 
@@ -600,13 +600,13 @@ describe('Relationship Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
       const authorDoc = createJsonApiDocument('authors', { name: 'Original Author' })
       const authorResult = await basicApi.resources.authors.post({
-        inputRecord: authorDoc,
+        document: authorDoc,
         format: 'jsonapi'
       })
 
@@ -623,7 +623,7 @@ describe('Relationship Operations', () => {
       )
 
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
 
@@ -633,7 +633,7 @@ describe('Relationship Operations', () => {
         { country: createRelationship(resourceIdentifier('countries', countryResult.data.id)) }
       )
       const newPublisherResult = await basicApi.resources.publishers.post({
-        inputRecord: newPublisherDoc,
+        document: newPublisherDoc,
         format: 'jsonapi'
       })
 
@@ -656,7 +656,7 @@ describe('Relationship Operations', () => {
 
       await basicApi.resources.books.put({
         id: bookResult.data.id,
-        inputRecord: putDoc,
+        document: putDoc,
         format: 'jsonapi',
         returning: 'none'
       })

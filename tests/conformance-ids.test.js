@@ -15,14 +15,14 @@ describe(`Generated mapped ID conformance (${storageMode.mode})`, () => {
   for (const format of ['jsonapi', 'plain']) {
     for (const returning of ['none', 'minimal', 'full']) {
       it(`returns generated IDs and preserves their relationships (${format}, ${returning})`, async () => {
-        const group = await fixture.api.resources.groups.post({ inputRecord: createJsonApiDocument('groups', { name: 'Parent' }) })
+        const group = await fixture.api.resources.groups.post({ document: createJsonApiDocument('groups', { name: 'Parent' }) })
         const createdIds = []
         for (const name of ['First', 'Second']) {
           const attributes = { name, active: false, rank: 0 }
           const result = await fixture.api.resources.items.post({
             format,
             returning,
-            inputRecord: format === 'plain' ? { ...attributes, group: group.data.id } : createJsonApiDocument('items', attributes, { group: { data: { type: 'groups', id: group.data.id } } })
+            [format === 'plain' ? 'data' : 'document']: format === 'plain' ? { ...attributes, group: group.data.id } : createJsonApiDocument('items', attributes, { group: { data: { type: 'groups', id: group.data.id } } })
           })
           const found = await fixture.api.resources.items.query({ queryParams: { filters: { name } } })
           assert.equal(found.data.length, 1)
@@ -59,7 +59,7 @@ for (const idType of ['integer', 'string']) {
       ? { id, ...attributes }
       : { data: { type: 'items', id, attributes } }
     const seedZero = async () => {
-      await items.post({ format: 'jsonapi', inputRecord: body('jsonapi', 0, { name: 'Zero' }) })
+      await items.post({ format: 'jsonapi', document: body('jsonapi', 0, { name: 'Zero' }) })
     }
     before(async () => {
       fixture = await createConformanceFixture({
@@ -118,12 +118,12 @@ for (const idType of ['integer', 'string']) {
       for (const id of ['Case-sensitive', '0007', '9007199254740993', 'part/one?x#% β', '__proto__', 'constructor']) {
         it(`preserves opaque ID ${JSON.stringify(id)} across CRUD and relationships`, async () => {
           await fixture.api.resources.groups.post({
-            format: 'plain', inputRecord: { id, name: 'Opaque group' }
+            format: 'plain', data: { id, name: 'Opaque group' }
           })
           for (const format of ['plain', 'jsonapi']) {
-            const created = await items.post({ format, inputRecord: body(format, id, { name: 'Opaque' }) })
+            const created = await items.post({ format, [format === 'plain' ? 'data' : 'document']: body(format, id, { name: 'Opaque' }) })
             assert.equal(format === 'plain' ? created.id : created.data.id, id)
-            await items.patch({ id, format: 'plain', inputRecord: { group: id, groups: [id], subject: { _type: 'groups', id } } })
+            await items.patch({ id, format: 'plain', data: { group: id, groups: [id], subject: { _type: 'groups', id } } })
             const fetched = await items.get({ id: ` ${id} `, format: 'jsonapi', queryParams: { include: ['group', 'groups', 'subject'] } })
             assert.equal(fetched.data.id, id)
             assert.equal(fetched.data.relationships.group.data.id, id)
@@ -135,7 +135,7 @@ for (const idType of ['integer', 'string']) {
             assert.deepEqual(parent.data.relationships.firstItem.data, { type: 'items', id })
             assert.deepEqual(parent.data.relationships.mentions.data, [{ type: 'items', id }])
             assert.ok(parent.included.some(record => record.type === 'items' && record.id === id))
-            await items.put({ id, format: 'plain', inputRecord: { name: 'Replaced', active: true, score: 0, group: id, groups: [id], subject: { _type: 'groups', id } } })
+            await items.put({ id, format: 'plain', data: { name: 'Replaced', active: true, score: 0, group: id, groups: [id], subject: { _type: 'groups', id } } })
             assert.equal((await items.get({ id, format: 'plain' })).name, 'Replaced')
             await items.delete({ id })
             assert.equal(await fixture.count('items'), 0)
@@ -146,13 +146,13 @@ for (const idType of ['integer', 'string']) {
 
     for (const format of ['jsonapi', 'plain']) {
       it(`keeps zero primary and pivot IDs in many-to-many writes and includes (${format})`, async () => {
-        await fixture.api.resources.groups.post({ format: 'plain', inputRecord: { id: 0, name: 'Zero group' } })
+        await fixture.api.resources.groups.post({ format: 'plain', data: { id: 0, name: 'Zero group' } })
         const inputRecord = format === 'plain'
           ? { id: 0, name: 'Zero item', groups: [0] }
           : {
               data: { type: 'items', id: 0, attributes: { name: 'Zero item' }, relationships: { groups: { data: [{ type: 'groups', id: 0 }] } } }
             }
-        await items.post({ format, inputRecord })
+        await items.post({ format, [format === 'plain' ? 'data' : 'document']: inputRecord })
         const fetched = await items.get({ id: 0, format: 'jsonapi', queryParams: { include: ['groups'] } })
         assert.deepEqual(fetched.data.relationships.groups.data, [{ type: 'groups', id: '0' }])
         assert.ok(fetched.included.some(record => record.type === 'groups' && record.id === '0'))
@@ -165,16 +165,16 @@ for (const idType of ['integer', 'string']) {
         assert.deepEqual((await items.getRelated({ id: 0, relationshipName: 'groups', format: 'plain' })).data, [])
       })
       it(`preserves zero IDs in hasOne and polymorphic relationships (${format})`, async () => {
-        await fixture.api.resources.groups.post({ format: 'plain', inputRecord: { id: 0, name: 'Zero group' } })
+        await fixture.api.resources.groups.post({ format: 'plain', data: { id: 0, name: 'Zero group' } })
         await seedZero()
         const inputRecord = format === 'plain'
           ? { firstItem: 0 }
           : { data: { type: 'groups', relationships: { firstItem: { data: { type: 'items', id: 0 } } } } }
-        await fixture.api.resources.groups.patch({ id: 0, format, inputRecord })
+        await fixture.api.resources.groups.patch({ id: 0, format, [format === 'plain' ? 'data' : 'document']: inputRecord })
         const subject = format === 'plain'
           ? { subject: { _type: 'groups', id: 0 } }
           : { data: { type: 'items', relationships: { subject: { data: { type: 'groups', id: 0 } } } } }
-        await items.patch({ id: 0, format, inputRecord: subject })
+        await items.patch({ id: 0, format, [format === 'plain' ? 'data' : 'document']: subject })
         const fetched = await items.get({ id: 0, format: 'jsonapi', queryParams: { include: ['subject.firstItem'] } })
         assert.deepEqual(fetched.data.relationships.subject.data, { type: 'groups', id: '0' })
         assert.equal((await items.getRelated({ id: 0, relationshipName: 'subject', format: 'plain' }))?.id, '0')
@@ -186,13 +186,13 @@ for (const idType of ['integer', 'string']) {
       })
       it(`rejects invalid explicit POST IDs before creating a row (${format})`, async () => {
         for (const id of [null, '', false, true, NaN, Infinity, [], {}, '   ']) {
-          await assert.rejects(items.post({ format, inputRecord: body(format, id) }), { code: 'REST_API_VALIDATION' })
+          await assert.rejects(items.post({ format, [format === 'plain' ? 'data' : 'document']: body(format, id) }), { code: 'REST_API_VALIDATION' })
           assert.equal(await fixture.count('items'), 0)
         }
       })
       for (const returning of ['none', 'minimal', 'full']) {
         it(`preserves an explicit zero POST ID (${format}, ${returning})`, async () => {
-          const result = await items.post({ format, returning, inputRecord: body(format, 0, { name: 'Zero' }) })
+          const result = await items.post({ format, returning, [format === 'plain' ? 'data' : 'document']: body(format, 0, { name: 'Zero' }) })
           if (returning === 'none') assert.equal(result, undefined)
           else assert.equal(format === 'plain' ? result.id : result.data.id, '0')
           assert.equal((await items.get({ id: 0, format: 'jsonapi' })).data.attributes.name, 'Zero')
@@ -205,7 +205,7 @@ for (const idType of ['integer', 'string']) {
           await seedZero()
           const other = await fixture.seed('items', { name: 'Other' })
           await assert.rejects(items[method]({
-            id: other.id, format, inputRecord: body(format, 0, { name: 'Wrong', active: true, score: 0 })
+            id: other.id, format, [format === 'plain' ? 'data' : 'document']: body(format, 0, { name: 'Wrong', active: true, score: 0 })
           }), error => {
             assert.equal(error.code, 'REST_API_VALIDATION')
             assert.equal(error.details.violations[0].rule, 'id_consistency')
@@ -220,7 +220,7 @@ for (const idType of ['integer', 'string']) {
           await seedZero()
           for (const params of [{ id: '0' }, {}]) {
             const result = await items[method]({
-              ...params, format, inputRecord: body(format, 0, { name: 'Changed', active: true, score: 0 })
+              ...params, format, [format === 'plain' ? 'data' : 'document']: body(format, 0, { name: 'Changed', active: true, score: 0 })
             })
             assert.equal(format === 'plain' ? result.id : result.data.id, '0')
           }
@@ -232,7 +232,7 @@ for (const idType of ['integer', 'string']) {
           const other = await fixture.seed('items', { name: 'Other' })
           for (const id of [null, '', false, NaN, Infinity, [], {}, '   ']) {
             await assert.rejects(items[method]({
-              id: other.id, format, inputRecord: body(format, id, { name: 'Wrong', active: true, score: 0 })
+              id: other.id, format, [format === 'plain' ? 'data' : 'document']: body(format, id, { name: 'Wrong', active: true, score: 0 })
             }), { code: 'REST_API_VALIDATION' })
             assert.equal((await items.get({ id: other.id, format: 'jsonapi' })).data.attributes.name, 'Other')
           }
@@ -241,7 +241,7 @@ for (const idType of ['integer', 'string']) {
 
       it(`keeps a zero belongsTo ID in writes, linkage and includes (${format})`, async () => {
         await fixture.api.resources.groups.post({
-          format: 'jsonapi', inputRecord: { data: { type: 'groups', id: 0, attributes: { name: 'Zero group' } } }
+          format: 'jsonapi', document: { data: { type: 'groups', id: 0, attributes: { name: 'Zero group' } } }
         })
         const inputRecord = format === 'plain'
           ? { id: 9, name: 'Child', group: 0 }
@@ -249,7 +249,7 @@ for (const idType of ['integer', 'string']) {
             group: { data: { type: 'groups', id: 0 } }
           })
         if (format === 'jsonapi') inputRecord.data.id = 9
-        const result = await items.post({ format, inputRecord })
+        const result = await items.post({ format, [format === 'plain' ? 'data' : 'document']: inputRecord })
         const id = format === 'plain' ? result.id : result.data.id
         const fetched = await items.get({ id, format: 'jsonapi', queryParams: { include: ['group'] } })
         assert.deepEqual(fetched.data.relationships.group.data, { type: 'groups', id: '0' })
@@ -260,11 +260,11 @@ for (const idType of ['integer', 'string']) {
 
     it('keeps zero parent and child IDs in reverse linkage, related queries and includes', async () => {
       await fixture.api.resources.groups.post({
-        format: 'jsonapi', inputRecord: { data: { type: 'groups', id: 0, attributes: { name: 'Zero group' } } }
+        format: 'jsonapi', document: { data: { type: 'groups', id: 0, attributes: { name: 'Zero group' } } }
       })
       await items.post({
         format: 'jsonapi',
-        inputRecord: {
+        document: {
           data: { type: 'items', id: 0, attributes: { name: 'Zero child' }, relationships: { group: { data: { type: 'groups', id: 0 } } } }
         }
       })

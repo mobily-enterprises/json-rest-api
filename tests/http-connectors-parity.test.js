@@ -18,6 +18,7 @@ for (const connector of ['express', 'fastify']) {
       let api
       let app
       let knex
+      let lastWriteMetadata
       const publicBaseUrl = returning === 'minimal' ? 'https://public.example/api/' : ''
       const prefix = publicBaseUrl ? publicBaseUrl.slice(0, -1) : '/api'
       const send = async (method, url, body, headers = {}) => {
@@ -32,7 +33,7 @@ for (const connector of ['express', 'fastify']) {
         return { status: response.status, headers: response.headers, body: response.text ? response.body : undefined }
       }
       const seed = async (type, attributes, relationships) => (await api.resources[type].post({
-        inputRecord: createJsonApiDocument(type, attributes, relationships), format: 'jsonapi', returning: 'full'
+        document: createJsonApiDocument(type, attributes, relationships), format: 'jsonapi', returning: 'full'
       })).data
       const assertDocument = (response, status = 200) => {
         assert.equal(response.status, status, JSON.stringify(response.body))
@@ -57,6 +58,19 @@ for (const connector of ['express', 'fastify']) {
           app.post('/host-parser', express.json(), (req, res) => res.json({ hostParsed: req.body }))
         }
         api = await createConnectorParityApi(knex, { app, connector, returning, publicBaseUrl })
+        await api.customize({
+          hooks: {
+            beforeDataCall: {
+              functionName: 'capture-write-document-metadata',
+              handler: ({ context }) => {
+                if (context.inputRecord) {
+                  const { meta, links, jsonapi } = context.inputRecord
+                  lastWriteMetadata = { meta, links, jsonapi }
+                }
+              }
+            }
+          }
+        })
         if (connector === 'express') app.use((req, res) => res.status(404).json({ host: 'missing' }))
         assert.equal(api.anyapi ? 'anyapi' : 'knex', storageMode.mode)
         if (connector === 'fastify') {
@@ -72,7 +86,7 @@ for (const connector of ['express', 'fastify']) {
       })
 
       it('selects full JSON:API HTTP responses independently from programmatic defaults', async () => {
-        const direct = await api.resources.countries.post({ inputRecord: { name: 'Direct' } })
+        const direct = await api.resources.countries.post({ data: { name: 'Direct' } })
         if (returning === 'none') assert.equal(direct, undefined)
         else if (returning === 'minimal') assert.deepEqual(Object.keys(direct).sort(), ['id', 'type'])
         else assert.equal(direct.name, 'Direct')
@@ -108,6 +122,41 @@ for (const connector of ['express', 'fastify']) {
           assert.equal(response.body.data.attributes.name, name)
         }
         assert.equal((await api.resources.countries.query()).data.length, 1)
+      })
+
+      it('retains document metadata for write hooks without treating it as stored fields', async () => {
+        const metadata = { meta: { reason: 'Catalog correction' }, links: { self: '/source/country' }, jsonapi: { version: '1.1' } }
+        const document = { ...createJsonApiDocument('countries', { name: 'Original' }), ...metadata }
+        const created = await send('POST', '/api/countries', document)
+        assertDocument(created, 201)
+        assert.deepEqual(lastWriteMetadata, metadata)
+        const id = created.body.data.id
+        for (const method of ['PATCH', 'PUT']) {
+          const body = { ...createJsonApiDocument('countries', { name: method, active: true }), ...metadata }
+          body.data.id = id
+          const updated = await send(method, `/api/countries/${id}`, body)
+          assertDocument(updated)
+          assert.deepEqual(lastWriteMetadata, metadata)
+          assert.equal(updated.body.data.attributes.name, method)
+          assert.equal(updated.body.data.attributes.meta, undefined)
+          assert.equal(updated.body.data.attributes.links, undefined)
+          assert.equal(updated.body.data.attributes.jsonapi, undefined)
+        }
+      })
+
+      it('accepts only JSON:API write documents over HTTP and rejects unsupported document members', async () => {
+        const document = createJsonApiDocument('countries', { name: 'Rejected' })
+        for (const body of [
+          { name: 'Plain application data' },
+          { document },
+          { ...document, included: [] },
+          { ...document, errors: [] }
+        ]) {
+          const response = await send('POST', '/api/countries', body)
+          assert.equal(response.status, 422, JSON.stringify(response.body))
+          assert.ok(response.body.errors.length)
+        }
+        assert.deepEqual((await api.resources.countries.query()).data, [])
       })
 
       it('accepts bodyless resource deletion with either supported JSON content type', async () => {
@@ -170,7 +219,7 @@ for (const connector of ['express', 'fastify']) {
       for (const contentType of [jsonapi, 'application/json']) {
         it(`preserves accepted scalar coercion and nulls from the resource contract (${contentType})`, async () => {
           const body = createJsonApiDocument('countries', { name: 'Coerced', active: 'false', rank: '0' })
-          const direct = (await api.resources.countries.post({ inputRecord: structuredClone(body), format: 'jsonapi', returning: 'full' })).data
+          const direct = (await api.resources.countries.post({ document: structuredClone(body), format: 'jsonapi', returning: 'full' })).data
           const created = await send('POST', '/api/countries', body, { 'content-type': contentType })
           assertDocument(created, 201)
           assert.deepEqual(created.body.data.attributes, direct.attributes)
@@ -192,7 +241,7 @@ for (const connector of ['express', 'fastify']) {
             createJsonApiDocument('countries', { name: 'Valid', unknown: 'reject me' })
           ]) {
             let expected
-            try { await api.resources.countries.post({ inputRecord: typeof body === 'string' ? JSON.parse(body) : structuredClone(body), format: 'jsonapi' }) } catch (error) { expected = error }
+            try { await api.resources.countries.post({ document: typeof body === 'string' ? JSON.parse(body) : structuredClone(body), format: 'jsonapi' }) } catch (error) { expected = error }
             assert.equal(expected?.code, 'REST_API_VALIDATION')
             const response = await send('POST', '/api/countries', body, { 'content-type': contentType })
             assert.equal(response.status, 422, JSON.stringify(response.body))

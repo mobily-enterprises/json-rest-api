@@ -455,7 +455,10 @@ function buildWriteDocumentContract (scopeName, schemaInfo, mode) {
   }
 
   const schema = createSchema({
-    data: dataFieldDefinition
+    data: dataFieldDefinition,
+    meta: { type: 'object', additionalProperties: true },
+    links: { type: 'object', additionalProperties: true },
+    jsonapi: { type: 'object', additionalProperties: true }
   })
 
   return {
@@ -603,7 +606,7 @@ export function validateRequestContractOrThrow (contract, payload, message = 'Re
   }
 
   if (!isPlainObject(payload)) {
-    throw new RestApiValidationError('inputRecord must be a record object', { fields: ['inputRecord'] })
+    throw new RestApiValidationError('document must be an object', { fields: ['document'] })
   }
 
   const { validatedObject, errors } = schema[mode](payload)
@@ -623,6 +626,27 @@ export function validateRequestContractOrThrow (contract, payload, message = 'Re
     fields: violations.map((entry) => entry.field),
     violations
   })
+}
+
+/** Select input by argument name, independently of the response format. */
+export function selectWriteInput (params) {
+  const hasData = Object.hasOwn(params, 'data')
+  const hasDocument = Object.hasOwn(params, 'document')
+  if (hasData === hasDocument) {
+    throw new RestApiValidationError('Supply exactly one of data or document', { fields: ['data', 'document'] })
+  }
+  if (hasDocument) {
+    if (!isPlainObject(params.document)) {
+      throw new RestApiValidationError('document must be an object', { fields: ['document'] })
+    }
+    const unsupported = ['errors', 'included'].filter(key => Object.hasOwn(params.document, key))
+    if (unsupported.length) {
+      throw new RestApiValidationError('Write documents do not support errors or included resources', {
+        fields: unsupported.map(key => `document.${key}`)
+      })
+    }
+  }
+  return hasDocument ? 'document' : 'data'
 }
 
 /** Validate PUT/PATCH identity and body, then store the normalized document and ID on context. */

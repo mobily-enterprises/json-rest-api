@@ -10,6 +10,7 @@ import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import {
   getRequestContracts,
+  selectWriteInput,
   validateRequestContractOrThrow
 } from '../lib/querying-writing/request-contracts.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
@@ -59,9 +60,10 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
   context.simplified = context.format === 'plain'
   context.returning = resolveReturning(params.returning, vars.returning)
   context.params = params
-  context.inputRecord = params.inputRecord
+  const inputKey = selectWriteInput(params)
+  context.inputRecord = params[inputKey]
   if (!context.inputRecord || typeof context.inputRecord !== 'object' || Array.isArray(context.inputRecord)) {
-    throw new RestApiValidationError('inputRecord must be a record object', { fields: ['inputRecord'] })
+    throw new RestApiValidationError(`${inputKey} must be a record object`, { fields: [inputKey] })
   }
 
   // These only make sense as parameter per query, not in vars etc.
@@ -80,8 +82,8 @@ export async function setupCommonRequest ({ params, context, vars, scopes, scope
   const schemaStructure = context.schemaInfo.schemaInstance.structure
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
-  // Transform input if in simplified mode
-  if (context.simplified) {
+  // Both input forms enter the same validation and hook pipeline.
+  if (inputKey === 'data') {
     context.inputRecord = transformSimplifiedToJsonApi(
       { inputRecord: context.inputRecord },
       { context: { scopeName, schemaStructure, schemaRelationships } }

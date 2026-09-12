@@ -85,16 +85,16 @@ completion-hook behavior and migration examples.
 
 ## Files, notifications and known gaps
 
-`LocalStorage` writes real files. The exported `S3Storage` is a mock/demo URL
-generator and does not upload bytes to Amazon S3. A real S3 adapter is not
-provided by the library. File cleanup is best effort; failures remain in
+`LocalStorage` writes real files. Remote storage uses application-provided
+adapters implementing `upload` and `delete`. File cleanup is best effort; failures remain in
 diagnostic context for reconciliation. See [file storage and cleanup](26-file-uploads.md).
 
 Socket.IO has real WebSocket/polling and Redis integration checks. These are
 resource invalidations, not a durable event log or exactly-once delivery system;
 see the [Socket.IO contract](28-socketio.md).
 
-[Positioning](31-positioning.md) is experimental: native positioning concurrency
-has a known failure, and canonical native concurrency is unverified. Do not rely
-on concurrent reordering guarantees. Passing the CRUD or transport suites does
-not establish positioning correctness.
+[Positioning](31-positioning.md) uses transaction-owned coordinator rows and has
+separate-connection insertion/move/rollback coverage on PostgreSQL and MySQL in
+both storage modes. Writes to one positioned resource are serialized. SQLite
+busy conflicts and stale PostgreSQL snapshots can still require an application
+retry; column collation and offline imports remain application responsibilities.

@@ -67,7 +67,7 @@ portable physical SQL column name.
 
 For a definition such as `country_id: { type: 'id', belongsTo: 'countries',
 as: 'country' }`, callers write the relationship through
-`inputRecord: { country: countryId }`. Plain output contains a `country` object
+`data: { country: countryId }`. Plain output contains a `country` object
 with its ID; an unassigned to-one relationship is omitted from plain output.
 Including the country adds its selected attributes.
 JSON:API output represents linkage under `data.relationships.country` and

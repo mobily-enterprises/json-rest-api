@@ -71,7 +71,7 @@ describe('Post-commit hook failure semantics', () => {
 
     await assert.rejects(
       api.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', {
+        document: createJsonApiDocument('countries', {
           name: 'Committed Country',
           code: 'CC'
         }),
@@ -86,11 +86,11 @@ describe('Post-commit hook failure semantics', () => {
 
   it('surfaces afterCommit errors without rolling back committed relationship writes', async () => {
     const country = await api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
+      document: createJsonApiDocument('countries', { name: 'USA', code: 'US' }),
       format: 'jsonapi'
     })
     const book = await api.resources.books.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'books',
         { title: 'Committed Book' },
         { country: createRelationship(resourceIdentifier('countries', country.data.id)) }
@@ -98,7 +98,7 @@ describe('Post-commit hook failure semantics', () => {
       format: 'jsonapi'
     })
     const author = await api.resources.authors.post({
-      inputRecord: createJsonApiDocument('authors', { name: 'Committed Author' }),
+      document: createJsonApiDocument('authors', { name: 'Committed Author' }),
       format: 'jsonapi'
     })
 

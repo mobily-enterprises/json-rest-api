@@ -112,12 +112,12 @@ if (storageMode.mode === 'anyapi') {
           id: created.id,
           expectedVersion,
           format: 'plain',
-          ...(method === 'delete' ? {} : { inputRecord: { name: 'Updated' } })
+          ...(method === 'delete' ? {} : { data: { name: 'Updated' } })
         })
         await mutate(token)
         assert.deepEqual(await foreign(), before)
         if (method === 'delete') {
-          await items.post({ inputRecord: { id: created.id, name: 'Recreated' }, format: 'plain' })
+          await items.post({ data: { id: created.id, name: 'Recreated' }, format: 'plain' })
         }
         const current = await items.get({ id: created.id, format: 'plain' })
         assert.notEqual(current.revision, token)

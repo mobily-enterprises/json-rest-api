@@ -20,7 +20,7 @@ for (const phase of ['commit', 'rollback', 'unsettled rollback']) {
       try {
         await fixture.api.transaction(async transaction => {
           connection = await transaction.client.acquireConnection()
-          await fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'Written row' } } } })
+          await fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'Written row' } } } })
           if (phase === 'unsettled rollback') t.mock.method(transaction, 'rollback', async () => { throw rollbackError })
           if (phase !== 'commit') throw primary
         }, context)
@@ -64,7 +64,7 @@ test('BEGIN failure retains its cause when connection release also fails', async
     fixture.knex.client.removeListener('query', rejectBegin)
     t.mock.restoreAll()
     assert.equal(await fixture.count('items'), 0)
-    await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', attributes: { name: 'Next request' } } } })
+    await fixture.api.resources.items.post({ document: { data: { type: 'items', attributes: { name: 'Next request' } } } })
     assert.equal(await fixture.count('items'), 1)
   } finally {
     fixture.knex.client.removeListener('query', rejectBegin)

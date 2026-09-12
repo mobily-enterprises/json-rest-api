@@ -21,9 +21,9 @@ const denied = { code: 'REST_API_RESOURCE', subtype: 'forbidden' }
 
 async function seed (fixture) {
   await fixture.reset()
-  await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id: '0', attributes: { name: 'Group' } } } })
+  await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id: '0', attributes: { name: 'Group' } } } })
   await fixture.api.resources.items.post({
-    inputRecord: {
+    document: {
       data: {
         type: 'items',
         id: '0',
@@ -129,7 +129,7 @@ describe(`Included resource query permissions (${storageMode.mode})`, () => {
   for (const returning of ['full', 'minimal', 'none']) {
     it(`enforces permissions for the selected ${returning} write response`, async () => {
       const operation = fixture.api.resources.items.patch({
-        id: '0', returning, inputRecord: { data: { type: 'items', attributes: { name: 'Changed' } } }
+        id: '0', returning, document: { data: { type: 'items', attributes: { name: 'Changed' } } }
       }, { denyQueryScope: 'groups' })
       if (returning === 'full') await assert.rejects(operation, denied)
       else await operation
@@ -200,7 +200,7 @@ for (const strategy of ['standard', 'window']) {
     })
     beforeEach(async () => {
       await seed(fixture)
-      await fixture.api.resources.groups.post({ inputRecord: { data: { type: 'groups', id: '1', attributes: { name: 'Visible membership' } } } })
+      await fixture.api.resources.groups.post({ document: { data: { type: 'groups', id: '1', attributes: { name: 'Visible membership' } } } })
       await fixture.api.resources.items.postRelationship({ id: '0', relationshipName: 'groups', relationshipData: [{ type: 'groups', id: '1' }] })
     })
     after(async () => { await fixture?.close() })

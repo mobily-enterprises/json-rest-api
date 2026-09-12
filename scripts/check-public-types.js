@@ -12,7 +12,7 @@ try {
   const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary], {
     cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024
   }))[0]
-  const expectedFiles = new Set(['package.json', 'index.js', 'index.d.ts', 'LICENSE', 'README.md', 'docs/API.md', 'docs/QUICKSTART.md', 'docs/architecture.md', 'docs/contributing.md'])
+  const expectedFiles = new Set(['package.json', 'index.js', 'index.d.ts', 'LICENSE', 'LICENSE-MIT', 'LICENSE-GPL-3.0', 'README.md', 'docs/API.md', 'docs/QUICKSTART.md', 'docs/architecture.md', 'docs/contributing.md'])
   for await (const file of glob(['lib/**/*.js', 'lib/**/*.d.ts', 'plugins/**/*.js', 'plugins/**/*.d.ts', 'types/**/*.d.ts', 'docs/GUIDE/**/*.md'], { cwd: root })) {
     expectedFiles.add(file.split(path.sep).join('/'))
   }
@@ -86,6 +86,7 @@ try {
   assert.deepEqual(rejectedLines, expectedLines, report(rejected))
   const manifest = JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8'))
   assert.equal(manifest.types, 'index.d.ts')
+  assert.equal(manifest.license, '(GPL-3.0-or-later OR MIT)')
   console.log(`Packed public types and contents passed: ${packed.files.length} files, ${packed.size} packed bytes; ${localDocLinks} local documentation links; ${declaredValues.length} runtime exports, ${rejected.length} negative checks; ${packed.shasum}`)
 } finally {
   await rm(temporary, { recursive: true, force: true })

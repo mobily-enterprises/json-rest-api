@@ -43,7 +43,7 @@ describe('Polymorphic Relationships - Basic Tests', () => {
   it('should create and retrieve a review for a book', async () => {
     // Create a country first
     const country = await api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', {
+      document: createJsonApiDocument('countries', {
         name: 'USA',
         code: 'US'
       })
@@ -51,7 +51,7 @@ describe('Polymorphic Relationships - Basic Tests', () => {
 
     // Create a book
     const book = await api.resources.books.post({
-      inputRecord: createJsonApiDocument('books', {
+      document: createJsonApiDocument('books', {
         title: 'Test Book'
       }, {
         country: createRelationship({ type: 'countries', id: country.data.id })
@@ -60,7 +60,7 @@ describe('Polymorphic Relationships - Basic Tests', () => {
 
     // Create a review for the book
     const review = await api.resources.reviews.post({
-      inputRecord: createJsonApiDocument('reviews', {
+      document: createJsonApiDocument('reviews', {
         rating: 5,
         title: 'Great book!',
         content: 'This is an excellent book about testing.',
@@ -88,14 +88,14 @@ describe('Polymorphic Relationships - Basic Tests', () => {
   it('should query all reviews', async () => {
     // Create test data
     const country = await api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', {
+      document: createJsonApiDocument('countries', {
         name: 'UK',
         code: 'GB'
       })
     })
 
     const book = await api.resources.books.post({
-      inputRecord: createJsonApiDocument('books', {
+      document: createJsonApiDocument('books', {
         title: 'Book 1'
       }, {
         country: createRelationship({ type: 'countries', id: country.data.id })
@@ -103,14 +103,14 @@ describe('Polymorphic Relationships - Basic Tests', () => {
     })
 
     const author = await api.resources.authors.post({
-      inputRecord: createJsonApiDocument('authors', {
+      document: createJsonApiDocument('authors', {
         name: 'Author 1'
       })
     })
 
     // Create reviews
     await api.resources.reviews.post({
-      inputRecord: createJsonApiDocument('reviews', {
+      document: createJsonApiDocument('reviews', {
         rating: 5,
         title: 'Great book',
         content: 'Love it',
@@ -121,7 +121,7 @@ describe('Polymorphic Relationships - Basic Tests', () => {
     })
 
     await api.resources.reviews.post({
-      inputRecord: createJsonApiDocument('reviews', {
+      document: createJsonApiDocument('reviews', {
         rating: 4,
         title: 'Good author',
         content: 'Nice writing',

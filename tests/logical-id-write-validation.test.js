@@ -52,7 +52,7 @@ describe('Logical resource ids in write validation', () => {
 
   it('accepts explicit resource ids in non-simplified POST without exposing id as an attribute', async () => {
     const created = await api.resources.profiles.post({
-      inputRecord: {
+      document: {
         data: {
           type: 'profiles',
           id: '101',
@@ -77,7 +77,7 @@ describe('Logical resource ids in write validation', () => {
   it('reports missing logical ids against data.id during POST validation', async () => {
     await assert.rejects(
       () => api.resources.profiles.post({
-        inputRecord: {
+        document: {
           data: {
             type: 'profiles',
             attributes: {
@@ -96,7 +96,7 @@ describe('Logical resource ids in write validation', () => {
   })
 
   it('accepts explicit resource ids in simplified POST and still keeps id out of attributes', async () => {
-    const created = await api.resources.profiles.post({ format: 'plain', inputRecord: { id: '202', name: 'Bob' } })
+    const created = await api.resources.profiles.post({ format: 'plain', data: { id: '202', name: 'Bob' } })
 
     assert.equal(created.id, '202')
     assert.equal(created.name, 'Bob')
@@ -120,7 +120,7 @@ describe('Logical resource ids in write validation', () => {
 
     const updated = await api.resources.profiles.put({
       id: '303',
-      inputRecord: {
+      document: {
         data: {
           type: 'profiles',
           id: '303',

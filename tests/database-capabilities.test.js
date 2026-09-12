@@ -199,7 +199,7 @@ describe(`Installed database capabilities (${storageMode.mode})`, () => {
     const generated = await fixture.seed('items', { name: 'Generated' }, undefined, { generatedId: true })
     assert.equal(typeof generated.id, 'string')
     assert.notEqual(generated.id, '')
-    const explicit = await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: '42', attributes: { name: 'Explicit' } } } })
+    const explicit = await fixture.api.resources.items.post({ document: { data: { type: 'items', id: '42', attributes: { name: 'Explicit' } } } })
     assert.equal(explicit.data.id, '42')
     assert.equal((await fixture.api.resources.items.get({ id: generated.id })).data.attributes.name, 'Generated')
     assert.deepEqual(returningWarnings, [])

@@ -41,11 +41,11 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
     const child = await fixture.seed('items', { name: 'Child' }, link(first))
     const oldFirst = await revision(first)
     const oldSecond = await revision(second)
-    await fixture.api.resources.items.patch({ id: child.id, inputRecord: { data: { type: 'items', relationships: link(second) } } })
+    await fixture.api.resources.items.patch({ id: child.id, document: { data: { type: 'items', relationships: link(second) } } })
     assert.notEqual(await revision(first), oldFirst)
     assert.notEqual(await revision(second), oldSecond)
     const current = await revision(second)
-    await fixture.api.resources.items.patch({ id: child.id, inputRecord: { name: 'Renamed' }, format: 'plain' })
+    await fixture.api.resources.items.patch({ id: child.id, data: { name: 'Renamed' }, format: 'plain' })
     assert.equal(await revision(second), current)
   })
 
@@ -67,7 +67,7 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
   it('tracks PUT-create and PUT replacement references', async () => {
     const put = group => fixture.api.resources.items.put({
       id: '91',
-      inputRecord: {
+      document: {
         data: { type: 'items', attributes: { name: 'Child', active: true, score: 0 }, relationships: { ...link(group), collections: { data: [] } } }
       }
     })
@@ -100,7 +100,7 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
       const oldSecond = await revision(second)
       await fixture.api.resources.items[method]({
         id: child?.id,
-        inputRecord: {
+        document: {
           data: {
             type: 'items',
             attributes: { name: 'Child', active: true, score: 0 },
@@ -188,11 +188,11 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
     assert.deepEqual(await members(first), [child.id])
     const created = await revision(first)
     assert.notEqual(created, first.attributes.revision)
-    await fixture.api.resources.memberships.patch({ id: pivot.id, inputRecord: { data: { type: 'memberships', relationships: { item: { data: { type: 'items', id: other.id } } } } } })
+    await fixture.api.resources.memberships.patch({ id: pivot.id, document: { data: { type: 'memberships', relationships: { item: { data: { type: 'items', id: other.id } } } } } })
     const replaced = await revision(first)
     assert.notEqual(replaced, created)
     assert.deepEqual(await members(first), [other.id])
-    await fixture.api.resources.memberships.patch({ id: pivot.id, inputRecord: { data: { type: 'memberships', relationships: { group: { data: { type: 'groups', id: second.id } } } } } })
+    await fixture.api.resources.memberships.patch({ id: pivot.id, document: { data: { type: 'memberships', relationships: { group: { data: { type: 'groups', id: second.id } } } } } })
     assert.notEqual(await revision(first), replaced)
     const moved = await revision(second)
     assert.notEqual(moved, second.attributes.revision)
@@ -231,7 +231,7 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
     assert.deepEqual(await members(), [])
     assert.notEqual(await revision(first), token)
     assert.equal(await revision(second), second.attributes.revision)
-    await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', id: child.id, attributes: { name: 'Recreated' } } } })
+    await fixture.api.resources.items.post({ document: { data: { type: 'items', id: child.id, attributes: { name: 'Recreated' } } } })
     assert.deepEqual(await members(), [])
   })
 })
@@ -265,11 +265,11 @@ describe(`Polymorphic inverse revisions (${storageMode.mode})`, () => {
     const revision = async parent => (await items.get({ id: parent.id, format: 'plain' })).revision
     const initial = await revision(first)
     assert.notEqual(initial, first.attributes.revision)
-    await items.patch({ id: child.id, inputRecord: { data: { type: 'items', relationships: subject(second) } } })
+    await items.patch({ id: child.id, document: { data: { type: 'items', relationships: subject(second) } } })
     assert.notEqual(await revision(first), initial)
     const linked = await revision(second)
     assert.notEqual(linked, second.attributes.revision)
-    await items.patch({ id: child.id, inputRecord: { data: { type: 'items', relationships: subject(null) } } })
+    await items.patch({ id: child.id, document: { data: { type: 'items', relationships: subject(null) } } })
     assert.notEqual(await revision(second), linked)
   })
 })

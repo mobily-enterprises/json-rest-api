@@ -39,7 +39,7 @@ function evolutionCase (name, run, options = {}) {
 
 for (const format of ['jsonapi', 'plain']) {
   evolutionCase(`adds defaults, transforms and filters after request contracts are cached (${format})`, async ({ items, descriptor, db }) => {
-    await items.post({ format: 'plain', inputRecord: { id: '1', name: 'Before' } })
+    await items.post({ format: 'plain', data: { id: '1', name: 'Before' } })
     await items.query()
     let defaults = 0
     await items.addKnexFields({
@@ -57,7 +57,7 @@ for (const format of ['jsonapi', 'plain']) {
     assert.equal(existing.score, null)
     assert.equal(existing.label, null)
     const inputRecord = format === 'plain' ? { name: 'After', note: ' stored ' } : createJsonApiDocument('items', { name: 'After', note: ' stored ' })
-    const result = await items.post({ format, inputRecord })
+    const result = await items.post({ format, [format === 'plain' ? 'data' : 'document']: inputRecord })
     const attributes = format === 'plain' ? result : result.data.attributes
     assert.equal(attributes.note, 'STORED')
     assert.equal(attributes.score, 0)
@@ -83,8 +83,8 @@ evolutionCase('retains added fields through repeated creation and a fresh API de
     label: { type: 'string', defaultTo: () => { defaultCalls++; return 'Restarted' } }
   }
   await items.addKnexFields({ fields, canonicalFieldsMap: { note: 'string_4', groupId: 'rel_2_id' } })
-  const group = await api.resources.groups.post({ format: 'plain', inputRecord: { id: '1', name: 'Group' } })
-  await items.post({ format: 'plain', inputRecord: { id: '1', name: 'Stored', note: 'Kept', group: group.id } })
+  const group = await api.resources.groups.post({ format: 'plain', data: { id: '1', name: 'Group' } })
+  await items.post({ format: 'plain', data: { id: '1', name: 'Stored', note: 'Kept', group: group.id } })
   const before = await snapshot()
   await items.createKnexTable()
   assert.deepEqual(await snapshot(), before)
@@ -95,7 +95,7 @@ evolutionCase('retains added fields through repeated creation and a fresh API de
   assert.equal(result.label, 'Restarted')
   assert.equal(result.group.name, 'Group')
   assert.equal(restarted.resources.items.vars.schemaInfo.descriptor.fields.note.slot, 'string_4')
-  const created = await restarted.resources.items.post({ format: 'plain', inputRecord: { name: 'New after restart' } })
+  const created = await restarted.resources.items.post({ format: 'plain', data: { name: 'New after restart' } })
   assert.equal(created.label, 'Restarted')
   assert.equal(defaultCalls, 2)
 })
@@ -181,7 +181,7 @@ evolutionCase('rejects out-of-range canonical slots without changing persisted s
 
 for (const format of ['jsonapi', 'plain']) {
   evolutionCase(`uses one published slot mapping until explicit refresh (${format})`, async ({ items, descriptor, registry, db }) => {
-    await items.post({ format: 'plain', inputRecord: { id: '1', name: 'Original' } })
+    await items.post({ format: 'plain', data: { id: '1', name: 'Original' } })
     const published = items.vars.schemaInfo
     const originalAdapter = items.vars.storageAdapter
     const config = await db('any_resource_configs').where({ tenant_id: 'field_evolution', resource: 'items' }).first()
@@ -196,7 +196,7 @@ for (const format of ['jsonapi', 'plain']) {
     }
     assert.equal(await readName(), 'Original')
     assert.equal(items.vars.schemaInfo, published)
-    await items.patch({ id: '1', format: 'plain', inputRecord: { name: 'Published' } })
+    await items.patch({ id: '1', format: 'plain', data: { name: 'Published' } })
     let row = await db('any_records').where({ tenant_id: 'field_evolution', resource: 'items', logical_id: '1' }).first()
     assert.equal(row.string_1, 'Published')
     assert.equal(row.string_4, 'Migrated')
@@ -207,7 +207,7 @@ for (const format of ['jsonapi', 'plain']) {
     assert.notEqual(items.vars.storageAdapter, originalAdapter)
     assert.equal(published.descriptor.fields.name.slot, 'string_1')
     assert.equal(await readName(), 'Migrated')
-    await items.patch({ id: '1', format: 'plain', inputRecord: { name: 'Destination' } })
+    await items.patch({ id: '1', format: 'plain', data: { name: 'Destination' } })
     row = await db('any_records').where({ tenant_id: 'field_evolution', resource: 'items', logical_id: '1' }).first()
     assert.equal(row.string_1, 'Published')
     assert.equal(row.string_4, 'Destination')
@@ -217,7 +217,7 @@ for (const format of ['jsonapi', 'plain']) {
 }
 
 evolutionCase('keeps managed registry changes separate from published resource metadata', async ({ items, descriptor, registry, api, snapshot }) => {
-  await items.post({ format: 'plain', inputRecord: { id: '1', name: 'Original' } })
+  await items.post({ format: 'plain', data: { id: '1', name: 'Original' } })
   const published = items.vars.schemaInfo
   const before = await snapshot()
   await assert.rejects(api.transaction(async transaction => {
@@ -249,8 +249,8 @@ describe(`Published descriptors across tenant APIs (${databaseClient})`, () => {
   beforeEach(async () => {
     await cleanTables(database.knex, ['any_links', 'any_records'], { storage: 'knex' })
     for (const [api, name] of [[first, 'First'], [second, 'Second']]) {
-      await api.resources.groups.post({ format: 'plain', inputRecord: { id: '1', name: `${name} group` } })
-      await api.resources.items.post({ format: 'plain', inputRecord: { id: '1', name, group: '1' } })
+      await api.resources.groups.post({ format: 'plain', data: { id: '1', name: `${name} group` } })
+      await api.resources.items.post({ format: 'plain', data: { id: '1', name, group: '1' } })
       for (const resource of ['items', 'groups']) api.anyapi.registry.invalidateDescriptor(api.anyapi.tenantId, resource)
     }
   })
@@ -270,7 +270,7 @@ describe(`Published descriptors across tenant APIs (${databaseClient})`, () => {
             assert.equal(format === 'plain' ? result.data[0].name : result.data[0].attributes.name, name)
             assert.equal(format === 'plain' ? result.data[0].group.name : result.included[0].attributes.name, `${name} group`)
           }
-          await first.resources.items.patch({ id: '1', format: 'plain', transaction, inputRecord: { name: 'Changed first' } })
+          await first.resources.items.patch({ id: '1', format: 'plain', transaction, data: { name: 'Changed first' } })
           assert.equal((await first.resources.items.get({ id: '1', format: 'plain', transaction })).name, 'Changed first')
           assert.equal((await second.resources.items.get({ id: '1', format: 'plain', transaction })).name, 'Second')
           assert.equal(transaction.isCompleted(), false)
@@ -305,7 +305,7 @@ evolutionCase('retains added computed and virtual definitions without allocating
   assert.equal(current.schema.transient.virtual, true)
   assert.equal(current.fields.computedValue, undefined)
   assert.equal(current.fields.transient, undefined)
-  const created = await items.post({ format: 'plain', inputRecord: { name: 'Stored', transient: 'temporary' } })
+  const created = await items.post({ format: 'plain', data: { name: 'Stored', transient: 'temporary' } })
   assert.equal(created.computedValue, 'Computed')
 })
 
@@ -317,7 +317,7 @@ evolutionCase('keeps a newly added storage serializer through creation and filte
   }
   await items.addKnexFields({ fields: { coded: { type: 'string', search: true, storage: { serialize }, getter: value => value?.replace(/^stored:/, '') } } })
   assert.deepEqual(calls, [])
-  const created = await items.post({ format: 'plain', inputRecord: { name: 'Value', coded: 'secret' } })
+  const created = await items.post({ format: 'plain', data: { name: 'Value', coded: 'secret' } })
   assert.equal(created.coded, 'secret')
   const current = await descriptor({ bypassCache: true })
   assert.equal((await db('any_records').where({ resource: 'items', logical_id: created.id }).first())[current.fields.coded.slot], 'stored:secret')

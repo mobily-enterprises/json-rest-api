@@ -141,7 +141,7 @@ describe(`Field callback failures (${storageMode.mode})`, () => {
         it(`${format}/${returning} does not evaluate an unused write-response ${phase}`, async () => {
           probe = { phase, scopeName: 'items', value: 'Changed', error: errors[2][1], calls: 0 }
           const inputRecord = format === 'plain' ? { name: 'Changed' } : { data: { type: 'items', id: records.items.id, attributes: { name: 'Changed' } } }
-          await fixture.api.resources.items.patch({ id: records.items.id, inputRecord, format, returning })
+          await fixture.api.resources.items.patch({ id: records.items.id, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning })
           assert.equal(probe.calls, 0)
           probe = undefined
           assert.equal((await fixture.api.resources.items.get({ id: records.items.id, format: 'plain' })).name, 'Changed')
@@ -174,7 +174,7 @@ describe(`Field callback failures (${storageMode.mode})`, () => {
             const [label, original, async] = errors[format === 'plain' ? (borrowed ? 4 : 3) : (borrowed ? 0 : 2)]
             probe = { phase, scopeName: 'items', value: 'Changed', error: original, async, calls: 0 }
             try {
-              await assert.rejects(fixture.api.resources.items[operation.method]({ id, inputRecord, format, returning: 'full', transaction }, context),
+              await assert.rejects(fixture.api.resources.items[operation.method]({ id, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning: 'full', transaction }, context),
                 error => assertFailure(error, original, phase, 'items', borrowed ? 'pending' : 'rolledBack'), label)
               assert.equal(probe.calls, 1)
               assert.equal(context.transactionCommitted, false)
@@ -185,7 +185,7 @@ describe(`Field callback failures (${storageMode.mode})`, () => {
               await unit?.rollback()
             }
             assert.deepEqual(await snapshot(fixture), beforeState)
-            await fixture.api.resources.items[operation.method]({ id, inputRecord, format, returning: 'full' })
+            await fixture.api.resources.items[operation.method]({ id, [format === 'plain' ? 'data' : 'document']: inputRecord, format, returning: 'full' })
             assert.equal((await fixture.api.resources.items.get({ id, format: 'plain' })).name, 'Changed')
           })
         }
@@ -210,7 +210,7 @@ describe(`Field callback failures (${storageMode.mode})`, () => {
               format: 'jsonapi',
               returning: 'full',
               queryParams: { include: ['groups'] },
-              inputRecord: {
+              document: {
                 data: {
                   type: 'items',
                   id,

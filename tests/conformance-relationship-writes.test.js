@@ -132,26 +132,26 @@ for (const childIdProperty of ['id', 'key']) {
 
     it('updates reverse relationships in resource POST, PATCH and PUT payloads', async () => {
       const created = (await api.resources.parents.post({
-        inputRecord: { data: { type: 'parents', attributes: { name: 'Created' }, relationships: { children: { data: [identifier(free)] } } } }
+        document: { data: { type: 'parents', attributes: { name: 'Created' }, relationships: { children: { data: [identifier(free)] } } } }
       })).data
       assert.deepEqual(await linkage(created), [identifier(free)])
       await api.resources.parents.patch({
         id: created.id,
-        inputRecord: {
+        document: {
           data: { type: 'parents', relationships: { children: { data: [identifier(foreign)] } } }
         }
       })
       assert.deepEqual(await linkage(created), [identifier(foreign)])
       await api.resources.parents.put({
         id: created.id,
-        inputRecord: {
+        document: {
           data: { type: 'parents', attributes: { name: 'Replaced' }, relationships: { children: { data: [identifier(free)] } } }
         }
       })
       assert.deepEqual(await linkage(created), [identifier(free)])
       await api.resources.parents.put({
         id: created.id,
-        inputRecord: {
+        document: {
           data: { type: 'parents', attributes: { name: 'Cleared' }, relationships: {} }
         }
       })
@@ -159,28 +159,28 @@ for (const childIdProperty of ['id', 'key']) {
     })
 
     it('keeps reverse relationships when a PUT has no relationships object', async () => {
-      await api.resources.parents.put({ id: parent.id, inputRecord: { data: { type: 'parents', attributes: { name: 'Renamed' } } } })
+      await api.resources.parents.put({ id: parent.id, document: { data: { type: 'parents', attributes: { name: 'Renamed' } } } })
       assert.deepEqual(await children(), owned.map(record => record.id).sort())
     })
 
     it('creates reverse linkage through PUT creation and plain PATCH input', async () => {
       const created = (await api.resources.parents.put({
         id: '999',
-        inputRecord: {
+        document: {
           data: { type: 'parents', attributes: { name: 'PUT created' }, relationships: { children: { data: [identifier(free)] } } }
         }
       })).data
       assert.deepEqual(await linkage(created), [identifier(free)])
-      await api.resources.parents.patch({ id: parent.id, inputRecord: { children: [free.id] }, format: 'plain' })
+      await api.resources.parents.patch({ id: parent.id, data: { children: [free.id] }, format: 'plain' })
       assert.deepEqual(await children(), [free.id])
       assert.deepEqual(await linkage(created), [])
     })
 
     it('rolls back the parent create or attribute update when a reverse child write fails', async () => {
       const document = { data: { type: 'parents', attributes: { name: 'Must roll back' }, relationships: { children: { data: [identifier(free)] } } } }
-      await assert.rejects(api.resources.parents.post({ inputRecord: document }, { denyChildId: free.id }), { code: 'REST_API_RESOURCE', subtype: 'forbidden' })
+      await assert.rejects(api.resources.parents.post({ document }, { denyChildId: free.id }), { code: 'REST_API_RESOURCE', subtype: 'forbidden' })
       assert.equal(await countRecords(knex, 'reverse_parents'), 2)
-      await assert.rejects(api.resources.parents.patch({ id: parent.id, inputRecord: document }, { denyChildId: free.id }), { code: 'REST_API_RESOURCE', subtype: 'forbidden' })
+      await assert.rejects(api.resources.parents.patch({ id: parent.id, document }, { denyChildId: free.id }), { code: 'REST_API_RESOURCE', subtype: 'forbidden' })
       assert.deepEqual(await children(), owned.map(record => record.id).sort())
       assert.equal((await api.resources.parents.get({ id: parent.id })).data.attributes.name, 'Parent')
     })

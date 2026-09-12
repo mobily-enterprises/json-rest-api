@@ -46,21 +46,3 @@ export class LocalStorage implements FileStorage {
   upload(file: UploadFile): Promise<string>
   delete(url: string): Promise<void>
 }
-
-export interface S3StorageOptions {
-  bucket: string
-  region?: string
-  prefix?: string
-  acl?: string
-  mockMode?: true
-}
-export class S3Storage implements FileStorage {
-  constructor(options: S3StorageOptions)
-  bucket: string
-  region: string
-  prefix: string
-  acl: string
-  mockMode: boolean
-  upload(file: Pick<StorageFile, 'filename'>): Promise<string>
-  delete(url: string): Promise<void>
-}

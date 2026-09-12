@@ -42,17 +42,17 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Edge Cases for Positioning', () => {
     it('should handle positioning multiple items before the same target in sequence', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial task
-      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      const task1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
       // Position multiple tasks before task1
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task A', category: category.id, beforeId: task1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task A', category: category.id, beforeId: task1.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task B', category: category.id, beforeId: task1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task B', category: category.id, beforeId: task1.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task C', category: category.id, beforeId: task1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task C', category: category.id, beforeId: task1.id } })
 
       // Query and verify order
       const { data: tasks } = await api.resources.tasks.query({
@@ -76,17 +76,17 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle positioning between very close positions', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial tasks
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
+      const task2 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category.id } })
 
       // Insert many tasks between 1 and 2
       const insertedTasks = []
       for (let i = 0; i < 10; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Inserted Task ${i}`, category: category.id, beforeId: task2.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Inserted Task ${i}`, category: category.id, beforeId: task2.id } })
         insertedTasks.push(task)
       }
 
@@ -108,12 +108,12 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle beforeId pointing to non-existent item in same category', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
       // Create task with non-existent beforeId
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id, beforeId: '99999' } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category.id, beforeId: '99999' } })
 
       // Should position at end since beforeId doesn't exist
       const { data: tasks } = await api.resources.tasks.query({
@@ -129,12 +129,12 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle beforeId from different category', async () => {
-      const category1 = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Category 1' } })
-      const category2 = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Category 2' } })
+      const category1 = await api.resources.categories.post({ format: 'plain', data: { name: 'Category 1' } })
+      const category2 = await api.resources.categories.post({ format: 'plain', data: { name: 'Category 2' } })
 
-      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category1.id } })
+      const task1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category1.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category2.id, beforeId: task1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category2.id, beforeId: task1.id } })
 
       // Task 2 should be positioned normally in its category (ignoring beforeId from other category)
       const { data: cat2Tasks } = await api.resources.tasks.query({
@@ -152,23 +152,23 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Complex Update Scenarios', () => {
     it('should handle moving items multiple times', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial tasks
       const tasks = []
       for (let i = 1; i <= 5; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Move task 5 before task 3
-      await api.resources.tasks.patch({ id: tasks[4].id, format: 'plain', inputRecord: { beforeId: tasks[2].id } })
+      await api.resources.tasks.patch({ id: tasks[4].id, format: 'plain', data: { beforeId: tasks[2].id } })
 
       // Move task 1 to the end
-      await api.resources.tasks.patch({ id: tasks[0].id, format: 'plain', inputRecord: { beforeId: null } })
+      await api.resources.tasks.patch({ id: tasks[0].id, format: 'plain', data: { beforeId: null } })
 
       // Move task 3 to the beginning
-      await api.resources.tasks.patch({ id: tasks[2].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } })
+      await api.resources.tasks.patch({ id: tasks[2].id, format: 'plain', data: { beforeId: 'FIRST' } })
 
       // Query final order
       const { data: finalTasks } = await api.resources.tasks.query({
@@ -187,19 +187,19 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle category changes with positioning', async () => {
-      const category1 = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Category 1' } })
-      const category2 = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Category 2' } })
+      const category1 = await api.resources.categories.post({ format: 'plain', data: { name: 'Category 1' } })
+      const category2 = await api.resources.categories.post({ format: 'plain', data: { name: 'Category 2' } })
 
       // Create tasks in category 1
-      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category1.id } })
+      const task1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category1.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category1.id } })
 
       // Create tasks in category 2
-      const task3 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 3', category: category2.id } })
+      const task3 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 3', category: category2.id } })
 
       // Move task 1 to category 2, positioning it before task 3
-      await api.resources.tasks.patch({ id: task1.id, format: 'plain', inputRecord: { category: category2.id, beforeId: task3.id } })
+      await api.resources.tasks.patch({ id: task1.id, format: 'plain', data: { category: category2.id, beforeId: task3.id } })
 
       // Verify category 1 only has task 2
       const { data: cat1Tasks } = await api.resources.tasks.query({
@@ -226,18 +226,18 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should maintain position when updating other fields', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create tasks
       const tasks = []
       for (let i = 1; i <= 3; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Update title without beforeId
       const originalPosition = tasks[1].position
-      await api.resources.tasks.patch({ id: tasks[1].id, format: 'plain', inputRecord: { title: 'Updated Task 2' } })
+      await api.resources.tasks.patch({ id: tasks[1].id, format: 'plain', data: { title: 'Updated Task 2' } })
 
       // Get updated task
       const updatedTask = await api.resources.tasks.get({ id: tasks[1].id })
@@ -261,15 +261,15 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Bulk Operations', () => {
     it('should handle bulk creation with positioning', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial task
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
       // Create multiple tasks in parallel (simulating bulk creation)
       const promises = []
       for (let i = 2; i <= 10; i++) {
-        promises.push(api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } }))
+        promises.push(api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } }))
       }
 
       await Promise.all(promises)
@@ -296,17 +296,17 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle bulk positioning before same target', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial tasks
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
-      const task2 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
+      const task2 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category.id } })
 
       // Create multiple tasks before task2 in parallel
       const promises = []
       for (let i = 1; i <= 5; i++) {
-        promises.push(api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Inserted Task ${i}`, category: category.id, beforeId: task2.id } }))
+        promises.push(api.resources.tasks.post({ format: 'plain', data: { title: `Inserted Task ${i}`, category: category.id, beforeId: task2.id } }))
       }
 
       await Promise.all(promises)
@@ -337,18 +337,18 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Query and Filtering', () => {
     it('should sort correctly with mixed position values', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create tasks in random order
-      const taskC = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task C', category: category.id } })
+      const taskC = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task C', category: category.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task A', category: category.id, beforeId: taskC.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task A', category: category.id, beforeId: taskC.id } })
 
-      const taskE = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task E', category: category.id } })
+      const taskE = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task E', category: category.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task B', category: category.id, beforeId: taskC.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task B', category: category.id, beforeId: taskC.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task D', category: category.id, beforeId: taskE.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task D', category: category.id, beforeId: taskE.id } })
 
       // Query with ascending sort
       const { data: ascTasks } = await api.resources.tasks.query({
@@ -374,11 +374,11 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle pagination with position sorting', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create 20 tasks
       for (let i = 1; i <= 20; i++) {
-        await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i.toString().padStart(2, '0')}`, category: category.id } })
+        await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i.toString().padStart(2, '0')}`, category: category.id } })
       }
 
       // Query first page
@@ -412,17 +412,17 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should combine position sort with other sorts', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create tasks with same titles
       const positions = []
       for (let i = 0; i < 3; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task A', category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task A', category: category.id } })
         positions.push(task)
       }
 
       for (let i = 0; i < 3; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task B', category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task B', category: category.id } })
         positions.push(task)
       }
 
@@ -448,18 +448,18 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Special Characters and Extreme Values', () => {
     it('should handle special position values correctly', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create many tasks to test various position values
       const tasks = []
       for (let i = 0; i < 50; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Insert tasks between existing ones
       for (let i = 0; i < 10; i++) {
-        await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Inserted ${i}`, category: category.id, beforeId: tasks[i * 5].id } })
+        await api.resources.tasks.post({ format: 'plain', data: { title: `Inserted ${i}`, category: category.id, beforeId: tasks[i * 5].id } })
       }
 
       // Query all and verify ordering
@@ -488,12 +488,12 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should handle rapid position updates', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial tasks
       const tasks = []
       for (let i = 0; i < 10; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
@@ -501,16 +501,16 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       const lastTask = tasks[9]
 
       // Move to beginning
-      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', inputRecord: { beforeId: tasks[0].id } })
+      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', data: { beforeId: tasks[0].id } })
 
       // Move to middle
-      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', inputRecord: { beforeId: tasks[5].id } })
+      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', data: { beforeId: tasks[5].id } })
 
       // Move to near end
-      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', inputRecord: { beforeId: tasks[8].id } })
+      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', data: { beforeId: tasks[8].id } })
 
       // Move back to beginning
-      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', inputRecord: { beforeId: 'FIRST' } })
+      await api.resources.tasks.patch({ id: lastTask.id, format: 'plain', data: { beforeId: 'FIRST' } })
 
       // Verify final state
       const { data: finalTasks } = await api.resources.tasks.query({
@@ -536,18 +536,18 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
   describe('Null and Empty Filter Values', () => {
     it('should handle tasks with null category separately', async () => {
       // Create tasks with categories
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task with Category 1', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task with Category 1', category: category.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task with Category 2', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task with Category 2', category: category.id } })
 
       // Create tasks without category - don't send category_id at all for null
-      const taskNoCat1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task without Category 1' } })
+      const taskNoCat1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task without Category 1' } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task without Category 2' } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task without Category 2' } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task without Category 3', beforeId: taskNoCat1.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task without Category 3', beforeId: taskNoCat1.id } })
 
       // Query tasks with category
       const { data: tasksWithCat } = await api.resources.tasks.query({
@@ -595,36 +595,36 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Position Field Validation', () => {
     it('should ignore manually set position values', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Try to set position manually on create
-      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id, position: 'ZZZZ' } })
+      const task1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id, position: 'ZZZZ' } })
 
       assert.notEqual(task1.position, 'ZZZZ')
       assert.equal(task1.position, 'a0') // First item gets 'a0'
 
       // Try to set position manually on update
-      const task2 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
+      const task2 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category.id } })
 
       const originalPosition = task2.position
 
-      await api.resources.tasks.patch({ id: task2.id, format: 'plain', inputRecord: { position: 'AAAA' } })
+      await api.resources.tasks.patch({ id: task2.id, format: 'plain', data: { position: 'AAAA' } })
 
       const updated = await api.resources.tasks.get({ id: task2.id })
       assert.equal(updated.position, originalPosition) // Position unchanged
     })
 
     it('should handle both position and beforeId in update', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
-      const task1 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 1', category: category.id } })
+      const task1 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 1', category: category.id } })
 
-      await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 2', category: category.id } })
+      await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 2', category: category.id } })
 
-      const task3 = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Task 3', category: category.id } })
+      const task3 = await api.resources.tasks.post({ format: 'plain', data: { title: 'Task 3', category: category.id } })
 
       // Update with both position (ignored) and beforeId (used)
-      await api.resources.tasks.patch({ id: task3.id, format: 'plain', inputRecord: { position: 'XXXX', beforeId: task1.id } })
+      await api.resources.tasks.patch({ id: task3.id, format: 'plain', data: { position: 'XXXX', beforeId: task1.id } })
 
       const { data: tasks } = await api.resources.tasks.query({
         queryParams: {
@@ -643,11 +643,11 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
 
   describe('Performance and Stress Tests', () => {
     it('should handle large number of tasks efficiently', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create 100 tasks
       for (let i = 0; i < 100; i++) {
-        await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i.toString().padStart(3, '0')}`, category: category.id } })
+        await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i.toString().padStart(3, '0')}`, category: category.id } })
       }
 
       // Query with position sort
@@ -667,7 +667,7 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
       }
 
       // Insert task in the middle
-      const middleTask = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: 'Middle Task', category: category.id, beforeId: tasks[50].id } })
+      const middleTask = await api.resources.tasks.post({ format: 'plain', data: { title: 'Middle Task', category: category.id, beforeId: tasks[50].id } })
 
       // Verify it's positioned correctly
       const { data: updatedTasks } = await api.resources.tasks.query({
@@ -685,22 +685,22 @@ describe('Extended Positioning Plugin Tests', { timeout: 30000 }, () => {
     })
 
     it('should maintain consistency under concurrent updates', async () => {
-      const category = await api.resources.categories.post({ format: 'plain', inputRecord: { name: 'Test Category' } })
+      const category = await api.resources.categories.post({ format: 'plain', data: { name: 'Test Category' } })
 
       // Create initial tasks
       const tasks = []
       for (let i = 0; i < 20; i++) {
-        const task = await api.resources.tasks.post({ format: 'plain', inputRecord: { title: `Task ${i}`, category: category.id } })
+        const task = await api.resources.tasks.post({ format: 'plain', data: { title: `Task ${i}`, category: category.id } })
         tasks.push(task)
       }
 
       // Perform concurrent position updates
       const updates = [
-        api.resources.tasks.patch({ id: tasks[5].id, format: 'plain', inputRecord: { beforeId: tasks[0].id } }),
-        api.resources.tasks.patch({ id: tasks[10].id, format: 'plain', inputRecord: { beforeId: tasks[0].id } }),
-        api.resources.tasks.patch({ id: tasks[15].id, format: 'plain', inputRecord: { beforeId: tasks[0].id } }),
-        api.resources.tasks.patch({ id: tasks[19].id, format: 'plain', inputRecord: { beforeId: 'FIRST' } }),
-        api.resources.tasks.patch({ id: tasks[1].id, format: 'plain', inputRecord: { beforeId: null } }) // Move to end
+        api.resources.tasks.patch({ id: tasks[5].id, format: 'plain', data: { beforeId: tasks[0].id } }),
+        api.resources.tasks.patch({ id: tasks[10].id, format: 'plain', data: { beforeId: tasks[0].id } }),
+        api.resources.tasks.patch({ id: tasks[15].id, format: 'plain', data: { beforeId: tasks[0].id } }),
+        api.resources.tasks.patch({ id: tasks[19].id, format: 'plain', data: { beforeId: 'FIRST' } }),
+        api.resources.tasks.patch({ id: tasks[1].id, format: 'plain', data: { beforeId: null } }) // Move to end
       ]
 
       await Promise.all(updates)

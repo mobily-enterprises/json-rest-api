@@ -30,7 +30,6 @@ export { FastifyPlugin } from './plugins/core/connectors/fastify-plugin.js'
 
 // Storage plugins for file handling
 export { LocalStorage } from './plugins/storage/local-storage.js'
-export { S3Storage } from './plugins/storage/s3-storage.js'
 
 export * from './lib/rest-api-errors.js'
 

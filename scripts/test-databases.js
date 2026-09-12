@@ -29,6 +29,7 @@ const files = requestedFiles.length
         ...(await readdir('tests')).filter(name => /^conformance-.*\.test\.js$/.test(name)).sort().map(name => `tests/${name}`),
         'tests/db-schema-conformance.test.js',
         'tests/db-field-alterations.test.js',
+        'tests/positioning-contracts.test.js',
         'tests/anyapi-temporal-migration.test.js',
         'tests/anyapi-field-evolution.test.js',
         'tests/anyapi-registry-failures.test.js',

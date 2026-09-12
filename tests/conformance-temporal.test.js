@@ -81,7 +81,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
 
     it(`handles precision beyond the native SQL time limit explicitly (${format})`, async () => {
       const defaultTime = '12:34:56.1234567'
-      const params = { format, inputRecord: input(format, { name: 'Fine time', defaultTime }) }
+      const params = { format, [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Fine time', defaultTime }) }
       if (databaseClient !== 'better-sqlite3' && fixture.storage === 'knex') {
         for (const returning of ['none', 'minimal', 'full']) {
           await assert.rejects(events.post({ ...params, returning }), error => {
@@ -172,7 +172,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
             transformedAt: '2024-02-29T23:59:59.987Z'
           }
           const result = await events[method]({
-            ...(created ? { id: created.id } : {}), format, returning, inputRecord: input(format, values)
+            ...(created ? { id: created.id } : {}), format, returning, [format === 'plain' ? 'data' : 'document']: input(format, values)
           })
           const records = await events.query({ format: 'jsonapi', queryParams: { page: { size: 3 } } })
           const id = created?.id || records.data.find(row => row.attributes.name === values.name)?.id
@@ -225,7 +225,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
       it(`${unsupported ? 'rejects unsupported' : 'round-trips and filters'} ${field}=${value} (${format})`, async () => {
         if (unsupported) {
           for (const returning of ['none', 'minimal', 'full']) {
-            await assert.rejects(events.post({ format, returning, inputRecord: input(format, { name: 'Range', [field]: value }) }), error => {
+            await assert.rejects(events.post({ format, returning, [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Range', [field]: value }) }), error => {
               assert.equal(error.code, 'REST_API_VALIDATION')
               assert.equal(error.details.violations[0].rule, 'storage_range')
               return true
@@ -234,13 +234,13 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
           }
           return
         }
-        const created = await events.post({ format, inputRecord: input(format, { name: 'Value', [field]: value }) })
+        const created = await events.post({ format, [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Value', [field]: value }) })
         const id = format === 'plain' ? created.id : created.data.id
         assert.equal(attributes(format, created)[field], expected)
         const result = await events.query({ format, queryParams: { filters: { [field]: value } } })
         assert.deepEqual(result.data.map(record => record.id), [id])
         assert.equal(format === 'plain' ? result.data[0][field] : result.data[0].attributes[field], expected)
-        await events.patch({ id, format, inputRecord: input(format, { [field]: null }) })
+        await events.patch({ id, format, [format === 'plain' ? 'data' : 'document']: input(format, { [field]: null }) })
         assert.equal(attributes(format, await events.get({ id, format }))[field], null)
         assert.equal((await rowQuery(id).first())[columns[field]], null)
       })
@@ -261,7 +261,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
           await assert.rejects(events[method]({
             ...(method === 'post' ? {} : { id: created.id }),
             format,
-            inputRecord: input(format, { name: 'Rejected', [field]: value })
+            [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Rejected', [field]: value })
           }), { code: 'REST_API_VALIDATION' }, `${method} ${field}=${String(value)}`)
           assert.equal(await fixture.count('events'), 1)
           const kept = await events.get({ id: created.id, format: 'jsonapi' })
@@ -275,7 +275,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
       for (const returning of ['none', 'minimal']) {
         for (const occurredAt of ['0000-01-01T00:00:00+01:00', '9999-12-31T23:59:59-01:00']) {
           await assert.rejects(events.post({
-            format, returning, inputRecord: input(format, { name: 'Rejected', occurredAt })
+            format, returning, [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Rejected', occurredAt })
           }), { code: 'REST_API_VALIDATION' })
           assert.equal(await fixture.count('events'), 0)
         }
@@ -329,7 +329,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
 
     it(`uses the custom temporal serializer for writes and scalar/array filters (${format})`, async () => {
       const value = '2024-02-29T23:59:59.123456Z'
-      const result = await events.post({ format, inputRecord: input(format, { name: 'Serialized', serializedAt: value }) })
+      const result = await events.post({ format, [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Serialized', serializedAt: value }) })
       const id = format === 'plain' ? result.id : result.data.id
       assert.equal(attributes(format, result).serializedAt, value)
       const expression = databaseClient === 'pg'
@@ -365,7 +365,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
         const result = await events[method]({
           ...(id ? { id } : {}),
           format,
-          inputRecord: input(format, { name: method, serializedAt: value })
+          [format === 'plain' ? 'data' : 'document']: input(format, { name: method, serializedAt: value })
         })
         id = format === 'plain' ? result.id : result.data.id
         assert.equal(attributes(format, result).serializedAt, value)
@@ -384,7 +384,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
         await assert.rejects(events[method]({
           ...(method === 'post' ? {} : { id }),
           format,
-          inputRecord: input(format, { name: 'Rejected', serializedAt: value })
+          [format === 'plain' ? 'data' : 'document']: input(format, { name: 'Rejected', serializedAt: value })
         }), /Temporal serializer failed/)
         assert.equal(await fixture.count('events'), 1)
         assert.equal(attributes(format, await events.get({ id, format })).name, 'patch')
@@ -567,7 +567,7 @@ describe(`Temporal write response completion (${storageMode.mode})`, () => {
             }
             const write = fixture.api.resources.events[method]({
               ...(original ? { id: original.id } : {}),
-              inputRecord,
+              [format === 'plain' ? 'data' : 'document']: inputRecord,
               format,
               returning: 'full',
               queryParams: { include: ['person'] }

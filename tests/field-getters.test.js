@@ -35,7 +35,7 @@ describe('Field Getters', () => {
 
     it('should apply simple getter transformations', async () => {
       // Create user with data that needs transformation
-      const user = await api.resources.users.post({ format: 'plain', inputRecord: { email: '  USER@EXAMPLE.COM  ', name: '  John Doe  ', phone: '1234567890', metadata_json: '{"key": "value", "num": 123}', tags_csv: 'tag1, tag2, tag3' } })
+      const user = await api.resources.users.post({ format: 'plain', data: { email: '  USER@EXAMPLE.COM  ', name: '  John Doe  ', phone: '1234567890', metadata_json: '{"key": "value", "num": 123}', tags_csv: 'tag1, tag2, tag3' } })
 
       // Check transformations applied on create
       assert.equal(user.email, 'user@example.com')
@@ -54,7 +54,7 @@ describe('Field Getters', () => {
     })
 
     it('should handle null and undefined values', async () => {
-      const user = await api.resources.users.post({ format: 'plain', inputRecord: { email: null, phone: null, metadata_json: null, tags_csv: null } })
+      const user = await api.resources.users.post({ format: 'plain', data: { email: null, phone: null, metadata_json: null, tags_csv: null } })
 
       assert.equal(user.email, undefined) // null?.toLowerCase().trim() returns undefined
       assert.equal(user.name, undefined) // omitted nullable field remains unset
@@ -64,7 +64,7 @@ describe('Field Getters', () => {
     })
 
     it('should handle invalid data gracefully', async () => {
-      const user = await api.resources.users.post({ format: 'plain', inputRecord: { email: '  mixed@CASE.com  ', name: '   ', phone: '123', metadata_json: 'invalid json', tags_csv: ', , empty, , values, ' } })
+      const user = await api.resources.users.post({ format: 'plain', data: { email: '  mixed@CASE.com  ', name: '   ', phone: '123', metadata_json: 'invalid json', tags_csv: ', , empty, , values, ' } })
 
       assert.equal(user.email, 'mixed@case.com')
       assert.equal(user.name, '')
@@ -80,7 +80,7 @@ describe('Field Getters', () => {
     })
 
     it('should apply getters before computed fields', async () => {
-      const product = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'widget', description: 'This is a very long product description that should be truncated', price_str: '100.00', tax_rate_str: '0.20' } })
+      const product = await api.resources.products.post({ format: 'plain', data: { name: 'widget', description: 'This is a very long product description that should be truncated', price_str: '100.00', tax_rate_str: '0.20' } })
 
       // Getters should transform values
       assert.equal(product.name, 'WIDGET')
@@ -94,7 +94,7 @@ describe('Field Getters', () => {
     })
 
     it('should work with sparse fieldsets', async () => {
-      const product = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'another widget', description: 'Short desc', price_str: '50.00', tax_rate_str: '0.10' } })
+      const product = await api.resources.products.post({ format: 'plain', data: { name: 'another widget', description: 'Short desc', price_str: '50.00', tax_rate_str: '0.10' } })
 
       // Fetch with sparse fieldsets
       const sparse = await api.resources.products.get({
@@ -117,7 +117,7 @@ describe('Field Getters', () => {
     })
 
     it('should apply getters in dependency order', async () => {
-      const data = await api.resources.formatted_data.post({ format: 'plain', inputRecord: { step1: '  hello  ', step2: 'world', step3: 'end' } })
+      const data = await api.resources.formatted_data.post({ format: 'plain', data: { step1: '  hello  ', step2: 'world', step3: 'end' } })
 
       // Check that getters ran in order
       assert.equal(data.step1, 'hello') // Trimmed
@@ -126,7 +126,7 @@ describe('Field Getters', () => {
     })
 
     it('should handle missing dependencies gracefully', async () => {
-      const data = await api.resources.formatted_data.post({ format: 'plain', inputRecord: { step3: 'only step3' } })
+      const data = await api.resources.formatted_data.post({ format: 'plain', data: { step3: 'only step3' } })
 
       assert.equal(data.step1, undefined)
       assert.equal(data.step2, null)
@@ -151,7 +151,7 @@ describe('Field Getters', () => {
       let id
       if (storageMode.isAnyApi()) {
         // AnyAPI mode stores records in canonical slots, so use the API to ensure persistence
-        const created = await api.resources.encrypted_data.post({ inputRecord: payload, format: 'plain' })
+        const created = await api.resources.encrypted_data.post({ data: payload, format: 'plain' })
         id = created.id
       } else {
         // Legacy mode can insert directly into the backing table for the same effect
@@ -170,7 +170,7 @@ describe('Field Getters', () => {
     })
 
     it('should handle null values in async getters', async () => {
-      const record = await api.resources.encrypted_data.post({ format: 'plain', inputRecord: { secret: null, data: null } })
+      const record = await api.resources.encrypted_data.post({ format: 'plain', data: { secret: null, data: null } })
 
       assert.equal(record.secret, null)
       assert.equal(record.data, null)
@@ -183,12 +183,12 @@ describe('Field Getters', () => {
     })
 
     it('should apply getters to included resources', async () => {
-      const product = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'test product', description: 'A product', price_str: '99.99', tax_rate_str: '0' } })
+      const product = await api.resources.products.post({ format: 'plain', data: { name: 'test product', description: 'A product', price_str: '99.99', tax_rate_str: '0' } })
 
       // Add reviews
-      await api.resources.reviews.post({ format: 'plain', inputRecord: { product: product.id, content: 'Great product!', rating: 5 } })
+      await api.resources.reviews.post({ format: 'plain', data: { product: product.id, content: 'Great product!', rating: 5 } })
 
-      await api.resources.reviews.post({ format: 'plain', inputRecord: { product: product.id, content: 'Not bad', rating: 3 } })
+      await api.resources.reviews.post({ format: 'plain', data: { product: product.id, content: 'Not bad', rating: 3 } })
 
       // Fetch with includes
       const result = await api.resources.products.get({
@@ -208,9 +208,9 @@ describe('Field Getters', () => {
     })
 
     it('should work with sparse fieldsets on included resources', async () => {
-      const product = await api.resources.products.post({ format: 'plain', inputRecord: { name: 'another product', description: 'Description', price_str: '10', tax_rate_str: '0' } })
+      const product = await api.resources.products.post({ format: 'plain', data: { name: 'another product', description: 'Description', price_str: '10', tax_rate_str: '0' } })
 
-      await api.resources.reviews.post({ format: 'plain', inputRecord: { product: product.id, content: 'Review text', rating: 4 } })
+      await api.resources.reviews.post({ format: 'plain', data: { product: product.id, content: 'Review text', rating: 4 } })
 
       const result = await api.resources.products.get({
         id: product.id,
@@ -245,13 +245,13 @@ describe('Field Getters', () => {
         assert.deepEqual(error.context, { scopeName: 'error_test', fieldName: 'bad_field', phase: 'getter' })
         return true
       }
-      await assert.rejects(resource.post({ format: 'jsonapi', inputRecord }), error => {
+      await assert.rejects(resource.post({ format: 'jsonapi', document: inputRecord }), error => {
         assertWriteFailure(error, { outcome: 'rolledBack' })
         return rejectsGetter(error.cause)
       })
       assert.equal((await resource.query({ format: 'jsonapi' })).data.length, 0)
 
-      const record = await resource.post({ format: 'jsonapi', returning: 'minimal', inputRecord })
+      const record = await resource.post({ format: 'jsonapi', returning: 'minimal', document: inputRecord })
       await assert.rejects(resource.get({ id: record.data.id, format: 'jsonapi' }), rejectsGetter)
     })
   })

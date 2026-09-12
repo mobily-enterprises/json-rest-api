@@ -47,11 +47,11 @@ describe(`Conditional file replacement (${storageMode.mode})`, () => {
       const before = await documents.get({ id: original.id })
       await assert.rejects(fixture.api.transaction(async transaction => {
         detectorState.payload = payload('provisional.png')
-        const first = await documents[method]({ id: original.id, expectedVersion: original.attributes.revision, transaction, format: 'plain', inputRecord: {} })
+        const first = await documents[method]({ id: original.id, expectedVersion: original.attributes.revision, transaction, format: 'plain', data: {} })
         assert.notEqual(first.revision, original.attributes.revision)
         assert.ok(active.has('/uploads/provisional.png'))
         detectorState.payload = payload('rejected.png')
-        await documents[method]({ id: original.id, expectedVersion: original.attributes.revision, transaction, format: 'plain', inputRecord: {} })
+        await documents[method]({ id: original.id, expectedVersion: original.attributes.revision, transaction, format: 'plain', data: {} })
       }), error => error.code === 'REST_API_VERSION_CONFLICT')
       detectorState.payload = null
       assert.equal(cleanupCalls, 2)
@@ -69,7 +69,7 @@ describe(`Conditional file replacement (${storageMode.mode})`, () => {
           expectedVersion,
           format,
           returning: 'full',
-          inputRecord: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
+          [format === 'plain' ? 'data' : 'document']: format === 'plain' ? {} : { data: { type: 'documents', attributes: {} } }
         })
         await assert.rejects(write('stale-token'), error => error.code === 'REST_API_VERSION_CONFLICT')
         assert.equal(cleanupCalls, 1)

@@ -150,7 +150,7 @@ describe(`Sparse resource fields (${storageMode.mode})`, () => {
               : { data: { type: 'items', id, attributes: { name: 'Changed' }, relationships: { group: { data: { type: 'groups', id: group.id } } } } }
             const result = await fixture.api.resources.items[method]({
               id,
-              inputRecord,
+              [format === 'plain' ? 'data' : 'document']: inputRecord,
               format,
               returning: 'full',
               queryParams: { fields: { items: fields, groups: '' }, include: ['group'] }
@@ -179,7 +179,7 @@ describe(`Sparse resource fields (${storageMode.mode})`, () => {
           ...(method === 'post' ? {} : { id: item.id }),
           format,
           returning: 'full',
-          inputRecord,
+          [format === 'plain' ? 'data' : 'document']: inputRecord,
           queryParams: { fields: { items: '' } }
         })
         const row = format === 'plain' ? result : result.data

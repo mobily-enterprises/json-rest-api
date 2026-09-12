@@ -141,7 +141,7 @@ for (const strategy of ['standard', 'window']) {
         const result = await fixture.api.resources.items[method]({
           id,
           returning: 'full',
-          inputRecord: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 }, relationships: { group: { data: { type: 'groups', id: '1' } }, subject: { data: { type: 'groups', id: '2' } }, groups: { data: [{ type: 'groups', id: '1' }, { type: 'groups', id: '2' }] } } } },
+          document: { data: { type: 'items', id, attributes: { name: 'Written', active: true, score: 0 }, relationships: { group: { data: { type: 'groups', id: '1' } }, subject: { data: { type: 'groups', id: '2' } }, groups: { data: [{ type: 'groups', id: '1' }, { type: 'groups', id: '2' }] } } } },
           queryParams: { include: ['groups'], fields: { items: 'derivedName,groups', groups: 'derivedName' } }
         })
         assertPublicResources(result)
@@ -191,7 +191,7 @@ describe(`Metadata added by finish hooks (${storageMode.mode})`, () => {
       const unit = await holdManagedTransaction(fixture.api)
       const transaction = unit.transaction
       try {
-        const result = await fixture.api.resources.items.patch({ id: '1', transaction, returning, inputRecord: { data: { type: 'items', id: '1', attributes: { name: 'Pending' } } }, queryParams: { include: ['groups'] } }, { injectPrivateMetadata: true })
+        const result = await fixture.api.resources.items.patch({ id: '1', transaction, returning, document: { data: { type: 'items', id: '1', attributes: { name: 'Pending' } } }, queryParams: { include: ['groups'] } }, { injectPrivateMetadata: true })
         assertPublicResources(result)
         assert.deepEqual(result.data.meta, { [COMPUTED_DEPENDENCIES_KEY]: ['public meta value'] })
         assert.equal(transaction.isCompleted(), false)

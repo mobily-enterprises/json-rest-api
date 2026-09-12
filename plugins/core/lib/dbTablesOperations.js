@@ -860,7 +860,7 @@ function normalizeSnapshotDefaultValue (column = {}) {
   return normalizeComparableDefault(column.defaultValue, column.typeKind)
 }
 
-function collectDestructiveColumnWarnings (currentColumn, desiredColumn) {
+function collectDestructiveColumnWarnings (currentColumn, desiredColumn, dialect) {
   const warnings = []
   const columnName = desiredColumn.name
 
@@ -905,6 +905,9 @@ function collectDestructiveColumnWarnings (currentColumn, desiredColumn) {
 
   if (normalizeText(currentColumn.typeKind) !== normalizeText(desiredColumn.typeKind)) {
     warnings.push(`Column '${columnName}' changes type semantics from '${currentColumn.typeKind}' to '${desiredColumn.typeKind}'.`)
+  }
+  if (!isSqliteDialectName(dialect) && currentColumn.dataType === 'bigint' && desiredColumn.shape === 'integer') {
+    warnings.push(`Column '${columnName}' narrows bigint to integer and may overflow existing values.`)
   }
 
   return warnings
@@ -1250,6 +1253,8 @@ exports.down = function(knex) {
  * @param {object} [options={}] - Diff options
  * @param {boolean} [options.autoIncrement=true] - Whether the resource expects an implicit auto-increment id column
  * @param {boolean} [options.allowDropColumns=false] - Whether removed columns should be dropped automatically
+ * @param {boolean} [options.allowDropIndexes=false] - Whether undeclared indexes should be dropped
+ * @param {boolean} [options.allowDropForeignKeys=false] - Whether undeclared foreign keys should be dropped
  * @param {string} [options.dialect=''] - Optional target dialect override
  * @returns {{ migration: string, warnings: string[], plan: object }} Diff result
  */
@@ -1257,8 +1262,15 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   const {
     autoIncrement = true,
     allowDropColumns = false,
+    allowDropIndexes = false,
+    allowDropForeignKeys = false,
     dialect = ''
   } = options
+  for (const name of ['allowDropColumns', 'allowDropIndexes', 'allowDropForeignKeys']) {
+    if (options[name] !== undefined && typeof options[name] !== 'boolean') {
+      throw new TypeError(`${name} must be a boolean.`)
+    }
+  }
   const resolvedDialect = normalizeText(dialect || currentSnapshot?.dialect).toLowerCase()
   const tableSchemaContext = resolveTableSchemaContext(schema, {
     ...options,
@@ -1291,6 +1303,9 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       }
 
       plan.addColumns.push(desiredColumn)
+      if (!desiredColumn.nullable && !desiredColumn.hasDefault) {
+        plan.warnings.push(`New not-null column '${columnName}' has no static non-null default. Adding it may fail on existing rows; plan a backfill before enforcing not-null.`)
+      }
       continue
     }
 
@@ -1310,7 +1325,7 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
     if (!planEnumAlteration(plan, tableName, currentColumn, desiredColumn, [...currentChecks.values()], resolvedDialect)) continue
 
     plan.alterColumns.push(desiredColumn)
-    plan.warnings.push(...collectDestructiveColumnWarnings(currentColumn, desiredColumn))
+    plan.warnings.push(...collectDestructiveColumnWarnings(currentColumn, desiredColumn, resolvedDialect))
   }
 
   for (const currentColumn of currentColumns.values()) {
@@ -1341,6 +1356,7 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       plan.addIndexes.push(desiredIndex)
       if (indexChanged) {
         plan.dropIndexes.push(currentIndex)
+        plan.warnings.push(`Index '${currentIndex.name}' will be dropped and recreated with its changed definition; review uniqueness and query effects.`)
       }
     }
   }
@@ -1351,7 +1367,13 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
         foreignKey.columns.every((column, index) => currentIndex.columns[index] === column)
       )
       if (supportsForeignKey) continue
-      plan.dropIndexes.push(currentIndex)
+      const warning = `Index '${currentIndex.name}' exists in the live table but not in the desired schema.`
+      if (allowDropIndexes) {
+        plan.dropIndexes.push(currentIndex)
+        plan.warnings.push(`${warning} It will be dropped because allowDropIndexes=true; review uniqueness and query effects.`)
+      } else {
+        plan.warnings.push(`${warning} Skipping automatic drop.`)
+      }
     }
   }
 
@@ -1372,22 +1394,49 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
 
     if (!currentForeignKey || !sameColumns || !sameReferencedColumns || !sameTable || !sameDeleteRule || !sameUpdateRule) {
       plan.addForeignKeys.push(desiredForeignKey)
-      if (currentForeignKey) plan.dropForeignKeys.push(currentForeignKey)
+      if (currentForeignKey) {
+        plan.dropForeignKeys.push(currentForeignKey)
+        plan.warnings.push(`Foreign key '${currentForeignKey.name}' will be dropped and recreated with its changed definition; review referential actions and existing rows.`)
+      }
     }
   }
 
   for (const currentForeignKey of currentForeignKeys.values()) {
     if (!desiredForeignKeys.has(currentForeignKey.name)) {
-      plan.dropForeignKeys.push(currentForeignKey)
-    } else if (isMysqlDialect(resolvedDialect) && !plan.dropForeignKeys.some(key => key.name === currentForeignKey.name)) {
+      const warning = `Foreign key '${currentForeignKey.name}' exists in the live table but not in the desired schema.`
+      if (allowDropForeignKeys) {
+        plan.dropForeignKeys.push(currentForeignKey)
+        plan.warnings.push(`${warning} It will be dropped because allowDropForeignKeys=true; referential integrity will no longer be enforced by this constraint.`)
+        continue
+      }
+      plan.warnings.push(`${warning} Skipping automatic drop.`)
+    }
+    if (isMysqlDialect(resolvedDialect) && !plan.dropForeignKeys.some(key => key.name === currentForeignKey.name)) {
       const dropsSupportingIndex = plan.dropIndexes.some(index =>
         currentForeignKey.columns.every((column, position) => index.columns[position] === column.name)
       )
       if (dropsSupportingIndex) {
         // MySQL forbids dropping a supporting index while its foreign key exists.
         plan.dropForeignKeys.push(currentForeignKey)
-        plan.addForeignKeys.push(desiredForeignKeys.get(currentForeignKey.name))
+        plan.addForeignKeys.push(desiredForeignKeys.get(currentForeignKey.name) || {
+          ...currentForeignKey,
+          columns: currentForeignKey.columns.map(column => column.name),
+          referencedColumns: currentForeignKey.columns.map(column => column.referencedName)
+        })
+        plan.warnings.push(`Foreign key '${currentForeignKey.name}' will be temporarily dropped and restored while replacing its supporting index.`)
       }
+    }
+  }
+
+  for (const column of plan.dropColumns) {
+    const retainedIndex = plan.addIndexes.find(index => index.columns.includes(column.name)) ||
+      [...currentIndexes.values()].find(index => index.columns.includes(column.name) && !plan.dropIndexes.some(dropped => dropped.name === index.name))
+    const retainedForeignKey = plan.addForeignKeys.find(key => key.columns.includes(column.name) ||
+      (key.referencedTableName === tableName && key.referencedColumns.includes(column.name))) ||
+      [...currentForeignKeys.values()].find(key => !plan.dropForeignKeys.some(dropped => dropped.name === key.name) &&
+        key.columns.some(entry => entry.name === column.name || (key.referencedTableName === tableName && entry.referencedName === column.name)))
+    if (retainedIndex || retainedForeignKey) {
+      throw new Error(`Cannot drop column '${column.name}' while retaining ${retainedIndex ? `index '${retainedIndex.name}'` : `foreign key '${retainedForeignKey.name}'`}. Remove that dependency explicitly, using allowDropIndexes or allowDropForeignKeys for undeclared metadata.`)
     }
   }
 
@@ -1494,7 +1543,7 @@ ${addConstraintLines.map((line) => `    ${line};`).join('\n')}
   }
 
   const warningComment = plan.warnings.length > 0
-    ? `  // Warnings:\n${plan.warnings.map((warning) => `  // - ${warning}`).join('\n')}\n`
+    ? `  // Warnings:\n${plan.warnings.flatMap(warning => warning.split(/\r\n|[\r\n\u2028\u2029]/).map(line => `  // - ${line}`)).join('\n')}\n`
     : ''
 
   return {

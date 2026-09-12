@@ -13,7 +13,7 @@ declare const raw: Knex.Transaction
 await items.get({ id: '1', transaction: raw })
 await relationships.getRelationship({ id: '1', relationshipName: 'children', transaction: raw })
 const result: number = await api.transaction(async transaction => {
-  await items.patch({ id: '1', inputRecord: { name: 'Changed' }, transaction })
+  await items.patch({ id: '1', data: { name: 'Changed' }, transaction })
   await relationships.patchRelationship({ id: '1', relationshipName: 'children', relationshipData: [], transaction })
   await bulk.bulkDelete({ ids: ['2'], transaction, atomic: true })
   await transaction('audit_entries').insert({ message: 'Changed' })
@@ -23,7 +23,7 @@ const synchronous: string = await api.transaction(() => 'result')
 void [result, synchronous]
 
 // @ts-expect-error Raw Knex transactions cannot own library writes.
-await items.patch({ id: '1', inputRecord: { name: 'Changed' }, transaction: raw })
+await items.patch({ id: '1', data: { name: 'Changed' }, transaction: raw })
 // @ts-expect-error The same ownership rule applies to deletion.
 await items.delete({ id: '1', transaction: raw })
 // @ts-expect-error Relationship writes also require a managed owner.

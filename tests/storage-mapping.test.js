@@ -130,13 +130,13 @@ describe('Storage mapping', () => {
 
   it('persists mapped columns while exposing logical field names', async () => {
     const country = await api.resources.countries.post({
-      inputRecord: createJsonApiDocument('countries', {
+      document: createJsonApiDocument('countries', {
         name: 'Australia'
       })
     })
 
     const createResult = await api.resources.profiles.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'profiles',
         {
           displayName: 'Mercury',
@@ -230,7 +230,7 @@ describe('Storage mapping', () => {
 
   it('applies storage mapping on PATCH updates and sparse fieldsets', async () => {
     const created = await api.resources.profiles.post({
-      inputRecord: createJsonApiDocument('profiles', {
+      document: createJsonApiDocument('profiles', {
         displayName: 'Before',
         loginCount: 1,
         lastSeenAt: '2026-01-01T00:00:00Z'
@@ -239,7 +239,7 @@ describe('Storage mapping', () => {
 
     const patchResult = await api.resources.profiles.patch({
       id: created.data.id,
-      inputRecord: {
+      document: {
         data: {
           type: 'profiles',
           id: created.data.id,
@@ -280,7 +280,7 @@ describe('Storage mapping', () => {
     for (const [index, temporalAttributes] of invalidTemporalValues.entries()) {
       await assert.rejects(
         api.resources.profiles.post({
-          inputRecord: createJsonApiDocument('profiles', {
+          document: createJsonApiDocument('profiles', {
             displayName: `Invalid temporal value ${index}`,
             ...temporalAttributes
           })
@@ -332,7 +332,7 @@ describe('Storage mapping', () => {
 
   it('can opt out of snake_case translation for an entire resource', async () => {
     const created = await api.resources.verbatim_profiles.post({
-      inputRecord: createJsonApiDocument('verbatim_profiles', {
+      document: createJsonApiDocument('verbatim_profiles', {
         displayName: 'Exact Mode',
         loginCount: 3
       })

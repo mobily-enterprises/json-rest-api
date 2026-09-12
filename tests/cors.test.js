@@ -166,7 +166,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       })
 
       await api.resources.countries.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -281,7 +281,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       })
 
       const result = await api.resources.countries.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -703,7 +703,7 @@ describe('CORS Plugin Tests', { timeout: 30000 }, () => {
       })
 
       const createResult = await api.resources.countries.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 

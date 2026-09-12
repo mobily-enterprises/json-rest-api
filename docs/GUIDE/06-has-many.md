@@ -39,29 +39,29 @@ await api.resources.publishers.createKnexTable()
 await api.resources.authors.createKnexTable()
 
 const frenchPublisher = await api.resources.publishers.post({
-  inputRecord: { name: 'French Books Inc.' }
+  data: { name: 'French Books Inc.' }
 })
 const germanPublisher = await api.resources.publishers.post({
-  inputRecord: { name: 'German Press GmbH' }
+  data: { name: 'German Press GmbH' }
 })
 const emptyPublisher = await api.resources.publishers.post({
-  inputRecord: { name: 'Global Publishing' }
+  data: { name: 'Global Publishing' }
 })
 const victor = await api.resources.authors.post({
-  inputRecord: { name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id }
+  data: { name: 'Victor', surname: 'Hugo', publisher: frenchPublisher.id }
 })
 const emile = await api.resources.authors.post({
-  inputRecord: { name: 'Émile', surname: 'Zola', publisher: frenchPublisher.id }
+  data: { name: 'Émile', surname: 'Zola', publisher: frenchPublisher.id }
 })
 await api.resources.authors.post({
-  inputRecord: { name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id }
+  data: { name: 'Johann', surname: 'Goethe', publisher: germanPublisher.id }
 })
 const unassigned = await api.resources.authors.post({
-  inputRecord: { name: 'Unknown', surname: 'Author', publisher: null }
+  data: { name: 'Unknown', surname: 'Author', publisher: null }
 })
 ```
 
-Link children through the public `publisher` alias in `inputRecord`, not the
+Link children through the public `publisher` alias in `data`, not the
 foreign-key field name. Declaring the inverse `belongsTo` also gives authors
 a public relationship representation. Cross-table filter targets explicitly
 declare `indexed: true`.
@@ -150,7 +150,7 @@ await api.resources.publishers.deleteRelationship({
 })
 await api.resources.publishers.patch({
   id: frenchPublisher.id,
-  inputRecord: { authors: [emile.id] },
+  data: { authors: [emile.id] },
   returning: 'none'
 })
 const finalLinkage = await api.resources.publishers.getRelationship({
@@ -167,7 +167,7 @@ The final member is Émile. Removing membership does not delete the author:
 Victor remains, with no publisher. Detaching children requires their relationship
 to allow null; required relationships cannot be cleared this way. Relationship
 writes use `relationshipData` and return undefined. Resource writes put their
-record, including any relationships, under `inputRecord`.
+record, including any relationships, under `data`.
 
 ## HTTP examples
 

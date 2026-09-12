@@ -76,14 +76,14 @@ describe('AutoFilter Plugin', () => {
 
   it('stamps workspace-scoped records and filters collections by workspace', async () => {
     const reportA = await api.resources.workspace_reports.post({
-      inputRecord: createJsonApiDocument('workspace_reports', {
+      document: createJsonApiDocument('workspace_reports', {
         title: 'Workspace A report'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.workspace_reports.post({
-      inputRecord: createJsonApiDocument('workspace_reports', {
+      document: createJsonApiDocument('workspace_reports', {
         title: 'Workspace B report'
       }),
       format: 'jsonapi'
@@ -107,14 +107,14 @@ describe('AutoFilter Plugin', () => {
 
   it('stamps user-scoped records and filters collections by user', async () => {
     const noteA = await api.resources.user_notes.post({
-      inputRecord: createJsonApiDocument('user_notes', {
+      document: createJsonApiDocument('user_notes', {
         body: 'User 101 note'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.user_notes.post({
-      inputRecord: createJsonApiDocument('user_notes', {
+      document: createJsonApiDocument('user_notes', {
         body: 'User 202 note'
       }),
       format: 'jsonapi'
@@ -138,21 +138,21 @@ describe('AutoFilter Plugin', () => {
 
   it('applies composite workspace+user scoping', async () => {
     const ownProject = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Workspace A / User 101'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Workspace A / User 202'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 202))
 
     await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Workspace B / User 101'
       }),
       format: 'jsonapi'
@@ -176,7 +176,7 @@ describe('AutoFilter Plugin', () => {
 
   it('treats public resources as unscoped', async () => {
     const created = await api.resources.system_settings.post({
-      inputRecord: createJsonApiDocument('system_settings', {
+      document: createJsonApiDocument('system_settings', {
         key: 'app.version',
         value: '1.0.0'
       }),
@@ -200,7 +200,7 @@ describe('AutoFilter Plugin', () => {
 
   it('scopes single-record lookups so out-of-scope records are not found', async () => {
     const project = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Scoped Project'
       }),
       format: 'jsonapi'
@@ -220,7 +220,7 @@ describe('AutoFilter Plugin', () => {
 
   it('stamps scoped fields on PUT and rejects inconsistent scoped updates', async () => {
     const project = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Original Project',
         description: 'Original Description'
       }),
@@ -228,7 +228,7 @@ describe('AutoFilter Plugin', () => {
     }, scopedContext('workspace-a', 101))
 
     await api.resources.projects.put({
-      inputRecord: {
+      document: {
         data: {
           type: 'projects',
           id: project.data.id,
@@ -259,7 +259,7 @@ describe('AutoFilter Plugin', () => {
       async () => {
         await api.resources.projects.patch({
           id: project.data.id,
-          inputRecord: {
+          document: {
             data: {
               type: 'projects',
               id: project.data.id,
@@ -278,21 +278,21 @@ describe('AutoFilter Plugin', () => {
 
   it('uses scoped lookups when validating relationships', async () => {
     const projectA = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Project A'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const projectB = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Project B'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-b', 101))
 
     const task = await api.resources.tasks.post({
-      inputRecord: createJsonApiDocument('tasks',
+      document: createJsonApiDocument('tasks',
         {
           title: 'Task A'
         },
@@ -313,7 +313,7 @@ describe('AutoFilter Plugin', () => {
     await assert.rejects(
       async () => {
         await api.resources.tasks.post({
-          inputRecord: createJsonApiDocument('tasks',
+          document: createJsonApiDocument('tasks',
             {
               title: 'Cross-scope Task'
             },
@@ -331,14 +331,14 @@ describe('AutoFilter Plugin', () => {
 
   it('scopes included resources through the same autofilter path as top-level queries', async () => {
     const project = await api.resources.projects.post({
-      inputRecord: createJsonApiDocument('projects', {
+      document: createJsonApiDocument('projects', {
         name: 'Scoped include project'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const visibleTask = await api.resources.tasks.post({
-      inputRecord: createJsonApiDocument('tasks',
+      document: createJsonApiDocument('tasks',
         {
           title: 'Visible task'
         },
@@ -350,7 +350,7 @@ describe('AutoFilter Plugin', () => {
     }, scopedContext('workspace-a', 101))
 
     const hiddenTask = await api.resources.tasks.post({
-      inputRecord: createJsonApiDocument('tasks',
+      document: createJsonApiDocument('tasks',
         {
           title: 'Out-of-scope task'
         },
@@ -386,14 +386,14 @@ describe('AutoFilter Plugin', () => {
 
   it('treats null belongsTo autofilter values as valid null linkage on writes', async () => {
     const implicitNull = await api.resources.optional_tasks.post({
-      inputRecord: createJsonApiDocument('optional_tasks', {
+      document: createJsonApiDocument('optional_tasks', {
         title: 'Implicit null project'
       }),
       format: 'jsonapi'
     }, scopedContext('workspace-a', 101))
 
     const explicitNull = await api.resources.optional_tasks.post({
-      inputRecord: createJsonApiDocument(
+      document: createJsonApiDocument(
         'optional_tasks',
         {
           title: 'Explicit null project'
@@ -435,7 +435,7 @@ describe('AutoFilter Plugin', () => {
     await assert.rejects(
       async () => {
         await api.resources.projects.post({
-          inputRecord: createJsonApiDocument('projects', {
+          document: createJsonApiDocument('projects', {
             name: 'No Scope'
           }),
           format: 'jsonapi'

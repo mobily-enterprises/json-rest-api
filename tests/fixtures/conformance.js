@@ -35,7 +35,7 @@ export async function createConformanceFixture ({
         const created = (await api.resources[type].post({
           format: 'jsonapi',
           returning: 'full',
-          inputRecord
+          document: inputRecord
         })).data
         if (!generatedId) nextIds.set(type, id)
         return created

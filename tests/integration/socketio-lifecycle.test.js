@@ -119,7 +119,7 @@ for (const close of ['socketio', 'http', 'reconnecting']) {
       assert.equal(api.io, undefined)
       assert.equal(api.vars.socketIO, undefined)
       assert.equal(api.vars.socketIORedisClients, undefined)
-      const record = await api.resources.groups.post({ format: 'plain', inputRecord: { name: 'After shutdown' } })
+      const record = await api.resources.groups.post({ format: 'plain', data: { name: 'After shutdown' } })
       assert.equal(record.name, 'After shutdown')
       assert.equal((await api.resources.groups.query({ format: 'plain' })).data.length, 1)
     })

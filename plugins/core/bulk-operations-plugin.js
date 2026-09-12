@@ -1,6 +1,7 @@
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
 import { beginWriteTransaction, commitTransaction, onTransactionFinished, rollbackAfterError, withWriteOutcome } from '../../lib/error-context.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from './lib/querying-writing/response-options.js'
+import { selectWriteInput } from './lib/querying-writing/request-contracts.js'
 
 function validateAtomic (atomic, field = 'atomic') {
   if (typeof atomic !== 'boolean') {
@@ -68,8 +69,10 @@ export const BulkOperationsPlugin = {
 
     // Add bulk methods to each scope
     addResourceMethod('bulkPost', withWriteOutcome(async ({ scope, vars, params, context }) => {
-      const { inputRecords, atomic = defaultAtomic } = params
+      const { atomic = defaultAtomic } = params
       rejectRemovedOptions(params)
+      const inputKey = selectWriteInput(params)
+      const inputRecords = inputKey === 'document' ? params.document.data : params.data
       validateAtomic(atomic)
       validateTransactionMode(atomic, params.transaction)
       resolveBulkVersions(params)
@@ -117,7 +120,9 @@ export const BulkOperationsPlugin = {
           try {
             // Use the existing post method with transaction
             const result = await scope.post({
-              inputRecord: format === 'jsonapi' && inputRecord && !Object.hasOwn(inputRecord, 'data') ? { data: inputRecord } : inputRecord,
+              ...(inputKey === 'document'
+                ? { document: { ...params.document, data: inputRecord } }
+                : { data: inputRecord }),
               transaction,
               format,
               returning
@@ -211,13 +216,13 @@ export const BulkOperationsPlugin = {
           const operation = operations[i]
 
           // Validate operation structure
-          if (!operation || operation.id === undefined || operation.id === null || !operation.data) {
+          if (!operation || operation.id === undefined || operation.id === null) {
             errors.push({
               index: i,
               status: 'error',
               error: {
                 code: 'INVALID_OPERATION',
-                message: 'Operation must include id and data',
+                message: 'Operation must include id and exactly one of data or document',
                 details: { operation },
                 transactionOutcome: 'none'
               }
@@ -228,7 +233,7 @@ export const BulkOperationsPlugin = {
                 violations: [{
                   field: `operations[${i}]`,
                   rule: 'required_fields',
-                  message: 'Operation must include id and data'
+                  message: 'Operation must include id and exactly one of data or document'
                 }]
               })
             }
@@ -244,9 +249,8 @@ export const BulkOperationsPlugin = {
           }
           try {
             const result = await scope.patch({
-              id: operation.id,
+              ...operation,
               expectedVersion: expectedVersions?.[i],
-              inputRecord: format === 'jsonapi' ? { data: operation.data } : operation.data,
               transaction,
               format,
               returning
@@ -418,13 +422,16 @@ export const BulkOperationsPlugin = {
           if (method === 'bulkPost') {
             // For bulk create, expect array in data field (JSON:API style)
             params = {
-              inputRecords: body?.data || body,
+              document: body,
               atomic
             }
           } else if (method === 'bulkPatch') {
             // For bulk update, expect operations array
+            const operations = body?.operations || body
             params = {
-              operations: body?.operations || body,
+              operations: Array.isArray(operations)
+                ? operations.map(operation => ({ id: operation?.id, document: { data: operation?.data } }))
+                : operations,
               atomic
             }
           } else if (method === 'bulkDelete') {

@@ -10,7 +10,7 @@ export async function readForConditionalUpdate (url, { headers = {}, credentials
 
   return {
     document,
-    async save (inputRecord) {
+    async save (document) {
       const writeHeaders = new Headers(selectedHeaders)
       writeHeaders.set('Content-Type', 'application/vnd.api+json')
       writeHeaders.set('If-Match', etag)
@@ -19,7 +19,7 @@ export async function readForConditionalUpdate (url, { headers = {}, credentials
         method: 'PATCH',
         credentials,
         headers: writeHeaders,
-        body: JSON.stringify(inputRecord)
+        body: JSON.stringify(document)
       })
     }
   }

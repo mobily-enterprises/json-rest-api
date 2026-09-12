@@ -77,7 +77,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const result = await api.resources.users.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -108,7 +108,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const createResult = await api.resources.users.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -136,7 +136,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const createResult = await api.resources.users.post({
-        inputRecord: createDoc,
+        document: createDoc,
         format: 'jsonapi'
       })
 
@@ -156,7 +156,7 @@ describe('Virtual Fields Tests', () => {
 
       const patchResult = await api.resources.users.patch({
         id: userId,
-        inputRecord: patchDoc,
+        document: patchDoc,
         format: 'jsonapi'
       })
 
@@ -177,7 +177,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const createResult = await api.resources.users.post({
-        inputRecord: createDoc,
+        document: createDoc,
         format: 'jsonapi'
       })
 
@@ -197,7 +197,7 @@ describe('Virtual Fields Tests', () => {
 
       const patchResult = await api.resources.users.patch({
         id: userId,
-        inputRecord: patchDoc,
+        document: patchDoc,
         queryParams: {
           fields: {
             users: 'email,passwordConfirmation'
@@ -226,7 +226,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const createResult = await api.resources.users.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -262,7 +262,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const createResult = await api.resources.users.post({
-        inputRecord: createDoc,
+        document: createDoc,
         format: 'jsonapi'
       })
 
@@ -285,7 +285,7 @@ describe('Virtual Fields Tests', () => {
 
       const putResult = await api.resources.users.put({
         id: userId,
-        inputRecord: putDoc,
+        document: putDoc,
         format: 'jsonapi'
       })
 
@@ -347,7 +347,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const result = await api.resources.products.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 
@@ -384,7 +384,7 @@ describe('Virtual Fields Tests', () => {
       })
 
       const result = await api.resources.products.post({
-        inputRecord: doc,
+        document: doc,
         format: 'jsonapi'
       })
 

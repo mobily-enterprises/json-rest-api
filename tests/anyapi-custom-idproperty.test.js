@@ -72,7 +72,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
 
   it('uses logical ids for post, get, query, sparse fields, cursors, and includes', async () => {
     const owner = await api.resources.owners.post({
-      inputRecord: createJsonApiDocument('owners', { name: 'Owner One' }),
+      document: createJsonApiDocument('owners', { name: 'Owner One' }),
       format: 'jsonapi',
     })
 
@@ -86,7 +86,7 @@ maybeDescribe('AnyAPI custom idProperty', () => {
     const createdItems = []
     for (const item of itemInputs) {
       const created = await api.resources.items.post({
-        inputRecord: createJsonApiDocument(
+        document: createJsonApiDocument(
           'items',
           item,
           { owner: createRelationship(resourceIdentifier('owners', owner.data.id)) }

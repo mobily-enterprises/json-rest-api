@@ -104,7 +104,7 @@ describe(`Transitive field dependencies (${storageMode.mode})`, () => {
     failField = 'middle'
     await assert.rejects(fixture.api.resources.items.patch({
       id: item.id,
-      inputRecord: createJsonApiDocument('items', { base: 'changed' }),
+      document: createJsonApiDocument('items', { base: 'changed' }),
       queryParams: { fields: { items: 'final' } }
     }), /Computation for field 'middle' failed/)
     assert.deepEqual(calls, ['suffix', 'upperSource', 'middle'].map(field => `items:${item.id}:${field}`))
@@ -330,7 +330,7 @@ describe(`Dependencies on input fields without setters (${storageMode.mode})`, (
   it('runs the dependent setter after validated input is available', async () => {
     const item = await fixture.seed('items', { name: 'Setter', base: 4 })
     assert.equal(item.attributes.doubled, 8)
-    const result = await fixture.api.resources.items.patch({ id: item.id, inputRecord: createJsonApiDocument('items', { base: 5 }) })
+    const result = await fixture.api.resources.items.patch({ id: item.id, document: createJsonApiDocument('items', { base: 5 }) })
     assert.equal(result.data.attributes.doubled, 10)
   })
 })
@@ -371,7 +371,7 @@ describe(`Virtual input dependencies (${storageMode.mode})`, () => {
   after(async () => fixture?.close())
   it('uses available virtual input after its getter without treating it as a stored column', async () => {
     const created = await fixture.api.resources.items.post({
-      inputRecord: createJsonApiDocument('items', { name: 'Virtual', virtualSource: 'value' }),
+      document: createJsonApiDocument('items', { name: 'Virtual', virtualSource: 'value' }),
       queryParams: { fields: { items: 'result' } }
     })
     assert.deepEqual(created.data.attributes, { result: 'Virtual:VALUE' })
@@ -381,7 +381,7 @@ describe(`Virtual input dependencies (${storageMode.mode})`, () => {
 
   it('fetches dependencies of a directly selected virtual getter and skips unused virtual callbacks', async () => {
     const created = await fixture.api.resources.items.post({
-      inputRecord: createJsonApiDocument('items', { name: 'Virtual', virtualSource: 'value', unusedVirtual: 'unused' }),
+      document: createJsonApiDocument('items', { name: 'Virtual', virtualSource: 'value', unusedVirtual: 'unused' }),
       queryParams: { fields: { items: 'virtualSource,unusedVirtual' } }
     })
     assert.deepEqual(created.data.attributes, { virtualSource: 'Virtual:VALUE' })
@@ -396,7 +396,7 @@ describe(`Virtual input dependencies (${storageMode.mode})`, () => {
         const result = await fixture.api.resources.items[method]({
           ...(item ? { id: item.id } : {}),
           format,
-          inputRecord: format === 'plain'
+          [format === 'plain' ? 'data' : 'document']: format === 'plain'
             ? { name: 'Owner', virtualSource: 'owner', group: group.id, parent: parent.id }
             : createJsonApiDocument('items', { name: 'Owner', virtualSource: 'owner' }, {
               group: { data: { type: 'groups', id: group.id } },

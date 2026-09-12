@@ -11,7 +11,7 @@ for (const phase of ['commit', 'rollback']) {
       const primary = new Error('Reject callback')
       try {
         await assert.rejects(fixture.api.transaction(async transaction => {
-          await fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'First write' } } } })
+          await fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'First write' } } } })
           completion = interceptTransactionCompletion(transaction, fixture.knex, { phase, afterExecution })
           borrowing = fixture.knex.client.acquireConnection()
           borrowing.catch(() => {})
@@ -25,7 +25,7 @@ for (const phase of ['commit', 'rollback']) {
         borrowed = null
         const committed = phase === 'commit' && afterExecution ? 1 : 0
         assert.equal(await fixture.count('items'), committed)
-        await fixture.api.transaction(transaction => fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'Second request' } } } }))
+        await fixture.api.transaction(transaction => fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'Second request' } } } }))
         assert.equal(await fixture.count('items'), committed + 1)
       } finally {
         if (!borrowed && borrowing) borrowed = await borrowing.catch(() => null)
@@ -44,7 +44,7 @@ for (const phase of ['commit', 'rollback']) {
     try {
       const operation = fixture.api.transaction(async transaction => {
         connection = await transaction.client.acquireConnection()
-        await fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'First write' } } } })
+        await fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'First write' } } } })
         borrowing = fixture.knex.client.acquireConnection()
         borrowing.catch(() => {})
         assert.equal(fixture.knex.client.pool.numPendingAcquires(), 1)
@@ -89,7 +89,7 @@ test('failed BEGIN releases its connection lease without lending the failed conn
     await fixture.knex.client.releaseConnection(borrowed)
     borrowed = null
     fixture.knex.client.removeListener('query', rejectBegin)
-    await fixture.api.transaction(transaction => fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'Next request' } } } }))
+    await fixture.api.transaction(transaction => fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'Next request' } } } }))
     assert.equal(await fixture.count('items'), 1)
   } finally {
     fixture.knex.client.removeListener('query', rejectBegin)
@@ -110,7 +110,7 @@ test('a rollback rejection without completion settlement releases an unusable co
       transaction = trx
       connection = await trx.client.acquireConnection()
       rollback = trx.rollback.bind(trx)
-      await fixture.api.resources.items.post({ transaction: trx, inputRecord: { data: { type: 'items', attributes: { name: 'Unfinished write' } } } })
+      await fixture.api.resources.items.post({ transaction: trx, document: { data: { type: 'items', attributes: { name: 'Unfinished write' } } } })
       t.mock.method(trx, 'rollback', async () => { throw secondary })
       borrowing = fixture.knex.client.acquireConnection()
       borrowing.catch(() => {})
@@ -124,8 +124,8 @@ test('a rollback rejection without completion settlement releases an unusable co
     await fixture.knex.client.releaseConnection(borrowed)
     borrowed = null
     assert.equal(await fixture.count('items'), 0)
-    await assert.rejects(fixture.api.resources.items.post({ transaction, inputRecord: { data: { type: 'items', attributes: { name: 'Rejected old owner' } } } }), /active transaction from api.transaction/)
-    await fixture.api.resources.items.post({ inputRecord: { data: { type: 'items', attributes: { name: 'Next request' } } } })
+    await assert.rejects(fixture.api.resources.items.post({ transaction, document: { data: { type: 'items', attributes: { name: 'Rejected old owner' } } } }), /active transaction from api.transaction/)
+    await fixture.api.resources.items.post({ document: { data: { type: 'items', attributes: { name: 'Next request' } } } })
     assert.equal(await fixture.count('items'), 1)
   } finally {
     if (!borrowed && borrowing) borrowed = await borrowing.catch(() => null)

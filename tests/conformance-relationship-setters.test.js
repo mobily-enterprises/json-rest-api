@@ -37,7 +37,7 @@ describe(`Relationship setter storage parity (${storageMode.mode})`, () => {
         const result = await fixture.api.resources.items[method]({
           ...(method === 'post' ? {} : { id }),
           format,
-          inputRecord: format === 'plain'
+          [format === 'plain' ? 'data' : 'document']: format === 'plain'
             ? { id, name: 'Written item', active: true, score: 0, group: group.id }
             : {
                 data: {

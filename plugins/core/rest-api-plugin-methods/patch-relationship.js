@@ -46,7 +46,7 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
     // Reuse existing patch with relationship data
     await scope.patch({
       id: context.id,
-      inputRecord: {
+      document: {
         data: {
           type: scopeName,
           id: context.id,

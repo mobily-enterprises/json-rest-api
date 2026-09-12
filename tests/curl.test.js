@@ -117,7 +117,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       // Create test data using API methods
       const countryDoc = createJsonApiDocument('countries', { name: 'CURL Test Country', code: 'CT' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       testData.country = countryResult.data
@@ -222,11 +222,11 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
     it('should handle query parameters using CURL', async () => {
       // Create additional countries
       await basicApi.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Another Country', code: 'AC' }),
+        document: createJsonApiDocument('countries', { name: 'Another Country', code: 'AC' }),
         format: 'jsonapi'
       })
       await basicApi.resources.countries.post({
-        inputRecord: createJsonApiDocument('countries', { name: 'Third Country', code: 'TC2' }),
+        document: createJsonApiDocument('countries', { name: 'Third Country', code: 'TC2' }),
         format: 'jsonapi'
       })
 
@@ -249,7 +249,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
         { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
 
@@ -346,7 +346,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       // Create complex test data
       const countryDoc = createJsonApiDocument('countries', { name: 'Complex Country', code: 'CC' })
       const countryResult = await basicApi.resources.countries.post({
-        inputRecord: countryDoc,
+        document: countryDoc,
         format: 'jsonapi'
       })
       testData.country = countryResult.data
@@ -356,7 +356,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
         { country: createRelationship(resourceIdentifier('countries', testData.country.id)) }
       )
       const publisherResult = await basicApi.resources.publishers.post({
-        inputRecord: publisherDoc,
+        document: publisherDoc,
         format: 'jsonapi'
       })
       testData.publisher = publisherResult.data
@@ -364,11 +364,11 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       const author1Doc = createJsonApiDocument('authors', { name: 'Complex Author One' })
       const author2Doc = createJsonApiDocument('authors', { name: 'Complex Author Two' })
       const author1Result = await basicApi.resources.authors.post({
-        inputRecord: author1Doc,
+        document: author1Doc,
         format: 'jsonapi'
       })
       const author2Result = await basicApi.resources.authors.post({
-        inputRecord: author2Doc,
+        document: author2Doc,
         format: 'jsonapi'
       })
       testData.authors = [author1Result.data, author2Result.data]
@@ -385,7 +385,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
         }
       )
       const bookResult = await basicApi.resources.books.post({
-        inputRecord: bookDoc,
+        document: bookDoc,
         format: 'jsonapi'
       })
       testData.book = bookResult.data
@@ -415,7 +415,7 @@ describe('CURL HTTP Abstraction Layer Tests', () => {
       // Create multiple books
       for (let i = 0; i < 5; i++) {
         await basicApi.resources.books.post({
-          inputRecord: createJsonApiDocument('books',
+          document: createJsonApiDocument('books',
             { title: `Book ${i}` },
             {
               country: createRelationship(resourceIdentifier('countries', testData.country.id)),

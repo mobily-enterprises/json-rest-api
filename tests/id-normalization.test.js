@@ -169,7 +169,7 @@ describe('Resource ID normalization', () => {
     countryDoc.data.id = countryId
 
     await defaultApi.resources.countries.post({
-      inputRecord: countryDoc,
+      document: countryDoc,
       format: 'jsonapi'
     })
 
@@ -196,12 +196,12 @@ describe('Resource ID normalization', () => {
     publisherDoc.data.id = publisherId
 
     await overrideApi.resources.countries.post({
-      inputRecord: countryDoc,
+      document: countryDoc,
       format: 'jsonapi'
     })
 
     await overrideApi.resources.publishers.post({
-      inputRecord: publisherDoc,
+      document: publisherDoc,
       format: 'jsonapi'
     })
 
@@ -223,26 +223,26 @@ describe('Resource ID normalization', () => {
   })
 
   it('compares path and body IDs after the selected normalizer in both formats', async () => {
-    await overrideApi.resources.publishers.post({ format: 'plain', inputRecord: { id: 'shared-id', name: 'Original' } })
+    await overrideApi.resources.publishers.post({ format: 'plain', data: { id: 'shared-id', name: 'Original' } })
     for (const format of ['plain', 'jsonapi']) {
       for (const method of ['patch', 'put']) {
         const inputRecord = format === 'plain'
           ? { id: ' shared-id ', name: 'Changed' }
           : { data: { type: 'publishers', id: ' shared-id ', attributes: { name: 'Changed' } } }
-        const updated = await overrideApi.resources.publishers[method]({ id: ' SHARED-ID ', format, inputRecord })
+        const updated = await overrideApi.resources.publishers[method]({ id: ' SHARED-ID ', format, [format === 'plain' ? 'data' : 'document']: inputRecord })
         assert.equal(format === 'plain' ? updated.id : updated.data.id, 'SHARED-ID')
         if (format === 'plain') inputRecord.id = 'different-id'
         else inputRecord.data.id = 'different-id'
-        await assert.rejects(overrideApi.resources.publishers[method]({ id: 'shared-id', format, inputRecord }), error => {
+        await assert.rejects(overrideApi.resources.publishers[method]({ id: 'shared-id', format, [format === 'plain' ? 'data' : 'document']: inputRecord }), error => {
           assert.equal(error.code, 'REST_API_VALIDATION')
           assert.equal(error.details.violations[0].rule, 'id_consistency')
           return true
         })
       }
     }
-    const country = await overrideApi.resources.countries.post({ format: 'plain', inputRecord: { id: ' Country-ID ', name: 'Country' } })
+    const country = await overrideApi.resources.countries.post({ format: 'plain', data: { id: ' Country-ID ', name: 'Country' } })
     assert.equal(country.id, 'country-id')
-    const updated = await overrideApi.resources.countries.patch({ id: ' COUNTRY-ID ', format: 'plain', inputRecord: { id: 'country-id', name: 'Updated' } })
+    const updated = await overrideApi.resources.countries.patch({ id: ' COUNTRY-ID ', format: 'plain', data: { id: 'country-id', name: 'Updated' } })
     assert.equal(updated.id, 'country-id')
   })
 
@@ -253,7 +253,7 @@ describe('Resource ID normalization', () => {
     inputRecord.data.id = '  publisher-explicit  '
 
     const result = await overrideApi.resources.publishers.post({
-      inputRecord,
+      document: inputRecord,
       returning: 'none',
       format: 'jsonapi'
     })
@@ -291,7 +291,7 @@ describe('Resource ID normalization', () => {
 
     await assert.rejects(
       () => overrideApi.resources.publishers.post({
-        inputRecord,
+        document: inputRecord,
         format: 'jsonapi'
       }),
       (error) => {
@@ -327,7 +327,7 @@ describe('Resource ID normalization', () => {
     countryRecord.data.id = 'country-1'
 
     await overrideApi.resources.countries.post({
-      inputRecord: countryRecord,
+      document: countryRecord,
       format: 'jsonapi'
     })
 
@@ -344,7 +344,7 @@ describe('Resource ID normalization', () => {
     publisherRecord.data.id = 'publisher-country'
 
     await overrideApi.resources.publishers.post({
-      inputRecord: publisherRecord,
+      document: publisherRecord,
       format: 'jsonapi'
     })
 
@@ -370,7 +370,7 @@ describe('Resource ID normalization', () => {
     publisherRecord.data.id = 'publisher-invalid-relationship'
 
     await overrideApi.resources.publishers.post({
-      inputRecord: publisherRecord,
+      document: publisherRecord,
       format: 'jsonapi'
     })
 
@@ -403,7 +403,7 @@ describe('Resource ID normalization', () => {
     tagRecord.data.id = 'tag-1'
 
     await overrideApi.resources.tags.post({
-      inputRecord: tagRecord,
+      document: tagRecord,
       format: 'jsonapi'
     })
 
@@ -413,7 +413,7 @@ describe('Resource ID normalization', () => {
     publisherRecord.data.id = 'publisher-tags'
 
     await overrideApi.resources.publishers.post({
-      inputRecord: publisherRecord,
+      document: publisherRecord,
       format: 'jsonapi'
     })
 

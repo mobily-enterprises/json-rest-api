@@ -205,7 +205,7 @@ for (const relationshipName of ['items', 'mentions']) {
       it(`bounds membership reads for resource ${method.toUpperCase()} payloads`, async () => {
         const wanted = targets.slice(2)
         await measured(() => fixture.api.resources.groups[method]({
-          id: parent, format: 'jsonapi', returning: 'none', inputRecord: { data: { type: 'groups', id: parent, attributes: { name: 'Changed' }, relationships: { [relationshipName]: { data: wanted } } } }
+          id: parent, format: 'jsonapi', returning: 'none', document: { data: { type: 'groups', id: parent, attributes: { name: 'Changed' }, relationships: { [relationshipName]: { data: wanted } } } }
         }))
         assert.deepEqual(await membership(), wanted.map(row => row.id).sort())
       })
