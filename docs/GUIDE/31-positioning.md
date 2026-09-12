@@ -47,6 +47,9 @@ not add the field or migrate an existing database. Install the plugin before
 registering participating resources. Each resource not excluded by configuration
 must also declare the grouping fields.
 
+Validation uses the compiled schema after `schema:enrich`, so a setup hook may
+supply the position field. Its final definition must be a string without a setter.
+
 Installation creates the internal `json_rest_api_positioning_locks` table when
 it is absent. It stores one coordinator row per physical resource, including
 the tenant/resource identity for canonical storage. Provision that table during

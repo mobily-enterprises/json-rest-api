@@ -1,5 +1,5 @@
 // @ts-check
-import { createStorageAdapter, createSelectTranslator, translateSelectFieldsForAdapter } from '../../plugins/core/lib/storage/storage-adapter.js'
+import { createStorageAdapter, createSelectTranslator } from '../../plugins/core/lib/storage/storage-adapter.js'
 import { createStorageAdapterUtilities } from '../../plugins/core/lib/querying/storage-adapter-utils.js'
 import { getCanonicalFieldValue, translateCanonicalRecordFromStorage } from '../../plugins/core/lib/storage/canonical-storage-mapping.js'
 import { translateAttributesForStorage, translateRecordFromStorage } from '../../plugins/core/lib/storage/storage-mapping.js'
@@ -37,8 +37,6 @@ export function checkStorageAdapterContracts (knex) {
   const canonicalAttributes = translateCanonicalRecordFromStorage({ logical_id: '1' }, {}).attributes
   getCanonicalFieldValue(null, {}, 'id')
   createSelectTranslator(null)
-  translateSelectFieldsForAdapter(['id', knex.raw('?', [1])], adapter)
-  translateSelectFieldsForAdapter(undefined, undefined)
 
   // @ts-expect-error A logical column name is a string.
   adapter.translateColumn(42)

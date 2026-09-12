@@ -1,5 +1,5 @@
 import { assertScalarQueryField } from '../querying-writing/field-utils.js'
-import { analyzeRequiredIndexes, buildJoinChain } from './knex-cross-table-search.js'
+import { buildJoinChain } from './knex-cross-table-search.js'
 import { createStorageAdapterUtilities } from './storage-adapter-utils.js'
 import { unwrapQueryBuilderState } from './query-builder-utils.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
@@ -480,13 +480,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
   const aliasScopeMap = new Map()
   aliasScopeMap.set(tableAlias, scopeName)
 
-  // Step 1: Analyze indexes
-  const requiredIndexes = analyzeRequiredIndexes(scopes, log, scopeName, schemaInfo)
-  if (requiredIndexes.length > 0) {
-    log.debug('Cross-table search requires indexes:', requiredIndexes)
-  }
-
-  // Step 2: Build JOIN maps
+  // Build JOIN maps.
   const joinMap = new Map()
   const fieldPathMap = new Map()
   let hasCrossTableFilters = false
@@ -572,7 +566,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
     return adapterUtils.translateFilterValue(scopeName, field, value)
   }
 
-  // Step 3: Apply JOINs
+  // Apply JOINs.
   const appliedJoins = new Set()
 
   const applyPolymorphicJoin = (join, source) => {
@@ -635,7 +629,7 @@ export const crossTableFiltersHook = async (hookParams, dependencies) => {
     }
   }
 
-  // Step 4: Handle DISTINCT
+  // Handle DISTINCT.
   let hasOneToManyJoins = false
   joinMap.forEach((joinInfo) => {
     if (joinInfo.isOneToMany) {

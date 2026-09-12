@@ -92,6 +92,25 @@ describe(`Direct storage boundaries (${storageMode.mode})`, () => {
   })
   after(async () => fixture?.close())
 
+  for (const batch of [false, true]) {
+    it(`keeps minimal identity and storage attributes when filtering adds a projection (${batch ? 'batch' : 'single'})`, async () => {
+      await seedStorageAdapterRecords(fixture.knex, schemaInfo, [{ id: '0', name: 'Stored', quantity: 2 }])
+      const record = await fixture.api.helpers.dataGetMinimal({
+        scopeName: 'items',
+        context: { scopeName: 'items', id: '0', db: fixture.knex, schemaInfo, queryParams: {} },
+        ...(batch ? { ids: ['0'] } : {}),
+        applyQueryFilters: async ({ query }) => ({
+          query: query.clearSelect().select(adapter.translateColumn('name'))
+        })
+      })
+      const resource = batch ? record[0] : record
+      assert.equal(resource.id, '0')
+      assert.equal(resource.attributes.name, 'Stored')
+      assert.equal(resource.attributes.quantity, 2)
+      assert.equal(resource.type, 'items')
+    })
+  }
+
   it('combines mandatory mapped values with an ID subquery and existing predicates', async () => {
     await seedStorageAdapterRecords(fixture.knex, schemaInfo, [
       { id: '0', name: 'Chosen', quantity: 0, active: false, coded: 'code', ownerId: null },

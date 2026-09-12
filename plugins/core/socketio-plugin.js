@@ -1,7 +1,7 @@
 import { throwMissingPackage } from '../../lib/missing-package.js'
 import { randomUUID } from 'node:crypto'
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
-import { errorMessage } from '../../lib/error-context.js'
+import { errorMessage, getOperationDiagnosticContext } from '../../lib/error-context.js'
 import { queryConstraint } from './lib/querying/query-constraint.js'
 
 const pendingRoomChanges = new WeakMap()
@@ -43,7 +43,13 @@ async function matchesSubscription ({ subscription, scopeName, id, transaction, 
   } catch (error) {
     try {
       await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo })
-        .warn('Socket.IO subscription query failed', { scopeName, subscriptionId: subscription.id, error })
+        .warn('Socket.IO subscription query failed', {
+          ...getOperationDiagnosticContext({ transaction }, {
+            phase: 'subscriptionMatch', method: 'query', scopeName, backend: api.knex?.instance?.client?.config?.client
+          }),
+          subscriptionId: subscription.id,
+          error
+        })
     } catch { /* Warning failure must preserve the existing non-match result. */ }
     return false
   }
@@ -94,7 +100,9 @@ async function authenticateSocket ({ socket, api, helpers, log, config }) {
         await onAuthenticationFailed({ socket, error, log })
       } catch (hookError) {
         try {
-          await log.error('socketio auth failure handler threw error', hookError)
+          await log.error('socketio auth failure handler threw error', {
+            ...getOperationDiagnosticContext({}, { phase: 'authenticationFailureHook', method: 'socketAuthenticate', backend: 'socketio' }), error: hookError
+          })
         } catch { /* A diagnostic failure must not replace the authentication rejection. */ }
       }
     }
@@ -193,14 +201,18 @@ async function registerSubscription ({ socket, data, scopes, runHooks, log, conf
       throw error
     }
     try {
-      await log.info(`Socket ${socket.id} subscribed to ${resource}`, { subscriptionId })
+      await log.info(`Socket ${socket.id} subscribed to ${resource}`, {
+        ...getOperationDiagnosticContext({}, { phase: 'subscriptionReady', method: 'subscribe', scopeName, backend: 'socketio' }), subscriptionId
+      })
     } catch { /* Logging cannot undo a subscription already installed in its room. */ }
     return { subscriptionId, resource, filters: subscription.filters, status: 'active' }
   } catch (error) {
     // Only a successfully resolved resource supplies diagnostic field policy.
     try {
       await createEnhancedLogger(log, { schemaInfo: scope?.vars?.schemaInfo })
-        .error('Socket.IO subscribe error', { operation: 'subscribe', phase: 'admission', scopeName, error })
+        .error('Socket.IO subscribe error', {
+          ...getOperationDiagnosticContext({}, { phase: 'admission', method: 'subscribe', scopeName, backend: 'socketio' }), operation: 'subscribe', error
+        })
     } catch { /* Logging must not replace the subscription rejection. */ }
     throw error
   }
@@ -260,13 +272,22 @@ async function performBroadcast ({ method, scopeName, id, isCreate, recipients, 
     } catch (error) {
       try {
         await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo })
-          .warn('Socket.IO notification permission check failed', { scopeName, subscriptionId: subscription.id, error })
+          .warn('Socket.IO notification permission check failed', {
+            ...getOperationDiagnosticContext({}, {
+              phase: 'notificationPermission', method: 'query', scopeName, backend: api.knex?.instance?.client?.config?.client
+            }),
+            subscriptionId: subscription.id,
+            error
+          })
       } catch { /* Warning failure must not interrupt delivery to other recipients. */ }
       continue
     }
 
+    let type = 'resource.updated'
+    if (method === 'delete') type = 'resource.deleted'
+    else if (method === 'post' || (method === 'put' && isCreate)) type = 'resource.created'
     const notification = {
-      type: method === 'delete' ? 'resource.deleted' : method === 'post' || (method === 'put' && isCreate) ? 'resource.created' : 'resource.updated',
+      type,
       resource: scopeName,
       id: String(id),
       action: method,
@@ -291,15 +312,29 @@ export const SocketIOPlugin = {
     let Server
     try {
       ({ Server } = await import('socket.io'))
-    } catch (error) {
+    } catch {
       throwMissingPackage('socket.io', 'socketio', 'Socket.IO is required for WebSocket support. This is a peer dependency.')
-      throw error
     }
 
-    let createAdapter
-    let createClient
     let io
     let starting = false
+
+    async function logRedisWarning (message, details) {
+      try { await log.warn(message, details) } catch { /* Diagnostic writers must not escape Redis event handlers. */ }
+    }
+
+    async function logSocketInfo (message, details) {
+      try { await log.info(message, details) } catch { /* Information logs must not interrupt socket event handling. */ }
+    }
+
+    async function closeRedisClient (role, client) {
+      const diagnostic = getOperationDiagnosticContext({}, { phase: 'redisShutdown', method: 'socketioShutdown', backend: 'redis' })
+      try {
+        if (client.isOpen) await client.close()
+      } catch (error) {
+        await logRedisWarning('Socket.IO Redis shutdown failed', { ...diagnostic, role, error })
+      }
+    }
 
     api.startSocketServer = async (server, startOptions = {}) => {
       if (starting || io) throw new Error('Socket.IO server is already starting or started')
@@ -311,50 +346,64 @@ export const SocketIOPlugin = {
       const cors = startOptions.cors || config.transport.cors || { origin: '*', methods: ['GET', 'POST'] }
 
       let redisClients
+      let createAdapter
+      let pendingConnections = []
       starting = true
       try {
         if (redisConfig) {
+          let createClient
           try {
             ({ createClient } = await import('redis'))
-          } catch (error) {
+          } catch {
             throwMissingPackage('redis', 'socketio', 'Redis is required for Socket.IO horizontal scaling. This is a peer dependency.')
-            throw error
           }
 
           try {
             ({ createAdapter } = await import('@socket.io/redis-adapter'))
-          } catch (error) {
+          } catch {
             throwMissingPackage('@socket.io/redis-adapter', 'socketio',
               'Socket.IO Redis adapter is required for horizontal scaling. This is a peer dependency.')
-            throw error
           }
 
           const pubClient = createClient(redisConfig)
-          redisClients = { pubClient, subClient: pubClient.duplicate() }
+          redisClients = { pubClient }
+          redisClients.subClient = pubClient.duplicate()
+          const diagnostic = getOperationDiagnosticContext({}, { phase: 'redisConnect', method: 'socketioStart', backend: 'redis' })
           for (const [role, client] of Object.entries(redisClients)) {
-            client.on('error', error => log.warn('Socket.IO Redis connection error', { role, message: error.message, error }))
+            client.on('error', error => logRedisWarning('Socket.IO Redis connection error', { ...diagnostic, role, error }))
           }
-          const connections = Object.values(redisClients).map(client => client.connect())
-          try {
-            await Promise.all(connections)
-          } catch (error) {
-            for (const client of Object.values(redisClients)) if (client.isOpen) client.destroy()
-            await Promise.allSettled(connections)
-            throw error
-          }
+          // Async wrappers retain both attempts even if connect throws synchronously.
+          pendingConnections = Object.values(redisClients).map(async client => client.connect())
+          await Promise.all(pendingConnections)
         }
 
-        io = new Server(server, { path, cors, transports: ['websocket', 'polling'] })
+        const socketServer = new Server({ path, cors, transports: ['websocket', 'polling'] })
         if (redisClients) {
-          io.adapter(createAdapter(redisClients.pubClient, redisClients.subClient))
-          vars.socketIORedisClients = redisClients
-          log.info('Socket.IO configured with Redis adapter')
+          socketServer.adapter(createAdapter(redisClients.pubClient, redisClients.subClient))
+          await logSocketInfo('Socket.IO configured with Redis adapter', getOperationDiagnosticContext({}, {
+            phase: 'redisConnect', method: 'socketioStart', backend: 'redis'
+          }))
         }
+        socketServer.attach(server)
+        io = socketServer
+        vars.socketIORedisClients = redisClients
         vars.socketIO = io
         api.io = io
         config.auth = authConfig
       } catch (error) {
-        for (const client of Object.values(redisClients || {})) if (client.isOpen) client.destroy()
+        const errors = [error]
+        for (const client of Object.values(redisClients || {})) {
+          try {
+            if (client.isOpen) await client.destroy()
+          } catch (cleanupError) {
+            errors.push(cleanupError)
+          }
+        }
+        // Failed destruction may leave an attempt pending; do not wait for it forever.
+        if (errors.length > 1) {
+          throw new AggregateError(errors, 'Socket.IO Redis setup and cleanup failed', { cause: error })
+        }
+        await Promise.allSettled(pendingConnections)
         throw error
       } finally {
         starting = false
@@ -367,9 +416,7 @@ export const SocketIOPlugin = {
         delete api.io
         vars.socketIO = undefined
         vars.socketIORedisClients = undefined
-        for (const [role, client] of Object.entries(redisClients || {})) {
-          if (client.isOpen) client.close().catch(error => log.warn('Socket.IO Redis shutdown failed', { role, error }))
-        }
+        for (const [role, client] of Object.entries(redisClients || {})) closeRedisClient(role, client)
       })
 
       io.use(async (socket, next) => {
@@ -380,7 +427,9 @@ export const SocketIOPlugin = {
           next()
         } catch (error) {
           try {
-            await log.warn('Socket.IO authentication failed', error)
+            await log.warn('Socket.IO authentication failed', {
+              ...getOperationDiagnosticContext({}, { phase: 'authentication', method: 'socketAuthenticate', backend: 'socketio' }), error
+            })
           } catch { /* The client must still receive the authentication rejection. */ }
           const message = error == null ? 'Authentication failed' : errorMessage(error) || 'Authentication failed'
           next(new Error(message, { cause: error }))
@@ -388,7 +437,8 @@ export const SocketIOPlugin = {
       })
 
       io.on('connection', (socket) => {
-        log.info(`Socket connected: ${socket.id}`, {
+        logSocketInfo(`Socket connected: ${socket.id}`, {
+          ...getOperationDiagnosticContext({}, { phase: 'socketConnected', method: 'socketConnect', backend: 'socketio' }),
           userId: socket.data.auth?.userId ?? null
         })
 
@@ -420,6 +470,7 @@ export const SocketIOPlugin = {
 
         socket.on('unsubscribe', async (payload, callback) => {
           callback = typeof callback === 'function' ? callback : null
+          let scopeName
           try {
             const subscriptionId = payload?.subscriptionId
             if (!subscriptionId) {
@@ -434,6 +485,7 @@ export const SocketIOPlugin = {
               if (callback) callback({ error })
               return
             }
+            scopeName = subscription.resource
 
             socket.data.subscriptions.splice(socket.data.subscriptions.indexOf(subscription), 1)
             const hasOther = socket.data.subscriptions
@@ -442,13 +494,15 @@ export const SocketIOPlugin = {
               await changeRoom(socket, 'leave', `${subscription.resource}:updates`)
             }
 
-            try {
-              await log.info(`Socket ${socket.id} unsubscribed from ${subscription.resource}`, { subscriptionId })
-            } catch { /* Logging cannot undo a completed unsubscribe. */ }
+            await logSocketInfo(`Socket ${socket.id} unsubscribed from ${subscription.resource}`, {
+              ...getOperationDiagnosticContext({}, { phase: 'subscriptionRemoved', method: 'unsubscribe', scopeName, backend: 'socketio' }), subscriptionId
+            })
             if (callback) callback({ success: true })
           } catch (error) {
             try {
-              await log.error('Socket.IO unsubscribe error', error)
+              await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo }).error('Socket.IO unsubscribe error', {
+                ...getOperationDiagnosticContext({}, { phase: 'subscriptionRemoval', method: 'unsubscribe', scopeName, backend: 'socketio' }), error
+              })
             } catch { /* Report the room failure even when diagnostics fail. */ }
             if (callback) {
               callback({
@@ -482,12 +536,16 @@ export const SocketIOPlugin = {
 
             if (callback) callback({ success: true, ...result })
           } catch (error) {
-            log.error('Socket.IO restore subscriptions error', error)
+            try {
+              await log.error('Socket.IO restore subscriptions error', {
+                ...getOperationDiagnosticContext({}, { phase: 'subscriptionRestore', method: 'restoreSubscriptions', backend: 'socketio' }), error
+              })
+            } catch { /* Report the restore failure even when diagnostics fail. */ }
             if (callback) {
               callback({
                 error: {
                   code: 'RESTORE_ERROR',
-                  message: error.message
+                  message: error == null ? 'Subscription restore failed' : errorMessage(error)
                 }
               })
             }
@@ -495,14 +553,17 @@ export const SocketIOPlugin = {
         })
 
         socket.on('disconnect', (reason) => {
-          log.info(`Socket disconnected: ${socket.id}`, {
+          logSocketInfo(`Socket disconnected: ${socket.id}`, {
+            ...getOperationDiagnosticContext({}, { phase: 'socketDisconnected', method: 'socketDisconnect', backend: 'socketio' }),
             reason,
             subscriptionCount: socket.data.subscriptions?.length || 0
           })
         })
       })
 
-      log.info('Socket.IO server started', { path })
+      await logSocketInfo('Socket.IO server started', {
+        ...getOperationDiagnosticContext({}, { phase: 'socketStartup', method: 'socketioStart', backend: 'socketio' }), path
+      })
       return io
     }
 

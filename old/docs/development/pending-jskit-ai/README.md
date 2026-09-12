@@ -1,5 +1,42 @@
 # Parked jskit-ai API migration
 
+## Current source preparation, 2026-09-12
+
+[v2-source-preparation.patch](v2-source-preparation.patch) captures the current
+**42-file** source port against jskit-ai `70163546304ee1fed80cbf1c6ec67517294db855`.
+Its [manifest](v2-source-preparation-manifest.json) records base/prepared hashes,
+the required library worktree, ownership snapshot and deferred dependencies.
+The temporary clone has been removed. Active jskit-ai/integrations, Vibe64 and
+seeds were not edited. Consumer checks have not run; subsequent library
+verification is recorded in [preparation status](preparation-status.md).
+
+This patch supersedes the intent of the older 13-file patch below. **Do not apply
+both.** It includes the host, CRUD/user/workspace repositories, managed owners,
+duplicate handling, HTTP/client outcomes, post-commit failures and authored tests.
+It deliberately excludes manifests, lockfiles, catalog and generated docs.
+
+Before landing, refresh the active integrations diff and reconcile dependencies
+and generated outputs as described in [preparation status](preparation-status.md).
+In particular, json-rest-api-core must select v2 and remove hooked-api, crud-core
+now needs a direct v2 dependency for `RestApiWriteError`, and engines must reflect
+Node 24+. The patch is not independently runnable against current v1 dependencies.
+
+From this library's root, a later static applicability check is:
+
+```sh
+git -C ../jskit-ai apply --check "$PWD/old/docs/development/pending-jskit-ai/v2-source-preparation.patch"
+```
+
+Review conflicts against the new source; do not restore whole archived files
+over current work. A clean patch check does not establish runtime compatibility.
+Consumer checks and generators remain deferred until the integration checkpoint.
+
+## Historical first batch
+
+For the newly authorized v2 preparation batch, current ownership boundaries and
+explicitly deferred tests, read [Current preparation status](preparation-status.md).
+The older patch and capture evidence below remain intact.
+
 The maintainer requested that this unfinished migration live in json-rest-api
 instead of a separate worktree or the active jskit-ai checkout. The library
 implementation goal has resumed, but consumer work remains paused. Do not apply
@@ -37,7 +74,7 @@ The manifest records the exact command and result.
 3. From the json-rest-api repository root, check whether the patch still applies:
 
    ```sh
-   git -C ../jskit-ai apply --check "$PWD/docs/development/pending-jskit-ai/migration.patch"
+   git -C ../jskit-ai apply --check "$PWD/old/docs/development/pending-jskit-ai/migration.patch"
    ```
 
    After reviewing the affected paths, apply with `git apply` using the same

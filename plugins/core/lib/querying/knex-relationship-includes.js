@@ -1,5 +1,5 @@
 import { RELATIONSHIPS_KEY } from '../querying-writing/knex-constants.js'
-import { wrapUnexpectedError } from '../../../../lib/error-context.js'
+import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../../../lib/error-context.js'
 import { getFieldValueForScope, parseIncludeTree } from './include-query-helpers.js'
 import { loadBelongsTo, loadHasOne, loadPolymorphicBelongsTo } from './include-to-one.js'
 import { loadHasMany, loadReversePolymorphic } from './include-to-many.js'
@@ -128,12 +128,14 @@ export const processIncludes = async (scope, deps) => {
     }
 
     if (!handled) {
-      log.warn('[INCLUDE] Unknown relationship:', {
-        scopeName,
-        includeName,
-        availableFields: Object.keys(schemaStructure || {}).filter(k => schemaStructure[k].as),
-        availableRelationships: Object.keys(schemaRelationships || {})
-      })
+      try {
+        await log.warn('[INCLUDE] Unknown relationship:', {
+          ...getOperationDiagnosticContext(requestContext || {}, { phase: 'include', scopeName, backend: knex.client?.config?.client }),
+          includeName,
+          availableFields: Object.keys(schemaStructure || {}).filter(k => schemaStructure[k].as),
+          availableRelationships: Object.keys(schemaRelationships || {})
+        })
+      } catch { /* Diagnostics must preserve the unknown-relationship decision. */ }
     }
     for (const record of recordsToProcess) {
       const recordId = getFieldValueForScope(scopes, scopeName, record, 'id')
@@ -168,7 +170,7 @@ export const buildIncludedResources = async (scope, deps) => {
   const { records, scopeName, includeParam, fields } = scope
   const { scopes, log, knex, capabilities, requestContext } = deps.context
   try {
-    log.trace('[INCLUDE] Building included resources:', { scopeName, includeParam, recordCount: records.length })
+    log.trace('[INCLUDE] Building included resources:', { scopeName, recordCount: records.length })
 
     // Check if includes are empty or records are empty
     if (!includeParam || records.length === 0) {
@@ -191,7 +193,7 @@ export const buildIncludedResources = async (scope, deps) => {
     // Parse the include parameter
     const includeTree = parseIncludeTree(includeParam)
 
-    log.debug('[INCLUDE] Parsed include tree:', includeTree)
+    log.debug('[INCLUDE] Parsed include tree:', { relationshipCount: Object.keys(includeTree).length })
 
     // Share primary linkage with the include graph when a path returns to it.
     const primary = new Map(records.map(record => {

@@ -8,7 +8,7 @@ import {
   COMPUTED_DEPENDENCIES_KEY,
   RELATIONSHIP_READ_BATCH_SIZE,
 } from '../querying-writing/knex-constants.js'
-import { wrapUnexpectedError } from '../../../../lib/error-context.js'
+import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../../../lib/error-context.js'
 import { getPolymorphicLinkage } from '../querying-writing/relationship-contracts.js'
 import {
   resolveScopeStorageAdapter,
@@ -55,7 +55,11 @@ export const loadBelongsTo = async (scope, deps) => {
     // Get the target scope name
     const targetScope = fieldDef.belongsTo
     if (!scopes[targetScope]) {
-      log.warn('[INCLUDE] Target scope not found:', targetScope)
+      try {
+        await log.warn('[INCLUDE] Target scope not found:', {
+          ...getOperationDiagnosticContext(requestContext || {}, { phase: 'include', scopeName, backend: knex.client?.config?.client }), targetScope
+        })
+      } catch { /* Diagnostics must preserve the missing-target decision. */ }
       return
     }
 
@@ -314,7 +318,11 @@ export const loadHasOne = async (scope, deps) => {
   for (const related of relatedRecords) {
     const parentId = getFieldValueForScope(scopes, targetScope, related, foreignKey)
     if (relatedByParentId[parentId]) {
-      log.warn(`[INCLUDE] Multiple records found for hasOne relationship '${includeName}' with ${foreignKey}=${parentId}`)
+      try {
+        await log.warn('[INCLUDE] Multiple records found for hasOne relationship', {
+          ...getOperationDiagnosticContext(requestContext || {}, { phase: 'include', scopeName, backend: knex.client?.config?.client }), includeName, foreignKey
+        })
+      } catch { /* Diagnostics must preserve the existing record selection. */ }
     }
     relatedByParentId[parentId] = related
   }

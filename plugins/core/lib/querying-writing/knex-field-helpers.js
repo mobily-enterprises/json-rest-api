@@ -1,5 +1,5 @@
 // @ts-check
-/** @import { FieldSelection, SelectedQuery, SelectionContext, SelectionQueryRequest, SelectionSchema, SelectionScope } from './field-selection-types.js' */
+/** @import { FieldSelection, SelectedQuery, SelectionContext, SelectionQueryRequest, SelectionScope } from './field-selection-types.js' */
 /** @import { StorageFieldDefinition } from '../storage/storage-types.js' */
 import { buildQuerySelection } from '../querying/knex-query-helpers-base.js'
 import { createSelectTranslator } from '../storage/storage-adapter.js'
@@ -22,19 +22,6 @@ export const validateRequestedFieldsets = async (context, scopes) => {
       context: { scopeName, queryParams: { fields: context.queryParams?.fields } }
     })
   }
-}
-
-/**
- * Computed and virtual fields have no database column; absent fields return undefined.
- * @param {string} fieldName
- * @param {SelectionSchema} schemaInfo
- * @returns {boolean | undefined}
- */
-export const isNonDatabaseField = (fieldName, schemaInfo) => {
-  const { computed = {}, schemaStructure = {} } = schemaInfo
-  if (Object.hasOwn(computed, fieldName)) return true
-  const fieldDef = schemaStructure[fieldName]
-  return fieldDef && fieldDef.virtual === true
 }
 
 /**

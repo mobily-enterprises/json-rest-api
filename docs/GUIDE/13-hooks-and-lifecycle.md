@@ -286,7 +286,7 @@ context or enforce ownership through proxies.
 | `schemaInfo`, `params`, `queryParams`, `format`, `returning`, `simplified` | Library-owned compiled schema, request parameters and selected response behavior. | Set public options in method arguments. Do not overwrite these fields to redirect processing. Use schema declarations, row policies and documented query hooks for customization. |
 | `minimalRecord`, `originalMinimalRecord`, `originalInputAttributes`, `originalRecord` | Library-owned stored data and snapshots; availability depends on the stage. | Inspect them when available. Do not change snapshots to influence validation, permissions or persistence. |
 | `transaction`, `db`, `shouldCommit`, `transactionOutcome`, `transactionCommitted`, `error`, `cleanupErrors` | Library-owned transaction and failure state. | Inspect through the documented transaction/error contract. Pass transaction handles through method arguments; do not replace these fields, forge outcomes or erase diagnostics. |
-| `knexQuery`, `storageAdapter` | Temporary state at native query hook boundaries. | Modify the supported query builder through the documented filtering contract; do not replace internal state or retain a builder for a later operation. |
+| `knexQuery`, `storageAdapter` | Temporary state at native query hook boundaries, also visible to nested query permission checks. | `knexQuery` is a filtering envelope; its `query` property holds the native builder. Use the [documented filtering contract](29-writing-plugins.md#knexqueryfiltering), and do not retain a builder for a later operation. |
 
 Fields belonging to optional plugins follow those plugins' documented hooks.
 Other implementation fields are not extension points simply because they are

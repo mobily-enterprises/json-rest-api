@@ -7,9 +7,11 @@ import { holdManagedTransaction } from './helpers/transaction-completion.js'
 import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { PositioningPlugin } from '../plugins/core/rest-api-positioning-plugin.js'
+import { RestApiValidationError } from '../lib/rest-api-errors.js'
+import { assertWriteFailure } from './helpers/test-utils.js'
 
 describe(`Positioning transaction coordination (${databaseClient}, ${storageMode.mode})`, { timeout: 30000 }, () => {
-  let fixture, entering, calculated, permission, finish, nextTransactionOptions
+  let fixture, entering, calculated, permission, readTarget, finish, nextTransactionOptions
   const sqlite = databaseClient === 'better-sqlite3'
   const post = (data, transaction, context) => fixture.api.resources.tasks.post({ data, transaction, format: 'jsonapi' }, context)
   const patch = (id, data, transaction, context) => fixture.api.resources.tasks.patch({ id, data, transaction, format: 'jsonapi' }, context)
@@ -40,12 +42,13 @@ describe(`Positioning transaction coordination (${databaseClient}, ${storageMode
         beforeDataCallPost: { functionName: 'positioning-post-observer', afterFunction: 'calculate-position-post', handler: ({ context }) => calculated?.(context) },
         beforeDataCallPatch: { functionName: 'positioning-patch-observer', afterFunction: 'calculate-position-patch', handler: ({ context }) => calculated?.(context) },
         checkPermissions: ({ context }) => permission?.(context.originalContext ?? context),
+        beforeDataGet: ({ context }) => readTarget?.(context),
         finishPost: ({ context }) => finish?.(context)
       }
     })
   })
   beforeEach(async () => {
-    entering = calculated = permission = finish = nextTransactionOptions = undefined
+    entering = calculated = permission = readTarget = finish = nextTransactionOptions = undefined
     await fixture.reset()
   })
   after(async () => { await fixture?.close() })
@@ -112,6 +115,36 @@ describe(`Positioning transaction coordination (${databaseClient}, ${storageMode
     const next = (await post({ title: 'Allowed', category: null, beforeId: target.id })).data
     assert.ok(next.attributes.position < target.attributes.position)
   })
+
+  for (const phase of ['permission', 'beforeDataGet']) {
+    for (const [name, failure] of [
+      ['null', null],
+      ['undefined', undefined],
+      ['typed error', Object.freeze(new RestApiValidationError('Target read failed'))],
+      ['untyped not-found object', Object.freeze({ subtype: 'not_found' })]
+    ]) {
+      it(`retains placement-target ${phase} failures: ${name}`, async () => {
+        const target = (await post({ title: 'Target', category: null })).data
+        let calls = 0
+        const rejectTarget = context => {
+          if (context.method === 'get' && String(context.id) === target.id) {
+            calls++
+            throw failure
+          }
+        }
+        if (phase === 'permission') permission = rejectTarget
+        else readTarget = rejectTarget
+        await assert.rejects(post({ title: 'Rejected', category: null, beforeId: target.id }), error => {
+          return assertWriteFailure(error, { cause: failure, outcome: 'rolledBack' })
+        })
+        assert.equal(calls, 1)
+        assert.deepEqual((await list(null)).map(record => record.id), [target.id])
+        permission = readTarget = undefined
+        const next = (await post({ title: 'Allowed', category: null, beforeId: target.id })).data
+        assert.ok(next.attributes.position < target.attributes.position)
+      })
+    }
+  }
 
   it('rolls back a failed response and releases its allocated position and database lock', async () => {
     finish = context => { if (context.rejectResponse) throw new Error('Response rejected') }

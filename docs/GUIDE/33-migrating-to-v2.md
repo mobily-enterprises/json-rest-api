@@ -402,6 +402,10 @@ checks, instead of imposing an ID-only parent fieldset. Its response still
 contains only linkage and links. A parent data-permission hook that denies a
 normal GET can now deny the linkage endpoint using the same attributes.
 
+`getRelated` and `getRelationship` set the current resource's `scopeName` before
+permission hooks run. Reusing a context from another resource cannot leave those
+hooks checking its stale resource name.
+
 Included resources and relationship identifiers now require the target resource's
 `query` permission, including nested includes and default linkage without
 `include`. The library applies this check at the shared query-filtering boundary
@@ -583,6 +587,20 @@ The unused deep helpers `buildWindowedIncludeSubquery`, `buildOrderByClause` and
 their `include` settings instead of importing storage query builders. No forwarding
 exports or compatibility implementation remain. Check application extensions
 for imports of the removed helpers.
+
+Other unused deep exports have also been removed: `createRequiredIndexes` and
+`analyzeRequiredIndexes` from `knex-cross-table-search.js`, `isNonDatabaseField`
+from `knex-field-helpers.js`, `translateSelectFieldsForAdapter` from
+`storage-adapter.js`, and `getLogicalFieldName` from `storage-mapping.js`.
+Remove imports of these internal utilities. Use resource configuration and the
+existing storage adapter when writing custom queries; create indexes through
+reviewed schema changes. The automatic cross-table index advice was unused by
+query execution and did not reliably identify the required indexes.
+
+The standalone AnyAPI `api.helpers.dataQueryCount` helper has been removed.
+Use `resource.query({ queryParams: { page: { number: 1, size: 1 } } })` and read
+`result.meta.pagination.total` when a pagination total is needed. This uses the
+same filters and access rules as the resource's returned records.
 
 AnyAPI also allocates string slots for non-primary scalar fields declared
 `type: 'id'`, including polymorphic backing IDs. Such fields previously lacked
@@ -3067,6 +3085,12 @@ POST and canonical writes. Resource API calls need no migration for this change.
 Custom storage implementations should consume those prepared attributes before
 applying physical storage mapping, preserving setter results.
 
+A custom `dataPost` helper must return a nonempty string, a finite number, or a
+bigint ID. The lifecycle converts bigint IDs to strings without losing precision.
+Invalid helper results reject before `afterDataCall` hooks and roll back the
+write, including with `returning: 'none'` or `'minimal'`. Resource `normalizeId`
+is not invoked again on the helper's result.
+
 The unexported internal `plugins/core/lib/writing/knex-json-api-transformers-writing.js`
 module and its `processBelongsToRelationships` helper have been removed. If you
 imported that file directly, remove the second relationship conversion and use
@@ -3366,6 +3390,24 @@ Install the desired base writers before creating an enhanced logger.
 
 ## Error causes in diagnostic output
 
+Operation failure reports now include these stable fields:
+
+| Field | Meaning |
+| --- | --- |
+| `method` | Resource method, HTTP verb, or named setup/socket operation; null when unavailable |
+| `scopeName` | Resolved resource name; null before resource resolution or for server-wide operations |
+| `phase` | Reporting boundary, such as `writeFailure`, `httpError`, `include`, `admission`, or `redisShutdown` |
+| `backend` | Knex client name, `socketio`, or `redis`; null when unavailable |
+| `transactionOutcome` | Existing transaction state at reporting time: `none`, `pending`, `committed`, `rolledBack`, or `unknown` |
+
+`phase` describes where an error is reported. It does not identify every hook
+that ran before the failure. Existing nested getter, setter, include and
+relationship-metadata errors retain their more specific context and causes.
+Cleanup warnings may report `pending` even when the operation later commits.
+Socket notification permission checks run outside a transaction and report
+`none`; subscription-matching reads inside a write report its borrowed transaction
+state. Setup/debug traces are informational and need not contain this envelope.
+
 Formatted diagnostics now include native `Error.cause` and `AggregateError.errors`
 properties, which JavaScript normally makes non-enumerable. Nested errors retain
 their names, messages and selected stacks, including errors inside diagnostic
@@ -3404,6 +3446,24 @@ Express may omit `path` for errors that occur before a route is matched.
 HTTP routing and error responses are unchanged. Error-object details are a
 separate diagnostic payload and may still carry resource identifiers.
 
+Both connectors await error diagnostics. A failing writer leaves the original
+HTTP response intact and adds the logging failure to `context.cleanupErrors`
+with `phase: 'logging'` and `during: 'httpError'`. Express route-registration
+diagnostics also preserve the original setup rejection if logging fails.
+
+HTTP diagnostic loggers omit structured `body` and `headers` containers,
+including on errors raised before a route supplies resource metadata. Known JSON
+parser failures (`type: 'entity.parse.failed'`) produce a generic diagnostic
+preview with name, message, type and status. Their raw message, stack, body and
+cause are omitted because parser messages can quote the request body. Express
+uses this parser identifier already; the Fastify JSON parser supplies the same
+identifier. The original error still reaches hooks and HTTP error mapping.
+
+A read hook that throws `null` or `undefined` produces a generic JSON:API 500
+response. Conditional PUT and positioning target reads recognize typed
+not-found errors; other hook failures propagate through the transaction's
+normal failure handling.
+
 ## Formatted errors are bounded previews
 
 `formatError` and `formatErrorString` now produce bounded diagnostic previews:
@@ -3419,10 +3479,8 @@ values become text, functions become markers, and object-valued error names or
 messages become a non-string-text marker. These are diagnostic representations,
 not changes to the errors thrown by the API or the HTTP error contract.
 
-These limits currently apply to formatted error objects. Additional logger
-arguments and direct logger calls are separate output paths and still require
-their own redaction/bounding work. One-line summaries now share the bounded
-formatter and are capped at 2,048 characters, including any truncation marker.
+One-line summaries share the bounded formatter and are capped at 2,048
+characters, including any truncation marker.
 Short summary spelling is unchanged. Summaries inspect only message, code,
 violations and fields; they do not invoke custom `toJSON()` methods.
 
@@ -3440,6 +3498,11 @@ receiver binding, return values and exceptions still come from the original
 writer. These bounds do not apply to direct calls that bypass the enhanced
 logger, and bounding is not sensitive-field redaction.
 
+The storage, positioning and file plugins use this formatter for their own
+diagnostics too. Include messages report counts instead of complete path
+collections. These changes preserve logger binding and query/file behavior;
+they do not add a resource-field policy to every logger.
+
 ## Field-aware write diagnostics
 
 The resource write-error logger now derives redacted field names from compiled
@@ -3455,9 +3518,45 @@ and rule metadata with a redacted message; their other payload properties are
 omitted. Summaries use the same policy. Enhanced loggers snapshot the configured
 field-name list at creation.
 
+When field redaction is configured or `includeStack: false` is selected,
+`formatError` inspects ordinary error properties without invoking `toJSON()`.
+Custom conversion could otherwise read an excluded stack or copy a hidden value
+under another key before filtering. Unrestricted diagnostics still use custom
+`toJSON()` results. Nested error-envelope accessors are inspected once through the
+bounded value formatter; their returned errors use ordinary property inspection.
+
 This is structured-field redaction, not a scanner for arbitrary secret text in
-messages. Direct loggers, connector error contexts without a supplied field
-policy, and early failures without compiled metadata remain separate coverage.
+messages. Early failures without compiled metadata cannot infer which application
+attributes are sensitive. Custom search validators should return general
+validation messages: their text can become the query error's top-level message,
+where field-key redaction cannot recognize a value embedded in a sentence.
+
+The resource-field policy applies to write reports, matched HTTP resource routes,
+file cleanup, subscription admission/removal, subscription matching and
+notification permission reports. It uses the resolved resource's compiled fields;
+it does not guess a resource from a URL, an authentication error or a client-supplied
+subscription name. Authentication and server-wide reports omit raw handshake,
+credential and subscription-filter objects. Application properties deliberately
+attached to an authentication error still appear as bounded diagnostics: a field
+named `accessKey` there does not inherit an unrelated resource's field policy.
+
+Buffers and other binary values are represented by type and byte length,
+including uploaded-file metadata and nested errors. Identifiers, filenames,
+paths, arbitrary application/driver error text and values copied under unrelated
+keys are not automatically secret-free. Use general error messages, omit secrets
+from custom error properties, and apply any broader retention/redaction policy in
+the application-owned logger. Direct application logger calls do not pass through
+the library's formatter. The built-in runtime no longer emits upstream method
+arguments or plugin-option dumps.
+
+Socket connection/disconnection diagnostics and Redis setup/shutdown diagnostics
+contain throwing and rejecting writers. They cannot prevent handler installation,
+subscription acknowledgement or later Redis cleanup attempts. A Redis setup
+failure retains cleanup failures as secondary `AggregateError` members. The Redis
+adapter is configured before attaching Socket.IO to the caller's HTTP server, so
+an adapter setup failure leaves that server's listeners intact. If destruction
+itself fails, startup reports the failure without waiting indefinitely for the
+connection attempt that could not be cancelled.
 
 
 ## Opt-in stored revision migration

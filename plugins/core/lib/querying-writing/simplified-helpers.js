@@ -32,7 +32,7 @@ const indexIncludedResources = (included, data) => {
  * @param {Object} deps.context
  * @param {string} deps.context.scopeName - Resource type
  * @param {Object} deps.context.schemaStructure - Compiled writable fields
- * @param {Object} deps.context.schemaRelationships - Relationship definitions
+ * @param {Object} [deps.context.schemaRelationships] - Relationship definitions
  * @returns {Object} JSON:API document for subsequent validation
  * @example
  * transformSimplifiedToJsonApi({ inputRecord: { id: '7', title: 'Book' } }, {
@@ -152,8 +152,8 @@ export const transformSimplifiedToJsonApi = (scope, deps) => {
  * @param {Object} scope.record - JSON:API response document
  * @param {Object} deps
  * @param {Object} deps.context
- * @param {Object} deps.context.schemaStructure - Compiled resource fields
- * @param {Object} deps.context.schemaRelationships - Relationship definitions
+ * @param {Object} [deps.context.schemaStructure] - Compiled resource fields
+ * @param {Object} [deps.context.schemaRelationships] - Relationship definitions
  * @param {Object} deps.context.scopes - Resource registry for included records
  * @returns {Object} Plain record or collection envelope
  * @example
@@ -215,7 +215,7 @@ export const transformJsonApiToSimplified = (scope, deps) => {
  * @param {Map} [scope.includedByType] - Shared type/ID lookup
  * @param {Object} deps
  * @param {Object} deps.context
- * @param {Object} deps.context.schemaRelationships - Relationship definitions
+ * @param {Object} [deps.context.schemaRelationships] - Relationship definitions
  * @param {Object} deps.context.scopes - Registry for nested resource metadata
  * @param {Set<string>} [ancestors] - Resource identities on the current path
  * @returns {Object} Plain record with minimal or expanded relationship objects

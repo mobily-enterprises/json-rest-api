@@ -1,3 +1,6 @@
+// @ts-check
+/** @import { JsonApiRelationship, JsonApiResource } from '../../../../types/representations.js' */
+/** @import { DataDocument, DataOperationScope, DataReadContext, DataResource, DataStorageRow, ResourceConversionScope, StorageRow } from '../storage/storage-types.js' */
 import { RELATIONSHIPS_KEY, RELATIONSHIP_METADATA_KEY, ROW_NUMBER_KEY, COMPUTED_DEPENDENCIES_KEY } from '../querying-writing/knex-constants.js'
 import { getUrlPrefix, buildResourceUrl, buildRelationshipUrl, buildJsonApiLink } from './url-helpers.js'
 import { translateRecordFromStorage } from '../storage/storage-mapping.js'
@@ -13,19 +16,20 @@ const internalFields = new Set([
 
 /**
  * @overload
- * @param {import('../storage/storage-types.js').ResourceConversionScope} scope
- * @param {import('../storage/storage-types.js').StorageRow} record
+ * @param {ResourceConversionScope} scope
+ * @param {StorageRow} record
  * @param {string} scopeName
- * @returns {import('../../../../types/representations.js').JsonApiResource}
+ * @returns {JsonApiResource}
  */
 /**
  * @overload
- * @param {import('../storage/storage-types.js').ResourceConversionScope} scope
- * @param {import('../storage/storage-types.js').StorageRow | null | undefined} record
+ * @param {ResourceConversionScope} scope
+ * @param {StorageRow | null | undefined} record
  * @param {string} scopeName
- * @returns {import('../../../../types/representations.js').JsonApiResource | null}
+ * @returns {JsonApiResource | null}
  */
-export const toJsonApiRecord = (scope, record, scopeName) => {
+/** @param {ResourceConversionScope} scope @param {StorageRow | null | undefined} record @param {string} scopeName @returns {JsonApiResource | null} */
+export function toJsonApiRecord (scope, record, scopeName) {
   let foreignKeys
   try {
     foreignKeys = scope.vars.schemaInfo.foreignKeyFields
@@ -41,6 +45,7 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
 
   const logicalRecord = translateRecordFromStorage(record, scope.vars.schemaInfo)
   const { id, ...allAttributes } = logicalRecord
+  /** @type {StorageRow} */
   const attributes = {}
   for (const [key, value] of Object.entries(allAttributes)) {
     if (!foreignKeys.has(key) && !internalFields.has(key) && key !== idProperty) {
@@ -51,18 +56,34 @@ export const toJsonApiRecord = (scope, record, scopeName) => {
 }
 
 /**
- * Builds complete JSON:API response with data, relationships, links, and optional includes
- *
- * @async
- * @param {Object} scope - Scope containing schema and configuration
- * @param {Array<Object>} records - Primary records to include in response
- * @param {Array<Object>} included - Resources to include in 'included' array
- * @param {boolean} isSingle - Whether this is a single resource response
- * @param {string} scopeName - Resource type name
- * @param {Object} context - Request context with pagination metadata
- * @returns {Promise<Object>} Complete JSON:API response document
+ * @overload
+ * @param {DataOperationScope} scope
+ * @param {DataStorageRow[]} records
+ * @param {DataResource[]} included
+ * @param {true} isSingle
+ * @param {string} scopeName
+ * @param {DataReadContext} context
+ * @returns {Promise<DataDocument<DataResource>>}
  */
-export const buildJsonApiResponse = async (scope, records, included = [], isSingle = false, scopeName, context) => {
+/**
+ * @overload
+ * @param {DataOperationScope} scope
+ * @param {DataStorageRow[]} records
+ * @param {DataResource[]} included
+ * @param {false} isSingle
+ * @param {string} scopeName
+ * @param {DataReadContext} context
+ * @returns {Promise<DataDocument<DataResource[]>>}
+ */
+/**
+ * @param {DataOperationScope} scope
+ * @param {DataStorageRow[]} records
+ * @param {DataResource[]} included
+ * @param {boolean} isSingle
+ * @param {string} scopeName
+ * @param {DataReadContext} context
+ */
+export async function buildJsonApiResponse (scope, records, included = [], isSingle = false, scopeName, context) {
   const { schemaInfo } = scope.vars
 
   const {
@@ -112,6 +133,7 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
 
         if (data || typeValue === null || idValue === null) {
           jsonApiRecord.relationships = jsonApiRecord.relationships || {}
+          /** @type {JsonApiRelationship} */
           const relationshipObject = { data }
 
           relationshipObject.links = {
@@ -124,23 +146,16 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
       }
     })
 
+    jsonApiRecord.links ||= {}
+    jsonApiRecord.links.self = buildResourceUrl(context, scope, scopeName, resourceId)
     return jsonApiRecord
   })
 
-  const normalizedData = isSingle ? processedRecords[0] : processedRecords
+  const singleRecord = processedRecords[0]
+  if (isSingle && !singleRecord) throw new Error('A single-resource response requires a record')
+  const normalizedData = isSingle && singleRecord ? singleRecord : processedRecords
 
-  if (normalizedData) {
-    if (Array.isArray(normalizedData)) {
-      normalizedData.forEach(item => {
-        if (!item.links) item.links = {}
-        item.links.self = buildResourceUrl(context, scope, scopeName, item.id)
-      })
-    } else {
-      if (!normalizedData.links) normalizedData.links = {}
-      normalizedData.links.self = buildResourceUrl(context, scope, scopeName, normalizedData.id)
-    }
-  }
-
+  /** @type {DataDocument<DataResource | DataResource[]>} */
   const response = {
     data: normalizedData
   }
@@ -165,8 +180,8 @@ export const buildJsonApiResponse = async (scope, records, included = [], isSing
   } else {
     const urlPrefix = getUrlPrefix(context, scope)
     response.links = {
-      self: isSingle
-        ? buildJsonApiLink(buildResourceUrl(context, scope, scopeName, normalizedData.id), context.queryParams)
+      self: isSingle && singleRecord
+        ? buildJsonApiLink(buildResourceUrl(context, scope, scopeName, singleRecord.id), context.queryParams)
         : `${urlPrefix}/${scopeName}${context?.returnMeta?.queryString || ''}`
     }
   }

@@ -6,6 +6,7 @@ import { storageMode } from './helpers/storage-mode.js'
 import { PositioningPlugin } from '../plugins/core/rest-api-positioning-plugin.js'
 import { hasKnexTableIndex, introspectKnexTableSnapshot } from '../plugins/core/lib/dbIntrospection.js'
 import { databaseClient } from './helpers/test-database.js'
+import { RestApiValidationError } from '../lib/rest-api-errors.js'
 
 describe(`Positioning configuration and storage boundaries (${storageMode.mode})`, () => {
   let fixture
@@ -72,6 +73,112 @@ describe(`Positioning configuration and storage boundaries (${storageMode.mode})
     // Repeated setup must recognize the existing index rather than attempt another CREATE.
     await createPositioningApi(fixture.knex, options)
   })
+
+  if (!storageMode.isAnyApi()) {
+    for (const [name, failure] of [
+      ['null', null],
+      ['undefined', undefined],
+      ['typed failure', Object.freeze(new RestApiValidationError('Index inspection failed'))],
+      ['long failure', Object.freeze(new Error('Index inspection failed: ' + 'x'.repeat(65536)))]
+    ]) {
+      for (const loggerFailure of ['none', 'throw', 'reject']) {
+        it(`retains best-effort positioning setup after ${name} with a ${loggerFailure} warning sink`, async t => {
+          const warnings = []
+          const diagnostics = []
+          let indexChecks = 0
+          const originalQuery = fixture.knex.client.query
+          const queryMock = t.mock.method(fixture.knex.client, 'query', function (connection, query, ...args) {
+            if (/pragma index_list|information_schema.*statistics|pg_indexes/i.test(query.sql)) {
+              indexChecks++
+              return Promise.reject(failure)
+            }
+            return originalQuery.call(this, connection, query, ...args)
+          })
+          let api
+          try {
+            api = await createPositioningApi(fixture.knex, {
+              positionFieldOptions,
+              beforeResources: async api => {
+                api.log.warn = (message, diagnostic) => {
+                  warnings.push(message)
+                  diagnostics.push(diagnostic)
+                  if (loggerFailure === 'throw') throw new Error('Warning sink failed')
+                  if (loggerFailure === 'reject') return Promise.reject(new Error('Warning sink rejected'))
+                }
+                await api.use(PositioningPlugin, { ...config, autoIndex: true })
+                await api.customize({ methods: { createKnexTable: () => {} } })
+              }
+            })
+          } finally {
+            queryMock.mock.restore()
+          }
+          assert.equal(indexChecks, 1)
+          assert.deepEqual(diagnostics.map(({ method, scopeName, phase, backend, transactionOutcome }) => ({ method, scopeName, phase, backend, transactionOutcome })), [{
+            method: 'addResource', scopeName: 'tasks', phase: 'positionIndex', backend: fixture.knex.client.config.client, transactionOutcome: 'none'
+          }])
+          if (name === 'long failure') {
+            assert.equal(warnings.length, 1)
+            assert.match(warnings[0], /^Could not create positioning index for tasks: Index inspection failed:/)
+            assert.ok(warnings[0].length < 10000)
+            assert.equal(failure.message.length, 'Index inspection failed: '.length + 65536)
+          } else {
+            assert.deepEqual(warnings, [`Could not create positioning index for tasks: ${failure == null ? String(failure) : failure.message}`])
+          }
+          const result = await api.resources.tasks.post({ data: { title: 'After index failure', category: null }, format: 'jsonapi' })
+          assert.equal(result.data.attributes.position, 'a0')
+          assert.equal(await fixture.count('tasks'), 1)
+        })
+      }
+    }
+  }
+
+  it('uses a positioning field supplied by schema enrichment', async () => {
+    const api = await createPositioningApi(fixture.knex, {
+      positionFieldOptions,
+      beforeResources: async api => {
+        await api.customize({
+          methods: { createKnexTable: () => {} },
+          hooks: {
+            'schema:enrich': ({ context }) => {
+              if (context.scopeName !== 'tasks') return
+              context.fields.compiledPosition = context.fields.position
+              delete context.fields.position
+            }
+          }
+        })
+        await api.use(PositioningPlugin, { ...config, field: 'compiledPosition' })
+      }
+    })
+    const tasks = api.resources.tasks
+    assert.equal(tasks.scopeOptions.schema.compiledPosition, undefined)
+    assert.equal(tasks.vars.schemaInfo.schemaStructure.compiledPosition.type, 'string')
+    const result = await tasks.post({ data: { title: 'Enriched position', category: null }, format: 'jsonapi' })
+    assert.equal(result.data.attributes.compiledPosition, 'a0')
+    assert.equal(result.data.attributes.position, undefined)
+  })
+
+  for (const [name, enrich, message] of [
+    ['changed type', fields => { fields.position.type = 'integer' }, /must declare a string 'position'/],
+    ['added setter', fields => { fields.position.setter = value => value }, /cannot have a setter/],
+    ['removed field', fields => { delete fields.position }, /must declare a string 'position'/]
+  ]) {
+    it(`rejects an invalid compiled positioning declaration: ${name}`, async () => {
+      await assert.rejects(createPositioningApi(fixture.knex, {
+        positionFieldOptions,
+        beforeResources: async api => {
+          await api.customize({
+            methods: { createKnexTable: () => {} },
+            hooks: {
+              'schema:enrich': ({ context }) => {
+                if (context.scopeName === 'tasks') enrich(context.fields)
+              }
+            }
+          })
+          await api.use(PositioningPlugin, config)
+        }
+      }), message)
+    })
+  }
 
   it('rejects inert options and exposes only implemented positioning helpers', async () => {
     await assert.rejects(createPositioningApi(fixture.knex, {

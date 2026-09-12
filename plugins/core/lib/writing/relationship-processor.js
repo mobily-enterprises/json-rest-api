@@ -80,7 +80,7 @@ export const lockRelationshipTargets = async (api, transaction, identifiers) => 
  * @param {Object} deps
  * @param {Object} deps.context
  * @param {Object} deps.context.inputRecord - Normalized JSON:API write document
- * @returns {Object} belongsToUpdates map plus belongsToTargets,
+ * @returns {import('../../rest-api-plugin-methods/lifecycle-types.js').RelationshipPlan} belongsToUpdates map plus belongsToTargets,
  *   manyToManyRelationships and reverseRelationships arrays
  * @example
  * // An explicit author clear produces belongsToUpdates.author_id = null.

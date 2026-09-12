@@ -1,6 +1,6 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { getRequestedComputedFields, isNonDatabaseField } from '../plugins/core/lib/querying-writing/knex-field-helpers.js'
+import { getRequestedComputedFields } from '../plugins/core/lib/querying-writing/knex-field-helpers.js'
 
 it('selects computed fields with default and explicit visibility, preserving request order', () => {
   const fields = Object.assign(Object.create({ inherited: {} }), {
@@ -25,8 +25,6 @@ it('resolves a sparse computed selection without scanning unrelated definitions'
   assert.deepEqual({ enumerations, reads }, { enumerations: 0, reads: 1 })
 })
 
-it('rejects an absent compiled computed definition while retaining missing-field absence', () => {
+it('rejects an absent compiled computed definition', () => {
   assert.throws(() => getRequestedComputedFields('items', ['broken'], { broken: undefined }), /Missing compiled computed definition 'items.broken'/)
-  assert.equal(isNonDatabaseField('missing', {}), undefined)
-  assert.equal(isNonDatabaseField('virtual', { schemaStructure: { virtual: { virtual: true } } }), true)
 })

@@ -1,12 +1,5 @@
 // @ts-check
-/** @import { StorageAdapter, StorageQuery, StorageRow } from '../storage/storage-types.js' */
-
-/**
- * @typedef {object} MandatoryQueryConstraint
- * @property {string} scopeName
- * @property {StorageRow} [values]
- * @property {StorageQuery} [idsQuery]
- */
+/** @import { MandatoryQueryConstraint, StorageAdapter, StorageQuery } from '../storage/storage-types.js' */
 
 // Mandatory selection is independent of public search fields and caller filters.
 export const queryConstraint = Symbol('queryConstraint')

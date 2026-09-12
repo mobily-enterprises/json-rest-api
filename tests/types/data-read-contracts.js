@@ -25,6 +25,7 @@ export async function checkDataReadContracts (ordinary, canonical, context) {
   const invalidCanonicalId = (await canonical.dataGet(singleRequest)).data.id
   const document = await ordinary.dataQuery({
     ...request,
+    runHooks: async () => {},
     context: { ...context, queryParams: {}, returnMeta: {} }
   })
   document.data.map(record => record.id)

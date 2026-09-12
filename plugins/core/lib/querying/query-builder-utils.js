@@ -2,11 +2,23 @@
 /** @import { StorageQuery, QueryFilteringState } from '../storage/storage-types.js' */
 
 /**
+ * @overload
+ * @param {import('../storage/storage-types.js').QueryBuilderResult | null | undefined} value
+ * @param {StorageQuery} fallback
+ * @returns {StorageQuery}
+ */
+/**
+ * @overload
+ * @param {unknown} value
+ * @param {unknown} [fallback]
+ * @returns {unknown}
+ */
+/**
  * @param {unknown} value
  * @param {unknown} [fallback]
  * @returns {unknown} Hook values are untrusted until the caller validates them.
  */
-export const unwrapQueryBuilderState = (value, fallback = null) => {
+export function unwrapQueryBuilderState (value, fallback = null) {
   let current = value
   const seen = new Set()
 

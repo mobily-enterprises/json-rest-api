@@ -22,6 +22,7 @@ import {
   addWriteOutcomeToHttpErrors,
   buildTransportRejectionBody,
   executeConnectorRoute,
+  logHttpRequestError,
   handleConnectorError
 } from './lib/connector-core.js'
 
@@ -202,15 +203,16 @@ export const ExpressPlugin = {
      */
     const handleError = async (error, req, res, routeMeta) => {
       const { context, transportData } = ensureContext(req, res)
-      const schemaInfo = scopes[routeMeta?.scopeName]?.vars?.schemaInfo || context.schemaInfo
-      createEnhancedLogger(log, { schemaInfo }).logError('HTTP request error', error, {
-        ...getOperationDiagnosticContext(context, {
-          phase: 'httpError',
-          method: req.method,
-          scopeName: routeMeta?.scopeName || context.scopeName,
-          backend: api.knex?.instance?.client?.config?.client
-        }),
-        path: req.route?.path
+      await logHttpRequestError({
+        error,
+        context,
+        log,
+        scopes,
+        routeMeta,
+        api,
+        method: req.method,
+        path: req.route?.path,
+        message: 'HTTP request error'
       })
 
       const { status, body: errorResponse, headers } = await handleConnectorError({
@@ -234,7 +236,6 @@ export const ExpressPlugin = {
       const beforeMiddleware = expressOptions.middleware?.beforeAll || []
 
       try {
-        // Extract the handler logic into a shared function to keep it DRY (Don't Repeat Yourself).
         const expressHandler = async (req, res) => {
           try {
             const { context, transportData } = ensureContext(req, res)
@@ -260,14 +261,12 @@ export const ExpressPlugin = {
             })
             applyHeaders(res, outcome.headers)
 
-            // Set content type
             res.set('Content-Type', 'application/vnd.api+json')
 
             if (outcome.location) {
               res.set('Location', outcome.location)
             }
 
-            // Handle response based on status
             if (outcome.status === 204) {
               res.sendStatus(204)
             } else if (outcome.serialized) {
@@ -280,66 +279,32 @@ export const ExpressPlugin = {
           }
         }
 
-        // CRITICAL: Express routing method selection - wildcard vs specific routes
-        //
-        // Express provides two different ways to register routes:
-        // 1. router.METHOD(path, handler) - e.g., router.get('/users', handler)
-        //    - Only responds to the SPECIFIC HTTP method
-        //    - Perfect for normal REST endpoints
-        //
-        // 2. router.use(path, handler)
-        //    - Responds to ALL HTTP methods
-        //    - Needed for wildcard paths that must handle any method
-        //
-        // The CORS plugin needs wildcard routes because it must handle OPTIONS
-        // requests for ANY path under the API prefix, even paths that don't exist
-        // as defined routes. For example:
-        // - Defined route: GET /api/users
-        // - Browser might send: OPTIONS /api/users/invalid/path
-        // - CORS must still respond with proper headers
-        //
         if (path === vars.transport.matchAll) {
-          // This is a wildcard route (path = '*')
-          // We MUST use router.use() because:
-          // - We need to catch ALL paths (using '*' or '/api/*')
-          // - We need to handle a SPECIFIC method (e.g., OPTIONS)
-          // - router.options('*') would NOT work for paths like '/api/some/nested/path'
-
-          // Since router.use() responds to ALL methods, we need a wrapper
-          // that only handles our specific method (e.g., OPTIONS)
+          // CORS must also match unknown paths; router.use needs an explicit method check.
           const methodSpecificMiddleware = (req, res, next) => {
             if (req.method.toLowerCase() === method.toLowerCase()) {
               expressHandler(req, res)
             } else {
-              // Not our method, pass to next middleware
               next()
             }
           }
-          // IMPORTANT: We do NOT need to pass a path to router.use() here!
-          // When no path is provided, router.use() matches ALL requests
-          // This is exactly what we want for wildcard routes
           router.use(...beforeMiddleware, methodSpecificMiddleware)
         } else {
-          // This is a normal route with a specific path (e.g., '/api/users')
-          // We use router.METHOD() because:
-          // - We want to respond to ONLY this specific HTTP method
-          // - The path is exact, not a wildcard
-          // - This is more efficient than router.use() with method checking
-          //
-          // Note: Routes from RestApiPlugin already include the full path with mountPath
-          // So we use them as-is without adding basePath to avoid double-prefixing
-
+          // Resource routes already contain the mount path.
           router[method.toLowerCase()](path, ...beforeMiddleware, expressHandler)
-
-          // Debug logging for route registration
         }
       } catch (routeError) {
-        log.error('[EXPRESS DEBUG] Error creating route:', {
-          error: routeError.message,
-          stack: routeError.stack,
-          path,
-          method: method.toLowerCase()
-        })
+        try {
+          await createEnhancedLogger(log).logError('Express route registration failed', routeError, {
+            ...getOperationDiagnosticContext(context, {
+              phase: 'routeRegistration',
+              method,
+              scopeName: routeMeta?.scopeName,
+              backend: api.knex?.instance?.client?.config?.client
+            }),
+            path
+          })
+        } catch { /* Diagnostic failure must not replace the registration failure. */ }
         throw routeError
       }
 

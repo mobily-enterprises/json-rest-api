@@ -16,6 +16,7 @@ const knex = knexLib({
 let api
 let detectorState
 let storage
+const diagnostics = []
 
 function createTrackingStorage () {
   return {
@@ -48,7 +49,9 @@ describe('File handling cleanup', () => {
   before(async () => {
     detectorState = { payload: null }
     storage = createTrackingStorage()
-    api = await createFileUploadApi(knex, { detectorState, storage })
+    api = await createFileUploadApi(knex, {
+      detectorState, storage, logging: { logger: { debug: (...args) => diagnostics.push(args) } }
+    })
   })
 
   after(async () => {
@@ -60,6 +63,18 @@ describe('File handling cleanup', () => {
     detectorState.payload = null
     storage.uploaded = []
     storage.deleted = []
+    diagnostics.length = 0
+  })
+
+  it('bounds detector registration diagnostics without changing detector identity', () => {
+    const detector = { name: 'd'.repeat(65536), detect: () => false, parse: () => ({}) }
+    api.rest.registerFileDetector(detector)
+    assert.equal(api.rest.fileDetectors.at(-1), detector)
+    assert.equal(detector.name.length, 65536)
+    assert.equal(diagnostics.length, 1)
+    assert.match(diagnostics[0][0], /^Registered file detector:/)
+    assert.ok(JSON.stringify(diagnostics[0]).length < 10000)
+    assert.ok(!JSON.stringify(diagnostics[0]).includes(detector.name))
   })
 
   it('cleans detector temp files when MIME validation rejects an upload', async () => {

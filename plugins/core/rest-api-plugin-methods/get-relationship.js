@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * RelationshipArguments, RelationshipContext
+ * } from './lifecycle-types.js' */
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
@@ -8,20 +12,23 @@ import { requireExistingResourceId } from '../lib/querying-writing/resource-id-n
  * Read authorized relationship linkage for params.id/relationshipName.
  * This returns a JSON:API linkage document regardless of resource format;
  * to-many linkage must not be truncated by ordinary include limits.
+ * @param {RelationshipArguments} args
  */
-export default async function getRelationshipMethod ({ params, context, vars, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
+export default async function getRelationshipMethod ({ params, context: callerContext, vars, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
-  context.method = 'getRelationship'
-  context.id = requireExistingResourceId(params.id, {
+  callerContext.method = 'getRelationship'
+  callerContext.scopeName = scopeName
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
-  context.relationshipName = params.relationshipName
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
-  context.transaction = params.transaction
-  context.db = context.transaction || api.knex.instance
+  callerContext.relationshipName = params.relationshipName
+  callerContext.schemaInfo = scope.vars.schemaInfo
+  callerContext.transaction = params.transaction
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {RelationshipContext} */ (callerContext)
 
   // Validate the relationship exists
   const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName)

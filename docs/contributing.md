@@ -58,6 +58,9 @@ and executed in the other; inspect both results before calling it untested.
 consumer and checks optional dependencies plus ordinary/canonical CRUD.
 The `test:*guide`, `test:quickstart`, `test:api-reference` and `test:server-examples`
 commands execute maintained documentation examples. Run those when their code changes.
+`npm run test:migration-guide:package` executes the migration guide's selected
+examples against an extracted tarball and reports its hash. It reuses local test
+dependencies; the separate clean-package check verifies fresh installation.
 
 Tests and package tools use temporary directories and dispose of their databases,
 servers and sockets. They do not operate on application databases. Consumer checks
@@ -65,6 +68,12 @@ require an explicit path and command; library verification does not establish an
 application migration.
 
 ## Resource stress checks
+
+For smaller repeatable measurements, `node scripts/measure-write-lifecycles.js`
+records SQL counts and checks child-hook order for bulk and reverse-relationship
+writes. It supports both storage modes and the database runner.
+`node scripts/measure-diagnostics.js` reports bounded logger formatting cost;
+its local timings are observations, not pass/fail performance thresholds.
 
 `npm run test:stress` runs a bounded workload in both SQLite storage modes,
 separately from the full suite. It repeats authorized, paginated `tasks` and

@@ -1,14 +1,77 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { RestApiValidationError, RestApiWriteError } from '../lib/rest-api-errors.js'
-import { withWriteOutcome, wrapUnexpectedError, wrapWriteError } from '../lib/error-context.js'
+import { getBinaryDiagnostic, isRestApiError, withWriteOutcome, wrapUnexpectedError, wrapWriteError } from '../lib/error-context.js'
+import { formatDiagnosticValue, formatError } from '../lib/error-formatter.js'
 import { mapRestApiErrorToHttp } from '../plugins/core/connectors/lib/transport-http-helpers.js'
+import { buildTransportData, handleConnectorError } from '../plugins/core/connectors/lib/connector-core.js'
+
+describe('HTTP mapping of absent thrown values', () => {
+  for (const failure of [null, undefined]) {
+    it(`maps ${String(failure)} to an internal error response`, () => {
+      const result = mapRestApiErrorToHttp(failure)
+      assert.equal(result.status, 500)
+      assert.deepEqual(JSON.parse(JSON.stringify(result.body)), {
+        errors: [{ status: '500', title: 'Internal Server Error' }]
+      })
+    })
+  }
+})
 
 describe('Unexpected error context', () => {
   const typed = new RestApiValidationError('Invalid included value')
   it('retains a typed API error by identity', () => {
+    assert.equal(isRestApiError(typed), true)
+    assert.equal(isRestApiError(new Error('Ordinary failure')), false)
     assert.equal(wrapUnexpectedError(typed, { message: 'Include failed' }), typed)
   })
+
+  it('stops classification before inspecting an inherited cyclic proxy prototype', async () => {
+    let prototypeReads = 0
+    const prototype = new Proxy({}, {
+      getPrototypeOf () { prototypeReads++; return prototype }
+    })
+    const cause = Object.assign(Object.create(prototype), { message: 'Original failure', publicNote: 'Visible' })
+
+    assert.equal(isRestApiError(cause), false)
+    assert.equal(getBinaryDiagnostic(cause), undefined)
+    assert.equal(wrapUnexpectedError(cause, { message: 'Operation failed' }).cause, cause)
+    assert.deepEqual(formatDiagnosticValue(cause), { message: 'Original failure', publicNote: 'Visible' })
+    assert.equal(formatError(cause).message, 'Original failure')
+    assert.equal(mapRestApiErrorToHttp(cause).status, 500)
+    assert.equal(prototypeReads, 0)
+
+    const wrapped = wrapWriteError(cause, { transactionOutcome: 'committed' })
+    assert.equal(wrapped.cause, cause)
+    assert.equal(wrapped.transactionOutcome, 'committed')
+    assert.equal(wrapped.code, 'REST_API_WRITE')
+    assert.equal(prototypeReads, 0)
+
+    const transportData = buildTransportData({ method: 'POST' })
+    const response = await handleConnectorError({
+      error: cause,
+      context: { transport: transportData },
+      transportData,
+      runHooks: async () => {}
+    })
+    assert.equal(response.status, 500)
+    assert.equal(response.body.errors[0].meta.transactionOutcome, 'none')
+  })
+
+  for (const [type, value] of [
+    ['Buffer', Buffer.from('Private bytes')],
+    ['ArrayBufferView', new Uint16Array([1, 2])],
+    ['ArrayBufferView', new DataView(new ArrayBuffer(8), 2, 4)],
+    ['ArrayBuffer', new ArrayBuffer(8)],
+    ['SharedArrayBuffer', new SharedArrayBuffer(8)]
+  ]) {
+    it(`preserves ${value.constructor.name} diagnostic classification`, () => {
+      const expected = { type, byteLength: value.byteLength }
+      assert.deepEqual(getBinaryDiagnostic(value), expected)
+      assert.deepEqual(formatDiagnosticValue(value), expected)
+      assert.deepEqual(formatError(value).data, expected)
+    })
+  }
 
   it('reads an accessor message once when retaining an unexpected cause', () => {
     let reads = 0
@@ -47,6 +110,46 @@ describe('Unexpected error context', () => {
 })
 
 describe('Write error snapshots', () => {
+  for (const trap of ['getOwnPropertyDescriptor', 'getPrototypeOf']) {
+    it(`retains a committed cause when ${trap} rejects error inspection`, () => {
+      const cause = new Proxy({}, { [trap]: () => { throw new Error('Inspection failed') } })
+      const wrapped = wrapWriteError(cause, { transactionOutcome: 'committed' })
+      assert.equal(wrapped.cause, cause)
+      assert.equal(wrapped.transactionOutcome, 'committed')
+      assert.equal(wrapped.code, 'REST_API_WRITE')
+      const unexpected = wrapUnexpectedError(cause, { message: 'Operation failed' })
+      assert.equal(unexpected.cause, cause)
+    })
+  }
+
+  it('terminates metadata inspection of a cyclic proxy prototype', () => {
+    const cause = new Proxy({}, { getPrototypeOf: () => cause })
+    const wrapped = new RestApiWriteError('Operation failed', { cause, transactionOutcome: 'committed' })
+    assert.equal(wrapped.cause, cause)
+    assert.equal(wrapped.transactionOutcome, 'committed')
+    assert.equal(wrapped.code, 'REST_API_WRITE')
+    assert.equal(wrapWriteError(cause, { transactionOutcome: 'committed' }).cause, cause)
+    assert.equal(wrapUnexpectedError(cause, { message: 'Operation failed' }).cause, cause)
+  })
+
+  it('retains own metadata without following an unbounded proxy prototype chain', () => {
+    let prototypeReads = 0
+    function proxyLink () {
+      return new Proxy({ code: 'UPSTREAM_FAILURE' }, {
+        getPrototypeOf () {
+          if (++prototypeReads > 20) throw new Error('Synthetic prototype chain exceeded test limit')
+          return proxyLink()
+        }
+      })
+    }
+    const cause = proxyLink()
+    const wrapped = new RestApiWriteError('Primary failure', { cause, transactionOutcome: 'committed' })
+    assert.equal(wrapped.cause, cause)
+    assert.equal(wrapped.transactionOutcome, 'committed')
+    assert.equal(wrapped.code, 'UPSTREAM_FAILURE')
+    assert.equal(prototypeReads, 0)
+  })
+
   for (const cause of [Object.freeze(new Error('Frozen')), null, undefined, false, 0, 'failure', Symbol('failure'), Object.create(null)]) {
     it(`preserves ${typeof cause} failures without modifying them`, async () => {
       const context = { transactionOutcome: 'committed', transaction: {}, transactionCommitted: true }

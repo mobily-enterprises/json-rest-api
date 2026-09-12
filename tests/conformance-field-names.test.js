@@ -7,7 +7,7 @@ import { createJsonApiDocument } from './helpers/test-utils.js'
 import { RestApiFieldsetError, RestApiValidationError } from '../lib/rest-api-errors.js'
 import { parseJsonApiQuery } from '../plugins/core/lib/querying-writing/connectors-query-parser.js'
 import { createStorageAdapter } from '../plugins/core/lib/storage/storage-adapter.js'
-import { buildStorageInfo, getFieldValue, getLogicalFieldName } from '../plugins/core/lib/storage/storage-mapping.js'
+import { buildStorageInfo, getFieldValue } from '../plugins/core/lib/storage/storage-mapping.js'
 import { getForeignKeyFields } from '../plugins/core/lib/querying-writing/field-utils.js'
 import { generateKnexMigration } from '../plugins/core/lib/dbTablesOperations.js'
 
@@ -130,7 +130,6 @@ describe(`Undeclared prototype-named fields (${storageMode.mode})`, () => {
   it('does not return inherited properties for missing storage values or mappings', () => {
     const schemaInfo = fixture.api.resources.items.vars.schemaInfo
     for (const name of names) {
-      assert.equal(getLogicalFieldName(schemaInfo, name), name)
       assert.equal(getFieldValue({}, schemaInfo, name), undefined)
     }
   })

@@ -42,7 +42,7 @@ function mapTable (knex, api, tableName, resourceName) {
 }
 
 export async function createConformanceApi (knex, { storage = storageMode.mode, itemOptions = {}, groupOptions = {}, groupFieldOptions = {}, itemNameOptions = {}, queryProjections = false, labelOptions, includeExpress = false, ...options } = {}) {
-  const api = new JsonRestApi({ name: 'conformance' })
+  const api = new JsonRestApi({ name: 'conformance', logger: options.logging?.logger })
   await api.use(RestApiPlugin, {
     format: 'jsonapi',
     returning: 'full',
@@ -2945,7 +2945,7 @@ export async function createPositioningApi (knex, pluginOptions = {}) {
   })
 
   const restApiOptions = {
-    format: 'plain',  // Changed to true to allow simplified API calls in tests
+    format: 'plain',
     returning: 'full',
     sortableFields: ['id', 'title', 'name', 'position', 'sort_order', 'category_id', 'project_id', 'status'],
     ...pluginOptions['rest-api']
@@ -3392,6 +3392,7 @@ export async function createFileUploadApi (knex, pluginOptions = {}) {
 
   const api = new JsonRestApi({
     name: apiName,
+    logger: pluginOptions.logging?.logger,
   })
 
   const previousTenant = storageMode.currentTenant

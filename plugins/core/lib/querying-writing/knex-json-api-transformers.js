@@ -5,6 +5,8 @@ import { toJsonApiRecord } from '../querying/knex-json-api-transformers-querying
 import { translateRecordFromStorage } from '../storage/storage-mapping.js'
 import { getPolymorphicLinkage } from './relationship-contracts.js'
 
+/** @overload @param {ResourceConversionScope} scope @param {StorageRow} record @param {string} scopeName @returns {JsonApiResource} */
+/** @overload @param {ResourceConversionScope} scope @param {StorageRow | null | undefined} record @param {string} scopeName @returns {JsonApiResource | null} */
 /**
  * Convert one storage row and its belongs-to linkage without loading targets.
  * Empty foreign keys become null linkage; backing fields stay out of attributes.
@@ -13,7 +15,7 @@ import { getPolymorphicLinkage } from './relationship-contracts.js'
  * @param {string} scopeName
  * @returns {JsonApiResource | null}
  */
-export const toJsonApiRecordWithBelongsTo = (scope, record, scopeName) => {
+export function toJsonApiRecordWithBelongsTo (scope, record, scopeName) {
   if (!record) return null
 
   const schemaInfo = scope.vars.schemaInfo

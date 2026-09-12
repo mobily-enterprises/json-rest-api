@@ -12,10 +12,11 @@ for (const transport of ['websocket', 'polling']) {
     let api, server, knex, denyQuery, failFinish, subscriptionGate, gateEntered, authFailure, authHookFailure, observedAuthFailure
     const clients = new Set()
     const commits = []
-    let diagnosticFailureKind, rejectNotification, resourceFailure, failAdmissionLog, failDiagnosticLog, rejectAuth
+    let diagnosticFailureKind, rejectNotification, resourceFailure, failAdmissionLog, failDiagnosticLog, rejectDiagnosticLog, rejectAuth
     const diagnosticEvents = []
     const captureDiagnostic = (...args) => {
       if (failDiagnosticLog && String(args[0]).includes(failDiagnosticLog)) throw new Error('Authentication diagnostic sink failed')
+      if (rejectDiagnosticLog && String(args[0]).includes(rejectDiagnosticLog)) return Promise.reject(new Error('Diagnostic sink rejected'))
       if (failAdmissionLog && String(args[0]).includes('Socket.IO subscribe error')) throw new Error('Diagnostic sink failed')
       diagnosticEvents.push(args)
     }
@@ -58,7 +59,7 @@ for (const transport of ['websocket', 'polling']) {
       const result = await createWebSocketApi(knex, {
         apiName: `socket-contract-${transport}`,
         countryFields: { accessKey: { type: 'string', hidden: true }, privateNote: { type: 'string', normallyHidden: true } },
-        logging: { level: 'info', format: 'pretty', logger: { log: captureDiagnostic, warn: captureDiagnostic, error: captureDiagnostic } },
+        logging: { level: 'info', format: 'pretty', logger: { info: captureDiagnostic, log: captureDiagnostic, warn: captureDiagnostic, error: captureDiagnostic } },
         bookSearchSchema: {
           customTitle: {
             type: 'string',
@@ -144,6 +145,7 @@ for (const transport of ['websocket', 'polling']) {
       resourceFailure = undefined
       failAdmissionLog = false
       failDiagnosticLog = undefined
+      rejectDiagnosticLog = undefined
       rejectAuth = false
     })
     afterEach(() => {
@@ -160,7 +162,34 @@ for (const transport of ['websocket', 'polling']) {
       assert.match((await connect('invalid', true)).message, /Authentication required/)
       const socket = await connect()
       assert.deepEqual(api.io.sockets.sockets.get(socket.id).data.auth, { userId: 'server-user', roles: ['reader'] })
+      const diagnostic = diagnosticEvents.find(([message]) => message === `Socket connected: ${socket.id}`)?.[1]
+      assert.deepEqual(diagnostic, {
+        method: 'socketConnect', scopeName: null, phase: 'socketConnected', backend: 'socketio', transactionOutcome: 'none', userId: 'server-user'
+      })
     })
+
+    for (const failure of ['throws', 'rejects']) {
+      it(`retains connection when info writer ${failure}`, async () => {
+        if (failure === 'throws') failDiagnosticLog = 'Socket connected:'
+        else rejectDiagnosticLog = 'Socket connected:'
+        const socket = await connect()
+        assert.equal((await subscribe(socket, { resource: 'countries' })).success, true)
+      })
+
+      it(`retains disconnection cleanup when info writer ${failure}`, async () => {
+        const socket = await connect()
+        const serverSocket = api.io.sockets.sockets.get(socket.id)
+        await subscribe(socket, { resource: 'countries' })
+        if (failure === 'throws') failDiagnosticLog = 'Socket disconnected:'
+        else rejectDiagnosticLog = 'Socket disconnected:'
+        const disconnected = waitForSocketEvent(serverSocket, 'disconnect')
+        socket.disconnect()
+        await disconnected
+        await new Promise(resolve => setImmediate(resolve))
+        assert.equal(api.io.sockets.sockets.has(serverSocket.id), false)
+        assert.equal(api.io.sockets.adapter.rooms.get('countries:updates'), undefined)
+      })
+    }
 
     for (const value of [null, undefined]) {
       it(`rejects authentication when the callback throws ${value}`, async () => {
@@ -194,6 +223,10 @@ for (const transport of ['websocket', 'polling']) {
       const events = diagnosticEvents.filter(args => /authentication failed|auth failure handler/.test(String(args[0])))
       assert.equal(events.length, 2)
       for (const event of events) {
+        assert.equal(event[1].method, 'socketAuthenticate')
+        assert.equal(event[1].scopeName, null)
+        assert.equal(event[1].backend, 'socketio')
+        assert.equal(event[1].transactionOutcome, 'none')
         const output = JSON.stringify(event)
         assert.ok(output.length < 30000, `Diagnostic length: ${output.length}`)
         assert.doesNotMatch(output, /PRIVATE_SOCKET_BYTES/)
@@ -201,6 +234,18 @@ for (const transport of ['websocket', 'polling']) {
       assert.equal(authFailure.details.upload.toString(), 'PRIVATE_SOCKET_BYTES')
       assert.equal(authFailure.details.text.length, 100000)
       assert.equal(authHookFailure.details.text.length, 100000)
+    })
+
+    it('keeps application error details separate from raw authentication input and resource policy', async () => {
+      authFailure = new Error('Authentication rejected', { cause: new Error('Application-owned diagnostic text') })
+      authFailure.details = { accessKey: 'APPLICATION_DIAGNOSTIC_FIELD' }
+      assert.equal((await connect('PRIVATE_HANDSHAKE_TOKEN', true)).message, authFailure.message)
+      const diagnostic = diagnosticEvents.find(([message]) => message === 'Socket.IO authentication failed')?.[1]
+      assert.equal(diagnostic.scopeName, null)
+      assert.equal(diagnostic.phase, 'authentication')
+      assert.equal(diagnostic.error.details.accessKey, 'APPLICATION_DIAGNOSTIC_FIELD')
+      assert.equal(diagnostic.error.cause.message, 'Application-owned diagnostic text')
+      assert.doesNotMatch(JSON.stringify(diagnosticEvents), /PRIVATE_HANDSHAKE_TOKEN/)
     })
 
     it('rejects a subscription denied by resource query permissions', async () => {
@@ -390,6 +435,27 @@ for (const transport of ['websocket', 'polling']) {
       }
     })
 
+    it('redacts hidden resource details when room departure fails', async () => {
+      const socket = await connect()
+      const serverSocket = api.io.sockets.sockets.get(socket.id)
+      await subscribe(socket, { resource: 'countries', subscriptionId: 'private-removal' })
+      const failure = new Error('Room departure failed', { cause: new Error('Adapter failure') })
+      failure.details = { accessKey: 'PRIVATE_REMOVAL_KEY', privateNote: 'PRIVATE_REMOVAL_NOTE', visible: 'retained' }
+      const originalLeave = serverSocket.leave
+      serverSocket.leave = async () => { throw failure }
+      try {
+        const response = await socket.timeout(3000).emitWithAck('unsubscribe', { subscriptionId: 'private-removal' })
+        assert.equal(response.error.message, failure.message)
+        const diagnostic = diagnosticEvents.find(([message]) => message === 'Socket.IO unsubscribe error')?.[1]
+        assert.deepEqual([diagnostic.method, diagnostic.scopeName, diagnostic.phase, diagnostic.backend, diagnostic.transactionOutcome],
+          ['unsubscribe', 'countries', 'subscriptionRemoval', 'socketio', 'none'])
+        assert.equal(diagnostic.error.cause.message, 'Adapter failure')
+        assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE_REMOVAL_KEY|PRIVATE_REMOVAL_NOTE/)
+        assert.equal(diagnostic.error.details.visible, 'retained')
+        assert.equal(failure.details.accessKey, 'PRIVATE_REMOVAL_KEY')
+      } finally { serverSocket.leave = originalLeave }
+    })
+
     for (const admission of ['subscribe', 'restore-subscriptions']) {
       it(`redacts hidden resource fields in ${admission} admission diagnostics`, async () => {
         const socket = await connect()
@@ -407,6 +473,9 @@ for (const transport of ['websocket', 'polling']) {
         assert.equal(event[1].scopeName, 'countries')
         assert.equal(event[1].operation, 'subscribe')
         assert.equal(event[1].phase, 'admission')
+        assert.equal(event[1].method, 'subscribe')
+        assert.equal(event[1].backend, 'socketio')
+        assert.equal(event[1].transactionOutcome, 'none')
         const output = JSON.stringify(event)
         assert.doesNotMatch(output, /PRIVATE_ADMISSION_KEY|PRIVATE_ADMISSION_NOTE/)
         assert.match(output, /retained/)
@@ -430,6 +499,8 @@ for (const transport of ['websocket', 'polling']) {
           ? 'Socket.IO subscription query failed'
           : 'Socket.IO notification permission check failed'))
         assert.ok(event, 'Expected the selected Socket.IO diagnostic boundary')
+        assert.deepEqual([event[1].method, event[1].scopeName, event[1].phase, event[1].backend, event[1].transactionOutcome],
+          ['query', 'countries', phase === 'query' ? 'subscriptionMatch' : 'notificationPermission', knex.client.config.client, phase === 'query' ? 'pending' : 'none'])
         const output = JSON.stringify(event)
         assert.doesNotMatch(output, /PRIVATE_SOCKET_KEY|PRIVATE_SOCKET_NOTE/)
         assert.match(output, /retained/)
@@ -621,6 +692,33 @@ for (const transport of ['websocket', 'polling']) {
       assert.deepEqual(result.restored, ['valid'])
       assert.deepEqual(result.failed.map(item => item.error.code), ['RESOURCE_NOT_FOUND', 'SUBSCRIPTION_EXISTS'])
     })
+
+    for (const failure of [null, undefined, Object.freeze(new Error('Restore input failed'))]) {
+      for (const loggerFailure of ['none', 'throw', 'reject']) {
+        it(`acknowledges a ${String(failure)} restore failure with a ${loggerFailure} diagnostic sink`, async () => {
+          const socket = await connect()
+          const handler = api.io.sockets.sockets.get(socket.id).listeners('restore-subscriptions')[0]
+          const message = 'Socket.IO restore subscriptions error'
+          if (loggerFailure === 'throw') failDiagnosticLog = message
+          if (loggerFailure === 'reject') rejectDiagnosticLog = message
+          const responses = []
+          // Invoke the installed handler directly to exercise its outer failure boundary.
+          await handler({ get subscriptions () { throw failure } }, response => responses.push(response))
+          assert.deepEqual(responses, [{
+            error: {
+              code: 'RESTORE_ERROR',
+              message: failure == null ? 'Subscription restore failed' : failure.message
+            }
+          }])
+          if (loggerFailure === 'none') {
+            const diagnostic = diagnosticEvents.find(([event]) => event === message)?.[1]
+            assert.deepEqual([diagnostic.method, diagnostic.scopeName, diagnostic.phase, diagnostic.backend, diagnostic.transactionOutcome],
+              ['restoreSubscriptions', null, 'subscriptionRestore', 'socketio', 'none'])
+          }
+          assert.equal((await subscribe(socket, { resource: 'countries' })).success, true)
+        })
+      }
+    }
 
     it('does not mistake a non-function event argument for an acknowledgement', async () => {
       const socket = await connect()

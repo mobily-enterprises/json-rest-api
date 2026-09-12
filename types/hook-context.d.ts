@@ -1,6 +1,6 @@
 import type { Knex } from 'knex'
 import type { CleanupDiagnostic } from '../lib/transaction-types.js'
-import type { StorageAdapter } from '../plugins/core/lib/storage/storage-types.js'
+import type { QueryFilteringState, StorageAdapter } from '../plugins/core/lib/storage/storage-types.js'
 import type { TransactionOutcome } from './errors.js'
 import type { DirectResourceId, InputResourceId, InputResourceIdentifier, JsonApiDocument, JsonApiResource, PlainResource, ResourceFormat, WriteReturning } from './representations.js'
 import type { JsonApiWriteDocument, QueryParams } from './resource-methods.js'
@@ -33,7 +33,7 @@ interface LibraryHookFields {
   readonly inputRecord?: unknown
   readonly record?: unknown
   readonly responseRecord?: unknown
-  readonly knexQuery?: Knex.QueryBuilder
+  readonly knexQuery?: QueryFilteringState | null
   readonly storageAdapter?: StorageAdapter
 }
 

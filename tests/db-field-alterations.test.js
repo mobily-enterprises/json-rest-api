@@ -161,6 +161,48 @@ describe(`Direct field alterations (${databaseClient}, regular storage)`, () => 
   }
 
   if (databaseClient === 'better-sqlite3') {
+    for (const outcome of ['alteration-failed', 'cleanup-failed', 'alteration-succeeded']) {
+      it(`retains SQLite alteration outcome when pool release fails: ${outcome}`, async t => {
+        const releaseError = new Error('Pool release failed')
+        const cleanupError = new Error('Foreign-key restoration failed')
+        const originalRelease = db.client.releaseConnection.bind(db.client)
+        const originalQuery = db.client.query
+        let primary
+        let releaseAttempts = 0
+        t.mock.method(db.client, 'query', function (connection, statement) {
+          const sql = typeof statement === 'string' ? statement : statement.sql
+          if (outcome !== 'alteration-succeeded' && /PRAGMA table_xinfo/i.test(sql)) {
+            primary ||= Object.freeze(new Error('Schema inspection failed'))
+            return Promise.reject(primary)
+          }
+          if (outcome === 'cleanup-failed' && primary && /PRAGMA foreign_keys = ON/i.test(sql)) {
+            return Promise.reject(cleanupError)
+          }
+          return originalQuery.call(this, connection, statement)
+        })
+        t.mock.method(db.client, 'releaseConnection', async connection => {
+          releaseAttempts++
+          await originalRelease(connection)
+          throw releaseError
+        })
+        try {
+          await assert.rejects(items.alterKnexFields({ fields: { role: { ...role, defaultTo: 'Owner' } } }), error => {
+            if (outcome === 'alteration-succeeded') assert.equal(error, releaseError)
+            else {
+              assert.ok(primary, 'inject a failure before changing the schema')
+              assert.ok(error instanceof AggregateError)
+              assert.equal(error.cause, primary)
+              assert.deepEqual(error.errors, outcome === 'cleanup-failed' ? [primary, cleanupError, releaseError] : [primary, releaseError])
+            }
+            return true
+          })
+          assert.equal(releaseAttempts, 1)
+        } finally { t.mock.restoreAll() }
+        await db(tableName).insert({ record_key: 2 })
+        assert.equal((await db(tableName).where({ record_key: 2 }).first()).role, outcome === 'alteration-succeeded' ? 'Owner' : 'Member')
+        assert.equal((await db.raw('PRAGMA foreign_keys'))[0].foreign_keys, 1)
+      })
+    }
     for (const scenario of [
       { label: 'before schema-read COMMIT', target: 1, afterExecution: false },
       { label: 'after schema-read COMMIT', target: 1, afterExecution: true },

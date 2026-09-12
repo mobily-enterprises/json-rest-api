@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * Identifier, LifecycleResource, RelationshipWriteArguments, WriteRelationshipContext
+ * } from './lifecycle-types.js' */
 import { lockRelationshipParent } from '../lib/writing/relationship-processor.js'
 import { advanceResourceVersion } from '../lib/writing/resource-version.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
@@ -23,23 +27,24 @@ import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../lib/querying-writing/knex-cons
  * Remove the identifiers in params.relationshipData from a to-many relationship.
  * Authorization and parent/version locking precede mutation. The method
  * returns no resource and completes only an owned transaction.
+ * @param {RelationshipWriteArguments<Identifier[]>} args
  */
-export default async function deleteRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+export default async function deleteRelationshipMethod ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
-  context.method = 'deleteRelationship'
-  context.scopeName = scopeName
-  context.id = requireExistingResourceId(params.id, {
+  callerContext.method = 'deleteRelationship'
+  callerContext.scopeName = scopeName
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
-  context.relationshipName = params.relationshipName
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  callerContext.relationshipName = params.relationshipName
+  callerContext.schemaInfo = scope.vars.schemaInfo
 
-  // Transaction handling
-  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
-  context.db = context.transaction || api.knex.instance
+  await beginWriteTransaction(callerContext, params.transaction, helpers.newTransaction, runHooks)
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {WriteRelationshipContext} */ (callerContext)
 
   try {
     // Validate
@@ -65,7 +70,7 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
       operation: 'deleteRelationship',
       relationshipData: params.relationshipData
     })
-    params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
+    params.relationshipData = /** @type {Identifier[]} */ (normalizeRelationshipIdentifiers(params.relationshipData, { api }))
 
     // Check permissions
     await runHooks('checkPermissions')
@@ -104,10 +109,10 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
       } else {
         const knex = api.knex?.instance || helpers.db
         const pivotResource = relDef.through
-        const pivotScope = api.resources[pivotResource]
+        const pivotScope = /** @type {LifecycleResource} */ (api.resources[pivotResource])
         const pivotTable = pivotScope?.vars?.schemaInfo?.tableName || pivotResource
-        const localKey = getStorageColumn(pivotScope.vars.schemaInfo, relDef.foreignKey)
-        const foreignKey = getStorageColumn(pivotScope.vars.schemaInfo, relDef.otherKey)
+        const localKey = getStorageColumn(pivotScope.vars.schemaInfo, /** @type {string} */ (relDef.foreignKey))
+        const foreignKey = getStorageColumn(pivotScope.vars.schemaInfo, /** @type {string} */ (relDef.otherKey))
 
         const ids = [...new Set(params.relationshipData.map(identifier => identifier.id))]
         for (let offset = 0; offset < ids.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
@@ -127,8 +132,6 @@ export default async function deleteRelationshipMethod ({ params, context, vars,
     await runHooks('finishDeleteRelationship')
 
     await commitOwnedTransaction(context)
-
-    // 204 No Content
   } catch (error) {
     await handleWriteMethodError(error, context, 'DELETE_RELATIONSHIP', scopeName, log)
   }

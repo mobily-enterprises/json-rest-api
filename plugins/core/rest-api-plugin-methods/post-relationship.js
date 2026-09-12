@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * Identifier, RelationshipWriteArguments, WriteRelationshipContext
+ * } from './lifecycle-types.js' */
 import { lockRelationshipParent } from '../lib/writing/relationship-processor.js'
 import { advanceResourceVersion } from '../lib/writing/resource-version.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
@@ -22,38 +26,38 @@ import {
  * Add the identifiers in params.relationshipData to a to-many relationship.
  * Authorization and parent/version locking precede mutation. The method
  * returns no resource and completes only an owned transaction.
+ * @param {RelationshipWriteArguments<Identifier[]>} args
  */
-export default async function postRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+export default async function postRelationshipMethod ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
-  context.method = 'postRelationship'
-  context.scopeName = scopeName
-  context.id = requireExistingResourceId(params.id, {
+  callerContext.method = 'postRelationship'
+  callerContext.scopeName = scopeName
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
-  context.relationshipName = params.relationshipName
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  callerContext.relationshipName = params.relationshipName
+  callerContext.schemaInfo = scope.vars.schemaInfo
 
-  // Transaction handling
-  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
-  context.db = context.transaction || api.knex.instance
+  await beginWriteTransaction(callerContext, params.transaction, helpers.newTransaction, runHooks)
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {WriteRelationshipContext} */ (callerContext)
 
   try {
-  // Validate
     const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName)
     if (!relDef) {
       throw new RestApiResourceError(
-      `Relationship '${context.relationshipName}' not found on resource '${scopeName}'`,
-      { subtype: 'relationship_not_found' }
+        `Relationship '${context.relationshipName}' not found on resource '${scopeName}'`,
+        { subtype: 'relationship_not_found' }
       )
     }
 
     if (relDef.type !== 'hasMany' && relDef.type !== 'manyToMany') {
       throw new RestApiValidationError(
-      `Cannot POST to to-one relationship '${context.relationshipName}'. Use PATCH instead.`,
-      { fields: ['data'] }
+        `Cannot POST to to-one relationship '${context.relationshipName}'. Use PATCH instead.`,
+        { fields: ['data'] }
       )
     }
 
@@ -64,7 +68,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
       operation: 'postRelationship',
       relationshipData: params.relationshipData
     })
-    params.relationshipData = normalizeRelationshipIdentifiers(params.relationshipData, { api })
+    params.relationshipData = /** @type {Identifier[]} */ (normalizeRelationshipIdentifiers(params.relationshipData, { api }))
 
     // Check permissions
     await runHooks('checkPermissions')
@@ -115,9 +119,7 @@ export default async function postRelationshipMethod ({ params, context, vars, h
     await runHooks('finishPostRelationship')
 
     await commitOwnedTransaction(context)
-
-    // 204 No Content
   } catch (error) {
     await handleWriteMethodError(error, context, 'POST_RELATIONSHIP', scopeName, log)
   }
-};
+}

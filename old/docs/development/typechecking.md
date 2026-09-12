@@ -39,6 +39,9 @@ and reports rejected results from unchecked JavaScript callers.
 | `plugins/core/lib/storage/storage-adapter.js` | Ordinary/canonical adapter construction and lookup, column/value translation, scoped builders and selection helpers |
 | `plugins/core/lib/storage/storage-mapping.js` | Ordinary naming/mapping, serialization and row conversion |
 | `plugins/core/lib/storage/canonical-storage-mapping.js` | Canonical slots, logical IDs, attribute/linkage conversion and value extraction |
+| `plugins/core/lib/storage/ordinary-data-helpers.js` | Ordinary CRUD, minimal reads, collection reads, sort descriptors and deferred relationship-ID queries |
+| `plugins/core/lib/storage/canonical-data-helpers.js` | Canonical CRUD, minimal reads, collection reads and sort descriptors |
+| `plugins/core/lib/querying/knex-json-api-transformers-querying.js` | Ordinary row conversion and complete single/collection JSON:API response assembly |
 | `plugins/core/lib/querying/storage-adapter-utils.js` | Hook-local adapter lookup, alias selection and value translation |
 | `plugins/core/lib/querying/query-constraint.js` | Mandatory resource membership, translated equality values and unexecuted ID subqueries |
 | `plugins/core/lib/querying/query-builder-utils.js` | Temporary filtering state, builder replacement/restoration and wrapped async return values |
@@ -72,12 +75,12 @@ are not complete public resource declarations or a static validator for every
 schema extension.
 
 The database normalizer's exported options also have JSDoc so calls from checked
-storage modules can be validated. Its implementation body, resource-method lifecycle,
-Knex plugins and other modules remain dynamically typed; the canonical query
-proxy has been removed.
-Imported JavaScript can supply inferred or annotated signatures without its
-body being checked. Full checked contexts, capabilities, query/result types and
-public package declarations remain tracked under A6/A9.
+storage modules can be validated. Its implementation body remains dynamically
+typed. The storage operation bodies now live in the checked helper modules above;
+the two Knex plugin installers retain setup and schema-registration code outside
+that checked subset. The later storage and lifecycle sections record the current
+implementation coverage. Imported JavaScript can supply inferred or annotated
+signatures without its body being checked; this is not whole-repository checking.
 
 ## Values and ownership
 
@@ -659,8 +662,9 @@ metadata; it creates no new runtime schema. Stored values remain unknown, while
 resource and linkage IDs are strings. Absent rows produce null.
 
 The base `toJsonApiRecord` has declared overloads distinguishing present from
-nullable rows. Its implementation and the complete query response assembler
-remain unchecked; this batch does not establish their implementation coverage.
+nullable rows. At this earlier checkpoint its body and the complete query
+response assembler were unchecked; both are checked in the storage implementation
+checkpoint below.
 The wrapper uses a typed relationship map without changing its conversion
 algorithm. Seven negative type fixtures exercise input metadata, aliases,
 resource names, row objects, read-only membership and nullable results.
@@ -734,3 +738,172 @@ assignments verify both storage-mode interfaces. Eight runtime cases prove that
 each placeholder rejects without invoking caller-data getters. This is not a
 complete custom-backend interface: transaction/query integration and installed
 adapter behavior retain their separate contracts and verification.
+
+
+## Resource lifecycle implementation checks
+
+Every JavaScript implementation in `plugins/core/rest-api-plugin-methods/` now
+opts into `@ts-check`: POST, PUT, PATCH, DELETE, GET, QUERY, the five relationship
+operations, common write/return/visibility helpers, attribute and include
+enrichment, permission/filter dispatch, route notification and release. The
+wildcard entries in `tsconfig.json` include their bodies and the local
+`lifecycle-types.d.ts`; these are not declaration-only acceptance fixtures.
+
+The local types describe existing mutable working state. Method entry accepts an
+empty caller context, and ordinary CRUD/query parameters do not require unrelated
+relationship fields. Existing initialization produces narrow resource/read/
+relationship views; write setup returns its initialized processing context.
+`ProcessingContext` keeps the document contents unknown before request validation. Validated write helpers receive
+the document shape, while attribute values, custom context properties, computed
+values and setter results remain unknown. Single-resource and collection
+contexts have distinct result shapes. The context retains the existing SQL
+handle, transaction fields and mutable attribute bags; no runtime context class,
+copy or new hook protocol was introduced. Storage calls reuse the checked
+`DataWriteHelpers` and `CanonicalDataReadHelpers` contracts instead of declaring
+another helper protocol. This also exposed an incorrect caller requirement for
+`returnMeta`: the storage query implementation initializes that field itself.
+
+Each helper requires the fields established by its working stage; it does not
+require write-only fields on read or relationship operations. Entry declarations
+do not claim that caller state is already initialized. The runtime still initializes
+fields, validates documents and enforces transaction ownership. Narrow local
+assertions identify state already established by those owners: a validated ID,
+a started write transaction, registration-compiled resource/callback maps and
+relationship cardinality established by the request/schema contract. TypeScript
+does not infer those mutations across async calls, nor derive a relationship's
+cardinality from a schema lookup. The assertions do not validate unchecked hook
+output or unknown driver values. `get-related` reuses the target scope after its
+existence guard and narrows single linkage before reading ID/type; its pivot
+assertion follows the registered many-to-many branch. Imported schema-validation, relationship
+planning, conversion and versioning functions still have their own checking
+scope; annotating their return contract does not check their full bodies.
+
+`tests/types/lifecycle-context-contracts.ts` imports the real JavaScript methods
+and helpers. It verifies valid mutable contexts and shared storage requests,
+then requires compiler errors for raw processing input passed to setters,
+invalid database/transaction handles, non-record attributes, invented transaction
+outcomes, single/collection confusion, unknown scalar values, non-callable
+setters, incomplete schema validators and a presumed scalar storage POST result.
+
+Two runtime corrections accompany this work. POST now validates the unknown
+storage return before publishing its ID to later hooks. Nonempty string and
+finite number IDs retain their values; native bigint IDs become lossless strings.
+Missing/object/empty/non-finite IDs reject and roll back for every `returning`
+mode, without invoking the custom ID normalizer a second time. Relationship GET
+and related-resource GET now initialize the actual parent `scopeName` before
+permission hooks, replacing a stale caller value.
+
+Node 24.6.0 verification for this batch: after the entry/stage correction, the
+six-file lifecycle selection passed 156 tests in ordinary SQLite and 171 in
+canonical SQLite, with no skips. A final ordinary ID/context smoke selection
+passed 33 tests. The selection includes existing schema enrichment, relationship
+writes/setters, bigint IDs and the new storage-return/scope-context regressions.
+Seven malformed-ID full-return cases and both relationship scope cases failed
+before their corrections; the final checks cover all three returning modes.
+The internal typecheck and affected-file lint passed. Native driver verification
+and the broader final acceptance checkpoint are recorded separately by the owning
+work ledger; these SQLite results do not imply native coverage.
+
+## Storage operation implementation checks
+
+The earlier boundary-only entries above describe intermediate checkpoints. The
+ordinary and canonical storage operation bodies are now checked, as are the
+resource lifecycle bodies described in the preceding section. This supersedes
+the earlier statement that annotating the plugin helper signatures left all
+their implementations unchecked.
+
+`ordinary-data-helpers.js` and `canonical-data-helpers.js` both opt into
+`@ts-check`. Their ordinary factory functions contain the actual existence,
+POST, PUT, PATCH, DELETE, minimal single/batch read, full GET and QUERY bodies.
+The checked bodies include sort-descriptor construction, query/count/cursor
+coordination and the ordinary deferred relationship-ID subquery. The plugin
+installers retain their existing registration/setup responsibilities and install
+these helpers directly; no generic dispatch framework or new context protocol
+was added. `knex-json-api-transformers-querying.js` also checks its base resource
+converter and complete ordinary single/collection response assembler. Existing
+checked adapter, mapping, query-unwrapping and belongs-to conversion owners
+continue to supply their respective contracts.
+
+The helper signatures reuse `storage-types.d.ts`, the public resource/document
+representations and the existing Knex database/transaction types. Attribute and
+serializer values remain unknown. Single minimal reads require an ID and return
+a nullable resource; batch reads return arrays. Query implementations initialize
+`returnMeta`, so callers do not have to supply it. Ordinary collection reads
+require their filtering hook callback. Deferred filtering retains the existing
+wrapped-builder contract and the existing unwrapping utility; no new runtime
+builder adapter or duck-type guard was introduced to satisfy the compiler.
+
+Two narrow SQL binding assertions remain: one `Knex.Value[]` assertion in each
+minimal-reader implementation at the `whereIn` handoff. Custom serializer and
+filter translation return types remain unknown. Knex's declarations cannot
+express arbitrary values accepted or rejected by a configured SQL driver, so
+these assertions mark that third-party boundary; they do not claim that custom
+serializer results are statically validated. Materialized canonical records
+must contain an actual logical resource ID before conversion. The ordinary
+single-response assembler likewise checks whether a row exists before treating
+it as a single resource.
+
+Supporting pagination/cursor algorithms, include loading, canonical link-store
+and relationship-reader bodies, and database value normalization remain outside
+this body-checking increment. Called signatures were clarified where needed;
+for example, `normalizeRecordAttributes` preserves its input document shape
+instead of erasing it to `Object`. Such annotations do not check those entire
+implementations. This is checked operation coordination and response assembly,
+not a claim that every imported storage algorithm or the whole repository is
+statically verified.
+
+`tests/types/storage-implementations.js` imports both actual factories. Its six
+negative cases reject batch/document confusion, a single read without an ID,
+materialized rows in place of a wrapped filtering builder, an ordinary query
+without its hooks, and assumed string results from either a serializer or filter
+translation. Positive calls retain wrapped native builders and the distinct
+single/batch result shapes.
+
+Checking these bodies exposed two projection defects. A minimal batch lookup
+could lose its ID projection when a filter hook selected an attribute; both
+storage modes now restore distinct qualified IDs before using that query for
+membership. Canonical single minimal reads now restore the full canonical row
+after filter hooks change the projection, preserving identity and attributes.
+The new storage-boundary regressions reproduce these failures before the fixes
+and verify them with the same projection-changing hook afterward. Required
+adapter lookups no longer retain unreachable nullable-adapter fallback branches;
+canonical write paths that genuinely permit a fallback still retain it.
+
+Node 24.6.0 verification for this storage increment:
+
+- The seven-file SQLite selection passed 240 ordinary and 241 canonical tests,
+  without failures, cancellations or skips. It covers storage boundaries,
+  serializers, returned IDs, queries, related-storage boundaries, filtering
+  context and reference sorting. Logs:
+  `/tmp/jra-storage-focused-knex.log` and
+  `/tmp/jra-storage-focused-anyapi.log`.
+- The affected four-file native selection (storage boundaries, serializers,
+  queries and reference sorting) passed 209 ordinary and 210 canonical tests on
+  PostgreSQL 16.15, and the same counts on MySQL 8.0.46, without failures,
+  cancellations or skips. Logs: `/tmp/jra-storage-native-pg.log` and
+  `/tmp/jra-storage-native-mysql.log`. Both owned servers stopped and both
+  temporary data directories were removed.
+- After the final storage review, the three-file SQLite selection for storage
+  boundaries, serializers and returned IDs passed 80 ordinary and 83 canonical
+  tests, without failures, cancellations or skips. Logs:
+  `/tmp/jra-storage-review-knex.log` and
+  `/tmp/jra-storage-review-anyapi.log`.
+- Internal typechecks passed at the storage checkpoints; affected-file lint and
+  `git diff --check` passed. The later lifecycle/final combined checks are
+  recorded by their owners. No comprehensive suite was rerun for this storage
+  review, and these native selections do not claim comprehensive driver coverage.
+
+The later packed consumer check caught a declaration-only boundary missed by
+the internal `allowJs` compiler: `storage-types.d.ts` referenced two runtime
+constant modules and a JavaScript-only fieldset typedef without published
+declarations. Matching declarations now accompany the existing
+`knex-constants.js` and `query-constraint.js` owners; the unique symbol describes
+the actual exported runtime symbol. The constraint shape has one shared
+definition, reused by the checked implementation, and request fields reuse
+public `SelectionParams['fields']`. No executable runtime code changed for this
+correction. Node 24.6.0 internal typechecking and packed public type checking both
+passed afterward. The packed check verified 173 files, 28 runtime exports,
+24 negative cases and 257 local documentation links; logs:
+`/tmp/jra-storage-packed-boundary-typecheck.log` and
+`/tmp/jra-storage-packed-boundary-public-types.log`. No runtime suite was rerun
+for the declaration correction.

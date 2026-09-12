@@ -144,21 +144,30 @@ describe(`Cold canonical descriptors on one connection (${databaseClient})`, () 
     }
   }
 
-  it('counts uncommitted records without reading configuration tables', async () => {
+  it('paginates uncommitted records with cold descriptors without reading configuration tables', async () => {
     invalidate()
     await assert.rejects(fixture.api.transaction(async transaction => {
-      const count = () => fixture.api.helpers.dataQueryCount({
-        scopeName: 'items', context: { transaction, db: transaction, queryParams: { filters: { name: 'Original' } } }
+      const query = () => fixture.api.resources.items.query({
+        transaction,
+        format: 'jsonapi',
+        queryParams: { filters: { name: 'Original' }, sort: ['id'], page: { number: 1, size: 1 } }
       })
-      assert.equal(await count(), 1)
+      const before = await query()
+      assert.deepEqual(before.data.map(row => row.id), [item.id])
+      assert.equal(before.meta.pagination.total, 1)
+      assert.equal(before.meta.pagination.pageCount, 1)
       await fixture.api.resources.items.post({
         transaction,
         format: 'jsonapi',
         returning: 'none',
         document: { data: { type: 'items', id: '99', attributes: { name: 'Original' } } }
       })
-      assert.equal(await count(), 2)
+      const after = await query()
+      assert.equal(after.data.length, 1)
+      assert.equal(after.meta.pagination.total, 2)
+      assert.equal(after.meta.pagination.pageCount, 2)
       assert.equal(transaction.isCompleted(), false)
+      assert.equal(registry.cache.size, 0, 'transaction reads must not publish descriptors to the committed cache')
       throw rollbackRequested
     }), /Roll back cold descriptor writes/)
     assert.equal(await fixture.count('items'), 2)

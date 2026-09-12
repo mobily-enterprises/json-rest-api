@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * CompletedWriteContext, LifecycleArguments
+ * } from './lifecycle-types.js' */
 import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { lockRelationshipParent, lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
@@ -21,10 +25,11 @@ import {
  * Update only supplied attributes and relationships on an existing resource.
  * Input normalization, selected write response and transaction ownership use
  * the same contracts as POST/PUT; omitted fields remain unchanged.
+ * @param {LifecycleArguments} args
  */
 export default async function patchMethod ({
   params,
-  context,
+  context: callerContext,
   vars,
   helpers,
   scope,
@@ -35,12 +40,12 @@ export default async function patchMethod ({
   api,
   log
 }) {
-  context.method = 'patch'
+  callerContext.method = 'patch'
 
   try {
-    const { schema, versionState } = await setupCommonRequest({
+    const { schema, versionState, context: preparedContext } = await setupCommonRequest({
       params,
-      context,
+      context: callerContext,
       vars,
       scopes,
       scopeName,
@@ -48,19 +53,14 @@ export default async function patchMethod ({
       helpers,
       runHooks
     })
-    // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPatch')
 
-    validateUpdateRequest({ method: 'patch', params, context, vars, scopeOptions, scopeName })
+    validateUpdateRequest({ method: 'patch', params, context: preparedContext, vars, scopeOptions, scopeName })
+    const context = /** @type {CompletedWriteContext} */ (preparedContext)
 
-    // Validate that user has read access to all related resources
-    // This ensures users can only create relationships to resources they can access
     await validateRelationshipAccess(context, context.inputRecord, helpers, api)
 
-    // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
-    // Example: relationships.author -> author_id: '123' for storage
-    // Example: relationships.tags -> array of pivot records to create later (only for provided relationships in PATCH)
     const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(
       scope,
       { context }
@@ -90,7 +90,6 @@ export default async function patchMethod ({
 
     context.minimalRecord = minimalRecord
 
-    // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'patch',
       originalContext: context,
@@ -119,7 +118,6 @@ export default async function patchMethod ({
     const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName })
     await applyResourceVersion({ state: versionState, context, helpers, scopeName })
 
-    // Call the storage helper - should return the patched record
     await helpers.dataPatch({
       scopeName,
       context
@@ -163,7 +161,7 @@ export default async function patchMethod ({
       await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData })
     }
 
-    const ret = await handleRecordReturnAfterWrite({
+    const response = await handleRecordReturnAfterWrite({
       context,
       scopeName,
       api,
@@ -174,8 +172,8 @@ export default async function patchMethod ({
 
     await commitOwnedTransaction(context)
 
-    return ret
+    return response
   } catch (error) {
-    await handleWriteMethodError(error, context, 'PATCH', scopeName, log)
+    await handleWriteMethodError(error, callerContext, 'PATCH', scopeName, log)
   }
 }

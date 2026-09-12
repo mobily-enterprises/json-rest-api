@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * LifecycleArguments, QueryContext, Resource
+ * } from './lifecycle-types.js' */
 import { enrichIncludedAttributes } from './enrich-attributes.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
@@ -13,10 +17,11 @@ import { queryConstraint } from '../lib/querying/query-constraint.js'
  * Read a filtered collection using params.queryParams and the selected format.
  * Preserve authorization and field selection through collection execution.
  * Pagination metadata belongs to the result; this method sends no HTTP request.
+ * @param {LifecycleArguments<Resource[]>} args
  */
 export default async function queryMethod ({
   params,
-  context,
+  context: callerContext,
   vars,
   helpers,
   scope,
@@ -25,36 +30,32 @@ export default async function queryMethod ({
   scopeName,
   api
 }) {
-  context.method = 'query'
+  callerContext.method = 'query'
   // Nested queries only inherit membership when it is explicitly supplied again.
-  context[queryConstraint] = params[queryConstraint]
+  callerContext[queryConstraint] = params[queryConstraint]
 
   rejectRemovedOptions(params)
-  context.format = resolveFormat(params.format, vars.format)
-  context.simplified = context.format === 'plain'
+  callerContext.format = resolveFormat(params.format, vars.format)
+  callerContext.simplified = callerContext.format === 'plain'
 
-  // Assign common context properties
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo // This is the object variable created by compileSchemas
-  context.queryParams = params.queryParams || {}
+  callerContext.schemaInfo = scope.vars.schemaInfo // This is the object variable created by compileSchemas
+  callerContext.queryParams = params.queryParams || {}
 
-  // These only make sense as parameter per query
-  context.queryParams.fields = params.queryParams?.fields ?? {}
-  if (context.queryParams.include == null) delete context.queryParams.include
-  context.queryParams.sort = params.queryParams?.sort ?? []
-  context.queryParams.page = params.queryParams?.page ?? {}
+  callerContext.queryParams.fields = params.queryParams?.fields ?? {}
+  if (callerContext.queryParams.include == null) delete callerContext.queryParams.include
+  callerContext.queryParams.sort = params.queryParams?.sort ?? []
+  callerContext.queryParams.page = params.queryParams?.page ?? {}
 
-  context.transaction = params.transaction
-  context.db = context.transaction || api.knex.instance
+  callerContext.transaction = params.transaction
+  callerContext.db = callerContext.transaction || api.knex.instance
 
-  context.scopeName = scopeName
+  callerContext.scopeName = scopeName
+  const context = /** @type {QueryContext} */ (callerContext)
 
-  // These are just shortcuts used in this function and will be returned
   const schemaStructure = context.schemaInfo.schemaInstance.structure
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
-  // Sortable fields and sort (mab)
   context.sortableFields = getEffectiveSortableFields(vars)
-  // Apply default sort if no sort specified
   if (context.queryParams.sort.length === 0 && vars.defaultSort) {
     context.queryParams.sort = Array.isArray(vars.defaultSort) ? vars.defaultSort : [vars.defaultSort]
   }
@@ -72,7 +73,6 @@ export default async function queryMethod ({
   )
   context.queryParams = validatedRequest.queryParams || {}
 
-  // Centralised checkPermissions function
   await scope.checkPermissions({
     method: 'query',
     originalContext: context,
@@ -88,7 +88,6 @@ export default async function queryMethod ({
     runHooks
   })
 
-  // Normalize database values (e.g., convert 1/0 to true/false for booleans)
   context.record = normalizeRecordAttributes(context.record, scopes)
 
   context.originalRecord = structuredClone(context.record)
@@ -99,7 +98,6 @@ export default async function queryMethod ({
   const requestedFields = getResourceFieldset(context.queryParams.fields, scopeName)
   const requestedComputedFields = getRequestedComputedFields(scopeName, requestedFields, computedFields)
 
-  // Run enrichAttributes for every single set of attribute, calling it from the right scope
   for (const entry of context.record.data) {
     entry.attributes = await scope.enrichAttributes({
       id: entry.id,

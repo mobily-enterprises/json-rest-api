@@ -43,6 +43,7 @@ import {
  * @param {string} scopeName - The parent scope name (e.g., 'authors')
  * @param {Object} scopes - All available scopes with their schemas
  * @param {Object} knex - Knex instance for database queries
+ * @param {import('../storage/storage-types.js').DataReadContext | null} [requestContext]
  * @returns {Promise<void>} Modifies records in place by adding relationship data
  */
 export const loadRelationshipIdentifiers = async (records, scopeName, scopes, knex, requestContext = null) => {

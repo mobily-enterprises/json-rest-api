@@ -1,9 +1,13 @@
+// @ts-check
+/** @import {
+ * CompletedWriteContext, LifecycleArguments, WriteContext
+ * } from './lifecycle-types.js' */
 import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
-import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
+import { defaultNormalizeResourceId, requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import {
   setupCommonRequest,
   validateResourceAttributesBeforeWrite,
@@ -19,10 +23,11 @@ import {
  * Create a resource from plain data or a JSON:API document.
  * Supplied IDs and existing-resource linkage are validated before writing.
  * Prepare the selected returning result before completing an owned transaction.
+ * @param {LifecycleArguments} args
  */
 export default async function postMethod ({
   params,
-  context,
+  context: callerContext,
   vars,
   helpers,
   scope,
@@ -33,12 +38,12 @@ export default async function postMethod ({
   api,
   log
 }) {
-  context.method = 'post'
+  callerContext.method = 'post'
 
   try {
-    const { schema, versionState } = await setupCommonRequest({
+    const { schema, versionState, context: preparedContext } = await setupCommonRequest({
       params,
-      context,
+      context: callerContext,
       vars,
       scopes,
       scopeName,
@@ -47,21 +52,21 @@ export default async function postMethod ({
       runHooks
     })
 
-    // Run early hooks for pre-processing (e.g., file handling)
     await runHooks('beforeProcessing')
     await runHooks('beforeProcessingPost')
 
     const requestContracts = getRequestContracts({
       scopeName,
-      schemaInfo: context.schemaInfo,
+      schemaInfo: preparedContext.schemaInfo,
       includeDepthLimit: vars.includeDepthLimit,
       sortableFields: vars.sortableFields
     })
-    context.inputRecord = validateRequestContractOrThrow(
+    preparedContext.inputRecord = validateRequestContractOrThrow(
       requestContracts.post,
-      context.inputRecord,
+      preparedContext.inputRecord,
       'POST request body is invalid'
     )
+    const context = /** @type {WriteContext} */ (preparedContext)
 
     if (context.inputRecord?.data?.id !== undefined) {
       context.inputRecord.data.id = requireDocumentResourceId(context.inputRecord.data.id, {
@@ -70,13 +75,8 @@ export default async function postMethod ({
       })
     }
 
-    // Validate that user has read access to all related resources
-    // This ensures users can only create relationships to resources they can access
     await validateRelationshipAccess(context, context.inputRecord, helpers, api)
 
-    // Extract foreign keys from JSON:API relationships and prepare many-to-many operations
-    // Example: relationships.author -> author_id: '123' for storage
-    // Example: relationships.tags -> array of pivot records to create later
     const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = await processRelationships(
       scope,
       { context }
@@ -107,7 +107,6 @@ export default async function postMethod ({
       }
     }
 
-    // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'post',
       originalContext: context,
@@ -123,10 +122,17 @@ export default async function postMethod ({
     await applyResourceVersion({ state: versionState, context, helpers, scopeName, isCreate: true })
 
     // Create the main record and retain the logical ID returned by storage.
-    context.id = await helpers.dataPost({
+    const storedId = await helpers.dataPost({
       scopeName,
       context
     })
+
+    const resourceId = typeof storedId === 'bigint' ? String(storedId) : storedId
+    if ((typeof resourceId !== 'string' && typeof resourceId !== 'number') || !defaultNormalizeResourceId(resourceId)) {
+      throw new Error('Storage POST did not return a valid resource ID')
+    }
+    context.id = resourceId
+    const completedContext = /** @type {CompletedWriteContext} */ (context)
 
     await invalidateInverseVersions({ state: inverseVersions, context, helpers, api })
 
@@ -137,7 +143,7 @@ export default async function postMethod ({
     for (const { relName, relDef, relData } of manyToManyRelationships) {
       if (api.anyapi?.links?.attachMany && relDef?.through) {
         await api.anyapi.links.attachMany({
-          context,
+          context: completedContext,
           scopeName,
           relName,
           relDef,
@@ -146,7 +152,6 @@ export default async function postMethod ({
         continue
       }
 
-      // Validate pivot resource exists
       validatePivotResource(scopes, relDef, relName)
       await createPivotRecords(api, context.id, relDef, relData, context.transaction)
     }
@@ -155,8 +160,8 @@ export default async function postMethod ({
       await updateReverseRelationship({ api, helpers, context, scopeName, relDef, relData })
     }
 
-    const ret = await handleRecordReturnAfterWrite({
-      context,
+    const response = await handleRecordReturnAfterWrite({
+      context: completedContext,
       scopeName,
       api,
       scopes,
@@ -166,8 +171,8 @@ export default async function postMethod ({
 
     await commitOwnedTransaction(context)
 
-    return ret
+    return response
   } catch (error) {
-    await handleWriteMethodError(error, context, 'POST', scopeName, log)
+    await handleWriteMethodError(error, callerContext, 'POST', scopeName, log)
   }
 }

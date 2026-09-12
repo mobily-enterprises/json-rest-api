@@ -2,9 +2,33 @@
 
 Created: 2026-09-08. Revision 2: 2026-09-09, following the maintainer's approval of coordinated breaking changes across json-rest-api, jskit-ai, vibe64, and the seeds selected by vibe64; other app migrations are explicitly deferred to the maintainer.
 
+**Current revision 3, 2026-09-12:** the maintainer explicitly requested that
+completed mixed entries close and only unfinished work receive new checkboxes.
+The 34 original mixed IDs now describe their completed library portions; 34
+linked consumer residuals and two separate library residuals are in Part R.
+This changes the checklist from 214 to **250 items** without adding product
+scope. Three stale library-only items (A5-02/A5-03/A5-12) also close against
+existing implementation and verification. **190/250 complete (76.0%); 60 open.**
+The 34 split closures are bookkeeping, not 34 newly implemented features or
+completed migrations. Current remaining work is 34 consumer residuals, twelve Part M items and fourteen
+final review/report items. Historical 214-item counts and mixed-item pause rules
+below are superseded by this explicit split.
+
 Starting reference: `51302ce` (`1.0.29`), following the temporal, fieldset, error-propagation, and pagination fixes in `24ea75e`. Confirm the actual checkout before implementation; other work may have advanced it.
 
-**Library work paused at the requested library-only Part B checkpoint; consumer work remains on hold.**
+**Preparation resumed, 2026-09-12:** the user authorized advancing as far as
+possible while protecting active integrations. Reconcile all open items against
+later work; prepare library changes and the focused consumer source migration.
+The 42-file consumer patch is now archived and its temporary clone removed.
+The maintainer has now authorized targeted Node 24 tests and comprehensive
+tests when strictly justified. Do not alter active consumer checkouts, shared dependencies,
+consumer generated outputs or deployments. Completed historical
+acceptance may be reconciled; newly prepared code without required verification
+stays open. The [current preparation status](docs/development/pending-jskit-ai/preparation-status.md)
+records scope, ownership, artifact locations and deferred checks. The pause
+notes below describe the earlier checkpoint and remain historical evidence.
+
+**Historical library-only Part B pause checkpoint; later preparation and verification are recorded above.**
 The separately requested cleanup has completed four readability passes and a
 structured maintainability review. The maintainer also authorized removal of
 implicit pivot-field search. That source passed full Node 24 verification. The
@@ -21,7 +45,7 @@ When consumer work is authorized again, reconcile and apply that work with the r
 coordinated migration; earlier paired test results describe the captured
 migrated source, not the active jskit-ai checkout after parking.
 
-**Library-first execution, revised 2026-09-11:** finish as much work as possible
+**Historical library-first instruction, 2026-09-11; counting rule superseded by revision 3:** finish as much work as possible
 inside json-rest-api, including the library portions of mixed checklist items.
 Then pause before work that requires changes to other software. Keep the full
 goal and its 214-item denominator; a mixed item stays unticked until all of its
@@ -29,7 +53,7 @@ requirements are verified. The [remaining-work split](docs/development/library-f
 separates library acceptance from paused consumer/dependency work. It does not
 claim that 17 or 21 further ticks would finish the library.
 
-**Next requested pause point, 2026-09-11:** the maintainer asks to pause after
+**Historical pause point, 2026-09-11:** the maintainer asks to pause after
 the library-only portion of Part B, then undertake a separate broad cleanup and
 commit/push. The maintainer explicitly confirmed that consumers stay paused.
 The independently actionable Part B library acceptance is now recorded below.
@@ -38,7 +62,7 @@ software; consumer-dependent checkboxes remain open. Positioning and upstream
 dispatcher exceptions remain explicitly deferred, not completed.
 This pause point does not mark the full 214-item goal complete.
 
-**Positioning work is paused at the maintainer's request.** The first native
+**Historical positioning pause, since superseded by implemented and verified corrections.** The first native
 run exposed duplicate keys under concurrent writes; no production positioning
 fix has been made. The fixture changes and failed-run evidence are retained.
 Read-only inspection of current jskit-ai found no use of PositioningPlugin or
@@ -57,11 +81,28 @@ with a concrete cross-cutting verification need, and final acceptance; do not
 run them after each checklist closure, small fix or documentation change.
 Required database and connector coverage remains part of the goal.
 
-**Verified checklist: 138/214 complete (64.5%); 76 open.** Internal: 101/138;
-API: 35/48; migration: 2/14; final review/report: 0/14. Latest evidence is in the
+**Reconciled checklist: 190/250 complete (76.0%); 60 open.** Internal: 138/138;
+API: 48/48; migration: 2/14; residual work: 2/36; final review/report: 0/14.
+A/B completion refers to the narrowed library acceptance above; transferred
+consumer work stays open in Part R, while R-L01/R-L02 are accepted. The 2026-09-12
+[A7 reconciliation](#2026-09-12-a7-error-boundary-reconciliation) closes A7-04;
+the [subsequent reconciliation](#2026-09-12-later-library-work-reconciled) closes
+five more entries using existing source and recorded verification. New source
+preparation and unexecuted consumer acceptance remain open. The subsequent
+[A7-06 verification](#2026-09-12-error-boundary-verification-a7-06) closes one more
+library item after the maintainer resumed targeted and justified comprehensive
+testing. Earlier pause evidence is in the
 [verification log](docs/development/verification-progress.md#2026-09-11-library-only-part-b-pause-checkpoint).
 
-**Latest accumulated verification:** the 2026-09-11 Node 24 `npm run verify`
+**Current verification, 2026-09-12:** the completed checkpoint combines focused
+SQLite/PostgreSQL/MySQL checks, both full SQLite invocations, Express 4, internal
+and packed public types, query budgets, lint and docs. The first full default
+invocation exposed three diagnostic regressions; all passed focused rechecks
+after correction. The final AnyAPI suite passes 6,257 tests and Express 4 passes
+530 + 532. The whole default suite was not repeated for the isolated formatter
+fix. See [exact staged evidence](docs/development/pending-jskit-ai/preparation-status.md#completed-verification-checkpoint).
+
+**Earlier accumulated verification:** the 2026-09-11 Node 24 `npm run verify`
 checkpoint passes internal and packed public types, both query budgets,
 **12,973 tests** across both full SQLite invocations and Express 4 (zero failures,
 one existing skip), lint and docs. Runtime/test source was held steady throughout
@@ -123,7 +164,7 @@ The final native schema selection passed 414 checks; supplemental canonical slot
 capacity checks passed 18 SQLite and 72 native tests. See the
 [preflight evidence](docs/development/verification-progress.md#2026-09-11-native-set-preflight-and-capability-audit).
 
-**Current connection audit:** SQL completion remains distinct from lease cleanup,
+**Earlier connection audit:** SQL completion remains distinct from lease cleanup,
 and acknowledged outcomes survive pool-release errors. A4-14 and A7-03 are
 verified. The installed dispatcher can still erase an acknowledged outcome when
 logging fails, so A7-04/A7-05/A7-06 remain open. See the
@@ -336,24 +377,24 @@ Primary files: `plugins/core/rest-api-plugin-methods/common.js`, resource method
 
 The repeated before-data hooks, setters, storage call, and after-data hooks are a candidate, not a prescribed architecture. First account for B0 and actual hook consumers. Removing an awkward public contract may be simpler than extracting machinery to preserve it. Keep operation-specific validation and relationship decisions visible.
 
-- [ ] **A4-01** Inventory current hook order and context guarantees, including nested GETs for write responses; identify actual library/plugin/jskit-ai consumers and specify the smallest justified final contract.
+- [x] **A4-01** Recorded library hook order, nested response reads and the selected mutable-context contract. Remaining acceptance moved to **R-A4-01** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-02** Add trace tests for the selected POST, PUT-create, PUT-update, PATCH, and DELETE contract, covering hook names, order, counts, and awaited completion. Record deliberate old/new differences.
 - [x] **A4-03** Add corresponding trace tests for relationship writes and bulk operations under the selected transaction model, including owned and borrowed transactions. Bulk POST/PATCH/DELETE and 88 relationship cases now verify exact awaited stages, nested child PATCHes, distinct contexts, shared/separate transaction identities, completion ordering and stored results. Relationship coverage includes ordinary/inverse many-to-many, hasMany, hasOne, belongsTo, polymorphic/reverse polymorphic, explicit clearing, owned commit/finish failure and managed commit/callback rollback. The complete lifecycle file passes 2,808 checks across SQLite/PostgreSQL/MySQL and both storage modes. See [composition evidence](docs/development/verification-progress.md#2026-09-10-composed-relationship-lifecycle-traces).
-- [ ] **A4-04** Verify documented hook-visible IDs, input/current attributes, result records, operation names, auth context, and transaction identity. Migrate consumers of removed or changed context fields.
+- [x] **A4-04** Verified library hook-visible IDs, input/current attributes, results, operation/auth context, nested context and transaction identity. Remaining acceptance moved to **R-A4-04** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-05** Inject failures at each retained lifecycle stage and assert which later hooks must not run, whether data changes, and which error reaches the caller. Existing resource-stage injection is complemented by 114 composed bulk cases and 244 pivot/reverse relationship cases, including nested old/new child PATCHes and each enlisted afterCommit hook. Exact reached prefixes, no later pre-commit work, rollback/commit completion order, original causes, outcomes, transaction/context identity and stored state pass 4,956 lifecycle checks across three databases and both storage modes. Broader A7 extension/logging/uncertain-completion guarantees remain separate. See [stage-injection evidence](docs/development/verification-progress.md#2026-09-10-relationship-failure-stage-traces).
 - [x] **A4-06** Identify repeated sequences and the helpers already responsible for them. Compare direct API simplification with internal extraction; record the demonstrated problem, chosen boundary, affected consumers, and expected reduction in complexity before editing.
 - [x] **A4-07** Remove the demonstrated repeated write orchestration with the smallest sufficient change. Use ordinary helpers where they simplify actual callers; do not build a mode registry or generic operation engine, and do not force an extraction when a simpler contract removes the duplication.
-- [ ] **A4-08** Implement the chosen POST lifecycle and migrate its consumers; verify ID handling, trace, failure behavior, and selected response contract.
+- [x] **A4-08** Implemented and verified the POST lifecycle, ID handling, hook traces, failures and response choices. Remaining acceptance moved to **R-A4-08** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-09** Apply the same simplification to PATCH where appropriate, keeping partial validation, existence checks, authorization, and relationship decisions explicit.
-- [ ] **A4-10** Apply the simplification to PUT while testing its distinct create/replacement and omitted-relationship semantics; migrate any deliberately changed behavior.
+- [x] **A4-10** Implemented and verified PUT create/replacement, omitted relationships, failures and response choices. Remaining acceptance moved to **R-A4-10** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-11** Review DELETE and relationship methods for actual reuse. Keep distinct sequences separate when sharing would require extra switches; migrate hooks only where simplifying them has a demonstrated benefit.
-- [ ] **A4-12** Keep selected response preparation and finish-hook behavior in one existing helper where practical. Remove old boolean/return aliases and duplicate response branches after B0 callers migrate.
-- [ ] **A4-13** Keep final response normalization after every retained hook that can introduce native/invalid values. Share conversion rules across JSON:API and plain traversals, including migrated jskit-ai temporal behavior.
+- [x] **A4-12** Consolidated response preparation and finish behavior in the existing helper; removed old public booleans, aliases and duplicate branches. Remaining acceptance moved to **R-A4-12** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A4-13** Shared value conversion across JSON:API/plain output and retained final normalization after response-mutating hooks. Remaining acceptance moved to **R-A4-13** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-14** Keep transaction completion explicit after successful response preparation, with one cleanup entrypoint implementing the selected ownership contract. The [completion-order audit](docs/development/verification-progress.md#explicit-response-preparation-and-completion-audit-a4-14) records shared response preparation, central cleanup and passing full/native verification.
 - [x] **A4-15** Add concise input/output and ownership documentation to extracted helpers, including whether attributes are validated or transformed and which context fields they change.
-- [ ] **A4-16** Remove obsolete branches, imports, and hook/context views after all actual callers and examples migrate. Remove old deep-import paths directly; do not add forwarding exports solely for compatibility.
+- [x] **A4-16** Removed obsolete library runtime/proxy branches, aliases and deep-import paths without forwarding compatibility exports. Remaining acceptance moved to **R-A4-16** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A4-17** Review the resulting methods from top to bottom. If an extraction adds more flags, callbacks, or indirection than the duplication it removes, simplify or undo that extraction.
-- [ ] **A4-18** Run conformance, relevant real integrations, and affected jskit-ai/app checks. Compare traces with the selected A4 contract and record intended API changes separately from discovered defects.
+- [x] **A4-18** Executed library lifecycle conformance and relevant native/connector checks; recorded traces and intended API changes. Remaining acceptance moved to **R-A4-18** under the maintainer-authorized split; this tick does not claim consumer migration.
 
 Acceptance: operation-specific behavior remains readable, demonstrated duplication/ambiguity is removed, and all consumers use the selected hook/context contract directly.
 
@@ -362,17 +403,17 @@ Acceptance: operation-specific behavior remains readable, demonstrated duplicati
 Primary files: `compile-schemas.js`, `request-contracts.js`, schema helpers, storage mapping modules, scope initialization, and the AnyAPI registry.
 
 - [x] **A5-01** Inventory existing representations of fields, relationships, storage mappings, getters/setters, query fields, and request contracts. Identify duplicated derivation and stale-cache risks. See the [resource metadata inventory](docs/development/compiled-resources.md).
-- [ ] **A5-02** Make existing compiled metadata authoritative for the facts actual consumers need. Extend or simplify it to remove demonstrated duplicate derivation; do not create a parallel schema system.
-- [ ] **A5-03** Resolve field names, logical IDs, physical columns, relationship aliases, visibility, and query capabilities consistently from compiled metadata.
+- [x] **A5-02** Make existing compiled metadata authoritative for the facts actual consumers need. Extend or simplify it to remove demonstrated duplicate derivation; do not create a parallel schema system. Completed by current-source and existing-evidence reconciliation on 2026-09-12; see [metadata acceptance](#2026-09-12-completed-library-work-and-residual-split).
+- [x] **A5-03** Resolve field names, logical IDs, physical columns, relationship aliases, visibility, and query capabilities consistently from compiled metadata. Completed by current-source and existing-evidence reconciliation on 2026-09-12; see [metadata acceptance](#2026-09-12-completed-library-work-and-residual-split).
 - [x] **A5-04** Compile getter/setter/computed dependencies once where that removes repeated work, validate cycles/missing dependencies, and test the selected execution order and visibility rules.
 - [x] **A5-05** Derive request and connector schemas from the same authored validation contract. Preserve stateful validation and authorization outside those schemas. Shared contract/export checks and real HTTP tests cover enriched declarations and post-startup relationship additions; see the [metadata/contract evidence](docs/development/verification-progress.md#2026-09-09-schema-enrichment-canonical-metadata-and-connector-contracts).
-- [ ] **A5-06** Define the boundary between public JSON values, validated values, storage values, and output values. Simplify serializer/getter/setter inputs when warranted and migrate the jskit-ai declarations and transformations together.
+- [x] **A5-06** Defined and tested public JSON, validated, storage and output value boundaries using the existing serializer/getter/setter implementation. Remaining acceptance moved to **R-A5-06** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A5-07** Reuse compiled temporal and cursor contracts where safe; avoid repeatedly compiling identical contracts per record or sort field.
 - [x] **A5-08** Define cache keys and invalidation for scope customization, query projections, mappings, tenant-specific descriptors, and relevant runtime options.
 - [x] **A5-09** Specify when resource configuration becomes effective and test changes permitted by that contract. Prefer explicit initialization/finalization over elaborate invalidation machinery when actual callers can migrate safely.
-- [ ] **A5-10** Validate impossible configurations at the earliest lifecycle point consistent with the selected contract; support needed forward references and migrate actual late-customization callers.
-- [ ] **A5-11** Replace repeated metadata derivations in actual consumers. Migrate hook-accessible schema consumers, including jskit-ai, and remove obsolete metadata views rather than retaining compatibility copies.
-- [ ] **A5-12** Remove redundant caches and derivation helpers when the replacement has equivalent tested behavior and measured initialization/request costs.
+- [x] **A5-10** Implemented early rejection of supported invalid declarations, preserving permitted forward references and publication only after validation. Remaining acceptance moved to **R-A5-10** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A5-11** Replaced demonstrated repeated metadata derivation with compiled indexes; reconciled legitimate setup and per-record traversals. Remaining acceptance moved to **R-A5-11** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A5-12** Remove redundant caches and derivation helpers when the replacement has equivalent tested behavior and measured initialization/request costs. Completed by current-source and existing-evidence reconciliation on 2026-09-12; see [metadata acceptance](#2026-09-12-completed-library-work-and-residual-split).
 
 Acceptance: each metadata fact has one authoritative derivation, consumers agree, and supported configuration changes cannot leave stale runtime contracts.
 
@@ -388,14 +429,14 @@ Primary files: `storage-adapter.js`, `storage-mapping.js`, `canonical-storage-ma
 - [x] **A6-06** Keep physical columns, canonical slots, tenant/resource constraints, dialect-specific expressions, and driver value handling in the responsible adapter. The [physical-storage ownership audit](docs/development/storage-boundaries.md#physical-storage-ownership-a6-06-acceptance-audit) maps each concern to existing backend/mapping/SQL helpers. Aliased canonical scoping now uses the storage adapter, replacing the query proxy. Full Node 24 verification passes 11,360 tests with one existing skip; 1,250 selected native tests and source reconciliation pass.
 - [x] **A6-07** Ensure serializer behavior is consistent across supported writes, filters, cursors, projections, and reads. Declare unsupported custom-serialization combinations explicitly. Scalar and structured-value boundaries, projection/getter behavior, identity/async rejections, real HTTP and all three databases pass; see the [serializer verification](docs/development/verification-progress.md#2026-09-10-structured-query-capabilities-and-postgresql-json-selections).
 - [x] **A6-08** Consolidate shared query decisions one consumer at a time; test regular/AnyAPI results, links, metadata, permissions, and typed errors against the selected contract. The [shared-query acceptance review](docs/development/storage-boundaries.md#shared-query-decisions-a6-08-acceptance-review) maps both plugins to their shared selection, membership, sort and pagination helpers and verifies all five result/behavior categories against the current 11,360-pass full gate and 1,250 native checks.
-- [ ] **A6-09** Inventory actual Knex/proxy usage and test retained joins, callbacks, aliases, cloning, aggregates, raw expressions, and binding forms. Do not emulate an unused legacy method surface; document intentional removals and port callers.
-- [ ] **A6-10** Replace proxy interception with direct storage calls where this simplifies implementation. Migrate actual external query hooks to the selected interface and remove obsolete proxy compatibility behavior.
+- [x] **A6-09** Inventoried and tested retained native joins, callbacks, aliases, cloning, aggregates, raw expressions and bindings; documented intentional removals. Remaining acceptance moved to **R-A6-09** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A6-10** Removed canonical proxy interception in favor of direct storage calls and native builders with explicit translation helpers. Remaining acceptance moved to **R-A6-10** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A6-11** Ensure tenant/resource and row-policy constraints survive joins, nested predicates, include loads, count queries, and cursor predicates. The [scope-preservation audit](docs/development/storage-boundaries.md#scope-and-policy-preservation-a6-11-acceptance-audit) reconciles owners and coverage, including foreign-tenant/resource identity overlap, hook replacements, nested/polymorphic joins, counts and cursor/include visibility. Added selections pass 229 SQLite and 458 native tests; documented hook constraints and raw-query migration limits remain explicit.
 - [x] **A6-12** Add an internal backend capability description for temporal precision, returning behavior, schema changes, and supported relationship/serialization features. The existing capability module supplies these descriptions to both plugins and shared helpers. The [acceptance review](docs/development/storage-boundaries.md#capability-description-acceptance-review-a6-12) records scope, unknown-driver limits, 11,229 full-gate passes and 730 selected native passes. Capability enforcement remains under A6-13.
 - [x] **A6-13** Validate required capabilities before executing unsupported operations, with actionable errors and no partial writes. Include, temporal/schema, SET, insert, serializer, relationship and canonical-capacity checks are reconciled in the [acceptance review](docs/development/storage-boundaries.md#capability-preflight-acceptance-review-a6-13); the full Node 24 gate passes 11,307 tests with one existing skip, with supplemental native and capacity evidence.
 - [x] **A6-14** Test fallback adapters and late-initialized included resources so behavior does not depend on which resource was queried first. Full/sparse include, mapped policy, cold/warm target and canonical field-addition checks pass on Node 24 and all three databases; see the [include adapter evidence](docs/development/verification-progress.md#2026-09-09-include-field-selection-and-adapter-initialization).
 - [x] **A6-15** Migrate remaining duplicated storage behavior only when shared tests establish equivalence. Keep dialect-specific behavior explicit. The [duplication acceptance review](docs/development/storage-boundaries.md#remaining-storage-duplication-a6-15-acceptance) maps shared query/context/cache owners, removes the obsolete second relationship conversion, and retains physical write differences explicitly. The final write selection passes 2,340 SQLite and 480 native checks; types, budgets and lint pass.
-- [ ] **A6-16** Migrate and execute raw-query/custom-hook examples and actual consumer queries on their supported backends; record deliberate capability differences.
+- [x] **A6-16** Migrated and executed library raw-query/custom-hook examples on their stated backends, with separately recorded native conformance. Remaining acceptance moved to **R-A6-16** under the maintainer-authorized split; this tick does not claim consumer migration.
 
 Acceptance: actual storage boundaries are explicit and tested, duplicated decisions have a single owner where useful, and no general adapter/proxy framework exists merely to preserve historical calls.
 
@@ -403,13 +444,13 @@ Acceptance: actual storage boundaries are explicit and tested, duplicated decisi
 
 Primary files: transaction helpers in `common.js`, relationship and bulk methods, file handling, Socket.IO, typed errors, and failure-injection tests.
 
-- [ ] **A7-01** Specify transaction states and ownership across the library, jskit-ai, and apps. Distinguish active work, acknowledged commit, acknowledged rollback, and uncertain outcome; migrate ambiguous old behavior.
+- [x] **A7-01** Specified and verified library transaction ownership and active, committed, rolled-back and uncertain outcomes. Remaining acceptance moved to **R-A7-01** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A7-02** Test failures during preparation, authorization, setters, main writes, relationship writes, finish/enrichment hooks, and commit. The [phase-to-test map](docs/development/verification-progress.md#2026-09-10-managed-caller-migration-and-full-gate) reconciles lifecycle injection, field callback failures, real write contention, partial relationship changes and driver completion failures. The full Node 24 gate passes on the managed contract; the preceding 5,062-case ownership matrix covers the unchanged runtime on all three databases. This completes phase coverage, not the remaining A7 cleanup, extension or consumer guarantees.
 - [x] **A7-03** Ensure failures before successful commit roll back all owned database changes, including pivots and atomic bulk operations. The [owned rollback audit](docs/development/verification-progress.md#owned-rollback-requirement-audit-a7-03) covers rows, linkage, bulk, registry and schema owners. Failed completion remains explicitly unknown; this does not claim rollback acknowledgement when the driver cannot establish it.
-- [ ] **A7-04** Ensure a post-commit failure never attempts to undo committed data and retains evidence that commit was acknowledged. **A7-F07 corrected:** owned savepoints now reject before release instead of running commit hooks or publishing registry metadata while the parent remains pending. Confirmed savepoint rollback retains unrelated parent work and permits file cleanup. Eighteen new cases and 2,494 selected native passes verify the boundary; Core post-commit rollback guards now also have mutation-checked method-call assertions. However, a hooked-api logging failure after commit can return an error without its acknowledged outcome; the retained dispatcher patch is not installed, so this whole-API guarantee remains open.
-- [ ] **A7-05** Preserve the original error when rollback, cleanup, logging, or failure hooks also fail; attach secondary failures as diagnostic context. **A7-F02 corrected:** child cleanup diagnostics now survive on the caller's batch context with a zero-based `bulkIndex`; successful warnings and rejected calls retain their original secondary errors. **A7-F05 corrected:** rollback rejections exposed only by Knex `executionPromise` now survive as diagnostics; all owned commit sites also await that promise before hooks or cache publication. Fifty-six regressions, full Node 24 gates, 2,278 native cases and 92 Redis cases verify that correction. **A7-F06 corrected:** PostgreSQL COMMIT reporting ROLLBACK now rejects and allows confirmed rollback cleanup without a second control statement. Eighteen PostgreSQL regressions and 2,314 native passes cover resource, bulk, registry and file behavior; all full gate stages pass, with an unexplained Socket.IO connection failure in the first invocation retained in the evidence log. Remaining extension boundaries and managed completion keep this item open. **A7-F09 corrected:** finalizer failures no longer skip later diagnostic collection or replace an earlier after-commit failure. Four regressions fail before the fix; full Node 24 and 1,646 selected native checks pass. The broader audit remains open.
-- [ ] **A7-06** Preserve typed errors through all relevant catches and wrappers, including non-Error throws handled at extension boundaries. The installed hooked-api dispatcher still loses null/undefined failures. A [tested upstream patch and integration regression](docs/development/pending-hooked-api/README.md) are retained: six regressions fail on 1.0.24; the extended isolated patch passes 295 upstream and 24 library integration checks, including secondary diagnostic logging failures. Dependency release/consumption, plugin installation and remaining logging boundaries stay open.
-- [ ] **A7-07** Verify operations never commit or roll back a borrowed transaction. Migrate callers to the single selected ownership/event contract and document any intentionally unsupported unmanaged side effects. **A7-F01 corrected:** bulk POST/PATCH/DELETE now use the supplied transaction without completing it; non-atomic participation rejects before children or SQL. Twenty-four new cases fail on the old source and pass in both modes; full Node 24 checks and 1,024 selected native cases pass. The managed ownership/event contract and consumer migration remain open. See [bulk ownership evidence](docs/development/verification-progress.md#2026-09-10-borrowed-bulk-transactions). **A7-F08 corrected:** private ownership now prevents a participant from entering owner rollback and deadlocking, and prevents diagnostic flags from suppressing implicit completion. Four ownership regressions and 5,062 selected checks pass across both modes and SQLite/PostgreSQL/MySQL; remaining caller migration and integration keep this item open. See [managed ownership evidence](docs/development/verification-progress.md#2026-09-10-managed-ownership-registry-and-concurrency).
+- [x] **A7-04** Ensure a post-commit failure never attempts to undo committed data and retains evidence that commit was acknowledged. Reconciled on 2026-09-12 against `35919bd`: the local runtime has replaced hooked-api, acknowledged outcomes survive completion and diagnostic failures, and existing ordinary/managed write regressions assert committed rows, the committed outcome and zero rollback attempts. See the [A7 reconciliation](#2026-09-12-a7-error-boundary-reconciliation).
+- [x] **A7-05** Preserve the original error when rollback, cleanup, logging, or failure hooks also fail; attach secondary failures as diagnostic context. **A7-F02 corrected:** child cleanup diagnostics now survive on the caller's batch context with a zero-based `bulkIndex`; successful warnings and rejected calls retain their original secondary errors. **A7-F05 corrected:** rollback rejections exposed only by Knex `executionPromise` now survive as diagnostics; all owned commit sites also await that promise before hooks or cache publication. Fifty-six regressions, full Node 24 gates, 2,278 native cases and 92 Redis cases verify that correction. **A7-F06 corrected:** PostgreSQL COMMIT reporting ROLLBACK now rejects and allows confirmed rollback cleanup without a second control statement. Eighteen PostgreSQL regressions and 2,314 native passes cover resource, bulk, registry and file behavior; all full gate stages pass, with an unexplained Socket.IO connection failure in the first invocation retained in the evidence log. **A7-F09 corrected:** finalizer failures no longer skip later diagnostic collection or replace an earlier after-commit failure. Four regressions fail before the fix; full Node 24 and 1,646 selected native checks pass. The final two owners are now corrected: SQLite alteration/release preserves primary and secondary failures (23 focused passes); Redis setup, shutdown and diagnostic failures preserve their causes, attempt both clients, avoid stranded-connection waits after failed cleanup, and configure adapters before attaching HTTP listeners (18 real Redis cases per storage mode). See the [completed owner map and regression evidence](docs/development/diagnostic-boundaries.md#a7-05-secondary-failure-reconciliation-2026-09-12).
+- [x] **A7-06** Preserve typed errors through all relevant catches and wrappers, including non-Error throws handled at extension boundaries. Completed on 2026-09-12: positioning setup/target reads, conditional PUT, HTTP mapping, Express registration and connector diagnostics preserve the selected failure contract. Guarded error classification also retains actual SQLite driver messages without traversing proxy prototypes. Focused reproductions, full-suite coverage, native checks and the final owner review support this library-only closure; see [verification and limits](#2026-09-12-error-boundary-verification-a7-06).
+- [x] **A7-07** Verified resource, relationship and bulk participants never complete a borrowed managed transaction. Remaining acceptance moved to **R-A7-07** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A7-08** Test non-atomic bulk behavior explicitly, including per-item errors, successful writes, cleanup, and event delivery. Indexed cleanup/tracking, actual files, committed rows/linkage and polling/WebSocket delivery are verified, including middle-entry failures and rejected cleanup hooks. Full Node 24 gates, 1,680 selected native cases and 92 real Redis cases pass. Post-commit call errors are distinguished from rolled-back writes; outer managed completion and outcomes remain separate. See [non-atomic bulk evidence](docs/development/verification-progress.md#2026-09-10-non-atomic-bulk-cleanup-and-delivery).
 - [x] **A7-09** Test upload success followed by validation/database/relationship failure, rollback cleanup failure, replacement, and deletion. Verify temporary files and tracked uploads are handled consistently. A7-F03/F04/F10 corrections retain cleanup diagnostics, normalize stored handles and reserve LocalStorage uploads exclusively. Verified replacement/deletion preserves shared committed objects; rollback removes only new uploads and restores rows/relationships. Committed objects are application-owned because file URLs do not imply exclusive references. Real SQL and child-write failures, temporary/rollback cleanup failures, and both response/storage modes pass. See [file lifetime evidence and requirement mapping](docs/development/verification-progress.md#2026-09-10-file-lifetime-and-failure-coverage).
 - [x] **A7-10** Test Socket.IO/deferred side effects for resource and relationship writes, commit, rollback, and side-effect failure. Do not imply exactly-once delivery from in-memory hooks. **A7-F11:** the deferred queue now attempts later notices after an adapter failure and retains indexed diagnostics plus the first error. The regression fails before the fix, and 748 selected native/Redis checks pass. The full Node 24 gate passes 10,163 tests with one existing skip; see [broadcast failure evidence](docs/development/verification-progress.md#2026-09-10-deferred-broadcast-failure-isolation).
@@ -425,7 +466,7 @@ Primary files: relationship include/query helpers, `get-related.js`, relationshi
 - [x] **A8-01** Add deterministic instrumentation for query counts and representative timing/memory measurements without exposing raw data or credentials. The fixture runner measures read/write shapes, statement/configuration counts, elapsed time and heap deltas in both storage modes; repeated statement/result counts match. A8-02 expands its original six scenarios. See [instrumentation and limits](docs/development/query-measurements.md).
 - [x] **A8-02** Record baselines for flat queries, sparse fields, nested includes, polymorphic includes, many-to-many endpoints, relationship authorization, and bulk writes. The existing runner verifies the original 42 shapes/scales plus two batch-boundary cases in both modes on SQLite/PostgreSQL/MySQL, with matching counters across databases; [the baseline results](docs/development/query-measurements.md#workload-baselines) distinguish target-type costs, per-target write work and atomic/non-atomic bulk operations.
 - [x] **A8-03** Define query-count budgets by operation shape, number of relationship types, and necessary database batch size. Avoid flaky wall-clock thresholds in normal tests. All 44 workload measurements enforce explicit ceilings alongside result and metadata checks, including 101-target relationship writes across the 100-ID boundary. Both normal verification and default native SQL jobs run them; an injected extra query demonstrably stops the gate. See [budgets and scope](docs/development/query-measurements.md#enforced-query-budgets).
-- [ ] **A8-04** Replace proven per-record fetch bottlenecks with bounded batched reads, preserving authorization, complete results, ordering, and per-parent limits. Simplify and migrate hook contracts if that removes otherwise unnecessary per-record work. Target locks, existing canonical edge lookups and target validation now use bounded batches with measured reductions; canonical removal/replacement no longer reads the complete old membership. Bulk resource writes, reverse child PATCH lifecycles and consumer migration remain. See [target validation and remaining work](docs/development/query-measurements.md#relationship-target-validation).
+- [x] **A8-04** Implemented measured bounded target locks/validation, pivot and canonical-edge work, reverse candidate reads and include reads with preserved authorization and ordering. Remaining acceptance moved to **R-A8-04** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A8-05** Review the per-ID fallback in get-related.js and eliminate proven unnecessary fetches; verify endpoint results and include behavior against the selected contract. Earlier query work already removed the fallback. Review and native conformance confirm constrained collection queries and the required to-one GET lifecycle; additional 2/10/40-member cases verify constant query counts, visibility, sparse fields and polymorphic includes. See [the endpoint review](docs/development/query-measurements.md#related-endpoint-review).
 - [x] **A8-06** Batch relationship validation/include work where authorization and customization apply consistently. Keep a fallback only for a demonstrated supported need, not to emulate retired hooks. Existing include batches and single-query collection limits now pair with 100-target minimal validation batches, per-target read permissions and a database-collation lookup when needed. Full target GET validation is removed, with explicit hook migration. Node 24 full suites and 2,616 native cases pass; consumer ports remain under Part M/A8-12. See [validation evidence](docs/development/verification-progress.md#2026-09-10-batched-relationship-target-validation).
 - [x] **A8-07** Bound batch sizes to database parameter limits and memory use; test large relationship collections and repeated IDs. Target locks, canonical existing-edge reads, ordinary pivot writes, identifier visibility, belongs-to includes, canonical parent-link prefetches and target minimal reads now have explicit batch bounds. Collection/reverse-linkage predicates deduplicate IDs and keep large PostgreSQL/SQLite lists in a single bound parameter, preserving SQL sorting and limits; MySQL retains its verified text-protocol query. Canonical removal bounds each DELETE to 100 distinct requested IDs; replacement uses one complete exclusion predicate verified with 33,000 IDs. Canonical reverse linkage now fetches only identity/reference columns, with measured row-byte reduction and full/native verification. Plain conversion now shares one type/ID lookup per document, removing measured quadratic searches. Ordinary pivot reads now use 100 requested targets and at most 101 physical rows per page; replacement uses one complete keep-list deletion, and database-equivalent requested targets are deduplicated before insertion. Canonical parent-link prefetch also pages physical rows and constrains the declared target resource. Sparse fieldsets now avoid omitted collection hydration and to-one visibility reads in both storage modes while retaining explicit includes and selected linkage filtering. Explicit includes now avoid preliminary linkage and select limited targets before loading parent mappings in bounded pages. Ordinary SQL bigint primary/reference reads, relationship writes and generated IDs now retain exact identity values. Final response normalization now removes internal dependency metadata after enrichment. Include maps now share primary resource identities and linkage, plain conversion indexes primary resources too, and canonical default linkage preserves explicit include limits (A8-F20). Explicit empty include documents and refresh links are corrected under A2-16 (A8-F21). Reverse additions/removals now read only requested IDs in batches, and replacement pages at most 101 removed identities while preserving complete keep-lists, database ID equality and child PATCH lifecycles (A8-F22). Canonical linkage now applies target permissions and filters before fetching link rows, removing full hidden-edge/visibility intermediates (A8-F23). Input/result allocation has been reconciled, including tested isolation of full responses with 100/1,000/5,000 children from after-commit observers. The last confirmed intermediate, canonical attachment of duplicate physical edges, now uses at most 101 rows per page and retains at most 100 requested-ID matches (A8-F24). Full Node 24 verification and 787 selected native checks pass, including late-page rollback, edge locks and explicit case-insensitive MySQL IDs. All eight relevant 44-workload reports retain their previous counters. The allocation criterion is complete with the documented whole-input/output costs; per-child lifecycle work and consumer verification remain under A8-04/A8-12. See the [allocation review and findings](docs/development/query-measurements.md#relationship-allocation-review).
@@ -433,7 +474,7 @@ Primary files: relationship include/query helpers, `get-related.js`, relationshi
 - [x] **A8-09** Cache compiled metadata and safe request-local lookups where measurements justify it; avoid unbounded or authorization-blind caches. Existing published descriptors and scalar contracts retain measured reuse; request contracts retain one correctly keyed variant. Registry descriptors now retain at most 100 recent entries, and temporal normalization retains at most 40 common contracts without rejecting unusual precision. Borrowed metadata and authorization results are not published into these caches. Full Node 24 verification and 1,802 selected native cases pass with unchanged query budgets. See [retention decisions and limits](docs/development/query-measurements.md#metadata-cache-retention).
 - [x] **A8-10** Examine real query plans for key scenarios, including nullable sorting. Recommend or generate indexes only through the library's existing schema/migration mechanisms. A populated fixture explains eleven public operation shapes before/after candidate indexes in both modes on SQLite/PostgreSQL/MySQL. The review identifies owner/reference indexes and residual sorts; SQLite now uses native null ordering to avoid a full sort where its existing index can supply order. Ten new regressions, full Node 24 verification and 1,890 selected native cases pass. See [plans, recommendations and limits](docs/development/query-plans.md).
 - [x] **A8-11** Add regression tests for query counts, complete results, hidden fields, per-parent limits, and callback counts after each optimization. The [regression map](docs/development/query-measurements.md#optimization-regression-coverage) reconciles all five requirements across implemented optimizations, including existing workload ceilings, exact membership, visibility, window limits and child/permission callbacks. The latest expansion verifies exact getter/computation identities and sparse dependency removal; all 282 selected checks pass across SQLite/PostgreSQL/MySQL and both storage modes. Future optimizations must extend their affected regressions; A8-04/A8-12 remain open. See [acceptance evidence](docs/development/verification-progress.md#2026-09-11-optimization-regression-acceptance).
-- [ ] **A8-12** Record before/after measurements and consumer regression results. Retain an optimization only when its benefit is demonstrated.
+- [x] **A8-12** Recorded before/after costs and correctness/query budgets for the implemented library optimizations. Remaining acceptance moved to **R-A8-12** under the maintainer-authorized split; this tick does not claim consumer migration.
 
 Acceptance: measured bottlenecks improve without changing result semantics, authorization, or extension behavior.
 
@@ -442,14 +483,14 @@ Acceptance: measured bottlenecks improve without changing result semantics, auth
 Primary files: checked JSDoc definitions, internal helpers/adapters, new type-check configuration, and logging/error utilities.
 
 - [x] **A9-01** Introduce incremental `checkJs`/JSDoc checking with no required runtime transpilation step. Storage, transaction and selected query implementation modules now opt into strict TypeScript checking through `@ts-check`, with `noEmit`; see [scope and contracts](docs/development/typechecking.md).
-- [ ] **A9-02** Define shared types for compiled resources, field definitions, storage capabilities/adapters, resource identifiers, query descriptors, and result representations.
-- [ ] **A9-03** Define stage-specific context guarantees without creating a duplicate runtime context hierarchy; annotate the existing helpers and actual mutation points.
-- [ ] **A9-04** Check storage and lifecycle boundaries first, then expand to the internal modules changed by this plan.
-- [ ] **A9-05** Resolve real shape mismatches and missing adapter members. Avoid blanket `any`, broad suppressions, or type assertions that conceal unknown behavior.
+- [x] **A9-02** Define shared types for compiled resources, field definitions, storage capabilities/adapters, resource identifiers, query descriptors, and result representations.
+- [x] **A9-03** Define stage-specific context guarantees without creating a duplicate runtime context hierarchy; annotate the existing helpers and actual mutation points.
+- [x] **A9-04** Check storage and lifecycle boundaries first, then expand to the internal modules changed by this plan.
+- [x] **A9-05** Resolve real shape mismatches and missing adapter members. Avoid blanket `any`, broad suppressions, or type assertions that conceal unknown behavior.
 - [x] **A9-06** Add compile-time negative fixtures proving invalid adapter calls and incompatible stage/result shapes are detected.
-- [ ] **A9-07** Add stable diagnostic fields for operation, resource, phase, backend, and transaction state through existing logging facilities; preserve error causes.
-- [ ] **A9-08** Redact sensitive attributes and bound logged payload size. Test diagnostics using hidden fields, uploaded-file metadata, and nested errors.
-- [ ] **A9-09** Publish declarations for the selected public surface and validate library, jskit-ai, and app consumers. Remove old overloads and aliases from types alongside the runtime migration.
+- [x] **A9-07** Add stable diagnostic fields for operation, resource, phase, backend, and transaction state through existing logging facilities; preserve error causes.
+- [x] **A9-08** Redact sensitive attributes and bound logged payload size. Test diagnostics using hidden fields, uploaded-file metadata, and nested errors.
+- [x] **A9-09** Published the selected public declarations, removed old overloads/aliases and passed library and packed positive/negative type checks. Remaining acceptance moved to **R-A9-09** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A9-10** Add the type check to verification and document the scope that remains dynamically typed. `npm run verify` and its existing CI job run `npm run typecheck`; [the scope document](docs/development/typechecking.md) identifies the remaining unchecked lifecycle, plugin and query bodies and declaration work.
 
 Acceptance: checking catches meaningful interface errors, diagnostics identify the failing phase, and declarations describe the selected runtime/package contract used by migrated consumers.
@@ -458,16 +499,16 @@ Acceptance: checking catches meaningful interface errors, diagnostics identify t
 
 Primary files: `README.md`, `docs/`, `tests/README.md`, package configuration, examples, and publication smoke tests.
 
-- [ ] **A10-01** Reconcile documentation with the selected API and migration map. Correct stale hook, transaction, serializer, error, and option examples, keeping a short before/after migration guide.
-- [ ] **A10-02** Consolidate repeated reference explanations and link tutorials to one authoritative description of each contract.
-- [ ] **A10-03** Replace long repetitive implementation comments with concise invariant/decision comments where appropriate; retain useful public JSDoc and examples.
+- [x] **A10-01** Reconcile documentation with the selected API and migration map. Correct stale hook, transaction, serializer, error, and option examples, keeping a short before/after migration guide.
+- [x] **A10-02** Consolidate repeated reference explanations and link tutorials to one authoritative description of each contract.
+- [x] **A10-03** Replace long repetitive implementation comments with concise invariant/decision comments where appropriate; retain useful public JSDoc and examples.
 - [x] **A10-04** Execute representative documentation and migration-guide examples, covering actual imports, configuration, outputs, hooks, and supported drivers/connectors. The executable corpus includes 66 SQL tutorial scenarios and six migration-snippet scenarios across SQLite/PostgreSQL/MySQL and both storage modes, Fastify injection, Express 5/4 file/Socket.IO examples, standalone HTTP servers, prior API/quickstart/relationship and data-migration examples, and extracted-package import checks. [Acceptance evidence and limits](docs/development/verification-progress.md#2026-09-11-representative-documentation-execution-a10-04-complete) distinguish representative execution from the still-open full prose audit and consumer migration.
 - [x] **A10-05** Update contributor/testing instructions to use the shared fixtures, real integration commands, type checks, and full verification gate. The consolidated `tests/README.md`, linked development guide, root README and repository instructions now describe the selected API and separate verification scopes; links/script names and the documentation build pass.
 - [x] **A10-06** Document backend capabilities and limitations clearly, including temporal precision, real S3 availability, migrations, and externally owned transactions. Do not claim unsupported features were implemented by this roadmap. The [backend reference](docs/GUIDE/BACKEND_CAPABILITIES.md) consolidates verified combinations, unverified dialects, precision/storage differences, migration limits, managed/raw ownership, mock S3 and the paused positioning failure; detailed contracts remain linked to their owning guides.
 - [x] **A10-07** Define an explicit npm file allowlist for runtime code, supported declarations/imports, license, and selected documentation. Exclude tests, development notes, and agent configuration from publication. The manifest now selects runtime JS/declarations, license, README, API/quickstart and guides. The existing packed-package gate verifies the exact file set before compiling the consumer; 148 files replace the previous 444-file package. See [package evidence](docs/development/verification-progress.md#2026-09-11-package-content-allowlist). Consumer import migration and clean installation remain under A10-08–10.
-- [ ] **A10-08** Inventory actual deep imports before publication changes; migrate library, jskit-ai, app, and generated callers to the selected paths. Remove obsolete paths rather than shipping forwarding aliases; test optional-peer loading.
-- [ ] **A10-09** Pack/install the actual tarball into temporary consumers and paired jskit-ai/app checks, exercising selected imports, optional plugins, a minimal API, declarations, and exact dependency resolution.
-- [ ] **A10-10** Test clean dependency installation under supported Node versions in the library and migrated consumers, inspect scoped lockfile changes, and keep development tooling out of mandatory runtime dependencies.
+- [x] **A10-08** Reconciled library import removals and supported deep imports; verified optional-peer-free core loading and documented removed private paths. Remaining acceptance moved to **R-A10-08** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A10-09** Verified library tarball contents, temporary installation, supported imports, minimal APIs and declarations with recorded artifact identities. Remaining acceptance moved to **R-A10-09** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **A10-10** Verified clean Node 24 library installation, scoped dependency contents and absence of development tooling from required runtime dependencies. Remaining acceptance moved to **R-A10-10** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **A10-11** Document a coordinated breaking-version and consumer-dependency update procedure; wire local/CI gates to real verification commands and keep unrelated version/release work separate. The [release procedure](docs/development/releasing.md) covers source reconciliation, candidate versions, exact-artifact consumer/seed checks, dependency/lock updates and publication order without executing paused consumer work or publishing. CI now requires the existing clean-package command alongside library/native jobs; its aggregate rejects all non-success combinations. The actual Node 24 clean installation passes core/optional-peer checks and both storage-mode CRUD checks. [Acceptance evidence](docs/development/verification-progress.md#2026-09-11-coordinated-release-procedure-and-required-package-job) distinguishes local verification from unexecuted hosted CI and consumer acceptance.
 - [x] **A10-12** Rebuild documentation and repeat package-content checks after documentation, declaration, and publication changes. Following the declaration entry point, file allowlist and backend-guide changes, docs rebuild and the exact packed-content/type gate pass: 149 files, 27 runtime exports, 10 negative type checks. The [artifact evidence](docs/development/verification-progress.md#2026-09-11-backend-reference-and-artifact-reconciliation) records its hash and scope. Future publication/doc changes must continue running these checks; this does not replace final C2 artifact or paired-consumer verification.
 
@@ -489,12 +530,12 @@ Dependencies: M-01–M-06 for affected consumers, existing A0 evidence, and focu
 - [x] **B0-04** Select one write argument convention separating record fields from controls; favor explicit `inputRecord` and the existing ID option. Specify context and transaction placement consistently. Prove fields named format/returning/id/queryParams cannot be accidentally interpreted as controls inside record data.
 - [x] **B0-05** Record the old/new API and configuration map, selected defaults, and removed spellings in the short migration guide. Include jskit-ai's plain user/workspace calls, JSON:API CRUD calls, errors, and transaction forwarding.
 - [x] **B0-06** Implement the selected options and argument contract using existing operation/representation helpers where appropriate. Remove old simplified/returnFullRecord/boolean-alias parsing instead of adding synonyms.
-- [ ] **B0-07** Make connectors select their required JSON:API representation and return behavior explicitly at the boundary. Update query/request contracts, CORS where affected, and HTTP/client/assistant consumers of changed options or payloads.
-- [ ] **B0-08** Migrate library tests, fixtures, plugins, examples, declarations, and configuration to the new API. Preserve behavioral assertions; delete tests whose only purpose was an obsolete alias after replacement-contract coverage exists. The [local migration audit](docs/development/local-api-migration.md) finds only deliberate literal shorthand rejection and schema-validation calls in source, and one labelled old example in migration JavaScript. The paused positioning guide still shows plain JSON at a JSON:API HTTP endpoint; dynamic-call evidence is now reconciled, leaving that explicitly paused example as the remaining local gap.
-- [ ] **B0-09** Port jskit-ai and downstream callers through Part M in the same batch, including templates and generated repositories. Verify plain/JSON:API consumers, field mappings, policies, includes, and pagination against the selected API.
+- [x] **B0-07** Made library connectors explicitly select JSON:API representation and return behavior; verified request/query/CORS and real HTTP contracts. Remaining acceptance moved to **R-B0-07** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **B0-08** Migrate library tests, fixtures, plugins, examples, declarations, and configuration to the new API. Preserve behavioral assertions; delete tests whose only purpose was an obsolete alias after replacement-contract coverage exists. The [local migration audit](docs/development/local-api-migration.md) found only deliberate old-call rejection and labelled migration comparisons. The later input/context port and executed positioning guide close the former local gap; see the [reconciliation](#2026-09-12-later-library-work-reconciled). Consumer migration and new unrun regressions retain separate acceptance.
+- [x] **B0-09** Implemented the selected plain/document input and independent format/returning resource API, with its migration map. Remaining acceptance moved to **R-B0-09** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B0-10** Test malformed/removed options, data/control name collisions, default/override precedence, every applicable response mode, and programmatic/real-HTTP parity. Removed options must fail clearly rather than silently change request meaning.
-- [ ] **B0-11** Audit consumer wrappers, including jskit-ai temporal normalization and missing/fieldset error translation. Remove demonstrated library workarounds after equivalent direct behavior is tested; retain domain integration that still serves a purpose.
-- [ ] **B0-12** Execute the migration-guide examples against packaged library and consumer artifacts, verify regeneration emits new calls, and search for remaining legacy spellings/imports or compatibility branches before marking the API migration complete.
+- [x] **B0-11** Verified direct library temporal, fieldset and missing-resource behavior needed to replace identified downstream workarounds. Remaining acceptance moved to **R-B0-11** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **B0-12** Executed selected migration-guide examples against library source and checked packed declarations, exports and documentation links. Remaining acceptance moved to **R-B0-12** under the maintainer-authorized split; this tick does not claim consumer migration.
 
 Acceptance: CRUD calls remain straightforward, response options are explicit, data and controls cannot collide, consumers and generators call the new API directly, and the migration guide is short, accurate, and executable.
 
@@ -503,10 +544,10 @@ Acceptance: CRUD calls remain straightforward, response options are explicit, da
 Dependencies: A7; integrate with B2 and transport error handling.
 
 - [x] **B1-01** Define the public outcome states and their exact meaning: acknowledged commit, acknowledged rollback, unknown outcome, and any necessary distinction for a still-active caller-owned transaction or no transaction. The [selected contract](docs/GUIDE/transaction-outcomes.md) defines `none`, `pending`, `committed`, `rolledBack` and `unknown`, with ownership, confirmation, snapshots, per-entry bulk outcomes and retry limits. Vocabulary and B1-03 population are complete; B1-02/B1-04/B1-05 still require consumer migration.
-- [ ] **B1-02** Choose stable machine-readable outcome metadata and useful typed error fields, preserving original causes and nontransactional diagnostics. Migrate jskit-ai/app error classification if the error contract changes.
+- [x] **B1-02** Implemented stable typed outcome metadata and original causes; documented the local runtime null/undefined failure contract. Remaining acceptance moved to **R-B1-02** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B1-03** Populate outcomes from transaction evidence. A thrown commit operation must not be reported as definitely rolled back without confirmation. The existing completion helpers require method/completion evidence, recognize PostgreSQL's ROLLBACK acknowledgment, retain unknown outcomes without confirmation and reject owned savepoint release. Full Node 24 gates and 2,494 selected native cases pass; [scope and limitations](docs/development/verification-progress.md#2026-09-10-owned-savepoints-and-managed-transaction-contract) keep managed completion and real network-failure guarantees under B2/A7.
-- [ ] **B1-04** Surface a post-commit hook failure as an acknowledged-commit outcome with a clear error/result contract; migrate consumer handling and prevent blind retries of committed writes.
-- [ ] **B1-05** Carry safe outcome metadata through programmatic errors, HTTP JSON:API errors, bulk results, and applicable Socket.IO acknowledgments. Update real consumer error handling and status mapping tests together.
+- [x] **B1-04** Verified acknowledged commit is retained when after-commit hooks fail, without rollback or an implied safe retry. Remaining acceptance moved to **R-B1-04** under the maintainer-authorized split; this tick does not claim consumer migration.
+- [x] **B1-05** Carried safe outcome metadata through library programmatic, HTTP and bulk failures and applicable Socket.IO boundaries. Remaining acceptance moved to **R-B1-05** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B1-06** Test commit failure, rollback failure, secondary cleanup errors, borrowed transactions, non-extensible errors, and successful commit followed by hook failure. Resource/relationship/bulk/registry, file and lifecycle failures assert outcome snapshots and preserved causes; the Node 24 gates, 6,226 selected SQL cases and 92 Redis cases pass. See [exact evidence and limits](docs/development/verification-progress.md#2026-09-10-write-error-outcomes-and-retry-guidance).
 - [x] **B1-07** Document examples explaining when application retries could duplicate a committed write; avoid presenting the outcome as a general automatic-retry guarantee. The [migration guide](docs/GUIDE/MIGRATING_API_V2.md#transactions-and-errors) explains generated-ID POST duplication after notification failure, unknown completion, pending ownership and external effects despite rollback.
 
@@ -516,16 +557,16 @@ Acceptance: migrated applications distinguish materially different write outcome
 
 Dependencies: A4, A7, B1.
 
-- [ ] **B2-01** Inspect the library, Knex, and jskit-ai database-runtime transaction helpers. Select one ownership model and integrate with or replace the existing consumer helper, rather than adding a competing abstraction.
+- [x] **B2-01** Selected and implemented one library managed-transaction owner using the existing Knex machinery. Remaining acceptance moved to **R-B2-01** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B2-02** Specify callback arguments/return values, transaction ownership, rollback propagation, and how operations enlist their after-commit/rollback work. The [selected managed transaction contract](docs/GUIDE/managed-transactions.md) defines `api.transaction(callback, context?)`, actual Knex participation, one completion owner, failed-unit propagation, ordered completion chains, per-operation context ownership and raw-transaction migration. This completes specification only. Implementation is in progress in the working tree; focused tests pass, but broader migration and verification remain unfinished.
 - [x] **B2-03** Implement transaction creation, awaited callback execution, commit, rollback, and result propagation with explicit ownership and no implicit process-global transaction state. The actual Knex callback handle uses the existing completion helper; synchronous/awaited values retain identity and completion hooks are awaited. Private ownership also survives changes to diagnostic context flags. See [implementation and native evidence](docs/development/verification-progress.md#2026-09-10-managed-ownership-registry-and-concurrency).
 - [x] **B2-04** Ensure resource and relationship operations inside the helper participate in the same transaction and do not finalize it individually. Resource, nested relationship, atomic bulk and canonical registry writes share the owner. Lifecycle/concurrency tests verify pending visibility and owner-only completion on both storage modes and all three databases; consumer integration remains under B2-01/B2-10.
 - [x] **B2-05** Queue transaction-dependent events/cleanup until the actual outer outcome; run hooks the documented number of times and in a deterministic order. The producer audit covers resource/relationship chains, file cleanup, Socket.IO queues and bulk diagnostic finalizers. Overlapping writes verify enlistment/reverse-enlistment hook order separately from notification capture order. A7-F09 now attempts every finalizer without replacing an earlier failure. The full Node 24 gate and 1,646 selected PostgreSQL/MySQL checks pass; see [ordering evidence](docs/development/verification-progress.md#2026-09-10-completion-order-and-finalizer-failures). Broader file ownership and extension-error guarantees remain under A7.
 - [x] **B2-06** Define nesting behavior explicitly. Support an established safe nesting model or reject unsupported nesting clearly; do not silently commit an outer transaction or imply savepoint support. Every helper call creates an independent top-level unit; compose one unit by passing its handle. Tests verify independent callback commits survive outer rollback, and raw/child-savepoint library writes reject without completing their parent. See [the nesting contract](docs/GUIDE/managed-transactions.md#nesting-and-consumer-migration).
-- [ ] **B2-07** Specify the retained raw Knex transaction contract or migrate all affected callers to the selected managed mechanism. Retain raw SQL participation where consumers need it; do not maintain a separate legacy ownership/event mode.
+- [x] **B2-07** Specified and verified retained raw SQL participation; rejected unsupported unmanaged resource-write owners and savepoints. Remaining acceptance moved to **R-B2-07** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B2-08** Test mixed resource/relationship/bulk operations, callback rejection, intermediate failure, commit/rollback failure, and after-commit failure on both backends and real databases. The 11-file Node 24 selection passes 837/837 per SQLite mode, 856/856 per PostgreSQL mode and 838/838 per MySQL mode. It includes exact lifecycle traces, driver completion failures, original/secondary error assertions and concurrent owners. This is selected coverage; the full gate and remaining file/event integration stay open.
 - [x] **B2-09** Test upload cleanup and Socket.IO events under helper-owned commit and rollback, including multiple operations affecting the same resource. Eighteen new actual-file cases and sixteen WebSocket/polling cases cover repeated writes, callback/caught-write/caught-SQL failures, cleanup failure, commit timing and failed completion chains. The Node 24 selection passes 287/287 per SQLite mode, 173/173 per PostgreSQL mode and 169/169 per MySQL mode. Runtime code is unchanged; obsolete-file removal, the broader ordering audit and consumer migration remain open. See [managed side-effect evidence](docs/development/verification-progress.md#2026-09-10-managed-files-and-notifications).
-- [ ] **B2-10** Migrate jskit-ai/app transaction helpers and call sites, remove overlapping wrappers, add selected imports/types, and execute one successful multi-operation example and one rollback example from the migration guide.
+- [x] **B2-10** Published managed transaction imports/types and executed library success and rollback migration examples. Remaining acceptance moved to **R-B2-10** under the maintainer-authorized split; this tick does not claim consumer migration.
 
 Acceptance: one coherent transaction mechanism supports library operations and needed raw SQL across migrated consumers, with explicit ownership and correct event/cleanup timing.
 
@@ -557,15 +598,67 @@ Acceptance: opted-in callers prevent lost updates through an atomic condition, w
 Dependencies: A4, A7, B1.
 
 - [x] **B4-01** Inventory remaining deliberately nonfatal getter, computed-field, and include failures. Distinguish them from invalid input, denied access, expected missing data, and best-effort cleanup failures.
-- [ ] **B4-02** Select one clear default for unexpected getter/computed/include failures, preferring error propagation over silent partial success. Add an explicit best-effort option only for a demonstrated consumer requirement; migrate callers and avoid a legacy-default switch solely for compatibility.
+- [x] **B4-02** Implemented and tested propagation of unexpected getter/computed/include failures as the default, without a legacy compatibility mode. Remaining acceptance moved to **R-B4-02** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B4-03** Implement the selected error policy consistently at shared boundaries, retaining original causes and useful field/resource/phase context.
 - [x] **B4-04** Ensure strict read failures cannot be mistaken for successful partial results and strict write-response failures occur before owned transaction commit.
 - [x] **B4-05** Keep post-commit and cleanup failures governed by their own transaction semantics; strict mode must not imply that a committed write can be rolled back. Source review and 150 focused native checks verify committed-error reporting without rollback, retained primary errors and continued completion/cleanup chains across both storage modes. Sixteen additional temporary-file cases preserve warning diagnostics and successful writes without conflating cleanup with strict read failures. B4 consumer acceptance remains separate.
 - [x] **B4-06** Test primary/included getters and computed fields, all include kinds, nested/plain output, generic throws, and typed errors under the chosen default and any justified explicit policy.
-- [ ] **B4-07** Test real HTTP/programmatic parity, policy precedence, transaction outcomes, and migrated jskit-ai/app handling of failed responses.
+- [x] **B4-07** Verified real library HTTP/programmatic failure parity, policy precedence and transaction outcomes. Remaining acceptance moved to **R-B4-07** under the maintainer-authorized split; this tick does not claim consumer migration.
 - [x] **B4-08** Document the selected policy and migration examples, explaining any former partial-success responses that now become errors. Do not imply an error can undo an acknowledged commit.
 
 Acceptance: migrated consumers receive the selected, documented error behavior consistently; an optional best-effort mode exists only if a concrete need justifies it.
+
+# Part R — Only work remaining from completed mixed entries
+
+The maintainer requested closing completed portions and creating separate items
+for unfinished work on 2026-09-12. The original 34 A/B IDs above now describe
+only completed library acceptance. Their remaining consumer requirements are
+preserved one-for-one below; existing Part M items coordinate the same migration
+and are not additional implementations. A single verified workflow may satisfy
+several linked acceptance items. R-L01/R-L02 isolate the two remaining library
+portions so no completed library work is carried forward as unfinished.
+
+## R-L. Remaining library work
+
+- [x] **R-L01** Resolve remaining bulk resource and reverse-child write costs: measure the retained per-record work, implement bounded batching only where benefit is demonstrated and authorization, hook order, results and transaction behavior can be preserved, or record why the measured contract requires keeping that work. Preserve actual child lifecycles unless a justified contract change is explicitly documented. This retains the unfinished library portion of A8-04; record before/after evidence for any accepted optimization.
+- [x] **R-L02** Execute the migration guide's selected literal examples against the final packaged library runtime, verify they resolve that tarball and record its identity. Reuse the existing checks; source example execution and packed type/export checks already pass separately. Run at the final artifact checkpoint, not after every prose edit. This retains the unfinished library portion of B0-12.
+
+## R-M. Remaining consumer acceptance
+
+- [ ] **R-A4-01** Finish the actual JSKIT/app custom-hook inventory and reconcile downstream assumptions with the documented library contract. (From **A4-01**.)
+- [ ] **R-A4-04** Migrate removed or changed consumer hook/context fields and execute the prepared consumer context contracts. (From **A4-04**.)
+- [ ] **R-A4-08** Port and verify actual consumer POST calls, including IDs, permissions and selected response behavior. (From **A4-08**.)
+- [ ] **R-A4-10** Verify migrated consumer PUT replacement and omitted-relationship assumptions; port deliberately changed behavior. (From **A4-10**.)
+- [ ] **R-A4-12** Migrate and verify consumer response-option calls and dependent wrappers. (From **A4-12**.)
+- [ ] **R-A4-13** Verify consumer serializer/temporal declarations, includes and fieldsets after removing downstream response repair. (From **A4-13**.)
+- [ ] **R-A4-16** Remove remaining obsolete consumer/app/template/generated callers and reconcile the final combined old-path search. (From **A4-16**.)
+- [ ] **R-A4-18** Execute migrated JSKIT/app workflows and compare their hook/response traces with the selected lifecycle contract. (From **A4-18**.)
+- [ ] **R-A5-06** Migrate and verify consumer schemas, serializer declarations and value/temporal transformations against the installed v2 artifact. (From **A5-06**.)
+- [ ] **R-A5-10** Reconcile actual consumer late-customization and registration callers; verify their accepted configuration timing. (From **A5-10**.)
+- [ ] **R-A5-11** Migrate actual consumer hook/schema metadata readers and remove obsolete downstream metadata views. (From **A5-11**.)
+- [ ] **R-A6-09** Complete the external query-hook inventory, port removed proxy usage and execute retained consumer query forms. (From **A6-09**.)
+- [ ] **R-A6-10** Migrate actual external query hooks to native builders and the selected column/value helpers; remove downstream compatibility behavior. (From **A6-10**.)
+- [ ] **R-A6-16** Execute actual migrated consumer raw queries and custom hooks on the databases those consumers support. (From **A6-16**.)
+- [ ] **R-A7-01** Reconcile JSKIT/app transaction owners and migrate ambiguous completion/event handling. (From **A7-01**.)
+- [ ] **R-A7-07** Migrate consumer ownership and side-effect handling; verify participant calls cannot commit or roll back their owner. (From **A7-07**.)
+- [ ] **R-A8-04** Verify downstream permission/query/child-hook assumptions after the retained batching changes. Further library bulk/reverse-write work is separately tracked by R-L01. (From **A8-04**.)
+- [ ] **R-A8-12** Record performance and workflow regressions from the actual migrated consumers; compare against their prior behavior. (From **A8-12**.)
+- [ ] **R-A9-09** Type-check actual migrated JSKIT/app consumers against the intended installed declaration artifact. (From **A9-09**.)
+- [ ] **R-A10-08** Migrate and verify actual JSKIT/app/template/generated deep imports and their optional plugin dependencies. (From **A10-08**.)
+- [ ] **R-A10-09** Install the intended tarball into paired JSKIT/app checks and verify exact dependency resolution, plugins and real workflows. (From **A10-09**.)
+- [ ] **R-A10-10** Verify clean migrated-consumer installations, Node 24 engines and coordinated dependency/lockfile changes. (From **A10-10**.)
+- [ ] **R-B0-07** Port and verify actual JSKIT HTTP/client/assistant consumers, including pagination and changed error/response payloads. (From **B0-07**.)
+- [ ] **R-B0-09** Port JSKIT and selected app/seed callers, templates and generated repositories; verify mappings, policies, includes and pagination through Part M. (From **B0-09**.)
+- [ ] **R-B0-11** Remove consumer workaround wrappers after installed-artifact tests prove equivalent behavior; retain useful domain integration. (From **B0-11**.)
+- [ ] **R-B0-12** Verify migration examples against migrated consumer artifacts, regenerate callers and search consumers for old spellings/imports. Final packaged-library example execution is separately tracked by R-L02. (From **B0-12**.)
+- [ ] **R-B1-02** Migrate and verify actual consumer error classification, retry decisions and nontransactional diagnostics. (From **B1-02**.)
+- [ ] **R-B1-04** Verify migrated consumer after-commit handling and application callbacks do not blindly retry committed writes. (From **B1-04**.)
+- [ ] **R-B1-05** Verify migrated JSKIT HTTP/schema/client outcome propagation and application status mapping. (From **B1-05**.)
+- [ ] **R-B2-01** Integrate or replace actual JSKIT/app transaction helpers with the selected owner; remove overlapping ownership wrappers. (From **B2-01**.)
+- [ ] **R-B2-07** Port affected consumer raw-transaction callers and verify raw SQL participation inside the selected managed owner. (From **B2-07**.)
+- [ ] **R-B2-10** Migrate JSKIT/app helpers and call sites, remove overlapping wrappers and execute real multi-operation success/rollback workflows. (From **B2-10**.)
+- [ ] **R-B4-02** Port consumers that relied on silent partial success and verify intended failure handling. (From **B4-02**.)
+- [ ] **R-B4-07** Verify migrated JSKIT/app failed-response handling, including committed and uncertain write outcomes. (From **B4-07**.)
 
 # Part C — Final review and completion
 
@@ -636,13 +729,13 @@ Revision 2 selects format and returning as replacement options and authorizes co
 
 ## Goal completion definition
 
-### Execution objective for revision 2
+### Execution objective for revision 3
 
-Execute `/home/merc/Development/current/json-rest-api/library-improvement-plan.md` revision 2 to completion, including all 214 identified items and their acceptance conditions. Retain the library's light ORM character while implementing the approved format/returning and argument simplifications, justified internal improvements, and separately tracked API capabilities. Breaking API/default/import/hook changes are authorized with coordinated migration of jskit-ai and vibe64. Revalidate evolving consumer source during the ongoing expansion, migrate templates and generated code, remove obsolete paths without runtime compatibility layers, and verify the exact intended artifacts through real consumer workflows. Complete required backend/connector, failure/concurrency, typing, performance, documentation/package checks and three final reviews. Maintain exact checklist/evidence and report migrations, internal changes, and API capabilities separately. Remote publishing/deployment is outside scope. Do not count unimplemented, unavailable, deferred, or unverified required work as complete.
+Execute `/home/merc/Development/current/json-rest-api/old/library-improvement-plan.md` revision 3 to completion, including all 250 identified items and their acceptance conditions. The 34 narrowed original items and their 36 residuals preserve the previous scope; a completed original item does not satisfy its open residual. Retain the library's light ORM character while implementing the approved format/returning and argument simplifications, justified internal improvements, and separately tracked API capabilities. Breaking API/default/import/hook changes are authorized with coordinated migration of jskit-ai and vibe64. Revalidate evolving consumer source during the ongoing expansion, migrate templates and generated code, remove obsolete paths without runtime compatibility layers, and verify the exact intended artifacts through real consumer workflows. Complete required backend/connector, failure/concurrency, typing, performance, documentation/package checks and three final reviews. Maintain exact checklist/evidence and report migrations, internal changes, and API capabilities separately. Remote publishing/deployment is outside scope. Do not count unimplemented, unavailable, deferred, or unverified required work as complete.
 
 The goal service is active after the maintainer instructed execution to continue. Its stored objective still cites revision 1 and 188 items; available tools cannot edit that text. The maintainer's newer instructions and this revised objective govern execution. Do not mark the old goal complete to replace its wording, and do not claim the stored text has been edited.
 
-All required Part M, Part A, Part B, and Part C outcomes are implemented or demonstrably satisfied with recorded evidence. The library retains its light ORM usefulness with the selected simpler API; current jskit-ai, vibe64, and its public/accounts seeds are ported and verified against intended artifacts; no runtime compatibility layers remain; required checks and three review passes are complete; and the maintainer has received the final report. Planning, elapsed time, and tests against an older installed library do not establish completion.
+All required Part M, Part A, Part B, Part R, and Part C outcomes are implemented or demonstrably satisfied with recorded evidence. The library retains its light ORM usefulness with the selected simpler API; current jskit-ai, vibe64, and its public/accounts seeds are ported and verified against intended artifacts; no runtime compatibility layers remain; required checks and three review passes are complete; and the maintainer has received the final report. Planning, elapsed time, and tests against an older installed library do not establish completion.
 
 ### 2026-09-09 — Catalog-selected seeds and package-check evidence
 
@@ -2976,3 +3069,251 @@ both. Canonical through-resource records remain separate from canonical links;
 that distinction is tested and documented. The expanded inverse suite passes
 84 native checks, with 6 additional focused rollback/storage checks; types and
 scoped lint pass. B3-02 still includes source deletion/cascade acceptance.
+
+
+### 2026-09-12: A7 error-boundary reconciliation
+
+Read-only source and recorded-verification review against `35919bd`; no tests
+were run and no runtime code or consumer repository was changed. Consumer work
+and full-goal execution remain paused. This reconciles only A7-04 and A7-06.
+
+**A7-04 is complete.** `lib/error-context.js` records acknowledged commit before
+completion hooks, retains the outcome in `RestApiWriteError`, and guards finished
+transactions from rollback. The local runtime adds no dispatcher catch or
+automatic diagnostic logging that can replace the operation's failure.
+
+Existing regressions verify the required behavior:
+
+- [Owned writes](../tests/conformance-write-failures.test.js) assert committed
+  rows, the original cause, a committed outcome and zero rollback calls.
+- [Managed writes](../tests/conformance-managed-transactions.test.js) make the
+  same assertions and verify that later completion hooks are attempted.
+- [Runtime failure regressions](../tests/conformance-runtime-failures.test.js)
+  cover null/undefined from preparation, finish and after-commit hooks, including
+  a failing diagnostic logger, while checking stored rows, causes and outcomes.
+
+Previously completed verification is recorded in the
+[small-runtime review](docs/development/small-runtime-experiment.md#verification),
+[release review](release-review.md) and
+[input/context verification](api-input-context-review.md#verification). This
+reconciliation does not claim a fresh execution or a new full-suite result.
+
+**A7-06 remains open for a specific current boundary.** The local runtime
+directly propagates method, hook and plugin-installation rejections; the previous
+hooked-api blockers no longer apply. Existing runtime/error-context regressions
+cover typed errors and arbitrary thrown values. However, the automatic-index
+catch in [the positioning plugin](../plugins/core/rest-api-positioning-plugin.js)
+reads `error.message` and calls `log.warn` without guarding or awaiting it. A
+null/undefined index failure becomes a TypeError; a throwing warning logger can
+replace the failure, and an asynchronous warning rejection is not observed.
+The [positioning guide](../docs/GUIDE/31-positioning.md) says index failures are
+logged without aborting setup. That boundary still needs a focused correction
+and verification before this broader error-preservation item can close. The
+finding is based on source review; no new failure probe was executed.
+
+
+### 2026-09-12: Later library work reconciled
+
+Five additional stale entries close against the committed `35919bd` source and
+previously recorded verification. No tests were rerun for this reconciliation.
+The current preparation batch's regressions, docs build and consumer execution
+remain deferred; these ticks are not acceptance of that new source.
+
+- **A9-02:** shared compiled-field/resource, storage adapter/capability and query
+  types live in `plugins/core/lib/storage/storage-types.d.ts` and the checked
+  query modules; public identifiers and result representations live in
+  `types/representations.d.ts`, with schema declarations in
+  `types/resource-schema.d.ts`. Existing negative-call fixtures and the
+  [last follow-up's type/package evidence](../last_todo.md) verify their use.
+  This does not close broader internal implementation or consumer type checking.
+- **A10-01/A10-02:** the API reference and numbered guides own input/output,
+  hook context, serializers, managed transactions and outcomes. Tutorials link
+  those owners; the migration guide starts with the common changes and links
+  detailed before/after cases. The [release review](release-review.md) and
+  [later final verification](../last_todo.md) record runnable examples and
+  all 39 generated pages' link, anchor, asset and heading checks.
+- **A10-03:** the runtime, compiler, positioning and query cleanup replaced
+  repeated implementation walkthroughs with ordinary functions and short
+  decision/invariant comments, retaining useful public JSDoc. Two stale comment
+  phrases about the former simplified mode were corrected during this review.
+  Completion is the scoped cleanup, not a claim that every future edit is ideal.
+- **B0-08:** the later [input/context migration](api-input-context-review.md)
+  covers library source, fixtures, tests and declarations. The positioning HTTP
+  guide is corrected and was executed literally in the later final checks,
+  closing the last previously recorded local example gap. App and generated
+  consumer migrations remain open under Part M and B0-09/B0-12.
+
+**A5-02/A5-03 stay open:** source review found positioning registration still
+reading an authored field while requests use its enriched compiled definition.
+The direct correction and enrichment regressions are prepared, but not executed.
+A7-06's positioning/Socket.IO warning boundaries are also corrected in source
+with unrun regressions. Removing dormant helpers advances cleanup without
+claiming the equivalent-behavior and measurement acceptance in A5-12.
+
+The [preparation record](docs/development/pending-jskit-ai/preparation-status.md)
+tracks the broader consumer source patch, ownership boundaries and exact
+verification deferred until the user authorizes it.
+
+
+### 2026-09-12: Diagnostics and hook typing preparation continued
+
+A7-06 and A9-03/04/05/07/08 advance in source: guarded error inspection, bounded
+storage/positioning/file diagnostic owners, protected getter/custom-conversion
+handling, and the corrected query-envelope hook type. Focused regression and
+negative type fixtures are authored but unrun. The static Jekyll documentation
+build passes; no runtime tests, typecheck, lint or consumer execution ran.
+Counts stay **144/214 complete; 70 open**. See the
+[updated preparation record](docs/development/pending-jskit-ai/preparation-status.md#2026-09-12-additional-library-diagnostics-and-hook-typing)
+for exact deferred commands and remaining message-policy/performance limits.
+
+
+### 2026-09-12: Error-boundary verification (A7-06)
+
+The maintainer authorized focused Node 24 testing and comprehensive checks when
+strictly justified. Executed regressions and an independent owner review now
+close **A7-06**. Guarded classification preserves typed errors and arbitrary
+extension failures through positioning setup/target reads, conditional PUT,
+HTTP mapping, Express registration and connector diagnostics. Secondary logger
+failures no longer replace the selected operation failure. Existing best-effort
+positioning-index and Socket.IO restore behavior remains explicit.
+
+The full default run exposed three SQLite registry diagnostic regressions:
+`better-sqlite3`'s `SqliteError` inherits from `Error.prototype` without being a
+native V8 Error. Classification now recognizes that ordinary ancestry through
+the existing guarded helper, retaining non-enumerable driver messages while
+avoiding proxy-prototype traversal. All three failures and four new driver-error
+cases passed in a 176-test focused rerun; internal typechecking passed too.
+
+The checkpoint completed in stages: focused SQLite/PostgreSQL/MySQL coverage,
+the default full invocation (6,196 passes, three subsequently corrected failures,
+one storage-specific skip), the final full AnyAPI invocation (6,257 passes,
+zero skips), Express 4 (530 + 532 passes), packed public types, both query
+budgets, lint and docs. The complete default suite was not repeated after the
+isolated diagnostic correction. No single successful `npm run verify` exit
+is claimed. [Exact results and limits](docs/development/pending-jskit-ai/preparation-status.md#completed-verification-checkpoint)
+include commands, log paths, native selection scope and the packed artifact hash.
+
+This closes library error classification and cause preservation at the reviewed
+catches, not byte-for-byte HTTP error identity or general proxy support.
+**A7-05 stays open** for the broader secondary-error audit. A5 and A9 acceptance
+also remains incomplete: a passing prepared regression does not establish every
+metadata owner, internal implementation type, diagnostic policy or measured cost.
+The consumer migration remains archived and unexecuted; active consumers and
+their dependencies were not modified. **145/214 complete (67.8%); 69 open.**
+
+
+### 2026-09-12: Completed library work and residual split
+
+The maintainer explicitly requested closing work already done and splitting
+mixed items into completed work and entries containing only unfinished work.
+Revision 3 implements that instruction; it supersedes the old rule that a mixed
+original ID must remain open until the entire consumer migration finishes.
+
+**Three stale library-only entries close on existing evidence:**
+
+| Item | Accepted implementation and evidence |
+| --- | --- |
+| A5-02 | One compiled owner supplies output/relationship indexes, foreign-key membership, request contracts and plugin metadata. The authority audit covers file rules, autofilter, include validation and the now-corrected positioning registration. Existing enrichment, configuration-lifetime, metadata-cache, output-definition, file-metadata and positioning suites verify publication and reuse. |
+| A5-03 | Logical IDs, physical columns, aliases, visibility, projections and query capabilities resolve through compiled definitions and existing adapters. Existing mapping, namespace, field-name/selection, hidden-sort, cursor, include, descriptor and native checks cover those contracts. No separate raw-schema request fallback or parallel compiler remains identified. |
+| A5-12 | The implemented output-index changes have recorded request and initialization measurements; foreign-key membership, direct relationship lookup, sparse computed selection and dependency sorting have timing or deterministic work-count comparisons with equivalent output assertions. The current dormant-helper removals add no cache or initialization work; executed affected suites and query budgets retain behavior. No fresh throughput claim is made for deleting unused exports or debug-only advice. |
+
+The [compiled-resource evidence](docs/development/compiled-resources.md) and
+[metadata measurements](docs/development/query-measurements.md#compiled-output-definition-lookups)
+record the source owners, tests and costs. Remaining scans produce per-record
+linkage or request-specific selections from compiled definitions, or handle
+explicit setup/table inputs before publication. They are not competing schema
+owners and do not justify another cache or metadata framework. The current
+[verification checkpoint](docs/development/pending-jskit-ai/preparation-status.md#completed-verification-checkpoint)
+includes the latest positioning, removed-helper and typed-error corrections.
+
+**The 34 mixed A/B items now describe completed library work.** Each has an
+open **R-<original ID>** carrying its remaining consumer acceptance. The two
+unfinished library portions are isolated as **R-L01** (bulk/reverse write cost
+assessment and justified optimization) and **R-L02** (literal guide examples
+against the final packed runtime). Existing Part M items coordinate those same
+consumer workflows; they do not demand duplicate implementations or test runs.
+A single recorded workflow can satisfy every applicable acceptance item.
+
+The completed original IDs retain their lineage but no longer claim the entire
+old combined scope. For example, A8-04 closes the already implemented bounded
+relationship work; R-L01 retains the per-resource bulk/child-write decision and
+R-A8-04 retains consumer hook acceptance. B0-12 closes source-guide execution
+and packed contract checks; R-L02 retains their final packaged-runtime
+combination and R-B0-12 retains generated/consumer acceptance.
+
+**Current totals: 182/250 complete (72.8%); 68 open.** Arithmetic: the previous
+145 completed entries plus three evidence closures plus 34 narrowed completed
+entries; the previous 214 entries plus 34 consumer residuals plus two library
+residuals. This changes the percentage mechanically; it is not 37 new features.
+Remaining: A7-05 and A9-03/04/05/07/08 (six), R-L01/R-L02 (two), 34 consumer
+residuals, twelve Part M entries and fourteen final review/report entries.
+
+A7-05 remains open for exactly two source-reviewed failure owners, documented
+in the [secondary-failure map](docs/development/diagnostic-boundaries.md#a7-05-secondary-failure-reconciliation-2026-09-12):
+SQLite alteration pool release can replace the original failure, and Redis
+startup/shutdown cleanup or diagnostics can replace failures or escape handling.
+Those findings need targeted corrections and regressions; they were not newly
+executed during this reconciliation. The other owner coverage is already mapped.
+A9's unchecked lifecycle bodies and remaining diagnostic policy/cost work are
+also retained, rather than counted complete from passing public types alone.
+
+No runtime or test source changed during this reconciliation. One obsolete
+transaction-guide sentence about hooked-api null throws was corrected to match
+the local runtime; `npm run docs` passed on Node 24.6.0 in 3.159 seconds. No tests
+were rerun. Consumer repositories, the archived 42-file patch, dependencies and
+generated consumer output remain untouched. The earlier packed artifact hash
+still identifies its tested source; this later documentation sentence is not
+silently attributed to that artifact. Final artifact execution remains R-L02.
+
+### 2026-09-12: Remaining write cost acceptance completed
+
+R-L01 closes with the [measured direct-lifecycle decision](docs/development/query-measurements.md#bulk-and-reverse-child-writes-retained-lifecycle-decision-2026-09-12): 108 scenarios across three databases and both storage modes, plus six dependent-hook checks. Retain the existing per-child semantics; no speculative batching framework is added. Current count: 183/250 complete, 67 open, including seven remaining library entries. The other seven remain in implementation/review and final artifact verification.
+
+### 2026-09-12: Final secondary-failure owners completed
+
+A7-05 closes after source review and passing SQLite alteration/release (23 cases) plus real Redis lifecycle checks (18 per storage mode). Root review added two concrete startup regressions: failed destruction must not wait forever for a stranded connection, and adapter failure must not leave HTTP listeners attached or block startup retry. Both fail before correction and pass after. Diagnostic writers cannot replace startup/authentication failures or escape socket/Redis event handlers. Current count: 184/250 complete; 66 open, including six remaining library entries.
+
+### 2026-09-12: Diagnostic owner acceptance completed
+
+A9-07/A9-08 close against the [final finite owner map](docs/development/diagnostic-boundaries.md#current-owner-acceptance-2026-09-12), stable reporting metadata, structural redaction/bounds and explicit no-resource/free-text/parser limits. New focused evidence covers HTTP31/31 per storage mode and Express4 20/20 per mode, Socket152/152 per mode, Redis18/18 per mode, configuration/include/positioning102/102, ordinary query diagnostics6/6 and canonical filter/positioning12/12. Scoped lint and diff checks pass. Formatter cost is measured; independent review strengthened its small retained-preview redaction assertion. The combined Node24 gate is now running once; consumers stay paused. Current count186/250,64open; four library entries remain (three type acceptance items plus R-L02).
+
+### 2026-09-12: Lifecycle/storage implementation checking completed
+
+A9-03/A9-04/A9-05 close after actual method/storage body checking, scoped regressions, compiler fixtures and an independent control-flow review. Entry context permits absent working fields; prepared/read/write views describe the same object only after existing initialization. No new runtime context hierarchy is introduced. Ordinary method params no longer falsely require relationship fields. Storage serializers/results retain unknown boundaries, with explicit limited Knex binding assertions. The [typechecking evidence](docs/development/typechecking.md) names exactly which bodies are checked and which supporting algorithms remain dynamically typed.
+
+Confirmed runtime repairs cover malformed POST helper IDs (including no-return writes), lossless bigint results, actual parent scopeName in relationship reads, and minimal-reader projection/identity preservation. Final focused lifecycle checks pass156 ordinary/171canonical plus33ordinary ID/context checks; internal types and scoped lint pass. The storage extraction has240/241 affected SQLite passes and209/210 per native driver (PostgreSQL16/MySQL8), with80/83 post-review SQLite passes. A separate read-only review found no new context identity, hook order or catch-cleanup regression. One combined full gate is running; no results are claimed for it until completion. Current189/250 complete,61open; R-L02 is the only remaining library item.
+
+### Final packed declaration boundary correction
+
+The combined gate passed internal type checking, then stopped at packed public declarations before either full runtime suite ran. Four TS7016 errors reveal new storage declaration imports that depend on JavaScript-only modules; local allowJs does not prove installed-consumer acceptance. A9-05 is open pending that concrete correction and packed verification. A9-03/A9-04 implementation coverage remains accepted. Current188/250 complete,62open; two library items remain (A9-05,R-L02). After correcting this stage, resume the remaining gate stages without repeating already completed full runtime suites (none ran in this invocation).
+
+### Packed declaration correction verified
+
+A9-05 closes after matching declaration owners are added for the existing runtime constants/query constraint, fieldsets reuse the public selection type, and the constraint shape has one shared declaration. No executable query behavior changes. Internal typecheck and packed public checks pass:173files,28exports,24negative checks,257local links; artifact126c68ba2ef972d12f188e8cb9b4c6eea3f23db1. Remaining gate stages now run once in sequence; output is retained in `/tmp/jra-eight-final-stages-20260912.log`. Current189/250 complete,61open; only R-L02 remains in the library batch.
+
+### Maintainer-directed deslop before final verification
+
+The maintainer stopped the running comprehensive command and requires cleanup of code written since the previous deslop (`f242aa5` through current source) before full tests resume. Owned process group212314 stopped; session83821 exited143. The incomplete ordinary suite is recorded as interrupted (5517tests,5467pass,50cancelled,0fail), not passed. Later stages did not execute. The [current preparation record](docs/development/pending-jskit-ai/preparation-status.md#deslop-before-comprehensive-verification-2026-09-12) records scope, owners and deferred checks. Current189/250 complete,61open; consumers remain paused and R-L02 requires the final cleaned artifact.
+
+
+### 2026-09-12 two deslop passes and final packaged guide acceptance
+
+The requested two cleanup passes and independent assertion review are complete.
+See the [cleanup record](docs/development/pending-jskit-ai/preparation-status.md#deslop-before-comprehensive-verification-2026-09-12) for concrete simplifications, regression corrections and focused checks.
+
+**R-L02 closes:** `npm run test:migration-guide:package` passed under Node 24.6.0.
+The selected literal migration examples pass against the extracted tarball in
+both SQLite storage modes; the schema guide's mapped-ID/generated-migration
+example also passes. The checker verifies the extracted runtime path and reuses
+only the checkout's test dependencies, not its runtime source. Artifact SHA-1
+`7de97a9f055111af4c797dd3ca2c9becbcce2421`: 173 files, 441672 packed bytes, matching
+the packed public-type check. Log: `/tmp/jra-post-deslop-packaged-guide-20260912.log`.
+
+All eight requested library entries are accepted: **190/250 complete (76.0%);
+60 open**, comprising 46 overlapping consumer/migration acceptance entries and
+14 final combined review/report entries. The separately requested comprehensive
+post-cleanup verification passed: 13680 test executions plus 804 affected native
+executions, zero failures; types, query budgets, lint, docs and packaged examples
+passed. The ordinary invocation's one canonical-only fixture test passes in the
+canonical invocation. See the [final checkpoint](docs/development/pending-jskit-ai/preparation-status.md#final-post-deslop-verification-and-library-pause-2026-09-12).
+Work is paused before consumers; this does not complete the full goal.

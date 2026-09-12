@@ -1,0 +1,1080 @@
+{
+  "created": "2026-09-12",
+  "status": "Consumer source preparation only; migrations remain paused. Both library deslop passes, all eight library items and final post-cleanup verification completed.",
+  "baseCommit": "70163546304ee1fed80cbf1c6ec67517294db855",
+  "baseRepository": "/home/merc/Development/current/jskit-ai",
+  "patch": "v2-source-preparation.patch",
+  "patchSha256": "4a873765c707bad4ace4d9831a12582e170a620bad187fb35ecb71086f18cbb2",
+  "fileCount": 42,
+  "files": [
+    {
+      "path": "packages/agent-docs/patterns/server-search.md",
+      "baseGitBlob": "6a9dda4d6d07c1e94a9fdb708581d7b19c9da7a4",
+      "baseSha256": "6ee3f36ea9584c9914ac9c32dc1bc5ca68df15e6ac32e0344fb8302eaaa51580",
+      "preparedSha256": "b63e8b149a88408360505c9b557e1faf00df003a42961fd6eda66e2e035cc4ba"
+    },
+    {
+      "path": "packages/crud-core/src/server/defineCrudJsonApiFeature.js",
+      "baseGitBlob": "cab29e334ddb828012dce0440c87482d5a8acaaf",
+      "baseSha256": "a9a8a392426710d1338e908590dac015a77f88075b7fdd846dae0b79f3ee281c",
+      "preparedSha256": "56760fec6b4690409ec2cb850d7722952cc6e672c20456ee4e2a5b7d2a66c518"
+    },
+    {
+      "path": "packages/crud-core/src/server/jsonApiModule/actions.js",
+      "baseGitBlob": "6469358dd1c97fc3ba50d6dfc8085b4ca930aed5",
+      "baseSha256": "300d8032ef9f8a3a02036eda6e3d636219262ebd937a75abadd50ba1d6a1d669",
+      "preparedSha256": "395e0fb0c80e2dd219d515f744de065b7e341c0abd05865b53203275ab913704"
+    },
+    {
+      "path": "packages/crud-core/src/server/jsonApiModule/repository.js",
+      "baseGitBlob": "10a0a7fdfd47fc78a09b64b8750edd8ba909b670",
+      "baseSha256": "d566773a93213d7deba567d94eaee6a53f694166f3514646a811c6bc3f98c72a",
+      "preparedSha256": "1c1b08f79880a6623d9e22e7a1dc2882a5bbb69c80f4181d973fb018ae155644"
+    },
+    {
+      "path": "packages/crud-core/test/defineCrudJsonApiFeature.test.js",
+      "baseGitBlob": "e6f1b73d92ebea070339c65428989eb58fbaee1b",
+      "baseSha256": "de1771adcd4a6afc4ff01b0a5b5e44a2596ee1bca3e6bb1f26de588dda219eb9",
+      "preparedSha256": "697822f743186a417722d7b72f5c728762306a689d76c50a2c60f41428d83c65"
+    },
+    {
+      "path": "packages/crud-core/test/jsonApiRepository.test.js",
+      "baseGitBlob": null,
+      "baseSha256": null,
+      "preparedSha256": "bb6110eeac15f1455c898ee3b4ade855d849582b8cd3e0259e1d360658bc35c2"
+    },
+    {
+      "path": "packages/database-runtime/src/shared/duplicateEntry.js",
+      "baseGitBlob": "0fd308168bc97352f394540eac752fdd1513f9b5",
+      "baseSha256": "1d4fbbfcfa2357397ff5195a979318af71eaad63ff47163f40cccc650913bc24",
+      "preparedSha256": "1c266deeecfd2a7f956968799440ad1ed8f3c4ce463a88ac1eb16a8fcff27885"
+    },
+    {
+      "path": "packages/database-runtime/src/shared/index.js",
+      "baseGitBlob": "2cad6c94fa003b465405bc7c9de3c1f45ff68c33",
+      "baseSha256": "3f46d95c634ee814654bfd5c3d686444c10317cee67eabdb024ce525a8bd6d30",
+      "preparedSha256": "87f2ad4cceebe61f628e98feb10862dc924e4f43db92aba2ed2957fa16a0a4df"
+    },
+    {
+      "path": "packages/database-runtime/test/duplicateEntry.test.js",
+      "baseGitBlob": "13eb261a3c2d72840620ef80a77829d344fbad64",
+      "baseSha256": "d79e43136ce65644ef7a88d2c093592e3afaf294602c5f50e3851c159d69a8fe",
+      "preparedSha256": "a3f1c87a7adac41dc018a6b3189d69bf42214540f6e4d8739482fc2e307e9bee"
+    },
+    {
+      "path": "packages/http-runtime/src/shared/clientRuntime/errors.js",
+      "baseGitBlob": "8f97348a7e5a1e8b40843709a84d932bd5b237e6",
+      "baseSha256": "b29020025d26b4638cb539c4d492add84f5f105b0903d74b02cd57ba9fb4c278",
+      "preparedSha256": "6d99f6dba3d56b28f5a66061230d08f71a98192100b229070631d18a0f1078e2"
+    },
+    {
+      "path": "packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js",
+      "baseGitBlob": "de146ae0af89c36fdf597e67d1ecfdfab7c2b9f0",
+      "baseSha256": "b4caf22b16ec20bf2ac36d4ef727a5ce988c5c7d8f366296588dfefec047fd69",
+      "preparedSha256": "6c78aaf70d8673e8a997971db1678a898f8beb913f351a21f8f13c3822bb5cb7"
+    },
+    {
+      "path": "packages/http-runtime/src/shared/validators/errorResponses.js",
+      "baseGitBlob": "99b23e3f2bb86889be2b84863b62c5a48005e03b",
+      "baseSha256": "08d0d30237bdb9f092ac53078bfb5a34ae8b1d8f44f69ca09a9cf1d8648c4ce5",
+      "preparedSha256": "86163b4c2a48b9d4fee19128630c5feccc09be3e2d4c3b4137ec7912812e7b47"
+    },
+    {
+      "path": "packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js",
+      "baseGitBlob": "6e3d13398a2fac3abce98181bdd961b929b36e91",
+      "baseSha256": "59a95d851fcb6991e57c7430ea88481c1fcce5a5cc3d09bbabb2e8d1f8dda660",
+      "preparedSha256": "af4cfb8b6cac4cd4fc3d7fc6c961f2a2520cd662abbf221c294d065c4edd0a64"
+    },
+    {
+      "path": "packages/http-runtime/src/shared/validators/jsonApiTransport.js",
+      "baseGitBlob": "f4467b3de199e815aae0aa09fd8b958d62b62e46",
+      "baseSha256": "b42db543db7e2f74b172d93099b9835c70137f7d60e625685ba80fc9e86bc8cc",
+      "preparedSha256": "3d044e6a77069b891ca0f391abef6be78c9ad8add77d2b4a62aa56a237a18015"
+    },
+    {
+      "path": "packages/http-runtime/test/client.test.js",
+      "baseGitBlob": "bcd4bd512c2130924bd542185d8040958e50e653",
+      "baseSha256": "4500d459e0f7a91a9e0ec860a9c016e74deb8700d16519377e658a80f0d93580",
+      "preparedSha256": "1ca7bd7c57a7f2713e4667b192bd0d97b491eac625b6a90fb4a00fee77c3f3bb"
+    },
+    {
+      "path": "packages/http-runtime/test/errorResponses.test.js",
+      "baseGitBlob": "f54c6e7a01a66f4e202eee9348d881aaf4b5595b",
+      "baseSha256": "19c99c73163c130593f6833214bd7becb73abc607312c2fad9fb3e26064937e6",
+      "preparedSha256": "049141f76fc19c2a579c6aca0142b486735d0374fed3781a5794c5037c7f9810"
+    },
+    {
+      "path": "packages/http-runtime/test/jsonApiRouteTransport.test.js",
+      "baseGitBlob": "a8e00d7ad4b57a990cc96a0ee005ca6dccdd5b25",
+      "baseSha256": "0790e7639cd7ac0d7c342beb3e878619ec07e5def657da4d086381ced1b1a457",
+      "preparedSha256": "784b529c34ceae4fb8711f68d23cf8ca164b06da81a2ccd520b5ea9f5bcef9e5"
+    },
+    {
+      "path": "packages/json-rest-api-core/src/server/jsonRestApiHost.js",
+      "baseGitBlob": "5cafc95518f02cfa504b62d80dfbcad8555a15f9",
+      "baseSha256": "bb9fd438d393e838ccfde1bbaba21d3f43a781efb87eea4bb5c1d5fa894537a2",
+      "preparedSha256": "290694b70b1acfa38019e4bb14803285f8bcfd49923abaa5d2b38be5cf0be0ae"
+    },
+    {
+      "path": "packages/json-rest-api-core/test/entrypoints.boundary.test.js",
+      "baseGitBlob": "7b0ce42ac46b4aeb803fab88c6dc6ccbb225775b",
+      "baseSha256": "ff669ac1f9f42cf12a37c52257bd58f415d330b26a8cb6905ba678c2e51ffb00",
+      "preparedSha256": "c3d89ff202b1d558fb939bd8fdfb752c1a8e0cd9e10eafa063e86b4944859c62"
+    },
+    {
+      "path": "packages/kernel/server/runtime/fastifyBootstrap.js",
+      "baseGitBlob": "5ebf01c16fb1f05b49dc1bb7cba62e2dfd2b1470",
+      "baseSha256": "6fe9fba2ad089721b26a71bfde21db0be4e39259e6138e75aef8aafc9953095f",
+      "preparedSha256": "8dd2a32a9ef53504bc2298f15cba3dd6d828eb888b478a1eef88089683e99ebc"
+    },
+    {
+      "path": "packages/kernel/server/runtime/fastifyBootstrap.test.js",
+      "baseGitBlob": "c8a1c712f675cb9131b90722520327866a608aee",
+      "baseSha256": "47994d61809bc3e4cb7a2b6a9e42e632f9e8aa6ba3fc46dc785f0293b0e4ce0b",
+      "preparedSha256": "79f1fcfb1afabc779fe389ae08bfdb130a1071e840cd913f8bd7ba4a4a65bb07"
+    },
+    {
+      "path": "packages/kernel/shared/support/normalize.js",
+      "baseGitBlob": "6a56f7432dade7bd866aa504afbe48b1dd13ef30",
+      "baseSha256": "9c4c40bdf384b09a64363b7d8d14c0662dcd25c5049f820315ef21fac281ddea",
+      "preparedSha256": "e2018d1a76ef505c70ed223e78edcbb578327f456f3ffeffb359ca9a82ab0732"
+    },
+    {
+      "path": "packages/kernel/shared/support/normalize.test.js",
+      "baseGitBlob": "8aac76166c860f1c026bd702b60bc548e5f6f125",
+      "baseSha256": "8036fb48fb665d5bdb324598e34a29a6bb84a1ad8c81481d1c53da65190a0d33",
+      "preparedSha256": "52095bdbcf21d7404fc317cdfa2e8b09426d25a168db813ad7695e213b301b5d"
+    },
+    {
+      "path": "packages/users-core/src/server/UsersIdentityProvider.js",
+      "baseGitBlob": "7a8d04140e2a6d987e85dfe15afbbdb80cda6ee0",
+      "baseSha256": "1e4597aa96bbfb87b54faa86d287aed6887a46afffe59b4d213bba5fc501cf61",
+      "preparedSha256": "a39a264bfb07bdb5fdce7283a341319a0f3132626303ad6298e028fa6c05f30f"
+    },
+    {
+      "path": "packages/users-core/src/server/common/repositories/repositoryUtils.js",
+      "baseGitBlob": "63ee41bb8bf9a8bca03c7f75eb99ba37cf9f6020",
+      "baseSha256": "047a6a53b7031fb2f4bce4a46f00f9bfb183f03548c56f55974f255f447533f0",
+      "preparedSha256": "8d306e29ba081294285ddb67217afbef327aadd9c6f45ae9e2cbeefbf4ab656a"
+    },
+    {
+      "path": "packages/users-core/src/server/common/repositories/userProfilesRepository.js",
+      "baseGitBlob": "97b0c128e559a9aa12c564fb01721c436f25b712",
+      "baseSha256": "abf3fea688825637893289ef5e4f188764ddfec5b251d06b54ec1acae5fdf32b",
+      "preparedSha256": "18efa7d2b53bf5a6a68d123b8c5d475bad33949a0db506f3f8bf4239c3c882f5"
+    },
+    {
+      "path": "packages/users-core/src/server/common/repositories/userSettingsRepository.js",
+      "baseGitBlob": "a57a7114b8645e1a80c0c66f6c06f8ec5da1499a",
+      "baseSha256": "be71c8c69644fdb4f4bb0d3f405ec0d34ba06741793b855c48ba547d99650916",
+      "preparedSha256": "cf8ced1c80a41366f012961251e096e2893333b9b89247c8dbcbdd127f846fd4"
+    },
+    {
+      "path": "packages/users-core/test/authProfileSyncService.test.js",
+      "baseGitBlob": "bdac90010ed428fd488fa9d66936f742f5cbdc8d",
+      "baseSha256": "e6e95587efa630e34b44ab19ed143d1ab2f4362596eb10d90ead50cdd7abdb83",
+      "preparedSha256": "3d07a7b1484b0c18ce0cbbdb5d8415bdc1d839be2a673f77e7750e922538125c"
+    },
+    {
+      "path": "packages/users-core/test/featureRuntime.test.js",
+      "baseGitBlob": "fc6499484c172db4546d94ddcf1b9334ebff7a44",
+      "baseSha256": "dadd242bac56ea053cbb779a669c556a014421ad23b45c3bcd068c9408607245",
+      "preparedSha256": "6b44e5eb7381361b617f7732f2634c5f754ca57e0da4f0f15ace9d4f3585c503"
+    },
+    {
+      "path": "packages/users-core/test/repositoryContracts.test.js",
+      "baseGitBlob": "05d42754eeacdd160d4d531bc576d20be74fff80",
+      "baseSha256": "ada41cc6d545db184412b9cede68821e3624055447d6804e5adcd37b3651c9c1",
+      "preparedSha256": "c78b5cd761e8d9f972d8eca64a516560b05390238e2e8874c3ffd25232d467ba"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/WorkspacesFeature.js",
+      "baseGitBlob": "28a9f3bbe8e2f46fcaa97232b36d1dc5855256d7",
+      "baseSha256": "86d27b87a0a34a3a4bb6ecb529dc4bfed155eaaff2773d623c7f9f6199e041f9",
+      "preparedSha256": "150f8accfeaab4b59dfed7fe714fb6a651c6af63072446b7d699f3f2851f9884"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/repositoryUtils.js",
+      "baseGitBlob": "63ee41bb8bf9a8bca03c7f75eb99ba37cf9f6020",
+      "baseSha256": "047a6a53b7031fb2f4bce4a46f00f9bfb183f03548c56f55974f255f447533f0",
+      "preparedSha256": "f3c38c3f701b13ef5a9ba528210db65a48e0f6898fb5b5002e40926fcfba91b2"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js",
+      "baseGitBlob": "92086e10a2bc501aba96cbb71291a0f8574ef578",
+      "baseSha256": "795052d91060ec2b240269ca6ac6f5f88628e25a23fe45efc7386850e228586c",
+      "preparedSha256": "1cd4822f422c98d3bd69aed64090fb840881aad2c217537c185e59f51e349288"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js",
+      "baseGitBlob": "fcfe2aae099837b0a96aa1bc0dc30a14400cec6d",
+      "baseSha256": "ece3e97177652ad2f605b36364400ba018d12c77aaa79e4c9be341195382de67",
+      "preparedSha256": "5c76faa9c70b0ed27715308b5cc0f2c176896044b0a3625f7a55a773541db2df"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/common/repositories/workspacesRepository.js",
+      "baseGitBlob": "d380573532600dff28149ab417f056669eb71114",
+      "baseSha256": "e986a176ceef14d0691dfdf5e140bcf4d752dbfe0136b7e7a9bc4b2b6d3d1799",
+      "preparedSha256": "1905f71512c35fdda57ae2b84dcc248e0cce36914ab969b5873582155bac5f4f"
+    },
+    {
+      "path": "packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js",
+      "baseGitBlob": "bda112c2cf945f8efcaf048492d8c9575ad41f22",
+      "baseSha256": "7a349a38f4ebb2acccb8de86db51fb08a0a198178292982f1c93994a6ea1bb79",
+      "preparedSha256": "d249a27dea9c2b3b5e153d6c5a7bc7f0f0b8814c328c1e93496ba87d47c5050f"
+    },
+    {
+      "path": "packages/workspaces-core/test/featureRuntime.test.js",
+      "baseGitBlob": "9da53ecf9006270bf2a8ad270963fb7212a9653b",
+      "baseSha256": "3058f1009fb8bebe3e13701aa8b86695cfd6b983c0f7b7e7f23054ea17136d59",
+      "preparedSha256": "51711378d009c464847feb4b2ea3d3ab642606f66987e5e43287af0a8d7590d3"
+    },
+    {
+      "path": "packages/workspaces-core/test/repositoryContracts.test.js",
+      "baseGitBlob": "7ea398f35873862f34d7ceee8973fef9c600b2b5",
+      "baseSha256": "fd5a6aad0eb45e2618abd1385cff73c0899502f322a488eba9f411bd7e93e04b",
+      "preparedSha256": "8ddff9a3f4018e8e38ec81610d44bd2954ffff64053aa60456b1162a95dc07d4"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceInvitesRepository.test.js",
+      "baseGitBlob": "b6fe2e1c64fda14267fe10fb70b3c63c52397ad4",
+      "baseSha256": "547fcd21c582e4873dc1a4627352c2299ae2647e85fd7b45b6cf00c7294fe462",
+      "preparedSha256": "81dc3e5de9b25ce1f71c1cfcc77f0aa9bf72abdcf5ed14d4a2709f170a939e38"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceMembershipsRepository.test.js",
+      "baseGitBlob": "92d9cc44b03848ea32c45f9f5df05279018948f7",
+      "baseSha256": "f64813106132b34ffb07eb5a22bfdbc3f762e72213b7dca373078f5a438a628a",
+      "preparedSha256": "69e4822434edbe7cd610783d7bae2bc75c99e55d597063a599edb2bcc6a18203"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspaceSettingsRepository.test.js",
+      "baseGitBlob": "ab329f024c2e0bb53090d83567529bc5ea63a339",
+      "baseSha256": "618174904cb764921e604d8de9315c83da495586610168c4458276497a460ea6",
+      "preparedSha256": "5e29e616993c495f1345b2913192bae7e15adc0146f2728aa2cf2fa65cda836e"
+    },
+    {
+      "path": "packages/workspaces-core/test/workspacesRepository.test.js",
+      "baseGitBlob": "dded997e811a32f1edfa4cb15a4d0a2ae54ec9b2",
+      "baseSha256": "16b05d4b2028451ddfdb65447cd2922f1f61d80422976acfe2848dd2ffee4c93",
+      "preparedSha256": "456a1ba1542f4d79876a236037158a496b217c577760a79fb04e9c075468614c"
+    }
+  ],
+  "library": {
+    "baseCommit": "35919bdb3f252b3fe82581219cccbc42406ccae8",
+    "version": "2.0.0",
+    "uncommittedFilesRequired": [
+      {
+        "path": "docs/GUIDE/13-hooks-and-lifecycle.md",
+        "sha256": "d6a794341ea71f289ad1f369b9cd899a46c4eace936a86ae15dfc09bd5f51fe8"
+      },
+      {
+        "path": "docs/GUIDE/20-transaction-outcomes.md",
+        "sha256": "38d96bc88322d88720ae76eb65ffbb28e08ac1d804e707c86f38d795c6de5413"
+      },
+      {
+        "path": "docs/GUIDE/31-positioning.md",
+        "sha256": "5f8805e0c1f5de06ac31d01dbe4e55b67ef93865447a0d209431b51133a630d7"
+      },
+      {
+        "path": "docs/GUIDE/33-migrating-to-v2.md",
+        "sha256": "0c1c9fc9099f03ff341c63249f5a4d65bcd7b26e332e4cd0bd83f8192363dc03"
+      },
+      {
+        "path": "docs/contributing.md",
+        "sha256": "c92308594cfbc30034b0756828b6d74d5d586684230e3e82cfcf8faa14654bd0"
+      },
+      {
+        "path": "index.js",
+        "sha256": "fd60e96dd92324557d7edea5fbc6f669377198947a786ffe18e9d5a04feb4502"
+      },
+      {
+        "path": "lib/enhanced-logger.js",
+        "sha256": "e7b11dacc12e36f009708e623282d2170e885c695e910bcfe5f6b49deaf001de"
+      },
+      {
+        "path": "lib/error-context.js",
+        "sha256": "c4c7962b3312e792f4703a3f46759756507867bb693739c10f3c6ae7a4ba0d0f"
+      },
+      {
+        "path": "lib/error-formatter.js",
+        "sha256": "56ffb2e4d1466985ef52f0f8a837a97499cf23cec6c3d62ec3f517a160d240f5"
+      },
+      {
+        "path": "lib/rest-api-errors.js",
+        "sha256": "884367af39320bb91ccda09da848e69f5be7e0033ed5553932cbd40399724df0"
+      },
+      {
+        "path": "lib/runtime/json-rest-api.js",
+        "sha256": "341f39843338716e1ac9fc8d244f3f0c6ea5f1a6ba9b81f6a511e1f0f4d51dfe"
+      },
+      {
+        "path": "package.json",
+        "sha256": "59fc2fdc5abc27a19e3cd54b862f83303817b88cc9c21abc28f6b0b7b317c018"
+      },
+      {
+        "path": "plugins/core/connectors/express-plugin.js",
+        "sha256": "498fa4e168c40e89967f8638c78c6aef7065305822e94c8ac4171ffacec38e29"
+      },
+      {
+        "path": "plugins/core/connectors/fastify-plugin.js",
+        "sha256": "2f57434b9bd7018fc1eb48e8899c11efedcf9f14ec0987a8aae881ef90212433"
+      },
+      {
+        "path": "plugins/core/connectors/lib/connector-core.js",
+        "sha256": "25fccb1d9cdd456b10eb7323647662869d4635579c6de4271d7b9118620979d1"
+      },
+      {
+        "path": "plugins/core/connectors/lib/transport-http-helpers.js",
+        "sha256": "95ba446ff17ab4f3b868a8e18c6b7936193f7621e3458d46214314f6856c34aa"
+      },
+      {
+        "path": "plugins/core/file-handling-plugin.js",
+        "sha256": "a06919940290ec703530eb662572457a40fa1d5d191d0e2ca54f20eec58e99cc"
+      },
+      {
+        "path": "plugins/core/lib/dbTablesOperations.js",
+        "sha256": "b1ac4e4dd9d2f02b8840380fe32934729205a5d54cf48c1983ef5b69f6878499"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/database-value-normalizers.js",
+        "sha256": "6da2a79aed60c881da8d9f5de2cbaff946d4c4de7e1118584ac2c13bfd2c26c9"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/knex-constants.d.ts",
+        "sha256": "1ef880db059dfb3b00519f372f5c2e5afc8e39931bf4ff13270d2dbd96a0a425"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/knex-field-helpers.js",
+        "sha256": "f7bb3f63ba736326c92a8bea94184e004b7061fa88e1d6dce246b163da1577bb"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/knex-json-api-transformers.js",
+        "sha256": "629152a695a8607eb1e366be3ae70eaa1e3bd250bb721f3ba384b9f1b1907f06"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/request-contracts.js",
+        "sha256": "7193891e35e7410f8c1957dcb4635f52e5135d6b9ff9ab5414e1ab47b66a2f78"
+      },
+      {
+        "path": "plugins/core/lib/querying-writing/simplified-helpers.js",
+        "sha256": "35dccd45a4fc43f7851fd5c087f912f632a8a720ff844ed020c45ac86e376146"
+      },
+      {
+        "path": "plugins/core/lib/querying/include-to-one.js",
+        "sha256": "0f906f6724c566acb17c3ecf9128d4cfb0051446d30d882a7960f270a232770f"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-cross-table-search.js",
+        "sha256": "d3c9eb688ce82a26fbf84d19850d02433c06e215058495c8a4f5a91f21792730"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-json-api-transformers-querying.js",
+        "sha256": "6b68f32d78f257d8b9f4256fac561e58e950a836c8a9f60c4129b525a10861d8"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-pagination-helpers.js",
+        "sha256": "9565c07a91b41439dba4c664332d995d7ca5d0b2f15c6363f9c0e8f1b3a05070"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-process-includes.js",
+        "sha256": "a36ae852e1107ef7ba3f4a02bf019bfd1f5a3e809c778465e1564503f2862c03"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-query-helpers.js",
+        "sha256": "2858529496b53ffe79d06340cb7d1623062825238d46b32f43b6be7c8916d13c"
+      },
+      {
+        "path": "plugins/core/lib/querying/knex-relationship-includes.js",
+        "sha256": "4e15f281e8d43aaf22fcc29a79940389d94cf7797f5343b9863892dd3542649a"
+      },
+      {
+        "path": "plugins/core/lib/querying/query-builder-utils.js",
+        "sha256": "79f4564692612579f294308f433146725b0e157fd34d43e31da16a26c20089ee"
+      },
+      {
+        "path": "plugins/core/lib/querying/query-constraint.d.ts",
+        "sha256": "5e21531c329de865ddc479b6e63fbad556a3260efb41da6d0e98bfc685a46d7b"
+      },
+      {
+        "path": "plugins/core/lib/querying/query-constraint.js",
+        "sha256": "9c71bc2b6da5ffc690f23896fef463d43ff876da67b9f2f68b66cde6c1d1c9c0"
+      },
+      {
+        "path": "plugins/core/lib/querying/query-field-sort-helpers.js",
+        "sha256": "b9a6e199da18048ba72c069d9901f57190373562b52a9b5105c84d6ddd0ece67"
+      },
+      {
+        "path": "plugins/core/lib/querying/relationship-identifiers.js",
+        "sha256": "7c892c96a33390162b338295c2b017a96934aae909df872a395ebccf72cdf24b"
+      },
+      {
+        "path": "plugins/core/lib/storage/canonical-data-helpers.js",
+        "sha256": "9ee0902486d26193c6d5c5ec2c1c00201dc20bc337c93345457036a700875243"
+      },
+      {
+        "path": "plugins/core/lib/storage/ordinary-data-helpers.js",
+        "sha256": "510b5c03afe97e12382c92f99bd5555f317f5e9fb771e98f28b9676a522f9f3f"
+      },
+      {
+        "path": "plugins/core/lib/storage/storage-adapter.js",
+        "sha256": "9fc5986961e3f084271c2ae33368b6eb5993708c271525db95d3bd176dd96824"
+      },
+      {
+        "path": "plugins/core/lib/storage/storage-mapping.js",
+        "sha256": "cc35b2545f6dc5a0d339a9295a28ed7063957738b5c280ecaf1b6a5ea9456095"
+      },
+      {
+        "path": "plugins/core/lib/storage/storage-types.d.ts",
+        "sha256": "fcc52a9967857c656795df21aee160dc5b240ebd7a0fc9ff38161b38d4eb4e4a"
+      },
+      {
+        "path": "plugins/core/lib/writing/relationship-processor.js",
+        "sha256": "ae0e0c1cce872410fc2a096791e88b6fd650deef6829c2e9dbc9a3f5be5d6ad1"
+      },
+      {
+        "path": "plugins/core/rest-api-anyapi-knex-plugin.js",
+        "sha256": "8410939805bf15028355c9bc7b434936eb07d68b84a6a9de9fb539f37c86792d"
+      },
+      {
+        "path": "plugins/core/rest-api-knex-plugin.js",
+        "sha256": "f6b0461d8e5b471a30e003684eb57b15223b5505ba97154617dae36b35019548"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/add-route.js",
+        "sha256": "5e03be9fdaf17c60a832553a99a2f2d68832755b5e2a84a31d0d7d551a11da73"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/check-permissions.js",
+        "sha256": "95c8e7953db8803d0de0574ca684e93275b0a13582c93fe617b6ec42bc673643"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/common.js",
+        "sha256": "059958f47f5ca712c27cd30859051bee48963d46a6454ab6781cf1599395acfb"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/delete-relationship.js",
+        "sha256": "d537996b0e8958b42f054c476bca4827e515c4ef9e296f638ab39067ed20ae8c"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/delete.js",
+        "sha256": "51332f828d3e7ad96ced9c004bfced7141b08cf9887eb71f2e744cc92f95012e"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/enrich-attributes.js",
+        "sha256": "d46edeab6d5bc235b1618d16b977746b3860e2e6734dca42067e7a60eda48966"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/get-related.js",
+        "sha256": "28b5ffd6f4c6493ea8d255b427910f5fa1ae6a4bfb147a039951d408bcaebad6"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/get-relationship.js",
+        "sha256": "6c9a7b0ad0f11fa0e4588c18add7845033fa42a61358c9e5793f6e379c769ff1"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/get.js",
+        "sha256": "1d807fa808c7e6565155775e1ee62b07904d5ce125ceeee3afaace81651aa461"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/lifecycle-types.d.ts",
+        "sha256": "618a264a5f8852b4c0e88acde83756829f2bf98bf1a596a60c3b4817f8d1374a"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/patch-relationship.js",
+        "sha256": "00e61df9f938abbd50f47571d6b424d2d453dc844d890edf028bcc2c03d15995"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/patch.js",
+        "sha256": "57952b547ad03d5111c8d4b405c0401900177af2dd8c02ec7a79497614bab668"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/post-relationship.js",
+        "sha256": "32211b661b3e63b848b82106bdd51807d0d0ff4216496f8996e93bb4b1d85057"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/post.js",
+        "sha256": "e7eeb294a0933dd01213c35e3a13c55cf6543e5790b7acb34d051bb37f810ed7"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/put.js",
+        "sha256": "2377a886041b310c84f4871e9e888d6b51b6599db424b267a56a80d77d56690f"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/query.js",
+        "sha256": "1f41213b185663eb9435e2250f44ee73f6df0604966f79f7c66732882a6f0ac0"
+      },
+      {
+        "path": "plugins/core/rest-api-plugin-methods/release.js",
+        "sha256": "903517442db1f8586fc20b5b2f37e9e3cb9f06dec5be8adcc41515b9eebc7199"
+      },
+      {
+        "path": "plugins/core/rest-api-positioning-plugin.js",
+        "sha256": "2a284b2cc1133b54a9615acd613a7b25c4f80182c86078def27f9efed97e6105"
+      },
+      {
+        "path": "plugins/core/socketio-plugin.js",
+        "sha256": "3ee367814630a8113f39f4a398467b1fc980d5c6f041eff0e2344fecf5d3cc9c"
+      },
+      {
+        "path": "scripts/check-packaged-migration-guide.js",
+        "sha256": "786c239de0ad9b6bdcb420e08d44d543f4e0c5477dc98c66b2c6cfc9a11ee5e6"
+      },
+      {
+        "path": "scripts/check-tutorial-guides.js",
+        "sha256": "d5bc27a31f405360ff9e1c839c8fc0a84d27352d3fc77526ca6676dbb6218795"
+      },
+      {
+        "path": "scripts/measure-diagnostics.js",
+        "sha256": "0b3e99c2bc1ab4cb752f4cbec3e51929facd4bcfd3eadc9ace5a9c8f97a277bd"
+      },
+      {
+        "path": "scripts/measure-write-lifecycles.js",
+        "sha256": "f47763e84eec5c6e7894d40b163bf7f46d7f997fcda8b73af180685ece2b5eaa"
+      },
+      {
+        "path": "scripts/stress-resources.js",
+        "sha256": "2b27e703f71f1c683240257fb5540295949566f647074d584e6bee01a44efb74"
+      },
+      {
+        "path": "tests/anyapi-descriptor-transactions.test.js",
+        "sha256": "9608a712384d3b827232290f38d17bca51cedff98ceb5fac7fa153ee7f1a6b28"
+      },
+      {
+        "path": "tests/computed-field-selection.test.js",
+        "sha256": "e8af4ce0c26ebd45e59773f7d45589d061a11590e5b973a69d61ff0ad6aff958"
+      },
+      {
+        "path": "tests/conformance-field-names.test.js",
+        "sha256": "48918cfde10864b2dcdb95033ad13b85d25a2e040fd216068b3ff0e7df01a5b4"
+      },
+      {
+        "path": "tests/conformance-filter-diagnostics.test.js",
+        "sha256": "2d4fe65ecb3fc3adc1f9f1abcb4992ab20a07f90a007f92fb0f264700850cb71"
+      },
+      {
+        "path": "tests/conformance-http-validators.test.js",
+        "sha256": "1d1fbddc72f396e5a28464a3c94fefaa3fd769f8f5b1164bdfcbb04027308b79"
+      },
+      {
+        "path": "tests/conformance-positioning.test.js",
+        "sha256": "1747e4ee45f825f99c04955793e60d4c805049c046c6130f8fdd5542056c7bc2"
+      },
+      {
+        "path": "tests/conformance-runtime-failures.test.js",
+        "sha256": "0dfffb33b41a5cddb778483ffa16f65544870fc1abd8af5ddaae006ab8a425e6"
+      },
+      {
+        "path": "tests/conformance-storage-boundaries.test.js",
+        "sha256": "84e251da744921004d6bfcfa6943db5ffbafbd40838eaa150db32599caf181a4"
+      },
+      {
+        "path": "tests/conformance-storage-return-id.test.js",
+        "sha256": "3169bac9964f7ccbac33ee0ca9bdbfc32b620744007772babb74ff0ccb4c6483"
+      },
+      {
+        "path": "tests/cross-table-join-chain.test.js",
+        "sha256": "4aa1df6fa00b6c9c7add7f906b5e5489fa92a90264848b87640bdb47e082e878"
+      },
+      {
+        "path": "tests/db-field-alterations.test.js",
+        "sha256": "2789e107c18ac6bc65144148bd3559d872ab38c9bd70684d38801d44d571560e"
+      },
+      {
+        "path": "tests/enhanced-logger.test.js",
+        "sha256": "f5d1139f3a5442f5269c991a8951ad945dfa5e009f4338a5dc961e9b07821aac"
+      },
+      {
+        "path": "tests/error-context.test.js",
+        "sha256": "f17db1f68fe115b0b3548790ddbe9d63e74de61d2b03414a29f35dbd7c1faf45"
+      },
+      {
+        "path": "tests/error-formatter.test.js",
+        "sha256": "662fc06bf27fc8f017fb1f94befa574b71b45471c54fb207b2996aadf2911187"
+      },
+      {
+        "path": "tests/file-handling.test.js",
+        "sha256": "b21775f6c5db657a85dab591fc0cf34ccc2fcd852d48b2e9a40f13c2dfb4feab"
+      },
+      {
+        "path": "tests/fixtures/api-configs.js",
+        "sha256": "159f0b728f4fed63a1cd8dea1faaa7faf29d4df6b61074d580e50bfb6626eece"
+      },
+      {
+        "path": "tests/hook-context-contract.test.js",
+        "sha256": "fad95aa8694d32553fcecd20a6d503fef1b08c2d04a0c9a9dea06e636be42bc5"
+      },
+      {
+        "path": "tests/http-connector-diagnostics.test.js",
+        "sha256": "c0cb393c8ce0bf421dfcde5b1dd912abd7ae397287faaa830bc1b49969367350"
+      },
+      {
+        "path": "tests/http-early-diagnostics.test.js",
+        "sha256": "0561f8ccb1ee764d795efedcfad4b99813b40a6a02c2203578d6a63c192bcf96"
+      },
+      {
+        "path": "tests/include-error-handling.test.js",
+        "sha256": "c1c7573ebeccf70723e184861cf5e6810c1aa8af087ede07c70e52f7e0fa44d6"
+      },
+      {
+        "path": "tests/integration/socketio-lifecycle.test.js",
+        "sha256": "692ff85d565a5533b3a2e93b97468eaf9e786306c92707821d84b52097a0eaee"
+      },
+      {
+        "path": "tests/positioning-contracts.test.js",
+        "sha256": "c048d71f739a0b7d1afc41be61302472c8a8d083e0ece87ec338484e60346142"
+      },
+      {
+        "path": "tests/row-policy.test.js",
+        "sha256": "15de1406e9bcdb15cd473d36c04ef8f2a7478181037ecf638354e8f999228b40"
+      },
+      {
+        "path": "tests/socketio-contract.test.js",
+        "sha256": "65e6db3133bd158fe14348c74833ce340a384395d24758393274ae5966eae8c2"
+      },
+      {
+        "path": "tests/types/data-read-contracts.js",
+        "sha256": "a88cdc4b45d3ae9009340ab731c04f1b6c4aa76e3b936a5e3609a1ac9019a3e0"
+      },
+      {
+        "path": "tests/types/data-relationship-contracts.js",
+        "sha256": "b29b308556abc49149315cc03684474eaf60370cda3f60b8af384cf6c93f3944"
+      },
+      {
+        "path": "tests/types/field-selection-contracts.js",
+        "sha256": "b8628b10b74470fbc5fbdbd2bbd4a6f1b4e2912a4a8cad29e2cea12c6eea7642"
+      },
+      {
+        "path": "tests/types/lifecycle-context-contracts.ts",
+        "sha256": "f148ca4e6b807416f73d679d6dd9d89e3d8379881af1155e91625dfc3ad16b5b"
+      },
+      {
+        "path": "tests/types/public-hook-context.ts",
+        "sha256": "0b726853f82672bbbb88787959030c23fd9e28275a4c42fecad5ad3ac8b58f54"
+      },
+      {
+        "path": "tests/types/query-filtering-context-contracts.js",
+        "sha256": "b35aa3c466fa9dba640b51a6ad0f66f751ccdf758d59f156bc49ec3c8734b08c"
+      },
+      {
+        "path": "tests/types/storage-adapter-contracts.js",
+        "sha256": "d9f7f8f41eab24b779877c254ad3ae891830c778553fdbcd73d764de14761b9f"
+      },
+      {
+        "path": "tests/types/storage-implementations.js",
+        "sha256": "421719383141bfa66db6df17eb1f48a6d8f2103c2f1a86dd51615b3d9a9aec69"
+      },
+      {
+        "path": "tests/write-error-handling.test.js",
+        "sha256": "e5fd06907d68a9b6ff210e56d4bf570846b2ddb483b3b0645d400dfe5ce1c1b2"
+      },
+      {
+        "path": "tsconfig.json",
+        "sha256": "0e94d4f204c4b71c117411a3fe1e8f7d1a325819490174468b9f1c5445dcf705"
+      },
+      {
+        "path": "types/hook-context.d.ts",
+        "sha256": "5873709b951876b0831bda03c0af18233aebf2c3643c2092adb8c6a430038cc8"
+      }
+    ],
+    "followup": "Both deslop passes, all eight library items and final Node24 verification are complete. Pause before consumers. The remaining 60 entries cover overlapping consumer/migration acceptance and final combined review/report; the full goal remains incomplete. No commit/push in this batch.",
+    "documentationBuild": {
+      "command": "npm run docs (within npm run verify)",
+      "exitCode": 0,
+      "dependencyInstallation": false,
+      "log": "/tmp/jra-post-deslop-verify-20260912.log",
+      "durationSeconds": 2.139
+    },
+    "verification": {
+      "date": "2026-09-12",
+      "node": "24.6.0",
+      "testsRun": true,
+      "status": "Passed single post-deslop comprehensive gate and affected native selections; consumers remain paused.",
+      "record": "preparation-status.md#final-post-deslop-verification-and-library-pause-2026-09-12",
+      "comprehensive": {
+        "command": "npm run verify",
+        "exitCode": 0,
+        "log": "/tmp/jra-post-deslop-verify-20260912.log",
+        "results": [
+          {
+            "tests": 6273,
+            "suites": 630,
+            "pass": 6272,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 1,
+            "todo": 0,
+            "duration_ms": 387189.943822
+          },
+          {
+            "tests": 6322,
+            "suites": 648,
+            "pass": 6322,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 497438.982807
+          },
+          {
+            "tests": 542,
+            "suites": 28,
+            "pass": 542,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 31955.096572
+          },
+          {
+            "tests": 544,
+            "suites": 28,
+            "pass": 544,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 28688.468923
+          }
+        ],
+        "passingExecutions": 13680,
+        "skipExplanation": "Canonical cursor fixture cleanup is skipped in ordinary mode and passes in canonical mode."
+      },
+      "internalTypes": {
+        "exitCode": 0
+      },
+      "publicTypes": {
+        "exitCode": 0,
+        "files": 173,
+        "packedBytes": 441672,
+        "documentationLinks": 257,
+        "runtimeExports": 28,
+        "negativeChecks": 24,
+        "artifactSha1": "7de97a9f055111af4c797dd3ca2c9becbcce2421"
+      },
+      "queryBudgets": {
+        "modes": [
+          "knex",
+          "anyapi"
+        ],
+        "exitCode": 0
+      },
+      "lint": {
+        "exitCode": 0
+      },
+      "docs": {
+        "exitCode": 0
+      },
+      "packagedGuide": {
+        "command": "npm run test:migration-guide:package",
+        "log": "/tmp/jra-post-deslop-packaged-guide-20260912.log",
+        "exitCode": 0,
+        "artifactSha1": "7de97a9f055111af4c797dd3ca2c9becbcce2421",
+        "files": 173,
+        "packedBytes": 441672,
+        "modes": [
+          "knex",
+          "anyapi"
+        ],
+        "database": "better-sqlite3",
+        "includesSchemaMappedIdMigration": true,
+        "dependencyReuse": "Checkout test dependencies only; runtime and guide resolve inside extracted tarball"
+      },
+      "native": {
+        "scope": "Affected four-file selection, not full native suite",
+        "files": [
+          "tests/conformance-queries.test.js",
+          "tests/conformance-storage-boundaries.test.js",
+          "tests/conformance-storage-return-id.test.js",
+          "tests/db-schema-conformance.test.js"
+        ],
+        "postgres": {
+          "version": "16.15",
+          "exitCode": 0,
+          "log": "/tmp/jra-post-deslop-native-pg-20260912.log",
+          "results": [
+            {
+              "tests": 199,
+              "suites": 8,
+              "pass": 199,
+              "fail": 0,
+              "cancelled": 0,
+              "skipped": 0,
+              "todo": 0,
+              "duration_ms": 112083.206467
+            },
+            {
+              "tests": 199,
+              "suites": 8,
+              "pass": 199,
+              "fail": 0,
+              "cancelled": 0,
+              "skipped": 0,
+              "todo": 0,
+              "duration_ms": 148749.793424
+            }
+          ]
+        },
+        "mysql": {
+          "version": "8.0.46",
+          "exitCode": 0,
+          "log": "/tmp/jra-post-deslop-native-mysql-20260912.log",
+          "results": [
+            {
+              "tests": 203,
+              "suites": 8,
+              "pass": 203,
+              "fail": 0,
+              "cancelled": 0,
+              "skipped": 0,
+              "todo": 0,
+              "duration_ms": 150503.039022
+            },
+            {
+              "tests": 203,
+              "suites": 8,
+              "pass": 203,
+              "fail": 0,
+              "cancelled": 0,
+              "skipped": 0,
+              "todo": 0,
+              "duration_ms": 231327.233756
+            }
+          ]
+        },
+        "passingExecutions": 804,
+        "ownedServersStopped": true,
+        "temporaryDirectoriesRemoved": true
+      },
+      "sourceUnchangedDuringVerification": true,
+      "changedSourceTestDocPathsHashed": 103,
+      "consumerTestsRun": false,
+      "activeConsumersEdited": false
+    },
+    "checklist": {
+      "revision": 3,
+      "complete": 190,
+      "total": 250,
+      "open": 60,
+      "libraryOpen": 0,
+      "consumerAndMigrationOpen": 46,
+      "finalReviewOpen": 14,
+      "reconciledLibraryItems": [
+        "A5-02",
+        "A5-03",
+        "A5-12"
+      ],
+      "mixedOriginalsNarrowedToCompletedLibraryWork": 34,
+      "newResidualItems": 36
+    },
+    "previousVerification": {
+      "date": "2026-09-12",
+      "node": "24.6.0",
+      "testsRun": true,
+      "status": "Completed checkpoint in stages; no single successful npm run verify invocation is claimed.",
+      "record": "preparation-status.md#completed-verification-checkpoint",
+      "default": {
+        "command": "npm run verify",
+        "log": "/tmp/jra-full-verify-final-20260912.log",
+        "exitCode": 1,
+        "results": [
+          {
+            "tests": 6200,
+            "suites": 627,
+            "pass": 6196,
+            "fail": 3,
+            "cancelled": 0,
+            "skipped": 1,
+            "todo": 0,
+            "duration_ms": 294458.476034
+          }
+        ],
+        "note": "Internal types, public types and both query budgets passed before default runtime suite. All three default diagnostic failures subsequently corrected and passed focused checks; entire default suite not repeated."
+      },
+      "classifierCorrection": {
+        "command": "node --test tests/error-formatter.test.js tests/enhanced-logger.test.js tests/error-context.test.js tests/anyapi-registry-failures.test.js",
+        "log": "/tmp/jra-error-classifier-focused.log",
+        "exitCode": 0,
+        "results": [
+          {
+            "tests": 176,
+            "suites": 11,
+            "pass": 176,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 8684.995385
+          }
+        ]
+      },
+      "internalTypes": {
+        "command": "npm run typecheck",
+        "log": "/tmp/jra-error-classifier-types.log",
+        "exitCode": 0
+      },
+      "anyapi": {
+        "command": "npm run test:anyapi",
+        "log": "/tmp/jra-full-anyapi-final-20260912.log",
+        "exitCode": 0,
+        "results": [
+          {
+            "tests": 6257,
+            "suites": 646,
+            "pass": 6257,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 367853.059603
+          }
+        ]
+      },
+      "publicTypes": {
+        "command": "npm run test:public-types",
+        "log": "/tmp/jra-public-types-final-20260912.log",
+        "exitCode": 0,
+        "files": 168,
+        "packedBytes": 439790,
+        "documentationLinks": 257,
+        "runtimeExports": 28,
+        "negativeChecks": 24,
+        "artifactSha1": "abd6eee251ce6dd12ab009403e664a7b9807b397"
+      },
+      "express4": {
+        "command": "npm run test:connectors:express4",
+        "log": "/tmp/jra-express4-final-20260912.log",
+        "exitCode": 0,
+        "results": [
+          {
+            "tests": 530,
+            "suites": 28,
+            "pass": 530,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 36064.481557
+          },
+          {
+            "tests": 532,
+            "suites": 28,
+            "pass": 532,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+            "duration_ms": 36465.14048
+          }
+        ]
+      },
+      "lint": {
+        "command": "npm run lint",
+        "log": "/tmp/jra-lint-clean-20260912.log",
+        "exitCode": 0
+      },
+      "docs": {
+        "command": "npm run docs",
+        "log": "/tmp/jra-docs-final-20260912.log",
+        "exitCode": 0
+      },
+      "native": {
+        "scope": "Focused boundary/positioning selections; not full native suites. Fixed-canonical descriptor cases repeat under both runner modes. Exact files and counts in preparation-status.md.",
+        "postgresVersion": "16.15",
+        "mysqlVersion": "8.0.46",
+        "logs": [
+          "/tmp/jra-native-boundaries-pg.log",
+          "/tmp/jra-positioning-target-pg.log",
+          "/tmp/jra-native-boundaries-mysql.log"
+        ],
+        "ownedServersStopped": true
+      },
+      "consumerTestsRun": false,
+      "changesAfterArtifactCheck": {
+        "runtimeOrTestsChanged": true,
+        "archivedLedgerReconciled": true,
+        "note": "The prior verification and uncommitted file hashes identify the preceding checkpoint. Current eight-item source changes are under focused verification; final source hashes, comprehensive gate and packaged guide artifact are pending. Do not claim prior artifact or suite results verify the later code."
+      },
+      "deslopInterruption": {
+        "date": "2026-09-12",
+        "commandSession": 83821,
+        "processGroup": 212314,
+        "exitCode": 143,
+        "reason": "User ordered cleanup before comprehensive tests",
+        "completedQueryBudgets": true,
+        "defaultRuntimeInterrupted": {
+          "tests": 5517,
+          "pass": 5467,
+          "fail": 0,
+          "cancelled": 50,
+          "skipped": 0
+        },
+        "remainingStagesRun": false,
+        "log": "/tmp/jra-eight-final-stages-20260912.log"
+      },
+      "postDeslopInProgress": {
+        "command": "npm run verify",
+        "log": "/tmp/jra-post-deslop-verify-20260912.log",
+        "commandSession": 83261,
+        "status": "Historical progress snapshot; completed result is now under library.verification.",
+        "packagedGuide": {
+          "command": "npm run test:migration-guide:package",
+          "log": "/tmp/jra-post-deslop-packaged-guide-20260912.log",
+          "exitCode": 0,
+          "artifactSha1": "7de97a9f055111af4c797dd3ca2c9becbcce2421",
+          "files": 173,
+          "packedBytes": 441672,
+          "modes": [
+            "knex",
+            "anyapi"
+          ],
+          "database": "better-sqlite3",
+          "includesSchemaMappedIdMigration": true,
+          "dependencyReuse": "Checkout test dependencies only; runtime and guide resolve inside extracted tarball"
+        }
+      }
+    }
+  },
+  "ownershipSnapshots": [
+    {
+      "path": "/home/merc/Development/current/jskit-ai",
+      "head": "70163546304ee1fed80cbf1c6ec67517294db855",
+      "branch": "main",
+      "changedTrackedPaths": 1,
+      "untrackedPaths": 0,
+      "overlapWithPreparedPaths": [],
+      "changedTrackedPathsSinceBase": 1
+    },
+    {
+      "path": "/home/merc/Development/current/jskit-ai-integrations",
+      "head": "70163546304ee1fed80cbf1c6ec67517294db855",
+      "branch": "integrations",
+      "changedTrackedPaths": 62,
+      "untrackedPaths": 504,
+      "overlapWithPreparedPaths": [],
+      "changedTrackedPathsSinceBase": 62
+    }
+  ],
+  "staticCaptureChecks": [
+    "git diff --check",
+    "git apply --reverse --check",
+    "base/prepared file SHA-256 capture",
+    "Archived checksum and every prepared file hash rechecked before removing the temporary clone"
+  ],
+  "testsRun": false,
+  "dependenciesChanged": false,
+  "generatedOutputsChanged": false,
+  "activeConsumersEdited": false,
+  "temporaryClone": "/tmp/json-rest-api-jskit-v2-aQpHrK",
+  "temporaryCloneRemoved": true,
+  "supersedes": "migration.patch intent; do not apply both patches",
+  "deferredRequirements": [
+    "Replace json-rest-api-core hooked-api / json-rest-api ^1.0.29 dependencies with intended v2 artifact",
+    "Declare direct crud-core dependency on json-rest-api v2 for RestApiWriteError",
+    "Coordinate changed internal package versions, provider capability metadata, Node24+ engines, lockfile and catalog",
+    "Rebuild distributed agent docs from combined source",
+    "At the coordinated consumer checkpoint, execute prepared repository, managed transaction, HTTP/client, generated-output and real application workflow checks against the selected v2 artifact.",
+    "Vibe64 and seeds remain paused"
+  ],
+  "verificationScope": "Top-level testsRun/dependency/generated-output fields describe the archived consumer preparation; library checks are under library.verification."
+}

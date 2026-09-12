@@ -6,6 +6,21 @@ import { RestApiValidationError } from '../lib/rest-api-errors.js'
 import { beginWriteTransaction } from '../lib/error-context.js'
 
 describe('Write error cleanup', () => {
+  for (const [method, label] of [['postRelationship', 'POST_RELATIONSHIP'], ['patchRelationship', 'PATCH_RELATIONSHIP'], ['deleteRelationship', 'DELETE_RELATIONSHIP'], [undefined, 'PATCH']]) {
+    it(`reports the operation name for ${label}`, async () => {
+      const primary = new Error('Write failed')
+      const context = { method, scopeName: 'items' }
+      const calls = []
+      await beginWriteTransaction(context, null, async () => Object.assign(new EventEmitter(), { rollback: async () => {} }), async () => {})
+      await assert.rejects(handleWriteMethodError(primary, context, label, 'items', { error: (...args) => calls.push(args) }), error => error === primary)
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0][1].method, method ?? 'patch')
+      assert.equal(calls[0][1].scopeName, 'items')
+      assert.equal(calls[0][1].phase, 'writeFailure')
+      assert.equal(calls[0][1].transactionOutcome, 'rolledBack')
+    })
+  }
+
   for (const primary of [new RestApiValidationError('Original validation failure'), Object.freeze(new Error('Frozen failure')), null, undefined, 'Thrown value']) {
     for (const failedPhase of ['rollback', 'afterRollback', 'logging']) {
       it(`preserves ${primary?.message || String(primary)} when ${failedPhase} fails`, async () => {

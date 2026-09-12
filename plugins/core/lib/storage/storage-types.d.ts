@@ -1,3 +1,7 @@
+import type { JsonApiDocument, JsonApiLinks, JsonApiRelationship, JsonApiResource } from '../../../../types/representations.js'
+import type { SelectionParams } from '../../../../types/resource-methods.js'
+import { RELATIONSHIPS_KEY } from '../querying-writing/knex-constants.js'
+import { queryConstraint } from '../querying/query-constraint.js'
 import type { TransactionContext } from '../../../../lib/transaction-types.js'
 import type { Knex } from 'knex'
 
@@ -5,6 +9,11 @@ import type { Knex } from 'knex'
 export type StorageRow = Record<string, unknown>
 export type StorageQuery = Knex.QueryBuilder<StorageRow, StorageRow[]>
 export type StorageDatabase = Knex<StorageRow, StorageRow[]>
+export interface MandatoryQueryConstraint {
+  scopeName: string
+  values?: StorageRow
+  idsQuery?: StorageQuery
+}
 export type SelectColumn = string | Knex.Raw<unknown> | StorageQuery | Record<string, string>
 export type SelectColumns = SelectColumn[] | Record<string, string> | null | undefined
 export type SelectTranslator = (field: string, alias?: string | null) => string
@@ -184,6 +193,7 @@ export interface QueryFilteringState {
   queryPurpose?: string
   adapter?: StorageAdapter
   storageAdapter?: StorageAdapter
+  isAnyApi?: boolean
 }
 
 // Attributes have passed setters; their values need not be public JSON values.
@@ -196,16 +206,16 @@ export interface StorageInputRecord {
   }
 }
 
-export interface DataWriteContext extends TransactionContext {
+export interface DataWriteContext extends TransactionContext, StorageContext {
   db: StorageDatabase
-  schemaInfo: StorageSchemaInfo
+  schemaInfo: DataOperationSchema
   storageAdapter?: StorageAdapter
   inputRecord: StorageInputRecord
 }
 
-export interface DataIdentityContext extends TransactionContext {
+export interface DataIdentityContext extends TransactionContext, StorageContext {
   db: StorageDatabase
-  schemaInfo: StorageSchemaInfo
+  schemaInfo: DataOperationSchema
   storageAdapter?: StorageAdapter
   id: string | number
 }
@@ -229,34 +239,38 @@ export type OrdinaryDataWriteHelpers = DataWriteHelpers<void, { success: true }>
 export type CanonicalDataWriteHelpers = DataWriteHelpers<number, number>
 
 // Read helpers assemble resource-shaped values before final output normalization.
-export interface DataResource {
-  type: string
-  id: string
-  attributes?: StorageRow
-  relationships?: Record<string, unknown>
-  links?: Record<string, unknown>
-  meta?: Record<string, unknown>
+export interface DataResource extends JsonApiResource {
+  __$jsonrestapi_computed_deps$__?: string[]
 }
 
-export interface DataDocument<T> {
-  data: T
-  included?: DataResource[]
-  links?: Record<string, unknown>
-  meta?: Record<string, unknown>
+export type DataDocument<T> = JsonApiDocument<T>
+
+export interface DataStorageRow extends StorageRow {
+  [RELATIONSHIPS_KEY]?: Record<string, JsonApiRelationship>
 }
 
-export interface DataReadContext extends TransactionContext {
+export interface DataReadContext extends TransactionContext, StorageContext {
+  scopeName: string
+  [queryConstraint]?: MandatoryQueryConstraint
   db: StorageDatabase
-  schemaInfo: StorageSchemaInfo
+  schemaInfo: DataOperationSchema
   storageAdapter?: StorageAdapter
   id?: string | number
   queryParams?: {
     filters?: StorageRow
-    [parameter: string]: unknown
+    fields?: SelectionParams['fields']
+    include?: string[]
+    sort?: string[]
+    page?: { size?: number; number?: number; before?: string; after?: string }
   }
   knexQuery?: QueryFilteringState | null
   computedDependencies?: string[]
-  returnMeta?: Record<string, unknown>
+  returnMeta?: {
+    queryString?: string
+    paginationMeta?: object
+    paginationLinks?: JsonApiLinks | null
+    [key: string]: unknown
+  }
   sortableFields?: string[]
 }
 
@@ -266,10 +280,12 @@ export interface DataReadRequest {
   runHooks?: (name: 'knexQueryFiltering') => unknown | Promise<unknown>
 }
 
+export type QueryBuilderResult = StorageQuery | { query: QueryBuilderResult }
+
 export interface DataMinimalRequest extends DataReadRequest {
   filters?: StorageRow
   queryPurpose?: string
-  applyQueryFilters?: (params: QueryFilteringState & { query: StorageQuery }) => Promise<unknown>
+  applyQueryFilters?: (params: QueryFilteringState & { query: StorageQuery }) => Promise<{ query: QueryBuilderResult } | null | undefined>
 }
 
 export interface DataMinimalReader {
@@ -286,9 +302,9 @@ export interface DataReadHelpers<GetResult> {
     context: DataReadContext & { id: string | number }
   }) => Promise<GetResult>
   dataQuery: (request: DataReadRequest & {
+    runHooks: NonNullable<DataReadRequest['runHooks']>
     context: DataReadContext & {
       queryParams: NonNullable<DataReadContext['queryParams']>
-      returnMeta: Record<string, unknown>
     }
   }) => Promise<DataDocument<DataResource[]>>
 }
@@ -365,10 +381,6 @@ export interface RelatedQueryRequest {
 // Wrap thenable builders so awaiting the helper does not execute its subquery.
 export type DataRelatedIdsQuery = (request: RelatedQueryRequest) => Promise<{ query: StorageQuery }>
 export type CanonicalDataRelatedIdsQuery = (request: Omit<RelatedQueryRequest, 'relDef'> & { relDef?: unknown }) => Promise<{ query: StorageQuery }>
-export type DataQueryCount = (request: {
-  scopeName: string
-  context: TransactionContext & { db?: StorageDatabase; queryParams?: DataReadContext['queryParams'] }
-}) => Promise<number>
 
 export interface CanonicalLinkContext extends TransactionContext {
   db?: StorageDatabase
@@ -397,4 +409,94 @@ export interface CanonicalLinkHelpers {
     parentIds: Array<string | number>
     context: Omit<CanonicalLinkContext, 'id'>
   }): Promise<Array<{ parentId: string; childId: string; childType: string }>>
+}
+
+export interface DataOperationSchema extends ResourceConversionSchema {
+  idProperty: string
+  queryFields?: Record<string, import('../querying-writing/query-field-types.js').CompiledQueryField>
+}
+
+export interface DataOperationScope {
+  checkPermissions(request: { method: 'query', originalContext: DataReadContext }): Promise<unknown>
+  applyQueryFilters(request: QueryFilteringState, context: DataReadContext): Promise<{ query: QueryBuilderResult } | null | undefined>
+  name?: string
+  scopeName?: string
+  vars: {
+    schemaInfo: DataOperationSchema
+    defaultSort?: string[]
+    enablePaginationCounts?: boolean
+    queryDefaultLimit?: number
+    queryMaxLimit?: number
+    [option: string]: unknown
+  }
+}
+
+export interface DataOperationApi {
+  resources: Record<string, DataOperationScope>
+  knex: { instance: StorageDatabase }
+}
+
+export interface DataSortDescriptor {
+  field: string
+  direction: string
+  column?: string
+  resultColumn?: string
+  actualField?: string
+  referenceField?: string
+  definition?: StorageFieldDefinition | null
+  isRelationship: boolean
+  queryFieldRuntime?: import('../querying-writing/query-field-types.js').ProjectionRuntime
+}
+
+export interface DataSortRequest {
+  query: StorageQuery
+  sort?: unknown
+  schemaInfo: StorageSchemaInfo
+  sortableFields?: string[]
+  storageAdapter: StorageAdapter
+  defaultSort?: string[]
+  scopeName: string
+  context: DataReadContext
+  before?: boolean
+  queryFieldRuntimeByField: Map<string, import('../querying-writing/query-field-types.js').ProjectionRuntime>
+}
+
+export interface OrdinaryDataDependencies {
+  api: DataOperationApi
+  scopes: Record<string, DataOperationScope>
+  knex: StorageDatabase
+  log: import('../../../../types/runtime.js').RuntimeLogger
+  getScopeStorageAdapter(scopeName: string): StorageAdapter | null
+}
+
+export interface DataCursorOptions {
+  schemaInfo?: StorageSchemaInfo | null
+  definitions?: Record<string, StorageFieldDefinition | null | undefined>
+  before?: boolean
+}
+
+export interface CanonicalDataDependencies {
+  api: DataOperationApi
+  knex: StorageDatabase
+  getScopeStorageAdapter(scopeName: string): StorageAdapter | null
+  getDescriptor(scopeName: string): CanonicalDescriptor
+  linkStore: {
+    invalidateDeletedLinkTargets(scopeName: string, context: DataIdentityContext): Promise<void>
+    deleteResourceLinks(request: { descriptor: CanonicalDescriptor, scopeName: string, id: string | number, db: StorageDatabase }): Promise<void>
+  }
+  buildIncludes(request: { parentResources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<DataResource[]>
+  attachReverseRelationships(request: { resources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<void>
+  attachManyToManyRelationships(request: { resources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<void>
+  applyBuiltInAnyApiQueryFilters(context: DataReadContext): Promise<void>
+}
+
+export interface CanonicalDataSortRequest {
+  query: StorageQuery
+  sort?: string[]
+  descriptor: CanonicalDescriptor
+  scope: DataOperationScope
+  tableAlias: string
+  context: DataReadContext
+  before?: boolean
+  queryFieldRuntimeByField: Map<string, import('../querying-writing/query-field-types.js').ProjectionRuntime>
 }

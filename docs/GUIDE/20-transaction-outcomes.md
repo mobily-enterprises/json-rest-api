@@ -150,9 +150,8 @@ Writes reject with `RestApiWriteError`, exported from the package root. Its
 read-only `transactionOutcome` is one of the five strings above. `cause` retains
 the original thrown value, including a frozen error, null or undefined; a fresh
 wrapper is created for each failed operation. Read errors retain their existing
-contract. Errors already lost inside an extension's own catch cannot be restored
-by the write boundary; the installed hook dispatcher's null-throw issue remains
-an independent boundary.
+contract. The runtime propagates null and undefined throws. Errors already lost
+inside an extension's own catch cannot be restored by the write boundary.
 
 The wrapper retains ordinary data fields used for classification: `code`,
 `type`, `subtype`, `details`, `statusCode`, `status`, `path`, `parameter` and

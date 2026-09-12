@@ -576,6 +576,7 @@ function buildContractCacheKey ({ scopeName, includeDepthLimit, sortableFields }
   })
 }
 
+/** @param {{ scopeName: string, schemaInfo: object, includeDepthLimit?: number, sortableFields?: string[] }} options */
 export function getRequestContracts ({ scopeName, schemaInfo, includeDepthLimit = 3, sortableFields = [] }) {
   installRequestContractSupport()
 

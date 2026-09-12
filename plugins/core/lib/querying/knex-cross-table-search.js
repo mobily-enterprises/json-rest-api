@@ -1,4 +1,5 @@
 import { assertScalarQueryField } from '../querying-writing/field-utils.js'
+import { getOperationDiagnosticContext } from '../../../../lib/error-context.js'
 // Cross-table search helper functions that enable filtering across related database tables
 
 /**
@@ -26,8 +27,7 @@ export const validateCrossTableField = async (scopes, log, targetScopeName, fiel
     targetSchemaInstance = scopes[targetScopeName].vars.schemaInfo.schemaInstance
     log.trace('[VALIDATE] Got target schema:', { scopeName: targetScopeName, schemaKeys: Object.keys(targetSchemaInstance || {}) })
   } catch (error) {
-    log.trace('[VALIDATE] Error getting target schema:', error.message)
-    throw new Error(`Target scope '${targetScopeName}' not found`)
+    throw new Error(`Target scope '${targetScopeName}' not found`, { cause: error })
   }
 
   if (!targetSchemaInstance) {
@@ -145,8 +145,13 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
           relationshipType = 'hasMany'
           relationshipField = relDef.foreignKey
           if (!relationshipField) {
-            log.error('[BUILD-JOIN] Missing foreignKey in hasMany relationship:', { relName, currentScope })
-            throw new Error(`Missing foreignKey in hasMany relationship '${relName}' for scope '${currentScope}'`)
+            const error = new Error(`Missing foreignKey in hasMany relationship '${relName}' for scope '${currentScope}'`)
+            try {
+              await log.error('[BUILD-JOIN] Missing foreignKey in hasMany relationship:', {
+                ...getOperationDiagnosticContext({}, { phase: 'crossTableJoin', method: 'buildJoinChain', scopeName: currentScope }), relName, error
+              })
+            } catch { /* The configuration error remains primary. */ }
+            throw error
           }
           log.trace('[BUILD-JOIN] Found hasMany relationship:', { relName, targetScope, foreignKey: relationshipField })
           break
@@ -274,80 +279,4 @@ export const buildJoinChain = async (scopes, log, fromScopeName, targetPath, sea
       targetScopeName: lastJoin.targetScopeName || finalScope
     }
   }
-}
-
-/**
- * Analyzes a search schema to identify which fields need database indexes
- *
- * @param {Object} scopes - All registered resources containing schema and relationship definitions
- * @param {Object} log - Logger instance for debug and trace output
- * @param {string} scopeName - The scope being analyzed
- * @param {Object} searchSchema - Search schema definition with filter fields
- * @returns {Array<Object>} Array of required indexes with scope, field, and reason
-   */
-export const analyzeRequiredIndexes = (scopes, log, scopeName, schemaInfo) => {
-  const requiredIndexes = []
-
-  const schemaToAnalyze = schemaInfo.searchSchemaStructure
-
-  Object.entries(schemaToAnalyze).forEach(([filterKey, fieldDef]) => {
-    if (fieldDef.actualField && fieldDef.actualField.includes('.')) {
-      const [targetScopeName, targetFieldName] = fieldDef.actualField.split('.')
-      requiredIndexes.push({
-        scope: targetScopeName,
-        field: targetFieldName,
-        reason: `Cross-table search from ${scopeName}.${filterKey}`
-      })
-    }
-
-    if (fieldDef.oneOf && Array.isArray(fieldDef.oneOf)) {
-      fieldDef.oneOf.forEach(field => {
-        if (field.includes('.')) {
-          const [targetScopeName, targetFieldName] = field.split('.')
-          requiredIndexes.push({
-            scope: targetScopeName,
-            field: targetFieldName,
-            reason: `Cross-table oneOf search from ${scopeName}.${filterKey}`
-          })
-        }
-      })
-    }
-  })
-
-  return requiredIndexes
-}
-
-/**
- * Creates database indexes for fields identified by analyzeRequiredIndexes
- *
- * @async
- * @param {Object} scopes - All registered resources containing schema and relationship definitions
- * @param {Object} log - Logger instance for debug and trace output
- * @param {Array<Object>} requiredIndexes - Index requirements from analyzeRequiredIndexes
- * @param {Object} knex - Knex database connection instance
- * @returns {Promise<Array<Object>>} Array of successfully created indexes
-   */
-export const createRequiredIndexes = async (scopes, log, requiredIndexes, knex) => {
-  const createdIndexes = []
-
-  for (const indexInfo of requiredIndexes) {
-    const { scope, field } = indexInfo
-    const tableName = scopes[scope].vars.schemaInfo.tableName
-    const indexName = `idx_${tableName}_${field}_search`
-
-    try {
-      const hasIndex = await knex.schema.hasIndex(tableName, [field])
-      if (!hasIndex) {
-        await knex.schema.table(tableName, table => {
-          table.index([field], indexName)
-        })
-        createdIndexes.push({ tableName, field, indexName })
-        log.info(`Created index: ${indexName} on ${tableName}.${field}`)
-      }
-    } catch (error) {
-      log.warn(`Failed to create index on ${tableName}.${field}:`, error.message)
-    }
-  }
-
-  return createdIndexes
 }

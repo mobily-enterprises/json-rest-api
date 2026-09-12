@@ -105,7 +105,10 @@ const database = await createTestDatabase(undefined, { maxConnections: sqlConnec
 const { knex } = database
 try {
   const versionResult = await knex.raw(databaseClient === 'better-sqlite3' ? 'select sqlite_version() as version' : 'select version() as version')
-  const databaseVersion = (databaseClient === 'pg' ? versionResult.rows[0] : databaseClient === 'mysql2' ? versionResult[0][0] : versionResult[0]).version
+  let versionRow = versionResult[0]
+  if (databaseClient === 'pg') versionRow = versionResult.rows[0]
+  else if (databaseClient === 'mysql2') versionRow = versionResult[0][0]
+  const databaseVersion = versionRow.version
   const api = await createRowPolicyApi(knex, { polymorphic: true })
   const seeded = await seedQueryPolicyApi(api, config.rows)
   const projects = api.resources.policy_projects
@@ -117,18 +120,19 @@ try {
   const pageCount = Math.ceil(config.rows / config.pageSize)
   let persistedTitle = seeded.subject.attributes.title
 
-  await api.customize({
-    hooks: {
-      finishPatch: ({ context }) => { if (context.stressRollback) throw intentionalRollback },
-      ...Object.fromEntries(['afterCommit', 'afterRollback'].map(event => [event, ({ context }) => {
-        if (!context.stressCompletion) return
-        const outcome = event === 'afterCommit' ? 'committed' : 'rolledBack'
-        assert.equal(context.transactionOutcome, outcome)
-        context.stressCompletion[outcome]++
-        completionHooks[outcome]++
-      }]))
+  const hooks = {
+    finishPatch: ({ context }) => { if (context.stressRollback) throw intentionalRollback }
+  }
+  for (const event of ['afterCommit', 'afterRollback']) {
+    const outcome = event === 'afterCommit' ? 'committed' : 'rolledBack'
+    hooks[event] = ({ context }) => {
+      if (!context.stressCompletion) return
+      assert.equal(context.transactionOutcome, outcome)
+      context.stressCompletion[outcome]++
+      completionHooks[outcome]++
     }
-  })
+  }
+  await api.customize({ hooks })
 
   async function read (index) {
     const relationshipName = index % 2 === 0 ? 'tasks' : 'shared_tasks'
@@ -165,15 +169,18 @@ try {
     const ownerContext = freshContext()
     await measure(name, async () => {
       const patch = transaction => tasks.patch({ id: seeded.subject.id, data: { title }, format: 'plain', returning: 'full', transaction }, context)
-      const operation = managed
-        ? api.transaction(async transaction => {
+      let operation
+      if (managed) {
+        operation = api.transaction(async transaction => {
           const result = await patch(transaction)
           assert.equal(result.title, title)
           assert.deepEqual(context.stressCompletion, { committed: 0, rolledBack: 0 })
           assert.equal(transaction.isCompleted(), false)
           if (rollback) throw intentionalRollback
         }, ownerContext)
-        : patch()
+      } else {
+        operation = patch()
+      }
       if (rollback) {
         await assert.rejects(operation, error => error.cause === intentionalRollback && error.transactionOutcome === 'rolledBack')
       } else {

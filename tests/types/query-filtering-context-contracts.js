@@ -1,5 +1,6 @@
 // @ts-check
 import { unwrapQueryBuilderState, withQueryFilteringContext } from '../../plugins/core/lib/querying/query-builder-utils.js'
+import checkPermissionsMethod from '../../plugins/core/rest-api-plugin-methods/check-permissions.js'
 /** @import { StorageDatabase, QueryFilteringState } from '../../plugins/core/lib/storage/storage-types.js' */
 
 /** @param {StorageDatabase} database */
@@ -27,4 +28,14 @@ export async function checkQueryFilteringContracts (database) {
   unwrapQueryBuilderState({ query: 42 }).where({ id: 1 })
   context.knexQuery = { query: null }
   delete context.knexQuery
+
+  const originalContext = { method: 'query', scopeName: 'items', knexQuery: { query: database('items') } }
+  const permissionRequest = { context: {}, runHooks: () => {} }
+  await checkPermissionsMethod({ ...permissionRequest, params: { method: 'query', originalContext } })
+  // @ts-expect-error Permission wrappers must identify their originating operation.
+  await checkPermissionsMethod({ ...permissionRequest, params: { method: 'query' } })
+  // @ts-expect-error Permission methods are operation names, not numeric identifiers.
+  await checkPermissionsMethod({ ...permissionRequest, params: { method: 1, originalContext } })
+  // @ts-expect-error The operation carries a filtering envelope, not a bare builder.
+  await checkPermissionsMethod({ ...permissionRequest, params: { method: 'query', originalContext: { knexQuery: database('items') } } })
 }

@@ -5,9 +5,11 @@ import { serializableTransaction } from '../../../../lib/knex-transaction.js'
 import { cloneRequestHeaders } from './request-helpers.js'
 import { RestApiPreconditionFailedError, RestApiValidationError, RestApiWriteError } from '../../../../lib/rest-api-errors.js'
 import { createStrongEntityTag, matchesIfMatch, parseIfMatch } from './http-validators.js'
-import { getWriteOutcome, wrapWriteError } from '../../../../lib/error-context.js'
+import { getOperationDiagnosticContext, getWriteOutcome, isRestApiError, wrapWriteError } from '../../../../lib/error-context.js'
+import { createEnhancedLogger } from '../../../../lib/enhanced-logger.js'
 import {
   determineResponseStatus,
+  getHttpDiagnosticError,
   isWriteMethod,
   mapRestApiErrorToHttp,
   mergeResponseHeaders
@@ -219,7 +221,7 @@ export async function executeConnectorRoute ({
           await lockRelationshipParent({ context: readContext, helpers, scopeName: routeMeta.scopeName })
         } catch (error) {
           // Conditional PUT requires an existing visible representation.
-          if (routeMeta.operation === 'put' && error.subtype === 'not_found') {
+          if (routeMeta.operation === 'put' && isRestApiError(error) && error.subtype === 'not_found') {
             throw new RestApiPreconditionFailedError({ resourceType: routeMeta.scopeName, resourceId: params.id })
           }
           throw error
@@ -283,6 +285,24 @@ export async function executeConnectorRoute ({
   }
 }
 
+export async function logHttpRequestError ({ error, context, log, scopes, routeMeta, api, method, path, message }) {
+  try {
+    const schemaInfo = scopes[routeMeta?.scopeName]?.vars?.schemaInfo || context.schemaInfo
+    const logger = createEnhancedLogger(log, { schemaInfo, redactFields: ['body', 'headers'] })
+    await logger.logError(message, getHttpDiagnosticError(error), {
+      ...getOperationDiagnosticContext(context, {
+        phase: 'httpError',
+        method,
+        scopeName: routeMeta?.scopeName || context.scopeName,
+        backend: api.knex?.instance?.client?.config?.client
+      }),
+      path
+    })
+  } catch (error) {
+    (context.cleanupErrors ||= []).push({ phase: 'logging', during: 'httpError', error })
+  }
+}
+
 export async function handleConnectorError ({
   error,
   context,
@@ -290,7 +310,7 @@ export async function handleConnectorError ({
   runHooks
 }) {
   const write = isWriteMethod(transportData?.request?.method)
-  if (write && !(error instanceof RestApiWriteError)) error = wrapWriteError(error, context)
+  if (write && !(isRestApiError(error) && error instanceof RestApiWriteError)) error = wrapWriteError(error, context)
   const { status, body } = mapRestApiErrorToHttp(error)
   try {
     const headers = await applyTransportResponseLifecycle({ context, transportData, status, body, runHooks })

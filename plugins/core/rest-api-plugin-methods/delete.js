@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * IdentityContext, LifecycleArguments
+ * } from './lifecycle-types.js' */
 import { initializeResourceVersion, applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
@@ -8,10 +12,11 @@ import { requireExistingResourceId } from '../lib/querying-writing/resource-id-n
 /**
  * Delete an existing resource and complete only an owned transaction.
  * The programmatic method returns no resource; connectors choose HTTP status.
+ * @param {LifecycleArguments} args
  */
 export default async function deleteMethod ({
   params,
-  context,
+  context: callerContext,
   vars,
   helpers,
   scope,
@@ -25,29 +30,27 @@ export default async function deleteMethod ({
   // Make the method available to all hooks
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
-  context.method = 'delete'
+  callerContext.method = 'delete'
 
   // Set the ID in context
-  context.id = requireExistingResourceId(params.id, {
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
 
   // Set scopeName in context (needed for broadcasting)
-  context.scopeName = scopeName
+  callerContext.scopeName = scopeName
 
   // Set schema info even for DELETE (needed by storage layer)
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  callerContext.schemaInfo = scope.vars.schemaInfo
 
-  // Transaction handling
-  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
-  context.db = context.transaction || api.knex.instance
+  await beginWriteTransaction(callerContext, params.transaction, helpers.newTransaction, runHooks)
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {IdentityContext} */ (callerContext)
 
   try {
     const versionState = initializeResourceVersion({ context, expectedVersion: params.expectedVersion })
-
-    // No payload validation needed for DELETE
 
     // Fetch minimal record for authorization and logging
     const minimalRecord = await helpers.dataGetMinimal({
@@ -70,7 +73,6 @@ export default async function deleteMethod ({
     context.originalMinimalRecord = minimalRecord
     context.minimalRecord = minimalRecord
 
-    // Centralised checkPermissions function
     await scope.checkPermissions({
       method: 'delete',
       originalContext: context,
@@ -99,14 +101,10 @@ export default async function deleteMethod ({
     await runHooks('afterDataCallDelete')
     await runHooks('afterDataCall')
 
-    // No return record for DELETE (204 No Content)
-
     await runHooks('finish')
     await runHooks('finishDelete')
 
     await commitOwnedTransaction(context)
-
-    // DELETE typically returns void/undefined (204 No Content)
   } catch (error) {
     await handleWriteMethodError(error, context, 'DELETE', scopeName, log)
   }

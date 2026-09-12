@@ -12,7 +12,7 @@ describe(`Mutable hook context contract (${storageMode.mode})`, () => {
     'beforeSchemaValidatePatch', 'afterSchemaValidatePost', 'beforeDataCallPost',
     'afterDataCallPost', 'finishPost', 'afterCommit', 'afterRollback',
     'checkPermissions', 'beforeDataGet', 'enrichAttributes', 'finishGet',
-    'finishPatch', 'finishPatchRelationship'
+    'finishPatch', 'finishPatchRelationship', 'checkPermissionsGetRelationship', 'checkPermissionsGetRelated'
   ]
 
   before(async () => {
@@ -219,4 +219,25 @@ describe(`Mutable hook context contract (${storageMode.mode})`, () => {
     assert.deepEqual(contexts.map(context => context.seenName), ['First', 'Second'])
     assert.notEqual(contexts[0].record, contexts[1].record)
   })
+  for (const method of ['getRelationship', 'getRelated']) {
+    it(`${method} establishes its parent scope before permission hooks`, async () => {
+      const item = await fixture.seed('items', { name: 'Item' })
+      const context = { scopeName: 'stale-parent' }
+      let seen = false
+      const event = `checkPermissions${method[0].toUpperCase()}${method.slice(1)}`
+      handlers[event] = ({ context: actual }) => {
+        assert.equal(actual, context)
+        assert.equal(actual.scopeName, 'items')
+        assert.equal(actual.method, method)
+        assert.equal(actual.id, item.id)
+        assert.equal(actual.relationshipName, 'group')
+        seen = true
+      }
+      await fixture.api.resources.items[method]({
+        id: item.id, relationshipName: 'group', format: 'jsonapi'
+      }, context)
+      assert.equal(seen, true)
+      assert.equal(context.scopeName, 'items')
+    })
+  }
 })

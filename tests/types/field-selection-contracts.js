@@ -1,5 +1,5 @@
 // @ts-check
-import { applyFieldSelectionToQuery, buildFieldSelection, getRequestedComputedFields, isNonDatabaseField, validateRequestedFieldsets } from '../../plugins/core/lib/querying-writing/knex-field-helpers.js'
+import { applyFieldSelectionToQuery, buildFieldSelection, getRequestedComputedFields, validateRequestedFieldsets } from '../../plugins/core/lib/querying-writing/knex-field-helpers.js'
 /** @import { SelectionScope } from '../../plugins/core/lib/querying-writing/field-selection-types.js' */
 /** @import { StorageQuery } from '../../plugins/core/lib/storage/storage-types.js' */
 
@@ -17,8 +17,6 @@ export async function checkFieldSelectionContracts (query) {
   selection.requestedFields?.push('extra')
   // @ts-expect-error Selection requires a resource name.
   buildFieldSelection(scope, { context: {} })
-  // @ts-expect-error Missing fields produce undefined, not a guaranteed boolean.
-  isNonDatabaseField('missing', {}).valueOf()
   // @ts-expect-error SQL application needs a builder rather than an executed row array.
   applyFieldSelectionToQuery({ query: [], tableName: 'items' })
   // @ts-expect-error The wrapper is deliberately not thenable; its query remains inside.

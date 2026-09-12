@@ -12,9 +12,10 @@ import { RestApiResourceError } from '../lib/rest-api-errors.js'
 
 for (const connector of ['express', 'fastify']) {
   describe(`HTTP serialized validators ${connector} (${storageMode.mode})`, () => {
-    let fixture, app, parent, child, synchronize
+    let fixture, app, parent, child, synchronize, readFailure
     const computedTransactions = []
     const renderStages = []
+    const failedPutContexts = []
     const send = async (method, url, body, headers = {}) => {
       headers = { accept: 'application/vnd.api+json', 'content-type': 'application/vnd.api+json', ...headers }
       if (connector === 'fastify') {
@@ -69,10 +70,10 @@ for (const connector of ['express', 'fastify']) {
             }
           },
           hooks: {
-            beforeProcessingPatch: {
+            beforeProcessing: {
               functionName: 'provisional-computed-dependency',
               handler: async ({ context }) => {
-                if (context.transport?.request.headers['x-provisional-child']) {
+                if (['patch', 'put'].includes(context.method) && context.transport?.request.headers['x-provisional-child']) {
                   await fixture.api.resources.items.patch({
                     id: child.id,
                     transaction: context.transaction,
@@ -80,6 +81,18 @@ for (const connector of ['express', 'fastify']) {
                     data: { name: 'Provisional child' }
                   })
                 }
+              }
+            },
+            beforeDataGet: {
+              functionName: 'fail-conditional-read',
+              handler: ({ context }) => {
+                if (readFailure && context.transport?.request.headers['x-fail-conditional-read']) throw readFailure.value
+              }
+            },
+            afterRollback: {
+              functionName: 'capture-conditional-put-failure',
+              handler: ({ context }) => {
+                if (context.method === 'put' && context.transport?.request.headers['x-fail-conditional-read']) failedPutContexts.push(context)
               }
             },
             checkPermissions: {
@@ -145,8 +158,10 @@ for (const connector of ['express', 'fastify']) {
     })
     beforeEach(async () => {
       synchronize = undefined
+      readFailure = undefined
       computedTransactions.length = 0
       renderStages.length = 0
+      failedPutContexts.length = 0
       await fixture.reset()
       parent = await fixture.seed('items', { name: 'Parent' })
       child = await fixture.seed('items', { name: 'Child' }, { parent: { data: { type: 'items', id: parent.id } } })
@@ -336,6 +351,30 @@ for (const connector of ['express', 'fastify']) {
       assert.equal(result.status, 200)
       assert.equal(result.headers.etag, undefined)
     })
+    for (const condition of ['wildcard', 'strong']) {
+      for (const value of [null, undefined]) {
+        it(`retains ${String(value)} from the ${condition} PUT precondition read`, async () => {
+          const url = `/api/items/${parent.id}`
+          const current = await send('GET', url)
+          readFailure = { value }
+          const body = { data: { type: 'items', id: parent.id, attributes: { name: 'Rejected parent' } } }
+          const result = await send('PUT', url, body, {
+            'if-match': condition === 'wildcard' ? '*' : current.headers.etag,
+            'x-fail-conditional-read': 'yes',
+            'x-provisional-child': 'yes'
+          })
+          assert.equal(result.status, 500)
+          assert.equal(JSON.parse(result.text).errors[0].meta.transactionOutcome, 'rolledBack')
+          assert.equal(failedPutContexts.length, 1)
+          assert.equal(failedPutContexts[0].transactionOutcome, 'rolledBack')
+          let cause = failedPutContexts[0].error
+          while (cause && typeof cause === 'object' && Object.hasOwn(cause, 'cause')) cause = cause.cause
+          assert.equal(cause, value)
+          assert.equal((await fixture.api.resources.items.get({ id: parent.id })).data.attributes.name, 'Parent')
+          assert.equal((await fixture.api.resources.items.get({ id: child.id })).data.attributes.name, 'Child')
+        })
+      }
+    }
     for (const method of ['PATCH', 'PUT', 'DELETE']) {
       it(`preserves normal hidden-target errors for strong ${method}`, async () => {
         const current = await send('GET', `/api/items/${parent.id}`)

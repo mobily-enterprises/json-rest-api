@@ -1,9 +1,42 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildJoinChain } from '../plugins/core/lib/querying/knex-cross-table-search.js'
+import { buildJoinChain, validateCrossTableField } from '../plugins/core/lib/querying/knex-cross-table-search.js'
 
 const log = { trace () {} }
 const scope = (tableName, structure = {}, schemaRelationships = {}) => ({ vars: { schemaInfo: { tableName, schemaInstance: { structure }, schemaRelationships } } })
+
+for (const writer of ['none', 'throw', 'reject']) {
+  it(`retains missing foreign-key configuration with ${writer} diagnostic writer`, async () => {
+    const scopes = {
+      books: scope('books', {}, { authors: { type: 'hasMany', target: 'authors' } }),
+      authors: scope('authors', { name: { type: 'string', indexed: true } })
+    }
+    const calls = []
+    await assert.rejects(buildJoinChain(scopes, {
+      trace () {},
+      error: (...args) => {
+        calls.push(args)
+        if (writer === 'throw') throw new Error('Diagnostic writer failed')
+        if (writer === 'reject') return Promise.reject(new Error('Diagnostic writer failed'))
+      }
+    }, 'books', 'authors.name'), /Missing foreignKey in hasMany relationship/)
+    assert.equal(calls.length, 1)
+    const { error: failure, ...metadata } = calls[0][1]
+    assert.match(failure.message, /Missing foreignKey/)
+    assert.deepEqual(metadata, { method: 'buildJoinChain', scopeName: 'books', phase: 'crossTableJoin', backend: null, transactionOutcome: 'none', relName: 'authors' })
+  })
+}
+
+for (const cause of [null, Object.freeze(new Error('Schema metadata failed'))]) {
+  it(`retains the ${cause === null ? 'null' : 'frozen'} schema lookup cause without another error log`, async () => {
+    const scopes = { get books () { throw cause } }
+    await assert.rejects(validateCrossTableField(scopes, log, 'books', 'name'), error => {
+      assert.equal(error.cause, cause)
+      assert.equal(error.message, "Target scope 'books' not found")
+      return true
+    })
+  })
+}
 for (const kind of ['belongsTo', 'hasMany', 'manyToMany', 'polymorphic']) {
   it(`continues from the target after a pivot before ${kind}`, async () => {
     const scopes = {

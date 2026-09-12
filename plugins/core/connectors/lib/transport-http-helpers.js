@@ -4,6 +4,7 @@ import {
   REST_API_INCLUDE_ERROR_CODE,
   REST_API_TEMPORAL_DATA_ERROR_CODE
 } from '../../../../lib/rest-api-errors.js'
+import { isRestApiError } from '../../../../lib/error-context.js'
 import { parse as parseContentType } from 'content-type'
 import vary from 'vary'
 
@@ -17,6 +18,13 @@ export function mergeResponseHeaders (...sources) {
     }
   }
   return Object.fromEntries(headers)
+}
+
+export function getHttpDiagnosticError (error) {
+  // Parser messages and stacks can quote raw input before a resource is known.
+  // Keep the original error for hooks/responses, but log only this safe preview.
+  if (error?.type !== 'entity.parse.failed') return error
+  return { name: 'SyntaxError', message: 'Invalid JSON request body', type: 'entity.parse.failed', status: 400 }
 }
 
 const JSON_API_WRITE_CONTENT_TYPES = [
@@ -104,6 +112,8 @@ export function determineResponseStatus (method, result) {
 }
 
 export function mapRestApiErrorToHttp (error) {
+  // Read hooks can reject with null or undefined.
+  error ??= {}
   const statusHint = error.statusCode ?? error.status
   let status = 500
   let errors = [{
@@ -203,7 +213,7 @@ export function mapRestApiErrorToHttp (error) {
     }]
   }
 
-  if (error instanceof RestApiWriteError) {
+  if (isRestApiError(error) && error instanceof RestApiWriteError) {
     errors = errors.map(item => ({ ...item, meta: { ...item.meta, transactionOutcome: error.transactionOutcome } }))
   }
 

@@ -1,7 +1,82 @@
 # Diagnostic boundaries
 
-A9-07/A9-08 implementation inventory, 2026-09-11. Neither item is complete.
-Consumer repositories and positioning changes remain paused.
+## Current owner acceptance, 2026-09-12
+
+The finite A9-07/A9-08 reporting-owner review is complete. Final combined checks
+are coordinated in the master plan; this file records targeted acceptance and
+the deliberate limits of the policy. Consumers remain untouched.
+
+Every owned operation failure/warning report now supplies `method`, `scopeName`,
+`phase`, `backend` and `transactionOutcome` through the existing
+`getOperationDiagnosticContext` helper. Scope is a resolved resource, or null
+before resolution. Phase identifies the reporting boundary, not mutable hook
+bookkeeping. Existing nested getter/setter/include/relationship-metadata context
+and original causes remain intact. Read failures that are only propagated do
+not acquire invented logging sites. Pure setup/debug traces remain informational.
+
+| Current owner | Accepted behavior and evidence |
+| --- | --- |
+| Resource writes | Compiled hidden and normally-hidden fields are redacted in input, violations and nested errors. Early malformed input still resolves the registered resource's policy. `conformance-write-diagnostics.test.js`, `error-context.test.js`, `enhanced-logger.test.js` and `error-formatter.test.js` supply existing executed evidence. |
+| HTTP errors and Express registration | Stable route/setup metadata, guarded writers and explicit omission of `body`/`headers`. The known `entity.parse.failed` parser preview omits raw parser text, stack and causes because these can contain body excerpts; original errors still reach hooks and HTTP mapping. New `http-early-diagnostics.test.js` covers pre-route body parsing and transport hooks. Root's final targeted checks passed 31/31 per storage mode and Express 4 selections 20/20 per mode. |
+| File cleanup | Compiled resource policy, binary type/byte-length previews, bounded metadata and ordered original cleanup diagnostics; `conformance-file-failures.test.js` and uploaded-field logger regressions already exercise these owners. Filenames/paths and arbitrary external error text remain application-owned. |
+| AnyAPI registry | Structured operation/resource/tenant/phase/backend/outcome fields and bounded original rollback/cleanup errors; no mutable transaction-context dump. Existing registry failure checks retain driver causes, including SQLite's non-native Error subclass. |
+| Socket authentication, events and restoration | Stable transport metadata with null resource where unresolved. Raw handshake/credential/filter objects are omitted. Explicit application error properties are bounded, not assigned an unrelated resource's field policy. Connection and disconnection info writers can throw/reject without preventing handlers or cleanup. |
+| Socket admission, removal and notification decisions | Trusted resource metadata supplies hidden/normally-hidden redaction. Query matching reports the borrowed transaction; standalone permission checks report outcome `none`. Tests cover nested causes, preserved source objects, success/failure acknowledgements and later recipients. |
+| Redis setup/shutdown | Stable Redis role and operation metadata, original setup and cleanup errors, contained diagnostic writers and immediate independent close attempts. Adapter configuration precedes HTTP attachment; failed destruction cannot make reporting wait for a stranded connection promise. |
+| Include warnings | Missing targets, unknown relationships and duplicate hasOne matches report resource/include/backend/outcome. Duplicate warnings omit the actual parent identifier. Throwing/rejecting warning writers preserve existing decisions. |
+| Ordinary sort warnings | The skipped-sort report uses the existing query context and field name. It retains a successful query when the warning writer fails. Canonical paths that do not issue this warning do not gain a new logger. |
+| Positioning index setup | Best-effort index diagnostics now include resolved resource, setup method, backend, outcome and original error. Existing null/frozen/long-message and failing-writer checks retain index setup behavior. |
+| Cross-table schema/configuration | Missing-foreign-key reports carry setup metadata and preserve the configuration error when writers fail. The redundant schema-lookup error trace was removed; its wrapper now retains the original cause, including null. |
+| Ordinary missing-scope read branch | Removed as unreachable during the storage helper extraction; shared scope resolution already throws before it. There is no remaining direct report owner at that branch. |
+| Runtime and other setup/debug messages | The small runtime does not dump method parameters or plugin options. Storage/include/filter/file payload reduction and bounding remain covered by their existing checks. This is not a global sink: direct application logger calls and setup-only messages outside enhanced loggers are not covered by the enhanced formatter's limits. |
+
+The redaction policy is structural and uses the resolved resource's compiled
+field names. It does not scan secrets from arbitrary driver/application messages,
+IDs, filenames, paths, or values moved to unrelated keys. A custom authentication
+error has no resource schema; its own application properties can appear in
+bounded form. HTTP's known raw payload containers and parser-preview exception
+are explicit transport rules, not guessed resource metadata. Applications own
+their error wording, extra properties and any broader sink/retention policy.
+
+Targeted Node 24.6.0 evidence for the final owner additions:
+
+- Socket.IO contract file: **152/152 ordinary and 152/152 canonical**, real
+  WebSocket and polling. `/tmp/jra-a9-socket-knex.log` and
+  `/tmp/jra-a9-socket-anyapi.log`. Throwing connection-info writers reproduced
+  failed handler installation before correction (`/tmp/jra-a9-socket-info-before.log`).
+- Actual Redis 7.0.15 lifecycle file: **18/18 per storage mode**, no unhandled
+  rejections (`/tmp/jra-a9-redis-setup-after.log`). Both final setup failure cases
+  failed before correction (`/tmp/jra-a9-redis-setup-before.log`).
+- Cross-table/include error-boundary files and ordinary positioning contracts:
+  **102/102** (`/tmp/jra-a9-config-diagnostics.log`). The relationship tests
+  include guarded writers and original cause preservation.
+- Ordinary filter/query warning file: **6/6**
+  (`/tmp/jra-a9-query-diagnostics-knex-completed.log`). This checks a real
+  duplicate hasOne result and skipped internal sorting with normal, throwing and
+  rejecting writers alongside the previous payload tests. Canonical filter plus
+  positioning checks passed **12/12**
+  (`/tmp/jra-a9-query-diagnostics-anyapi-verified.log`); ordinary-only warning
+  branches are selected only in the ordinary mode.
+- Scoped ESLint passed for all changed diagnostic runtime/regression files
+  (`/tmp/jra-a9-diagnostic-lint-completed.log`). `git diff --check` is clean.
+- HTTP's before-correction probes found the raw body/header leak and, separately,
+  parser snippets in messages/stacks/summaries. Root's passing final evidence is
+  `/tmp/jra-http-diagnostics-after-20260912.log`,
+  `/tmp/jra-http-diagnostics-anyapi-20260912.log`,
+  `/tmp/jra-http-diagnostics-express4-knex-20260912.log`, and
+  `/tmp/jra-http-diagnostics-express4-anyapi-20260912.log`.
+
+The formatter's measured local cost and limitations are recorded separately in
+`query-measurements.md`. No new logger enablement mechanism or per-hook context
+tracking was introduced. The migration guide records this contract and its
+limits in its diagnostic sections.
+
+## Historical implementation inventory
+
+The following sections preserve earlier investigations, superseded gaps and
+measurements. References to hooked-api, paused positioning, or unfinished owners
+below describe those earlier checkpoints; the current owner map above replaces
+those acceptance statuses.
 
 The serializer failure review now covers non-Error throws from custom toJSON,
 its accessor, nested/enumerable properties and non-enumerable causes. These
@@ -383,3 +458,163 @@ index. An isolated probe without the completion check retains all three. An
 initial room-only cleanup draft removes the first two but fails the socket-index
 assertion; final cleanup uses the existing adapter operation rather than a new
 registry or a special disconnected-socket cache.
+
+
+## Current follow-up, 2026-09-12
+
+Current source now bounds storage, positioning and file-plugin diagnostic
+owners through the existing formatter. Include logs report counts instead of
+path collections. Formatter fixes cover protected inherited/accessor fields,
+restricted custom conversion, nested stacks, envelope getter reads and failed
+property inspection; native brand checks and guarded Error ancestry avoid
+proxy-prototype traversal while retaining ordinary SQLite driver errors.
+Error wrapping preserves causes/outcomes through failed metadata inspection.
+
+The old hooked-api and positioning-payload blockers above are historical.
+A9-07/A9-08 remain open: application-authored
+search-validator messages, schema-free authentication error strings and
+formatter overhead retain the limits recorded in the preparation report.
+Normal write attribute validation uses a fixed top-level message; the suspected
+built-in hidden-value leak on that path was not established. No generic secret
+scanner or new logger framework was added.
+
+The authorized Node 24 checkpoint is complete. Focused SQLite/PostgreSQL/MySQL
+checks, the final full AnyAPI suite, Express 4, internal and packed public types,
+query budgets, lint and docs pass. The full default suite found three SQLite
+driver-message regressions; all passed the 176-test focused rerun after the
+classifier correction. That entire default suite was not repeated. Additional
+verified corrections cover nullish HTTP read failures, conditional PUT,
+positioning target reads and failing Express/Fastify diagnostic sinks.
+
+A7-06 is now complete. A7-05 remains open for the two owners identified below;
+A9 retains its separate acceptance work. The
+[completed verification record](pending-jskit-ai/preparation-status.md#completed-verification-checkpoint)
+contains exact results, commands, logs, final artifact evidence and limits.
+Consumer migration and verification remain deferred.
+
+## A7-05: Secondary-failure reconciliation, 2026-09-12
+
+This bounded source review reconciles the current cleanup owners with existing
+executed assertions. It ran no tests and changed no runtime code. The two
+remaining findings below are source-reviewed failure paths, not newly executed
+reproductions. Older requests for an unspecified wider audit are superseded by
+this finite owner map.
+
+| Owner | Existing primary/secondary failure evidence |
+| --- | --- |
+| Ordinary and relationship writes | `handleWriteMethodError` and `rollbackAfterError` retain the original cause and ordered cleanup diagnostics. `tests/conformance-write-failures.test.js`, the `Secondary write failures` suite, asserts owned/managed rollback and `afterRollback` failures, stored rows/linkage, exact diagnostics and context reuse. |
+| Managed completion | `finishTransaction` attempts later operation hooks and finalizers, preserves the first committed failure and indexes later failures. `tests/conformance-managed-transactions.test.js` asserts exact hook/finalizer diagnostics, acknowledged outcomes and stored rows, including null/undefined finalizer failures and unknown completion. |
+| Shared connection leases | `lib/knex-transaction.js` and the shared completion owner distinguish SQL outcome from pool release. `tests/conformance-connection-release.test.js` covers release failure after acknowledged commit, acknowledged rollback, unsettled rollback and failed BEGIN, asserting original causes, secondary diagnostics and one release attempt. |
+| Bulk operations | `retainChildCleanup` retains child diagnostics with `bulkIndex`; shared rollback handles atomic owners. `tests/conformance-bulk-failures.test.js` asserts failed atomic rollback, non-atomic rollback/completion failures, later successful writes and exact indexed diagnostics without mutating child entries. |
+| AnyAPI registry | `#handleWriteFailure` uses shared rollback, invalidates the descriptor and contains synchronous/asynchronous logging failures. `tests/anyapi-registry-failures.test.js` covers primary errors, failed rollback, throwing/rejecting writers, retained rollback diagnostics, cache reload and subsequent recovery. |
+| File handling | `recordCleanupFailure` retains cleanup and logger failures while later cleanup attempts continue. `tests/conformance-file-failures.test.js` covers temporary files, uploaded files, managed completion chains, bulk indexes, retained failed-upload tracking and original write causes. |
+| Socket.IO authentication, subscriptions and notifications | `tests/socketio-contract.test.js` verifies authentication/admission rejection despite failing writers, bounded failure-hook diagnostics, successful acknowledgements and recipient isolation. `tests/conformance-socketio-authorization.test.js` asserts continued broadcast attempts, committed rows, the first broadcast failure as cause and indexed diagnostics for both failed broadcasts. Best-effort permission/query decisions retain their documented skip/no-match behavior. Redis bulk cases in `tests/integration/socketio-redis.test.js` additionally assert original child errors, indexed rollback-hook diagnostics and delivery only for committed entries. |
+| PostgreSQL schema alterations | Owned alterations use the shared transaction owner; borrowed alterations retain their savepoint and outer ownership. `tests/db-field-alterations.test.js` and the recorded native schema/completion checks cover rejected completion, parent ownership and surviving schema state. |
+| SQLite schema alterations | `runSqliteAlteration` retains an alteration error and failed rollback/FK restoration through `AggregateError`. The SQLite rebuild cases in `tests/db-field-alterations.test.js` assert its cause/error members, connection disposal and stored schema. Its separate final pool release is the outstanding path described below. |
+
+The completed Node 24 checkpoint covers the selected unit/public operation
+files, including the final full AnyAPI invocation and focused correction of the
+three registry diagnostic failures. Earlier native and Redis executions are
+recorded in `verification-progress.md`, including the SQL lease-release, schema
+completion and deferred Socket.IO broadcast sections. This reconciliation does
+not claim those native/Redis suites ran again or covered the two new findings.
+
+### Resolved owner 1: SQLite alteration pool release
+
+The following describes the reproduced defect before correction. The completed
+verification for this owner is recorded below.
+
+`plugins/core/lib/dbTablesOperations.js`, `runSqliteAlteration`, unconditionally
+awaits `knex.client.releaseConnection(connection)` in `finally`. If alteration
+already failed, a rejected release replaces that error. If rollback or restoring
+foreign keys also failed, the release rejection replaces the existing
+`AggregateError` and loses both retained errors.
+
+The current SQLite alteration cases inject rollback/FK-restoration failures;
+they do not inject release failure. The shared transaction-factory release tests
+exercise a different owner and do not establish this helper's behavior.
+
+The finite follow-up is to preserve the original alteration cause and retain
+release failure as secondary, with targeted cases for alteration failure plus
+failed release and an existing cleanup aggregate plus failed release. Also
+retain the successful-alteration/failed-release result deliberately; a release
+failure must not imply that acknowledged schema changes were rolled back.
+
+### Resolved owner 2: Socket.IO Redis cleanup and diagnostics
+
+The following describes the reproduced defects before correction. The completed
+verification for this owner is recorded below.
+
+`plugins/core/socketio-plugin.js` has three uncovered secondary-failure paths:
+
+- Both startup catches call `client.destroy()` before rethrowing the original
+  connection/setup error. If destruction throws, it replaces the original and
+  prevents attempts on later clients.
+- The Redis `error` listener calls `log.warn` without containing a throwing or
+  rejecting writer. A secondary diagnostic failure can escape the event handler
+  or become an unhandled rejection.
+- Redis shutdown uses `client.close().catch(error => log.warn(...))` without
+  observing the returned promise. A rejected close followed by a throwing or
+  rejecting warning writer can leave an unhandled rejection.
+
+`tests/integration/socketio-lifecycle.test.js` already exercises missing sockets,
+invalid credentials, one failed client, exhausted retries, normal/reconnecting
+shutdown and subsequent successful startup. It does not inject destruction,
+close or diagnostic-writer failures at these paths.
+
+The finite follow-up is to preserve the startup error while retaining cleanup
+failures and attempting both clients, contain Redis event/shutdown diagnostics,
+and add targeted regressions for those specific combinations. Authentication,
+subscription and broadcast acceptance above does not need to be reopened.
+
+**A7-05's two remaining owners are now corrected and verified.** The completed
+checks below supply the remaining closure evidence for this finite owner map.
+
+### A7-05 completed owner verification, 2026-09-12
+
+`runSqliteAlteration` collects alteration, rollback/FK-restoration and pool
+release failures in execution order. One failure is rethrown unchanged; multiple
+failures produce an `AggregateError` whose cause is the original failure. A
+release failure after successful alteration still rejects, and its regression
+verifies the committed new column default remains installed. The failure cases
+verify the old schema, restored FK enforcement, one release attempt and a usable
+subsequent connection, including a frozen primary error.
+
+Redis startup has one cleanup path. It attempts destruction of both clients,
+observes synchronous and asynchronous cleanup failures, settles the connection
+attempts, and retains setup plus cleanup errors through `AggregateError`.
+Redis event warnings, both startup information logs and shutdown warnings contain
+throwing/rejecting writers. Both graceful shutdown attempts still start
+immediately. Shutdown does not add forced destruction: flushing an adapter's
+pending unsubscribe promises would introduce unrelated unhandled rejections.
+Warning metadata records method, scope, phase, backend, outcome and client role;
+these non-resource operations deliberately report null scope and outcome `none`.
+
+All commands used Node **24.6.0**, with its bin directory prepended to `PATH`:
+
+- Before correction, the three SQLite pool-release cases produced **2 failures
+  and 1 pass** in `/tmp/jra-a705-sqlite-before.log`; both failures lost the primary
+  error to pool release. After correction,
+  `node --test tests/db-field-alterations.test.js` passed **23/23** with no
+  failures, cancellations or skips (`/tmp/jra-a705-sqlite-after.log`).
+- The first six Redis secondary-failure cases produced **6 failures** alongside
+  eight passing existing lifecycle cases in
+  `/tmp/jra-a705-redis-before-final.log`. A later throwing/rejecting info-writer
+  check also reproduced the unguarded final startup log before that correction
+  (`/tmp/jra-a705-redis-verified.log`).
+- The final command
+  `node scripts/test-databases.js redis tests/integration/socketio-lifecycle.test.js`
+  passed **16/16 in each storage mode**, with no failures, cancellations, skips or
+  unhandled rejections (`/tmp/jra-a705-redis-final.log`; 3.376s regular and 9.302s
+  canonical). It ran actual **Redis 7.0.15**, using
+  `JSON_REST_API_REDIS_BIN=/tmp/jra-redis-binaries-UPZeIA/root/usr/bin/redis-server`
+  and `LD_LIBRARY_PATH=/tmp/jra-redis-binaries-UPZeIA/root/usr/lib/x86_64-linux-gnu`.
+  The runner owns and removes its server and disposable database directory.
+- Scoped ESLint passed for both changed runtime files and both regression files
+  (`/tmp/jra-a705-lint-final.log`).
+
+The tests also verify ordinary/reconnecting shutdown, startup failure recovery,
+both Redis roles, original frozen error identity, later cleanup attempts and
+successful restart. The shared conformance fixture now forwards its configured
+diagnostic writer so the native tests exercise actual caller logging. These are
+targeted checks; no full library or notification matrix was rerun for this item.

@@ -424,14 +424,15 @@ export function normalizeAttributes (attributes, schemaStructure, {
  * Final response normalization removes internal enrichment metadata and reapplies
  * the supplied fieldset so dependency-only values do not escape in output.
  *
- * @param {Object} record - JSON:API document, or a plain resource in simplified mode
+ * @template T
+ * @param {T} record - JSON:API document, or a plain resource in simplified mode
  * @param {Object} scopes - Resource registry for schema lookup
  * @param {Object} [options]
  * @param {string} [options.source='database'] - Value origin for normalization
  * @param {boolean} [options.simplified=false] - Internal plain-resource selector
  * @param {string} [options.resourceType] - Required for plain-resource schema lookup
  * @param {Object} [options.fields] - Selected fieldsets, if supplied
- * @returns {Object} Normalized document or plain resource
+ * @returns {T} Normalized document or plain resource
  */
 export function normalizeRecordAttributes (record, scopes, {
   source = 'database',

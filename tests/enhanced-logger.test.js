@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import Database from 'better-sqlite3'
 import { createEnhancedLogger, enhanceLogger } from '../lib/enhanced-logger.js'
+
+for (const logFullErrors of [false, true]) {
+  it(`retains SQLite error messages in direct, envelope and cleanup logs with logFullErrors=${logFullErrors}`, () => {
+    const logger = recordingLogger()
+    const enhanced = createEnhancedLogger(logger, { logFullErrors, includeStack: false })
+    const failure = new Database.SqliteError('Rollback statement failed', 'SQLITE_ERROR')
+    enhanced.error('Direct', failure)
+    enhanced.error('Envelope', { error: failure })
+    enhanced.error('Cleanup', {
+      error: new Error('Registry write failed'), cleanupErrors: [{ phase: 'rollback', error: failure }]
+    })
+    for (const formatted of [logger.calls[0].args[1], logger.calls[1].args[1].error]) {
+      if (logFullErrors) assert.equal(formatted.message, failure.message)
+      else assert.match(formatted, /Rollback statement failed/)
+    }
+    const cleanup = logger.calls[2].args[1].cleanupErrors[0]
+    assert.equal(cleanup.phase, 'rollback')
+    assert.equal(cleanup.error.message, failure.message)
+    assert.equal(cleanup.error.code, failure.code)
+    assert.equal(cleanup.error.stack, undefined)
+  })
+}
 
 it('rejects in-place enhancement when a writer is not writable', () => {
   const logger = Object.freeze({ error () {} })
@@ -15,6 +38,31 @@ it('contains an error-envelope getter failure without losing other metadata', ()
   enhanced.error('Failure', data)
   assert.equal(logger.calls[0].args[1].publicNote, 'Visible')
   assert.match(logger.calls[0].args[1].error, /Error serializing/)
+})
+
+it('reads an error-envelope accessor once through bounded value inspection', () => {
+  const logger = recordingLogger()
+  const enhanced = createEnhancedLogger(logger, { includeStack: false })
+  let reads = 0
+  const data = { publicNote: 'Visible', get error () { reads++; return new Error('Rejected') } }
+  enhanced.warn('Failure', data)
+  assert.equal(reads, 1)
+  assert.equal(logger.calls[0].args[1].publicNote, 'Visible')
+  assert.equal(logger.calls[0].args[1].error.message, 'Rejected')
+  assert.equal(logger.calls[0].args[1].error.stack, undefined)
+})
+
+it('does not inspect cleanup errors for a hidden uploaded-file field', () => {
+  const logger = recordingLogger()
+  const enhanced = createEnhancedLogger(logger, { schemaInfo: { outputFields: { privateFile: { hidden: true } } } })
+  let reads = 0
+  const error = new Error('Upload cleanup failed')
+  Object.defineProperty(error, 'message', { get () { reads++; return 'PRIVATE_FILENAME' } })
+  enhanced.warn('File cleanup failed', { field: 'privateFile', error })
+  assert.equal(reads, 0)
+  assert.equal(logger.calls[0].args[1].field, 'privateFile')
+  assert.equal(logger.calls[0].args[1].message, '[Redacted]')
+  assert.ok(!JSON.stringify(logger.calls).includes('PRIVATE_FILENAME'))
 })
 
 it('does not invoke custom JSON conversion again while classifying validation errors', () => {
@@ -112,6 +160,21 @@ describe('Enhanced logger method ownership', () => {
 })
 
 describe('Bounded enhanced-log events', () => {
+  it('does not follow cyclic proxy prototypes while classifying diagnostics', () => {
+    const logger = recordingLogger()
+    const enhanced = createEnhancedLogger(logger)
+    let prototypeReads = 0
+    const cyclic = new Proxy({ publicNote: 'Visible' }, {
+      getPrototypeOf () { prototypeReads++; return cyclic }
+    })
+    enhanced.warn('Before', cyclic, { error: cyclic }, { publicNote: 'After' })
+    assert.equal(prototypeReads, 0)
+    assert.equal(logger.calls.length, 1)
+    assert.deepEqual(logger.calls[0].args, [
+      'Before', { publicNote: 'Visible' }, { error: '[Circular reference]' }, { publicNote: 'After' }
+    ])
+  })
+
   it('retains sibling arguments when diagnostic values cannot be inspected', () => {
     const logger = recordingLogger()
     const enhanced = createEnhancedLogger(logger)

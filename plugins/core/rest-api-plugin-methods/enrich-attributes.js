@@ -1,9 +1,14 @@
+// @ts-check
+/** @import {
+ * EnrichmentArguments, Field, LifecycleContext, LifecycleResource, LifecycleSchema
+ * } from './lifecycle-types.js' */
 import { filterHiddenFields, getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
 import { wrapUnexpectedError } from '../../../lib/error-context.js'
 import { getFieldDependencyClosure } from '../lib/querying-writing/schema-helpers.js'
 import { getRequestedComputedFields } from '../lib/querying-writing/knex-field-helpers.js'
 
 // Resolve field dependencies before filtering and running resource enrichment hooks.
+/** @param {EnrichmentArguments} args */
 export default async function enrichAttributesMethod ({ context, params, runHooks, scopeName, scopes, api, helpers }) {
   const { id, attributes, parentContext, requestedComputedFields, isMainResource } = params || {}
 
@@ -11,7 +16,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
     return {}
   }
 
-  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo || {}
+  const schemaInfo = scopes[scopeName]?.vars?.schemaInfo || /** @type {Partial<LifecycleSchema>} */ ({})
   const schemaStructure = schemaInfo.schemaStructure || {}
   const computedFields = schemaInfo.computed || {}
   const fieldGetters = schemaInfo.fieldGetters || {}
@@ -24,7 +29,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
     scopeName, resourceFieldset, computedFields
   )
   const selectedVirtualFields = Object.keys(schemaStructure).filter(name => {
-    const definition = schemaStructure[name]
+    const definition = /** @type {Field} */ (schemaStructure[name])
     return definition.virtual === true && definition.hidden !== true &&
       (requestedFields === null ? definition.normallyHidden !== true : requestedFields.includes(name))
   })
@@ -50,7 +55,7 @@ export default async function enrichAttributesMethod ({ context, params, runHook
   // Getters run in dependency order while hidden dependencies are still available.
   for (const fieldName of sortedGetterFields) {
     if (Object.hasOwn(transformedAttributes, fieldName)) {
-      const getterInfo = fieldGetters[fieldName]
+      const getterInfo = /** @type {NonNullable<LifecycleSchema['fieldGetters'][string]>} */ (fieldGetters[fieldName])
       try {
         const getterContext = {
           id,
@@ -134,15 +139,16 @@ export default async function enrichAttributesMethod ({ context, params, runHook
 
   await runHooks('enrichAttributes')
 
-  return context.attributes
+  return /** @type {import('../lib/storage/storage-types.js').StorageRow} */ (context.attributes)
 }
 
 // Preserve include order and each resource's enrichment hooks and fieldset.
+/** @param {LifecycleContext} context @param {Record<string, LifecycleResource>} scopes */
 export async function enrichIncludedAttributes (context, scopes) {
-  for (const entry of (context.record.included || [])) {
-    const entryScope = scopes[entry.type]
+  for (const entry of (context.record?.included || [])) {
+    const entryScope = /** @type {LifecycleResource} */ (scopes[entry.type])
     const entryComputed = entryScope.vars.schemaInfo?.computed || {}
-    const entryRequestedFields = getResourceFieldset(context.queryParams.fields, entry.type)
+    const entryRequestedFields = getResourceFieldset(context.queryParams?.fields, entry.type)
     const entryRequestedComputed = getRequestedComputedFields(
       entry.type,
       entryRequestedFields,

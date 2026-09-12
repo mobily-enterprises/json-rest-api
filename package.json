@@ -34,6 +34,7 @@
     "test:tutorial-guides:databases": "node scripts/test-databases.js all scripts/check-tutorial-guides.js",
     "test:server-examples": "node scripts/check-server-examples.js",
     "test:migration-guide": "node scripts/check-migration-guide.js",
+    "test:migration-guide:package": "node scripts/check-packaged-migration-guide.js",
     "test:migration-guide:databases": "node scripts/test-databases.js all scripts/check-migration-guide.js",
     "test:socket-guide": "node scripts/check-socket-guide.js && node --import ./tests/helpers/select-express4.js scripts/check-socket-guide.js",
     "test:file-guide": "node scripts/check-file-guide.js && node --import ./tests/helpers/select-express4.js scripts/check-file-guide.js",

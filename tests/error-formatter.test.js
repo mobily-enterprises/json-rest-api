@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import Database from 'better-sqlite3'
 import { formatDiagnosticValue, formatError, formatErrorString, formatErrorSummary, readDiagnosticProperty } from '../lib/error-formatter.js'
 import { createEnhancedLogger } from '../lib/enhanced-logger.js'
 import { wrapUnexpectedError } from '../lib/error-context.js'
+import { RestApiValidationError } from '../lib/rest-api-errors.js'
+
+for (const includeStack of [false, true]) {
+  it(`retains a SQLite error cause with includeStack=${includeStack}`, () => {
+    const cause = new Database.SqliteError('Rollback statement failed', 'SQLITE_ERROR')
+    const formatted = formatError(new Error('Registry write failed', { cause }), { includeStack })
+    assert.equal(formatted.cause.name, 'SqliteError')
+    assert.equal(formatted.cause.message, cause.message)
+    assert.equal(formatted.cause.code, cause.code)
+    if (includeStack) assert.match(formatted.cause.stack, /Rollback statement failed/)
+    else assert.equal(formatted.cause.stack, undefined)
+  })
+}
 
 it('retains primitive property access and null absence in guarded diagnostics', () => {
   assert.equal(readDiagnosticProperty('abc', 1), 'b')
@@ -49,7 +63,7 @@ describe('Binary diagnostic metadata', () => {
     const failure = Buffer.from('PRIVATE_BYTES')
     const error = new Error('Original failure')
     error.toJSON = () => { throw failure }
-    const output = formatErrorString(error, { includeStack: false })
+    const output = formatErrorString(error)
     assert.ok(!output.includes('PRIVATE_BYTES'))
     assert.match(output, /Binary value thrown/)
     const wrapped = wrapUnexpectedError(failure)
@@ -60,16 +74,15 @@ describe('Binary diagnostic metadata', () => {
 
 describe('Diagnostic metadata accessors', () => {
   for (const options of [{ includeStack: false }, { redactFields: ['message'] }]) {
-    it(`omits custom JSON stacks before access with ${JSON.stringify(options)}`, () => {
+    it(`skips custom JSON conversion under restricted diagnostics with ${JSON.stringify(options)}`, () => {
       let reads = 0
-      const error = new Error('Original failure')
-      error.toJSON = () => ({
-        code: 'CUSTOM',
-        get stack () { reads++; return 'PRIVATE_STACK' },
-        cause: { errors: [{ get stack () { reads++; return 'PRIVATE_STACK' } }] }
+      const error = Object.assign(new Error('Original failure'), { code: 'ORIGINAL' })
+      Object.defineProperty(error, 'toJSON', {
+        enumerable: true,
+        get () { reads++; return () => ({ code: 'CUSTOM', stack: 'PRIVATE_STACK' }) }
       })
       const formatted = formatError(error, options)
-      assert.equal(formatted.code, 'CUSTOM')
+      assert.equal(formatted.code, 'ORIGINAL')
       assert.equal(Object.hasOwn(formatted, 'stack'), false)
       assert.equal(reads, 0)
       assert.ok(!JSON.stringify(formatted).includes('PRIVATE_STACK'))
@@ -105,16 +118,133 @@ describe('Diagnostic metadata accessors', () => {
     assert.ok(!full.includes('PRIVATE_VALUE'))
     assert.ok(!summary.includes('PRIVATE_VALUE'))
   })
+
+  it('does not let library JSON conversion read redacted details or an excluded stack', () => {
+    for (const [field, options] of [['details', { redactFields: ['details'] }], ['stack', { includeStack: false }]]) {
+      let reads = 0
+      const error = new RestApiValidationError('Invalid upload')
+      Object.defineProperty(error, field, { configurable: true, get () { reads++; return 'PRIVATE_VALUE' } })
+      const formatted = formatError(error, options)
+      assert.equal(formatted.code, 'REST_API_VALIDATION')
+      assert.equal(formatted.message, 'Invalid upload')
+      assert.equal(reads, 0)
+      assert.ok(!JSON.stringify(formatted).includes('PRIVATE_VALUE'))
+    }
+  })
+
+  it('omits excluded stacks from nested plain error metadata before access', () => {
+    let reads = 0
+    const nested = { message: 'Nested failure', get stack () { reads++; return 'PRIVATE_STACK' } }
+    const error = Object.assign(new Error('Failed'), { details: { failure: nested } })
+    const formatted = formatError(error, { includeStack: false })
+    assert.equal(formatted.details.failure.message, 'Nested failure')
+    assert.equal(Object.hasOwn(formatted.details.failure, 'stack'), false)
+    assert.equal(reads, 0)
+  })
+
+  it('does not let custom JSON conversion relabel a hidden attribute', () => {
+    let reads = 0
+    const error = Object.assign(new Error('Rejected'), { details: { publicNote: 'Visible' } })
+    Object.defineProperty(error.details, 'accessKey', { enumerable: true, get () { reads++; return 'PRIVATE_VALUE' } })
+    error.toJSON = () => ({ message: error.details.accessKey })
+    const formatted = formatError(error, { redactFields: ['accessKey'] })
+    assert.equal(formatted.message, 'Rejected')
+    assert.equal(formatted.details.accessKey, '[Redacted]')
+    assert.equal(formatted.details.publicNote, 'Visible')
+    assert.equal(reads, 0)
+  })
+
+  it('skips inherited redacted diagnostic getters', () => {
+    let reads = 0
+    class ProtectedError extends Error {
+      get details () { reads++; return { privateNote: 'PRIVATE_VALUE' } }
+      get cause () { reads++; return new Error('PRIVATE_VALUE') }
+    }
+    const error = new ProtectedError('Rejected')
+    const options = { redactFields: ['details', 'cause'] }
+    const formatted = formatError(error, options)
+    assert.equal(formatted.details, '[Redacted]')
+    assert.equal(formatted.cause, '[Redacted]')
+    assert.ok(!formatErrorSummary(error, options).includes('PRIVATE_VALUE'))
+    assert.equal(reads, 0)
+  })
+
+  for (const inherited of [false, true]) {
+    for (const field of ['accessKey', 'data.attributes.accessKey']) {
+      it(`redacts violations identified by ${inherited ? 'inherited' : 'own'} field accessors (${field})`, () => {
+        let fieldReads = 0
+        let privateReads = 0
+        const owner = {}
+        Object.defineProperty(owner, 'field', { enumerable: true, get () { fieldReads++; return field } })
+        const violation = inherited ? Object.create(owner) : owner
+        violation.rule = 'invalid_value'
+        for (const key of ['message', 'value']) {
+          Object.defineProperty(violation, key, { enumerable: true, get () { privateReads++; return 'PRIVATE_VALUE' } })
+        }
+        const error = new RestApiValidationError('Invalid', { violations: [violation] })
+        const options = { redactFields: ['accessKey'] }
+        const formatted = formatError(error, options)
+        assert.deepEqual(formatted.details.violations[0], { field, rule: 'invalid_value', message: '[Redacted]' })
+        assert.ok(!formatErrorSummary(error, options).includes('PRIVATE_VALUE'))
+        assert.equal(privateReads, 0)
+        assert.equal(fieldReads, 2)
+      })
+    }
+  }
 })
 
 describe('Diagnostic serialization failures', () => {
+  for (const trap of ['getPrototypeOf', 'getOwnPropertyDescriptor']) {
+    it(`retains original metadata and reaches the writer when ${trap} inspection fails`, () => {
+      const error = new Proxy(Object.assign(new Error('Original failure'), { code: 'ORIGINAL' }), {
+        [trap] () { throw new Error('Cannot classify error') }
+      })
+      const formatted = formatError(error, { includeStack: false })
+      assert.equal(formatted.message, 'Original failure')
+      assert.equal(formatted.code, 'ORIGINAL')
+      const calls = []
+      const loggerFailure = new Error('Logger failed')
+      const logger = createEnhancedLogger({ error: (...args) => { calls.push(args); throw loggerFailure } }, { includeStack: false })
+      assert.throws(() => logger.logError('Failed', error), failure => failure === loggerFailure)
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0][1].error.message, 'Original failure')
+    })
+  }
+
+  it('retains bounded original metadata when property enumeration fails', () => {
+    const original = Object.assign(new Error('Original failure'), { code: 'ORIGINAL', details: { publicNote: 'Visible' } })
+    const error = new Proxy(original, { ownKeys () { throw new Error('Cannot inspect properties'.repeat(1000)) } })
+    const formatted = formatError(error, { includeStack: false })
+    assert.equal(formatted.message, 'Original failure')
+    assert.equal(formatted.code, 'ORIGINAL')
+    assert.equal(formatted.details.publicNote, 'Visible')
+    assert.match(formatted.propertiesError, /Error listing properties/)
+    assert.match(formatted.propertiesError, /Truncated/)
+    const calls = []
+    createEnhancedLogger({ error: (...args) => calls.push(args) }, { includeStack: false }).logError('Failed', error)
+    assert.equal(calls[0][1].error.code, 'ORIGINAL')
+  })
+
+  it('does not read protected values when membership inspection fails', () => {
+    let reads = 0
+    const error = new Proxy(new Error('Original failure'), {
+      has () { throw new Error('Cannot inspect membership') },
+      get (target, key, receiver) {
+        if (key === 'details') { reads++; return 'PRIVATE_VALUE' }
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    assert.equal(formatError(error, { redactFields: ['details'] }).details, '[Redacted]')
+    assert.equal(reads, 0)
+  })
+
   for (const [label, failure] of [['null', null], ['undefined', undefined], ['string', 'Serializer failed']]) {
     it(`retains the original error when nested properties and toJSON throw ${label}`, () => {
       const error = new Error('Original failure')
       error.toJSON = () => { throw failure }
       error.details = { get nested () { throw failure } }
       Object.defineProperty(error, 'extra', { enumerable: true, get () { throw failure } })
-      const formatted = formatError(error, { includeStack: false })
+      const formatted = formatError(error)
       assert.equal(formatted.message, 'Original failure')
       assert.equal(formatted.toJSONError, `Failed to call toJSON: ${String(failure)}`)
       assert.match(formatted.details.nested, /Error serializing/)
@@ -135,7 +265,7 @@ describe('Diagnostic serialization failures', () => {
     const error = Object.assign(new Error('Original failure'), { code: 'ORIGINAL' })
     const failure = undefined
     Object.defineProperty(error, 'toJSON', { get () { throw failure } })
-    const formatted = formatError(error, { includeStack: false })
+    const formatted = formatError(error)
     assert.equal(formatted.message, 'Original failure')
     assert.equal(formatted.code, 'ORIGINAL')
     assert.equal(formatted.toJSONError, 'Failed to call toJSON: undefined')
@@ -224,7 +354,7 @@ describe('Bounded error diagnostics', () => {
 
 it('bounds custom JSON output and nonstandard error text', () => {
   const error = Object.assign(new Error('Failure'), { toJSON: () => 'value'.repeat(10000) })
-  const formatted = formatError(error, { includeStack: false })
+  const formatted = formatError(error)
   assert.ok(Object.keys(formatted).length < 100)
   assert.match(formatted.toJSONResult, /Truncated/)
   const nonstandard = { name: 'Error', message: { payload: 'value'.repeat(100000) }, amount: 1n }

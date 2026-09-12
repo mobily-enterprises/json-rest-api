@@ -1,0 +1,4375 @@
+diff --git a/packages/agent-docs/patterns/server-search.md b/packages/agent-docs/patterns/server-search.md
+index 6a9dda4d6d07c1e94a9fdb708581d7b19c9da7a4..7f50630921393a341b157507b8876dcd166a51b3 100644
+--- a/packages/agent-docs/patterns/server-search.md
++++ b/packages/agent-docs/patterns/server-search.md
+@@ -17,7 +17,7 @@ The standard CRUD repository pattern follows this path:
+ ```js
+ return api.resources.contacts.query({
+   queryParams: buildJsonRestQueryParams(RESOURCE_TYPE, contactListFilterContract.toJsonRestQuery(query)),
+-  simplified: false
++  format: "jsonapi"
+ }, createJsonRestContext(context));
+ ```
+ 
+diff --git a/packages/crud-core/src/server/defineCrudJsonApiFeature.js b/packages/crud-core/src/server/defineCrudJsonApiFeature.js
+index cab29e334ddb828012dce0440c87482d5a8acaaf..8997bb70cdf9820a51abc2d0ffc4112e796fadc1 100644
+--- a/packages/crud-core/src/server/defineCrudJsonApiFeature.js
++++ b/packages/crud-core/src/server/defineCrudJsonApiFeature.js
+@@ -233,7 +233,6 @@ function defineCrudJsonApiFeature({
+       );
+       const defaultRepository = createCrudJsonApiRepository({
+         api: jsonRestApi,
+-        knex: database.knex,
+         resource,
+         resourceScopeName
+       });
+diff --git a/packages/crud-core/src/server/jsonApiModule/actions.js b/packages/crud-core/src/server/jsonApiModule/actions.js
+index 6469358dd1c97fc3ba50d6dfc8085b4ca930aed5..a381ff70765de50c1e42c801f82a15a557319d50 100644
+--- a/packages/crud-core/src/server/jsonApiModule/actions.js
++++ b/packages/crud-core/src/server/jsonApiModule/actions.js
+@@ -3,6 +3,7 @@ import {
+   createSchema,
+   recordIdParamsValidator
+ } from "@jskit-ai/kernel/shared/validators";
++import { RestApiWriteError } from "json-rest-api";
+ import { normalizeJsonApiFieldsets } from "@jskit-ai/kernel/shared/support/jsonApiFieldsets";
+ import { createEntityChangedActionEvent } from "@jskit-ai/kernel/server/actions";
+ import {
+@@ -618,15 +619,22 @@ function createCrudJsonApiActions({
+     }
+     const result = mutation ? await repository.withTransaction(run) : await run();
+     if (hooks.afterCommit) {
+-      await hooks.afterCommit(createLifecycleContext({
+-        operation,
+-        input: value,
+-        context,
+-        resource,
+-        repository,
+-        service,
+-        result
+-      }));
++      try {
++        await hooks.afterCommit(createLifecycleContext({
++          operation,
++          input: value,
++          context,
++          resource,
++          repository,
++          service,
++          result
++        }));
++      } catch (error) {
++        throw new RestApiWriteError(`CRUD ${operation} afterCommit hook failed.`, {
++          cause: error,
++          transactionOutcome: "committed"
++        });
++      }
+     }
+     return result;
+   }
+diff --git a/packages/crud-core/src/server/jsonApiModule/repository.js b/packages/crud-core/src/server/jsonApiModule/repository.js
+index 10a0a7fdfd47fc78a09b64b8750edd8ba909b670..9398b6d570011b15cc557f9eb67140191c236687 100644
+--- a/packages/crud-core/src/server/jsonApiModule/repository.js
++++ b/packages/crud-core/src/server/jsonApiModule/repository.js
+@@ -1,19 +1,14 @@
+-import { createWithTransaction } from "@jskit-ai/database-runtime/shared";
+ import {
+   buildJsonRestQueryParams,
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   returnBadRequestWhenJsonRestFieldsetInvalid,
+   returnNullWhenJsonRestResourceMissing
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ 
+-function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName } = {}) {
++function createCrudJsonApiRepository({ api, resource, resourceScopeName } = {}) {
+   if (!api) {
+     throw new TypeError("createCrudJsonApiRepository requires api.");
+   }
+-  if (!knex) {
+-    throw new TypeError("createCrudJsonApiRepository requires knex.");
+-  }
+   if (!resource || typeof resource !== "object" || Array.isArray(resource)) {
+     throw new TypeError("createCrudJsonApiRepository requires resource.");
+   }
+@@ -22,7 +17,30 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+     throw new TypeError("createCrudJsonApiRepository requires resourceScopeName.");
+   }
+ 
+-  const withTransaction = createWithTransaction(knex);
++  function withTransaction(work) {
++    return api.transaction(work);
++  }
++
++  function inputData(payload) {
++    const data = { ...payload };
++    for (const [fieldName, definition] of Object.entries(resource.schema || {})) {
++      if (!definition?.belongsTo || !Object.hasOwn(data, fieldName)) {
++        continue;
++      }
++      const relationshipName = definition.as || fieldName;
++      if (relationshipName === fieldName) {
++        continue;
++      }
++      if (Object.hasOwn(data, relationshipName)) {
++        throw new TypeError(`Provide either "${fieldName}" or "${relationshipName}", not both.`);
++      }
++      if (data[fieldName] !== undefined) {
++        data[relationshipName] = data[fieldName];
++      }
++      delete data[fieldName];
++    }
++    return data;
++  }
+ 
+   function requireApiResource() {
+     const apiResource = api.resources?.[scopeName];
+@@ -38,7 +56,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+         {
+           queryParams: buildJsonRestQueryParams(scopeName, query),
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       )
+@@ -53,7 +71,7 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+             id: recordId,
+             queryParams: buildJsonRestQueryParams(scopeName, query),
+             transaction: options.trx || null,
+-            simplified: false
++            format: "jsonapi"
+           },
+           createJsonRestContext(options.context || null)
+         )
+@@ -64,9 +82,10 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+   async function createDocument(payload = {}, options = {}) {
+     return requireApiResource().post(
+       {
+-        inputRecord: createJsonApiInputRecord(scopeName, payload, { resource }),
++        data: inputData(payload),
++        returning: "full",
+         transaction: options.trx || null,
+-        simplified: false
++        format: "jsonapi"
+       },
+       createJsonRestContext(options.context || null)
+     );
+@@ -82,9 +101,10 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+       requireApiResource().patch(
+         {
+           id: recordId,
+-          inputRecord: createJsonApiInputRecord(scopeName, sourcePatch, { resource }),
++          data: inputData(sourcePatch),
++          returning: "full",
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       )
+@@ -96,8 +116,9 @@ function createCrudJsonApiRepository({ api, knex, resource, resourceScopeName }
+       await requireApiResource().delete(
+         {
+           id: recordId,
++          returning: "none",
+           transaction: options.trx || null,
+-          simplified: false
++          format: "jsonapi"
+         },
+         createJsonRestContext(options.context || null)
+       );
+diff --git a/packages/crud-core/test/defineCrudJsonApiFeature.test.js b/packages/crud-core/test/defineCrudJsonApiFeature.test.js
+index e6f1b73d92ebea070339c65428989eb58fbaee1b..61a04b53b80d373e790b0684e1fea33cf3748d91 100644
+--- a/packages/crud-core/test/defineCrudJsonApiFeature.test.js
++++ b/packages/crud-core/test/defineCrudJsonApiFeature.test.js
+@@ -1,6 +1,7 @@
+ import assert from "node:assert/strict";
+ import test from "node:test";
+ import { createSchema } from "json-rest-schema";
++import { RestApiWriteError } from "json-rest-api";
+ 
+ import { createActionProvider } from "@jskit-ai/kernel/server/actions";
+ import { createCapabilityRuntime, defineProvider } from "@jskit-ai/kernel/shared/capabilities";
+@@ -582,6 +583,80 @@ test("CRUD operation lifecycle does not run after or afterCommit when the transa
+   assert.deepEqual(calls, ["transaction:begin", "before", "service"]);
+ });
+ 
++test("CRUD afterCommit failures preserve the original cause and acknowledged commit", async () => {
++  for (const failure of [new Error("notification failed"), Object.freeze(new Error("frozen failure")), null, undefined]) {
++    let committed = false;
++    const actions = createCrudJsonApiActions({
++      namespace: "books",
++      resource: createBookResource(),
++      repository: {
++        async withTransaction(work) {
++          const result = await work({ id: "transaction" });
++          committed = true;
++          return result;
++        }
++      },
++      service: {
++        patchDocumentById(id, attributes) { return { data: { id, attributes } }; }
++      },
++      surface: "app",
++      operations: ["update"],
++      permissionForOperation: () => ({ require: "authenticated" }),
++      operationLifecycle: {
++        update: { afterCommit() { assert.equal(committed, true); throw failure; } }
++      }
++    });
++    await assert.rejects(
++      () => actions[0].execute({ recordId: "42", title: "Kindred" }, {}),
++      (error) => {
++        assert.ok(error instanceof RestApiWriteError);
++        assert.equal(error.transactionOutcome, "committed");
++        assert.equal(error.cause, failure);
++        return true;
++      }
++    );
++  }
++});
++
++test("CRUD failures before acknowledged commit are not marked committed", async () => {
++  for (const phase of ["before", "after", "commit"]) {
++    const failure = Object.freeze(new Error(`${phase} failed`));
++    let committed = false;
++    let afterCommitCalled = false;
++    const actions = createCrudJsonApiActions({
++      namespace: "books",
++      resource: createBookResource(),
++      repository: {
++        async withTransaction(work) {
++          const result = await work({ id: "transaction" });
++          if (phase === "commit") throw failure;
++          committed = true;
++          return result;
++        }
++      },
++      service: {
++        patchDocumentById(id, attributes) { return { data: { id, attributes } }; }
++      },
++      surface: "app",
++      operations: ["update"],
++      permissionForOperation: () => ({ require: "authenticated" }),
++      operationLifecycle: {
++        update: {
++          before() { if (phase === "before") throw failure; },
++          after() { if (phase === "after") throw failure; },
++          afterCommit() { afterCommitCalled = true; }
++        }
++      }
++    });
++    await assert.rejects(
++      () => actions[0].execute({ recordId: "42", title: "Kindred" }, {}),
++      (error) => error === failure && error.transactionOutcome === undefined
++    );
++    assert.equal(committed, false);
++    assert.equal(afterCommitCalled, false);
++  }
++});
++
+ test("defineCrudJsonApiFeature exposes custom service methods as actions and optional routes", async () => {
+   const routes = [];
+   const calls = [];
+diff --git a/packages/crud-core/test/jsonApiRepository.test.js b/packages/crud-core/test/jsonApiRepository.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..2632860efad9bf8e59c62d921186a9a4d320f121
+--- /dev/null
++++ b/packages/crud-core/test/jsonApiRepository.test.js
+@@ -0,0 +1,186 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import knexLib from "knex";
++import {
++  createJsonRestApiHost,
++  createJsonRestResourceScopeOptions
++} from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
++import { defineCrudResource } from "@jskit-ai/resource-crud-core/shared/crudResource";
++import { createCrudJsonApiActions } from "../src/server/jsonApiModule/actions.js";
++import { createCrudJsonApiRepository } from "../src/server/jsonApiModule/repository.js";
++import { createCrudJsonApiService } from "../src/server/jsonApiModule/service.js";
++
++function createRepositoryRecorder() {
++  const calls = [];
++  const response = { data: { type: "books", id: "7", attributes: { title: "Dune" } } };
++  const resource = {
++    schema: {
++      title: { type: "string" },
++      authorId: { type: "id", belongsTo: "authors", as: "author" }
++    }
++  };
++  const api = { resources: { books: {} }, transaction: (work) => work("managed") };
++  for (const method of ["get", "query", "post", "patch", "delete"]) {
++    api.resources.books[method] = async (params, context) => {
++      calls.push({ method, params, context });
++      return response;
++    };
++  }
++  return {
++    calls,
++    response,
++    repository: createCrudJsonApiRepository({ api, resource, resourceScopeName: "books" })
++  };
++}
++
++test("JSON:API repositories use plain input with explicit document responses", async () => {
++  const { repository, calls, response } = createRepositoryRecorder();
++  const context = Object.freeze({ scopeValues: Object.freeze({ workspaceId: "2" }) });
++  const payload = Object.freeze({ title: "Dune", authorId: 9, data: { edition: 1 } });
++  assert.equal(await repository.createDocument(payload, { trx: "managed", context }), response);
++  assert.deepEqual(calls[0].params, {
++    data: { title: "Dune", author: 9, data: { edition: 1 } },
++    returning: "full",
++    transaction: "managed",
++    format: "jsonapi"
++  });
++  assert.notEqual(calls[0].context, context);
++  assert.notEqual(calls[0].context.scopeValues, context.scopeValues);
++  assert.equal(payload.authorId, 9);
++  assert.equal(await repository.patchDocumentById("7", { authorId: null }), response);
++  assert.deepEqual(calls[1].params, {
++    id: "7",
++    data: { author: null },
++    returning: "full",
++    transaction: null,
++    format: "jsonapi"
++  });
++  await assert.rejects(
++    () => repository.createDocument({ authorId: "9", author: "10" }),
++    /Provide either "authorId" or "author", not both/
++  );
++  assert.equal(calls.length, 2);
++});
++
++test("JSON:API repository reads and empty patches retain their document contract", async () => {
++  const { repository, calls, response } = createRepositoryRecorder();
++  assert.equal(await repository.queryDocuments({ title: "Dune" }), response);
++  assert.equal(await repository.patchDocumentById("7", {}), response);
++  assert.equal(await repository.deleteDocumentById("7"), null);
++  assert.deepEqual(calls.map(({ method, params }) => ({ method, params })), [
++    { method: "query", params: { queryParams: { filters: { title: "Dune" } }, transaction: null, format: "jsonapi" } },
++    { method: "get", params: { id: "7", queryParams: {}, transaction: null, format: "jsonapi" } },
++    { method: "delete", params: { id: "7", returning: "none", transaction: null, format: "jsonapi" } }
++  ]);
++  assert.equal(await repository.withTransaction((trx) => trx), "managed");
++});
++
++async function createDatabaseRepository(t) {
++  const knex = knexLib({
++    client: "better-sqlite3",
++    connection: { filename: ":memory:" },
++    useNullAsDefault: true
++  });
++  t.after(() => knex.destroy());
++  await knex.schema.createTable("books", (table) => {
++    table.increments("id");
++    table.string("title").notNullable();
++  });
++  await knex.schema.createTable("audit_entries", (table) => {
++    table.increments("id");
++    table.string("message").notNullable();
++  });
++  const api = await createJsonRestApiHost({ knex });
++  const resource = { tableName: "books", schema: { title: { type: "string", required: true } } };
++  await api.addResource("books", createJsonRestResourceScopeOptions(resource));
++  const repository = createCrudJsonApiRepository({ api, resource, resourceScopeName: "books" });
++  return { api, knex, repository };
++}
++
++test("repository transactions commit resource writes and raw SQL before completion hooks", async (t) => {
++  const { api, knex, repository } = await createDatabaseRepository(t);
++  const committed = [];
++  await api.customize({ hooks: { afterCommit: ({ context }) => committed.push(context.method) } });
++  const document = await repository.withTransaction(async (trx) => {
++    const first = await repository.createDocument({ title: "Dune" }, { trx });
++    await repository.createDocument({ title: "Kindred" }, { trx });
++    await trx("audit_entries").insert({ message: "Created books" });
++    assert.deepEqual(committed, []);
++    return first;
++  });
++  assert.equal(document.data.attributes.title, "Dune");
++  assert.deepEqual(await knex("books").orderBy("id").pluck("title"), ["Dune", "Kindred"]);
++  assert.deepEqual(await knex("audit_entries").pluck("message"), ["Created books"]);
++  assert.deepEqual(committed, ["post", "post"]);
++});
++
++test("repository transactions roll back resource writes and raw SQL after a rejected participant", async (t) => {
++  const { knex, repository } = await createDatabaseRepository(t);
++  await assert.rejects(
++    () => repository.withTransaction(async (trx) => {
++      await repository.createDocument({ title: "Dune" }, { trx });
++      await trx("audit_entries").insert({ message: "Pending" });
++      await repository.createDocument({}, { trx });
++    }),
++    (error) => error.transactionOutcome === "rolledBack" && error.code === "REST_API_VALIDATION"
++  );
++  assert.deepEqual(await knex("books"), []);
++  assert.deepEqual(await knex("audit_entries"), []);
++});
++
++test("a missing write inside a managed transaction cannot become a successful null result", async (t) => {
++  const { knex, repository } = await createDatabaseRepository(t);
++  await assert.rejects(
++    () => repository.withTransaction(async (trx) => {
++      await repository.createDocument({ title: "Dune" }, { trx });
++      return repository.patchDocumentById("999", { title: "Missing" }, { trx });
++    }),
++    (error) => error.transactionOutcome === "rolledBack" && error.subtype === "not_found"
++  );
++  assert.deepEqual(await knex("books"), []);
++  assert.equal(await repository.patchDocumentById("999", { title: "Missing" }), null);
++});
++
++test("repository writes reject a raw transaction owner without inserting data", async (t) => {
++  const { knex, repository } = await createDatabaseRepository(t);
++  await knex.transaction(async (trx) => {
++    await assert.rejects(
++      () => repository.createDocument({ title: "Dune" }, { trx }),
++      (error) => error.code === "REST_API_VALIDATION" && error.transactionOutcome === "none"
++    );
++    assert.deepEqual(await trx("books"), []);
++  });
++  assert.deepEqual(await knex("books"), []);
++});
++
++test("a failing CRUD afterCommit hook reports committed and leaves the actual write stored", async (t) => {
++  const { knex, repository } = await createDatabaseRepository(t);
++  const book = await repository.createDocument({ title: "Dune" });
++  const failure = Object.freeze(new Error("Notification failed"));
++  const actions = createCrudJsonApiActions({
++    namespace: "books",
++    resource: defineCrudResource({
++      namespace: "books",
++      tableName: "books",
++      autofilter: "public",
++      schema: {
++        title: {
++          type: "string",
++          required: true,
++          operations: { output: { required: true }, patch: { required: false } }
++        }
++      }
++    }),
++    repository,
++    service: createCrudJsonApiService({ repository }),
++    surface: "app",
++    operations: ["update"],
++    permissionForOperation: () => ({ require: "authenticated" }),
++    operationLifecycle: { update: { afterCommit() { throw failure; } } }
++  });
++  await assert.rejects(
++    () => actions[0].execute({ recordId: book.data.id, title: "Kindred" }, {}),
++    (error) => error.transactionOutcome === "committed" && error.cause === failure
++  );
++  assert.equal((await knex("books").where({ id: book.data.id }).first()).title, "Kindred");
++});
+diff --git a/packages/database-runtime/src/shared/duplicateEntry.js b/packages/database-runtime/src/shared/duplicateEntry.js
+index 0fd308168bc97352f394540eac752fdd1513f9b5..eb3c960f231827c90b15c111bd7fe6bb779aafa9 100644
+--- a/packages/database-runtime/src/shared/duplicateEntry.js
++++ b/packages/database-runtime/src/shared/duplicateEntry.js
+@@ -15,23 +15,35 @@ function isPostgresDuplicateEntryError(error) {
+   return code === "23505";
+ }
+ 
+-function isDuplicateEntryError(error, { dialect = "", client = null } = {}) {
+-  if (!error) {
+-    return false;
+-  }
+-
++function findDuplicateEntryError(error, { dialect = "", client = null } = {}) {
+   const resolvedDialect =
+     normalizeDialect(dialect) || (client ? normalizeDialect(detectDialectFromClient(client)) : "");
+-
+-  if (resolvedDialect === "postgres") {
+-    return isPostgresDuplicateEntryError(error);
++  const seen = new Set();
++  let duplicate = null;
++
++  while (error && typeof error === "object" && !seen.has(error)) {
++    seen.add(error);
++    let matches;
++    if (resolvedDialect === "postgres") {
++      matches = isPostgresDuplicateEntryError(error);
++    } else if (resolvedDialect === "mysql") {
++      matches = isMysqlDuplicateEntryError(error);
++    } else {
++      matches = isMysqlDuplicateEntryError(error) || isPostgresDuplicateEntryError(error);
++    }
++
++    if (matches) {
++      // Wrappers may copy driver codes; retain the underlying constraint details.
++      duplicate = error;
++    }
++    error = error.cause;
+   }
+ 
+-  if (resolvedDialect === "mysql") {
+-    return isMysqlDuplicateEntryError(error);
+-  }
++  return duplicate;
++}
+ 
+-  return isMysqlDuplicateEntryError(error) || isPostgresDuplicateEntryError(error);
++function isDuplicateEntryError(error, options) {
++  return findDuplicateEntryError(error, options) !== null;
+ }
+ 
+-export { isDuplicateEntryError };
++export { findDuplicateEntryError, isDuplicateEntryError };
+diff --git a/packages/database-runtime/src/shared/index.js b/packages/database-runtime/src/shared/index.js
+index 2cad6c94fa003b465405bc7c9de3c1f45ff68c33..a8f81dcd0dc1b8d4c084fb3e6735e727c325a5e7 100644
+--- a/packages/database-runtime/src/shared/index.js
++++ b/packages/database-runtime/src/shared/index.js
+@@ -23,7 +23,7 @@ export {
+   resolveDatabaseConnectionFromEnvironment,
+   resolveKnexConnectionFromEnvironment
+ } from "./databaseConnection.js";
+-export { isDuplicateEntryError } from "./duplicateEntry.js";
++export { findDuplicateEntryError, isDuplicateEntryError } from "./duplicateEntry.js";
+ export { normalizePath, jsonTextExpression, whereJsonTextEquals } from "./json.js";
+ export { DEFAULT_VISIBILITY_COLUMNS, applyVisibility, applyVisibilityOwners } from "./visibility.js";
+ export { createRepositoryScope } from "./repositoryScope.js";
+diff --git a/packages/database-runtime/test/duplicateEntry.test.js b/packages/database-runtime/test/duplicateEntry.test.js
+index 13eb261a3c2d72840620ef80a77829d344fbad64..6ae07473cb27b9ab059a51512707ee265905792e 100644
+--- a/packages/database-runtime/test/duplicateEntry.test.js
++++ b/packages/database-runtime/test/duplicateEntry.test.js
+@@ -1,6 +1,6 @@
+ import test from "node:test";
+ import assert from "node:assert/strict";
+-import { isDuplicateEntryError } from "../src/shared/duplicateEntry.js";
++import { findDuplicateEntryError, isDuplicateEntryError } from "../src/shared/duplicateEntry.js";
+ 
+ test("isDuplicateEntryError matches mysql and postgres duplicate signatures", () => {
+   assert.equal(isDuplicateEntryError({ code: "ER_DUP_ENTRY" }), true);
+@@ -8,3 +8,26 @@ test("isDuplicateEntryError matches mysql and postgres duplicate signatures", ()
+   assert.equal(isDuplicateEntryError({ code: "23505" }), true);
+   assert.equal(isDuplicateEntryError({ code: "ER_PARSE_ERROR", errno: 1064 }), false);
+ });
++
++test("duplicate classification follows causes and retains the database error", () => {
++  const databaseError = Object.freeze({ code: "23505", message: "users_email_unique" });
++  const failure = new Error("Write failed", { cause: new Error("Storage failed", { cause: databaseError }) });
++
++  assert.equal(isDuplicateEntryError(failure, { dialect: "postgres" }), true);
++  assert.equal(findDuplicateEntryError(failure), databaseError);
++  failure.code = "23505";
++  assert.equal(findDuplicateEntryError(failure), databaseError);
++  assert.equal(findDuplicateEntryError(failure, { dialect: "mysql" }), null);
++  assert.equal(findDuplicateEntryError({ cause: { errno: 1062 } }, { dialect: "mysql" }).errno, 1062);
++});
++
++test("duplicate classification terminates on missing, primitive and cyclic causes", () => {
++  const first = new Error("first");
++  const second = new Error("second", { cause: first });
++  first.cause = second;
++
++  for (const error of [null, undefined, false, "failure", { cause: 42 }, first]) {
++    assert.equal(findDuplicateEntryError(error), null);
++    assert.equal(isDuplicateEntryError(error), false);
++  }
++});
+diff --git a/packages/http-runtime/src/shared/clientRuntime/errors.js b/packages/http-runtime/src/shared/clientRuntime/errors.js
+index 8f97348a7e5a1e8b40843709a84d932bd5b237e6..8873702022d3184a8d15d81bcc402bc1953a815d 100644
+--- a/packages/http-runtime/src/shared/clientRuntime/errors.js
++++ b/packages/http-runtime/src/shared/clientRuntime/errors.js
+@@ -1,3 +1,4 @@
++import { normalizeTransactionOutcome } from "@jskit-ai/kernel/shared/support/normalize";
+ import { isRecord, resolveFieldErrors } from "../support/fieldErrors.js";
+ import { createJsonApiClientErrorPayload } from "./jsonApiResourceTransport.js";
+ 
+@@ -20,6 +21,10 @@ function createHttpError(response, data = {}) {
+   const normalizedFieldErrors = resolveFieldErrors(payload);
+   error.status = Number(response?.status || 0);
+   error.code = String(payload.code || "").trim() || null;
++  const transactionOutcome = normalizeTransactionOutcome(payload.transactionOutcome);
++  if (transactionOutcome) {
++    error.transactionOutcome = transactionOutcome;
++  }
+   error.fieldErrors = Object.keys(normalizedFieldErrors).length > 0 ? normalizedFieldErrors : null;
+   if (isRecord(payload.details)) {
+     error.details = payload.details;
+diff --git a/packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js b/packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js
+index de146ae0af89c36fdf597e67d1ecfdfab7c2b9f0..6d07ce6bbc483e3904a0ef6127c0e3a7e3944dd3 100644
+--- a/packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js
++++ b/packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js
+@@ -1,4 +1,4 @@
+-import { normalizeArray, normalizeObject, normalizeText } from "@jskit-ai/kernel/shared/support/normalize";
++import { normalizeArray, normalizeObject, normalizeText, normalizeTransactionOutcome } from "@jskit-ai/kernel/shared/support/normalize";
+ import {
+   JSON_API_CONTENT_TYPE,
+   createJsonApiDocument,
+@@ -331,12 +331,14 @@ function createJsonApiClientErrorPayload(payload = {}) {
+ 
+   const firstError = normalizeArray(document.errors)[0] || {};
+   const fieldErrors = decodeJsonApiErrorFieldErrors(payload);
++  const transactionOutcome = normalizeTransactionOutcome(firstError.meta?.transactionOutcome);
+ 
+   return {
+     error: normalizeText(firstError.detail || firstError.title, {
+       fallback: "Request failed."
+     }),
+     code: normalizeText(firstError.code) || null,
++    ...(transactionOutcome ? { transactionOutcome } : {}),
+     ...(Object.keys(fieldErrors).length > 0
+       ? {
+           fieldErrors,
+diff --git a/packages/http-runtime/src/shared/validators/errorResponses.js b/packages/http-runtime/src/shared/validators/errorResponses.js
+index 99b23e3f2bb86889be2b84863b62c5a48005e03b..a6b16d5720b8ffd92acfd66813efad116c2238b0 100644
+--- a/packages/http-runtime/src/shared/validators/errorResponses.js
++++ b/packages/http-runtime/src/shared/validators/errorResponses.js
+@@ -1,4 +1,5 @@
+ import { createSchema } from "json-rest-schema";
++import { TRANSACTION_OUTCOMES } from "@jskit-ai/kernel/shared/support/normalize";
+ import { deepFreeze } from "@jskit-ai/kernel/shared/support/deepFreeze";
+ import { createEmbeddableTransportSchemaDocument } from "./transportSchemaEmbedding.js";
+ 
+@@ -28,6 +29,7 @@ const apiErrorOutputValidator = deepFreeze({
+   schema: createSchema({
+     error: { type: "string", required: true, minLength: 1 },
+     code: { type: "string", required: false, minLength: 1 },
++    transactionOutcome: { type: "string", required: false, enum: TRANSACTION_OUTCOMES },
+     details: {
+       type: "object",
+       required: false,
+@@ -46,6 +48,7 @@ const apiValidationErrorOutputValidator = deepFreeze({
+   schema: createSchema({
+     error: { type: "string", required: true, minLength: 1 },
+     code: { type: "string", required: false, minLength: 1 },
++    transactionOutcome: { type: "string", required: false, enum: TRANSACTION_OUTCOMES },
+     fieldErrors: {
+       ...fieldErrorsFieldDefinition,
+       required: true
+@@ -77,6 +80,7 @@ const fastifyDefaultErrorTransportSchema = {
+     error: { type: "string", minLength: 1 },
+     message: { type: "string", minLength: 1 },
+     code: { type: "string", minLength: 1 },
++    transactionOutcome: { type: "string", enum: TRANSACTION_OUTCOMES },
+     details: {},
+     fieldErrors: {
+       type: "object",
+diff --git a/packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js b/packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js
+index 6e3d13398a2fac3abce98181bdd961b929b36e91..2fffaab4759e25c0173c6cba86d5439385460bc9 100644
+--- a/packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js
++++ b/packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js
+@@ -864,9 +864,11 @@ function createJsonApiResourceRouteTransport({
+     },
+     error(error, {
+       statusCode = 500,
+-      code = ""
++      code = "",
++      message = error?.message,
++      exposeDetails = true
+     } = {}) {
+-      const fieldErrors = isRecord(error?.fieldErrors)
++      const fieldErrors = !exposeDetails ? {} : isRecord(error?.fieldErrors)
+         ? error.fieldErrors
+         : isRecord(error?.details?.fieldErrors)
+           ? error.details.fieldErrors
+@@ -875,9 +877,10 @@ function createJsonApiResourceRouteTransport({
+       return createJsonApiErrorDocumentFromFailure({
+         statusCode,
+         code,
+-        message: error?.message,
++        message,
++        transactionOutcome: error?.transactionOutcome,
+         fieldErrors,
+-        validationIssues: Array.isArray(error?.validation) ? error.validation : [],
++        validationIssues: exposeDetails && Array.isArray(error?.validation) ? error.validation : [],
+         validationContext: String(error?.validationContext || "").trim(),
+         pointerPrefix
+       });
+diff --git a/packages/http-runtime/src/shared/validators/jsonApiTransport.js b/packages/http-runtime/src/shared/validators/jsonApiTransport.js
+index f4467b3de199e815aae0aa09fd8b958d62b62e46..95f5d4f591ffa84ce819a09f94097352efcfb7e1 100644
+--- a/packages/http-runtime/src/shared/validators/jsonApiTransport.js
++++ b/packages/http-runtime/src/shared/validators/jsonApiTransport.js
+@@ -1,4 +1,4 @@
+-import { normalizeArray, normalizeObject, normalizeText } from "@jskit-ai/kernel/shared/support/normalize";
++import { normalizeArray, normalizeObject, normalizeText, normalizeTransactionOutcome } from "@jskit-ai/kernel/shared/support/normalize";
+ import { simplifyJsonApiResourceWithRelationshipIds } from "../support/jsonApiSimplify.js";
+ 
+ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
+@@ -388,11 +388,14 @@ function createJsonApiErrorDocumentFromFailure({
+   statusCode = 500,
+   code = "",
+   message = "",
++  transactionOutcome,
+   fieldErrors = {},
+   validationIssues = [],
+   validationContext = "",
+   pointerPrefix = "/data/attributes"
+ } = {}) {
++  const outcome = normalizeTransactionOutcome(transactionOutcome);
++  const meta = outcome ? { transactionOutcome: outcome } : undefined;
+   const normalizedStatus = String(Number(statusCode) || 500);
+   const normalizedCode = String(code || "").trim();
+   const normalizedMessage = String(message || "").trim() || "Request failed.";
+@@ -404,6 +407,7 @@ function createJsonApiErrorDocumentFromFailure({
+       errors: issues.map((issue) =>
+         createJsonApiErrorObject({
+           status: normalizedStatus,
++          meta,
+           code: normalizedCode,
+           title: normalizedMessage,
+           detail: String(issue?.message || "Invalid value.").trim() || "Invalid value.",
+@@ -419,6 +423,7 @@ function createJsonApiErrorDocumentFromFailure({
+       errors: fieldEntries.map(([field, detail]) =>
+         createJsonApiErrorObject({
+           status: normalizedStatus,
++          meta,
+           code: normalizedCode,
+           title: normalizedMessage,
+           detail: String(detail || "Invalid value.").trim() || "Invalid value.",
+@@ -434,6 +439,7 @@ function createJsonApiErrorDocumentFromFailure({
+     errors: [
+       createJsonApiErrorObject({
+         status: normalizedStatus,
++        meta,
+         code: normalizedCode,
+         title: normalizedMessage
+       })
+diff --git a/packages/http-runtime/test/client.test.js b/packages/http-runtime/test/client.test.js
+index bcd4bd512c2130924bd542185d8040958e50e653..53524f3f1ef24c87aea27ec04b44f34ef47f0c26 100644
+--- a/packages/http-runtime/test/client.test.js
++++ b/packages/http-runtime/test/client.test.js
+@@ -21,6 +21,32 @@ function mockResponse({ status = 200, data = {}, contentType = "application/json
+   };
+ }
+ 
++test("request retains standard and JSON:API write outcomes without retrying", async () => {
++  for (const jsonapi of [false, true]) {
++    for (const outcome of ["committed", "rolledBack", "unknown", "invalid"]) {
++      let requests = 0;
++      const data = jsonapi
++        ? { errors: [{ status: "500", title: "Internal server error.", meta: { transactionOutcome: outcome } }] }
++        : { error: "Internal server error.", transactionOutcome: outcome };
++      const client = createHttpClient({
++        fetchImpl: async () => {
++          requests += 1;
++          return mockResponse({ status: 500, data, contentType: jsonapi ? "application/vnd.api+json" : "application/json" });
++        }
++      });
++      await assert.rejects(
++        () => client.request("/api/books/1", { method: "PATCH", body: { title: "Dune" }, csrf: false }),
++        (error) => {
++          assert.equal(error.status, 500);
++          assert.equal(error.transactionOutcome, outcome === "invalid" ? undefined : outcome);
++          return true;
++        }
++      );
++      assert.equal(requests, 1);
++    }
++  }
++});
++
+ test("request serializes json body and injects csrf token for unsafe methods", async () => {
+   const calls = [];
+   const fetchImpl = async (url, options) => {
+diff --git a/packages/http-runtime/test/errorResponses.test.js b/packages/http-runtime/test/errorResponses.test.js
+index f54c6e7a01a66f4e202eee9348d881aaf4b5595b..83329aae437d246dcb92280bd706c4b2d4d8f224 100644
+--- a/packages/http-runtime/test/errorResponses.test.js
++++ b/packages/http-runtime/test/errorResponses.test.js
+@@ -118,3 +118,11 @@ test("error response validators export transport schemas from the same contracts
+     true
+   );
+ });
++
++test("standard error schemas preserve optional transaction outcomes during serialization", () => {
++  const outcomes = ["none", "pending", "committed", "rolledBack", "unknown"];
++  for (const schema of [apiErrorTransportSchema, apiValidationErrorTransportSchema, fastifyDefaultErrorTransportSchema]) {
++    assert.deepEqual(schema.properties.transactionOutcome.enum, outcomes);
++    assert.equal(schema.required.includes("transactionOutcome"), false);
++  }
++});
+diff --git a/packages/http-runtime/test/jsonApiRouteTransport.test.js b/packages/http-runtime/test/jsonApiRouteTransport.test.js
+index a8e00d7ad4b57a990cc96a0ee005ca6dccdd5b25..5490fc0c2f26065246e9f397c9baf4c12c585f29 100644
+--- a/packages/http-runtime/test/jsonApiRouteTransport.test.js
++++ b/packages/http-runtime/test/jsonApiRouteTransport.test.js
+@@ -15,6 +15,9 @@ import {
+ } from "../src/shared/index.js";
+ import { createSchema } from "../../kernel/shared/validators/index.js";
+ import { resolveRouteValidatorOptions } from "../../kernel/server/http/lib/routeValidator.js";
++import { registerApiErrorHandler } from "../../kernel/server/runtime/fastifyBootstrap.js";
++import { AppError, isAppError } from "../../kernel/server/runtime/errors.js";
++import { createHttpError } from "../src/shared/clientRuntime/errors.js";
+ 
+ const CONTACT_BODY_SCHEMA = Object.freeze({
+   schema: createSchema({
+@@ -197,6 +200,70 @@ test("createJsonApiResourceRouteTransport unwraps request payloads and wraps res
+   assert.equal(errorPayload.errors[0].source.pointer, "/data/attributes/name");
+ });
+ 
++test("error handler, JSON:API transport and client preserve outcomes without disclosing internal failures", () => {
++  const transport = createJsonApiResourceRouteTransport({ type: "books" });
++  const app = { log: { error() {} }, setErrorHandler(handler) { this.errorHandler = handler; } };
++  registerApiErrorHandler(app, { isAppError });
++
++  for (const transactionOutcome of ["none", "pending", "committed", "rolledBack", "unknown", "invalid", undefined]) {
++    const failure = Object.assign(new Error("Private SQL statement"), {
++      transactionOutcome,
++      code: "REST_API_WRITE",
++      fieldErrors: { secret: "Private SQL value" },
++      cause: { secret: "Private cause" },
++      cleanupErrors: [{ message: "Private cleanup" }]
++    });
++    for (const jsonapi of [false, true]) {
++      const reply = {
++        statusCode: 200,
++        headers: {},
++        code(value) { this.statusCode = value; return this; },
++        header(name, value) { this.headers[name] = value; return this; },
++        send(payload) { this.payload = payload; return this; }
++      };
++      app.errorHandler(failure, jsonapi ? { routeTransport: transport } : {}, reply);
++      assert.equal(reply.statusCode, 500);
++      const clientError = createHttpError({ status: reply.statusCode }, reply.payload);
++      assert.equal(clientError.message, "Internal server error.");
++      assert.equal(clientError.code, "REST_API_WRITE");
++      assert.equal(clientError.transactionOutcome, transactionOutcome === "invalid" ? undefined : transactionOutcome);
++      assert.equal(clientError.cause, undefined);
++      assert.equal(clientError.fieldErrors, null);
++      assert.equal(JSON.stringify(reply.payload).includes("Private"), false);
++      if (jsonapi) {
++        assert.equal(reply.headers["Content-Type"], JSON_API_CONTENT_TYPE);
++        assert.equal(reply.payload.errors[0].meta?.transactionOutcome, clientError.transactionOutcome);
++      }
++    }
++  }
++});
++
++test("JSON:API field errors retain outcomes and permission details remain private", () => {
++  const transport = createJsonApiResourceRouteTransport({ type: "books" });
++  const payload = transport.error({
++    message: "Validation failed.",
++    transactionOutcome: "rolledBack",
++    fieldErrors: { title: "Required", author: "Missing" }
++  }, { statusCode: 422 });
++  assert.equal(payload.errors.length, 2);
++  assert.ok(payload.errors.every((error) => error.meta.transactionOutcome === "rolledBack"));
++
++  const app = { log: { error() {} }, setErrorHandler(handler) { this.errorHandler = handler; } };
++  registerApiErrorHandler(app, { isAppError });
++  const reply = {
++    code() { return this; },
++    header() { return this; },
++    send(value) { this.payload = value; return this; }
++  };
++  app.errorHandler(new AppError(403, "Forbidden.", {
++    code: "ACTION_PERMISSION_DENIED",
++    details: { fieldErrors: { secret: "Required private permission" } }
++  }), { routeTransport: transport }, reply);
++  assert.deepEqual(reply.payload, {
++    errors: [{ status: "403", code: "ACTION_PERMISSION_DENIED", title: "Forbidden." }]
++  });
++});
++
+ test("createJsonApiResourceQueryTransportSchema and route transport map list query params to JSON:API", () => {
+   const schema = createJsonApiResourceQueryTransportSchema({
+     query: CONTACT_LIST_QUERY_SCHEMA,
+diff --git a/packages/json-rest-api-core/src/server/jsonRestApiHost.js b/packages/json-rest-api-core/src/server/jsonRestApiHost.js
+index 5cafc95518f02cfa504b62d80dfbcad8555a15f9..98d6494c5a8da79e5947a77b42634e56a10066fb 100644
+--- a/packages/json-rest-api-core/src/server/jsonRestApiHost.js
++++ b/packages/json-rest-api-core/src/server/jsonRestApiHost.js
+@@ -1,6 +1,6 @@
+-import { Api } from "hooked-api";
+ import {
+   AutoFilterPlugin,
++  JsonRestApi,
+   QueryProjectionsPlugin,
+   REST_API_FIELDSET_ERROR_CODE,
+   RestApiKnexPlugin,
+@@ -51,9 +51,9 @@ const JSON_REST_RESERVED_QUERY_KEYS = Object.freeze(new Set([
+   "sort",
+   "fields"
+ ]));
+-const JSON_REST_CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+-const JSON_REST_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
+-const JSON_REST_DATABASE_UTC_DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2}) ((?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?)$/u;
++const JSON_REST_DEFAULT_LOGGER = Object.freeze({
++  error: (...args) => console.error(...args)
++});
+ 
+ function isPlainJsonRestObject(value) {
+   if (!value || typeof value !== "object" || Array.isArray(value)) {
+@@ -106,132 +106,6 @@ function cloneJsonRestResourceValue(value, { writeSerializers = {} } = {}) {
+   return next;
+ }
+ 
+-function resolveCanonicalCalendarDate(value) {
+-  if (value instanceof Date) {
+-    return Number.isNaN(value.getTime())
+-      ? ""
+-      : value.toISOString().slice(0, 10);
+-  }
+-
+-  const normalized = typeof value === "string" ? value.trim() : "";
+-  const candidate = normalized.match(/^(\d{4}-\d{2}-\d{2})(?:$|T)/u)?.[1] || "";
+-  if (!JSON_REST_CALENDAR_DATE_PATTERN.test(candidate)) {
+-    return "";
+-  }
+-
+-  const parsed = new Date(`${candidate}T00:00:00.000Z`);
+-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== candidate) {
+-    return "";
+-  }
+-
+-  return candidate;
+-}
+-
+-function serializeJsonRestCalendarDate(value) {
+-  if (value == null) {
+-    return value;
+-  }
+-
+-  const canonical = resolveCanonicalCalendarDate(value);
+-  if (!canonical) {
+-    throw new TypeError("json-rest-api calendar date must be a valid YYYY-MM-DD value.");
+-  }
+-  return canonical;
+-}
+-
+-function resolveCanonicalDateTime(value) {
+-  if (value instanceof Date) {
+-    return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+-  }
+-
+-  const normalized = typeof value === "string" ? value.trim() : "";
+-  if (JSON_REST_DATE_TIME_PATTERN.test(normalized)) {
+-    return normalized;
+-  }
+-
+-  const databaseMatch = JSON_REST_DATABASE_UTC_DATE_TIME_PATTERN.exec(normalized);
+-  return databaseMatch ? `${databaseMatch[1]}T${databaseMatch[2]}Z` : "";
+-}
+-
+-function applyJsonRestCalendarDateWriteSerializers(scopeOptions = {}) {
+-  const schema = normalizeJsonRestObject(scopeOptions.schema);
+-  for (const fieldDefinition of Object.values(schema)) {
+-    if (normalizeJsonRestText(fieldDefinition?.type).toLowerCase() !== "date") {
+-      continue;
+-    }
+-    if (fieldDefinition?.virtual === true || fieldDefinition?.storage?.virtual === true) {
+-      continue;
+-    }
+-
+-    const storage = normalizeJsonRestObject(fieldDefinition.storage);
+-    if (typeof storage.serialize === "function") {
+-      continue;
+-    }
+-    fieldDefinition.storage = {
+-      ...storage,
+-      serialize: serializeJsonRestCalendarDate
+-    };
+-  }
+-}
+-
+-function normalizeJsonRestTemporalEntry(entry = null, scopes = {}) {
+-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+-    return entry;
+-  }
+-
+-  const schema = normalizeJsonRestObject(
+-    scopes?.[normalizeJsonRestText(entry.type)]?.vars?.schemaInfo?.schemaStructure
+-  );
+-  const attributes = normalizeJsonRestObject(entry.attributes);
+-  for (const [fieldName, definition] of Object.entries(schema)) {
+-    if (!Object.hasOwn(attributes, fieldName) || attributes[fieldName] == null) {
+-      continue;
+-    }
+-
+-    const fieldType = normalizeJsonRestText(definition?.type).toLowerCase();
+-    const canonical = fieldType === "date"
+-      ? resolveCanonicalCalendarDate(attributes[fieldName])
+-      : fieldType === "datetime"
+-        ? resolveCanonicalDateTime(attributes[fieldName])
+-        : "";
+-    if (canonical) {
+-      attributes[fieldName] = canonical;
+-    }
+-  }
+-
+-  return entry;
+-}
+-
+-function normalizeJsonRestTemporalDocument(document = null, scopes = {}) {
+-  if (!document || typeof document !== "object" || Array.isArray(document)) {
+-    return document;
+-  }
+-
+-  const data = Array.isArray(document.data) ? document.data : [document.data];
+-  for (const entry of data) {
+-    normalizeJsonRestTemporalEntry(entry, scopes);
+-  }
+-  for (const entry of Array.isArray(document.included) ? document.included : []) {
+-    normalizeJsonRestTemporalEntry(entry, scopes);
+-  }
+-  return document;
+-}
+-
+-const JsonRestTemporalPlugin = Object.freeze({
+-  name: "jskit-temporal",
+-  dependencies: ["rest-api"],
+-  install({ addHook, scopes }) {
+-    addHook("finish", "normalizeCalendarDateDocuments", {}, ({ context }) => {
+-      if (context?.record) {
+-        normalizeJsonRestTemporalDocument(context.record, scopes);
+-      }
+-      if (context?.responseRecord) {
+-        normalizeJsonRestTemporalDocument(context.responseRecord, scopes);
+-      }
+-    });
+-  }
+-});
+-
+ async function addResourceIfMissing(api, scopeName, resourceConfig) {
+   if (api?.resources?.[scopeName]) {
+     return api.resources[scopeName];
+@@ -572,94 +446,11 @@ function buildJsonRestQueryParams(resourceType = "", query = {}, { include = und
+   return queryParams;
+ }
+ 
+-function extractJsonRestCollectionRows(payload = null) {
+-  if (Array.isArray(payload)) {
+-    return payload;
++function extractJsonRestCollectionRows(payload) {
++  if (!isPlainJsonRestObject(payload) || !Array.isArray(payload.data)) {
++    throw new TypeError("json-rest-api collection response must contain a data array.");
+   }
+-
+-  const source = normalizeJsonRestObject(payload);
+-  return Array.isArray(source.data) ? source.data : [];
+-}
+-
+-function extractJsonApiInputRelationships(attributes = {}, resource = null, relationships = null) {
+-  const normalizedAttributes = {
+-    ...normalizeJsonRestObject(attributes)
+-  };
+-  const normalizedRelationships = {
+-    ...normalizeJsonRestObject(relationships)
+-  };
+-  const resourceSchema = normalizeJsonRestObject(resource?.schema);
+-
+-  for (const [fieldName, fieldDefinition] of Object.entries(resourceSchema)) {
+-    if (!Object.hasOwn(normalizedAttributes, fieldName)) {
+-      continue;
+-    }
+-
+-    const normalizedFieldDefinition = normalizeJsonRestObject(fieldDefinition);
+-    const relationshipType = normalizeJsonRestText(normalizedFieldDefinition.belongsTo);
+-    if (!relationshipType) {
+-      continue;
+-    }
+-
+-    const relationshipName = normalizeJsonRestText(normalizedFieldDefinition.as, {
+-      fallback: fieldName
+-    });
+-    if (!relationshipName) {
+-      continue;
+-    }
+-
+-    const relationshipValue = normalizedAttributes[fieldName];
+-    delete normalizedAttributes[fieldName];
+-
+-    if (relationshipValue === undefined) {
+-      continue;
+-    }
+-
+-    if (!Object.hasOwn(normalizedRelationships, relationshipName)) {
+-      normalizedRelationships[relationshipName] = createJsonApiRelationship(
+-        relationshipType,
+-        relationshipValue
+-      );
+-    }
+-  }
+-
+-  return {
+-    attributes: normalizedAttributes,
+-    relationships: normalizedRelationships
+-  };
+-}
+-
+-function createJsonApiInputRecord(
+-  resourceType = "",
+-  attributes = {},
+-  { id = null, relationships = null, resource = null } = {}
+-) {
+-  const normalizedInput = extractJsonApiInputRelationships(attributes, resource, relationships);
+-  return {
+-    data: {
+-      type: normalizeJsonRestText(resourceType),
+-      ...(id == null ? {} : { id: String(id) }),
+-      attributes: normalizedInput.attributes,
+-      ...(Object.keys(normalizedInput.relationships).length < 1
+-        ? {}
+-        : { relationships: normalizedInput.relationships })
+-    }
+-  };
+-}
+-
+-function createJsonApiRelationship(resourceType = "", id = null) {
+-  if (id == null) {
+-    return {
+-      data: null
+-    };
+-  }
+-
+-  return {
+-    data: {
+-      type: normalizeJsonRestText(resourceType),
+-      id: String(id)
+-    }
+-  };
++  return payload.data;
+ }
+ 
+ function createJsonRestResourceScopeOptions(
+@@ -675,7 +466,6 @@ function createJsonRestResourceScopeOptions(
+   const scopeOptions = cloneJsonRestResourceValue(resource, {
+     writeSerializers: normalizeJsonRestObject(writeSerializers)
+   });
+-  applyJsonRestCalendarDateWriteSerializers(scopeOptions);
+   if (isPlainJsonRestObject(searchSchema)) {
+     scopeOptions.searchSchema = {
+       ...normalizeJsonRestObject(scopeOptions.searchSchema),
+@@ -767,7 +557,8 @@ async function returnNullWhenJsonRestResourceMissing(run) {
+   try {
+     return await run();
+   } catch (error) {
+-    if (isJsonRestResourceMissingError(error)) {
++    if (isJsonRestResourceMissingError(error) &&
++      (!error.transactionOutcome || ["none", "rolledBack"].includes(error.transactionOutcome))) {
+       return null;
+     }
+ 
+@@ -791,32 +582,30 @@ async function returnBadRequestWhenJsonRestFieldsetInvalid(run) {
+       throw error;
+     }
+ 
+-    throw new AppError(400, error.message, {
++    const mapped = new AppError(400, error.message, {
+       code: "JSON_API_FIELDSET_INVALID"
+     });
++    Object.defineProperty(mapped, "cause", { value: error, configurable: true });
++    if (error.transactionOutcome) {
++      mapped.transactionOutcome = error.transactionOutcome;
++    }
++    throw mapped;
+   }
+ }
+ 
+-async function createJsonRestApiHost({ knex }) {
++async function createJsonRestApiHost({ knex, logger = JSON_REST_DEFAULT_LOGGER }) {
+   if (typeof knex !== "function") {
+     throw new TypeError("createJsonRestApiHost requires knex.");
+   }
+ 
+-  const api = new Api({
++  const api = new JsonRestApi({
+     name: "jskit-internal-json-rest-api",
+-    logging: {
+-      level: "error"
+-    }
++    logger
+   });
+ 
+   await api.use(RestApiPlugin, {
+-    simplifiedApi: true,
+-    simplifiedTransport: false,
+-    returnRecordApi: {
+-      post: "full",
+-      put: "full",
+-      patch: "full"
+-    },
++    format: "plain",
++    returning: "full",
+     normalizeId: normalizeRecordId
+   });
+ 
+@@ -830,7 +619,6 @@ async function createJsonRestApiHost({ knex }) {
+     },
+     presets: JSON_REST_AUTOFILTER_PRESETS
+   });
+-  await api.use(JsonRestTemporalPlugin);
+ 
+   return api;
+ }
+@@ -839,8 +627,6 @@ export {
+   JSON_REST_AUTOFILTER_PRESETS,
+   addResourceIfMissing,
+   buildJsonRestQueryParams,
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestResourceScopeOptions,
+   createJsonRestContext,
+   extractJsonRestCollectionRows,
+diff --git a/packages/json-rest-api-core/test/entrypoints.boundary.test.js b/packages/json-rest-api-core/test/entrypoints.boundary.test.js
+index 7b0ce42ac46b4aeb803fab88c6dc6ccbb225775b..d0d5328632b8b2f49efe12b7f9688cb802ccf69b 100644
+--- a/packages/json-rest-api-core/test/entrypoints.boundary.test.js
++++ b/packages/json-rest-api-core/test/entrypoints.boundary.test.js
+@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
+ import { spawnSync } from "node:child_process";
+ import { readFile } from "node:fs/promises";
+ import test from "node:test";
++import knexLib from "knex";
+ import { normalizeRecordId } from "@jskit-ai/kernel/shared/support/normalize";
+-import { RestApiFieldsetError } from "json-rest-api";
++import { JsonRestApi, RestApiFieldsetError, RestApiWriteError } from "json-rest-api";
+ 
+ import {
+   addResourceIfMissing,
+   buildJsonRestQueryParams,
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestResourceScopeOptions,
+   createJsonRestContext,
+   createJsonRestApiHost,
+@@ -27,19 +26,18 @@ test("package exports include explicit server jsonRestApiHost entrypoint only",
+   const exportsMap = packageJson && typeof packageJson === "object" ? packageJson.exports : {};
+   assert.equal(exportsMap["./server/jsonRestApiHost"], "./src/server/jsonRestApiHost.js");
+   assert.equal(exportsMap["./server"], undefined);
+-  assert.equal(packageJson.dependencies?.["json-rest-api"], "^1.0.29");
+ });
+ 
+ test("server jsonRestApiHost entrypoint exposes only the focused host API", async () => {
+   const hostModule = await import("../src/server/jsonRestApiHost.js");
+   assert.equal(Object.hasOwn(hostModule, "simplifyJsonApiDocument"), false);
++  assert.equal(Object.hasOwn(hostModule, "createJsonApiInputRecord"), false);
++  assert.equal(Object.hasOwn(hostModule, "createJsonApiRelationship"), false);
+ });
+ 
+ test("server entrypoint exports shared host helpers", () => {
+   assert.equal(typeof addResourceIfMissing, "function");
+   assert.equal(typeof buildJsonRestQueryParams, "function");
+-  assert.equal(typeof createJsonApiInputRecord, "function");
+-  assert.equal(typeof createJsonApiRelationship, "function");
+   assert.equal(typeof createJsonRestResourceScopeOptions, "function");
+   assert.equal(typeof createJsonRestContext, "function");
+   assert.equal(typeof createJsonRestApiHost, "function");
+@@ -95,7 +93,6 @@ test("createJsonRestContext returns an empty mutable object when source context
+ test("extractJsonRestCollectionRows understands the internal collection-document contract", () => {
+   const rows = [{ id: "1" }, { id: "2" }];
+ 
+-  assert.deepEqual(extractJsonRestCollectionRows(rows), rows);
+   assert.deepEqual(
+     extractJsonRestCollectionRows({
+       data: rows,
+@@ -105,8 +102,10 @@ test("extractJsonRestCollectionRows understands the internal collection-document
+     }),
+     rows
+   );
+-  assert.deepEqual(extractJsonRestCollectionRows({ data: null }), []);
+-  assert.deepEqual(extractJsonRestCollectionRows(null), []);
++  assert.deepEqual(extractJsonRestCollectionRows({ data: [] }), []);
++  for (const malformed of [rows, { data: null }, {}, null, undefined]) {
++    assert.throws(() => extractJsonRestCollectionRows(malformed), /collection response must contain a data array/);
++  }
+ });
+ 
+ test("createJsonRestApiHost installs normalizeRecordId as the default resource id normalizer", async () => {
+@@ -136,7 +135,7 @@ test("createJsonRestApiHost installs normalizeRecordId as the default resource i
+   assert.equal(api.vars.normalizeId(7.5), null);
+ });
+ 
+-test("createJsonRestApiHost configures the internal json-rest logger at error level", async () => {
++test("createJsonRestApiHost uses the v2 runtime, error-only default logging and an injected logger", async (t) => {
+   const fakeKnex = Object.assign(() => {}, {
+     client: {
+       config: {
+@@ -153,11 +152,25 @@ test("createJsonRestApiHost configures the internal json-rest logger at error le
+     transaction() {}
+   });
+ 
++  const messages = [];
+   const api = await createJsonRestApiHost({
+-    knex: fakeKnex
++    knex: fakeKnex,
++    logger: { error: (...args) => messages.push(args) }
+   });
+ 
+-  assert.equal(api.options.logging.level, "error");
++  assert.ok(api instanceof JsonRestApi);
++  assert.equal(api.vars.format, "plain");
++  assert.equal(api.vars.returning, "full");
++  assert.equal(api.options.logging, undefined);
++  api.log.error("failure", { code: "example" });
++  assert.deepEqual(messages, [["failure", { code: "example" }]]);
++
++  const errorSink = t.mock.method(console, "error", () => {});
++  const defaultApi = await createJsonRestApiHost({ knex: fakeKnex });
++  defaultApi.log.info("quiet");
++  defaultApi.log.error("default failure");
++  assert.equal(errorSink.mock.callCount(), 1);
++  assert.deepEqual(errorSink.mock.calls[0].arguments, ["default failure"]);
+ });
+ 
+ test("createJsonRestApiHost installs row policies before resources are added", async () => {
+@@ -200,7 +213,7 @@ test("createJsonRestApiHost installs row policies before resources are added", a
+   assert.equal(scopeOptions.rowPolicy, rowPolicy);
+ });
+ 
+-test("shared query/document helpers build json-rest-api request shapes", () => {
++test("shared query helper builds json-rest-api request shapes", () => {
+   assert.deepEqual(
+     buildJsonRestQueryParams("contacts", {
+       q: "Merc",
+@@ -232,70 +245,6 @@ test("shared query/document helpers build json-rest-api request shapes", () => {
+     }
+   );
+ 
+-  assert.deepEqual(
+-    createJsonApiInputRecord("contacts", {
+-      name: "Merc"
+-    }, {
+-      id: 7,
+-      relationships: {
+-        workspace: createJsonApiRelationship("workspaces", 9)
+-      }
+-    }),
+-    {
+-      data: {
+-        type: "contacts",
+-        id: "7",
+-        attributes: {
+-          name: "Merc"
+-        },
+-        relationships: {
+-          workspace: {
+-            data: {
+-              type: "workspaces",
+-              id: "9"
+-            }
+-          }
+-        }
+-      }
+-    }
+-  );
+-
+-  assert.deepEqual(
+-    createJsonApiInputRecord("products", {
+-      serviceId: "9",
+-      name: "Style Groom"
+-    }, {
+-      resource: {
+-        schema: {
+-          serviceId: {
+-            type: "id",
+-            belongsTo: "services",
+-            as: "service"
+-          },
+-          name: {
+-            type: "string"
+-          }
+-        }
+-      }
+-    }),
+-    {
+-      data: {
+-        type: "products",
+-        attributes: {
+-          name: "Style Groom"
+-        },
+-        relationships: {
+-          service: {
+-            data: {
+-              type: "services",
+-              id: "9"
+-            }
+-          }
+-        }
+-      }
+-    }
+-  );
+-
+ });
+ 
+ test("buildJsonRestQueryParams preserves structured filter values", () => {
+@@ -424,16 +373,7 @@ test("createJsonRestResourceScopeOptions clones canonical resource metadata and
+   assert.equal(result.schema.createdAt.storage.serialize, serializer);
+   assert.equal(result.schema.createdAt.storage.serialize(null), null);
+   assert.equal(result.schema.createdAt.storage.writeSerializer, undefined);
+-  assert.equal(
+-    result.schema.publishedOn.storage.serialize(new Date("2024-02-29T00:00:00.000Z")),
+-    "2024-02-29"
+-  );
+-  assert.equal(result.schema.publishedOn.storage.serialize("2024-02-29"), "2024-02-29");
+-  assert.equal(result.schema.publishedOn.storage.serialize(null), null);
+-  assert.throws(
+-    () => result.schema.publishedOn.storage.serialize("2023-02-29"),
+-    /valid YYYY-MM-DD/
+-  );
++  assert.equal(result.schema.publishedOn.storage, undefined);
+   assert.equal(result.schema.bookingSteps.virtual, true);
+   assert.equal(result.schema.pets.virtual, true);
+   assert.equal(result.normalizeId, normalizeId);
+@@ -639,122 +579,110 @@ test("createJsonRestApiHost installs json-rest-api query projections", async ()
+   assert.equal(typeof api.resources.projectionContacts.vars.queryFields.displayName.select, "function");
+ });
+ 
+-test("createJsonRestApiHost returns JSON-native temporal values from database records", async () => {
+-  const fakeKnex = Object.assign(() => {}, {
+-    client: {
+-      config: {
+-        client: "sqlite3"
+-      }
+-    },
+-    async raw() {
+-      return [{ version: "3.35.5" }];
+-    },
+-    transaction() {}
++async function createTemporalFixture() {
++  const knex = knexLib({
++    client: "better-sqlite3",
++    connection: { filename: ":memory:" },
++    useNullAsDefault: true
+   });
+-  const api = await createJsonRestApiHost({ knex: fakeKnex });
+-
+-  await api.addResource("books", createJsonRestResourceScopeOptions({
+-    tableName: "books",
+-    schema: {
+-      id: { type: "id", primary: true },
+-      publishedOn: { type: "date" },
+-      scheduledAt: { type: "dateTime" },
+-      opensAt: { type: "time" }
+-    }
+-  }));
+-  await api.addResource("holidays", createJsonRestResourceScopeOptions({
+-    tableName: "holidays",
+-    schema: {
+-      id: { type: "id", primary: true },
+-      observedOn: { type: "date" }
+-    }
+-  }));
+-
+-  const scheduledAt = new Date("2024-02-29T12:34:56.000Z");
+-  const record = {
+-    data: {
+-      type: "books",
+-      id: "1",
+-      attributes: {
+-        publishedOn: new Date("2024-02-29T00:00:00.000Z"),
+-        scheduledAt,
+-        opensAt: "09:45:00"
++  try {
++    await knex.schema.createTable("holidays", (table) => {
++      table.increments("id");
++      table.date("observed_on");
++    });
++    await knex.schema.createTable("books", (table) => {
++      table.increments("id");
++      table.date("published_on");
++      table.dateTime("scheduled_at");
++      table.time("opens_at");
++      table.integer("holiday_id").references("id").inTable("holidays");
++    });
++    const api = await createJsonRestApiHost({ knex });
++    await api.addResource("holidays", createJsonRestResourceScopeOptions({
++      tableName: "holidays",
++      schema: {
++        id: { type: "id", primary: true },
++        observedOn: { type: "date" }
+       }
+-    },
+-    included: [{
+-      type: "holidays",
+-      id: "7",
+-      attributes: {
+-        observedOn: new Date("2024-03-01T00:00:00.000Z")
++    }));
++    await api.addResource("books", createJsonRestResourceScopeOptions({
++      tableName: "books",
++      schema: {
++        id: { type: "id", primary: true },
++        publishedOn: { type: "date" },
++        scheduledAt: { type: "dateTime" },
++        opensAt: { type: "time" },
++        holidayId: { type: "id", belongsTo: "holidays", as: "holiday", nullable: true }
+       }
+-    }]
+-  };
++    }));
++    return { api, knex };
++  } catch (error) {
++    await knex.destroy();
++    throw error;
++  }
++}
+ 
+-  await api.runHooks("finish", {
+-    record
++test("createJsonRestApiHost uses core temporal normalization for writes, reads and includes", async (t) => {
++  const { api, knex } = await createTemporalFixture();
++  t.after(() => knex.destroy());
++  const holiday = await api.resources.holidays.post({ data: { observedOn: "2024-03-01" } });
++  const book = await api.resources.books.post({
++    data: {
++      publishedOn: "2024-02-29",
++      scheduledAt: "2024-02-29T20:34:56+08:00",
++      opensAt: "09:45",
++      holiday: holiday.id
++    }
+   });
+ 
+-  assert.equal(record.data.attributes.publishedOn, "2024-02-29");
+-  assert.equal(record.data.attributes.scheduledAt, "2024-02-29T12:34:56.000Z");
+-  assert.equal(record.data.attributes.opensAt, "09:45:00");
+-  assert.equal(record.included[0].attributes.observedOn, "2024-03-01");
++  assert.equal(book.publishedOn, "2024-02-29");
++  assert.equal(book.scheduledAt, "2024-02-29T12:34:56.000Z");
++  assert.equal(book.opensAt, "09:45:00");
++  const document = await api.resources.books.get({
++    id: book.id,
++    format: "jsonapi",
++    queryParams: { include: ["holiday"] }
++  });
++  assert.equal(document.data.attributes.publishedOn, "2024-02-29");
++  assert.equal(document.data.attributes.scheduledAt, "2024-02-29T12:34:56.000Z");
++  assert.equal(document.included[0].attributes.observedOn, "2024-03-01");
++  await assert.rejects(
++    () => api.resources.books.patch({ id: book.id, data: { publishedOn: "2023-02-29" } }),
++    (error) => error.code === "REST_API_VALIDATION"
++  );
+ });
+ 
+ test("calendar date writes and responses keep leap day across server time zones", () => {
+-  const hostModuleUrl = new URL(
+-    "../src/server/jsonRestApiHost.js",
+-    import.meta.url
+-  ).href;
++  const hostModuleUrl = new URL("../src/server/jsonRestApiHost.js", import.meta.url).href;
+   const script = `
+-    import {
+-      createJsonRestApiHost,
+-      createJsonRestResourceScopeOptions
+-    } from ${JSON.stringify(hostModuleUrl)};
+-    const fakeKnex = Object.assign(() => {}, {
+-      client: { config: { client: "sqlite3" } },
+-      async raw() { return [{ version: "3.35.5" }]; },
+-      transaction() {}
+-    });
+-    const api = await createJsonRestApiHost({ knex: fakeKnex });
+-    const scopeOptions = createJsonRestResourceScopeOptions({
+-      tableName: "books",
+-      schema: {
+-        id: { type: "id", primary: true },
+-        publishedOn: { type: "date" },
+-        scheduledAt: { type: "dateTime" },
+-        opensAt: { type: "time" }
+-      }
+-    });
+-    await api.addResource("books", scopeOptions);
+-    const record = {
+-      data: {
+-        type: "books",
+-        id: "1",
+-        attributes: {
+-          publishedOn: new Date("2024-02-29T00:00:00.000Z"),
+-          scheduledAt: new Date("2024-02-29T12:34:56.000Z"),
++    import knexLib from "knex";
++    import { createJsonRestApiHost, createJsonRestResourceScopeOptions } from ${JSON.stringify(hostModuleUrl)};
++    ${createTemporalFixture.toString()}
++    const { api, knex } = await createTemporalFixture();
++    try {
++      const book = await api.resources.books.post({
++        data: {
++          publishedOn: "2024-02-29",
++          scheduledAt: "2024-02-29T12:34:56.000Z",
+           opensAt: "09:45:00"
+         }
+-      }
+-    };
+-    await api.runHooks("finish", { record });
+-    process.stdout.write(JSON.stringify({
+-      write: scopeOptions.schema.publishedOn.storage.serialize(
+-        new Date("2024-02-29T00:00:00.000Z")
+-      ),
+-      publishedOn: record.data.attributes.publishedOn,
+-      scheduledAt: record.data.attributes.scheduledAt,
+-      opensAt: record.data.attributes.opensAt
+-    }));
++      });
++      const row = await knex("books").where({ id: book.id }).first();
++      process.stdout.write(JSON.stringify({
++        write: row.published_on,
++        publishedOn: book.publishedOn,
++        scheduledAt: book.scheduledAt,
++        opensAt: book.opensAt
++      }));
++    } finally {
++      await knex.destroy();
++    }
+   `;
+ 
+   for (const timezone of ["UTC", "Australia/Perth", "America/Los_Angeles", "Pacific/Kiritimati"]) {
+     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+       encoding: "utf8",
+-      env: {
+-        ...process.env,
+-        TZ: timezone
+-      }
++      env: { ...process.env, TZ: timezone }
+     });
+ 
+     assert.equal(result.status, 0, result.stderr);
+@@ -767,36 +695,17 @@ test("calendar date writes and responses keep leap day across server time zones"
+   }
+ });
+ 
+-test("createJsonRestApiHost maps UTC database datetimes to RFC 3339 strings", async () => {
+-  const fakeKnex = Object.assign(() => {}, {
+-    client: { config: { client: "sqlite3" } },
+-    async raw() {
+-      return [{ version: "3.35.5" }];
+-    },
+-    transaction() {}
++test("createJsonRestApiHost maps native database datetime strings through core reads", async (t) => {
++  const { api, knex } = await createTemporalFixture();
++  t.after(() => knex.destroy());
++  await knex("books").insert({
++    id: 1,
++    published_on: "2024-02-29",
++    scheduled_at: "2024-02-29 12:34:56.123",
++    opens_at: "09:45:00"
+   });
+-  const api = await createJsonRestApiHost({ knex: fakeKnex });
+-
+-  await api.addResource("jobs", createJsonRestResourceScopeOptions({
+-    tableName: "jobs",
+-    schema: {
+-      id: { type: "id", primary: true },
+-      scheduledAt: { type: "dateTime" }
+-    }
+-  }));
+-  const record = {
+-    data: {
+-      type: "jobs",
+-      id: "1",
+-      attributes: {
+-        scheduledAt: "2024-02-29 12:34:56.123"
+-      }
+-    }
+-  };
+-
+-  await api.runHooks("finish", { record });
+-
+-  assert.equal(record.data.attributes.scheduledAt, "2024-02-29T12:34:56.123Z");
++  const book = await api.resources.books.get({ id: "1" });
++  assert.equal(book.scheduledAt, "2024-02-29T12:34:56.123Z");
+ });
+ 
+ test("returnNullWhenJsonRestResourceMissing only swallows missing-resource errors", async () => {
+@@ -841,6 +750,7 @@ test("typed invalid sparse fields become a stable 400 without message matching",
+       assert.equal(error.status, 400);
+       assert.equal(error.code, "JSON_API_FIELDSET_INVALID");
+       assert.equal(error.message, sparseFieldError.message);
++      assert.equal(error.cause, sparseFieldError);
+       return true;
+     }
+   );
+@@ -862,6 +772,47 @@ test("typed invalid sparse fields become a stable 400 without message matching",
+   );
+ });
+ 
++test("missing-resource mapping preserves failures from unresolved or committed writes", async () => {
++  const cause = Object.freeze({ code: "REST_API_RESOURCE", subtype: "not_found" });
++  for (const transactionOutcome of ["pending", "committed", "unknown"]) {
++    const failure = new RestApiWriteError("Missing resource", { cause, transactionOutcome });
++    await assert.rejects(
++      () => returnNullWhenJsonRestResourceMissing(() => Promise.reject(failure)),
++      (error) => error === failure
++    );
++  }
++  for (const transactionOutcome of ["none", "rolledBack"]) {
++    const failure = new RestApiWriteError("Missing resource", { cause, transactionOutcome });
++    assert.equal(await returnNullWhenJsonRestResourceMissing(() => Promise.reject(failure)), null);
++  }
++});
++
++test("fieldset mapping retains write outcome and the original error chain", async () => {
++  const cause = Object.freeze(new RestApiFieldsetError({ field: "privateNotes", resourceType: "books" }));
++  const failure = new RestApiWriteError(cause.message, { cause, transactionOutcome: "committed" });
++  await assert.rejects(
++    () => returnBadRequestWhenJsonRestFieldsetInvalid(() => Promise.reject(failure)),
++    (error) => {
++      assert.equal(error.code, "JSON_API_FIELDSET_INVALID");
++      assert.equal(error.transactionOutcome, "committed");
++      assert.equal(error.cause, failure);
++      assert.equal(error.cause.cause, cause);
++      return true;
++    }
++  );
++});
++
++test("unrelated primitive failures remain unchanged through host error mapping", async () => {
++  for (const failure of [null, undefined, "failure", 7]) {
++    for (const mapError of [returnNullWhenJsonRestResourceMissing, returnBadRequestWhenJsonRestFieldsetInvalid]) {
++      await assert.rejects(
++        () => mapError(() => Promise.reject(failure)),
++        (error) => error === failure
++      );
++    }
++  }
++});
++
+ test("scope resolvers understand explicit scopeValues and JSKIT visibilityContext", () => {
+   assert.equal(resolveWorkspaceScopeValue({
+     scopeValues: {
+diff --git a/packages/kernel/server/runtime/fastifyBootstrap.js b/packages/kernel/server/runtime/fastifyBootstrap.js
+index 5ebf01c16fb1f05b49dc1bb7cba62e2dfd2b1470..e5f242892e1084101c054bfc72d20984684b017f 100644
+--- a/packages/kernel/server/runtime/fastifyBootstrap.js
++++ b/packages/kernel/server/runtime/fastifyBootstrap.js
+@@ -1,5 +1,5 @@
+ import { ActionRuntimeError } from "../../shared/actions/actionDefinitions.js";
+-import { normalizeOpaqueId } from "../../shared/support/normalize.js";
++import { normalizeOpaqueId, normalizeTransactionOutcome } from "../../shared/support/normalize.js";
+ import { resolveDefaultSurfaceId } from "../support/appConfig.js";
+ 
+ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
+@@ -255,7 +255,9 @@ function resolveRequestRouteTransport(request) {
+ 
+ function applyRouteTransportErrorResponse(reply, request, error, {
+   statusCode = 500,
+-  normalizedErrorCode = ""
++  normalizedErrorCode = "",
++  message = error?.message,
++  exposeDetails = true
+ } = {}) {
+   const transport = resolveRequestRouteTransport(request);
+   const errorSerializer = transport && typeof transport.error === "function" ? transport.error : null;
+@@ -267,7 +269,9 @@ function applyRouteTransportErrorResponse(reply, request, error, {
+     request,
+     reply,
+     statusCode,
+-    code: normalizedErrorCode
++    code: normalizedErrorCode,
++    message,
++    exposeDetails
+   });
+ 
+   if (payload && typeof payload.then === "function") {
+@@ -308,6 +312,8 @@ function registerApiErrorHandler(
+ 
+   app.setErrorHandler((error, request, reply) => {
+     const normalizedErrorCode = String(error?.code || "").trim();
++    const transactionOutcome = normalizeTransactionOutcome(error?.transactionOutcome);
++    const outcomeFields = transactionOutcome ? { transactionOutcome } : {};
+     const isCsrfErrorCode = normalizedErrorCode.startsWith("FST_CSRF_");
+     const statusFromError = Number(error?.statusCode || error?.status);
+     const statusCode =
+@@ -325,6 +331,7 @@ function registerApiErrorHandler(
+       reply.code(400).send({
+         error: "Validation failed.",
+         code: validationErrorCode,
++        ...outcomeFields,
+         fieldErrors,
+         details: {
+           fieldErrors
+@@ -336,7 +343,8 @@ function registerApiErrorHandler(
+     if (isAppError(error) || error instanceof ActionRuntimeError) {
+       if (applyRouteTransportErrorResponse(reply, request, error, {
+         statusCode: error.status,
+-        normalizedErrorCode: normalizedErrorCode || "app_error"
++        normalizedErrorCode: normalizedErrorCode || "app_error",
++        exposeDetails: shouldExposeAppErrorDetails(normalizedErrorCode)
+       })) {
+         return;
+       }
+@@ -349,7 +357,8 @@ function registerApiErrorHandler(
+       const appErrorCode = normalizedErrorCode || "app_error";
+       const payload = {
+         error: error.message,
+-        code: appErrorCode
++        code: appErrorCode,
++        ...outcomeFields
+       };
+       if (error.details && shouldExposeAppErrorDetails(appErrorCode)) {
+         payload.details = error.details;
+@@ -385,7 +394,8 @@ function registerApiErrorHandler(
+       normalizedErrorCode || (statusCode >= 500 ? "internal_server_error" : "request_failed");
+     const payload = {
+       error: message,
+-      code: fallbackErrorCode
++      code: fallbackErrorCode,
++      ...outcomeFields
+     };
+     if (isCsrfErrorCode) {
+       payload.details = {
+@@ -394,7 +404,9 @@ function registerApiErrorHandler(
+     }
+     if (applyRouteTransportErrorResponse(reply, request, error, {
+       statusCode,
+-      normalizedErrorCode: fallbackErrorCode
++      normalizedErrorCode: fallbackErrorCode,
++      message,
++      exposeDetails: statusCode < 500
+     })) {
+       return;
+     }
+diff --git a/packages/kernel/server/runtime/fastifyBootstrap.test.js b/packages/kernel/server/runtime/fastifyBootstrap.test.js
+index c8a1c712f675cb9131b90722520327866a608aee..56165ade58405b1965810ef365f39b5e93bc08e1 100644
+--- a/packages/kernel/server/runtime/fastifyBootstrap.test.js
++++ b/packages/kernel/server/runtime/fastifyBootstrap.test.js
+@@ -155,6 +155,44 @@ test("registerApiErrorHandler includes internal_server_error code for unhandled
+   assert.equal(reply.payload.error, "Internal server error.");
+ });
+ 
++test("registerApiErrorHandler exposes only allowlisted transaction outcomes", () => {
++  const fastify = createFastifyStub();
++  registerApiErrorHandler(fastify, { isAppError });
++  for (const transactionOutcome of ["none", "pending", "committed", "rolledBack", "unknown"]) {
++    const error = Object.assign(new Error("Private SQL failure"), {
++      transactionOutcome,
++      cause: { password: "private" },
++      cleanupErrors: [{ message: "private cleanup" }]
++    });
++    const reply = createReplyStub();
++    fastify.errorHandler(error, {}, reply);
++    assert.equal(reply.statusCode, 500);
++    assert.deepEqual(reply.payload, {
++      error: "Internal server error.",
++      code: "internal_server_error",
++      transactionOutcome
++    });
++  }
++  for (const transactionOutcome of [undefined, "success", { secret: "private" }]) {
++    const reply = createReplyStub();
++    fastify.errorHandler(Object.assign(new Error("private"), { transactionOutcome }), {}, reply);
++    assert.equal(Object.hasOwn(reply.payload, "transactionOutcome"), false);
++  }
++});
++
++test("AppError and validation payloads retain transaction outcomes", () => {
++  const fastify = createFastifyStub();
++  registerApiErrorHandler(fastify, { isAppError });
++  for (const error of [
++    Object.assign(new AppError(409, "Conflict."), { transactionOutcome: "rolledBack" }),
++    { validation: [{ instancePath: "/title", message: "Required" }], transactionOutcome: "none" }
++  ]) {
++    const reply = createReplyStub();
++    fastify.errorHandler(error, {}, reply);
++    assert.equal(reply.payload.transactionOutcome, error.transactionOutcome);
++  }
++});
++
+ test("registerApiErrorHandler keeps known error code for non-app errors", () => {
+   const fastify = createFastifyStub();
+   registerApiErrorHandler(fastify, { isAppError });
+diff --git a/packages/kernel/shared/support/normalize.js b/packages/kernel/shared/support/normalize.js
+index 6a56f7432dade7bd866aa504afbe48b1dd13ef30..fb3226ef214920beb6b7a0a41b4ed9ffb6480197 100644
+--- a/packages/kernel/shared/support/normalize.js
++++ b/packages/kernel/shared/support/normalize.js
+@@ -1,3 +1,9 @@
++const TRANSACTION_OUTCOMES = Object.freeze(["none", "pending", "committed", "rolledBack", "unknown"]);
++
++function normalizeTransactionOutcome(value) {
++  return TRANSACTION_OUTCOMES.includes(value) ? value : "";
++}
++
+ function normalizeText(value, { fallback = "" } = {}) {
+   const normalized = String(value || "").trim();
+   return normalized || fallback;
+@@ -351,6 +357,8 @@ function ensureNonEmptyText(value, label = "value") {
+ }
+ 
+ export {
++  TRANSACTION_OUTCOMES,
++  normalizeTransactionOutcome,
+   normalizeText,
+   hasValue,
+   normalizeBoolean,
+diff --git a/packages/kernel/shared/support/normalize.test.js b/packages/kernel/shared/support/normalize.test.js
+index 8aac76166c860f1c026bd702b60bc548e5f6f125..e6e88474d6e2f03408d9517cdbea53e71d2dccc7 100644
+--- a/packages/kernel/shared/support/normalize.test.js
++++ b/packages/kernel/shared/support/normalize.test.js
+@@ -17,9 +17,19 @@ import {
+   normalizeOneOf,
+   normalizeQueryToken,
+   normalizeText,
++  normalizeTransactionOutcome,
+   normalizeUniqueTextList
+ } from "./normalize.js";
+ 
++test("normalizeTransactionOutcome accepts only the documented literal outcomes", () => {
++  for (const value of ["none", "pending", "committed", "rolledBack", "unknown"]) {
++    assert.equal(normalizeTransactionOutcome(value), value);
++  }
++  for (const value of [undefined, null, false, 0, "", "rolledback", " committed ", { toString: () => "committed" }]) {
++    assert.equal(normalizeTransactionOutcome(value), "");
++  }
++});
++
+ test("hasValue returns false for nullish and blank text, true otherwise", () => {
+   assert.equal(hasValue(null), false);
+   assert.equal(hasValue(undefined), false);
+diff --git a/packages/users-core/src/server/UsersIdentityProvider.js b/packages/users-core/src/server/UsersIdentityProvider.js
+index 7a8d04140e2a6d987e85dfe15afbbdb80cda6ee0..76ebae6f928dab2b9ef4f77588e3231e52d771ea 100644
+--- a/packages/users-core/src/server/UsersIdentityProvider.js
++++ b/packages/users-core/src/server/UsersIdentityProvider.js
+@@ -14,14 +14,13 @@ const UsersIdentityProvider = defineProvider({
+   id: "users.identity",
+   requires: {
+     authExtensions: "auth.extensions",
+-    database: "runtime.database",
+     extensions: "users.extensions",
+     jsonRestApi: "runtime.json-rest-api"
+   },
+   provides: {
+     identity: "users.identity"
+   },
+-  async setup({ authExtensions, database, extensions, jsonRestApi }) {
++  async setup({ authExtensions, extensions, jsonRestApi }) {
+     const scopeOptions = {
+       writeSerializers: { "datetime-utc": toDatabaseDateTimeUtc }
+     };
+@@ -36,8 +35,8 @@ const UsersIdentityProvider = defineProvider({
+       createJsonRestResourceScopeOptions(userSettingsResource, scopeOptions)
+     );
+     const repositories = Object.freeze({
+-      userProfiles: createUserProfilesRepository({ api: jsonRestApi, knex: database.knex }),
+-      userSettings: createUserSettingsRepository({ api: jsonRestApi, knex: database.knex })
++      userProfiles: createUserProfilesRepository({ api: jsonRestApi }),
++      userSettings: createUserSettingsRepository({ api: jsonRestApi })
+     });
+     const profileProjector = createAuthProfileSyncService({
+       userProfilesRepository: repositories.userProfiles,
+diff --git a/packages/users-core/src/server/common/repositories/repositoryUtils.js b/packages/users-core/src/server/common/repositories/repositoryUtils.js
+index 63ee41bb8bf9a8bca03c7f75eb99ba37cf9f6020..f21f7137159522528eec363ce60495aaf90da162 100644
+--- a/packages/users-core/src/server/common/repositories/repositoryUtils.js
++++ b/packages/users-core/src/server/common/repositories/repositoryUtils.js
+@@ -1,9 +1,8 @@
+ import {
+   normalizeDbRecordId,
+-  toIsoString,
+-  createWithTransaction
++  toIsoString
+ } from "@jskit-ai/database-runtime/shared";
+-import { isDuplicateEntryError } from "@jskit-ai/database-runtime/shared/duplicateEntry";
++import { findDuplicateEntryError, isDuplicateEntryError } from "@jskit-ai/database-runtime/shared/duplicateEntry";
+ import { normalizeLowerText, normalizeRecordId, normalizeText } from "@jskit-ai/kernel/shared/support/normalize";
+ 
+ function uniqueSorted(values) {
+@@ -32,12 +31,12 @@ function toDbJson(value, fallback = {}) {
+ export {
+   toIsoString,
+   isDuplicateEntryError,
++  findDuplicateEntryError,
+   normalizeText,
+   normalizeLowerText,
+   normalizeRecordId,
+   normalizeDbRecordId,
+   uniqueSorted,
+   parseJson,
+-  toDbJson,
+-  createWithTransaction
++  toDbJson
+ };
+diff --git a/packages/users-core/src/server/common/repositories/userProfilesRepository.js b/packages/users-core/src/server/common/repositories/userProfilesRepository.js
+index 97b0c128e559a9aa12c564fb01721c436f25b712..76d25a6c1bb8224bca695dfa6a3bebba24fccac3 100644
+--- a/packages/users-core/src/server/common/repositories/userProfilesRepository.js
++++ b/packages/users-core/src/server/common/repositories/userProfilesRepository.js
+@@ -1,5 +1,5 @@
+ import {
+-  createWithTransaction,
++  findDuplicateEntryError,
+   isDuplicateEntryError,
+   normalizeDbRecordId,
+   normalizeLowerText,
+@@ -8,13 +8,11 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { normalizeIdentity } from "../support/identity.js";
+ 
+-const RESOURCE_TYPE = "userProfiles";
+ const USERNAME_MAX_LENGTH = 120;
+ 
+ function normalizeUsername(value) {
+@@ -114,25 +112,28 @@ function buildUsernameCandidate(baseUsername, suffix) {
+ }
+ 
+ function duplicateTargetsEmail(error) {
+-  if (!isDuplicateEntryError(error)) {
++  const duplicate = findDuplicateEntryError(error);
++  if (!duplicate) {
+     return false;
+   }
+ 
+-  const message = normalizeLowerText(error?.sqlMessage || error?.message);
++  const message = normalizeLowerText(duplicate.sqlMessage || duplicate.message);
+   return message.includes("email");
+ }
+ 
+ function duplicateTargetsUsername(error) {
+-  if (!isDuplicateEntryError(error)) {
++  const duplicate = findDuplicateEntryError(error);
++  if (!duplicate) {
+     return false;
+   }
+ 
+-  const message = normalizeLowerText(error?.sqlMessage || error?.message);
++  const message = normalizeLowerText(duplicate.sqlMessage || duplicate.message);
+   return message.includes("username");
+ }
+ 
+-function createDuplicateEmailConflictError() {
+-  const error = new Error("Email is already linked to a different profile.");
++function createDuplicateEmailConflictError(cause) {
++  const error = new Error("Email is already linked to a different profile.", { cause });
++  error.transactionOutcome = cause.transactionOutcome;
+   error.code = "USER_PROFILE_EMAIL_CONFLICT";
+   return error;
+ }
+@@ -150,7 +151,7 @@ async function resolveUniqueUsername(api, baseUsername, { excludeUserId = null,
+           }
+         },
+         transaction,
+-        simplified: true
++        format: "plain"
+       })
+     );
+     const existing = existingRows[0] || null;
+@@ -163,15 +164,12 @@ async function resolveUniqueUsername(api, baseUsername, { excludeUserId = null,
+   throw new Error("Unable to generate unique username.");
+ }
+ 
+-function createRepository({ api, knex } = {}) {
++function createRepository({ api } = {}) {
+   if (!api?.resources?.userProfiles) {
+     throw new TypeError("internal.repository.user-profiles requires json-rest-api userProfiles resource.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("internal.repository.user-profiles requires knex.");
+-  }
+ 
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryFirst(filters = {}, options = {}) {
+     const rows = extractJsonRestCollectionRows(
+@@ -181,7 +179,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -233,16 +231,13 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            displayName,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        id: normalizedUserId,
++        data: {
++          displayName,
++          updatedAt: new Date().toISOString()
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -259,18 +254,15 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            avatarStorageKey: avatar.avatarStorageKey ?? null,
+-            avatarVersion: avatar.avatarVersion ?? null,
+-            avatarUpdatedAt: toIsoString(avatar.avatarUpdatedAt ?? new Date()),
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        id: normalizedUserId,
++        data: {
++          avatarStorageKey: avatar.avatarStorageKey ?? null,
++          avatarVersion: avatar.avatarVersion ?? null,
++          avatarUpdatedAt: toIsoString(avatar.avatarUpdatedAt ?? new Date()),
++          updatedAt: new Date().toISOString()
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -287,18 +279,15 @@ function createRepository({ api, knex } = {}) {
+ 
+     const updated = await api.resources.userProfiles.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            avatarStorageKey: null,
+-            avatarVersion: null,
+-            avatarUpdatedAt: null,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        id: normalizedUserId,
++        data: {
++          avatarStorageKey: null,
++          avatarVersion: null,
++          avatarUpdatedAt: null,
++          updatedAt: new Date().toISOString()
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -330,84 +319,80 @@ function createRepository({ api, knex } = {}) {
+         context: options?.context || null
+       });
+ 
+-      try {
+-        if (existing) {
+-          const existingUsername = normalizeUsername(existing.username);
+-          const username = existingUsername || (
+-            await resolveUniqueUsername(
+-              api,
+-              requestedUsername || usernameBaseFromEmail(email),
+-              { excludeUserId: existing.id, transaction: trx }
+-            )
+-          );
+-
+-          const updated = await api.resources.userProfiles.patch(
+-            {
+-              inputRecord: createJsonApiInputRecord(
+-                RESOURCE_TYPE,
+-                {
+-                  email,
+-                  displayName,
+-                  username,
+-                  updatedAt: new Date().toISOString()
+-                },
+-                {
+-                  id: normalizeDbRecordId(existing.id, { fallback: null })
+-                }
+-              ),
+-              transaction: trx
+-            },
+-            createJsonRestContext(options?.context || null)
+-          );
+-
+-          return normalizeProfileRecord(updated);
+-        }
+-
+-        const username = await resolveUniqueUsername(
+-          api,
+-          requestedUsername || usernameBaseFromEmail(email),
+-          { transaction: trx }
++      if (existing) {
++        const existingUsername = normalizeUsername(existing.username);
++        const username = existingUsername || (
++          await resolveUniqueUsername(
++            api,
++            requestedUsername || usernameBaseFromEmail(email),
++            { excludeUserId: existing.id, transaction: trx }
++          )
+         );
+ 
+-        const created = await api.resources.userProfiles.post(
++        const updated = await api.resources.userProfiles.patch(
+           {
+-            inputRecord: createJsonApiInputRecord(RESOURCE_TYPE, {
+-              authProvider: identity.provider,
+-              authProviderUserSid: identity.providerUserId,
++            id: normalizeDbRecordId(existing.id, { fallback: null }),
++            data: {
+               email,
+               displayName,
+               username,
+-              createdAt: new Date().toISOString()
+-            }),
++              updatedAt: new Date().toISOString()
++            },
++            format: "plain",
++            returning: "full",
+             transaction: trx
+           },
+           createJsonRestContext(options?.context || null)
+         );
+ 
+-        return normalizeProfileRecord(created);
+-      } catch (error) {
+-        if (duplicateTargetsEmail(error)) {
+-          throw createDuplicateEmailConflictError();
+-        }
+-        if (duplicateTargetsUsername(error)) {
+-          throw error;
+-        }
+-        if (!isDuplicateEntryError(error)) {
+-          throw error;
+-        }
++        return normalizeProfileRecord(updated);
+       }
+ 
+-      return findByIdentity(identity, {
+-        trx,
+-        context: options?.context || null
+-      });
++      const username = await resolveUniqueUsername(
++        api,
++        requestedUsername || usernameBaseFromEmail(email),
++        { transaction: trx }
++      );
++
++      const created = await api.resources.userProfiles.post(
++        {
++          data: {
++            authProvider: identity.provider,
++            authProviderUserSid: identity.providerUserId,
++            email,
++            displayName,
++            username,
++            createdAt: new Date().toISOString()
++          },
++          format: "plain",
++          returning: "full",
++          transaction: trx
++        },
++        createJsonRestContext(options?.context || null)
++      );
++
++      return normalizeProfileRecord(created);
+     };
+ 
+-    if (options?.trx) {
+-      return executeUpsert(options.trx);
++    try {
++      return await (options?.trx ? executeUpsert(options.trx) : withTransaction(executeUpsert));
++    } catch (error) {
++      if (["pending", "rolledBack"].includes(error?.transactionOutcome) && duplicateTargetsEmail(error)) {
++        throw createDuplicateEmailConflictError(error);
++      }
++      // A failed participant cannot recover inside the caller's transaction.
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
++        throw error;
++      }
++      if (duplicateTargetsUsername(error)) {
++        throw error;
++      }
++      const existing = await findByIdentity(identity, { context: options?.context || null });
++      if (existing) {
++        return existing;
++      }
++      throw error;
+     }
+-
+-    return withTransaction(executeUpsert);
+   }
+ 
+   return Object.freeze({
+diff --git a/packages/users-core/src/server/common/repositories/userSettingsRepository.js b/packages/users-core/src/server/common/repositories/userSettingsRepository.js
+index a57a7114b8645e1a80c0c66f6c06f8ec5da1499a..1b8af3bb3caf826c5eb4c85cd26d7a8f7865c9c5 100644
+--- a/packages/users-core/src/server/common/repositories/userSettingsRepository.js
++++ b/packages/users-core/src/server/common/repositories/userSettingsRepository.js
+@@ -1,16 +1,13 @@
+ import {
+   normalizeRecordId,
+-  isDuplicateEntryError,
+-  createWithTransaction
++  isDuplicateEntryError
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { DEFAULT_USER_SETTINGS } from "../../../shared/settings.js";
+ 
+-const RESOURCE_TYPE = "userSettings";
+ const USER_SETTINGS_PATCH_FIELDS = Object.freeze([
+   "theme",
+   "locale",
+@@ -56,14 +53,11 @@ function createDefaultUserSettingsCreatePayload(userId) {
+   };
+ }
+ 
+-function createRepository({ api, knex } = {}) {
++function createRepository({ api } = {}) {
+   if (!api?.resources?.userSettings) {
+     throw new TypeError("userSettingsRepository requires json-rest-api userSettings resource.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("userSettingsRepository requires knex.");
+-  }
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryFirst(filters = {}, options = {}) {
+     const rows = extractJsonRestCollectionRows(
+@@ -73,7 +67,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -105,19 +99,15 @@ function createRepository({ api, knex } = {}) {
+     try {
+       await api.resources.userSettings.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            createDefaultUserSettingsCreatePayload(normalizedUserId),
+-            {
+-              id: normalizedUserId
+-            }
+-          ),
++          data: createDefaultUserSettingsCreatePayload(normalizedUserId),
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+       );
+     } catch (error) {
+-      if (!isDuplicateEntryError(error)) {
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+         throw error;
+       }
+     }
+@@ -141,16 +131,13 @@ function createRepository({ api, knex } = {}) {
+ 
+     await api.resources.userSettings.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            ...updatePayload,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedUserId
+-          }
+-        ),
++        id: normalizedUserId,
++        data: {
++          ...updatePayload,
++          updatedAt: new Date().toISOString()
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/users-core/test/authProfileSyncService.test.js b/packages/users-core/test/authProfileSyncService.test.js
+index bdac90010ed428fd488fa9d66936f742f5cbdc8d..d80993687802e6ff73017d31064aee52253d8a9b 100644
+--- a/packages/users-core/test/authProfileSyncService.test.js
++++ b/packages/users-core/test/authProfileSyncService.test.js
+@@ -147,3 +147,31 @@ test("authProfileSyncService.findByIdentity normalizes provider identity input",
+     providerUserId: "user-1"
+   });
+ });
++
++test("auth profile sync joins the supplied managed transaction and propagates contributor failure", async () => {
++  const trx = { trxId: "managed-profile-sync" };
++  const failure = new Error("Lifecycle participant failed");
++  const calls = [];
++  const profile = {
++    id: "7", authProvider: "local", authProviderUserSid: "local-7",
++    email: "ada@example.com", displayName: "Ada"
++  };
++  const service = createService({
++    userProfilesRepository: {
++      async findByIdentity(_identity, options) { calls.push(options.trx); return null; },
++      async upsert(_data, options) { calls.push(options.trx); return profile; },
++      async withTransaction() { throw new Error("Must join the caller's owner"); }
++    },
++    userSettingsRepository: {
++      async ensureForUserId(_id, options) { calls.push(options.trx); }
++    },
++    resolveLifecycleContributors: () => [{
++      async afterIdentityProfileSynced({ options }) {
++        calls.push(options.trx);
++        throw failure;
++      }
++    }]
++  });
++  await assert.rejects(service.syncIdentityProfile(profile, { trx }), error => error === failure);
++  assert.deepEqual(calls, [trx, trx, trx, trx]);
++});
+diff --git a/packages/users-core/test/featureRuntime.test.js b/packages/users-core/test/featureRuntime.test.js
+index fc6499484c172db4546d94ddcf1b9334ebff7a44..5a834ad9e5e99ab5e5fce633d43b9945a9b7e6ae 100644
+--- a/packages/users-core/test/featureRuntime.test.js
++++ b/packages/users-core/test/featureRuntime.test.js
+@@ -46,7 +46,6 @@ test("UsersFeature assembles account behavior through explicit capabilities", as
+       "auth.extensions": authExtensions,
+       "auth.service": {},
+       "runtime.bootstrap": bootstrap,
+-      "runtime.database": { knex() {} },
+       "runtime.http": {
+         router: {
+           register(method, path) {
+diff --git a/packages/users-core/test/repositoryContracts.test.js b/packages/users-core/test/repositoryContracts.test.js
+index 05d42754eeacdd160d4d531bc576d20be74fff80..7be92891af2b23ed913424280cad390e8cdd563d 100644
+--- a/packages/users-core/test/repositoryContracts.test.js
++++ b/packages/users-core/test/repositoryContracts.test.js
+@@ -5,27 +5,17 @@ import { userProfileResource } from "../src/shared/resources/userProfileResource
+ import { createRepository as createUserProfilesRepository } from "../src/server/common/repositories/userProfilesRepository.js";
+ import { createRepository as createUserSettingsRepository } from "../src/server/common/repositories/userSettingsRepository.js";
+ 
+-function createKnexStub() {
+-  const knex = Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-
+-  return knex;
+-}
+-
+ function asCollectionDocument(rows = []) {
+   return {
+     data: Array.isArray(rows) ? rows : []
+   };
+ }
+ 
+-test("users-core repositories expose withTransaction", async () => {
+-  const knex = createKnexStub();
++test("users-core repositories delegate transaction ownership and failures to the API", async () => {
+   const api = {
++    async transaction(work) {
++      return work({ trxId: "managed-1" });
++    },
+     resources: {
+       userProfiles: {
+         async query() {
+@@ -40,14 +30,16 @@ test("users-core repositories expose withTransaction", async () => {
+     }
+   };
+   const repositories = [
+-    createUserProfilesRepository({ api, knex }),
+-    createUserSettingsRepository({ api, knex })
++    createUserProfilesRepository({ api }),
++    createUserSettingsRepository({ api })
+   ];
+ 
+   for (const repository of repositories) {
+     assert.equal(typeof repository.withTransaction, "function");
+     const result = await repository.withTransaction(async (trx) => ({ id: trx.trxId }));
+-    assert.deepEqual(result, { id: "trx-1" });
++    assert.deepEqual(result, { id: "managed-1" });
++    const failure = new Error("Participant failed");
++    await assert.rejects(repository.withTransaction(async () => { throw failure; }), error => error === failure);
+   }
+ });
+ 
+@@ -59,7 +51,8 @@ function createUserProfilesApiStub(expectedRecord) {
+     api: {
+       resources: {
+         userProfiles: {
+-          async query({ queryParams }) {
++          async query({ queryParams, format }) {
++            assert.equal(format, "plain");
+             calls.push(queryParams?.filters || {});
+             return asCollectionDocument(
+               expectedRecord ? [{
+@@ -74,12 +67,11 @@ function createUserProfilesApiStub(expectedRecord) {
+   };
+ }
+ 
+-test("userSettingsRepository.ensureForUserId sends transaction outside simplified attributes", async () => {
++test("userSettingsRepository.ensureForUserId sends transaction outside plain data", async () => {
+   const trx = { trxId: "trx-1" };
+   let queryCount = 0;
+   let postParams = null;
+   const repository = createUserSettingsRepository({
+-    knex: createKnexStub(),
+     api: {
+       resources: {
+         userSettings: {
+@@ -108,28 +100,25 @@ test("userSettingsRepository.ensureForUserId sends transaction outside simplifie
+ 
+   const record = await repository.ensureForUserId("7", { trx });
+ 
+-  assert.equal(postParams?.simplified, undefined);
++  assert.equal(postParams?.format, "plain");
++  assert.equal(postParams?.returning, "full");
+   assert.equal(postParams?.transaction, trx);
+-  assert.deepEqual(postParams?.inputRecord?.data, {
+-    type: "userSettings",
++  assert.deepEqual(postParams?.data, {
+     id: "7",
+-    attributes: {
+-      id: "7",
+-      ...DEFAULT_USER_SETTINGS
+-    }
++    ...DEFAULT_USER_SETTINGS
+   });
+   assert.equal(record?.id, "7");
+ });
+ 
+-test("userProfilesRepository.upsert sends native JSON:API write documents with transaction outside the record body", async () => {
++test("userProfilesRepository.upsert sends plain data with transaction outside the record body", async () => {
+   const trx = { trxId: "trx-1" };
+   let postParams = null;
+   const repository = createUserProfilesRepository({
+-    knex: createKnexStub(),
+     api: {
+       resources: {
+         userProfiles: {
+-          async query({ queryParams }) {
++          async query({ queryParams, format }) {
++            assert.equal(format, "plain");
+             const filters = queryParams?.filters || {};
+             if (Object.hasOwn(filters, "authProvider") || Object.hasOwn(filters, "authProviderUserSid")) {
+               return asCollectionDocument([]);
+@@ -141,7 +130,7 @@ test("userProfilesRepository.upsert sends native JSON:API write documents with t
+           },
+           async post(params) {
+             postParams = params;
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.data || {};
+             return {
+               id: "11",
+               authProvider: attributes.authProvider,
+@@ -167,11 +156,13 @@ test("userProfilesRepository.upsert sends native JSON:API write documents with t
+     displayName: "Ada Example"
+   }, { trx });
+ 
+-  assert.equal(postParams?.simplified, undefined);
++  assert.equal(postParams?.format, "plain");
++  assert.equal(postParams?.returning, "full");
+   assert.equal(postParams?.transaction, trx);
+-  assert.equal(postParams?.inputRecord?.transaction, undefined);
+-  assert.equal(postParams?.inputRecord?.data?.type, "userProfiles");
+-  assert.equal(postParams?.inputRecord?.data?.attributes?.authProvider, "supabase");
++  assert.equal(postParams?.data?.transaction, undefined);
++  assert.equal(postParams?.document, undefined);
++  assert.equal(postParams?.inputRecord, undefined);
++  assert.equal(postParams?.data?.authProvider, "supabase");
+   assert.equal(record?.id, "11");
+ });
+ 
+@@ -192,11 +183,11 @@ test("userProfilesRepository.upsert patches existing profiles with resource-back
+   };
+   let patchParams = null;
+   const repository = createUserProfilesRepository({
+-    knex: createKnexStub(),
+     api: {
+       resources: {
+         userProfiles: {
+-          async query({ queryParams }) {
++          async query({ queryParams, format }) {
++            assert.equal(format, "plain");
+             const filters = queryParams?.filters || {};
+             if (Object.hasOwn(filters, "authProvider") || Object.hasOwn(filters, "authProviderUserSid")) {
+               return asCollectionDocument([existingRecord]);
+@@ -208,7 +199,7 @@ test("userProfilesRepository.upsert patches existing profiles with resource-back
+           },
+           async patch(params) {
+             patchParams = params;
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.data || {};
+             return {
+               ...existingRecord,
+               ...attributes
+@@ -226,7 +217,7 @@ test("userProfilesRepository.upsert patches existing profiles with resource-back
+     displayName: "Ada Renamed"
+   }, { trx });
+ 
+-  const attributes = patchParams?.inputRecord?.data?.attributes || {};
++  const attributes = patchParams?.data || {};
+   assert.equal(userProfileResource.schema.updatedAt?.type, "dateTime");
+   assert.equal(userProfileResource.schema.updatedAt?.storage?.column, "updated_at");
+   assert.equal(userProfileResource.schema.updatedAt?.storage?.writeSerializer, "datetime-utc");
+@@ -244,7 +235,6 @@ test("userProfilesRepository profile patch helpers stamp updatedAt through the r
+   const trx = { trxId: "trx-1" };
+   const calls = [];
+   const repository = createUserProfilesRepository({
+-    knex: createKnexStub(),
+     api: {
+       resources: {
+         userProfiles: {
+@@ -253,9 +243,9 @@ test("userProfilesRepository profile patch helpers stamp updatedAt through the r
+           },
+           async patch(params) {
+             calls.push(params);
+-            const attributes = params.inputRecord?.data?.attributes || {};
++            const attributes = params.data || {};
+             return {
+-              id: params.inputRecord?.data?.id || "7",
++              id: params.id || "7",
+               authProvider: "local",
+               authProviderUserSid: "local-user-7",
+               email: "ada@example.com",
+@@ -285,21 +275,26 @@ test("userProfilesRepository profile patch helpers stamp updatedAt through the r
+   assert.equal(calls.length, 3);
+   for (const call of calls) {
+     assert.equal(call.transaction, trx);
+-    assert.equal(typeof call.inputRecord?.data?.attributes?.updatedAt, "string");
++    assert.equal(call.id, "7");
++    assert.equal(call.format, "plain");
++    assert.equal(call.returning, "full");
++    assert.equal(call.document, undefined);
++    assert.equal(call.inputRecord, undefined);
++    assert.equal(typeof call.data?.updatedAt, "string");
+   }
+-  assert.deepEqual(Object.keys(calls[0].inputRecord.data.attributes).sort(), ["displayName", "updatedAt"]);
+-  assert.deepEqual(Object.keys(calls[1].inputRecord.data.attributes).sort(), [
++  assert.deepEqual(Object.keys(calls[0].data).sort(), ["displayName", "updatedAt"]);
++  assert.deepEqual(Object.keys(calls[1].data).sort(), [
+     "avatarStorageKey",
+     "avatarUpdatedAt",
+     "avatarVersion",
+     "updatedAt"
+   ]);
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarStorageKey, "avatars/7.png");
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarVersion, "v1");
+-  assert.equal(calls[1].inputRecord.data.attributes.avatarUpdatedAt, avatarUpdatedAt.toISOString());
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarStorageKey, null);
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarVersion, null);
+-  assert.deepEqual(calls[2].inputRecord.data.attributes.avatarUpdatedAt, null);
++  assert.equal(calls[1].data.avatarStorageKey, "avatars/7.png");
++  assert.equal(calls[1].data.avatarVersion, "v1");
++  assert.equal(calls[1].data.avatarUpdatedAt, avatarUpdatedAt.toISOString());
++  assert.deepEqual(calls[2].data.avatarStorageKey, null);
++  assert.deepEqual(calls[2].data.avatarVersion, null);
++  assert.deepEqual(calls[2].data.avatarUpdatedAt, null);
+ });
+ 
+ test("userProfilesRepository.findByEmail normalizes email lookup", async () => {
+@@ -316,8 +311,7 @@ test("userProfilesRepository.findByEmail normalizes email lookup", async () => {
+     createdAt: "2026-04-20T00:00:00.000Z"
+   });
+   const repository = createUserProfilesRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const profile = await repository.findByEmail(" ADA@EXAMPLE.COM ");
+@@ -342,8 +336,7 @@ test("userProfilesRepository.findByIdentity reads existing profiles from collect
+     createdAt: "2026-04-20T00:00:00.000Z"
+   });
+   const repository = createUserProfilesRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const profile = await repository.findByIdentity({
+@@ -362,11 +355,158 @@ test("userProfilesRepository.findByIdentity reads existing profiles from collect
+ test("userProfilesRepository.findByEmail returns null when the row is missing", async () => {
+   const { api } = createUserProfilesApiStub(undefined);
+   const repository = createUserProfilesRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const profile = await repository.findByEmail("missing@example.com");
+ 
+   assert.equal(profile, null);
+ });
++
++for (const outcome of ["pending", "committed", "unknown"]) {
++  test(`user settings preserves a ${outcome} write failure instead of recovering as a duplicate`, async () => {
++    let reads = 0;
++    const failure = Object.assign(new Error("Write failed"), {
++      transactionOutcome: outcome,
++      cause: { code: "23505" }
++    });
++    const api = {
++      resources: {
++        userSettings: {
++          async query() { reads += 1; return asCollectionDocument([]); },
++          async post() { throw failure; }
++        }
++      }
++    };
++    const repository = createUserSettingsRepository({ api });
++    await assert.rejects(repository.ensureForUserId("7"), error => error === failure);
++    assert.equal(reads, 1);
++  });
++}
++
++test("user settings recovers a duplicate only after its standalone write rolled back", async () => {
++  let reads = 0;
++  const existing = { id: "7", ...DEFAULT_USER_SETTINGS };
++  const api = {
++    resources: {
++      userSettings: {
++        async query() { reads += 1; return asCollectionDocument(reads === 1 ? [] : [existing]); },
++        async post() {
++          throw Object.assign(new Error("Write failed"), {
++            transactionOutcome: "rolledBack", cause: { code: "23505" }
++          });
++        }
++      }
++    }
++  };
++  const repository = createUserSettingsRepository({ api });
++  assert.deepEqual(await repository.ensureForUserId("7"), existing);
++  assert.equal(reads, 2);
++});
++
++test("profile upsert performs duplicate recovery after its API transaction has finished", async () => {
++  const trx = { trxId: "managed-upsert" };
++  const profile = {
++    id: "7", authProvider: "local", authProviderUserSid: "local-7",
++    email: "ada@example.com", username: "ada", displayName: "Ada"
++  };
++  let active = false;
++  let rolledBack = false;
++  const api = {
++    async transaction(work) {
++      active = true;
++      try {
++        return await work(trx);
++      } catch (cause) {
++        active = false;
++        rolledBack = true;
++        throw Object.assign(new Error("Transaction failed", { cause }), { transactionOutcome: "rolledBack" });
++      }
++    },
++    resources: {
++      userProfiles: {
++        async query({ transaction, queryParams, format }) {
++          assert.equal(format, "plain");
++          if (active) {
++            assert.equal(transaction, trx);
++            return asCollectionDocument([]);
++          }
++          assert.equal(rolledBack, true);
++          assert.equal(transaction, null);
++          assert.equal(queryParams.filters.authProviderUserSid, "local-7");
++          return asCollectionDocument([profile]);
++        },
++        async post({ transaction }) {
++          assert.equal(transaction, trx);
++          throw Object.assign(new Error("Duplicate identity"), {
++            transactionOutcome: "pending", cause: { code: "23505", message: "unique provider identity" }
++          });
++        }
++      }
++    }
++  };
++  const repository = createUserProfilesRepository({ api });
++  assert.equal((await repository.upsert(profile)).id, "7");
++  assert.equal(active, false);
++});
++
++test("profile upsert never recovers inside a caller-owned failed transaction", async () => {
++  const trx = { trxId: "caller-managed" };
++  let reads = 0;
++  const failure = Object.assign(new Error("Duplicate identity"), {
++    transactionOutcome: "pending", cause: { code: "23505" }
++  });
++  const api = {
++    async transaction() { throw new Error("Must join the caller's owner"); },
++    resources: {
++      userProfiles: {
++        async query({ transaction }) {
++          assert.equal(transaction, trx);
++          reads += 1;
++          return asCollectionDocument([]);
++        },
++        async post() { throw failure; }
++      }
++    }
++  };
++  const repository = createUserProfilesRepository({ api });
++  await assert.rejects(repository.upsert({
++    authProvider: "local", authProviderUserSid: "local-7",
++    email: "ada@example.com", displayName: "Ada"
++  }, { trx }), error => error === failure);
++  assert.equal(reads, 2);
++});
++
++for (const outcome of ["pending", "committed", "unknown"]) {
++  test(`profile email conflict preserves the ${outcome} outcome from a caller-owned write`, async () => {
++    const trx = { trxId: "caller-managed" };
++    let reads = 0;
++    const failure = Object.assign(new Error("Resource write failed"), {
++      transactionOutcome: outcome,
++      cause: { code: "23505", message: "duplicate key in users_email_unique" }
++    });
++    const api = {
++      resources: {
++        userProfiles: {
++          async query() { reads += 1; return asCollectionDocument([]); },
++          async post() { throw failure; }
++        }
++      }
++    };
++    const repository = createUserProfilesRepository({ api });
++    await assert.rejects(repository.upsert({
++      authProvider: "local", authProviderUserSid: "local-7",
++      email: "ada@example.com", displayName: "Ada"
++    }, { trx }), error => {
++      if (outcome === "pending") {
++        assert.equal(error.code, "USER_PROFILE_EMAIL_CONFLICT");
++        assert.equal(error.cause, failure);
++      } else {
++        assert.equal(error, failure);
++      }
++      assert.equal(error.transactionOutcome, outcome);
++      return true;
++    });
++    assert.equal(reads, 2);
++  });
++}
+diff --git a/packages/workspaces-core/src/server/WorkspacesFeature.js b/packages/workspaces-core/src/server/WorkspacesFeature.js
+index 28a9f3bbe8e2f46fcaa97232b36d1dc5855256d7..2fccf558c81f51dd09c3c63cf23bda5f2e26228e 100644
+--- a/packages/workspaces-core/src/server/WorkspacesFeature.js
++++ b/packages/workspaces-core/src/server/WorkspacesFeature.js
+@@ -82,28 +82,21 @@ async function installWorkspaceResources(jsonRestApi) {
+   );
+ }
+ 
+-function createWorkspacesRuntime({ config, database, env, jsonRestApi } = {}) {
++function createWorkspacesRuntime({ config, env, jsonRestApi } = {}) {
+   const tenancyProfile = resolveTenancyProfile(config);
+   const invitationsPolicy = resolveWorkspaceInvitationsPolicy({ config, appConfig: config, tenancyProfile });
+   const invitationsEnabled = invitationsPolicy.enabled === true;
+   const roleCatalog = createWorkspaceRoleCatalog(config);
+   const workspaceSettingsRepository = createWorkspaceSettingsRepository({
+     api: jsonRestApi,
+-    knex: database.knex,
+     defaultInvitesEnabled: requireBoolean(
+       config?.workspaceSettings?.defaults?.invitesEnabled,
+       "runtime.config.workspaceSettings.defaults.invitesEnabled"
+     )
+   });
+-  const workspacesRepository = createWorkspacesRepository({ api: jsonRestApi, knex: database.knex });
+-  const workspaceMembershipsRepository = createWorkspaceMembershipsRepository({
+-    api: jsonRestApi,
+-    knex: database.knex
+-  });
+-  const workspaceInvitesRepository = createWorkspaceInvitesRepository({
+-    api: jsonRestApi,
+-    knex: database.knex
+-  });
++  const workspacesRepository = createWorkspacesRepository({ api: jsonRestApi });
++  const workspaceMembershipsRepository = createWorkspaceMembershipsRepository({ api: jsonRestApi });
++  const workspaceInvitesRepository = createWorkspaceInvitesRepository({ api: jsonRestApi });
+   const workspaceService = createWorkspaceService({
+     appConfig: config,
+     workspacesRepository,
+@@ -165,7 +158,6 @@ const WorkspacesFeature = defineFeature({
+   requires: {
+     bootstrap: "runtime.bootstrap",
+     config: "runtime.config",
+-    database: "runtime.database",
+     env: "runtime.env",
+     http: "runtime.http",
+     jsonRestApi: "runtime.json-rest-api",
+@@ -174,9 +166,9 @@ const WorkspacesFeature = defineFeature({
+   provides: {
+     workspaces: "workspaces.core"
+   },
+-  async setup({ bootstrap, config, database, env, http, jsonRestApi, users }) {
++  async setup({ bootstrap, config, env, http, jsonRestApi, users }) {
+     await installWorkspaceResources(jsonRestApi);
+-    const workspaces = createWorkspacesRuntime({ config, database, env, jsonRestApi });
++    const workspaces = createWorkspacesRuntime({ config, env, jsonRestApi });
+ 
+     bootstrap.register({
+       id: "workspaces.bootstrap",
+diff --git a/packages/workspaces-core/src/server/common/repositories/repositoryUtils.js b/packages/workspaces-core/src/server/common/repositories/repositoryUtils.js
+index 63ee41bb8bf9a8bca03c7f75eb99ba37cf9f6020..40f4ec8f5da8590ec3b04e34924352023347778e 100644
+--- a/packages/workspaces-core/src/server/common/repositories/repositoryUtils.js
++++ b/packages/workspaces-core/src/server/common/repositories/repositoryUtils.js
+@@ -1,7 +1,6 @@
+ import {
+   normalizeDbRecordId,
+-  toIsoString,
+-  createWithTransaction
++  toIsoString
+ } from "@jskit-ai/database-runtime/shared";
+ import { isDuplicateEntryError } from "@jskit-ai/database-runtime/shared/duplicateEntry";
+ import { normalizeLowerText, normalizeRecordId, normalizeText } from "@jskit-ai/kernel/shared/support/normalize";
+@@ -38,6 +37,5 @@ export {
+   normalizeDbRecordId,
+   uniqueSorted,
+   parseJson,
+-  toDbJson,
+-  createWithTransaction
++  toDbJson
+ };
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js b/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
+index 92086e10a2bc501aba96cbb71291a0f8574ef578..353eb74e139327fdfab6ce8cfd16c3a054cf100e 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js
+@@ -1,5 +1,4 @@
+ import {
+-  createWithTransaction,
+   normalizeLowerText,
+   normalizeRecordId,
+   normalizeDbRecordId,
+@@ -8,14 +7,10 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ 
+-const RESOURCE_TYPE = "workspaceInvites";
+-
+ function normalizeInviteRecord(payload) {
+   if (!payload) {
+     return null;
+@@ -80,28 +75,12 @@ function normalizeInviteWithWorkspace(payload = {}) {
+   };
+ }
+ 
+-function createInviteRelationships({ workspaceId = null, invitedByUserId = undefined } = {}) {
+-  const relationships = {};
+-
+-  if (workspaceId) {
+-    relationships.workspace = createJsonApiRelationship("workspaces", workspaceId);
+-  }
+-  if (invitedByUserId !== undefined) {
+-    relationships.invitedByUser = createJsonApiRelationship("userProfiles", invitedByUserId);
+-  }
+-
+-  return relationships;
+-}
+-
+-function createRepository({ api, knex } = {}) {
++function createRepository({ api } = {}) {
+   if (!api?.resources?.workspaceInvites) {
+     throw new TypeError("workspaceInvitesRepository requires json-rest-api workspaceInvites resource.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("workspaceInvitesRepository requires knex.");
+-  }
+ 
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryInvites(filters = {}, options = {}, { includeWorkspace = false } = {}) {
+     return extractJsonRestCollectionRows(
+@@ -112,7 +91,7 @@ function createRepository({ api, knex } = {}) {
+             ...(includeWorkspace ? { include: ["workspace"] } : {})
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -210,26 +189,21 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       const created = await api.resources.workspaceInvites.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              email: createPayload.email,
+-              roleSid: createPayload.roleSid,
+-              status: createPayload.status,
+-              tokenHash: createPayload.tokenHash,
+-              expiresAt: createPayload.expiresAt == null ? null : toIsoString(createPayload.expiresAt),
+-              acceptedAt: null,
+-              revokedAt: null,
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createInviteRelationships({
+-                workspaceId: createPayload.workspaceId,
+-                invitedByUserId: createPayload.invitedByUserId ?? null
+-              })
+-            }
+-          ),
++          data: {
++            email: createPayload.email,
++            roleSid: createPayload.roleSid,
++            status: createPayload.status,
++            tokenHash: createPayload.tokenHash,
++            expiresAt: createPayload.expiresAt == null ? null : toIsoString(createPayload.expiresAt),
++            acceptedAt: null,
++            revokedAt: null,
++            createdAt,
++            updatedAt: createdAt,
++            workspace: createPayload.workspaceId,
++            invitedByUser: createPayload.invitedByUserId ?? null
++          },
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -237,7 +211,7 @@ function createRepository({ api, knex } = {}) {
+ 
+       return normalizeInviteRecord(created);
+     } catch (error) {
+-      if (!isDuplicateEntryError(error)) {
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+         throw error;
+       }
+     }
+@@ -277,16 +251,13 @@ function createRepository({ api, knex } = {}) {
+       }
+       await api.resources.workspaceInvites.patch(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              status: patch.status,
+-              updatedAt: new Date().toISOString()
+-            },
+-            {
+-              id: row.id
+-            }
+-          ),
++          id: row.id,
++          data: {
++            status: patch.status,
++            updatedAt: new Date().toISOString()
++          },
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -303,17 +274,14 @@ function createRepository({ api, knex } = {}) {
+     const acceptedAt = new Date().toISOString();
+     await api.resources.workspaceInvites.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            status: "accepted",
+-            acceptedAt,
+-            updatedAt: acceptedAt
+-          },
+-          {
+-            id: normalizedInviteId
+-          }
+-        ),
++        id: normalizedInviteId,
++        data: {
++          status: "accepted",
++          acceptedAt,
++          updatedAt: acceptedAt
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -329,17 +297,14 @@ function createRepository({ api, knex } = {}) {
+     const revokedAt = new Date().toISOString();
+     await api.resources.workspaceInvites.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            status: "revoked",
+-            revokedAt,
+-            updatedAt: revokedAt
+-          },
+-          {
+-            id: normalizedInviteId
+-          }
+-        ),
++        id: normalizedInviteId,
++        data: {
++          status: "revoked",
++          revokedAt,
++          updatedAt: revokedAt
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js b/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
+index fcfe2aae099837b0a96aa1bc0dc30a14400cec6d..1d6cd59f1c1d9c203a9523930a167dc35f1555f7 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js
+@@ -1,5 +1,4 @@
+ import {
+-  createWithTransaction,
+   normalizeLowerText,
+   normalizeRecordId,
+   normalizeDbRecordId,
+@@ -8,15 +7,11 @@ import {
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { OWNER_ROLE_ID } from "../../../shared/roles.js";
+ 
+-const RESOURCE_TYPE = "workspaceMemberships";
+-
+ function normalizeMembershipRecord(payload) {
+   if (!payload) {
+     return null;
+@@ -61,28 +56,12 @@ function normalizeMemberSummaryRow(row) {
+   };
+ }
+ 
+-function createMembershipRelationships({ workspaceId = null, userId = null } = {}) {
+-  const relationships = {};
+-
+-  if (workspaceId) {
+-    relationships.workspace = createJsonApiRelationship("workspaces", workspaceId);
+-  }
+-  if (userId) {
+-    relationships.user = createJsonApiRelationship("userProfiles", userId);
+-  }
+-
+-  return relationships;
+-}
+-
+-function createRepository({ api, knex } = {}) {
++function createRepository({ api } = {}) {
+   if (!api?.resources?.workspaceMemberships) {
+     throw new TypeError("workspaceMembershipsRepository requires json-rest-api workspaceMemberships resource.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("workspaceMembershipsRepository requires knex.");
+-  }
+ 
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryMemberships(filters = {}, options = {}, { include = [] } = {}) {
+     const normalizedInclude = Array.from(
+@@ -100,7 +79,7 @@ function createRepository({ api, knex } = {}) {
+             ...(normalizedInclude.length > 0 ? { include: normalizedInclude } : {})
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -139,17 +118,14 @@ function createRepository({ api, knex } = {}) {
+         const updatedAt = new Date().toISOString();
+         await api.resources.workspaceMemberships.patch(
+           {
+-            inputRecord: createJsonApiInputRecord(
+-              RESOURCE_TYPE,
+-              {
+-                roleSid: OWNER_ROLE_ID,
+-                status: "active",
+-                updatedAt
+-              },
+-              {
+-                id: existing.id
+-              }
+-            ),
++            id: existing.id,
++            data: {
++              roleSid: OWNER_ROLE_ID,
++              status: "active",
++              updatedAt
++            },
++            format: "plain",
++            returning: "full",
+             transaction: options?.trx || null
+           },
+           createJsonRestContext(options?.context || null)
+@@ -162,27 +138,22 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       await api.resources.workspaceMemberships.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              roleSid: OWNER_ROLE_ID,
+-              status: "active",
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createMembershipRelationships({
+-                workspaceId: normalizedWorkspaceId,
+-                userId: normalizedUserId
+-              })
+-            }
+-          ),
++          data: {
++            roleSid: OWNER_ROLE_ID,
++            status: "active",
++            createdAt,
++            updatedAt: createdAt,
++            workspace: normalizedWorkspaceId,
++            user: normalizedUserId
++          },
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+       );
+     } catch (error) {
+-      if (!isDuplicateEntryError(error)) {
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+         throw error;
+       }
+     }
+@@ -210,27 +181,22 @@ function createRepository({ api, knex } = {}) {
+         const createdAt = new Date().toISOString();
+         await api.resources.workspaceMemberships.post(
+           {
+-            inputRecord: createJsonApiInputRecord(
+-              RESOURCE_TYPE,
+-              {
+-                roleSid,
+-                status,
+-                createdAt,
+-                updatedAt: createdAt
+-              },
+-              {
+-                relationships: createMembershipRelationships({
+-                  workspaceId: normalizedWorkspaceId,
+-                  userId: normalizedUserId
+-                })
+-              }
+-            ),
++            data: {
++              roleSid,
++              status,
++              createdAt,
++              updatedAt: createdAt,
++              workspace: normalizedWorkspaceId,
++              user: normalizedUserId
++            },
++            format: "plain",
++            returning: "full",
+             transaction: options?.trx || null
+           },
+           createJsonRestContext(options?.context || null)
+         );
+       } catch (error) {
+-        if (!isDuplicateEntryError(error)) {
++        if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+           throw error;
+         }
+       }
+@@ -240,17 +206,14 @@ function createRepository({ api, knex } = {}) {
+     const updatedAt = new Date().toISOString();
+     await api.resources.workspaceMemberships.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            roleSid,
+-            status,
+-            updatedAt
+-          },
+-          {
+-            id: existing.id
+-          }
+-        ),
++        id: existing.id,
++        data: {
++          roleSid,
++          status,
++          updatedAt
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js b/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
+index d380573532600dff28149ab417f056669eb71114..19ad1b8411a294af36e7162312fae552bd6b1d2e 100644
+--- a/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
++++ b/packages/workspaces-core/src/server/common/repositories/workspacesRepository.js
+@@ -1,19 +1,14 @@
+ import {
+-  createWithTransaction,
+   normalizeRecordId,
+   isDuplicateEntryError,
+   normalizeText,
+   toIsoString
+ } from "./repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+-  createJsonApiRelationship,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ 
+-const RESOURCE_TYPE = "workspaces";
+-
+ function normalizeWorkspaceRecord(payload = null) {
+   if (!payload || typeof payload !== "object") {
+     return null;
+@@ -32,26 +27,12 @@ function normalizeWorkspaceRecord(payload = null) {
+   };
+ }
+ 
+-function createWorkspaceRelationships(source = {}) {
+-  const relationships = {};
+-  const ownerUserId = normalizeRecordId(source.ownerUserId, { fallback: null });
+-
+-  if (ownerUserId) {
+-    relationships.owner = createJsonApiRelationship("userProfiles", ownerUserId);
+-  }
+-
+-  return relationships;
+-}
+-
+-function createRepository({ api, knex } = {}) {
++function createRepository({ api } = {}) {
+   if (!api?.resources?.workspaces || !api?.resources?.workspaceMemberships) {
+     throw new TypeError("workspacesRepository requires json-rest-api workspaces and workspaceMemberships resources.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("workspacesRepository requires knex.");
+-  }
+ 
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryFirst(filters = {}, options = {}) {
+     const rows = extractJsonRestCollectionRows(
+@@ -61,7 +42,7 @@ function createRepository({ api, knex } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -104,7 +85,7 @@ function createRepository({ api, knex } = {}) {
+             }
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -140,17 +121,14 @@ function createRepository({ api, knex } = {}) {
+       const createdAt = new Date().toISOString();
+       const created = await api.resources.workspaces.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            {
+-              ...createPayload,
+-              createdAt,
+-              updatedAt: createdAt
+-            },
+-            {
+-              relationships: createWorkspaceRelationships({ ownerUserId })
+-            }
+-          ),
++          data: {
++            ...createPayload,
++            createdAt,
++            updatedAt: createdAt,
++            owner: ownerUserId
++          },
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+@@ -158,7 +136,7 @@ function createRepository({ api, knex } = {}) {
+ 
+       return normalizeWorkspaceRecord(created);
+     } catch (error) {
+-      if (!isDuplicateEntryError(error)) {
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+         throw error;
+       }
+       if (!Object.hasOwn(createPayload, "slug")) {
+@@ -184,18 +162,17 @@ function createRepository({ api, knex } = {}) {
+       ...sourcePatch,
+       updatedAt: new Date().toISOString()
+     };
+-    const relationships = createWorkspaceRelationships(sourcePatch);
++    delete workspacePatch.ownerUserId;
++    if (Object.hasOwn(sourcePatch, "ownerUserId")) {
++      workspacePatch.owner = normalizeRecordId(sourcePatch.ownerUserId, { fallback: null });
++    }
+ 
+     const updated = await api.resources.workspaces.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          workspacePatch,
+-          {
+-            id: normalizedWorkspaceId,
+-            relationships
+-          }
+-        ),
++        id: normalizedWorkspaceId,
++        data: workspacePatch,
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+@@ -221,7 +198,7 @@ function createRepository({ api, knex } = {}) {
+             include: ["workspace"]
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+diff --git a/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js b/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
+index bda112c2cf945f8efcaf048492d8c9575ad41f22..8ee967f9ccee80ff812fcff422900f95a820082c 100644
+--- a/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
++++ b/packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js
+@@ -1,16 +1,13 @@
+ import {
+   normalizeRecordId,
+-  isDuplicateEntryError,
+-  createWithTransaction
++  isDuplicateEntryError
+ } from "../common/repositories/repositoryUtils.js";
+ import {
+-  createJsonApiInputRecord,
+   createJsonRestContext,
+   extractJsonRestCollectionRows
+ } from "@jskit-ai/json-rest-api-core/server/jsonRestApiHost";
+ import { resolveWorkspaceThemePalettes } from "../../shared/settings.js";
+ 
+-const RESOURCE_TYPE = "workspaceSettings";
+ const WORKSPACE_SETTINGS_PATCH_FIELDS = Object.freeze([
+   "lightPrimaryColor",
+   "lightSecondaryColor",
+@@ -52,14 +49,11 @@ function createDefaultWorkspaceSettingsCreatePayload(workspaceId, defaultInvites
+   };
+ }
+ 
+-function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
++function createRepository({ api, defaultInvitesEnabled = true } = {}) {
+   if (!api?.resources?.workspaceSettings) {
+     throw new TypeError("workspaceSettingsRepository requires json-rest-api workspaceSettings resource.");
+   }
+-  if (typeof knex !== "function") {
+-    throw new TypeError("workspaceSettingsRepository requires knex.");
+-  }
+-  const withTransaction = createWithTransaction(knex);
++  const withTransaction = (work) => api.transaction(work);
+ 
+   async function queryFirst(filters = {}, options = {}) {
+     const rows = extractJsonRestCollectionRows(
+@@ -69,7 +63,7 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+             filters
+           },
+           transaction: options?.trx || null,
+-          simplified: true
++          format: "plain"
+         },
+         createJsonRestContext(options?.context || null)
+       )
+@@ -101,19 +95,15 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+     try {
+       await api.resources.workspaceSettings.post(
+         {
+-          inputRecord: createJsonApiInputRecord(
+-            RESOURCE_TYPE,
+-            createDefaultWorkspaceSettingsCreatePayload(normalizedWorkspaceId, defaultInvitesEnabled === true),
+-            {
+-              id: normalizedWorkspaceId
+-            }
+-          ),
++          data: createDefaultWorkspaceSettingsCreatePayload(normalizedWorkspaceId, defaultInvitesEnabled === true),
++          format: "plain",
++          returning: "full",
+           transaction: options?.trx || null
+         },
+         createJsonRestContext(options?.context || null)
+       );
+     } catch (error) {
+-      if (!isDuplicateEntryError(error)) {
++      if (options?.trx || error?.transactionOutcome !== "rolledBack" || !isDuplicateEntryError(error)) {
+         throw error;
+       }
+     }
+@@ -137,16 +127,13 @@ function createRepository({ api, knex, defaultInvitesEnabled = true } = {}) {
+ 
+     await api.resources.workspaceSettings.patch(
+       {
+-        inputRecord: createJsonApiInputRecord(
+-          RESOURCE_TYPE,
+-          {
+-            ...updatePayload,
+-            updatedAt: new Date().toISOString()
+-          },
+-          {
+-            id: normalizedWorkspaceId
+-          }
+-        ),
++        id: normalizedWorkspaceId,
++        data: {
++          ...updatePayload,
++          updatedAt: new Date().toISOString()
++        },
++        format: "plain",
++        returning: "full",
+         transaction: options?.trx || null
+       },
+       createJsonRestContext(options?.context || null)
+diff --git a/packages/workspaces-core/test/featureRuntime.test.js b/packages/workspaces-core/test/featureRuntime.test.js
+index 9da53ecf9006270bf2a8ad270963fb7212a9653b..230216adb60b5bc200f9a2ba5feb6628c9c2a891 100644
+--- a/packages/workspaces-core/test/featureRuntime.test.js
++++ b/packages/workspaces-core/test/featureRuntime.test.js
+@@ -73,7 +73,6 @@ test("WorkspacesFeature assembles workspace behavior and explicit integrations",
+       "auth.extensions": authExtensions,
+       "runtime.bootstrap": bootstrap,
+       "runtime.config": runtimeConfig(),
+-      "runtime.database": { knex() {} },
+       "runtime.env": {},
+       "runtime.http": {
+         router: {
+diff --git a/packages/workspaces-core/test/repositoryContracts.test.js b/packages/workspaces-core/test/repositoryContracts.test.js
+index 7ea398f35873862f34d7ceee8973fef9c600b2b5..4396139c8ca604cdfa9b04e7f827a297899b36ad 100644
+--- a/packages/workspaces-core/test/repositoryContracts.test.js
++++ b/packages/workspaces-core/test/repositoryContracts.test.js
+@@ -5,20 +5,11 @@ import { createRepository as createWorkspaceMembershipsRepository } from "../src
+ import { createRepository as createWorkspacesRepository } from "../src/server/common/repositories/workspacesRepository.js";
+ import { createRepository as createWorkspaceSettingsRepository } from "../src/server/workspaceSettings/workspaceSettingsRepository.js";
+ 
+-function createKnexStub() {
+-  const knex = Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-
+-  return knex;
+-}
+-
+ function createApiStub() {
+   return {
++    async transaction(work) {
++      return work({ trxId: "managed-1" });
++    },
+     resources: {
+       workspaceInvites: {},
+       workspaceMemberships: {},
+@@ -28,19 +19,52 @@ function createApiStub() {
+   };
+ }
+ 
+-test("workspaces-core repositories expose withTransaction", async () => {
+-  const knex = createKnexStub();
++test("workspaces-core repositories delegate transaction ownership and failures to the API", async () => {
+   const api = createApiStub();
+   const repositories = [
+-    createWorkspaceInvitesRepository({ api, knex }),
+-    createWorkspaceMembershipsRepository({ api, knex }),
+-    createWorkspacesRepository({ api, knex }),
+-    createWorkspaceSettingsRepository({ api, knex })
++    createWorkspaceInvitesRepository({ api }),
++    createWorkspaceMembershipsRepository({ api }),
++    createWorkspacesRepository({ api }),
++    createWorkspaceSettingsRepository({ api })
+   ];
+ 
+   for (const repository of repositories) {
+     assert.equal(typeof repository.withTransaction, "function");
+     const result = await repository.withTransaction(async (trx) => ({ id: trx.trxId }));
+-    assert.deepEqual(result, { id: "trx-1" });
++    assert.deepEqual(result, { id: "managed-1" });
++    const failure = new Error("Participant failed");
++    await assert.rejects(repository.withTransaction(async () => { throw failure; }), error => error === failure);
+   }
+ });
++
++const duplicateRecoveryCases = [
++  ["settings", createWorkspaceSettingsRepository, "workspaceSettings", repository => repository.ensureForWorkspaceId("7")],
++  ["owner membership", createWorkspaceMembershipsRepository, "workspaceMemberships", repository => repository.ensureOwnerMembership("7", "9")],
++  ["membership", createWorkspaceMembershipsRepository, "workspaceMemberships", repository => repository.upsertMembership("7", "9")],
++  ["invite", createWorkspaceInvitesRepository, "workspaceInvites", repository => repository.insert({ workspaceId: "7", email: "ada@example.com" })],
++  ["workspace", createWorkspacesRepository, "workspaces", repository => repository.insert({ ownerUserId: "9", slug: "shared" })]
++];
++
++for (const [name, createRepository, resourceName, write] of duplicateRecoveryCases) {
++  for (const outcome of ["pending", "committed", "unknown"]) {
++    test(`${name} preserves a ${outcome} duplicate failure without a fallback query`, async () => {
++      let reads = 0;
++      let writeStarted = false;
++      const failure = Object.assign(new Error("Write failed"), {
++        transactionOutcome: outcome, cause: { code: "ER_DUP_ENTRY" }
++      });
++      const api = createApiStub();
++      api.resources[resourceName] = {
++        async query() {
++          assert.equal(writeStarted, false, "A failed transaction cannot support duplicate recovery");
++          reads += 1;
++          return { data: [] };
++        },
++        async post() { writeStarted = true; throw failure; }
++      };
++      const repository = createRepository({ api });
++      await assert.rejects(write(repository), error => error === failure);
++      assert.equal(reads, ["invite", "workspace"].includes(name) ? 0 : 1);
++    });
++  }
++}
+diff --git a/packages/workspaces-core/test/workspaceInvitesRepository.test.js b/packages/workspaces-core/test/workspaceInvitesRepository.test.js
+index b6fe2e1c64fda14267fe10fb70b3c63c52397ad4..6b7055701595621e3df0b9a241290ac8f5f2c965 100644
+--- a/packages/workspaces-core/test/workspaceInvitesRepository.test.js
++++ b/packages/workspaces-core/test/workspaceInvitesRepository.test.js
+@@ -3,18 +3,6 @@ import test from "node:test";
+ import { toIsoString } from "@jskit-ai/database-runtime/shared";
+ import { createRepository } from "../src/server/common/repositories/workspaceInvitesRepository.js";
+ 
+-function createKnexStub() {
+-  const knex = Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-
+-  return knex;
+-}
+-
+ function asCollectionDocument(rows = []) {
+   return {
+     data: Array.isArray(rows) ? rows : []
+@@ -58,7 +46,8 @@ function createWorkspaceInvitesApiStub({
+   const api = {
+     resources: {
+       workspaceInvites: {
+-        async query({ queryParams }) {
++        async query({ queryParams, format }) {
++          assert.equal(format, "plain");
+           const filters = queryParams?.filters || {};
+           const matching = rows.filter((row) => {
+             if (Object.hasOwn(filters, "id") && String(row.id) !== String(filters.id)) {
+@@ -82,21 +71,25 @@ function createWorkspaceInvitesApiStub({
+           return asCollectionDocument(matching.map((row) => toWorkspaceInviteRow(row)));
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.postPayload = inputRecord;
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.postPayload = payload;
+           const row = {
+             id: "1",
+-            workspace: { id: String(inputRecord.relationships?.workspace?.data?.id || "") },
+-            email: inputRecord.attributes?.email,
+-            roleSid: inputRecord.attributes?.roleSid,
+-            status: inputRecord.attributes?.status,
+-            tokenHash: inputRecord.attributes?.tokenHash,
+-            invitedByUser: inputRecord.relationships?.invitedByUser?.data
+-              ? { id: String(inputRecord.relationships.invitedByUser.data.id) }
++            workspace: { id: String(data.workspace || "") },
++            email: data.email,
++            roleSid: data.roleSid,
++            status: data.status,
++            tokenHash: data.tokenHash,
++            invitedByUser: data.invitedByUser
++              ? { id: String(data.invitedByUser) }
+               : null,
+-            expiresAt: inputRecord.attributes?.expiresAt,
+-            acceptedAt: inputRecord.attributes?.acceptedAt,
+-            revokedAt: inputRecord.attributes?.revokedAt,
++            expiresAt: data.expiresAt,
++            acceptedAt: data.acceptedAt,
++            revokedAt: data.revokedAt,
+             createdAt: "2026-03-09 00:26:35.710",
+             updatedAt: "2026-03-09 00:26:35.710"
+           };
+@@ -105,17 +98,21 @@ function createWorkspaceInvitesApiStub({
+           return toWorkspaceInviteRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.patchPayloads.push(inputRecord);
+-          const existing = rowById.get(String(inputRecord.id));
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.patchPayloads.push(payload);
++          const existing = rowById.get(String(payload.id));
+           if (existing) {
+             const updated = {
+               ...existing,
+-              ...(inputRecord.attributes || {})
++              ...data
+             };
+-            rowById.set(String(inputRecord.id), updated);
++            rowById.set(String(payload.id), updated);
+           }
+-          const updatedRow = rowById.get(String(inputRecord.id)) || null;
++          const updatedRow = rowById.get(String(payload.id)) || null;
+           return updatedRow ? toWorkspaceInviteRow(updatedRow) : null;
+         }
+       }
+@@ -127,7 +124,7 @@ function createWorkspaceInvitesApiStub({
+ 
+ test("workspaceInvitesRepository.insert preserves expiresAt and relationship fields through the resource write path", async () => {
+   const { api, state } = createWorkspaceInvitesApiStub();
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   await repository.insert({
+     workspaceId: "1",
+@@ -139,11 +136,11 @@ test("workspaceInvitesRepository.insert preserves expiresAt and relationship fie
+     expiresAt: "2026-03-16T00:26:35.709Z"
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.workspace?.data?.id, "1");
+-  assert.equal(state.postPayload.attributes?.email, "invitee@example.com");
+-  assert.equal(state.postPayload.relationships?.invitedByUser?.data?.id, "1");
+-  assert.equal(state.postPayload.attributes?.tokenHash, "hash");
+-  assert.equal(typeof state.postPayload.attributes?.expiresAt, "string");
++  assert.equal(state.postPayload.data.workspace, "1");
++  assert.equal(state.postPayload.data.email, "invitee@example.com");
++  assert.equal(state.postPayload.data.invitedByUser, "1");
++  assert.equal(state.postPayload.data.tokenHash, "hash");
++  assert.equal(typeof state.postPayload.data.expiresAt, "string");
+ });
+ 
+ test("workspaceInvitesRepository.findPendingByTokenHash reads from the canonical invite resource without workspace data", async () => {
+@@ -165,7 +162,7 @@ test("workspaceInvitesRepository.findPendingByTokenHash reads from the canonical
+       }
+     ]
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const invite = await repository.findPendingByTokenHash("hash-token");
+ 
+@@ -197,7 +194,7 @@ test("workspaceInvitesRepository.findByTokenHashWithWorkspace preserves workspac
+       }
+     ]
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const invite = await repository.findByTokenHashWithWorkspace("hash-token");
+ 
+@@ -227,14 +224,14 @@ test("workspaceInvitesRepository.markAcceptedById uses the internal invite resou
+       }]
+     ])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   await repository.markAcceptedById("1");
+ 
+   const payload = state.patchPayloads[0];
+-  assert.equal(payload.attributes?.status, "accepted");
+-  assert.equal(typeof payload.attributes?.acceptedAt, "string");
+-  assert.equal(payload.attributes?.updatedAt, payload.attributes?.acceptedAt);
++  assert.equal(payload.data.status, "accepted");
++  assert.equal(typeof payload.data.acceptedAt, "string");
++  assert.equal(payload.data.updatedAt, payload.data.acceptedAt);
+ });
+ 
+ test("workspaceInvitesRepository.listPendingByWorkspaceIdWithWorkspace keeps workspace join fields outside the base resource contract", async () => {
+@@ -261,7 +258,7 @@ test("workspaceInvitesRepository.listPendingByWorkspaceIdWithWorkspace keeps wor
+       }
+     ]
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const invites = await repository.listPendingByWorkspaceIdWithWorkspace("9");
+ 
+diff --git a/packages/workspaces-core/test/workspaceMembershipsRepository.test.js b/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
+index 92d9cc44b03848ea32c45f9f5df05279018948f7..c50c5733af4327aa710f57ffab323bfa2d436af7 100644
+--- a/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
++++ b/packages/workspaces-core/test/workspaceMembershipsRepository.test.js
+@@ -3,18 +3,6 @@ import test from "node:test";
+ import { toIsoString } from "@jskit-ai/database-runtime/shared";
+ import { createRepository } from "../src/server/common/repositories/workspaceMembershipsRepository.js";
+ 
+-function createKnexStub() {
+-  const knex = Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-
+-  return knex;
+-}
+-
+ function asCollectionDocument(rows = []) {
+   return {
+     data: Array.isArray(rows) ? rows : []
+@@ -55,7 +43,8 @@ function createWorkspaceMembershipsApiStub({
+   const api = {
+     resources: {
+       workspaceMemberships: {
+-        async query({ queryParams }) {
++        async query({ queryParams, format }) {
++          assert.equal(format, "plain");
+           state.queryCalls.push(queryParams || {});
+           const filters = queryParams?.filters || {};
+           const includeUser = Array.isArray(queryParams?.include) && queryParams.include.includes("user");
+@@ -100,14 +89,18 @@ function createWorkspaceMembershipsApiStub({
+           return asCollectionDocument([]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.postPayload = inputRecord;
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.postPayload = payload;
+           const row = rowById.get("1") || {
+             id: "1",
+-            workspace: { id: String(inputRecord.relationships?.workspace?.data?.id || "") },
+-            user: { id: String(inputRecord.relationships?.user?.data?.id || "") },
+-            roleSid: String(inputRecord.attributes?.roleSid || ""),
+-            status: String(inputRecord.attributes?.status || ""),
++            workspace: { id: String(data.workspace || "") },
++            user: { id: String(data.user || "") },
++            roleSid: String(data.roleSid || ""),
++            status: String(data.status || ""),
+             createdAt: "2026-03-09 00:26:35.710",
+             updatedAt: "2026-03-09 00:26:35.710"
+           };
+@@ -116,13 +109,17 @@ function createWorkspaceMembershipsApiStub({
+           return toWorkspaceMembershipRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.patchPayload = inputRecord;
+-          const existing = rowById.get(String(inputRecord.id));
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.patchPayload = payload;
++          const existing = rowById.get(String(payload.id));
+           const updated = {
+             ...(existing || {}),
+-            ...(inputRecord.attributes || {}),
+-            id: String(inputRecord.id),
++            ...data,
++            id: String(payload.id),
+             workspace: existing?.workspace || { id: "" },
+             user: existing?.user || { id: "" }
+           };
+@@ -150,7 +147,7 @@ test("workspaceMembershipsRepository.findByWorkspaceIdAndUserId normalizes canon
+   const { api } = createWorkspaceMembershipsApiStub({
+     rowByComposite: new Map([["7:9", membershipRow]])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const membership = await repository.findByWorkspaceIdAndUserId("7", "9");
+ 
+@@ -185,13 +182,13 @@ test("workspaceMembershipsRepository.ensureOwnerMembership upgrades an existing
+     rowById: new Map([["11", refreshedRow]]),
+     rowByComposite: new Map([["7:9", existingRow]])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const membership = await repository.ensureOwnerMembership("7", "9");
+ 
+-  assert.equal(state.patchPayload.attributes?.roleSid, "owner");
+-  assert.equal(state.patchPayload.attributes?.status, "active");
+-  assert.equal(typeof state.patchPayload.attributes?.updatedAt, "string");
++  assert.equal(state.patchPayload.data.roleSid, "owner");
++  assert.equal(state.patchPayload.data.status, "active");
++  assert.equal(typeof state.patchPayload.data.updatedAt, "string");
+   assert.deepEqual(membership, {
+     id: "11",
+     workspaceId: "7",
+@@ -199,7 +196,7 @@ test("workspaceMembershipsRepository.ensureOwnerMembership upgrades an existing
+     roleSid: "owner",
+     status: "active",
+     createdAt: toIsoString("2026-03-09 00:26:35.710"),
+-    updatedAt: toIsoString(state.patchPayload.attributes.updatedAt)
++    updatedAt: toIsoString(state.patchPayload.data.updatedAt)
+   });
+ });
+ 
+@@ -217,17 +214,17 @@ test("workspaceMembershipsRepository.upsertMembership creates normalized members
+     rowById: new Map([["1", createdRow]]),
+     rowByComposite: new Map()
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   await repository.upsertMembership("7", "9", {
+     roleSid: "ADMIN",
+     status: "ACTIVE"
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.workspace?.data?.id, "7");
+-  assert.equal(state.postPayload.relationships?.user?.data?.id, "9");
+-  assert.equal(state.postPayload.attributes?.roleSid, "admin");
+-  assert.equal(state.postPayload.attributes?.status, "active");
++  assert.equal(state.postPayload.data.workspace, "7");
++  assert.equal(state.postPayload.data.user, "9");
++  assert.equal(state.postPayload.data.roleSid, "admin");
++  assert.equal(state.postPayload.data.status, "active");
+ });
+ 
+ test("workspaceMembershipsRepository.listActiveByWorkspaceId keeps summary rows separate from the canonical membership resource", async () => {
+@@ -244,7 +241,7 @@ test("workspaceMembershipsRepository.listActiveByWorkspaceId keeps summary rows
+       }
+     ]
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const members = await repository.listActiveByWorkspaceId("7");
+ 
+@@ -272,7 +269,7 @@ test("workspaceMembershipsRepository.listActiveWorkspaceIdsByUserId returns norm
+   const { api, state } = createWorkspaceMembershipsApiStub({
+     rowByComposite: new Map([["7:9", membershipRow]])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const workspaceIds = await repository.listActiveWorkspaceIdsByUserId("9");
+ 
+diff --git a/packages/workspaces-core/test/workspaceSettingsRepository.test.js b/packages/workspaces-core/test/workspaceSettingsRepository.test.js
+index ab329f024c2e0bb53090d83567529bc5ea63a339..ab6e3b5264bbab79e84506a5d446183e93ac86e6 100644
+--- a/packages/workspaces-core/test/workspaceSettingsRepository.test.js
++++ b/packages/workspaces-core/test/workspaceSettingsRepository.test.js
+@@ -4,18 +4,6 @@ import { toIsoString } from "@jskit-ai/database-runtime/shared";
+ import { resolveWorkspaceThemePalettes } from "@jskit-ai/workspaces-core/shared/settings";
+ import { createRepository } from "../src/server/workspaceSettings/workspaceSettingsRepository.js";
+ 
+-function createKnexStub() {
+-  const knex = Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-
+-  return knex;
+-}
+-
+ function normalizeWorkspaceColor(value) {
+   return typeof value === "string" ? value.toUpperCase() : value;
+ }
+@@ -54,7 +42,8 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+   const api = {
+     resources: {
+       workspaceSettings: {
+-        async query({ queryParams }) {
++        async query({ queryParams, format }) {
++          assert.equal(format, "plain");
+           const id = String(queryParams?.filters?.id || "");
+           if (!state.row || (id && String(state.row.id) !== id)) {
+             return asCollectionDocument([]);
+@@ -66,20 +55,23 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+           }]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          const attributes = inputRecord.attributes || {};
+-          state.postPayload = inputRecord;
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.postPayload = payload;
+           state.row = {
+-            id: String(inputRecord.id),
+-            lightPrimaryColor: normalizeWorkspaceColor(attributes.lightPrimaryColor ?? DEFAULT_WORKSPACE_THEME.light.color),
+-            lightSecondaryColor: normalizeWorkspaceColor(attributes.lightSecondaryColor ?? DEFAULT_WORKSPACE_THEME.light.secondaryColor),
+-            lightSurfaceColor: normalizeWorkspaceColor(attributes.lightSurfaceColor ?? DEFAULT_WORKSPACE_THEME.light.surfaceColor),
+-            lightSurfaceVariantColor: normalizeWorkspaceColor(attributes.lightSurfaceVariantColor ?? DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor),
+-            darkPrimaryColor: normalizeWorkspaceColor(attributes.darkPrimaryColor ?? DEFAULT_WORKSPACE_THEME.dark.color),
+-            darkSecondaryColor: normalizeWorkspaceColor(attributes.darkSecondaryColor ?? DEFAULT_WORKSPACE_THEME.dark.secondaryColor),
+-            darkSurfaceColor: normalizeWorkspaceColor(attributes.darkSurfaceColor ?? DEFAULT_WORKSPACE_THEME.dark.surfaceColor),
+-            darkSurfaceVariantColor: normalizeWorkspaceColor(attributes.darkSurfaceVariantColor ?? DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor),
+-            invitesEnabled: attributes.invitesEnabled ?? true,
++            id: String(data.id),
++            lightPrimaryColor: normalizeWorkspaceColor(data.lightPrimaryColor ?? DEFAULT_WORKSPACE_THEME.light.color),
++            lightSecondaryColor: normalizeWorkspaceColor(data.lightSecondaryColor ?? DEFAULT_WORKSPACE_THEME.light.secondaryColor),
++            lightSurfaceColor: normalizeWorkspaceColor(data.lightSurfaceColor ?? DEFAULT_WORKSPACE_THEME.light.surfaceColor),
++            lightSurfaceVariantColor: normalizeWorkspaceColor(data.lightSurfaceVariantColor ?? DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor),
++            darkPrimaryColor: normalizeWorkspaceColor(data.darkPrimaryColor ?? DEFAULT_WORKSPACE_THEME.dark.color),
++            darkSecondaryColor: normalizeWorkspaceColor(data.darkSecondaryColor ?? DEFAULT_WORKSPACE_THEME.dark.secondaryColor),
++            darkSurfaceColor: normalizeWorkspaceColor(data.darkSurfaceColor ?? DEFAULT_WORKSPACE_THEME.dark.surfaceColor),
++            darkSurfaceVariantColor: normalizeWorkspaceColor(data.darkSurfaceVariantColor ?? DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor),
++            invitesEnabled: data.invitesEnabled ?? true,
+             createdAt: toIsoString("2026-03-10 00:00:00.000"),
+             updatedAt: toIsoString("2026-03-10 00:00:00.000")
+           };
+@@ -89,21 +81,24 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+           };
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          const attributes = inputRecord.attributes || {};
+-          state.patchPayload = inputRecord;
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.patchPayload = payload;
+           state.row = {
+             ...state.row,
+-            ...attributes,
+-            ...(Object.hasOwn(attributes, "lightPrimaryColor") ? { lightPrimaryColor: normalizeWorkspaceColor(attributes.lightPrimaryColor) } : {}),
+-            ...(Object.hasOwn(attributes, "lightSecondaryColor") ? { lightSecondaryColor: normalizeWorkspaceColor(attributes.lightSecondaryColor) } : {}),
+-            ...(Object.hasOwn(attributes, "lightSurfaceColor") ? { lightSurfaceColor: normalizeWorkspaceColor(attributes.lightSurfaceColor) } : {}),
+-            ...(Object.hasOwn(attributes, "lightSurfaceVariantColor") ? { lightSurfaceVariantColor: normalizeWorkspaceColor(attributes.lightSurfaceVariantColor) } : {}),
+-            ...(Object.hasOwn(attributes, "darkPrimaryColor") ? { darkPrimaryColor: normalizeWorkspaceColor(attributes.darkPrimaryColor) } : {}),
+-            ...(Object.hasOwn(attributes, "darkSecondaryColor") ? { darkSecondaryColor: normalizeWorkspaceColor(attributes.darkSecondaryColor) } : {}),
+-            ...(Object.hasOwn(attributes, "darkSurfaceColor") ? { darkSurfaceColor: normalizeWorkspaceColor(attributes.darkSurfaceColor) } : {}),
+-            ...(Object.hasOwn(attributes, "darkSurfaceVariantColor") ? { darkSurfaceVariantColor: normalizeWorkspaceColor(attributes.darkSurfaceVariantColor) } : {}),
+-            id: String(inputRecord.id || state.row?.id || "")
++            ...data,
++            ...(Object.hasOwn(data, "lightPrimaryColor") ? { lightPrimaryColor: normalizeWorkspaceColor(data.lightPrimaryColor) } : {}),
++            ...(Object.hasOwn(data, "lightSecondaryColor") ? { lightSecondaryColor: normalizeWorkspaceColor(data.lightSecondaryColor) } : {}),
++            ...(Object.hasOwn(data, "lightSurfaceColor") ? { lightSurfaceColor: normalizeWorkspaceColor(data.lightSurfaceColor) } : {}),
++            ...(Object.hasOwn(data, "lightSurfaceVariantColor") ? { lightSurfaceVariantColor: normalizeWorkspaceColor(data.lightSurfaceVariantColor) } : {}),
++            ...(Object.hasOwn(data, "darkPrimaryColor") ? { darkPrimaryColor: normalizeWorkspaceColor(data.darkPrimaryColor) } : {}),
++            ...(Object.hasOwn(data, "darkSecondaryColor") ? { darkSecondaryColor: normalizeWorkspaceColor(data.darkSecondaryColor) } : {}),
++            ...(Object.hasOwn(data, "darkSurfaceColor") ? { darkSurfaceColor: normalizeWorkspaceColor(data.darkSurfaceColor) } : {}),
++            ...(Object.hasOwn(data, "darkSurfaceVariantColor") ? { darkSurfaceVariantColor: normalizeWorkspaceColor(data.darkSurfaceVariantColor) } : {}),
++            id: String(payload.id || state.row?.id || "")
+           };
+           return {
+             ...state.row,
+@@ -120,8 +115,7 @@ function createWorkspaceSettingsApiStub(rowOverrides = {}) {
+ test("workspaceSettingsRepository.findByWorkspaceId returns the canonical workspace-settings row", async () => {
+   const { api, DEFAULT_WORKSPACE_THEME, STUB_CREATED_AT } = createWorkspaceSettingsApiStub();
+   const repository = createRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const record = await repository.findByWorkspaceId("1");
+@@ -145,15 +139,14 @@ test("workspaceSettingsRepository.findByWorkspaceId returns the canonical worksp
+ test("workspaceSettingsRepository.updateSettingsByWorkspaceId updates invitesEnabled only", async () => {
+   const { api, state } = createWorkspaceSettingsApiStub();
+   const repository = createRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const updated = await repository.updateSettingsByWorkspaceId("1", {
+     invitesEnabled: false
+   });
+ 
+-  assert.equal(state.patchPayload.attributes?.invitesEnabled, false);
++  assert.equal(state.patchPayload.data.invitesEnabled, false);
+   assert.equal(updated.invitesEnabled, false);
+ });
+ 
+@@ -161,22 +154,21 @@ test("workspaceSettingsRepository.ensureForWorkspaceId delegates defaults to the
+   const { api, state, DEFAULT_WORKSPACE_THEME } = createWorkspaceSettingsApiStub();
+   state.row = null;
+   const repository = createRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const record = await repository.ensureForWorkspaceId("5");
+ 
+-  assert.equal(state.postPayload.id, "5");
+-  assert.equal(state.postPayload.attributes?.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
+-  assert.equal(state.postPayload.attributes?.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
+-  assert.equal(state.postPayload.attributes?.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
+-  assert.equal(state.postPayload.attributes?.lightSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor);
+-  assert.equal(state.postPayload.attributes?.darkPrimaryColor, DEFAULT_WORKSPACE_THEME.dark.color);
+-  assert.equal(state.postPayload.attributes?.darkSecondaryColor, DEFAULT_WORKSPACE_THEME.dark.secondaryColor);
+-  assert.equal(state.postPayload.attributes?.darkSurfaceColor, DEFAULT_WORKSPACE_THEME.dark.surfaceColor);
+-  assert.equal(state.postPayload.attributes?.darkSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor);
+-  assert.equal(state.postPayload.attributes?.invitesEnabled, true);
++  assert.equal(state.postPayload.data.id, "5");
++  assert.equal(state.postPayload.data.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
++  assert.equal(state.postPayload.data.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
++  assert.equal(state.postPayload.data.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
++  assert.equal(state.postPayload.data.lightSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.light.surfaceVariantColor);
++  assert.equal(state.postPayload.data.darkPrimaryColor, DEFAULT_WORKSPACE_THEME.dark.color);
++  assert.equal(state.postPayload.data.darkSecondaryColor, DEFAULT_WORKSPACE_THEME.dark.secondaryColor);
++  assert.equal(state.postPayload.data.darkSurfaceColor, DEFAULT_WORKSPACE_THEME.dark.surfaceColor);
++  assert.equal(state.postPayload.data.darkSurfaceVariantColor, DEFAULT_WORKSPACE_THEME.dark.surfaceVariantColor);
++  assert.equal(state.postPayload.data.invitesEnabled, true);
+   assert.equal(record.lightPrimaryColor, DEFAULT_WORKSPACE_THEME.light.color);
+   assert.equal(record.lightSecondaryColor, DEFAULT_WORKSPACE_THEME.light.secondaryColor);
+   assert.equal(record.lightSurfaceColor, DEFAULT_WORKSPACE_THEME.light.surfaceColor);
+@@ -192,15 +184,14 @@ test("workspaceSettingsRepository.ensureForWorkspaceId delegates defaults to the
+ test("workspaceSettingsRepository.updateSettingsByWorkspaceId updates workspace settings fields", async () => {
+   const { api, state } = createWorkspaceSettingsApiStub();
+   const repository = createRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   const updated = await repository.updateSettingsByWorkspaceId("1", {
+     lightPrimaryColor: "#123abc"
+   });
+ 
+-  assert.equal(state.patchPayload.attributes?.lightPrimaryColor, "#123abc");
++  assert.equal(state.patchPayload.data.lightPrimaryColor, "#123abc");
+   assert.equal(updated.lightPrimaryColor, "#123ABC");
+ });
+ 
+@@ -208,8 +199,7 @@ test("workspaceSettingsRepository can be constructed without validating app conf
+   const { api } = createWorkspaceSettingsApiStub();
+ 
+   const repository = createRepository({
+-    api,
+-    knex: createKnexStub()
++    api
+   });
+ 
+   assert.ok(repository);
+diff --git a/packages/workspaces-core/test/workspacesRepository.test.js b/packages/workspaces-core/test/workspacesRepository.test.js
+index dded997e811a32f1edfa4cb15a4d0a2ae54ec9b2..054b014bc29f6dce2e58f426449875497131df65 100644
+--- a/packages/workspaces-core/test/workspacesRepository.test.js
++++ b/packages/workspaces-core/test/workspacesRepository.test.js
+@@ -3,16 +3,6 @@ import test from "node:test";
+ import { toIsoString } from "@jskit-ai/database-runtime/shared";
+ import { createRepository } from "../src/server/common/repositories/workspacesRepository.js";
+ 
+-function createKnexStub() {
+-  return Object.assign(() => {
+-    throw new Error("query execution not expected");
+-  }, {
+-    async transaction(work) {
+-      return work({ trxId: "trx-1" });
+-    }
+-  });
+-}
+-
+ function asCollectionDocument(rows = []) {
+   return {
+     data: Array.isArray(rows) ? rows : []
+@@ -24,7 +14,7 @@ function toWorkspaceRow(row = {}) {
+     id: String(row.id || ""),
+     slug: row.slug,
+     name: row.name,
+-    ownerUserId: row.ownerUserId == null ? null : String(row.ownerUserId),
++    owner: row.ownerUserId == null ? null : { id: String(row.ownerUserId) },
+     isPersonal: row.isPersonal,
+     avatarUrl: row.avatarUrl,
+     createdAt: row.createdAt,
+@@ -60,7 +50,8 @@ function createWorkspacesApiStub({
+   const api = {
+     resources: {
+       workspaces: {
+-        async query({ queryParams }) {
++        async query({ queryParams, format }) {
++          assert.equal(format, "plain");
+           const filters = queryParams?.filters || {};
+ 
+           if (Object.hasOwn(filters, "id")) {
+@@ -81,21 +72,25 @@ function createWorkspacesApiStub({
+           return asCollectionDocument([]);
+         },
+         async post(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.postPayload = inputRecord;
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.postPayload = payload;
+           if (insertError) {
+             throw insertError;
+           }
+ 
+           const row = {
+             id: "1",
+-            slug: String(inputRecord.attributes?.slug || ""),
+-            name: String(inputRecord.attributes?.name || ""),
+-            ownerUserId: String(inputRecord.relationships?.owner?.data?.id || ""),
+-            isPersonal: Boolean(inputRecord.attributes?.isPersonal),
+-            avatarUrl: String(inputRecord.attributes?.avatarUrl || ""),
+-            createdAt: inputRecord.attributes?.createdAt,
+-            updatedAt: inputRecord.attributes?.updatedAt,
++            slug: String(data.slug || ""),
++            name: String(data.name || ""),
++            ownerUserId: String(data.owner || ""),
++            isPersonal: Boolean(data.isPersonal),
++            avatarUrl: String(data.avatarUrl || ""),
++            createdAt: data.createdAt,
++            updatedAt: data.updatedAt,
+             deletedAt: null
+           };
+           rowsById.set(row.id, row);
+@@ -105,18 +100,22 @@ function createWorkspacesApiStub({
+           return toWorkspaceRow(row);
+         },
+         async patch(payload) {
+-          const inputRecord = payload?.inputRecord?.data || {};
+-          state.patchPayload = inputRecord;
+-          const existing = rowsById.get(String(inputRecord.id)) || {
+-            id: String(inputRecord.id)
++          const data = payload?.data || {};
++          assert.equal(payload.format, "plain");
++          assert.equal(payload.returning, "full");
++          assert.equal(payload.inputRecord, undefined);
++          assert.equal(payload.document, undefined);
++          state.patchPayload = payload;
++          const existing = rowsById.get(String(payload.id)) || {
++            id: String(payload.id)
+           };
+           const updated = {
+             ...existing,
+-            ...(inputRecord.attributes || {}),
+-            ...(inputRecord.relationships?.owner?.data?.id
+-              ? { ownerUserId: String(inputRecord.relationships.owner.data.id) }
++            ...data,
++            ...(data.owner
++              ? { ownerUserId: String(data.owner) }
+               : {}),
+-            id: String(inputRecord.id)
++            id: String(payload.id)
+           };
+           rowsById.set(updated.id, updated);
+           if (updated.slug) {
+@@ -126,7 +125,8 @@ function createWorkspacesApiStub({
+         }
+       },
+       workspaceMemberships: {
+-        async query({ queryParams }) {
++        async query({ queryParams, format }) {
++          assert.equal(format, "plain");
+           const filters = queryParams?.filters || {};
+           if (Object.hasOwn(filters, "user") && Object.hasOwn(filters, "status")) {
+             const rows = membershipRows.filter((row) => (
+@@ -161,7 +161,7 @@ test("workspacesRepository.findById reads a canonical workspace row through json
+       }]
+     ])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const workspace = await repository.findById("7");
+ 
+@@ -207,7 +207,7 @@ test("workspacesRepository.findPersonalByOwnerUserId returns the first personal
+       ]]
+     ])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const workspace = await repository.findPersonalByOwnerUserId("9");
+ 
+@@ -217,7 +217,7 @@ test("workspacesRepository.findPersonalByOwnerUserId returns the first personal
+ 
+ test("workspacesRepository.insert writes canonical fields through json-rest-api", async () => {
+   const { api, state } = createWorkspacesApiStub();
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const inserted = await repository.insert({
+     slug: "TonyMobily3",
+@@ -227,13 +227,13 @@ test("workspacesRepository.insert writes canonical fields through json-rest-api"
+     isPersonal: false
+   });
+ 
+-  assert.equal(state.postPayload.relationships?.owner?.data?.id, "9");
+-  assert.equal(state.postPayload.attributes?.slug, "TonyMobily3");
+-  assert.equal(state.postPayload.attributes?.name, "TonyMobily3");
+-  assert.equal(state.postPayload.attributes?.isPersonal, false);
+-  assert.equal(state.postPayload.attributes?.avatarUrl, "");
+-  assert.equal(typeof state.postPayload.attributes?.createdAt, "string");
+-  assert.equal(state.postPayload.attributes?.updatedAt, state.postPayload.attributes?.createdAt);
++  assert.equal(state.postPayload.data.owner, "9");
++  assert.equal(state.postPayload.data.slug, "TonyMobily3");
++  assert.equal(state.postPayload.data.name, "TonyMobily3");
++  assert.equal(state.postPayload.data.isPersonal, false);
++  assert.equal(state.postPayload.data.avatarUrl, "");
++  assert.equal(typeof state.postPayload.data.createdAt, "string");
++  assert.equal(state.postPayload.data.updatedAt, state.postPayload.data.createdAt);
+   assert.equal(inserted.id, "1");
+   assert.equal(inserted.ownerUserId, "9");
+ });
+@@ -252,9 +252,9 @@ test("workspacesRepository.insert falls back to slug lookup on duplicate slug",
+   };
+   const { api } = createWorkspacesApiStub({
+     rowsBySlug: new Map([["shared-workspace", existingRow]]),
+-    insertError: { code: "ER_DUP_ENTRY" }
++    insertError: { code: "REST_API_WRITE", transactionOutcome: "rolledBack", cause: { code: "ER_DUP_ENTRY" } }
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const inserted = await repository.insert({
+     slug: "shared-workspace",
+@@ -282,15 +282,15 @@ test("workspacesRepository.updateById patches canonical fields and updatedAt", a
+       }]
+     ])
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   await repository.updateById("7", {
+     name: "TonyMobily 4"
+   });
+ 
+   assert.equal(state.patchPayload.id, "7");
+-  assert.equal(state.patchPayload.attributes?.name, "TonyMobily 4");
+-  assert.equal(typeof state.patchPayload.attributes?.updatedAt, "string");
++  assert.equal(state.patchPayload.data.name, "TonyMobily 4");
++  assert.equal(typeof state.patchPayload.data.updatedAt, "string");
+ });
+ 
+ test("workspacesRepository.listForUserId keeps membership fields outside the canonical workspace row", async () => {
+@@ -346,7 +346,7 @@ test("workspacesRepository.listForUserId keeps membership fields outside the can
+       }
+     ]
+   });
+-  const repository = createRepository({ api, knex: createKnexStub() });
++  const repository = createRepository({ api });
+ 
+   const workspaces = await repository.listForUserId("9");
+ 

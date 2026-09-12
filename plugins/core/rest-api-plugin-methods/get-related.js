@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * Document, PivotField, RelationshipArguments, RelationshipContext
+ * } from './lifecycle-types.js' */
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
@@ -12,18 +16,21 @@ import { queryConstraint } from '../lib/querying/query-constraint.js'
  * The outer getRelated method selects the caller-facing representation.
  * Parent identity, relationship name and query controls come from params.
  */
-async function getRelatedDocument ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
-  context.method = 'getRelated'
-  context.id = requireExistingResourceId(params.id, {
+/** @param {RelationshipArguments} args @returns {Promise<Document & { links: import('../../../types/representations.js').JsonApiLinks }>} */
+async function getRelatedDocument ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api }) {
+  callerContext.method = 'getRelated'
+  callerContext.scopeName = scopeName
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
-  context.relationshipName = params.relationshipName
-  context.queryParams = params.queryParams || {}
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
-  context.transaction = params.transaction
-  context.db = context.transaction || api.knex.instance
+  callerContext.relationshipName = params.relationshipName
+  callerContext.queryParams = params.queryParams || {}
+  callerContext.schemaInfo = scope.vars.schemaInfo
+  callerContext.transaction = params.transaction
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {RelationshipContext} */ (callerContext)
 
   // Validate the relationship exists
   const relDef = findRelationshipDefinition(context.schemaInfo, context.relationshipName)
@@ -43,8 +50,8 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
   }
 
   if (relDef.belongsTo || relDef.belongsToPolymorphic || relDef.type === 'hasOne') {
-    const types = relDef.belongsToPolymorphic?.types || [relDef.belongsTo || relDef.target]
-    validateRequestedIncludes({ ...context, scopeName: types.length === 1 ? types[0] : scopeName }, scopes, types)
+    const types = relDef.belongsToPolymorphic?.types || [relDef.belongsTo || relDef.target].filter(type => type !== undefined)
+    validateRequestedIncludes({ ...context, scopeName: types.length === 1 ? types[0] || scopeName : scopeName }, scopes, types)
   }
 
   // A polymorphic target is determined by the visible parent record.
@@ -56,7 +63,8 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
   } else if (relDef.belongsTo) {
     targetType = relDef.belongsTo // belongsTo still in schema
   } else if (relDef.belongsToPolymorphic) {
-    targetType = parentRecord.relationships?.[context.relationshipName]?.data?.type
+    const linkage = parentRecord.relationships?.[context.relationshipName]?.data
+    targetType = Array.isArray(linkage) ? undefined : linkage?.type
     if (!targetType) {
       return {
         links: { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) },
@@ -65,7 +73,8 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
     }
   }
 
-  if (!targetType || !scopes[targetType]) {
+  const targetScope = targetType ? scopes[targetType] : undefined
+  if (!targetType || !targetScope) {
     throw new RestApiResourceError(
       `Related resource type '${targetType}' not found`,
       { subtype: 'related_type_not_found' }
@@ -84,11 +93,12 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
       format: 'jsonapi'
     }, { ...context })
 
-    const relatedId = parent.data.relationships?.[context.relationshipName]?.data?.id
+    const linkage = parent.data.relationships?.[context.relationshipName]?.data
+    const relatedId = Array.isArray(linkage) ? undefined : linkage?.id
     const links = { self: buildRelationshipUrl(context, scope, scopeName, context.id, context.relationshipName, false) }
     if (relatedId == null) return { links, data: null }
 
-    const related = await api.resources[targetType].get({
+    const related = await targetScope.get({
       id: relatedId,
       queryParams: context.queryParams,
       transaction: context.transaction,
@@ -102,7 +112,7 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
   if (relDef.type === 'hasMany') {
     let values
     if (relDef.via) {
-      const targetRelationships = scopes[targetType].vars.schemaInfo.schemaRelationships
+      const targetRelationships = targetScope.vars.schemaInfo.schemaRelationships
       const viaRel = targetRelationships?.[relDef.via]
       if (!viaRel?.belongsToPolymorphic) {
         throw new RestApiResourceError(
@@ -113,15 +123,16 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
       const { typeField, idField } = viaRel.belongsToPolymorphic
       values = { [typeField]: scopeName, [idField]: context.id }
     } else {
-      values = { [relDef.foreignKey]: context.id }
+      values = { [/** @type {string} */ (relDef.foreignKey)]: context.id }
     }
     constraint = { scopeName: targetType, values }
   } else if (relDef.type === 'manyToMany') {
-    const { query } = await helpers.dataRelatedIdsQuery({ context, scopeName, relDef })
+    const pivot = /** @type {PivotField} */ (relDef)
+    const { query } = await helpers.dataRelatedIdsQuery({ context, scopeName, relDef: pivot })
     constraint = { scopeName: targetType, idsQuery: query }
   }
 
-  const result = await api.resources[targetType].query({
+  const result = await targetScope.query({
     queryParams: { ...context.queryParams },
     transaction: context.transaction,
     format: 'jsonapi',
@@ -136,9 +147,10 @@ async function getRelatedDocument ({ params, context, vars, helpers, scope, scop
     const queryIndex = link.indexOf('?')
     result.links[name] = relatedUrl + (queryIndex === -1 ? '' : link.slice(queryIndex))
   }
-  return result
+  return /** @type {typeof result & { links: import('../../../types/representations.js').JsonApiLinks }} */ (result)
 }
 
+/** @param {RelationshipArguments} args */
 export default async function getRelatedMethod (args) {
   const { params, vars, scopes } = args
   rejectRemovedOptions(params)
@@ -149,7 +161,7 @@ export default async function getRelatedMethod (args) {
   if (format === 'jsonapi') return record
   if (record.data === null) return null
   const type = Array.isArray(record.data) ? record.data[0]?.type : record.data.type
-  const schemaInfo = scopes[type]?.vars.schemaInfo
+  const schemaInfo = type === undefined ? undefined : scopes[type]?.vars.schemaInfo
   return transformJsonApiToSimplified({ record }, {
     context: { schemaStructure: schemaInfo?.schemaStructure, schemaRelationships: schemaInfo?.schemaRelationships, scopes }
   })

@@ -101,6 +101,11 @@ export const getEffectiveSortableFields = (vars = {}) => {
   })
 }
 
+/**
+ * @param {unknown} sort
+ * @param {{ defaultSort?: unknown, idField?: string, schemaInfo?: Partial<import('../storage/storage-types.js').DataOperationSchema> }} [options]
+ * @returns {string[]}
+ */
 export const buildEffectiveSortList = (sort, { defaultSort, idField = 'id', schemaInfo } = {}) => {
   const toList = (value, option) => {
     if (value === undefined || value === null) return []
@@ -157,6 +162,11 @@ export const applyColumnOrder = (query, column, direction, nulls = 'last') => {
 }
 
 // Both storage modes use the same cursor direction and null placement.
+/**
+ * @param {import('../storage/storage-types.js').StorageQuery} query
+ * @param {{ column?: string, queryFieldRuntime?: import('../querying-writing/query-field-types.js').ProjectionRuntime, direction: string }} descriptor
+ * @param {{ before?: boolean }} [options]
+ */
 export const applySortDescriptorOrder = (query, { column, queryFieldRuntime, direction }, { before = false } = {}) => {
   const ascending = String(direction).toLowerCase() === 'asc'
   const queryDirection = (before ? !ascending : ascending) ? 'asc' : 'desc'

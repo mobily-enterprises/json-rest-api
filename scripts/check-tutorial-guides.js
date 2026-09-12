@@ -102,7 +102,23 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         await ensureAnyApiSchema(knex)
         await api.use(library.RestApiAnyapiKnexPlugin, { knex, tenantId: 'guide' })
       } else if (knex) await api.use(library.RestApiKnexPlugin, { knex })
-      const result = await new AsyncFunction('api', 'console', 'RestApiValidationError', 'RestApiResourceError', 'AutoFilterPlugin', 'JsonRestApi', 'RestApiPlugin', 'BulkOperationsPlugin', 'fastify', 'FastifyPlugin', 'QueryProjectionsPlugin', 'RowPolicyPlugin', `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`)(api, { log () {} }, library.RestApiValidationError, library.RestApiResourceError, library.AutoFilterPlugin, JsonRestApi, library.RestApiPlugin, BulkOperationsPlugin, fastify, library.FastifyPlugin, library.QueryProjectionsPlugin, library.RowPolicyPlugin)
+      const bindings = {
+        api,
+        console: { log () {} },
+        RestApiValidationError: library.RestApiValidationError,
+        RestApiResourceError: library.RestApiResourceError,
+        AutoFilterPlugin: library.AutoFilterPlugin,
+        JsonRestApi,
+        RestApiPlugin: library.RestApiPlugin,
+        BulkOperationsPlugin,
+        fastify,
+        FastifyPlugin: library.FastifyPlugin,
+        QueryProjectionsPlugin: library.QueryProjectionsPlugin,
+        RowPolicyPlugin: library.RowPolicyPlugin
+      }
+      const code = `${blocks.join('\n').replace(/^import .*\n/gm, '')}\nreturn { ${names} }`
+      const runExample = new AsyncFunction(...Object.keys(bindings), code)
+      const result = await runExample(...Object.values(bindings))
       const namesOf = collection => collection.data.map(record => record.name)
       if (guide === 'policies') {
         assert.deepEqual(result.acmePage.data.map(record => record.attributes.title), ['Alpha'])

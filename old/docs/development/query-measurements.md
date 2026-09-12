@@ -1501,3 +1501,82 @@ chain still reports the expected field. Lazy traversal and iterator cleanup are
 checked against the previous recursive implementation. These counters establish
 reduced metadata work, not an SQL-count, wall-clock or throughput improvement;
 the depth test is not a claim about database column limits.
+## Bulk and reverse-child writes: retained lifecycle decision (2026-09-12)
+
+`node scripts/measure-write-lifecycles.js` uses the shared row-policy fixture,
+with ordinary/canonical storage selected through the existing test environment.
+The same script runs under `scripts/test-databases.js pg` and `mysql2`.
+Node 24.6.0 passed all 18 scenarios per storage/database combination: 108
+measured scenarios across SQLite, PostgreSQL 16.15 and MySQL 8.0.46. Each of the
+six combinations also passed the separate dependent-hook assertion.
+
+Sizes are 1, 10 and 40 children. Bulk PATCH covers atomic/non-atomic ownership
+and full/no returned resources; reverse relationship addition/removal calls
+each child's PATCH lifecycle. Assertions check ordered before/after hooks,
+persisted attributes/linkage, result counts and absence of metadata queries.
+One later child hook reads the earlier child's write inside the same owner and
+uses it to change its own data. That is observable behavior a single deferred
+SQL batch would change.
+
+At 40 children, all three databases produced the same statement counts:
+
+| Operation | Ordinary reads | Canonical reads | Writes | Transaction statements |
+| --- | ---: | ---: | ---: | ---: |
+| Atomic bulk, full return | 300 | 260 | 40 | 2 |
+| Atomic bulk, no return | 120 | 80 | 40 | 2 |
+| Non-atomic bulk, full return | 300 | 260 | 40 | 80 |
+| Non-atomic bulk, no return | 120 | 80 | 40 | 80 |
+| Remove reverse children | 122 | 82 | 41 | 2 |
+| Add reverse children | 204 | 164 | 41 | 2 |
+
+All measured paths execute 80 ordered child hooks at size 40 and zero metadata
+queries. The extra reverse write belongs to the parent lifecycle. Counts grow
+linearly over the measured sizes; this is not a constant-query bulk interface.
+
+**Decision for R-L01:** retain the direct per-record implementation. Each child
+has authorization, mutable before/after hooks, its own result/error semantics
+and, for non-atomic bulk, its own commit boundary. The measured dependent hook
+shows why deferring all writes until after all before hooks would be incorrect.
+A hook-free mode or automatic hook analysis would add a second contract for an
+unproven benefit. The existing `returning: 'none'` option already cuts measured
+atomic totals from 342 to 162 ordinary statements and 302 to 122 canonical
+statements without changing hook execution. This batch adds evidence, not a new
+performance optimization or an assertion that these paths cannot improve later.
+
+Elapsed time and heap deltas are recorded by the script, but competing local
+work, garbage collection, warm caches and fixture size make them descriptive,
+not before/after performance claims. Logs:
+`/tmp/jra-write-lifecycles-knex-20260912.log`,
+`/tmp/jra-write-lifecycles-anyapi-20260912.log`,
+`/tmp/jra-write-lifecycles-pg-20260912.log`, and
+`/tmp/jra-write-lifecycles-mysql-20260912.log`.
+
+## Bounded diagnostic formatting cost (2026-09-12)
+
+`node scripts/measure-diagnostics.js` measures the retained enhanced logger on
+Node 24.6.0: 500 warm-up calls per case, then five alternating samples of 5,000
+calls. An independent review caught that the oversized error's entire details
+can be dropped by the budget: secret absence alone did not prove redaction.
+The script now checks a separate small preview for both explicit redaction
+markers and a retained visible field, then checks the measured oversized error
+is bounded. The latter contains binary data and an oversized array. It does not perform network or
+disk logging and does not benchmark a complete resource operation.
+
+| Case | Median microseconds/call | Observed min–max |
+| --- | ---: | ---: |
+| Direct no-op trace | 0.043 | 0.038–0.052 |
+| Bounded trace with no-op writer | 8.536 | 7.310–13.597 |
+| Bounded nested error with no-op writer | 50.095 | 39.327–56.077 |
+| Bounded nested error with JSON sink | 52.676 | 41.405–68.565 |
+
+The formatted error event was 594 bytes. The no-op cases explicitly show that
+formatting is not free when a supplied writer discards its output. These local
+samples were collected while other verification work was active; they are not
+production latency, throughput or confidence intervals.
+
+Retain the existing bounded formatter and logger contract for this batch. An
+additional level-enablement protocol or implicit no-op detection is not needed
+to close diagnostic correctness. This measurement makes the cost visible and
+provides a repeatable baseline for a future demonstrated logging bottleneck.
+No new caching, global state or formatter bypass is introduced.
+Log: `/tmp/jra-diagnostics-measurement-20260912.log`.

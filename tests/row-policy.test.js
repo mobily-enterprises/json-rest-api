@@ -9,7 +9,6 @@ import {
   resourceIdentifier,
   validateJsonApiStructure
 } from './helpers/test-utils.js'
-import { storageMode } from './helpers/storage-mode.js'
 import { createRowPolicyApi } from './fixtures/api-configs.js'
 import { createStorageAdapterUtilities } from '../plugins/core/lib/querying/storage-adapter-utils.js'
 
@@ -152,13 +151,13 @@ describe('RowPolicy Plugin', () => {
     )
   })
 
-  it('combines row policy visibility with the resource autofilter', async () => {
+  it('combines row policy visibility with the resource autofilter for rows and pagination totals', async () => {
     await postProject('Visible', 'group-a')
     await postProject('Wrong group', 'group-b')
     await postProject('Wrong workspace', 'group-a', adminContext('workspace-b'))
 
     const result = await api.resources.policy_projects.query({
-      queryParams: { sort: ['id'] },
+      queryParams: { sort: ['id'], page: { number: 1, size: 1 } },
       format: 'jsonapi'
     }, groupContext('group-a'))
 
@@ -166,6 +165,8 @@ describe('RowPolicy Plugin', () => {
       result.data.map((record) => record.attributes.name),
       ['Visible']
     )
+    assert.equal(result.meta.pagination.total, 1)
+    assert.equal(result.meta.pagination.pageCount, 1)
   })
 
   it('keeps cursor pagination inside the visible dataset', async () => {
@@ -207,27 +208,6 @@ describe('RowPolicy Plugin', () => {
     )
     assert.equal(secondPage.meta.pagination.hasMore, false)
   })
-
-  if (storageMode.isAnyApi()) {
-    it('applies the policy to the standalone AnyAPI count helper', async () => {
-      await postProject('Allowed 1', 'group-a')
-      await postProject('Hidden 1', 'group-b')
-      await postProject('Allowed 2', 'group-a')
-
-      policyEvents.length = 0
-      const total = await api.helpers.dataQueryCount({
-        scopeName: 'policy_projects',
-        context: {
-          db: knex,
-          queryParams: {},
-          ...groupContext('group-a')
-        }
-      })
-
-      assert.equal(total, 2)
-      assert(policyEvents.some((event) => event.queryPurpose === 'count'))
-    })
-  }
 
   it('uses the policy for single-record and write preflight lookups', async () => {
     const allowed = await postProject('Allowed', 'group-a')

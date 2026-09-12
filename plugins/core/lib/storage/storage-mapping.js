@@ -204,15 +204,6 @@ export const getStorageColumn = (schemaInfo = {}, fieldName) => {
   return fieldStorage?.column || fieldName
 }
 
-/** @param {Partial<StorageSchemaInfo>} schemaInfo @param {string} columnName @returns {string} */
-export const getLogicalFieldName = (schemaInfo = {}, columnName) => {
-  if (!columnName) return columnName
-  if (columnName === getIdColumn(schemaInfo)) return 'id'
-
-  const columns = getStorageInfo(schemaInfo).columns
-  return Object.hasOwn(columns, columnName) ? columns[columnName] || columnName : columnName
-}
-
 /** @param {StorageRow | null | undefined} record @param {Partial<StorageSchemaInfo>} schemaInfo @param {string} fieldName @returns {unknown} */
 export const getFieldValue = (record, schemaInfo = {}, fieldName) => {
   if (!record || !fieldName) return undefined

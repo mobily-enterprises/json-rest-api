@@ -1,15 +1,5 @@
 export { JsonRestApi } from './lib/runtime/json-rest-api.js'
 
-/**
- * JSON REST API - JSON:API resources and storage plugins
- *
- * This package provides:
- * - REST API plugin that adds query, get, post, put, patch, delete methods to resources
- * - Connector plugins for various HTTP frameworks (Express, etc.)
- * - JSON:API compliant request/response handling
- * - Comprehensive error handling and validation
- */
-
 // Core plugins
 export { RestApiPlugin } from './plugins/core/rest-api-plugin.js'
 export { AutoFilterPlugin } from './plugins/core/rest-api-autofilter-plugin.js'
@@ -33,5 +23,4 @@ export { LocalStorage } from './plugins/storage/local-storage.js'
 
 export * from './lib/rest-api-errors.js'
 
-// URL helper function for generating API URL prefix
 export { getUrlPrefix } from './plugins/core/lib/querying/url-helpers.js'

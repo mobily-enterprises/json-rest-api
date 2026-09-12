@@ -5,6 +5,7 @@ import { processIncludes } from '../plugins/core/lib/querying/knex-process-inclu
 import { loadRelationshipIdentifiers } from '../plugins/core/lib/querying/relationship-identifiers.js'
 import { toJsonApiRecord } from '../plugins/core/lib/querying/knex-json-api-transformers-querying.js'
 import { buildFieldSelection } from '../plugins/core/lib/querying-writing/knex-field-helpers.js'
+import { processIncludes as processIncludeTree } from '../plugins/core/lib/querying/knex-relationship-includes.js'
 
 const resource = (tableName, structure = {}, schemaRelationships = {}) => ({
   vars: { schemaInfo: { tableName, idProperty: 'id', schemaStructure: { id: { type: 'integer' }, ...structure }, schemaRelationships } }
@@ -56,6 +57,32 @@ describe('Relationship metadata error boundaries', () => {
 const originalCause = error => {
   while (error && typeof error === 'object' && Object.hasOwn(error, 'cause')) error = error.cause
   return error
+}
+
+for (const scenario of ['missing target', 'unknown relationship']) {
+  for (const writer of ['none', 'throw', 'reject']) {
+    it(`retains ${scenario} include handling with ${writer} warning writer`, async () => {
+      const scopes = { items: resource('items', scenario === 'missing target' ? { groupId: { belongsTo: 'missing', as: 'group' } } : {}) }
+      const records = [{ id: 1, groupId: 2 }]
+      const calls = []
+      const log = {
+        trace () {},
+        warn: (...args) => {
+          calls.push(args)
+          if (writer === 'throw') throw new Error('Diagnostic writer failed')
+          if (writer === 'reject') return Promise.reject(new Error('Diagnostic writer failed'))
+        }
+      }
+      await processIncludeTree({
+        records, scopeName: 'items', includeTree: { group: {} }, included: new Map(), processedPaths: new Set()
+      }, { context: { scopes, log, knex: { client: { config: { client: 'test' } } }, requestContext: { method: 'query' } } })
+      assert.equal(calls.length, 1)
+      const diagnostic = calls[0][1]
+      assert.deepEqual([diagnostic.method, diagnostic.scopeName, diagnostic.phase, diagnostic.backend, diagnostic.transactionOutcome],
+        ['query', 'items', 'include', 'test', 'none'])
+      assert.deepEqual(records, [{ id: 1, groupId: 2 }])
+    })
+  }
 }
 
 describe('Include failures and secondary logging', () => {

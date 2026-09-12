@@ -64,3 +64,21 @@ The separate [consumer feature investigation](consumer-migration-feature-usage.m
 3. Remove misleading index analysis and its debug-only call, preserving actual join validation and explicit index operations.
 4. Separately decide whether to remove `dataQueryCount`, migrating its meaningful tests onto public pagination counts first.
 5. Leave optional feature removals to explicit product decisions. Run only the affected checks when code changes; this report itself requires no new runtime test run.
+
+## Prepared cleanup, 12 September 2026
+
+The user later authorized advancing the implementation. The dormant index
+creator and debug-only advice, unused field/selection/mapping wrappers and
+standalone AnyAPI count path listed above are removed in the current library
+worktree. Real index creation, adapter mappings and resource query pagination
+remain. Policy/count and cold-descriptor assertions now exercise the public
+query path instead of the deleted helper. The migration guide lists the removed
+deep imports. The authorized Node 24 checks now cover the affected selection,
+policy/count and descriptor paths on SQLite and selected native databases;
+internal/public types, lint and docs also pass. The broader checkpoint completed
+in stages, with three default-suite diagnostic failures corrected and passed in
+a focused rerun before the final full AnyAPI run.
+
+See [completed verification and limits](docs/development/pending-jskit-ai/preparation-status.md#completed-verification-checkpoint).
+These removals do not close the broader metadata/performance acceptance or
+unexecuted consumer migration.

@@ -4,6 +4,8 @@ import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 import { hasKnexTableIndex } from './lib/dbIntrospection.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from './lib/querying-writing/database-value-normalizers.js'
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { errorMessage, getOperationDiagnosticContext, isRestApiError } from '../../lib/error-context.js'
+import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 
 const lockTable = 'json_rest_api_positioning_locks'
 
@@ -29,6 +31,7 @@ export const PositioningPlugin = {
   dependencies: ['rest-api', ['rest-api-knex', 'rest-api-anyapi-knex']],
 
   async install ({ api, addHook, vars, log, scopes, pluginOptions = {} }) {
+    log = createEnhancedLogger(log)
     const knex = api.knex?.instance
     if (!knex) throw new Error('Positioning requires Knex storage')
     const config = {
@@ -68,12 +71,13 @@ export const PositioningPlugin = {
 
     addHook('resource:added', 'validate-position-field', {}, ({ context }) => {
       if (config.excludeResources.includes(context.scopeName)) return
-      const definition = context.scopeOptions.schema?.[config.field]
+      const schemaInfo = scopes[context.scopeName].vars.schemaInfo
+      const definition = schemaInfo.schemaStructure[config.field]
       if (!definition || definition.type !== 'string') {
         throw new Error(`Resource '${context.scopeName}' must declare a string '${config.field}' field for positioning`)
       }
       if (definition.setter) throw new Error(`Positioning field '${config.field}' cannot have a setter`)
-      filterFields(scopes[context.scopeName].vars.schemaInfo)
+      filterFields(schemaInfo)
     })
 
     addHook('resource:added', 'add-position-index', { afterFunction: 'validate-position-field' }, async ({ context }) => {
@@ -91,7 +95,13 @@ export const PositioningPlugin = {
         if (!await hasKnexTableIndex(knex, tableName, name)) {
           await knex.schema.table(tableName, table => table.index(columns, name))
         }
-      } catch (error) { log.warn(`Could not create positioning index for ${context.scopeName}: ${error.message}`) }
+      } catch (error) {
+        try {
+          await log.warn(`Could not create positioning index for ${context.scopeName}: ${errorMessage(error)}`, {
+            ...getOperationDiagnosticContext(context, { phase: 'positionIndex', method: 'addResource', backend: knex.client.config.client }), error
+          })
+        } catch { /* Index creation is best-effort, including its diagnostics. */ }
+      }
     })
 
     addHook('beforeProcessing', 'lock-position-resource', {}, async ({ context, scopeName }) => {
@@ -177,7 +187,7 @@ export const PositioningPlugin = {
           }, { ...context })
           target = await select(base.clone()).where(idColumn, adapter.translateFilterValue('id', beforeId)).first()
         } catch (error) {
-          if (error.subtype !== 'not_found') throw error
+          if (!isRestApiError(error) || error.subtype !== 'not_found') throw error
         }
       }
       const neighbor = target

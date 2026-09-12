@@ -59,6 +59,10 @@ const hooks = {
   checkPermissions: ({ context }) => {
     const operation = context.originalContext ?? context
     operation.cache.set(operation.auth.userId, true)
+    // Query permissions can run with a temporary filtering envelope.
+    operation.knexQuery?.query?.clone()
+    // @ts-expect-error The filtering envelope is not itself a Knex builder.
+    operation.knexQuery?.where({ active: true })
     // @ts-expect-error Permission wrapper properties are not the operation's typed application state.
     context.auth.userId
   },

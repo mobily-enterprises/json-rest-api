@@ -1,38 +1,4 @@
-/**
- * File Handling Plugin for JSON REST API
- *
- * This plugin provides automatic file upload handling based on schema definitions.
- * It works with any protocol connector (HTTP, Express, WebSocket, etc.) by using
- * a detector registry pattern.
- *
- * Features:
- * - Schema-driven: Detects file fields from type: 'file' in schemas
- * - Protocol-agnostic: Works with any connector that registers a detector
- * - Storage pluggable: Different fields can use different storage backends
- * - Zero configuration: Just define file fields in your schema
- *
- * Usage:
- * ```javascript
- * import { LocalStorage } from 'json-rest-api';
- *
- * // 1. Define schema with file fields
- * const imageSchema = {
- *   title: { type: 'string' },
- *   uploadedImage: {
- *     type: 'file',
- *     storage: new LocalStorage({ directory: './uploads' }),
- *     accepts: ['image/jpeg', 'image/png']
- *   }
- * };
- *
- * // 2. Use plugins (order matters - file-handling depends on rest-api)
- * api.use(RestApiPlugin);
- * api.use(FileHandlingPlugin);
- * api.use(ExpressPlugin); // Or any other connector
- *
- * // 3. Files are automatically handled!
- * ```
- */
+/** File detection, uploads and cleanup tied to resource writes. */
 
 import { RestApiValidationError } from '../../lib/rest-api-errors.js'
 import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../lib/error-context.js'
@@ -43,10 +9,9 @@ export const FileHandlingPlugin = {
   dependencies: ['rest-api'],
 
   install ({ addHook, scopes, log, api }) {
-    // Track which scopes have file fields
-    const fileScopes = new WeakMap() // compiled schema -> fileField[]
+    const boundedLog = createEnhancedLogger(log)
+    const fileFieldsBySchema = new WeakMap()
 
-    // Registry of file detectors from various protocols
     const detectorRegistry = []
 
     /**
@@ -63,18 +28,10 @@ export const FileHandlingPlugin = {
       }
 
       detectorRegistry.push(detector)
-      log.debug(`Registered file detector: ${detector.name}`)
+      boundedLog.debug(`Registered file detector: ${detector.name}`)
     }
 
-    // Store detectors array for inspection
     api.rest.fileDetectors = detectorRegistry
-
-    const trackUploadedFile = (context, upload) => {
-      if (!context.fileHandlingUploads) {
-        context.fileHandlingUploads = []
-      }
-      context.fileHandlingUploads.push({ ...upload, transaction: context.transaction })
-    }
 
     const recordCleanupFailure = async (context, phase, field, error) => {
       const errors = context.cleanupErrors ||= []
@@ -124,7 +81,7 @@ export const FileHandlingPlugin = {
     const getFileFields = scopeName => {
       const schemaInfo = scopes[scopeName]?.vars?.schemaInfo
       if (!schemaInfo) return []
-      const cached = fileScopes.get(schemaInfo)
+      const cached = fileFieldsBySchema.get(schemaInfo)
       if (cached) return cached
 
       const fileFields = []
@@ -138,20 +95,14 @@ export const FileHandlingPlugin = {
           })
         }
       }
-      fileScopes.set(schemaInfo, fileFields)
+      fileFieldsBySchema.set(schemaInfo, fileFields)
       return fileFields
     }
 
-    /**
-     * Process files for a scope if it has file fields
-     */
     const processFiles = async (scopeName, params, context) => {
       const fileFields = getFileFields(scopeName)
-      if (!fileFields || fileFields.length === 0) {
-        return // This scope doesn't have file fields
-      }
+      if (fileFields.length === 0) return
 
-      // Try each detector to see if we have files
       let parsed = null
       let detectorUsed = null
 
@@ -165,19 +116,18 @@ export const FileHandlingPlugin = {
             context: { scopeName, detector: detector.name, phase: 'fileDetection' }
           })
         }
-        if (matched) {
-          log.debug(`Detector '${detector.name}' matched for scope '${scopeName}'`)
-          try {
-            parsed = await detector.parse(params, context)
-          } catch (error) {
-            throw wrapUnexpectedError(error, {
-              message: `File parser '${detector.name}' failed`,
-              context: { scopeName, detector: detector.name, phase: 'fileParsing' }
-            })
-          }
-          detectorUsed = detector.name
-          break
+        if (!matched) continue
+        boundedLog.debug(`Detector '${detector.name}' matched for scope '${scopeName}'`)
+        try {
+          parsed = await detector.parse(params, context)
+        } catch (error) {
+          throw wrapUnexpectedError(error, {
+            message: `File parser '${detector.name}' failed`,
+            context: { scopeName, detector: detector.name, phase: 'fileParsing' }
+          })
         }
+        detectorUsed = detector.name
+        break
       }
 
       if (!parsed) return
@@ -185,12 +135,11 @@ export const FileHandlingPlugin = {
       const { fields = {}, files = {} } = parsed
 
       try {
-        log.debug(`Processing files with detector '${detectorUsed}'`)
+        boundedLog.debug(`Processing files with detector '${detectorUsed}'`)
         const fileNames = new Set(fileFields.map(config => config.field))
         for (const name of Object.keys(files)) {
           if (!fileNames.has(name)) throw new RestApiValidationError(`Unknown file field '${name}'`, { fields: [name] })
         }
-        // Process each file field defined in schema
         for (const fieldConfig of fileFields) {
           const file = files[fieldConfig.field]
 
@@ -238,7 +187,6 @@ export const FileHandlingPlugin = {
             }
           }
 
-          // Upload to storage
           if (!fieldConfig.storage) {
             throw new Error(`No storage configured for file field '${fieldConfig.field}'`)
           }
@@ -246,12 +194,14 @@ export const FileHandlingPlugin = {
           try {
             const storedUrl = await fieldConfig.storage.upload(file)
             Object.defineProperty(fields, fieldConfig.field, { value: storedUrl, enumerable: true, writable: true, configurable: true })
-            trackUploadedFile(context, {
+            const uploads = context.fileHandlingUploads ||= []
+            uploads.push({
               field: fieldConfig.field,
               storage: fieldConfig.storage,
-              url: storedUrl
+              url: storedUrl,
+              transaction: context.transaction
             })
-            log.debug(`Uploaded file for field '${fieldConfig.field}'`)
+            boundedLog.debug(`Uploaded file for field '${fieldConfig.field}'`)
           } catch (error) {
             throw wrapUnexpectedError(error, {
               message: `Failed to upload file for field '${fieldConfig.field}'`,
@@ -268,21 +218,9 @@ export const FileHandlingPlugin = {
       }
     }
 
-    /**
-     * Hook into REST API methods to process files
-     */
     addHook('beforeProcessing', 'processFiles', {}, async ({ context }) => {
-      const method = context.method
-      const scopeName = context.scopeName
-      const params = context.params
-
-      // Only process for mutation methods
-      if (!['post', 'put', 'patch'].includes(method)) {
-        return
-      }
-
-      // Process files if this scope has file fields
-      await processFiles(scopeName, params, context)
+      if (!['post', 'put', 'patch'].includes(context.method)) return
+      await processFiles(context.scopeName, context.params, context)
     })
 
     addHook('afterRollback', 'cleanupUploadedFiles', {}, async ({ context }) => {
@@ -295,7 +233,7 @@ export const FileHandlingPlugin = {
       }
     })
 
-    log.info('File handling plugin initialized successfully')
+    boundedLog.info('File handling plugin initialized successfully')
   }
 }
 

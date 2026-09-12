@@ -7,7 +7,7 @@ import { wrapUnexpectedError } from '../../../../lib/error-context.js'
  * @param {Object} scope - The scope object for the primary resource
  * @param {Array<Object>} records - The primary records to load includes for
  * @param {Object} deps - Dependencies object containing log, scopes, knex, and context
- * @returns {Promise<Array<Object>>} Array of included resources in JSON:API format
+ * @returns {Promise<import('../storage/storage-types.js').DataResource[]>} Array of included resources in JSON:API format
  */
 export const processIncludes = async (scope, records, deps) => {
   try {
@@ -26,7 +26,7 @@ export const processIncludes = async (scope, records, deps) => {
       return []
     }
 
-    log.debug('[PROCESS-INCLUDES] Processing includes:', queryParams.include)
+    log.debug('[PROCESS-INCLUDES] Processing includes:', { scopeName, recordCount: records.length })
 
     const includeResult = await buildIncludedResources(
       {

@@ -82,7 +82,7 @@ export const calculatePaginationMeta = (total, page, pageSize) => {
  * @param {string} scopeName - Resource type name
  * @param {Object} queryParams - Current query parameters
  * @param {Object} paginationMeta - Pagination metadata from calculatePaginationMeta
- * @returns {Object|null} Links object with self, first, last, prev, next
+ * @returns {import('../../../../types/representations.js').JsonApiLinks | null} Links object with self, first, last, prev, next
  */
 export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, paginationMeta) => {
   // Allow empty urlPrefix to generate relative links
@@ -116,6 +116,7 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
  *
  * @param {Object} record - Database record to create cursor from
  * @param {Array<string>} sortFields - Fields to include in cursor (default: ['id'])
+ * @param {import('../storage/storage-types.js').DataCursorOptions} [options]
  * @returns {string} URL-safe cursor string
  */
 export const createCursor = (record, sortFields = ['id'], { schemaInfo = null, definitions = {} } = {}) => {
@@ -194,7 +195,8 @@ export const parseCursor = (cursor) => {
  * @param {number} pageSize - Records per page
  * @param {boolean} hasMore - Whether more records exist
  * @param {Array<string>} sortFields - Fields used for cursor
- * @returns {Object|null} Links object with self, first, next
+ * @param {import('../storage/storage-types.js').DataCursorOptions} [options]
+ * @returns {import('../../../../types/representations.js').JsonApiLinks | null} Links object with self, first, next
  */
 export const generateCursorPaginationLinks = (
   urlPrefix,
@@ -239,6 +241,7 @@ export const generateCursorPaginationLinks = (
  * @param {number} pageSize - Records per page
  * @param {boolean} hasMore - Whether more records exist
  * @param {Array<string>} sortFields - Fields used for cursor
+ * @param {import('../storage/storage-types.js').DataCursorOptions} [options]
  * @returns {Object} Metadata with pageSize, hasMore, and optional cursor
  */
 export const buildCursorMeta = (records, pageSize, hasMore, sortFields = ['id'], { schemaInfo = null, definitions = {}, before = false } = {}) => {

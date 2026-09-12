@@ -1105,24 +1105,36 @@ async function runSqliteAlteration (knex, execute) {
     get schema () { return knex.schema.connection(connection) }
   }
   let foreignKeys
+  let result
+  const errors = []
   try {
     foreignKeys = (await db.raw('PRAGMA foreign_keys'))[0].foreign_keys
-    return await execute(db)
+    result = await execute(db)
   } catch (error) {
+    errors.push(error)
     try {
       // A rejected rebuild COMMIT can leave its transaction and FK setting active.
       if (connection.inTransaction === true) await db.raw('ROLLBACK')
       if (connection.inTransaction !== false || foreignKeys === undefined) {
         connection.__knex__disposed = error || true
-      } else await db.raw(`PRAGMA foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+      } else {
+        await db.raw(`PRAGMA foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+      }
     } catch (cleanupError) {
       connection.__knex__disposed = cleanupError || true
-      throw new AggregateError([error, cleanupError], 'SQLite alteration and connection cleanup failed', { cause: error })
+      errors.push(cleanupError)
     }
-    throw error
-  } finally {
-    await knex.client.releaseConnection(connection)
   }
+  try {
+    await knex.client.releaseConnection(connection)
+  } catch (error) {
+    errors.push(error)
+  }
+  if (errors.length > 1) {
+    throw new AggregateError(errors, 'SQLite alteration and connection cleanup failed', { cause: errors[0] })
+  }
+  if (errors.length) throw errors[0]
+  return result
 }
 
 // Helper function to alter multiple fields in an existing table
@@ -1362,18 +1374,17 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
   }
 
   for (const currentIndex of currentIndexes.values()) {
-    if (!desiredIndexes.has(currentIndex.name)) {
-      const supportsForeignKey = !currentIndex.unique && isMysqlDialect(resolvedDialect) && [...desiredForeignKeys.values()].some(foreignKey =>
-        foreignKey.columns.every((column, index) => currentIndex.columns[index] === column)
-      )
-      if (supportsForeignKey) continue
-      const warning = `Index '${currentIndex.name}' exists in the live table but not in the desired schema.`
-      if (allowDropIndexes) {
-        plan.dropIndexes.push(currentIndex)
-        plan.warnings.push(`${warning} It will be dropped because allowDropIndexes=true; review uniqueness and query effects.`)
-      } else {
-        plan.warnings.push(`${warning} Skipping automatic drop.`)
-      }
+    if (desiredIndexes.has(currentIndex.name)) continue
+    const supportsForeignKey = !currentIndex.unique && isMysqlDialect(resolvedDialect) && [...desiredForeignKeys.values()].some(foreignKey =>
+      foreignKey.columns.every((column, index) => currentIndex.columns[index] === column)
+    )
+    if (supportsForeignKey) continue
+    const warning = `Index '${currentIndex.name}' exists in the live table but not in the desired schema.`
+    if (allowDropIndexes) {
+      plan.dropIndexes.push(currentIndex)
+      plan.warnings.push(`${warning} It will be dropped because allowDropIndexes=true; review uniqueness and query effects.`)
+    } else {
+      plan.warnings.push(`${warning} Skipping automatic drop.`)
     }
   }
 
@@ -1411,32 +1422,44 @@ export function generateKnexMigrationDiff (tableName, currentSnapshot, schema, o
       }
       plan.warnings.push(`${warning} Skipping automatic drop.`)
     }
-    if (isMysqlDialect(resolvedDialect) && !plan.dropForeignKeys.some(key => key.name === currentForeignKey.name)) {
-      const dropsSupportingIndex = plan.dropIndexes.some(index =>
-        currentForeignKey.columns.every((column, position) => index.columns[position] === column.name)
-      )
-      if (dropsSupportingIndex) {
-        // MySQL forbids dropping a supporting index while its foreign key exists.
-        plan.dropForeignKeys.push(currentForeignKey)
-        plan.addForeignKeys.push(desiredForeignKeys.get(currentForeignKey.name) || {
-          ...currentForeignKey,
-          columns: currentForeignKey.columns.map(column => column.name),
-          referencedColumns: currentForeignKey.columns.map(column => column.referencedName)
-        })
-        plan.warnings.push(`Foreign key '${currentForeignKey.name}' will be temporarily dropped and restored while replacing its supporting index.`)
-      }
-    }
+    if (!isMysqlDialect(resolvedDialect) || plan.dropForeignKeys.some(key => key.name === currentForeignKey.name)) continue
+    const dropsSupportingIndex = plan.dropIndexes.some(index =>
+      currentForeignKey.columns.every((column, position) => index.columns[position] === column.name)
+    )
+    if (!dropsSupportingIndex) continue
+
+    // MySQL forbids dropping a supporting index while its foreign key exists.
+    plan.dropForeignKeys.push(currentForeignKey)
+    plan.addForeignKeys.push(desiredForeignKeys.get(currentForeignKey.name) || {
+      ...currentForeignKey,
+      columns: currentForeignKey.columns.map(column => column.name),
+      referencedColumns: currentForeignKey.columns.map(column => column.referencedName)
+    })
+    plan.warnings.push(`Foreign key '${currentForeignKey.name}' will be temporarily dropped and restored while replacing its supporting index.`)
   }
 
-  for (const column of plan.dropColumns) {
-    const retainedIndex = plan.addIndexes.find(index => index.columns.includes(column.name)) ||
-      [...currentIndexes.values()].find(index => index.columns.includes(column.name) && !plan.dropIndexes.some(dropped => dropped.name === index.name))
-    const retainedForeignKey = plan.addForeignKeys.find(key => key.columns.includes(column.name) ||
-      (key.referencedTableName === tableName && key.referencedColumns.includes(column.name))) ||
-      [...currentForeignKeys.values()].find(key => !plan.dropForeignKeys.some(dropped => dropped.name === key.name) &&
-        key.columns.some(entry => entry.name === column.name || (key.referencedTableName === tableName && entry.referencedName === column.name)))
-    if (retainedIndex || retainedForeignKey) {
-      throw new Error(`Cannot drop column '${column.name}' while retaining ${retainedIndex ? `index '${retainedIndex.name}'` : `foreign key '${retainedForeignKey.name}'`}. Remove that dependency explicitly, using allowDropIndexes or allowDropForeignKeys for undeclared metadata.`)
+  if (plan.dropColumns.length > 0) {
+    const retainedIndexes = [
+      ...plan.addIndexes,
+      ...[...currentIndexes.values()].filter(index => !plan.dropIndexes.some(dropped => dropped.name === index.name))
+    ]
+    const retainedForeignKeys = [
+      ...plan.addForeignKeys,
+      ...[...currentForeignKeys.values()]
+        .filter(key => !plan.dropForeignKeys.some(dropped => dropped.name === key.name))
+        .map(key => ({
+          ...key,
+          columns: key.columns.map(column => column.name),
+          referencedColumns: key.columns.map(column => column.referencedName)
+        }))
+    ]
+    for (const column of plan.dropColumns) {
+      const index = retainedIndexes.find(index => index.columns.includes(column.name))
+      const foreignKey = retainedForeignKeys.find(key => key.columns.includes(column.name) ||
+        (key.referencedTableName === tableName && key.referencedColumns.includes(column.name)))
+      if (!index && !foreignKey) continue
+      const dependency = index ? `index '${index.name}'` : `foreign key '${foreignKey.name}'`
+      throw new Error(`Cannot drop column '${column.name}' while retaining ${dependency}. Remove that dependency explicitly, using allowDropIndexes or allowDropForeignKeys for undeclared metadata.`)
     }
   }
 

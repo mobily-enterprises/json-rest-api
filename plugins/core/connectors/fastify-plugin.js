@@ -1,6 +1,4 @@
 import { createContext } from './lib/request-helpers.js'
-import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
-import { getOperationDiagnosticContext } from '../../../lib/error-context.js'
 import { buildTransportRouteSchema, getTransportRouteContract } from './lib/transport-route-schemas.js'
 import { validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import {
@@ -21,6 +19,7 @@ import {
   addWriteOutcomeToHttpErrors,
   buildTransportRejectionBody,
   executeConnectorRoute,
+  logHttpRequestError,
   handleConnectorError
 } from './lib/connector-core.js'
 
@@ -41,6 +40,7 @@ function registerJsonParsers (app) {
   const parse = (request, body, done) => {
     try { done(null, body === '' ? {} : JSON.parse(body)) } catch (error) {
       error.statusCode = 400
+      error.type = 'entity.parse.failed'
       done(error)
     }
   }
@@ -111,15 +111,16 @@ export const FastifyPlugin = {
 
       const fastifyErrorHandler = async (error, request, reply) => {
         const context = ensureContext(request, reply)
-        const schemaInfo = scopes[routeMeta?.scopeName]?.vars?.schemaInfo || context.schemaInfo
-        createEnhancedLogger(log, { schemaInfo }).logError('Fastify request error', error, {
-          ...getOperationDiagnosticContext(context, {
-            phase: 'httpError',
-            method: request.method,
-            scopeName: routeMeta?.scopeName || context.scopeName,
-            backend: api.knex?.instance?.client?.config?.client
-          }),
-          path
+        await logHttpRequestError({
+          error,
+          context,
+          log,
+          scopes,
+          routeMeta,
+          api,
+          method: request.method,
+          path,
+          message: 'Fastify request error'
         })
 
         const transportData = context.transport

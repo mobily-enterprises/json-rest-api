@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * RelationshipWriteArguments, WriteRelationshipContext
+ * } from './lifecycle-types.js' */
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import {
@@ -12,23 +16,24 @@ import { requireExistingResourceId } from '../lib/querying-writing/resource-id-n
  * Validate relationship permission/cardinality, then delegate the data mutation
  * and version handling to PATCH using the same transaction. This outer method
  * runs its own finish hooks and completes the transaction only when it owns it.
+ * @param {RelationshipWriteArguments} args
  */
-export default async function patchRelationshipMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+export default async function patchRelationshipMethod ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
-  context.method = 'patchRelationship'
-  context.scopeName = scopeName
-  context.id = requireExistingResourceId(params.id, {
+  callerContext.method = 'patchRelationship'
+  callerContext.scopeName = scopeName
+  callerContext.id = requireExistingResourceId(params.id, {
     scopeOptions,
     vars,
     scopeName
   })
-  context.relationshipName = params.relationshipName
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  callerContext.relationshipName = params.relationshipName
+  callerContext.schemaInfo = scope.vars.schemaInfo
 
-  // Transaction handling
-  await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
-  context.db = context.transaction || api.knex.instance
+  await beginWriteTransaction(callerContext, params.transaction, helpers.newTransaction, runHooks)
+  callerContext.db = callerContext.transaction || api.knex.instance
+  const context = /** @type {WriteRelationshipContext} */ (callerContext)
 
   try {
     // Check permissions
@@ -65,8 +70,6 @@ export default async function patchRelationshipMethod ({ params, context, vars, 
     await runHooks('finishPatchRelationship')
 
     await commitOwnedTransaction(context)
-
-    // 204 No Content
   } catch (error) {
     await handleWriteMethodError(error, context, 'PATCH_RELATIONSHIP', scopeName, log)
   }

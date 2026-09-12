@@ -16,7 +16,7 @@ import {
 import { assertScalarQueryField } from '../querying-writing/field-utils.js'
 import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
 
-/** @import { BaseStorageAdapterOptions, CanonicalDescriptor, SelectColumn, SelectTranslator, StorageAdapter, StorageAdapterOptions, StorageAdapterLookupOptions, StorageSchemaInfo, StorageFieldDefinition } from './storage-types.js' */
+/** @import { BaseStorageAdapterOptions, CanonicalDescriptor, SelectTranslator, StorageAdapter, StorageAdapterOptions, StorageAdapterLookupOptions, StorageSchemaInfo, StorageFieldDefinition } from './storage-types.js' */
 
 /** @template T @param {T} value @returns {T} */
 const passthrough = (value) => value
@@ -99,12 +99,6 @@ const normalizeFilterValueForDefinition = (value, definition = {}, { isRelations
   return value
 }
 
-/** @param {string} source @param {StorageAdapter | null | undefined} adapter @returns {string} */
-const translateSourceColumn = (source, adapter) => {
-  if (!adapter || source === '*') return source
-  return adapter.translateColumn(source) || source
-}
-
 /** @overload @param {StorageAdapter} adapter @returns {SelectTranslator} */
 /** @overload @param {StorageAdapter | null | undefined} adapter @returns {SelectTranslator | null} */
 /** @param {StorageAdapter | null | undefined} adapter @returns {SelectTranslator | null} */
@@ -134,27 +128,6 @@ export const createSelectTranslator = (adapter) => {
 
     return `${alias}.${result}`
   }
-}
-
-/** @param {SelectColumn[] | null | undefined} fields @param {StorageAdapter | null | undefined} adapter @returns {SelectColumn[] | null | undefined} */
-export const translateSelectFieldsForAdapter = (fields, adapter) => {
-  if (!adapter || !fields) return fields
-
-  const translateField = createSelectTranslator(adapter)
-
-  return fields.map((field) => {
-    if (typeof field !== 'string') return field
-    if (field === '*') return '*'
-
-    const aliasMatch = field.match(/\s+as\s+/i)
-    if (aliasMatch) {
-      const [source = '', alias = ''] = field.split(/\s+as\s+/i)
-      const translatedSource = translateSourceColumn(source.trim(), adapter)
-      return `${translatedSource} as ${alias.trim()}`
-    }
-
-    return translateField(field)
-  })
 }
 
 /** @param {BaseStorageAdapterOptions} options @returns {StorageAdapter} */

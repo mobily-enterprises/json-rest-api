@@ -1,3 +1,7 @@
+// @ts-check
+/** @import {
+ * IdentityContext, LifecycleArguments, ReadContext, Resource
+ * } from './lifecycle-types.js' */
 import { enrichIncludedAttributes } from './enrich-attributes.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
@@ -12,10 +16,11 @@ import { validateRequestedIncludes, filterToOneResponseLinkage } from './common.
 /**
  * Read one resource using params.id and params.queryParams. Missing resources
  * reject; the final resource uses the selected plain or JSON:API representation.
+ * @param {LifecycleArguments<Resource>} args
  */
 export default async function getMethod ({
   params,
-  context,
+  context: callerContext,
   vars,
   helpers,
   scope,
@@ -25,26 +30,25 @@ export default async function getMethod ({
   scopeName,
   api
 }) {
-  context.method = 'get'
+  callerContext.method = 'get'
 
   rejectRemovedOptions(params)
-  context.format = resolveFormat(params.format, vars.format)
-  context.simplified = context.format === 'plain'
+  callerContext.format = resolveFormat(params.format, vars.format)
+  callerContext.simplified = callerContext.format === 'plain'
 
-  // Assign common context properties
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  callerContext.schemaInfo = scope.vars.schemaInfo
   const rawQueryParams = params.queryParams || {}
-  context.queryParams = {
+  callerContext.queryParams = {
     fields: rawQueryParams?.fields ?? {},
     ...(rawQueryParams.include == null ? {} : { include: rawQueryParams.include })
   }
 
-  context.transaction = params.transaction
-  context.db = context.transaction || api.knex.instance
+  callerContext.transaction = params.transaction
+  callerContext.db = callerContext.transaction || api.knex.instance
 
-  context.scopeName = scopeName
+  callerContext.scopeName = scopeName
+  const context = /** @type {ReadContext<Resource>} */ (callerContext)
 
-  // These are just shortcuts used in this function and will be returned
   const schemaStructure = context.schemaInfo.schemaInstance.structure
   const schemaRelationships = context.schemaInfo.schemaRelationships
 
@@ -71,10 +75,12 @@ export default async function getMethod ({
   context.id = validatedRequest.id
   context.queryParams = validatedRequest.queryParams || {}
 
+  const identityContext = /** @type {IdentityContext} */ (context)
+
   // Fetch minimal record for authorization checks
   const minimalRecord = await helpers.dataGetMinimal({
     scopeName,
-    context,
+    context: identityContext,
     runHooks
   })
 
@@ -91,7 +97,6 @@ export default async function getMethod ({
 
   context.minimalRecord = minimalRecord
 
-  // Centralised checkPermissions function
   await scope.checkPermissions({
     method: 'get',
     originalContext: context,
@@ -104,12 +109,10 @@ export default async function getMethod ({
 
   context.record = await helpers.dataGet({
     scopeName,
-    context,
+    context: identityContext,
     runHooks
   })
 
-  // Check if record was found - storage layer returns null/undefined for non-existent records.
-  // This generates a proper 404 error with JSON:API error format instead of returning empty data.
   if (!context.record || !context.record.data) {
     throw new RestApiResourceError(
       'Resource not found',
@@ -121,7 +124,6 @@ export default async function getMethod ({
     )
   }
 
-  // Normalize database values (e.g., convert 1/0 to true/false for booleans)
   context.record = normalizeRecordAttributes(context.record, scopes)
 
   await runHooks('checkDataPermissions')
@@ -159,8 +161,7 @@ export default async function getMethod ({
   })
   filterResponseFields(context.record, context.queryParams.fields)
 
-  // Get schema info for transformation
-  context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  context.schemaInfo = scope.vars.schemaInfo
 
   if (context.simplified) {
     return transformJsonApiToSimplified(
