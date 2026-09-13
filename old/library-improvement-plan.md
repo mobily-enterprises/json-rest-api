@@ -1,8 +1,18 @@
 # Library improvement execution plan
 
+**Active scope, 2026-09-13:** the user resumed the narrower goal of migrating
+current jskit-ai main to v2 after its integration work merged. Source, dependency,
+test and generated-documentation changes in jskit-ai are now authorized. Vibe64,
+its seeds and Online remain paused; publication/deployment remain excluded.
+The historical consumer-pause instructions below do not restrict this jskit-ai
+batch. See the [current migration evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
+Current accounting is **194/250 complete (77.6%); 56 open**. M-07/M-08 and
+R-B0-07/R-B1-05 close against the accepted jskit-ai migration. This narrow goal
+does not claim completion of Part C or the remaining application migrations.
+
 Created: 2026-09-08. Revision 2: 2026-09-09, following the maintainer's approval of coordinated breaking changes across json-rest-api, jskit-ai, vibe64, and the seeds selected by vibe64; other app migrations are explicitly deferred to the maintainer.
 
-**Current revision 3, 2026-09-12:** the maintainer explicitly requested that
+**Historical revision 3 reconciliation, 2026-09-12:** the maintainer explicitly requested that
 completed mixed entries close and only unfinished work receive new checkboxes.
 The 34 original mixed IDs now describe their completed library portions; 34
 linked consumer residuals and two separate library residuals are in Part R.
@@ -81,8 +91,8 @@ with a concrete cross-cutting verification need, and final acceptance; do not
 run them after each checklist closure, small fix or documentation change.
 Required database and connector coverage remains part of the goal.
 
-**Reconciled checklist: 190/250 complete (76.0%); 60 open.** Internal: 138/138;
-API: 48/48; migration: 2/14; residual work: 2/36; final review/report: 0/14.
+**Reconciled checklist: 194/250 complete (77.6%); 56 open.** Internal: 138/138;
+API: 48/48; migration: 4/14; residual work: 4/36; final review/report: 0/14.
 A/B completion refers to the narrowed library acceptance above; transferred
 consumer work stays open in Part R, while R-L01/R-L02 are accepted. The 2026-09-12
 [A7 reconciliation](#2026-09-12-a7-error-boundary-reconciliation) closes A7-04;
@@ -270,8 +280,8 @@ The initial [consumer inspection](docs/development/consumer-migration.md) is a s
 - [x] **M-04** Create a reproducible local artifact/link verification path and prove each consumer resolves the exact intended library build. Use isolated installs where needed; do not mutate another task's installed dependencies or lockfile incidentally.
 - [ ] **M-05** Record each intended breaking change with old/new call examples, affected source/tests/templates/apps, data implications, and the checks proving migration. Decide default behavior once; do not leave old/new parsers in the runtime.
 - [ ] **M-06** Reassess each architectural proposal against a demonstrated problem, comparing a local fix, direct API simplification, and internal refactoring. Retain working internals when change buys nothing; keep required correctness/capability work open.
-- [ ] **M-07** Before every migration batch, refresh branches, diffs, and usage searches against the ongoing jskit-ai expansion. Work in isolated checkouts when needed and reconcile overlapping edits without discarding either task's work.
-- [ ] **M-08** Reconcile the [parked first migration batch](docs/development/pending-jskit-ai/README.md) against current source, then finish porting jskit-ai's host, shared CRUD repositories, user/workspace repositories, dependency declarations, and tests alongside the changed library surface. Add no runtime compatibility bridge.
+- [x] **M-07** Before every migration batch, refresh branches, diffs, and usage searches against the ongoing jskit-ai expansion. Work in isolated checkouts when needed and reconcile overlapping edits without discarding either task's work. The current batch starts from clean main `dff33b4` after integrations and assistant contracts merged; the patch applied cleanly and the newly added assistant caller was reconciled. Refresh remains required at the next application batch. See [accepted jskit-ai evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
+- [x] **M-08** Reconcile the [parked first migration batch](docs/development/pending-jskit-ai/README.md) against current source, then finish porting jskit-ai's host, shared CRUD repositories, user/workspace repositories, dependency declarations, and tests alongside the changed library surface. Add no runtime compatibility bridge. The installed v2 commit, current source, generated outputs, targeted/native/browser checks and staged comprehensive acceptance are recorded in [the acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
 - [ ] **M-09** Port generated-code templates, authored examples, integration documentation, and fixtures; run the owning repository's documented generators and review their outputs. Regeneration must produce the new API directly.
 - [ ] **M-10** Port vibe64 and its public/accounts seed branches, including custom hooks, repositories, HTTP/client consumers, and dependency/lockfile updates. Its migration is not proven by jskit-ai's tests alone. Document equivalent steps for the maintainer's later ports of other apps without changing those apps here.
 - [ ] **M-11** Remove obsolete aliases, duplicate argument/return handling, forwarding imports, and consumer workarounds after their responsibilities are covered. Search actual consumers and generated outputs for remaining old calls.
@@ -647,13 +657,13 @@ portions so no completed library work is carried forward as unfinished.
 - [ ] **R-A10-08** Migrate and verify actual JSKIT/app/template/generated deep imports and their optional plugin dependencies. (From **A10-08**.)
 - [ ] **R-A10-09** Install the intended tarball into paired JSKIT/app checks and verify exact dependency resolution, plugins and real workflows. (From **A10-09**.)
 - [ ] **R-A10-10** Verify clean migrated-consumer installations, Node 24 engines and coordinated dependency/lockfile changes. (From **A10-10**.)
-- [ ] **R-B0-07** Port and verify actual JSKIT HTTP/client/assistant consumers, including pagination and changed error/response payloads. (From **B0-07**.)
+- [x] **R-B0-07** Port and verify actual JSKIT HTTP/client/assistant consumers, including pagination and changed error/response payloads. (From **B0-07**.) Real SQLite assistant pagination, Fastify requests, ordinary/streaming client retries, and all six conditional browser contracts pass; see [acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
 - [ ] **R-B0-09** Port JSKIT and selected app/seed callers, templates and generated repositories; verify mappings, policies, includes and pagination through Part M. (From **B0-09**.)
 - [ ] **R-B0-11** Remove consumer workaround wrappers after installed-artifact tests prove equivalent behavior; retain useful domain integration. (From **B0-11**.)
 - [ ] **R-B0-12** Verify migration examples against migrated consumer artifacts, regenerate callers and search consumers for old spellings/imports. Final packaged-library example execution is separately tracked by R-L02. (From **B0-12**.)
 - [ ] **R-B1-02** Migrate and verify actual consumer error classification, retry decisions and nontransactional diagnostics. (From **B1-02**.)
 - [ ] **R-B1-04** Verify migrated consumer after-commit handling and application callbacks do not blindly retry committed writes. (From **B1-04**.)
-- [ ] **R-B1-05** Verify migrated JSKIT HTTP/schema/client outcome propagation and application status mapping. (From **B1-05**.)
+- [x] **R-B1-05** Verify migrated JSKIT HTTP/schema/client outcome propagation and application status mapping. (From **B1-05**.) Actual typed library errors and resource failures pass through Fastify, plain/JSON:API schemas and the client with correct status/outcome and 5xx redaction. Unsafe default CSRF replay is rejected. See [acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
 - [ ] **R-B2-01** Integrate or replace actual JSKIT/app transaction helpers with the selected owner; remove overlapping ownership wrappers. (From **B2-01**.)
 - [ ] **R-B2-07** Port affected consumer raw-transaction callers and verify raw SQL participation inside the selected managed owner. (From **B2-07**.)
 - [ ] **R-B2-10** Migrate JSKIT/app helpers and call sites, remove overlapping wrappers and execute real multi-operation success/rollback workflows. (From **B2-10**.)

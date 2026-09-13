@@ -1,5 +1,193 @@
 # Current v2 migration preparation
 
+## Accepted jskit-ai migration, 2026-09-13
+
+The current jskit-ai source migration is complete and verified. Its clean starting
+main revision was `dff33b4f7ceb2253baa96d84e602464dbd4f83a5`. The user then
+requested committing all changes; jskit-ai is committed as
+`ba6b49252baead0cce791b3ceb39d04c13feb48b` with a clean working tree. All 67 files
+matched the accepted verification hashes before commit. No tests were repeated
+for this unchanged source. The commit remains unpushed.
+Vibe64, its seeds and Online were not changed; publication,
+deployment and application migrations remain paused.
+
+The master is **194/250 complete (77.6%); 56 open**. This closes M-07/M-08 and
+R-B0-07/R-B1-05. The other 32 consumer residuals and 10 migration coordination
+items still include application acceptance or combined evidence; all 14 final
+cross-repository review/report items remain open. The new narrow jskit-ai goal
+does not complete the original multi-repository master plan.
+
+### Accepted implementation and artifact
+
+- The archived 42-file patch was applied and reconciled with the merged
+  integrations and assistant work. Its original checksum is unchanged.
+- The host uses JsonRestApi directly. CRUD and user/workspace repositories use
+  plain data, explicit output/returning choices and api.transaction ownership.
+  Useful domain field/relationship mappings and Document/Documents methods stay.
+  Obsolete input builders, response repair and duplicate completion owners are
+  removed. No old/new runtime parser or compatibility framework was added.
+- Both actual runtime importers, json-rest-api-core and crud-core, declare the
+  exact v2 Git commit `f97dc859321aee41915f3b0e256a861c382bc1b3`; hooked-api is
+  absent from the installed graph. The npm-generated lock and fresh-cache import
+  proof identify that artifact. All 130 runtime/declaration/package files match.
+- HTTP status mapping now handles documented library error codes/subtypes at
+  the existing HTTP boundary. Plain and JSON:API errors preserve outcomes and
+  redact internal failures. Default CSRF retry refuses pending, committed or
+  unknown writes, including streaming requests. Application-defined retry hooks
+  remain explicitly application-owned.
+- Current source patterns delegate to the shared v2 implementation. Authored
+  migration guidance and generated references/catalog are current and
+  deterministic. The detailed JSKIT notes live in the existing application
+  migration guide, keeping the core operational reference within its size limit.
+  The library's GUIDE 33 also explains the JSKIT port and remaining app steps.
+
+### Final verification
+
+All execution used Node 24.6.0. The full `npm run verify` checkpoint exercised
+2,793 tests: 2,783 passed, one documentation-size assertion failed, and nine
+conditional checks were skipped. There were no runtime failures or cancellations.
+Lint, release coordination tests, runtime dependency audit, CI contracts,
+package/provider/migration imports and deterministic generation passed before
+the workspace suites. Log: `/tmp/jskit-v2-verify-20260913.log`.
+
+The failing prose was moved to the existing migration reference. A first short
+link still exceeded the core reference budget by 189 bytes (the baseline had
+only 21 bytes spare), so it was removed; the skill already links the dedicated
+migration guide. No generator workaround or larger budget was retained.
+The final agent-docs package check passes 19 tests with its one browser gate
+skipped, deterministic generation passes, and the VitePress build passes.
+Log: `/tmp/jskit-v2-docs-final-20260913.log`. The skipped browser gate passed
+separately below. The broad command itself exited 1; this is staged acceptance
+after the focused documentation correction, not a claim that it exited 0 or
+that every runtime suite was repeated for prose. Executable consumer source is
+unchanged after that broad checkpoint; the later test-only PostgreSQL fixture
+extension passed its focused checks.
+
+Additional real checks passed:
+
+| Verification | Result | Evidence |
+| --- | --- | --- |
+| MySQL 8.0.46, rewarded and user/workspace shipped migrations/workflows | 5 + 7 passed, no skips | `/tmp/jskit-v2-native-oracle-20260913.log` |
+| MySQL 8.0.46, connector persistence, concurrent pools, rollback and CLI restart | 7 passed, no skips | `/tmp/jskit-v2-native-connectors-20260913.log` |
+| PostgreSQL 16.15, six shipped user/workspace migrations and repository workflows | 7 passed, no skips | `/tmp/jskit-v2-native-postgres-20260913.log` |
+| Browser: linked package caching, responsive date filters, adaptive navigation and preserved forms | 1 + 1 + 2 passed, no skips | Tool execution records; commands below |
+| Browser: assistant scrolling and billing/account states | 1 + 1 passed, no skips | `/tmp/jskit-v2-browser-assistant-20260913.log`, `/tmp/jskit-v2-browser-payments-20260913.log` |
+| Final lock consistency | `npm ci --dry-run --ignore-scripts` passed | `/tmp/jskit-v2-lock-final-20260913.log` |
+| Library migration guide site | `npm run docs` passed | `/tmp/jra-jskit-migration-docs-20260913.log` |
+
+All nine conditional skips in the broad checkpoint were exercised separately:
+six browser cases, the connector database suite, and two native duplicate
+recovery cases. Native/browser suites add nested assertions, so these counts
+must not be added to the broad run as a distinct-test total. Owned databases,
+temporary install/cache directories and browser fixtures were cleaned up.
+
+From jskit-ai with Node 24 selected, the three browser commands whose results
+are retained in tool records are:
+
+```sh
+JSKIT_VITE_LINKED_PACKAGE_CACHE_INTEGRATION=1 node --test packages/agent-docs/test/viteLinkedPackageCache.browser.test.js
+JSKIT_HTTP_WEB_DATE_FILTER_VISUAL_INTEGRATION=1 node --test packages/http-web/test/crudListDateFilterSurface.browser.test.js
+JSKIT_SHELL_WEB_BROWSER_INTEGRATION=1 node --test packages/shell-web/test/adaptiveShell.browser.test.js
+```
+
+JSKIT's actual consumers are JavaScript: provider imports, syntax checks and
+runtime workflows provide their validation. There is no downstream TypeScript
+compilation claim. Rewarded's shipped ON UPDATE defaults are MySQL-specific;
+its SQLite tests exercise resource-generated tables, while native MySQL tests
+exercise the actual migrations. PostgreSQL acceptance covers the supported
+user/workspace path. The separate connectors configuration UI was unchanged
+and is outside this JSON REST migration.
+
+The [manifest](v2-source-preparation-manifest.json) retains the original parked
+patch and adds the current consumer file hashes, package resolution and exact
+verification accounting. Remaining broad-plan requirements stay unticked; their
+jskit-ai portions have this evidence ready for the later application batch.
+
+## Active jskit-ai migration, 2026-09-13
+
+The user has authorized migration of the current jskit-ai main branch to v2,
+including dependencies, templates, generated outputs and actual consumer
+verification. This supersedes the historical consumer pause below for jskit-ai
+only. Vibe64, its seeds and Vibe64 Online remain paused. Publication and
+deployment are outside this goal; jskit-ai pushes to main trigger a docs
+deployment, so this migration remains unpushed.
+
+Starting source: clean jskit-ai main at
+`dff33b4f7ceb2253baa96d84e602464dbd4f83a5`, including the completed integrations
+and assistant contracts. `git apply --check` passed and the saved 42-file
+`v2-source-preparation.patch` was applied. Its original checksum and manifest
+remain historical evidence. The library is the pushed, already verified commit
+`f97dc859321aee41915f3b0e256a861c382bc1b3`.
+
+Decisions and required acceptance:
+
+- Pin the unpublished library using its full HTTPS Git commit, remove
+  hooked-api, and generate the lock with npm. Do not commit local dependency
+  paths or publish a release to make the migration testable.
+- Retain JSKIT's Document/Documents methods. Migrate their implementation to
+  plain write data, explicit output selection and library-owned transactions.
+- Preserve raw Knex transaction owners in integrations that do not invoke
+  JSON REST operations.
+- Reconcile the new assistant pagination integration test, which was absent
+  from the patch, and verify rewarded grants with real database persistence
+  and rollback rather than only mocked repositories.
+- Use Node 24 for targeted checks, then one comprehensive final checkpoint.
+  The existing library test results do not establish consumer acceptance.
+- Rebuild catalog and agent documentation from their authored sources and
+  verify generation is deterministic. Update the migration guide and master
+  checklist from actual results; mixed application requirements remain open
+  until their remaining consumers have been migrated.
+
+Current master remains **190/250 complete; 60 open**. Source application is
+complete; final acceptance is pending.
+
+Verified intermediate evidence (not a completed final gate):
+
+- Node 24.6.0 `npm install --package-lock-only --ignore-scripts` and `npm ci`
+  passed in jskit-ai. Installed `json-rest-api` is 2.0.0 at the selected full
+  commit; 130 runtime/declaration/package files match the source byte for byte.
+  A fresh-cache temporary install passed with `GIT_SSH_COMMAND=false`, then
+  public imports and the same file comparison passed. npm canonicalizes the
+  GitHub lock entry to `git+ssh` but fetches this public pinned artifact without
+  SSH. The temporary install/cache were removed. Logs:
+  `/tmp/jskit-v2-install-20260913.log`, `/tmp/jskit-v2-artifact-20260913.log`.
+- The first 106 targeted repository tests had 103 passes and three stale fixture
+  assumptions: an obsolete private projection metadata path, the previous
+  SQLite raw date representation, and missing create-operation metadata in an
+  after-commit test resource. The projection now executes a real query; dates
+  verify UTC storage and public leap-day output in four time zones. All four
+  selected correction checks passed. Logs:
+  `/tmp/jskit-v2-repositories-targeted-20260913.log`,
+  `/tmp/jskit-v2-repositories-corrections-20260913.log`.
+- New assistant SQLite integration passes 4 tests; rewarded SQLite resource
+  workflows pass 5; users/workspaces run six shipped migrations with 5 passes
+  and 2 native duplicate-recovery cases skipped. Those two cases require a
+  supported application dialect (MySQL/PostgreSQL duplicate codes).
+- The same native suites passed against Oracle MySQL 8.0.46: rewarded 5/5 and
+  users/workspaces 7/7, no skips or failures. They execute four rewarded and six
+  users/workspaces shipped migrations, actual repositories, mapped relationships,
+  scope isolation, shared transactions, raw SQL participation and rollback.
+  `/tmp/jskit-v2-native-oracle-20260913.log` records execution; the owned server
+  and temporary data directory were removed. An earlier attempt using the
+  system MariaDB alias failed before any tests; it is not MySQL evidence.
+- Dependency review added the direct v2 import dependency to crud-core as well
+  as the host. Root and CI no longer claim Node 22 support; existing Node 26
+  support is retained, while this goal executes checks only on Node 24. Internal
+  JSKIT package versions remain coordinated at their current values. No release
+  preparation or version bump is needed to test current workspace source.
+- The authored guide/search pattern and stale AGENTS generator reference were
+  corrected; catalog and agent-docs generation ran. Final deterministic
+  generation checking waits for the final source. Rewarded now has a package
+  test script so its regressions participate in the normal workspace gate.
+- Review found two additional HTTP/client gaps: typed library error status
+  mapping and automatic CSRF retry of pending/committed/unknown writes. The retry
+  fix has 44 focused passing client/retry tests, including actual request counts
+  for ordinary and streaming requests. HTTP mapping and real Fastify execution
+  are in progress; Fastify 5.12.3 is a root test dependency. Neither review result
+  substitutes for the final comprehensive consumer gate.
+
+## Historical preparation and library verification
+
 Updated 2026-09-12. This records the user's newly authorized preparation batch;
 it supersedes the archive's blanket consumer pause only for the work below.
 The original parked patch and manifest remain historical evidence, not the

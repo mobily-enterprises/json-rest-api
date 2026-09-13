@@ -10,7 +10,9 @@ Version 2 changes setup, resource calls and transaction ownership. Upgrade each
 application's source and dependency versions together. Old option spellings are
 rejected; there is no compatibility mode. This guide describes the required port;
 it does not imply that any consuming application or seed generator is migrated.
-Before v2 is published, install the intended tarball in place of the registry package.
+Before v2 is published, install the intended tarball or pin an exact reviewed Git
+commit in place of the registry package. Verify the installed artifact; changing
+the version declaration alone does not migrate an application.
 
 ## Replace the API host
 
@@ -2971,6 +2973,64 @@ documents the retained hooks and their ordering.
 Coordinate dependency versions, consumer repositories, generated code and seeds
 before upgrading applications. Run their actual workflows against the intended
 package set. Library-side verification does not establish consumer compatibility.
+
+### JSKIT repositories
+
+JSKIT's `Document` / `Documents` repository methods keep their existing public
+names and JSON:API responses. Repository callers continue to pass plain payloads
+and `{ trx, context }` options. The shared implementation selects `data` for
+writes, `format: 'jsonapi'` for documents, and `returning: 'full'` for returned
+write attributes. DELETE explicitly selects `returning: 'none'`.
+
+Custom repositories calling the library directly need the same changes. Plain
+collection reads return an envelope with a `data` array; plain single-resource
+reads and full writes return the record itself. When a foreign-key field has a
+relationship alias, plain library input uses that alias. For example,
+`authorId: { belongsTo: 'authors', as: 'author' }` accepts `data: { author: id }`.
+JSKIT's shared repository maps its domain payload's `authorId` to `author` and
+rejects payloads that supply both names.
+
+Use the repository's transaction owner for operations involving JSON REST:
+
+```js
+// Before: a raw Knex owner surrounded JSON REST repository writes.
+await knex.transaction(async trx => {
+  await repository.createDocument(payload, { trx, context })
+})
+
+// After: the repository delegates ownership to api.transaction.
+await repository.withTransaction(async trx => {
+  const document = await repository.createDocument(payload, { trx, context })
+  await trx('audit_entries').insert({ record_id: document.data.id })
+})
+```
+
+Pass `trx` explicitly to every participating repository call. The transaction
+remains callable for raw SQL; return normally to commit and throw to roll back.
+Keep independent raw Knex transaction helpers for integrations that perform
+only SQL. They do not need to become JSON REST consumers.
+
+JSKIT copies the outer context for each library operation; hooks inside that
+operation share the resulting object. Its `visibilityContext` and `scopeValues`
+maps are copied, while other nested application objects retain their references.
+Use those maps for user/workspace scoping. A nested operation needs its own
+working context and explicit transaction participation. Remove hooks that repair
+dates or query results already normalized by v2; keep application-specific
+serializers and policies.
+
+Custom HTTP adapters must translate the library's typed error codes and resource
+subtypes into status codes, in addition to preserving `transactionOutcome`.
+Library errors need not carry an HTTP `statusCode`. Validation is 422, missing
+resources 404, forbidden resources 403, and conflicts 409. Client retry policies
+must inspect the outcome: `pending`, `committed` and `unknown` are not permission
+to replay a write, even if another copied error field resembles a retryable CSRF
+failure. An application-defined retry callback owns its own policy.
+
+The JSKIT migration uses Node 24 for verification and requires Node 24 or newer
+for packages that load v2. Upgrade the framework packages and lockfile together,
+rebuild the catalog and distributed agent docs from authored source patterns, and check
+custom app repositories and hooks separately. Passing JSKIT tests does not port
+Vibe64, its seeds or other applications. Those remain separate migration steps.
 
 The local dispatcher preserves null/undefined throws; see [transaction outcomes](20-transaction-outcomes.md).
 [Positioning](31-positioning.md) now coordinates writes through database locks;

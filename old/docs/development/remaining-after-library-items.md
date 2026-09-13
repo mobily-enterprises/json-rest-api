@@ -1,5 +1,10 @@
 # The 60 items remaining after the eight library items
 
+**Historical snapshot below.** The 2026-09-13 jskit-ai migration closes M-07,
+M-08, R-B0-07 and R-B1-05. The current master has **56 open items**: 10 migration
+coordination, 32 consumer residuals and 14 final cross-repository review/report
+items. See [accepted evidence](pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
+
 Snapshot: 2026-09-12. All eight library entries are accepted; comprehensive post-cleanup verification passed and work is paused before consumers. The [master plan](../../library-improvement-plan.md) remains the only completion ledger.
 
 There are 46 overlapping consumer migration/acceptance entries and 14 final review/reporting entries. A migration batch can satisfy several entries; these are not 60 independent implementation projects. Consumer repositories remain paused.

@@ -1,6 +1,19 @@
 # Parked jskit-ai API migration
 
-## Current source preparation, 2026-09-12
+## Applied to current jskit-ai, 2026-09-13
+
+The saved 42-file patch has now been reconciled and applied to jskit-ai main
+`dff33b4f7ceb2253baa96d84e602464dbd4f83a5`, under the user's new migration goal.
+Dependencies, current integration tests and generated output are migrated and
+verified in that checkout. The patch and original capture fields remain historical
+evidence; do not reapply either archived patch over the active migration.
+The accepted migration is committed as
+`ba6b49252baead0cce791b3ceb39d04c13feb48b` in jskit-ai and remains unpushed.
+See [current acceptance evidence](preparation-status.md#accepted-jskit-ai-migration-2026-09-13)
+for installation, tests and remaining checks. Vibe64, seeds and Online remain
+paused. No release or deployment is authorized by this batch.
+
+## Historical source preparation, 2026-09-12
 
 [v2-source-preparation.patch](v2-source-preparation.patch) captures the current
 **42-file** source port against jskit-ai `70163546304ee1fed80cbf1c6ec67517294db855`.

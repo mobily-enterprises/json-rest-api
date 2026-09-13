@@ -1076,5 +1076,584 @@
     "At the coordinated consumer checkpoint, execute prepared repository, managed transaction, HTTP/client, generated-output and real application workflow checks against the selected v2 artifact.",
     "Vibe64 and seeds remain paused"
   ],
-  "verificationScope": "Top-level testsRun/dependency/generated-output fields describe the archived consumer preparation; library checks are under library.verification."
+  "verificationScope": "Top-level testsRun/dependency/generated-output fields describe the archived consumer preparation; library checks are under library.verification.",
+  "currentMigration": {
+    "accepted": "2026-09-13",
+    "scope": "Current jskit-ai main migration only; Vibe64, seeds, Online and publishing/deployment paused",
+    "baseCommit": "dff33b4f7ceb2253baa96d84e602464dbd4f83a5",
+    "commit": "ba6b49252baead0cce791b3ceb39d04c13feb48b",
+    "workingTree": "Committed with a clean working tree; unpushed",
+    "node": "24.6.0",
+    "fileCount": 67,
+    "files": {
+      ".github/workflows/verify.yml": "96cea646584a33ad9876a123617d5c1807cf1cc5d7330e9da8855e327abd2a9b",
+      "AGENTS.md": "960764016310e58455ee69be3ac2483e702e83a4c471c67743d5299fdd0c7059",
+      "package-lock.json": "05a8d0728eb6e1a2087e7dc0ada412db1417e8bc2d6a9c8262409ad3dcf91583",
+      "package.json": "1aca336d23a2f51c1394601002046b35d73903026f4fc2bd92d946fa082636c9",
+      "packages/agent-docs/guide/agent/app-setup/existing-application-migration.md": "4217928359104beefa8f940a619d486727528f950c9137f2046b2a2242b8b8a6",
+      "packages/agent-docs/patterns/server-search.md": "b63e8b149a88408360505c9b557e1faf00df003a42961fd6eda66e2e035cc4ba",
+      "packages/agent-docs/reference/autogen/KERNEL_MAP.md": "1c4daaad0a96865f22d3b1381aee666dc2f968d39689ca9d4d183c5de4719279",
+      "packages/agent-docs/reference/autogen/packages/crud-core.md": "5c0392368f4a9da0a4b3c41dd24d794472d7511adbf7077cee571bec07b6d018",
+      "packages/agent-docs/reference/autogen/packages/database-runtime.md": "6f4d0c1ec8273fef86e45ad318dd1b732de419c34888ba2eaa38cc0c0214923a",
+      "packages/agent-docs/reference/autogen/packages/http-runtime.md": "e21b11edc4610919064ad03f60ea7dab7563c2c523c107b5609c4a9333b12226",
+      "packages/agent-docs/reference/autogen/packages/json-rest-api-core.md": "36e0afc36bed293fc1947e86fde25ef784a20f65444cea71204436a1948a8b28",
+      "packages/agent-docs/reference/autogen/packages/kernel.md": "525f46ff88386aaed1fe0189a98ab749eeb84086058f9cf0567e2ea3cfd93731",
+      "packages/agent-docs/reference/autogen/packages/users-core.md": "f47db00e62e9b1ff2b82078efd7dd76555c9657d88c40e2d3715a9c3992c291c",
+      "packages/agent-docs/reference/autogen/packages/workspaces-core.md": "ae910467768bd2d702d94e3aaba8c2a428d2eec41c0affe5a8ba2555e22321a2",
+      "packages/agent-docs/site/guide/app-setup/existing-application-migration.md": "26979528fa5e1f96d0e13028e353ad7c0e14f157bfc9fdf9bf4602e0a95a136e",
+      "packages/agent-docs/skills/jskit/references/existing-application-migration.md": "5a5c52e0a3b76c35ad3598456e9752ac59a26cf2526c6f7af1e3d1d25d8a45e2",
+      "packages/crud-core/package.json": "9bbc83bc6b9b176c1718a42058c659a5f749db5eebadbfe72e4dce946c91a9dc",
+      "packages/crud-core/src/server/defineCrudJsonApiFeature.js": "56760fec6b4690409ec2cb850d7722952cc6e672c20456ee4e2a5b7d2a66c518",
+      "packages/crud-core/src/server/jsonApiModule/actions.js": "395e0fb0c80e2dd219d515f744de065b7e341c0abd05865b53203275ab913704",
+      "packages/crud-core/src/server/jsonApiModule/repository.js": "1c1b08f79880a6623d9e22e7a1dc2882a5bbb69c80f4181d973fb018ae155644",
+      "packages/crud-core/test/assistantPagination.integration.test.js": "775f943da819f6040c0f12315d35e9e0b01d41ccb26160bb4182bd3c5a517b06",
+      "packages/crud-core/test/defineCrudJsonApiFeature.test.js": "697822f743186a417722d7b72f5c728762306a689d76c50a2c60f41428d83c65",
+      "packages/crud-core/test/jsonApiRepository.test.js": "d66c02004b8693e658943c70e15931f6f66d451e4b463552ce37b6c0c8093606",
+      "packages/database-runtime/src/shared/duplicateEntry.js": "1c266deeecfd2a7f956968799440ad1ed8f3c4ce463a88ac1eb16a8fcff27885",
+      "packages/database-runtime/src/shared/index.js": "87f2ad4cceebe61f628e98feb10862dc924e4f43db92aba2ed2957fa16a0a4df",
+      "packages/database-runtime/test/duplicateEntry.test.js": "a3f1c87a7adac41dc018a6b3189d69bf42214540f6e4d8739482fc2e307e9bee",
+      "packages/http-runtime/src/shared/clientRuntime/errors.js": "6d99f6dba3d56b28f5a66061230d08f71a98192100b229070631d18a0f1078e2",
+      "packages/http-runtime/src/shared/clientRuntime/jsonApiResourceTransport.js": "6c78aaf70d8673e8a997971db1678a898f8beb913f351a21f8f13c3822bb5cb7",
+      "packages/http-runtime/src/shared/clientRuntime/retry.js": "48ee9bd777f8451c611eafce110aa1bd1caf6e87517e402dc0ef54b5aaa76ac1",
+      "packages/http-runtime/src/shared/validators/errorResponses.js": "86163b4c2a48b9d4fee19128630c5feccc09be3e2d4c3b4137ec7912812e7b47",
+      "packages/http-runtime/src/shared/validators/jsonApiRouteTransport.js": "af4cfb8b6cac4cd4fc3d7fc6c961f2a2520cd662abbf221c294d065c4edd0a64",
+      "packages/http-runtime/src/shared/validators/jsonApiTransport.js": "3d044e6a77069b891ca0f391abef6be78c9ad8add77d2b4a62aa56a237a18015",
+      "packages/http-runtime/test/client.test.js": "a6653f33d0677f2499a2a5f13cacb034c98c39ffd436ecf4d52cf412421754ea",
+      "packages/http-runtime/test/errorResponses.test.js": "049141f76fc19c2a579c6aca0142b486735d0374fed3781a5794c5037c7f9810",
+      "packages/http-runtime/test/jsonApiRouteTransport.test.js": "e85eb8d705e8412de44e49fb80a05fb754e8f071c611381f1373428e88c6c28a",
+      "packages/json-rest-api-core/package.json": "b27cd670725d9e61fde2870e3248a4bf2c56c0b243b991e6cef39e8d05aa7f75",
+      "packages/json-rest-api-core/src/server/jsonRestApiHost.js": "290694b70b1acfa38019e4bb14803285f8bcfd49923abaa5d2b38be5cf0be0ae",
+      "packages/json-rest-api-core/test/entrypoints.boundary.test.js": "04c93cfd52bcb9c9b9f9eb2d40803690bff0cee53c9db3e6485cb9dd5b280435",
+      "packages/kernel/server/runtime/fastifyBootstrap.js": "3e0f2fb50942648bafeb22b0cd56031952457d808d55716e3cd26d8c6b0545ed",
+      "packages/kernel/server/runtime/fastifyBootstrap.test.js": "79f1fcfb1afabc779fe389ae08bfdb130a1071e840cd913f8bd7ba4a4a65bb07",
+      "packages/kernel/shared/support/normalize.js": "e2018d1a76ef505c70ed223e78edcbb578327f456f3ffeffb359ca9a82ab0732",
+      "packages/kernel/shared/support/normalize.test.js": "52095bdbcf21d7404fc317cdfa2e8b09426d25a168db813ad7695e213b301b5d",
+      "packages/rewarded-core/package.json": "241d17dce4e25d863384bb48737379b8a790080a1e22a8e67dcfce8ad68cc791",
+      "packages/rewarded-core/test/service.integration.test.js": "b3fc03daaf38df91aa979f0711c09e33828ab873cec2521095e37b855fb56138",
+      "packages/rewarded-web/package.json": "5e63b5931b8bc08e9a237e3ef1c93560fffdb9323cad60af1063718034f023e8",
+      "packages/users-core/src/server/UsersIdentityProvider.js": "a39a264bfb07bdb5fdce7283a341319a0f3132626303ad6298e028fa6c05f30f",
+      "packages/users-core/src/server/common/repositories/repositoryUtils.js": "8d306e29ba081294285ddb67217afbef327aadd9c6f45ae9e2cbeefbf4ab656a",
+      "packages/users-core/src/server/common/repositories/userProfilesRepository.js": "18efa7d2b53bf5a6a68d123b8c5d475bad33949a0db506f3f8bf4239c3c882f5",
+      "packages/users-core/src/server/common/repositories/userSettingsRepository.js": "cf8ced1c80a41366f012961251e096e2893333b9b89247c8dbcbdd127f846fd4",
+      "packages/users-core/test/authProfileSyncService.test.js": "3d07a7b1484b0c18ce0cbbdb5d8415bdc1d839be2a673f77e7750e922538125c",
+      "packages/users-core/test/featureRuntime.test.js": "6b44e5eb7381361b617f7732f2634c5f754ca57e0da4f0f15ace9d4f3585c503",
+      "packages/users-core/test/repositoryContracts.test.js": "c78b5cd761e8d9f972d8eca64a516560b05390238e2e8874c3ffd25232d467ba",
+      "packages/workspaces-core/src/server/WorkspacesFeature.js": "150f8accfeaab4b59dfed7fe714fb6a651c6af63072446b7d699f3f2851f9884",
+      "packages/workspaces-core/src/server/common/repositories/repositoryUtils.js": "f3c38c3f701b13ef5a9ba528210db65a48e0f6898fb5b5002e40926fcfba91b2",
+      "packages/workspaces-core/src/server/common/repositories/workspaceInvitesRepository.js": "1cd4822f422c98d3bd69aed64090fb840881aad2c217537c185e59f51e349288",
+      "packages/workspaces-core/src/server/common/repositories/workspaceMembershipsRepository.js": "5c76faa9c70b0ed27715308b5cc0f2c176896044b0a3625f7a55a773541db2df",
+      "packages/workspaces-core/src/server/common/repositories/workspacesRepository.js": "1905f71512c35fdda57ae2b84dcc248e0cce36914ab969b5873582155bac5f4f",
+      "packages/workspaces-core/src/server/workspaceSettings/workspaceSettingsRepository.js": "d249a27dea9c2b3b5e153d6c5a7bc7f0f0b8814c328c1e93496ba87d47c5050f",
+      "packages/workspaces-core/test/featureRuntime.test.js": "51711378d009c464847feb4b2ea3d3ab642606f66987e5e43287af0a8d7590d3",
+      "packages/workspaces-core/test/repositories.integration.test.js": "9337c8b41c26f04671fa858d7a4b3a397effbd124240f3457628bef0d5b74c0b",
+      "packages/workspaces-core/test/repositoryContracts.test.js": "8ddff9a3f4018e8e38ec81610d44bd2954ffff64053aa60456b1162a95dc07d4",
+      "packages/workspaces-core/test/workspaceInvitesRepository.test.js": "81dc3e5de9b25ce1f71c1cfcc77f0aa9bf72abdcf5ed14d4a2709f170a939e38",
+      "packages/workspaces-core/test/workspaceMembershipsRepository.test.js": "69e4822434edbe7cd610783d7bae2bc75c99e55d597063a599edb2bcc6a18203",
+      "packages/workspaces-core/test/workspaceSettingsRepository.test.js": "5e29e616993c495f1345b2913192bae7e15adc0146f2728aa2cf2fa65cda836e",
+      "packages/workspaces-core/test/workspacesRepository.test.js": "456a1ba1542f4d79876a236037158a496b217c577760a79fb04e9c075468614c",
+      "scripts/check-ci-contract.test.mjs": "b6251b66d650d898c046c5dd64970c1745ee1074de1a7eb100cc119dee82ac9d",
+      "tooling/jskit-catalog/catalog/packages.json": "e1e6c69858df3f6d10ee848d7273685484077023f04025ab93632951a7e5c0cf"
+    },
+    "library": {
+      "commit": "f97dc859321aee41915f3b0e256a861c382bc1b3",
+      "package": {
+        "version": "2.0.0",
+        "resolved": "git+ssh://git@github.com/mobily-enterprises/json-rest-api.git#f97dc859321aee41915f3b0e256a861c382bc1b3",
+        "integrity": "sha512-Lo/pbgNRNNBjb5IZM4WAkX+llC3/npUdqmFycSCQe0fPhX5TqylPffAe8XSJFEyujAZiKlm8EgMuhVIZaNXEdA==",
+        "license": "(GPL-3.0-or-later OR MIT)",
+        "dependencies": {
+          "content-type": "^1.0.5",
+          "json-rest-schema": "^1.0.17",
+          "on-headers": "^1.1.0",
+          "vary": "^1.1.2"
+        },
+        "engines": {
+          "node": ">=24.0.0"
+        },
+        "peerDependencies": {
+          "@socket.io/redis-adapter": "^8.3.0",
+          "busboy": "^1.0.0",
+          "express": "^4.0.0 || ^5.0.0",
+          "formidable": "^3.0.0",
+          "fractional-indexing": "^3.2.0",
+          "knex": "^3.1.0",
+          "redis": "^5.6.0",
+          "socket.io": "^4.8.1"
+        },
+        "peerDependenciesMeta": {
+          "@socket.io/redis-adapter": {
+            "optional": true
+          },
+          "busboy": {
+            "optional": true
+          },
+          "express": {
+            "optional": true
+          },
+          "formidable": {
+            "optional": true
+          },
+          "fractional-indexing": {
+            "optional": true
+          },
+          "knex": {
+            "optional": true
+          },
+          "redis": {
+            "optional": true
+          },
+          "socket.io": {
+            "optional": true
+          }
+        }
+      },
+      "matchingSourceFiles": 130,
+      "freshCacheInstallWithSshDisabled": true
+    },
+    "verification": {
+      "broadCommand": "npm run verify",
+      "broadLog": "/tmp/jskit-v2-verify-20260913.log",
+      "broadExitCode": 1,
+      "broadJobs": [
+        {
+          "job": "jskit-monorepo@1.0.0 test:release-npm",
+          "tests": 8,
+          "pass": 8,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "jskit-monorepo@1.0.0 check:ci",
+          "tests": 3,
+          "pass": 3,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/agent-docs@0.1.157 test",
+          "tests": 20,
+          "pass": 18,
+          "fail": 1,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/assistant-core@0.1.161 test",
+          "tests": 59,
+          "pass": 58,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/assistant-runtime@0.1.156 test",
+          "tests": 39,
+          "pass": 39,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/auth-core@0.1.183 test",
+          "tests": 52,
+          "pass": 52,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/auth-provider-local-core@0.1.86 test",
+          "tests": 25,
+          "pass": 25,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/auth-provider-local-db-core@0.1.77 test",
+          "tests": 10,
+          "pass": 10,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/auth-provider-supabase-core@0.1.182 test",
+          "tests": 37,
+          "pass": 37,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/auth-web@0.1.185 test",
+          "tests": 71,
+          "pass": 71,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/connector-google-calendar@0.1.2 test",
+          "tests": 0,
+          "pass": 0,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/connectors-catalog@0.1.2 test",
+          "tests": 879,
+          "pass": 879,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/connectors-core@0.1.2 test",
+          "tests": 88,
+          "pass": 87,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/console-core@0.1.148 test",
+          "tests": 21,
+          "pass": 21,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/console-web@0.1.153 test",
+          "tests": 2,
+          "pass": 2,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/crud-core@0.1.196 test",
+          "tests": 154,
+          "pass": 154,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/database-runtime@0.1.185 test",
+          "tests": 50,
+          "pass": 50,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/database-runtime-mysql@0.1.183 test",
+          "tests": 14,
+          "pass": 14,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/database-runtime-postgres@0.1.182 test",
+          "tests": 7,
+          "pass": 7,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/http-runtime@0.1.183 test",
+          "tests": 112,
+          "pass": 112,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/http-web@0.1.30 test",
+          "tests": 187,
+          "pass": 186,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/json-rest-api-core@0.1.129 test",
+          "tests": 26,
+          "pass": 26,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/kernel@0.1.185 test",
+          "tests": 349,
+          "pass": 349,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/mobile-capacitor@0.1.120 test",
+          "tests": 15,
+          "pass": 15,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/payments-core@0.1.2 test",
+          "tests": 30,
+          "pass": 30,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/payments-web@0.1.2 test",
+          "tests": 2,
+          "pass": 1,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 1,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/realtime@0.1.182 test",
+          "tests": 35,
+          "pass": 35,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/resource-core@0.1.127 test",
+          "tests": 4,
+          "pass": 4,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/resource-crud-core@0.1.127 test",
+          "tests": 35,
+          "pass": 35,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/rewarded-core@0.1.121 test",
+          "tests": 20,
+          "pass": 20,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/rewarded-web@0.1.121 test",
+          "tests": 7,
+          "pass": 7,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/shell-web@0.1.189 test",
+          "tests": 98,
+          "pass": 96,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 2,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/storage-runtime@0.1.182 test",
+          "tests": 1,
+          "pass": 1,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/uploads-image-web@0.1.160 test",
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/uploads-runtime@0.1.160 test",
+          "tests": 15,
+          "pass": 15,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/users-core@0.1.198 test",
+          "tests": 53,
+          "pass": 53,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/users-web@0.1.203 test",
+          "tests": 24,
+          "pass": 24,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/workspaces-core@0.1.163 test",
+          "tests": 164,
+          "pass": 162,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 2,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/workspaces-web@0.1.164 test",
+          "tests": 47,
+          "pass": 47,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/config-eslint@0.1.182 test",
+          "tests": 2,
+          "pass": 2,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        },
+        {
+          "job": "@jskit-ai/jskit-catalog@0.1.210 test",
+          "tests": 23,
+          "pass": 23,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      ],
+      "broadTotals": {
+        "tests": 2793,
+        "pass": 2783,
+        "fail": 1,
+        "cancelled": 0,
+        "skipped": 9,
+        "todo": 0
+      },
+      "finalAcceptance": "All broad runtime checks passed; the sole documentation size failure was corrected and affected documentation checks passed. All nine conditional skips exercised separately. No broad runtime rerun for prose.",
+      "docsCorrection": {
+        "log": "/tmp/jskit-v2-docs-final-20260913.log",
+        "exitCode": 0,
+        "tests": 20,
+        "pass": 19,
+        "skipped": 1,
+        "browserSkipVerifiedSeparately": true,
+        "deterministicGeneration": true,
+        "siteBuild": true
+      },
+      "native": [
+        {
+          "driver": "MySQL 8.0.46",
+          "scope": "Rewarded and users/workspaces shipped migrations and workflows",
+          "pass": 12,
+          "skipped": 0,
+          "log": "/tmp/jskit-v2-native-oracle-20260913.log"
+        },
+        {
+          "driver": "MySQL 8.0.46",
+          "scope": "Connector raw SQL persistence and CLI",
+          "pass": 7,
+          "skipped": 0,
+          "log": "/tmp/jskit-v2-native-connectors-20260913.log"
+        },
+        {
+          "driver": "PostgreSQL 16.15",
+          "scope": "Users/workspaces shipped migrations and workflows",
+          "pass": 7,
+          "skipped": 0,
+          "log": "/tmp/jskit-v2-native-postgres-20260913.log"
+        }
+      ],
+      "browser": {
+        "pass": 6,
+        "skipped": 0,
+        "cases": [
+          "linked application package cache",
+          "responsive date filters",
+          "adaptive shell navigation",
+          "form preservation",
+          "assistant scrolling",
+          "billing/account states"
+        ],
+        "evidence": "Tool records; assistant/payments logs linked in acceptance ledger"
+      },
+      "artifactLog": "/tmp/jskit-v2-artifact-20260913.log",
+      "lockDryRunLog": "/tmp/jskit-v2-lock-final-20260913.log",
+      "libraryGuideBuildLog": "/tmp/jra-jskit-migration-docs-20260913.log"
+    },
+    "master": {
+      "complete": 194,
+      "total": 250,
+      "open": 56,
+      "closedInBatch": [
+        "M-07",
+        "M-08",
+        "R-B0-07",
+        "R-B1-05"
+      ]
+    }
+  }
 }
