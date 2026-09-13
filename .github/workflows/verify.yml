@@ -54,7 +54,8 @@ jobs:
           sudo apt-get update
           JRA_TEST_BINARIES=$(mktemp -d)
           cd "$JRA_TEST_BINARIES"
-          apt-get download postgresql-16 postgresql-client-16 mysql-server-core-8.0 \
+          # Ignore preinstalled versions absent from the runner's apt sources.
+          apt-get -o Dir::State::status=/dev/null download postgresql-16 postgresql-client-16 mysql-server-core-8.0 \
             libmecab2 libevent-pthreads-2.1-7t64 redis-server redis-tools liblzf1 libjemalloc2
           for package in ./*.deb; do
             dpkg-deb --extract "$package" "$JRA_TEST_BINARIES/root"

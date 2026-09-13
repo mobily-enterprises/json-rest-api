@@ -50,6 +50,22 @@ published versions remain immutable. Consumer pins will follow the published
 cohort through the supported updater; no application runtime migration starts
 before this phase finishes.
 
+Publication progress: `json-rest-api@2.0.0` is now public npm `latest`; its
+downloaded tarball is byte-identical to the reviewed 173-file release (SHA-1
+`c1b039ec30ea11e5699f2a6831ada45fd36f5435`). Source commit `54238bf` is pushed,
+and GitHub Pages successfully built that commit. The official seed branches
+were also pushed before the next cohort refresh: public `25d34e2`, accounts
+`59a4896`.
+
+The automatic Verify run for `54238bf` passed the full Node 24 library and clean
+package jobs. All three database jobs failed before tests: apt selected a
+preinstalled PostgreSQL PGDG version absent from the runner's configured
+repositories. The workflow now ignores installed package status when downloading
+its disposable binaries. A targeted reproduction returns the original apt exit
+100 with the unavailable installed version; the corrected command selects all
+nine repository downloads successfully. This changes CI setup only; the
+published runtime remains unchanged.
+
 ## Completed rollout, 2026-09-13
 
 **The scoped master plan is complete: 250/250 items, zero open.** The 40 prepared
