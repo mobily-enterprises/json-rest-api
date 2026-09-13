@@ -86,10 +86,11 @@ check every distinct target; full target GETs are no longer part of validation.
 | Relationship add denied at one extra hidden target | `5 + ceil((N + 1) / 100)` |
 | Bulk POST, full return | `(8 + C) * N + transaction statements` |
 | Bulk PATCH, full return | `(8 - C) * N + transaction statements` |
-| Bulk DELETE | `(3 - C) * N + transaction statements` |
+| Bulk DELETE | `(4 - C) * N + transaction statements` |
 
 Transaction statements are `2` for an atomic bulk call and `2 * N` for
-non-atomic calls. The denied relationship case fails before target locking and
+non-atomic calls. DELETE includes the declared pivot or canonical-link cleanup.
+The denied relationship case fails before target locking and
 edge attachment, so only validation contributes a batch term. At 101 visible targets the allowed
 add budgets are **10 ordinary / 10 canonical**; the denied add budgets are
 **7 / 7**. Before minimal target batches these were 461/563 and 459/560.
@@ -1580,3 +1581,93 @@ to close diagnostic correctness. This measurement makes the cost visible and
 provides a repeatable baseline for a future demonstrated logging bottleneck.
 No new caching, global state or formatter bypass is introduced.
 Log: `/tmp/jra-diagnostics-measurement-20260912.log`.
+
+## Final cost comparison against A0 (2026-09-13; C2-03)
+
+Recorded 2026-09-13 from existing evidence only. No tests, benchmarks, installs, packing, publication or services were run for this comparison.
+
+The strongest findings are lower sparse/related-query counts, a smaller publication artifact, and unchanged SQL counts in the actual accounts migration workload. The evidence does **not** establish a universal latency, memory or initialization improvement.
+
+### Identity and comparability
+
+- **A0:** `51302ce`, json-rest-api 1.0.29, Node **22.16.0**, SQLite 3.49.2. Source: `old/docs/development/library-improvement-baseline.md:14,218–250`; original pack metadata: `/tmp/library-baseline-package.json`.
+- **Accepted library:** immutable `f97dc859321aee41915f3b0e256a861c382bc1b3`, json-rest-api 2.0.0. Latest completed library query-budget execution: Node **24.6.0**, SQLite, `/tmp/jra-post-deslop-verify-20260912.log:22` (ordinary) and `:557` (canonical). All 103 entries in `/tmp/jra-post-deslop-source-snapshot-20260912.json` were read and checked against f97; all match. Current runtime, declarations, manifest and measurement-script changes relative to f97 are empty.
+- **Actual accounts comparison:** published library **1.0.28**, not A0's 1.0.29, versus f97 v2; both on **Node 26.5.0 / MySQL 8.0.46**, using the corresponding JSKIT package graphs. `/tmp/jskit-v2-rollout-42tSXQ/performance/provenance.json` confirms the candidate's 131 runtime/declaration/manifest files match f97, with no issues. This measures the coordinated consumer migration, not an isolated library swap.
+
+### SQL work and recorded latency
+
+The current measured statement counts equal their explicit ceilings in **all 44 scenarios per storage mode**, with **zero configuration-table statements in all 88 measurements**. Result counts and behavior are asserted independently. The four original headline shapes retain the same returned/included counts:
+
+| Shape; returned / included | A0 ordinary / canonical statements | f97 ordinary / canonical statements |
+| --- | ---: | ---: |
+| Flat books; 10 / 0 | 2 / 3 | 4 / 4 |
+| Sparse title; 10 / 0 | 2 / 3 | 1 / 1 |
+| Publisher.country + authors; 10 / 5 | 6 / 9 | 7 / 9 |
+| Related authors; 3 / 0 | 11 / 15 | 3 / 3 |
+
+Related-author statements fall 72.7% / 80%; sparse statements fall 50% / 66.7%. Flat counts increase, and ordinary nested includes increase by one. These are honest operation-shape comparisons: the harness, visibility/linkage behavior and contracts evolved, so matching record counts alone do not establish identical complete work or attribute each difference to a single optimization. Statements include counts and other SQL, not only primary SELECTs. The A0 measurement script was introduced as development work after the baseline commit; it is not present in `51302ce` itself.
+
+Additional current measured counts, absent from A0:
+
+| Shape | Ordinary / canonical statements |
+| --- | ---: |
+| Full PATCH | 11 / 10 |
+| PATCH with nested includes | 14 / 15 |
+| Authorized hasMany or many-to-many read, 40 visible rows / two target types | 6 / 6 |
+| Same read with polymorphic includes | 8 / 8 |
+| Allowed idempotent relationship add, 40 / 101 targets | 7 / 7; 10 / 10 |
+| Denied relationship add, 41 / 102 requested targets | 6 / 6; 7 / 7 |
+| Atomic bulk POST / PATCH / DELETE, 40 rows | 322 / 362; 322 / 282; 162 / 122 |
+| Non-atomic bulk POST / PATCH / DELETE, 40 rows | 400 / 440; 400 / 360; 240 / 200 |
+
+Read statement counts stay constant between 10 and 40 visible rows when target-type count is unchanged. Bulk writes still execute each record's lifecycle and scale with item count. The latest authority is the actual reports and `scripts/measure-query-baseline.js:12–37`; the current budget table above has been corrected to **4/3 per item**, plus transaction statements, to cover linkage cleanup. The historical baseline result rows remain unchanged; those record the earlier implementation.
+
+A0 recorded only an overall elapsed range **2.794–9.641 ms** and heap deltas **0.46–1.31 MB**. Current first-four-shape times are ordinary **8.756 / 2.324 / 14.078 / 6.242 ms**, canonical **16.486 / 5.305 / 16.947 / 12.743 ms**. These single observations are not controlled before/after latency measurements: Node versions, semantics, warmup, scheduling and garbage collection differ. The current canonical sparse heap delta is negative, illustrating why these deltas are not peak-memory or leak measurements. No fresh native-database budget execution is claimed here.
+
+### Initialization and application performance
+
+**A0 contains no whole-library startup or compiler initialization measurement.** Consequently, a numerical A0-to-f97 initialization ratio is unavailable.
+
+The retained compiler-only experiments quantify specific implementation decisions:
+
+| Isolated change, 101 fields | Before median | After median | Source |
+| --- | ---: | ---: | --- |
+| Add compiled output-definition indexes | 4.504 ms | 4.507 ms | `/tmp/library-output-metadata-init-benchmark.log:4–5`; `old/docs/development/query-measurements.md:1397` |
+| Copy three enrichment-original maps | 1.324 ms | 1.884 ms | `/tmp/library-enrichment-copy-benchmark.log:4–5`; `old/docs/development/compiled-resources.md:752` |
+
+Each used seven alternating batches of 100 warmed compilations. These are historical local before/after experiments, **not measurements rerun on exact f97** and not mutually comparable baselines. The second explicitly records an approximately 0.560 ms initialization cost for ownership correctness. The matching output-normalization experiment recorded 5,000-record JSON:API normalization **21.630 → 1.412 ms**, plain records **28.036 → 1.834 ms**; it measured normalization only, not an endpoint or SQL workload (`/tmp/library-output-metadata-benchmark.log:4–5`).
+
+The latest actual accounts measurement is more representative of the selected consumer. Source: `/tmp/jskit-v2-rollout-42tSXQ/performance/comparison.json:10,47`, with raw samples in `baseline-result.json` / `candidate-result.json` and the exact script in `account-workload.mjs`.
+
+| Accounts metric | Published v1.0.28 graph | Candidate v2/f97 graph |
+| --- | ---: | ---: |
+| Registration / login statements | 20 / 8 | 20 / 8 |
+| Each measured profile PATCH / settings GET | 49 / 18 | 49 / 18 |
+| Server initialization | 1,574.73 ms | 1,734.10 ms |
+| RSS after initialization | 187.28 MiB | 186.88 MiB |
+| Heap used after initialization | 62.39 MiB | 68.24 MiB |
+| Heap increase during initialization | 42.09 MiB | 48.29 MiB |
+| PATCH median / p95 | 50.69 / 80.79 ms | 55.49 / 66.32 ms |
+| GET median / p95 | 17.05 / 21.82 ms | 17.66 / 24.18 ms |
+
+There are two warmup rounds and ten measured write/read pairs per graph. The workload uses actual Fastify request injection with the real MySQL database; it excludes network transport. Startup times import the app server, create it and await readiness **after migrations**, not process spawn or database creation (`account-workload.mjs:94–105`). The two runs retain equal profile rows and migration history. Both owned databases were dropped. The corrected accepted script was identical for both runs; its first baseline-only attempt had a wrong post-check table name, retained separately and excluded.
+
+Candidate observed startup and median request times are higher, while PATCH p95 and RSS are lower. Concurrent local acceptance work, small sample count, process/GC state and coordinated dependency changes prevent attributing these differences to v2 or promising a speedup. Ten samples make p95 effectively the maximum observed sample. The strongest reproducible comparison here is unchanged SQL work with preserved persisted behavior.
+
+### Package contents and size
+
+The existing npm cache artifact was read using the installed candidate's recorded SHA-512 integrity, verified, and inspected without extracting or repacking. **All 173 file bytes match f97**, including documentation. Its SHA-1 equals the final pre-commit pack log: `7de97a9f055111af4c797dd3ca2c9becbcce2421`. Read-only artifact results are saved in `/tmp/jskit-v2-rollout-42tSXQ/library-f97-package-size-evidence.json`; original acceptance logs are `/tmp/jra-post-deslop-verify-20260912.log:13` and `/tmp/jra-post-deslop-packaged-guide-20260912.log:9`.
+
+| Artifact metric | A0 | Exact f97 | Reduction |
+| --- | ---: | ---: | ---: |
+| Files | 219 | 173 | 46 (21.0%) |
+| Packed bytes | 564,419 | 441,672 | 122,747 (21.75%) |
+| Unpacked file bytes | 2,653,339 | 1,733,356 | 919,983 (34.67%) |
+
+The f97 artifact contains 104 plugin files, nine lib files, 15 `types/` files, both entry points, package.json, README, three license files and 38 documentation files. It contains no tests, scripts, `old/`, agent configuration or development trackers. A0 included tests, development notes and the newly written master plan, so this is publication-content hygiene, not a claim that executable code alone shrank by these percentages. Removing hooked-api also changes installed dependencies; these tarball numbers do not measure the complete dependency graph.
+
+Current uncommitted migration-guide additions are intentionally **outside this exact f97 artifact**. A future published artifact containing those additions will have its own size and integrity; the numbers above must not be relabelled as that future artifact.
+
+### C2-03 acceptance limit
+
+This records the available final-vs-A0 comparison without inventing missing history. There is strong exact-snapshot SQL/package evidence, a useful real consumer before/after workload, and documented historical compiler tradeoffs. Missing evidence remains a same-runtime, same-contract A0-to-f97 controlled latency/peak-memory/whole-library initialization experiment. Closing the comparison item can acknowledge that limit; it must not imply those unperformed measurements passed or that v2 is universally faster.

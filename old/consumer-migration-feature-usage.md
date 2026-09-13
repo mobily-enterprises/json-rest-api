@@ -220,3 +220,155 @@ authorized follow-up retained these implemented functions and improved their
 safeguards and documentation. No current consumer requirement forces retention
 of SQL diff generation; its value is the bounded, reviewed-draft workflow
 described above.
+
+## 2026-09-13: Canonical application v2 migration impact
+
+This follow-up examines application callers, custom repositories, transaction
+ownership and failure handling. It preserves the September 12 schema-helper
+investigation above; it does not claim that those applications have been ported.
+The owner will migrate these five applications separately. Their ports are
+outside the active Vibe64/public/accounts starter migration batch.
+
+### Authority and dependency evidence
+
+The first four revisions below were obtained from fresh GitHub API reads of
+their canonical `main` branches. WHS2's revision was read from its managed
+canonical `refs/heads/main`. Source inspection then read files from those exact
+commit objects in existing repositories, rather than treating session HEAD,
+remote-tracking refs or uncommitted session content as canonical authority.
+WHS2 has advanced since the earlier investigation.
+
+| Application | Canonical revision | Authority | Locked `json-rest-api` / JSKIT host |
+| --- | --- | --- | --- |
+| `sas/dogandgroom` | `65f94edcba4c1fdaf90b1ba7e54baeeb2ecacd4b` | GitHub `mobily-enterprises/dogandgroom`, `main` | `1.0.29` / `0.1.127` |
+| `sas/compas-next` | `0f5f895b6a954fae31254d00073a5c49d4c46df6` | GitHub `shipagency/compas-next`, `main` | `1.0.28` / `0.1.123` |
+| `sas/racing` | `de4771c72ac000a76d2e29943de959b98c947df2` | GitHub `shipagency/racing`, `main` | `1.0.28` / `0.1.123` |
+| `matt/beepollen` | `72a4fdb2550cd513f8e6bb19b3662144453b3023` | GitHub `mobily-enterprises/beepollen`, `main` | `1.0.28` / `0.1.123` |
+| `pass/whs2` | `f816e915762aafebb53193caee2b8c70b793a5f9` | Managed canonical `refs/heads/main` | `1.0.29` / `0.1.129` |
+
+Here, “JSKIT host” means `@jskit-ai/json-rest-api-core`. Versions come from the
+committed application lockfiles, not a fresh installed-artifact or production
+health check. All five locks contain `hooked-api@1.0.24`; all five canonical
+root manifests declare Node `26.x`. A future port must deliberately reconcile
+that runtime declaration with the library/framework's Node 24-or-newer contract
+and the chosen application verification runtime.
+
+The investigation read maintained application source and package manifests,
+then followed the concrete call sites described below. It excluded environment
+files, credentials, business-data exports, dependency trees, build output and
+the legacy CompAS `V1/` reference tree. No remote edits, checkout refresh,
+fetch, install, application command, migration or test was performed. Access
+details are intentionally omitted.
+
+### DogAndGroom: transaction owners and external cleanup
+
+No obsolete `inputRecord`, `returnFullRecord` or `simplified` resource options
+were found in maintained application runtime source. That does not make this
+a dependency-only migration:
+
+- `packages/booking-engine/src/server/repository.js:234` creates an owner with
+  `createWithTransaction(knex)`. Its booking-step writes at `:864–865` and
+  `:873` pass that transaction into resource-backed repository operations.
+  Move ownership for those workflows to a managed JSON REST transaction while
+  retaining the raw SQL participants and locks.
+- `packages/billing-engine/src/server/service.js:882` retries duplicate receipt
+  creation. Review the enclosing owner and retry only after confirmed rollback;
+  a failed resource participant cannot be retried inside the failed transaction.
+- `packages/day-cards/src/server/service.js:92–95` deletes a newly uploaded
+  attachment after any transaction failure. A committed or unknown outcome
+  cannot authorize deleting a file that the stored record may reference.
+  Preserve the file and reconcile uncertain outcomes; keep cleanup failures
+  separate from the original write failure.
+- `packages/booking-notification-deliveries/src/server/repository.js:171–218`
+  performs raw SQL and handles duplicate provider events. Its resource read
+  follows at `:232`. Keep the distinction between SQL-only owners and owners
+  that also invoke resource writes; do not replace every Knex transaction.
+
+The current root graph includes CRUD `0.1.194`, database-runtime `0.1.183`,
+users-core `0.1.196` and workspaces-core `0.1.161`. Products and other domain
+decorators still need workflow verification against the coordinated new graph.
+
+### CompAS: remove the custom legacy patch path
+
+`packages/jobs/src/server/repository.js:3–7` imports the removed
+`createJsonApiInputRecord` helper. Its custom patch override at `:44–69` calls
+the library with `inputRecord`, `returnFullRecord` and `simplified: false`.
+`packages/jobs/src/server/service.js:1015` requests
+`returnFullRecord: "minimal"` when refreshing vessel positions.
+
+The shared repository intentionally returns full documents and does not forward
+`options.returning`. Preserve the minimal-response requirement with a small
+explicit v2 resource call using `data`, `format: "jsonapi"` and
+`returning: "minimal"`; do not silently drop that behavior during consolidation.
+Retain its custom `lockDocumentById` behavior and explicit transaction
+participation. Standard registration helpers and document-extraction helpers
+elsewhere are not, by themselves, evidence that those callers need renaming.
+
+`packages/compas-auth/src/server/repository.js:143–156` owns raw contact SQL
+and local-session operations. Review that custom authentication owner on its
+own terms; this code is not a direct JSON REST resource write.
+
+### Racing: dependency migration with ordinary workflow proof
+
+The maintained-source scan found no direct library imports, obsolete resource
+options, custom transaction owners, duplicate-error recovery or CRUD lifecycle
+extensions. The app uses standard car-setups/users CRUD and authentication.
+Its port is primarily the coordinated package/lockfile update, followed by real
+authentication, CRUD, scoping and response-shape verification. Absence of custom
+callers does not establish that the upgraded application already works.
+
+### BeePollen: move uniqueness retry outside the failed transaction
+
+`packages/receivals/src/server/receivalOperationLifecycle.js:16–19` classifies
+duplicates using top-level driver fields or a 409/message heuristic. At
+`:190–207`, creation retries `standard(preparedInput)` inside one CRUD lifecycle
+operation while retaining the same transaction. This needs a deliberate owner
+change: allow the failed attempt to leave its transaction, establish confirmed
+rollback, then start a fresh attempt and recompute the allocation.
+
+`packages/receivals/src/server/ReceivalsFeature.js:26–40` installs that custom
+lifecycle and repository extension. Preserve the receival-code rules and
+explicitly test concurrent allocation and failure outcomes. No obsolete direct
+resource option names were found elsewhere in the maintained-source scan.
+
+CompAS, Racing and BeePollen all currently pin CRUD `0.1.190`,
+database-runtime `0.1.179` and users-core `0.1.192`; CompAS also pins
+workspaces-core `0.1.157`.
+
+### WHS2: a substantial copied-repository port
+
+At the exact current canonical revision, **107 authored repository files contain
+748 matches for `inputRecord`, `simplified` or `returnFullRecord`**. These are
+source-token counts, not 748 independent defects or a test result. The matching
+files span audit, change management, competency, contractor, safety, learning,
+organisation and workflow packages.
+
+Representative `packages/audit-events/src/server/repository.js`:
+
+- `:13` creates a raw Knex owner with `createWithTransaction(knex)`.
+- `:17–94` implements resource reads/writes using removed `simplified` and
+  `inputRecord` options plus `createJsonApiInputRecord`.
+- `:101–106` exposes the ordinary `withTransaction`, `queryDocuments`,
+  `getDocumentById`, `createDocument`, `patchDocumentById` and
+  `deleteDocumentById` domain methods.
+
+`packages/workflow-records/src/server/repository.js` repeats that baseline and
+also contains real custom SQL queries at `:116–157`. Consolidate ordinary CRUD
+onto the current shared repository while retaining those custom queries,
+locking, scoping, timestamps and domain semantics. Change resource transaction
+owners and review duplicate-error recovery in their calling workflows. A
+mechanical option rename alone leaves unmanaged write transactions in place.
+
+Its current graph pins CRUD `0.1.196`, database-runtime `0.1.185`, users-core
+`0.1.198` and workspaces-core `0.1.163`. This app requires a separate owner-led
+port and acceptance pass; its larger scope does not expand the active starter
+migration task.
+
+### Removed database-runtime export check
+
+Fresh searches of all five exact canonical revisions found **zero references**
+to `@jskit-ai/database-runtime/shared/runtime` or `registerDatabaseRuntime` in
+maintained application source, configuration or documentation. This supports
+removing the stale export whose implementation is already absent from current
+JSKIT. It is bounded evidence about these applications, not a claim about every
+external consumer or uncommitted session.

@@ -272,7 +272,9 @@ const profile = await profiles.patch({
 For a belongs-to relationship, plain input uses the relationship name and ID,
 for example `data: { name: 'Team', owner: userId }`. Keep existing domain
 normalization. A repository intentionally consuming JSON:API documents can keep
-its document builder instead:
+its application-owned document builder instead. The `createJsonApiInputRecord`
+name below represents that application's function; the old JSKIT export with
+that name has been removed.
 
 ```js
 const profile = await profiles.patch({
@@ -2990,6 +2992,25 @@ relationship alias, plain library input uses that alias. For example,
 JSKIT's shared repository maps its domain payload's `authorId` to `author` and
 rejects payloads that supply both names.
 
+Copied repositories can reuse the shared CRUD implementation and retain their
+application-specific methods. Here `lockDocumentById` is the application's
+existing scoped lock method, kept in the same module:
+
+```js
+import { createCrudJsonApiRepository } from '@jskit-ai/crud-core/server/jsonApiRepository'
+
+const repository = {
+  ...createCrudJsonApiRepository({ api, resource, resourceScopeName }),
+  lockDocumentById
+}
+```
+
+Preserve custom scoping, locks and write normalization when removing copied
+code. Standard document writes return full documents; the shared repository
+does not forward a `returning` option. A custom minimal-response path still
+needs an explicit resource call with `data`, `format: 'jsonapi'` and
+`returning: 'minimal'`.
+
 Use the repository's transaction owner for operations involving JSON REST:
 
 ```js
@@ -3009,6 +3030,74 @@ Pass `trx` explicitly to every participating repository call. The transaction
 remains callable for raw SQL; return normally to commit and throw to roll back.
 Keep independent raw Knex transaction helpers for integrations that perform
 only SQL. They do not need to become JSON REST consumers.
+
+Put an allocation retry around the complete transaction. For example, the
+application-owned `allocateCode(trx)` below computes a candidate using only SQL;
+`isCodeAllocationConflict` identifies its exact unique constraint from the
+underlying driver error. Other uniqueness failures must escape the loop.
+
+```js
+import { findDuplicateEntryError } from '@jskit-ai/database-runtime/shared'
+
+async function createWithAllocatedCode(payload, context) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await repository.withTransaction(async trx => {
+        const code = await allocateCode(trx)
+        return repository.createDocument({ ...payload, code }, { trx, context })
+      })
+    } catch (error) {
+      const duplicate = findDuplicateEntryError(error)
+      if (attempt === 3 || error?.transactionOutcome !== 'rolledBack' ||
+          !duplicate || !isCodeAllocationConflict(duplicate)) {
+        throw error
+      }
+    }
+  }
+}
+```
+
+Each attempt gets a new transaction and recomputes the candidate. Do not catch
+and retry `standard()` inside a failed CRUD lifecycle transaction, or restart a
+transaction supplied by another owner. Keep external effects outside this
+retrying unit unless the application can safely repeat or reconcile them.
+
+Application-owned uploads need the same outcome check before compensation.
+This example creates one new object used only by this operation. `uploads.save`
+and `uploads.remove` are the application's storage integration; the caller
+supplies its own mutable `diagnostics = { cleanupErrors: [] }`:
+
+```js
+async function createWithUpload(payload, file, context, diagnostics) {
+  const uploaded = await uploads.save(file)
+  diagnostics.uploaded = uploaded
+  try {
+    return await repository.withTransaction(trx =>
+      repository.createDocument(
+        { ...payload, fileUrl: uploaded.url },
+        { trx, context }
+      )
+    )
+  } catch (error) {
+    if (error?.transactionOutcome === 'rolledBack') {
+      try {
+        await uploads.remove(uploaded.key)
+      } catch (cleanupError) {
+        diagnostics.cleanupErrors.push({ key: uploaded.key, error: cleanupError })
+      }
+    }
+    throw error
+  }
+}
+```
+
+The original write error and its outcome still reach the caller; secondary
+cleanup failures and the uploaded object's identity remain in the application's
+diagnostics. Other outcomes retain the object for application reconciliation.
+In particular, deleting it after a committed or unknown failure could break a
+stored record. Library-managed file
+uploads already register rollback cleanup; do not add this second cleanup path
+for those files. See [file ownership](26-file-uploads.md#ownership-after-commit).
 
 JSKIT copies the outer context for each library operation; hooks inside that
 operation share the resulting object. Its `visibilityContext` and `scopeValues`

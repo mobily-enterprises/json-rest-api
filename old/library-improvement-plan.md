@@ -1,14 +1,12 @@
 # Library improvement execution plan
 
-**Active scope, 2026-09-13:** the user resumed the narrower goal of migrating
-current jskit-ai main to v2 after its integration work merged. Source, dependency,
-test and generated-documentation changes in jskit-ai are now authorized. Vibe64,
-its seeds and Online remain paused; publication/deployment remain excluded.
-The historical consumer-pause instructions below do not restrict this jskit-ai
-batch. See the [current migration evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
-Current accounting is **194/250 complete (77.6%); 56 open**. M-07/M-08 and
-R-B0-07/R-B1-05 close against the accepted jskit-ai migration. This narrow goal
-does not claim completion of Part C or the remaining application migrations.
+**Completed scope, 2026-09-13:** library and JSKIT implementation, selected
+Vibe64/public/accounts seed migration, the approved 40-package npm publication,
+fresh registry acceptance and combined review/report are complete. The master
+is **250/250 complete (100%); zero open**. Other canonical apps remain
+owner-managed ports with a migration guide; Git branch pushes and Online
+deployment remain outside this completed rollout. All source changes are
+committed locally. See the [completed report](docs/development/pending-jskit-ai/preparation-status.md#completed-rollout-2026-09-13).
 
 Created: 2026-09-08. Revision 2: 2026-09-09, following the maintainer's approval of coordinated breaking changes across json-rest-api, jskit-ai, vibe64, and the seeds selected by vibe64; other app migrations are explicitly deferred to the maintainer.
 
@@ -83,6 +81,11 @@ verification on Node 24 only. Do not repeat the matrix on Node 22 or Node 26.
 Keep the required databases, storage modes and connectors. Earlier multi-runtime
 results are historical evidence; this policy applies to all remaining work.
 
+**Consumer runtime clarification, 2026-09-13:** the user explicitly confirmed
+keeping Vibe64 and its selected seeds on their existing Node 26 runtime. App
+verification uses Node 26; library and JSKIT checks stay on Node 24. Do not
+broaden application engine declarations merely to run this migration.
+
 **Verification cadence, revised 2026-09-11:** the maintainer requests that the
 full comprehensive test lot run only very occasionally. Use focused tests for
 routine work and broaden only the affected areas when shared behavior or a
@@ -91,8 +94,8 @@ with a concrete cross-cutting verification need, and final acceptance; do not
 run them after each checklist closure, small fix or documentation change.
 Required database and connector coverage remains part of the goal.
 
-**Reconciled checklist: 194/250 complete (77.6%); 56 open.** Internal: 138/138;
-API: 48/48; migration: 4/14; residual work: 4/36; final review/report: 0/14.
+**Reconciled checklist: 250/250 complete (100%); zero open.** Internal: 138/138;
+API: 48/48; migration: 14/14; residual work: 36/36; final review/report: 14/14.
 A/B completion refers to the narrowed library acceptance above; transferred
 consumer work stays open in Part R, while R-L01/R-L02 are accepted. The 2026-09-12
 [A7 reconciliation](#2026-09-12-a7-error-boundary-reconciliation) closes A7-04;
@@ -275,19 +278,19 @@ Execute small, reviewable paired changes. Build the tests needed for the next ch
 The initial [consumer inspection](docs/development/consumer-migration.md) is a starting point. **In scope: jskit-ai, vibe64, and its catalog-selected public/accounts seeds.** Other apps are owner-managed later migrations and require a usable guide, not a port in this goal. Initial installed-dependency results and subsequent worktree-tarball checks are distinguished in the evidence guide.
 
 - [x] **M-01** Inventory jskit-ai, vibe64, and its catalog-selected seeds: repository path, branch/commit, dirty work, dependency versions, generated source, and verification commands. Include the public/accounts branches referenced by vibe64; do not expand to unrelated seeds, other worktrees, or other applications; record the maintainer's later-port responsibility.
-- [ ] **M-02** Trace direct, indirect, dynamic, and generated use of resource methods, response shapes, options, hooks/context, serializers, projections, policies, transactions, and imports across those repositories.
-- [ ] **M-03** Record baseline consumer workflows: CRUD, user/workspace repositories, permissions and tenant isolation, HTTP/client behavior, assistant pagination, relationships, transactions, and any newly added expansion features.
+- [x] **M-02** Trace direct, indirect, dynamic, and generated use of resource methods, response shapes, options, hooks/context, serializers, projections, policies, transactions, and imports across those repositories.
+- [x] **M-03** Record baseline consumer workflows: CRUD, user/workspace repositories, permissions and tenant isolation, HTTP/client behavior, assistant pagination, relationships, transactions, and any newly added expansion features.
 - [x] **M-04** Create a reproducible local artifact/link verification path and prove each consumer resolves the exact intended library build. Use isolated installs where needed; do not mutate another task's installed dependencies or lockfile incidentally.
-- [ ] **M-05** Record each intended breaking change with old/new call examples, affected source/tests/templates/apps, data implications, and the checks proving migration. Decide default behavior once; do not leave old/new parsers in the runtime.
-- [ ] **M-06** Reassess each architectural proposal against a demonstrated problem, comparing a local fix, direct API simplification, and internal refactoring. Retain working internals when change buys nothing; keep required correctness/capability work open.
+- [x] **M-05** Record each intended breaking change with old/new call examples, affected source/tests/templates/apps, data implications, and the checks proving migration. Decide default behavior once; do not leave old/new parsers in the runtime.
+- [x] **M-06** Reassess each architectural proposal against a demonstrated problem, comparing a local fix, direct API simplification, and internal refactoring. Retain working internals when change buys nothing; keep required correctness/capability work open.
 - [x] **M-07** Before every migration batch, refresh branches, diffs, and usage searches against the ongoing jskit-ai expansion. Work in isolated checkouts when needed and reconcile overlapping edits without discarding either task's work. The current batch starts from clean main `dff33b4` after integrations and assistant contracts merged; the patch applied cleanly and the newly added assistant caller was reconciled. Refresh remains required at the next application batch. See [accepted jskit-ai evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
 - [x] **M-08** Reconcile the [parked first migration batch](docs/development/pending-jskit-ai/README.md) against current source, then finish porting jskit-ai's host, shared CRUD repositories, user/workspace repositories, dependency declarations, and tests alongside the changed library surface. Add no runtime compatibility bridge. The installed v2 commit, current source, generated outputs, targeted/native/browser checks and staged comprehensive acceptance are recorded in [the acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
-- [ ] **M-09** Port generated-code templates, authored examples, integration documentation, and fixtures; run the owning repository's documented generators and review their outputs. Regeneration must produce the new API directly.
-- [ ] **M-10** Port vibe64 and its public/accounts seed branches, including custom hooks, repositories, HTTP/client consumers, and dependency/lockfile updates. Its migration is not proven by jskit-ai's tests alone. Document equivalent steps for the maintainer's later ports of other apps without changing those apps here.
-- [ ] **M-11** Remove obsolete aliases, duplicate argument/return handling, forwarding imports, and consumer workarounds after their responsibilities are covered. Search actual consumers and generated outputs for remaining old calls.
-- [ ] **M-12** After the expansion advances or finishes, repeat the consumer inventory and reconcile new call sites, changed templates, and package versions. Elapsed time alone does not establish readiness or completion.
-- [ ] **M-13** Run jskit-ai, vibe64, and both seeds' required checks against the intended local artifacts, then exercise representative real workflows. Record exact source revisions, package resolution, results, and any remaining gaps.
-- [ ] **M-14** Prepare a coordinated version/dependency and migration record identifying the compatible library/jskit-ai/vibe64/seed revisions and the prerequisites for later app migrations. Local paired changes must be reviewable and fully tested; remote publication/deployment remains outside scope.
+- [x] **M-09** Port generated-code templates, authored examples, integration documentation, and fixtures; run the owning repository's documented generators and review their outputs. Regeneration must produce the new API directly.
+- [x] **M-10** Port vibe64 and its public/accounts seed branches, including custom hooks, repositories, HTTP/client consumers, and dependency/lockfile updates. Its migration is not proven by jskit-ai's tests alone. Document equivalent steps for the maintainer's later ports of other apps without changing those apps here.
+- [x] **M-11** Remove obsolete aliases, duplicate argument/return handling, forwarding imports, and consumer workarounds after their responsibilities are covered. Search actual consumers and generated outputs for remaining old calls.
+- [x] **M-12** After the expansion advances or finishes, repeat the consumer inventory and reconcile new call sites, changed templates, and package versions. Elapsed time alone does not establish readiness or completion.
+- [x] **M-13** Run jskit-ai, vibe64, and both seeds' required checks against the intended local artifacts, then exercise representative real workflows. Record exact source revisions, package resolution, results, and any remaining gaps.
+- [x] **M-14** Record coordinated compatible library/jskit-ai/vibe64/seed versions, revisions and prerequisites for later app migrations. Verify the paired changes and published registry artifacts. The maintainer explicitly approved the 40-package JSKIT npm publication on 2026-09-13; Git branch pushes and deployment remain outside this rollout.
 
 Acceptance: the simpler API works through current jskit-ai and vibe64, generated code uses it directly, unrelated expansion work is preserved, and no runtime layer exists solely to keep obsolete calls working.
 
@@ -635,62 +638,62 @@ portions so no completed library work is carried forward as unfinished.
 
 ## R-M. Remaining consumer acceptance
 
-- [ ] **R-A4-01** Finish the actual JSKIT/app custom-hook inventory and reconcile downstream assumptions with the documented library contract. (From **A4-01**.)
-- [ ] **R-A4-04** Migrate removed or changed consumer hook/context fields and execute the prepared consumer context contracts. (From **A4-04**.)
-- [ ] **R-A4-08** Port and verify actual consumer POST calls, including IDs, permissions and selected response behavior. (From **A4-08**.)
-- [ ] **R-A4-10** Verify migrated consumer PUT replacement and omitted-relationship assumptions; port deliberately changed behavior. (From **A4-10**.)
-- [ ] **R-A4-12** Migrate and verify consumer response-option calls and dependent wrappers. (From **A4-12**.)
-- [ ] **R-A4-13** Verify consumer serializer/temporal declarations, includes and fieldsets after removing downstream response repair. (From **A4-13**.)
-- [ ] **R-A4-16** Remove remaining obsolete consumer/app/template/generated callers and reconcile the final combined old-path search. (From **A4-16**.)
-- [ ] **R-A4-18** Execute migrated JSKIT/app workflows and compare their hook/response traces with the selected lifecycle contract. (From **A4-18**.)
-- [ ] **R-A5-06** Migrate and verify consumer schemas, serializer declarations and value/temporal transformations against the installed v2 artifact. (From **A5-06**.)
-- [ ] **R-A5-10** Reconcile actual consumer late-customization and registration callers; verify their accepted configuration timing. (From **A5-10**.)
-- [ ] **R-A5-11** Migrate actual consumer hook/schema metadata readers and remove obsolete downstream metadata views. (From **A5-11**.)
-- [ ] **R-A6-09** Complete the external query-hook inventory, port removed proxy usage and execute retained consumer query forms. (From **A6-09**.)
-- [ ] **R-A6-10** Migrate actual external query hooks to native builders and the selected column/value helpers; remove downstream compatibility behavior. (From **A6-10**.)
-- [ ] **R-A6-16** Execute actual migrated consumer raw queries and custom hooks on the databases those consumers support. (From **A6-16**.)
-- [ ] **R-A7-01** Reconcile JSKIT/app transaction owners and migrate ambiguous completion/event handling. (From **A7-01**.)
-- [ ] **R-A7-07** Migrate consumer ownership and side-effect handling; verify participant calls cannot commit or roll back their owner. (From **A7-07**.)
-- [ ] **R-A8-04** Verify downstream permission/query/child-hook assumptions after the retained batching changes. Further library bulk/reverse-write work is separately tracked by R-L01. (From **A8-04**.)
-- [ ] **R-A8-12** Record performance and workflow regressions from the actual migrated consumers; compare against their prior behavior. (From **A8-12**.)
-- [ ] **R-A9-09** Type-check actual migrated JSKIT/app consumers against the intended installed declaration artifact. (From **A9-09**.)
-- [ ] **R-A10-08** Migrate and verify actual JSKIT/app/template/generated deep imports and their optional plugin dependencies. (From **A10-08**.)
-- [ ] **R-A10-09** Install the intended tarball into paired JSKIT/app checks and verify exact dependency resolution, plugins and real workflows. (From **A10-09**.)
-- [ ] **R-A10-10** Verify clean migrated-consumer installations, Node 24 engines and coordinated dependency/lockfile changes. (From **A10-10**.)
+- [x] **R-A4-01** Finish the actual JSKIT/app custom-hook inventory and reconcile downstream assumptions with the documented library contract. (From **A4-01**.)
+- [x] **R-A4-04** Migrate removed or changed consumer hook/context fields and execute the prepared consumer context contracts. (From **A4-04**.)
+- [x] **R-A4-08** Port and verify actual consumer POST calls, including IDs, permissions and selected response behavior. (From **A4-08**.)
+- [x] **R-A4-10** Verify migrated consumer PUT replacement and omitted-relationship assumptions; port deliberately changed behavior. (From **A4-10**.)
+- [x] **R-A4-12** Migrate and verify consumer response-option calls and dependent wrappers. (From **A4-12**.)
+- [x] **R-A4-13** Verify consumer serializer/temporal declarations, includes and fieldsets after removing downstream response repair. (From **A4-13**.)
+- [x] **R-A4-16** Remove remaining obsolete consumer/app/template/generated callers and reconcile the final combined old-path search. (From **A4-16**.)
+- [x] **R-A4-18** Execute migrated JSKIT/app workflows and compare their hook/response traces with the selected lifecycle contract. (From **A4-18**.)
+- [x] **R-A5-06** Migrate and verify consumer schemas, serializer declarations and value/temporal transformations against the installed v2 artifact. (From **A5-06**.)
+- [x] **R-A5-10** Reconcile actual consumer late-customization and registration callers; verify their accepted configuration timing. (From **A5-10**.)
+- [x] **R-A5-11** Migrate actual consumer hook/schema metadata readers and remove obsolete downstream metadata views. (From **A5-11**.)
+- [x] **R-A6-09** Complete the external query-hook inventory, port removed proxy usage and execute retained consumer query forms. (From **A6-09**.)
+- [x] **R-A6-10** Migrate actual external query hooks to native builders and the selected column/value helpers; remove downstream compatibility behavior. (From **A6-10**.)
+- [x] **R-A6-16** Execute actual migrated consumer raw queries and custom hooks on the databases those consumers support. (From **A6-16**.)
+- [x] **R-A7-01** Reconcile JSKIT/app transaction owners and migrate ambiguous completion/event handling. (From **A7-01**.)
+- [x] **R-A7-07** Migrate consumer ownership and side-effect handling; verify participant calls cannot commit or roll back their owner. (From **A7-07**.)
+- [x] **R-A8-04** Verify downstream permission/query/child-hook assumptions after the retained batching changes. Further library bulk/reverse-write work is separately tracked by R-L01. (From **A8-04**.)
+- [x] **R-A8-12** Record performance and workflow regressions from the actual migrated consumers; compare against their prior behavior. (From **A8-12**.)
+- [x] **R-A9-09** Type-check actual migrated JSKIT/app consumers against the intended installed declaration artifact. (From **A9-09**.)
+- [x] **R-A10-08** Migrate and verify actual JSKIT/app/template/generated deep imports and their optional plugin dependencies. (From **A10-08**.)
+- [x] **R-A10-09** Install the intended tarball into paired JSKIT/app checks and verify exact dependency resolution, plugins and real workflows. (From **A10-09**.)
+- [x] **R-A10-10** Verify clean migrated-consumer installations, the confirmed Node 24 library/JSKIT and Node 26 application runtimes, and coordinated dependency/lockfile changes. (From **A10-10**.)
 - [x] **R-B0-07** Port and verify actual JSKIT HTTP/client/assistant consumers, including pagination and changed error/response payloads. (From **B0-07**.) Real SQLite assistant pagination, Fastify requests, ordinary/streaming client retries, and all six conditional browser contracts pass; see [acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
-- [ ] **R-B0-09** Port JSKIT and selected app/seed callers, templates and generated repositories; verify mappings, policies, includes and pagination through Part M. (From **B0-09**.)
-- [ ] **R-B0-11** Remove consumer workaround wrappers after installed-artifact tests prove equivalent behavior; retain useful domain integration. (From **B0-11**.)
-- [ ] **R-B0-12** Verify migration examples against migrated consumer artifacts, regenerate callers and search consumers for old spellings/imports. Final packaged-library example execution is separately tracked by R-L02. (From **B0-12**.)
-- [ ] **R-B1-02** Migrate and verify actual consumer error classification, retry decisions and nontransactional diagnostics. (From **B1-02**.)
-- [ ] **R-B1-04** Verify migrated consumer after-commit handling and application callbacks do not blindly retry committed writes. (From **B1-04**.)
+- [x] **R-B0-09** Port JSKIT and selected app/seed callers, templates and generated repositories; verify mappings, policies, includes and pagination through Part M. (From **B0-09**.)
+- [x] **R-B0-11** Remove consumer workaround wrappers after installed-artifact tests prove equivalent behavior; retain useful domain integration. (From **B0-11**.)
+- [x] **R-B0-12** Verify migration examples against migrated consumer artifacts, regenerate callers and search consumers for old spellings/imports. Final packaged-library example execution is separately tracked by R-L02. (From **B0-12**.)
+- [x] **R-B1-02** Migrate and verify actual consumer error classification, retry decisions and nontransactional diagnostics. (From **B1-02**.)
+- [x] **R-B1-04** Verify migrated consumer after-commit handling and application callbacks do not blindly retry committed writes. (From **B1-04**.)
 - [x] **R-B1-05** Verify migrated JSKIT HTTP/schema/client outcome propagation and application status mapping. (From **B1-05**.) Actual typed library errors and resource failures pass through Fastify, plain/JSON:API schemas and the client with correct status/outcome and 5xx redaction. Unsafe default CSRF replay is rejected. See [acceptance evidence](docs/development/pending-jskit-ai/preparation-status.md#accepted-jskit-ai-migration-2026-09-13).
-- [ ] **R-B2-01** Integrate or replace actual JSKIT/app transaction helpers with the selected owner; remove overlapping ownership wrappers. (From **B2-01**.)
-- [ ] **R-B2-07** Port affected consumer raw-transaction callers and verify raw SQL participation inside the selected managed owner. (From **B2-07**.)
-- [ ] **R-B2-10** Migrate JSKIT/app helpers and call sites, remove overlapping wrappers and execute real multi-operation success/rollback workflows. (From **B2-10**.)
-- [ ] **R-B4-02** Port consumers that relied on silent partial success and verify intended failure handling. (From **B4-02**.)
-- [ ] **R-B4-07** Verify migrated JSKIT/app failed-response handling, including committed and uncertain write outcomes. (From **B4-07**.)
+- [x] **R-B2-01** Integrate or replace actual JSKIT/app transaction helpers with the selected owner; remove overlapping ownership wrappers. (From **B2-01**.)
+- [x] **R-B2-07** Port affected consumer raw-transaction callers and verify raw SQL participation inside the selected managed owner. (From **B2-07**.)
+- [x] **R-B2-10** Migrate JSKIT/app helpers and call sites, remove overlapping wrappers and execute real multi-operation success/rollback workflows. (From **B2-10**.)
+- [x] **R-B4-02** Port consumers that relied on silent partial success and verify intended failure handling. (From **B4-02**.)
+- [x] **R-B4-07** Verify migrated JSKIT/app failed-response handling, including committed and uncertain write outcomes. (From **B4-07**.)
 
 # Part C — Final review and completion
 
 ## C1. Review changes in three distinct passes
 
-- [ ] **C1-01** Review every milestone against its acceptance conditions in production code and tests across all changed repositories; verify each architectural change earns its complexity.
-- [ ] **C1-02** Review the whole final patch for contract and migration completeness: methods, payloads, options/defaults, imports, hook/context behavior, transaction ownership, supported backends, and separately scoped capabilities across library, jskit-ai, and apps.
-- [ ] **C1-03** Perform an adversarial pass over interactions: malformed values, nulls, sparse fields, custom IDs, serializers, projected sorts, empty/cyclic relationships, auth boundaries, hook mutations, failures, and concurrent operations.
-- [ ] **C1-04** Check that links, cursors, schemas, imports, declarations, generated source, and migration/documentation examples are accepted by their actual current consumers.
-- [ ] **C1-05** Check for duplicate normalization/validation, global state, stale caches, swallowed errors, speculative adapters, excessive mode flags, old/new API translation, and any runtime layer maintained solely for backward compatibility.
-- [ ] **C1-06** Confirm deleted/moved code has no remaining library, jskit-ai, app, template, or generated callers. Verify removed aliases/imports are absent from runtime and published declarations.
-- [ ] **C1-07** Add regression tests for confirmed final-review findings and fix them before repeating affected checks.
+- [x] **C1-01** Review every milestone against its acceptance conditions in production code and tests across all changed repositories; verify each architectural change earns its complexity.
+- [x] **C1-02** Review the whole final patch for contract and migration completeness: methods, payloads, options/defaults, imports, hook/context behavior, transaction ownership, supported backends, and separately scoped capabilities across library, jskit-ai, and apps.
+- [x] **C1-03** Perform an adversarial pass over interactions: malformed values, nulls, sparse fields, custom IDs, serializers, projected sorts, empty/cyclic relationships, auth boundaries, hook mutations, failures, and concurrent operations.
+- [x] **C1-04** Check that links, cursors, schemas, imports, declarations, generated source, and migration/documentation examples are accepted by their actual current consumers.
+- [x] **C1-05** Check for duplicate normalization/validation, global state, stale caches, swallowed errors, speculative adapters, excessive mode flags, old/new API translation, and any runtime layer maintained solely for backward compatibility.
+- [x] **C1-06** Confirm deleted/moved code has no remaining selected candidate library, jskit-ai, app, template, or generated callers. Verify removed aliases/imports are absent from candidate runtime and public declarations in the reviewed packed artifacts. Canonical portable locks remain under M-10/R-A10-10; the five other app ports remain owner-managed.
+- [x] **C1-07** Add regression tests for confirmed final-review findings and fix them before repeating affected checks.
 
 ## C2. Verify and report
 
-- [ ] **C2-01** Run the final complete library gate and jskit-ai/downstream-app checks against the same intended artifacts, including both storage modes, real databases/connectors, lint, types, docs, examples, and package installation.
-- [ ] **C2-02** Record actual test/pass/fail/skip counts per job, source revisions, package resolution, runtime/driver versions, commands, and conditions. Explain every material coverage limitation.
-- [ ] **C2-03** Compare final query budgets, performance measurements, initialization costs, and package contents against A0 baselines.
-- [ ] **C2-04** Run git diff --check in each changed repository and inspect final status/diffs for generated artifacts, unintended dependency changes, and interference with the concurrent expansion.
-- [ ] **C2-05** Reconcile every checklist item and migration decision against the latest jskit-ai expansion and app inventory. Unexecuted required work stays open and the execution goal must not be marked complete.
-- [ ] **C2-06** Produce a self-contained report separating internal improvements, API changes/capabilities, and jskit-ai/app migrations, with exact verification, fixed defects, performance evidence, and limitations.
-- [ ] **C2-07** Mark the execution goal complete only after required implementation, the jskit-ai and vibe64 migrations, artifact verification, documentation, and the final report are complete.
+- [x] **C2-01** Run the final complete library gate and jskit-ai/downstream-app checks against the same intended artifacts, including both storage modes, real databases/connectors, lint, types, docs, examples, and package installation.
+- [x] **C2-02** Record actual test/pass/fail/skip counts per job, source revisions, package resolution, runtime/driver versions, commands, and conditions. Explain every material coverage limitation.
+- [x] **C2-03** Compare final query budgets, performance measurements, initialization costs, and package contents against A0 baselines.
+- [x] **C2-04** Run git diff --check in each changed repository and inspect final status/diffs for generated artifacts, unintended dependency changes, and interference with the concurrent expansion.
+- [x] **C2-05** Reconcile every checklist item and migration decision against the latest jskit-ai expansion and app inventory. Unexecuted required work stays open and the execution goal must not be marked complete.
+- [x] **C2-06** Produce a self-contained report separating internal improvements, API changes/capabilities, and jskit-ai/app migrations, with exact verification, fixed defects, performance evidence, and limitations.
+- [x] **C2-07** Mark the execution goal complete only after required implementation, the jskit-ai and vibe64 migrations, artifact verification, documentation, and the final report are complete.
 
 ## Execution log
 
@@ -3327,3 +3330,197 @@ executions, zero failures; types, query budgets, lint, docs and packaged example
 passed. The ordinary invocation's one canonical-only fixture test passes in the
 canonical invocation. See the [final checkpoint](docs/development/pending-jskit-ai/preparation-status.md#final-post-deslop-verification-and-library-pause-2026-09-12).
 Work is paused before consumers; this does not complete the full goal.
+
+
+### 2026-09-13: Selected consumer inventory and artifact reconciliation
+
+Thirteen inventory/reconciliation entries close: M-02/M-03/M-06/M-09/M-12,
+R-A4-01/R-A4-10, R-A5-10/R-A5-11, R-A6-09/R-A6-10, R-A7-01 and R-A9-09.
+The accepted JSKIT host/repository/query/native evidence is combined with fresh
+post-expansion Vibe64 and catalog-selected seed source searches, actual packaged
+installs and account persistence/upgrade checks. The selected applications add
+no direct resource hooks, PUT/replacement calls, metadata readers, proxy query
+hooks, late resource customization or competing resource transaction owners.
+R-A4-10 is therefore explicitly not applicable to additional application PUT
+ports. R-A9-09 is not applicable to downstream TypeScript compilation: actual
+library callers are JavaScript; browser test TypeScript does not consume the
+library declarations. This does not claim a downstream TypeScript build.
+
+No application compatibility architecture or additional source generator is
+needed. The existing package catalog and distributed documentation were rebuilt
+and verified deterministic. The three new literal JSKIT migration-guide examples
+pass eight check groups on Node 24 using the actual packed graph, with real
+MySQL CRUD/rollback/commit and separately labelled injected failure cases.
+
+[Current artifact evidence](docs/development/pending-jskit-ai/preparation-status.md#artifact-acceptance-in-progress)
+records exact source/package identities. The five canonical applications have
+a refreshed, separate owner-managed migration-impact report; their code ports
+are outside these closure claims. Portable registry locks, complete selected-app
+acceptance, performance comparison and all Part C items remain open.
+
+Current total: **207/250 complete (82.8%); 43 open**. These are acceptance
+closures, not thirteen newly implemented features.
+
+### 2026-09-13: Consumer behavior and installed-artifact acceptance
+
+Twenty-three further entries close against completed implementation and executed
+consumer evidence, independently of the remaining rollout/final gates:
+
+- M-05/M-11, R-A4-04/R-A4-08/R-A4-12/R-A4-13/R-A4-16/R-A4-18,
+  R-A5-06 and R-A8-04: the accepted JSKIT migration exercises real CRUD,
+  context, permission, response, temporal/serializer, include, pagination and
+  lifecycle contracts. The current Vibe64/public/accounts source inventory
+  introduces no additional direct library callers or hook owners. Actual v2
+  accounts registration, persisted profile writes/reads, restart, login and
+  cross-user isolation pass; its v1 database also upgrades without losing
+  accounts or changing the existing four-migration history. The full seed
+  checks and all thirteen seed browser cases pass. Other canonical apps have
+  explicit owner-managed port instructions and are outside these closures.
+- R-A6-16/R-A7-07 and R-B2-01/R-B2-07/R-B2-10: accepted native MySQL and
+  PostgreSQL JSKIT repository workflows cover real raw SQL inside the managed
+  owner, multi-operation success/rollback and participant restrictions. The
+  selected apps add no competing raw/resource owner. The new literal guide
+  examples additionally run actual MySQL CRUD, whole-owner duplicate retries,
+  rollback cleanup and committed callback failure against the packed graph;
+  uncertain/injected cases are labelled separately, not claimed as real faults.
+- R-A10-08/R-A10-09 and R-B0-11: 40 actual coordinated tarballs have 2,161
+  source-matching files and 431 valid export targets. Fresh disposable consumer
+  installations match their intended package versions, integrity and bytes:
+  public 5 packages/356 files, Vibe64 16/1,412 and accounts 21/853. Accounts'
+  130 library runtime/declaration files plus package.json match immutable f97.
+  No hooked-api, duplicate/private JSKIT copies or linked JSKIT packages remain.
+  The dead database-runtime export is removed; useful domain adapters remain.
+  These installations use a truthful local artifact registry. They do not prove
+  published-registry locks or complete the portable canonical migration.
+- R-B1-02/R-B1-04/R-B4-02/R-B4-07: accepted Fastify, HTTP/client, ordinary and
+  streaming retry, outcome propagation and redaction tests exercise failed,
+  committed and uncertain responses. Actual Vibe64 client command/retry checks
+  pass 50 tests against these artifacts. The selected seeds introduce no
+  separate unsafe write-retry or after-commit handler. Their real browser/login
+  flows and the literal migration example outcomes supply application evidence.
+- R-A8-12: a bounded real accounts before/after HTTP workload, Node 26/MySQL 8,
+  uses two warmups and ten measured profile write/read rounds per version.
+  Registration/login/write/read SQL statement counts are unchanged at
+  20/8/49/18, with equal final profile and migration history. Concurrent local
+  acceptance makes timing/memory observations unsuitable for a speed claim.
+  Both measurement schemas were dropped and their absence verified.
+
+Exact commands, identities, counts and evidence paths are in the active
+[rollout record](docs/development/pending-jskit-ai/preparation-status.md#active-vibe64-and-seed-rollout-2026-09-13)
+and its manifest. Existing whole-library and Node 24 JSKIT verification is
+reused for unchanged executable files; source/packed byte comparison, current
+package checks and relevant app execution establish the connection.
+
+Current accounting: **230/250 complete (92.0%); 20 open**. Remaining are
+M-10/M-13/M-14, R-A10-10/R-B0-09/R-B0-12, and all fourteen Part C entries.
+The full Vibe64 client run exposed stale integration fixtures now being corrected;
+real Vibe64/Genesis template creation found missing seed Resource estimates.
+Those checks, final review/report and genuine portable registry locks remain
+open. This is not a claim that the final combined gate or migrations are done.
+
+### 2026-09-13: Local candidate workflows and package acceptance complete
+
+M-13 closes against the completed intended-artifact checkpoint: reused unchanged
+Node 24 library/JSKIT implementation evidence, current release/package checks,
+Node 26 seed verification, persistence/upgrade/browser checks, staged full Vibe64
+server/client checks with successful focused fixture corrections, production
+build/package boundaries, two browser smoke/recovery cases, and actual packed
+Vibe64 installation/startup. The optional systemd/cgroup host proof is explicitly
+skipped. No broad suite was repeated just to erase a recorded isolated failure.
+
+R-B0-12 closes against executed literal migration examples and real Vibe64/Genesis
+creation of both corrected candidate seeds. Each imported app passes fresh
+installation, graph verification, build and HTTP startup. The created accounts
+app also passes real database persistence, restart and profile isolation. Ordinary
+imported source files match their exact candidate snapshots; useful Genesis-owned
+normalization is recorded separately. Official remote branches are unchanged.
+
+The packed Vibe64 distribution has 13 unique JSKIT packages in 15 installations,
+with 1,187 files verified against the exact candidate tarballs. Its duplicate
+bundled/outer kernel and connectors-core copies have identical versions/bytes.
+The published baseline already has this arrangement; reviewed actual resolver
+paths keep identity-sensitive classes within the same owner. This is not a claim
+of a globally deduplicated packed graph or arbitrary cross-copy interoperability.
+
+All owned application/browser servers, MySQL and the artifact registry have
+stopped. Inactive fixture files, artifact identities and exact source hashes are
+retained in the rollout record. No package publication or deployment occurred.
+
+Current accounting: **232/250 complete (92.8%); 18 open**: M-10/M-14,
+R-A10-10/R-B0-09, and all fourteen Part C entries. The prepared 40-package JSKIT
+release is reviewable; actual registry publication requires the explicit final
+approval described in M-14. Genuine canonical dependency locks/fresh installs
+and final review/report reconciliation remain. Other canonical app ports and
+Online deployment remain outside this batch.
+
+### 2026-09-13: Final candidate interaction, simplicity and cost review
+
+C1-03 closes against a fresh adversarial review of the unchanged accepted
+library assertions, managed JSKIT owners, actual accounts upgrade/isolation,
+HTTP/client failures and executed literal migration examples. C1-05 closes
+against the reviewed normalization, cache/state ownership, completion cleanup
+and direct runtime/repository paths. No new concrete regression or compatibility
+framework was found; retained small domain utility duplication and deliberate
+weak ownership registries are documented, not claimed absent.
+
+C1-06 closes for the selected candidate sources and actual packed publication
+surface. Searches cover 158 library, 1,383 JSKIT, 531 Vibe64 and 38/44 seed
+source/configuration files, with no remaining removed-module/helper callers.
+All 2,161 packed JSKIT files and accepted source hashes still match. Its wording
+now makes this candidate scope explicit: it does not claim registry publication,
+canonical accounts lock replacement or ports of the other five applications.
+Those retain their separate acceptance requirements.
+
+C2-03 closes with the available [final cost comparison](docs/development/query-measurements.md#final-cost-comparison-against-a0-2026-09-13-c2-03).
+All 88 query measurements meet current budgets. Sparse/related queries improve,
+some other shapes grow, and actual accounts SQL counts remain unchanged. The
+exact f97 package excludes development files and is smaller. Historical compiler
+experiments, missing A0 initialization data and uncontrolled timing limitations
+remain explicit. No universal speedup or new measurement execution is claimed.
+
+Detailed findings and source identities are preserved in the [review record](docs/development/pending-jskit-ai/preparation-status.md#final-candidate-review-2026-09-13)
+and adjacent manifest. These read-only reviews required no test rerun or new
+services. All owned acceptance services remain stopped.
+
+Current accounting: **236/250 complete (94.4%); 14 open**: M-10/M-14,
+R-A10-10/R-B0-09, C1-01/C1-02/C1-04/C1-07 and
+C2-01/C2-02/C2-04/C2-05/C2-06/C2-07. Publication approval is still pending;
+then canonical dependency/lock changes, clean registry installs and final
+combined reconciliation/report can finish. No package was published and no
+remote branch or deployment was changed by this review.
+
+### 2026-09-13: Published rollout and final master completion
+
+M-10/R-A10-10/R-B0-09 close against canonical Vibe64/public/accounts dependency
+and lock updates through approved catalog 0.1.211, actual public registry
+artifacts, three fresh Node 26 installs/graph checks, ten passing focused
+startup/persistence checks, seed builds and Vibe64 package boundaries. Exact
+installed bytes and current source copies agree; no removed dependency or
+unrelated third-party version drift remains. Other apps retain their agreed
+owner-managed migration guide rather than an unperformed port claim.
+
+M-14 closes against the explicitly approved publication of all forty prepared
+JSKIT versions, recorded real registry identities and compatible local commits.
+The immutable f97 library Git pin remains deliberate. Thirty-nine archives
+match prepared bytes exactly; connectors-web contains one harmless extra
+45-byte Playwright result, with all prepared files unchanged and actual integrity
+recorded. This packaging blemish is disclosed, not hidden by an exact-tarball claim.
+
+C1-01/C1-02/C1-04/C1-07 close against the reviewed final source/package/lock
+surfaces, actual installed declarations and executed migration/template examples.
+Confirmed behavioral findings have their targeted passing corrections. The final
+registry phase requires no runtime correction: its environment ENOSPC failure
+rolled back cleanly and passed the normal retry after owned temporary cleanup.
+
+C2-01/C2-02 reconcile unchanged full library/JSKIT and scoped native evidence,
+staged app acceptance and the new registry checks. Earlier broad failures,
+conditional coverage and the optional Vibe64 host skip remain explicit.
+C2-04/C2-05 close against clean committed consumer trees, final diff/hash review,
+unchanged integration fixtures, the current app inventory and all 250 checklist
+conditions. C2-06/C2-07 close with the self-contained [completed report](docs/development/pending-jskit-ai/preparation-status.md#completed-rollout-2026-09-13)
+and the final implementation/artifact/evidence audit.
+
+**Final accounting: 250/250 complete (100%); zero open.** No unnecessary broad
+suite was repeated for publication or commits. Source commits are local; no Git
+branch push, remote seed update, owner-managed app port or Online deployment is
+claimed. This concludes the agreed implementation and npm rollout scope.

@@ -1,5 +1,449 @@
 # Current v2 migration preparation
 
+## Completed rollout, 2026-09-13
+
+**The scoped master plan is complete: 250/250 items, zero open.** The 40 prepared
+JSKIT packages are published to public npm. Canonical local Vibe64 and both seed
+branches use genuine registry dependencies/locks, pass fresh-install acceptance,
+and are committed. Library and JSKIT checks use Node 24.6.0; application checks
+use Node 26.5.0, with the apps' existing Node 26 engines retained.
+
+The user explicitly authorized publication with “Publish them!” and then
+“Then continue and finish everything off.” This supersedes the earlier npm
+publication boundary. No new version-preparation pass or extra release cohort
+was introduced. Source commits below are local; no Git branch was pushed and
+no application was deployed. The five other canonical application ports remain
+owner-managed. Those exclusions are the existing agreed scope, not unfinished
+library or selected-consumer implementation.
+
+### Result and source identity
+
+The library retains its SQL/storage/schema implementation behind the small
+direct runtime. Application writes use `data` or explicit JSON:API `document`,
+with independent `format`/`returning`; mutable hooks share deliberate operation
+context. Managed transactions preserve failure/commit ownership through nested
+operations and client error mapping. JSKIT's host and repositories implement
+that contract without the old input-builder/response-repair layers.
+
+This final batch publishes that implementation and connects actual consumers.
+Vibe64 needs dependency and stale test-fixture changes, not production operation
+rewrites. Both seeds gain the required project-owned Resource estimates; accounts
+also gains the reviewed real-database persistence/isolation CI check. Existing
+accounts edits and Vibe64 integration work were preserved. No unrelated
+third-party dependency versions changed.
+
+| Source | Accepted identity |
+| --- | --- |
+| JSON REST library | Version `2.0.0`, immutable Git `f97dc859321aee41915f3b0e256a861c382bc1b3`; all 173 installed files match. No new json-rest-api npm publication. |
+| JSKIT | `e52ce97f921e471ceaaa6ce4dcdc62aa0b09d077`; 40 npm versions including catalog `0.1.211`, host `0.1.130`, CRUD `0.1.197` and kernel `0.1.186` |
+| Vibe64 main | `777a6b1acf37d47326a665a8b3a8836c6551b278`; 14 root and 23 workspace JSKIT pins across twelve manifests |
+| Public seed | `25d34e282fd571e2b1b44104d20b2d36b58828fe`; five root pins plus workspace kernel |
+| Accounts seed | `f1617363e3e4e3180612cb1dd53eaaa120c3777d`; ten root pins plus workspace kernel; JSON REST v2 installed through the shared host |
+
+All 40 actual registry artifacts were downloaded and inspected. Thirty-nine
+archives are byte-identical to the prepared tarballs. `connectors-web@0.1.3`
+accidentally also contains the 45-byte Playwright file
+`test-results/.last-run.json` (`status: passed`, no failed tests). Every one of
+its ten prepared files, including its manifest and runtime, is unchanged.
+This is a packaging blemish, not an application-code difference. The actual
+published integrity is recorded and used in locks; it is not falsely labelled
+the original tarball. Across the release, all 2,161 prepared files match and
+there are 2,162 published files including that single reviewed extra.
+
+### Combined verification
+
+Existing broad results are reused only for matching implementation bytes.
+No whole-library or JSKIT suite was repeated for publication, dependency locks,
+archived prose or commits. The final fresh registry checks execute the installed
+packages on the agreed application runtime.
+
+| Gate | Actual result and scope |
+| --- | --- |
+| Library Node 24 | 6,272 ordinary SQLite, 6,322 canonical SQLite, Express 4 542 + 544 passes: 13,680 passing executions, not unique tests. One ordinary canonical-only fixture skips there and passes in canonical mode. Types, packed declarations, budgets, lint and docs pass. |
+| Final affected native library checks | PostgreSQL ordinary/canonical 199 + 199; MySQL 203 + 203: 804 passes. This final selection is not a new full native matrix; earlier scoped database/Redis evidence remains recorded below. |
+| JSKIT Node 24 | Broad checkpoint: 2,783 passes, one documentation-size failure and nine conditional skips out of 2,793. The documentation fix has 19 focused passes; conditional/native/browser acceptance is recorded separately below. Do not relabel the original broad command as exit zero. |
+| Prepared selected apps | Both full seed verify commands pass. Public/accounts browsers pass 9/4; accounts original-v1 persistence, retained-data v2 upgrade, fresh v2 persistence and real Vibe64-created app persistence pass. Real candidate creation succeeds for both seeds. |
+| Vibe64 staged broad acceptance | Server: 2,135 passes, two stale assertions corrected with 57 affected passes, one optional host skip. Client: 1,119 initial passes with seven failed assertions and one suite-load failure; all eight affected files then pass 44 checks on Node 26. Build, fifteen boundaries, affected lint, two browser cases and packed-app startup pass. |
+| Final public registry installs | Fresh `npm ci` and graph checks pass in all three copies. Public smoke 1/1, accounts smoke 1/1 and real persistence 1/1, Vibe64 smoke 7/7; no failures or skips in these ten checks. Both seed builds and fifteen Vibe64 package boundaries pass. |
+| Final installed bytes | Public 5 JSKIT packages/356 files; accounts 21/853; Vibe64 16/1,413 including the documented extra file. Canonical and fresh-copy locks match. No hooked-api, temporary registry URL, private/linked/duplicate JSKIT installation remains in these source-consumer graphs. |
+| Documentation and review | Three literal migration examples execute eight check groups against actual MySQL/packed packages; guide hash remains unchanged. Final interaction, simplicity, removed-caller, seed/source, dependency and cost reviews complete. |
+
+The fresh accounts persistence check uses a new owned MySQL 8.0.46 database,
+prepares twice, recreates the HTTP server within one Node process, verifies login
+and retained profiles, rejects anonymous/wrong-password access and isolates two
+users. It is not an OS crash/reboot test. Its database was dropped and the owned
+MySQL process stopped. The earlier upgrade rehearsal separately exercises v1
+and v2 installed applications in different Node invocations against retained data.
+
+The first final Vibe64 updater attempt encountered a full `/tmp` filesystem;
+npm presented the failed metadata write as an `ERESOLVE` conflict. The updater
+restored every manifest/lock and existing fixture. After deleting only inactive
+owned rehearsal dependency directories, the normal update and clean install
+passed without force/legacy-peer flags. Failed logs and rollback proof remain.
+All accepted source, locks, artifacts and logs were retained; cache cleanup and
+service shutdown are recorded. No new headless browser was started in this
+publication turn; no owned tests or application/database servers remain running.
+
+### Limits and migration handoff
+
+The sole optional Vibe64 systemd/cgroup workflow-owner proof remains unexecuted;
+existing lint/chunk-size warnings remain. The packed Vibe64 distribution has
+pre-existing same-version bundled/outer kernel and connectors-core copies; its
+reviewed class ownership works in the exercised paths, but it is not a globally
+deduplicated distribution. The fresh source-consumer graphs above are deduplicated.
+
+All 88 library query measurements meet their ceilings. Sparse/related-author
+reads improve; some flat/nested shapes grow. Actual accounts SQL counts remain
+20/8/49/18 for registration/login/write/read. Small concurrent timing/memory
+samples and missing A0 startup data support no universal speedup claim. See the
+[recorded comparison](../query-measurements.md#final-cost-comparison-against-a0-2026-09-13-c2-03).
+
+Official remote seed branches and hosted applications have not been updated by
+this rollout. Actual Genesis creation was verified from the accepted local
+candidate templates; the canonical local branches now contain the portable
+published dependencies and commits above. Git pushes and Online deployment are
+separate from the approved npm publication. The maintainer's later ports of
+`sas/compas-next`, `sas/racing`, `sas/dogandgroom`, `matt/beepollen` and `pass/whs2`
+are mapped in [the usage inventory](../../../consumer-migration-feature-usage.md)
+and [GUIDE 33](../../../../docs/GUIDE/33-migrating-to-v2.md), including composed
+repositories, whole-owner duplicate retries and application upload compensation.
+
+The adjacent manifest's `currentRollout.publication`, `registryAcceptance` and
+`finalSourceState` contain all versions/integrities, commands, counts, source
+hashes and evidence paths. Temporary raw evidence lives at
+`/tmp/jskit-v2-rollout-42tSXQ`; this report preserves the findings independently
+of those disposable files. Historical statuses below describe earlier stages
+and are superseded by this completed result.
+
+## Active Vibe64 and seed rollout, 2026-09-13
+
+The new goal authorizes completing Vibe64, the catalog-selected public/accounts
+seeds, coordinated package rollout and combined verification/final review.
+Earlier pause statements below are historical. After inventory, behavior and
+installed-artifact reconciliation, the master is **236/250 complete (94.4%); 14 open**.
+Local candidate acceptance and four final reviews are complete; portable rollout
+and final combined reconciliation remain pending.
+
+**Historical publication blocker, now resolved by user approval:** after three consecutive goal turns encountering the
+same missing publication approval, the prepared source hashes and canonical
+locks were rechecked unchanged. The preceding turn completed four independent
+review items; no further independent implementation or verification is needed
+before this boundary. The goal was blocked pending the user's publication
+decision. The user subsequently approved “Publish them!” and instructed
+continuing to finish the rollout. A status request or automatic continuation supplies no
+publication approval. On resumption, recheck the prepared graph and registry
+availability, then follow the publication handoff below; do not prepare another
+version graph or repeat unchanged full suites.
+
+The user confirmed that app checks use **Node 26** with their current engines;
+library and JSKIT checks remain on **Node 24**. Use focused checks during changes
+and reserve broad verification for the combined checkpoint. Serialize Vibe64
+test runs through its documented commands.
+
+Fresh read-only inventory:
+
+| Source | Starting revision | Working tree before rollout |
+| --- | --- | --- |
+| json-rest-api | `484d545` | Clean; accepted runtime is `f97dc859321aee41915f3b0e256a861c382bc1b3` |
+| jskit-ai | `ba6b49252baead0cce791b3ceb39d04c13feb48b` | Clean; accepted source migration, not published |
+| Vibe64 main | `c14eb989d4e54785fa55f5c863830257f932d977` | Clean |
+| seed-jskit public | `02cf10cef15a2a44b73adf52e5cd60e53b7bf9bf` | Clean |
+| seed-jskit accounts | `91dad8e418ada6594001b8282c2b87c41e8fc3e5` | Existing README/package edits and untracked account persistence integration test; preserve and review |
+
+Vibe64's public Genesis boundary selects `genesis-stack@1.1.2`. Its static
+template catalog selects `official:jskit/public` and `official:jskit/accounts`
+from the public/accounts branches of `vibe64-dev/seed-jskit`. Remote branch
+checks matched the seed revisions above. These are branch selections, not
+catalog-pinned commits.
+
+No direct JSON REST operation, context/hook, transaction or removed-option
+callers were found in Vibe64 or either seed's authored source. Vibe64 and the
+public seed have no installed JSON REST host. The accounts seed reaches v1
+through users-core and json-rest-api-core. Required work is the coordinated
+package graph and proof of the actual host/account workflows; do not invent
+application adapters or an ORM rewrite where there are no callers.
+
+Published JSKIT versions currently identify the old implementation, including
+json-rest-api-core `0.1.129` using json-rest-api `^1.0.29`. The migrated source
+must receive new versions through the existing coordinated release preparation.
+Prepare and pack that graph, then rehearse disposable consumers with those real
+artifacts. Such a rehearsal does not establish registry-install acceptance.
+Do not commit temporary tarball paths or fabricate registry lock metadata.
+Seek publication approval only once the exact release and checks are reviewable;
+then complete genuine portable locks and fresh-install checks. Online deployment
+and changes to deployed application data remain outside this batch.
+
+The user reconfirmed the five canonical applications: `sas/compas-next`,
+`sas/racing`, `sas/dogandgroom`, `matt/beepollen`, and `pass/whs2`. Refresh their
+read-only migration-impact inventory and document required ports. Their actual
+code/data migrations remain owner-managed, separately from Vibe64 and its seeds.
+The earlier [schema-helper audit](../../../consumer-migration-feature-usage.md)
+is evidence about migration-helper usage, not a completed v2 caller migration.
+
+### Artifact acceptance in progress
+
+The existing JSKIT preparation command ran **once**, producing catalog
+`0.1.211` and 40 coordinated package versions. Do not repeat it when resuming:
+each execution bumps versions again. All eight release-coordination tests pass;
+the lock comparison found no unrelated third-party version changes.
+
+Packed review found one pre-existing dangling database-runtime export,
+`./shared/runtime`, whose implementation was deleted in August. It has no
+current local or canonical-app callers. The export was removed, catalog/docs
+rebuilt and all artifacts repacked. The final audit covers 40 packages, 2,161
+matching source files and 431 valid export targets. The generic `npm pack
+--workspaces` command initially included an unversioned internal test utility;
+the successful pack explicitly selected the 40 publishable JSKIT workspaces.
+
+Artifacts, disposable consumer copies and evidence live in
+`/tmp/jskit-v2-rollout-42tSXQ`. The temporary registry serves actual verified
+tarballs read-only on loopback; its current URL/PID is in `registry.json`.
+`mysql.json` describes the owned Oracle MySQL 8 fixture; `stop-mysql.mjs` verifies
+process ownership before shutdown. Both services are now stopped, with inactive
+files retained for provenance and review. Their registry locks must not be copied
+into canonical repositories.
+
+Focused Node 26 checks pass against the actual artifacts: public seed startup
+1; Vibe64 server 7, real Socket.IO handshake 1 and client commands/retry 50.
+Byte verification matches all installed JSKIT files in public (5 packages/356
+files) and Vibe64 (16 packages/1,412 files). Neither installs the JSON REST host.
+
+The accounts test now verifies the explicit test database before migration,
+prepares twice, restarts its server and checks persisted/isolated profiles. It
+passes on the original v1 graph and a fresh v2 database. The same v1 database
+was retained across the artifact upgrade: both original accounts still log in
+and return their saved profiles under v2, and neither preparation invocation
+adds migrations. The test is also wired into the existing disposable CI database
+job; its direct Knex test import is declared as a development dependency.
+
+Both seeds now pass their full `npm run verify` checks on Node 26, including
+lint, server/client tests and production builds. Their existing browser suites
+also pass against owned real servers: public 9/9 and accounts 4/4. The accounts
+before/after workload retains exactly the same SQL statement counts for
+registration (20), login (8), profile writes (49) and settings reads (18).
+Its ten measured write/read rounds retain the same final profile and migration
+history. Timing and memory samples ran alongside other acceptance work and do
+not establish a speed improvement or regression.
+
+Vibe64's broad server stage completed with 2,135 passes, two stale integration
+test assertions and one optional skip, out of 2,138 tests. The two assertions
+now reflect the actual 40 routes and explicit resume-integration action; both
+affected files pass (2 and 55 tests). The sole skip needs a configured systemd
+workflow owner and cgroup host facilities; it does not exercise the package
+migration. The complete server suite was not repeated for those isolated fixes.
+The subsequent full client run reports 1,119 passes, seven failed assertions
+and one suite-load failure (108 files, 1,126 tests). All eight affected files
+now pass 44 focused checks on Node 26.5.0. Seven fixtures were stale after the
+Files/Subsystems/Integrations changes; the dense ERD check passed alone with its
+existing timeout unchanged. An incidental first focused run used Node 24 and
+was explicitly repeated on the agreed Node 26 runtime. The production build,
+all 15 package-boundary checks and affected lint pass. Existing lint/chunk-size
+warnings are retained. Do not claim the broad commands exited successfully;
+this is staged acceptance after focused corrections.
+
+Vibe64's two existing browser smoke/recovery cases pass on Node 26. The first
+attempt exposed a missing assistant-capabilities entry in their strict Studio
+API fixture. Its current empty/unavailable catalog response restores that
+fixture without bypassing unknown requests. These two tests exercise the real
+built client with mocked Studio API responses; the accounts browser/database
+checks above use actual application responses. The persistence test closes and
+recreates the HTTP server within one test process; it is not a process-crash or
+host-reboot simulation. The separate v1-to-v2 upgrade rehearsal runs the different
+installed application graphs in separate Node invocations against retained data.
+
+The real Vibe64/Genesis fresh-project rehearsal found that the selected seeds
+lacked the current stack's required project-owned Resource estimates contract.
+Both seed Stacks now include the actual app output and workspace setup, with
+README notes explaining initial unmeasured development planning hints and the
+accounts shared-database exclusion. Actual candidate creation now passes for
+both: real Vibe64 project service and Genesis import, new-to-ready transition,
+exact source snapshots, preserved destination HEAD/origin/collaboration and
+rejected repeat application. Fresh install, package-graph checks, build, and
+health/home/bootstrap HTTP checks pass for each imported application. The newly
+created accounts app also passes its database persistence/restart/isolation test.
+Its owned database and both HTTP servers were cleaned up. Local candidate Git
+snapshots prove the prepared templates; official remote branches remain unchanged.
+
+Detailed identities, counts and logs are in the manifest's `currentRollout`
+entry. The original parked patch and accepted JSKIT migration evidence remain
+unchanged. Published-registry lock/install acceptance is still pending.
+
+
+### Implementation report before registry rollout
+
+The library's internal changes replace the external hooked-api dispatcher with
+an ordinary resource/plugin/hook runtime, currently 172 lines. JSON:API operations,
+SQL storage, schema compilation and transaction management remain in their own
+implementation modules. The small runtime connects them; it does not implement
+an ORM in 172 lines. Shared compiled metadata, explicit storage/relationship
+boundaries, permission-aware includes, typed IDs/temporal values and tested failure
+ownership make behavior more consistent without introducing another generic
+framework. Native-driver conformance, meaningful query budgets, executable guide
+examples and packed declaration checks provide continuing regression coverage.
+See the maintained [architecture](../../../../docs/architecture.md).
+
+The public surface remains resource-oriented. Its deliberate breaking changes
+are `JsonRestApi`/`api.resources` setup; plain `data` or explicit JSON:API
+`document` input; independent output `format` and write `returning`; and managed
+transaction ownership with machine-readable failure outcomes. Hooks still share
+mutable operation context for caches, extra information and allowed field changes.
+Caller visibility, nested inheritance and library-owned fields are explicit.
+Old options are rejected rather than translated through a compatibility layer.
+Optional version checks and improved schema inference are available where an
+application needs them. The mock S3 adapter is removed; SQL focus and reviewed
+schema-helper responsibilities remain. GUIDE 33 is the complete
+[API migration reference](../../../../docs/GUIDE/33-migrating-to-v2.md).
+
+The accepted JSKIT source migration moves its host and shared repositories onto
+that contract while retaining useful domain mappings, document methods and native
+queries inside managed owners. Response repair, old input builders and overlapping
+completion helpers are removed. HTTP/client error mapping preserves outcomes and
+prevents automatic replay of committed or uncertain writes. Its current 40-package
+release preparation gives that implementation a coordinated distributable graph.
+Vibe64 and the selected seeds introduce no additional direct library callers;
+their work is package rollout and actual workflow acceptance. The new seed resource
+contracts and repaired Vibe64 fixtures address concrete problems found during that
+acceptance, without changing Vibe64 production logic.
+
+Exact executed checks, source/package identities and remaining limitations are in
+the handoff below and adjacent manifest. The five separately owned canonical apps
+have a read-only impact inventory and concrete migration examples, including
+whole-owner retries and upload compensation. Their ports have not been performed.
+The local candidate results do not establish published-registry installation,
+updated official seed branches, hosted deployment or production-scale adoption.
+Those distinctions remain explicit while publication approval is pending.
+
+### Final candidate review, 2026-09-13
+
+Independent read-only reviews complete C1-03, C1-05, C1-06 and C2-03 for the
+selected candidate source and prepared artifacts. No tests, benchmarks, installs
+or services were repeated for these reviews. Publication and canonical portable
+locks remain separate open acceptance conditions.
+
+Fresh byte comparisons confirm all 2,161 JSKIT packed files, the 131 library
+runtime/declaration/manifest files and 46 accepted JSKIT migration source/test
+paths still match their evidence. The current changed-file snapshots also match:
+JSKIT 105, Vibe64 11, public seed 2, accounts seed 6. The earlier broad JSKIT
+snapshot differs in one later native repository test; its seven current cases
+have their own recorded MySQL/PostgreSQL acceptance. The current migration guide
+and its three literal examples match their executed hashes.
+
+The adversarial pass traces malformed inputs, nulls, sparse authorized reads,
+custom IDs, serializers, projected cursors, temporal values, empty/cyclic
+relationships, mutable hook contexts and concurrent transaction failures to
+assertions in the unchanged accepted library suites. Shared JSKIT owners reject
+raw write owners/savepoints, retain failed-participant state even if caught,
+preserve committed/uncertain outcomes and limit duplicate recovery to acknowledged
+rollback. Actual accounts persistence, v1-to-v2 upgrade, isolation and browser
+checks agree with those contracts. Guide checks include real whole-owner SQL
+retries and application file compensation; injected uncertain outcomes remain
+explicitly distinct from actual network faults. No new concrete regression was
+found. This is bounded review, not every possible hook policy, OS crash recovery
+or a repeated full native matrix.
+
+The simplicity pass follows ordinary runtime functions, schema compilation,
+normalization, weak transaction/context registries, cleanup and shared repository
+delegation. There is one private recursive plain-record normalizer, reusing the
+attribute normalizer and a per-call WeakMap. Shape conversion has a separate
+responsibility. Completed owners clear participants, finalizers, active work and
+query listeners; schema caches have explicit resource or bounded type ownership.
+No new compatibility framework or concrete stale-state defect was found.
+Existing small users/workspaces JSON utility duplication and the unchanged
+deferred authentication proxy remain; neither is a replacement hooked-api layer.
+The packed Vibe64 duplicate-package ownership limits below also remain explicit.
+
+Removed-module/helper searches cover 158 maintained library source/configuration
+files, 1,383 JSKIT files, 531 Vibe64 files and 38/44 public/accounts seed files.
+No selected runtime callers remain for the removed S3 adapter, input builder,
+query adapter, normalization helpers or dead database-runtime export. Retained
+internal hook names and rejection declarations are intentional. Reviewed actual
+packed declarations/exports establish the prepared publication surface; this
+does not claim a registry publication. The canonical accounts lock still has
+four textual hooked-api occurrences pending its portable graph update. Known
+old callers in the five canonical apps remain documented owner-managed ports.
+
+The [final cost comparison](../query-measurements.md#final-cost-comparison-against-a0-2026-09-13-c2-03)
+records all 88 current SQL-budget measurements, initialization evidence and exact
+package contents against A0. Sparse and related-author query counts decrease;
+flat and some nested counts increase. Accounts SQL remains 20/8/49/18. Its actual
+Fastify request injection uses real MySQL but excludes network transport. Small
+concurrent timing samples establish no speedup. A0 has no whole-library startup
+baseline. The exact f97 artifact is 21.75% smaller packed and 34.67% smaller
+unpacked, partly because development files are excluded; these are not claims
+about executable-code shrinkage or the later unpublished guide additions.
+
+Full review notes are retained under `/tmp/jskit-v2-rollout-42tSXQ` as
+`final-interaction-review.md`, `final-simplicity-review.md` and
+`final-cost-comparison.md`; their hashes and acceptance limits are recorded in
+the adjacent manifest. This section and the measurement ledger preserve the
+findings if temporary files are later removed. Final source/dependency checks
+must still reconcile the canonical graphs after approved publication.
+
+### Publication handoff
+
+The local candidate release is ready for approval. This is a readiness record,
+not a claim that the canonical app dependencies or public registry are migrated.
+
+| Area | Accepted result |
+| --- | --- |
+| Runtime policy | Library/JSKIT Node 24.6.0; apps Node 26.5.0, existing `26.x` engines preserved |
+| JSKIT release | Existing preparation ran once; 40 coordinated versions, catalog `0.1.211`, host `0.1.130`; 40 publish dry runs pass |
+| Library identity | Both JSKIT runtime importers retain immutable v2 Git revision `f97dc859321aee41915f3b0e256a861c382bc1b3`; no new library runtime change |
+| Package audit | 40 tarballs, 2,161 matching files, 431 valid export targets; no unrelated third-party version changes |
+| Accounts | Original v1 persistence, retained-data upgrade to v2, fresh v2 persistence and newly created v2 app persistence all pass; repeated preparation adds no migrations to the upgraded database |
+| Seeds | Both full verify commands pass; public browser 9, accounts browser 4; both real Vibe64/Genesis candidate creation workflows pass |
+| Vibe64 source | Broad server 2,135 passes, two stale assertions, one optional host skip; corrected files pass 57. Broad client 1,119 passes/seven failed tests/one load failure; all affected files then pass 44 on Node 26. Build, package boundaries and affected lint pass |
+| Vibe64 browser | Two smoke/recovery cases pass after updating the strict assistant-catalog fixture |
+| Vibe64 distribution | Existing pack/install smoke passes. The actual fresh installed server returns health, app HTML and built JavaScript successfully; owned server closed |
+| Cost comparison | Accounts SQL counts unchanged at registration/login/write/read 20/8/49/18; equal persisted data/migration history. Concurrent timing observations establish no speed change |
+| Cleanup | All owned browser/application servers, MySQL and loopback registry stopped; inactive artifacts/evidence retained |
+
+The packed Vibe64 application contains thirteen unique JSKIT packages in fifteen
+installations; all 1,187 installed files match their intended artifacts. Kernel
+and connectors-core have bundled/outer copies with identical versions and bytes.
+The published `vibe64@0.1.26` artifact already has this arrangement. Independent
+resolver/source review found no class-identity crossing in the actual paths used
+here, so no speculative packaging rewrite was made. The detailed topology review
+is `/tmp/jskit-v2-rollout-42tSXQ/packed-topology-review.md`.
+
+New canonical changes prepared in this goal are the coordinated JSKIT release
+metadata/generated references and dead-export removal; eleven Vibe64 test-fixture
+files; each seed's Resource estimates and README; and the reviewed accounts
+persistence test, direct test dependency and existing database CI integration.
+The accounts work already present at goal start was preserved. The library adds
+migration examples and the five canonical apps' read-only impact inventory.
+Vibe64 production source and Online remain unchanged. Exact changed-file hashes,
+starting revisions, complete versions, integrity values and proposed dependency
+changes are recorded in `currentRollout` in the adjacent manifest.
+
+No library or JSKIT whole-suite repeat is required for these unchanged executable
+artifacts. The earlier accepted library/JSKIT gates and current source-to-packed
+byte verification are part of this combined evidence. Broad Vibe64 failures are
+retained alongside their successful focused corrections; they are not relabelled
+as successful broad command exits. The single optional systemd/cgroup proof was
+not exercised and remains an explicit coverage limitation.
+
+Next, with publication approval, run **only** `npm run release:npm:publish`
+in JSKIT on Node 24 against the reviewed source. Do not run `npm run release` or
+repeat `release:npm:prepare`: those prepare and bump another graph. Publish the
+40 prepared JSKIT versions, retaining the accepted immutable library Git pin.
+This action does not publish json-rest-api or Vibe64 itself, push the seeds, or
+deploy Online. All forty intended versions were absent from public npm at the
+recorded availability check; recheck source hashes and availability before the
+actual irreversible step.
+
+After successful publication, use the prepared catalog update in canonical
+Vibe64/public/accounts, generating real registry dependencies and locks. The
+expected root JSKIT pin changes are 14, 5 and 10 respectively. Inspect the exact
+resolved graph, perform clean installs and focused real workflow checks, then
+finish the final source review/report. Never copy the temporary registry URLs
+into canonical locks or manufacture npm integrity/resolution data.
+
+Remaining fourteen master items are M-10/M-14, R-A10-10/R-B0-09,
+C1-01/C1-02/C1-04/C1-07 and C2-01/C2-02/C2-04/C2-05/C2-06/C2-07. Other canonical app ports remain the owner's
+separate work; their guide is ready. M-14 explicitly excludes remote publication
+from the earlier authorized scope, so publication is the next approval boundary.
+
 ## Accepted jskit-ai migration, 2026-09-13
 
 The current jskit-ai source migration is complete and verified. Its clean starting

@@ -1655,5 +1655,1889 @@
         "R-B1-05"
       ]
     }
+  },
+  "currentRollout": {
+    "started": "2026-09-13",
+    "status": "Completed scoped implementation, approved40-package npm publication, canonical local consumer migration, fresh registry verification and final report. Source commits local; Git pushes/Online deployment and other canonical app ports excluded.",
+    "jskitSourceBase": "ba6b49252baead0cce791b3ceb39d04c13feb48b",
+    "jskitPreparation": "npm run release:npm:prepare (executed exactly once; do not repeat to resume)",
+    "libraryRuntime": "f97dc859321aee41915f3b0e256a861c382bc1b3",
+    "runtimes": {
+      "libraryAndJskit": "24.6.0",
+      "applications": "26.5.0"
+    },
+    "temporaryRoot": "/tmp/jskit-v2-rollout-42tSXQ",
+    "canonicalApplications": [
+      "sas/compas-next",
+      "sas/racing",
+      "sas/dogandgroom",
+      "matt/beepollen",
+      "pass/whs2"
+    ],
+    "canonicalApplicationScope": "Read-only impact inventory and migration guidance; code/data ports remain owner-managed.",
+    "artifacts": [
+      {
+        "name": "@jskit-ai/agent-docs",
+        "version": "0.1.158",
+        "filename": "jskit-ai-agent-docs-0.1.158.tgz",
+        "shasum": "4bc5663380063119761c2d88c59cc8d9b5fa9afe",
+        "integrity": "sha512-LFDF6y8PF0c67DCzzbnivHlrGZl7Fy/G12V27JFAoKbqVDgAgLmsVyEn4MDETkxkVhH4O83HLDZoFtAP/0a2KQ==",
+        "size": 247829
+      },
+      {
+        "name": "@jskit-ai/assistant-core",
+        "version": "0.1.162",
+        "filename": "jskit-ai-assistant-core-0.1.162.tgz",
+        "shasum": "0bcc04b03d97d047f03c84ab05be13d89725aa06",
+        "integrity": "sha512-pwCQyG/PSZEFXc5S3QB47Av4x2KgjoOVlALpm0or7jO7BwnxBnQIrJm7W/+QbRKJyC9uWSznKTIlwGga3xOY5Q==",
+        "size": 39016
+      },
+      {
+        "name": "@jskit-ai/assistant-runtime",
+        "version": "0.1.157",
+        "filename": "jskit-ai-assistant-runtime-0.1.157.tgz",
+        "shasum": "1c49b7a4c41a26587fa57bf05ecbfc1dc44a52f7",
+        "integrity": "sha512-CELwft71cZv8ix7S+/buvuQNwiiZRyMGsa8CBwwP+2P24ggb2+UwzNsQVlN1uqzS0X5HKpZWX+NINxjgm+NgCA==",
+        "size": 43816
+      },
+      {
+        "name": "@jskit-ai/auth-core",
+        "version": "0.1.184",
+        "filename": "jskit-ai-auth-core-0.1.184.tgz",
+        "shasum": "2e2f0004f656dcb0a359ab4e1c8f4eaebd06a40d",
+        "integrity": "sha512-e2XmuZ46FbYv4lk7p7N8rRimJxDRv4XVotLvbmDFwEyFuaTzvsi7bOFV8uzA/2vfJBCwp/qPuGRjbeYi5wTchQ==",
+        "size": 30890
+      },
+      {
+        "name": "@jskit-ai/auth-provider-local-core",
+        "version": "0.1.87",
+        "filename": "jskit-ai-auth-provider-local-core-0.1.87.tgz",
+        "shasum": "9005d0b037b1049ad59823a2d4bbb707e6149c9c",
+        "integrity": "sha512-NUgnfXxmZ5xRp4A2GWRyvUijpZ5iQrLvFUCWxHqdojwESdN0/3Fs10Fc1ngLAXSTsOrE9/+jiR8sL/uD3cUH3w==",
+        "size": 18828
+      },
+      {
+        "name": "@jskit-ai/auth-provider-local-db-core",
+        "version": "0.1.78",
+        "filename": "jskit-ai-auth-provider-local-db-core-0.1.78.tgz",
+        "shasum": "5d213a838ee5de2579c5bb31aeb9ada0b71a35ba",
+        "integrity": "sha512-obJonTKuqNiVFIAqHlb1kQ1KIUOq2NdCLdxRynq7vy1taIK/KL4IrRSew0ZzNPPYeqKL3o0WG8ZPSg4p/MQbzg==",
+        "size": 6715
+      },
+      {
+        "name": "@jskit-ai/auth-provider-supabase-core",
+        "version": "0.1.183",
+        "filename": "jskit-ai-auth-provider-supabase-core-0.1.183.tgz",
+        "shasum": "4641c5c86fb30b5bcdbbad26db00672765c79468",
+        "integrity": "sha512-I4eVBghSH2nBUMR0udzjN3RXzFoF/ZPiLp07JV3Ulu3cwI5T1X+KoSJuSJi86EILgkyVplTyZ4VbZE3pw2AvQw==",
+        "size": 31091
+      },
+      {
+        "name": "@jskit-ai/auth-web",
+        "version": "0.1.186",
+        "filename": "jskit-ai-auth-web-0.1.186.tgz",
+        "shasum": "d5e7a1473c9725e083a5effc5125df3eb92d76e6",
+        "integrity": "sha512-43/Dj6wXmUz1bENzcgJgPuSdeYeErrwNLv1wsWeFtW+GCEHpPEmsCo+uTjw1nS0DhvYjMFDaOURM/hAEQOyLhw==",
+        "size": 49239
+      },
+      {
+        "name": "@jskit-ai/connector-google-calendar",
+        "version": "0.1.3",
+        "filename": "jskit-ai-connector-google-calendar-0.1.3.tgz",
+        "shasum": "9be226081373a4d509ed0f835b17b4fd724f4210",
+        "integrity": "sha512-mTvECNfi45xh9jYAVakS+R8WQTEAoeABrDaXCK63vRutbWyYPRY9rO/O1ECpFIxcuPUD+C/6PWuW8f78cusheQ==",
+        "size": 13307
+      },
+      {
+        "name": "@jskit-ai/connectors-catalog",
+        "version": "0.1.3",
+        "filename": "jskit-ai-connectors-catalog-0.1.3.tgz",
+        "shasum": "f1a520b5f6c23133649ff7be97e8b66059a5e82c",
+        "integrity": "sha512-cpXcoCJ+LAbQT3X0X7wJvikf5qOcjV+w04ErDjNiaF/GBWcpYPcC2RJrtL2qplGzOeXfIw5b42KeyL9WVCsJXg==",
+        "size": 1165856
+      },
+      {
+        "name": "@jskit-ai/connectors-core",
+        "version": "0.1.3",
+        "filename": "jskit-ai-connectors-core-0.1.3.tgz",
+        "shasum": "68950b05464ff888c23c0af4e25a9017a5918196",
+        "integrity": "sha512-WeuqvE4Pnhxfnd+6oLc1tMYkrnjdcLZ8dd3HRycbvODzCblAXwT9rlFPRkwMNihxXViOXXuqAxY7nSAfQuYvpQ==",
+        "size": 56397
+      },
+      {
+        "name": "@jskit-ai/connectors-web",
+        "version": "0.1.3",
+        "filename": "jskit-ai-connectors-web-0.1.3.tgz",
+        "shasum": "4e0fad6760b3c72fe2c202523dd102ab8a572db4",
+        "integrity": "sha512-81Mz1GmH/TKXdP7nGiQ5A3/d/2/FCpe1PbSGVAbaItvdQhv4lP3fHsqvArvo6pMTbbxN1pYK4s6SsYOxWcaSVg==",
+        "size": 14782
+      },
+      {
+        "name": "@jskit-ai/console-core",
+        "version": "0.1.149",
+        "filename": "jskit-ai-console-core-0.1.149.tgz",
+        "shasum": "859de5f294069f9b799b9e77b7fb46c17ea06c12",
+        "integrity": "sha512-K1kKZYqMZc2G4fiqcmy8t8PnXUuLQRRQSwWPzqoASt0GlKx8yYBMuNuuzfyjsBfKWHymkNACuO9I8RJ/Sepdsw==",
+        "size": 9278
+      },
+      {
+        "name": "@jskit-ai/console-web",
+        "version": "0.1.154",
+        "filename": "jskit-ai-console-web-0.1.154.tgz",
+        "shasum": "67c0c67d22488d79e64426b6fb5a000fa6a270c1",
+        "integrity": "sha512-EHbTN4hS9oXTsdZQJ1JlRmX6PuHW/wUtF0R/CrWXe/mk+F5pUPGqzWXROKpxZY+Mvb5JbsWv5g0yZhsjEqwLZA==",
+        "size": 3436
+      },
+      {
+        "name": "@jskit-ai/crud-core",
+        "version": "0.1.197",
+        "filename": "jskit-ai-crud-core-0.1.197.tgz",
+        "shasum": "63c287d366396798b6a7a7a46fee8f4171881014",
+        "integrity": "sha512-/wWbQ2ppZrUDh7etiBH0zQ8NVLqUS9YR+bPlrScnG8BFDP2l87q0YR1uf2jie6IMFPns9gE41zqc5dmviLumqQ==",
+        "size": 75681
+      },
+      {
+        "name": "@jskit-ai/database-runtime",
+        "version": "0.1.186",
+        "filename": "jskit-ai-database-runtime-0.1.186.tgz",
+        "shasum": "1226a9f5fa07fbbacdd6600e3d9bf61a573ae36a",
+        "integrity": "sha512-1QFrnXzdtLodeTYJEa1Swffrq4y5ErE0tYVjdx1UAseJQFJRWH0qiN91wUJCD0EUZyTfH9jpQOaYs1HyAVesrw==",
+        "size": 17905
+      },
+      {
+        "name": "@jskit-ai/database-runtime-mysql",
+        "version": "0.1.184",
+        "filename": "jskit-ai-database-runtime-mysql-0.1.184.tgz",
+        "shasum": "ec6213bf0f48759140b490813477e0464d2c60ef",
+        "integrity": "sha512-TeAwhsTzGqd0vUIfn5Je+uaYWKjBXNUIZfpgCdQCobEX6TJnPl7GV7UmkiH1E9pJe1PhvcL08LeD/sB+hxW3fA==",
+        "size": 10975
+      },
+      {
+        "name": "@jskit-ai/database-runtime-postgres",
+        "version": "0.1.183",
+        "filename": "jskit-ai-database-runtime-postgres-0.1.183.tgz",
+        "shasum": "5f0c28e30257b6495f5c18ad675689faa929f14b",
+        "integrity": "sha512-GkRPETqRuO3dK0CzlWwrc7mD9S9ojSd/dzsqnqRuKxuMVLh26OOVJG9AmUG8l8lT/4J9pAKofbYcXXjpc+8/mw==",
+        "size": 4254
+      },
+      {
+        "name": "@jskit-ai/http-runtime",
+        "version": "0.1.184",
+        "filename": "jskit-ai-http-runtime-0.1.184.tgz",
+        "shasum": "cae21b66b0cedf40376999d084a98a30d2dc5d90",
+        "integrity": "sha512-m1Iw1cBE9+bkVkcWw8b3Q6VGl3UuNnsq8vcca2lAMMaNGqVdYuAOngwczNbncpoJUShxYgDN0lMYeXzeNcQT/w==",
+        "size": 40443
+      },
+      {
+        "name": "@jskit-ai/http-web",
+        "version": "0.1.31",
+        "filename": "jskit-ai-http-web-0.1.31.tgz",
+        "shasum": "0dc7376b9986aec06face69b44ae11be545ae831",
+        "integrity": "sha512-jSN8aikf/nTzRPmujvoSQaBCZI37w5Yu3ONndhbfCTKgdVJ6pPOniBuJMDFBsyzcVRuaMqNJjGMkBO5aU23e2Q==",
+        "size": 91393
+      },
+      {
+        "name": "@jskit-ai/json-rest-api-core",
+        "version": "0.1.130",
+        "filename": "jskit-ai-json-rest-api-core-0.1.130.tgz",
+        "shasum": "5542defc4f9e5d4d8d4965979fb10bf97341b1ce",
+        "integrity": "sha512-klkA9ICmh+zB+0FhiAHxKAY13NXg45/4A9zuOFlxVagVpDybivQB1ra9ZazXOe/nv4OcLYHFW+gpaS8DzFrxwA==",
+        "size": 10051
+      },
+      {
+        "name": "@jskit-ai/kernel",
+        "version": "0.1.186",
+        "filename": "jskit-ai-kernel-0.1.186.tgz",
+        "shasum": "94f0b9eb3691f9fa4e6b41dbb47d20ac0232a680",
+        "integrity": "sha512-BA0i7Rauzl/B2d6VjT85xU6P9L8kJeghkUdUHq/wN8pSkhpOACezUtJ0ZgOeTiekwcdE5wsPlbtKmqeixVg6aA==",
+        "size": 144948
+      },
+      {
+        "name": "@jskit-ai/mobile-capacitor",
+        "version": "0.1.121",
+        "filename": "jskit-ai-mobile-capacitor-0.1.121.tgz",
+        "shasum": "a82deca0fa12f1a6d8117ca4eb1d7a499f203c07",
+        "integrity": "sha512-MqUaf379CTFJUVXnj3orfDkbdb3zQCrh/AR4LMf15WI2BuTSKf+XcheIGm0q7kBGzy06PT7aXq2K5TWl8vObQg==",
+        "size": 8421
+      },
+      {
+        "name": "@jskit-ai/payments-core",
+        "version": "0.1.3",
+        "filename": "jskit-ai-payments-core-0.1.3.tgz",
+        "shasum": "71f9737442c8c00e7eb6ff75c123c294e0edb94b",
+        "integrity": "sha512-WodXLZGtuxcfzMkttbtyZN3sgHb+4rdxofn0ZFaaw0DQ59Uvo4xSiY3vttKADvb5YPOM7B9+4tqABqltmlJYAQ==",
+        "size": 39421
+      },
+      {
+        "name": "@jskit-ai/payments-web",
+        "version": "0.1.3",
+        "filename": "jskit-ai-payments-web-0.1.3.tgz",
+        "shasum": "13ac310aa83c60f355ec5517784aab6b7b4b53bb",
+        "integrity": "sha512-gtaeSjyMCbAyTKC324IREz8sOt+ndEcwrmRHi0df/PMvp7gBkBsuMi+9sBMazh/Nce0SDzZl+gy6rxV5kzHS+Q==",
+        "size": 10214
+      },
+      {
+        "name": "@jskit-ai/realtime",
+        "version": "0.1.183",
+        "filename": "jskit-ai-realtime-0.1.183.tgz",
+        "shasum": "c786111d46bb19e502cdf1d412c418fbb4f27370",
+        "integrity": "sha512-0kOrVBIlpNW2fZObC5GeIRfAEyWHXYBhw7TM+ivU/0tFb+mZZUsy3y77I+AtZeF4LAmTBdQGXbLFJVLk5CDQ5Q==",
+        "size": 17271
+      },
+      {
+        "name": "@jskit-ai/resource-core",
+        "version": "0.1.128",
+        "filename": "jskit-ai-resource-core-0.1.128.tgz",
+        "shasum": "667df4c3952f58128e634b01ddc1ae4277609d74",
+        "integrity": "sha512-/wqq3mNZPVHoY1u9fI5a99CHoBWaxSK6DMnHH+O0ZGEq0oYodsvNVS74lV+rx9PBrgWAEMN6lIFSzsTBdAEMEg==",
+        "size": 2298
+      },
+      {
+        "name": "@jskit-ai/resource-crud-core",
+        "version": "0.1.128",
+        "filename": "jskit-ai-resource-crud-core-0.1.128.tgz",
+        "shasum": "75dff46a242bbcf9a5e7886cf14f16e82bdfcd24",
+        "integrity": "sha512-PfGqavO8beuDOOjBt5gfsQTbW0T8NMQo+oJiDzqyWZbnm+pgPDsu5xXNFuqpZPJIAwOOD/V30eLDa9DKD2yFtA==",
+        "size": 17019
+      },
+      {
+        "name": "@jskit-ai/rewarded-core",
+        "version": "0.1.122",
+        "filename": "jskit-ai-rewarded-core-0.1.122.tgz",
+        "shasum": "55696b592855edb1bc8e3a5541da9f18e94f3816",
+        "integrity": "sha512-INI0oyYYCKPqeTyDofXTewAMkAxy0fvDEkR1ghpuIhnc5yL8MbpgEpX00p3lZDQOwI9J3YLoxIbLTtbrRD1M9w==",
+        "size": 20538
+      },
+      {
+        "name": "@jskit-ai/rewarded-web",
+        "version": "0.1.122",
+        "filename": "jskit-ai-rewarded-web-0.1.122.tgz",
+        "shasum": "2f569a4a1f1513fbf8a0b87c7291325186dbb652",
+        "integrity": "sha512-sV4r4nac5/RZtVnm1xRot8Dnvo6pnMxbdZyJjcag+xnLb3B4yxloWlEVtOlI/eqADZ0DPiFRfl/+QWWXZXv4lg==",
+        "size": 9942
+      },
+      {
+        "name": "@jskit-ai/shell-web",
+        "version": "0.1.190",
+        "filename": "jskit-ai-shell-web-0.1.190.tgz",
+        "shasum": "5b3e1fe349fed3e15227fd6f7a02edd071e5e422",
+        "integrity": "sha512-Vxz2oSlBjD068X7e+uk5PrXDeQM7X1D/COddEXd9PRuVJyttCGSa3Mdn4LwKYhEau9ry+T9PB+nenu0XAQeBvw==",
+        "size": 75930
+      },
+      {
+        "name": "@jskit-ai/storage-runtime",
+        "version": "0.1.183",
+        "filename": "jskit-ai-storage-runtime-0.1.183.tgz",
+        "shasum": "768818611fff901a1ff217b275fb6b38c6b76a16",
+        "integrity": "sha512-x15F+GaRCTdpROkBoRMKOT15WS2/bIlzaRwsvL6l7aFgZ21WUfVGX6Y4V6FnglSshqsLcRFYqvJcpqKzZ6IUqA==",
+        "size": 1631
+      },
+      {
+        "name": "@jskit-ai/uploads-image-web",
+        "version": "0.1.161",
+        "filename": "jskit-ai-uploads-image-web-0.1.161.tgz",
+        "shasum": "75df2b3c9cdad0ef8e5368da23f9000d62c37ce8",
+        "integrity": "sha512-ssxUxqowDD74PNpT+soiKcYj0IWOx0ab59Awa9i0ln/4DhFoNmf4Lu+8w8crOWymhGF3AvSNMFqL+sdYRZ3U4w==",
+        "size": 8012
+      },
+      {
+        "name": "@jskit-ai/uploads-runtime",
+        "version": "0.1.161",
+        "filename": "jskit-ai-uploads-runtime-0.1.161.tgz",
+        "shasum": "477842f94a9f53795ef388c83fc160b39df30653",
+        "integrity": "sha512-hJbJEtqlZCGvDGZ5+FYDt2kcHx+QRvN48kaHlK+dogR5wTS6TDUqHnkKM+iIJoibWZ0IQqX5nj+HED7zlGoxBg==",
+        "size": 6116
+      },
+      {
+        "name": "@jskit-ai/users-core",
+        "version": "0.1.199",
+        "filename": "jskit-ai-users-core-0.1.199.tgz",
+        "shasum": "f77ec1b8b96253b611efeb2650f63c1fc05e2943",
+        "integrity": "sha512-+9z2S1Jc6V1cAn+FwbjyWyLz/kbWPPFyT9UWgWEgzGpHBAKEzfze9Tdryx6lH4MGmrdzlOkpEo0sZdc9W/+ZmA==",
+        "size": 35636
+      },
+      {
+        "name": "@jskit-ai/users-web",
+        "version": "0.1.204",
+        "filename": "jskit-ai-users-web-0.1.204.tgz",
+        "shasum": "489efa48bacb20526444f32810cce0f91e5f2e96",
+        "integrity": "sha512-c1PqboniWvGYIRzK95HnRYIqEKgRZAKco1CC3IFYNlyQDE2pL5yQQHDYc6EH/QC8OqFPqFzKqA0v/Z4mUyg7lA==",
+        "size": 18738
+      },
+      {
+        "name": "@jskit-ai/workspaces-core",
+        "version": "0.1.164",
+        "filename": "jskit-ai-workspaces-core-0.1.164.tgz",
+        "shasum": "e7d957434a5ff4be709cd707c413045de73270d4",
+        "integrity": "sha512-lxkfR2lmSXMCwiozrRZSd4fkkuDe8BlXfvxcIOy6dZoTULAnaQcNzMRatkYrrmV9mLZ1cSEoahGphevtgPC+3Q==",
+        "size": 73889
+      },
+      {
+        "name": "@jskit-ai/workspaces-web",
+        "version": "0.1.165",
+        "filename": "jskit-ai-workspaces-web-0.1.165.tgz",
+        "shasum": "103132199cb2209aa5f59b7a594c51a6132b3b74",
+        "integrity": "sha512-JoEh/xaJerUdPBGoI3XnWf5K73z6kyKAgUftKh9CX4TsOkbvV6t3Vcw8i6qGwXRcshkYx8MJTbQslChZErQmKg==",
+        "size": 47988
+      },
+      {
+        "name": "@jskit-ai/config-eslint",
+        "version": "0.1.183",
+        "filename": "jskit-ai-config-eslint-0.1.183.tgz",
+        "shasum": "8aabd2aaff03152fa39d1670e81a2ea87e959a37",
+        "integrity": "sha512-6FSFeSB2OAsfcBc5sTQtonP0xGMxJooqtcv3sugwVhYk5UMLZkZC7LwQUo2ad7bRxCVu34Iv1sN63D8tahgRIA==",
+        "size": 1681
+      },
+      {
+        "name": "@jskit-ai/jskit-catalog",
+        "version": "0.1.211",
+        "filename": "jskit-ai-jskit-catalog-0.1.211.tgz",
+        "shasum": "d8673eb1166b3af0c8593f1f54eea7f3b0302704",
+        "integrity": "sha512-24faG2SFr5jTrv7QrleCMwxPd0fKtoajB4sQk15ZFYq+2OcJs8bZsUKklI+iogST2mCno1aw1m4wbs/wZ00kqA==",
+        "size": 29453
+      }
+    ],
+    "verification": {
+      "releaseCoordination": {
+        "tests": 8,
+        "passed": 8,
+        "failed": 0,
+        "log": "/tmp/jskit-v2-release-check-20260913.log"
+      },
+      "packedExports": {
+        "packages": 40,
+        "regularFiles": 2161,
+        "validExportTargets": 431,
+        "issues": 0,
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/packed-artifact-audit.json"
+      },
+      "publicSeedSmoke": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/public-artifact-smoke.log"
+      },
+      "vibe64ServerSmoke": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-artifact-smoke.log"
+      },
+      "vibe64SocketHandshake": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-artifact-socket.log"
+      },
+      "vibe64ClientCommands": {
+        "passed": 50,
+        "failed": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-artifact-client.log"
+      },
+      "accountsV1Persistence": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/accounts-v1-persistence.log"
+      },
+      "accountsV2FreshPersistence": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/accounts-v2-fresh-persistence.log"
+      },
+      "accountsUpgrade": {
+        "from": "1.0.28",
+        "to": "2.0.0",
+        "accounts": 2,
+        "oldMigrations": 4,
+        "newMigrations": [],
+        "repeatMigrations": [],
+        "result": "passed"
+      },
+      "newLiteralGuideExamples": {
+        "groupsPassed": 8,
+        "failed": 0,
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/guide/evidence.json",
+        "realDatabase": "MySQL 8.0.46",
+        "syntheticCases": "Uncertain owner outcomes and injected cleanup failure; see exact evidence."
+      },
+      "documentationBuild": {
+        "result": "passed",
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/migration-guide-docs.log"
+      },
+      "consumerFull": {
+        "public": {
+          "result": "passed",
+          "serverTests": 1,
+          "clientTests": 1,
+          "lint": "passed",
+          "build": "passed",
+          "log": "/tmp/jskit-v2-rollout-42tSXQ/seed-jskit-verify.log"
+        },
+        "accounts": {
+          "result": "passed",
+          "serverTests": 1,
+          "clientTests": 1,
+          "lint": "passed",
+          "build": "passed",
+          "log": "/tmp/jskit-v2-rollout-42tSXQ/seed-jskit-accounts-verify.log"
+        },
+        "vibe64": {
+          "result": "Staged source checks, browser checks, packed installation and actual packed server startup accepted; optional systemd host proof remains explicitly skipped.",
+          "initialLint": "One pre-existing imprecise numeric test literal corrected; affected lint and15tests passed. Subsequent full lint passed with71existing warnings.",
+          "server": {
+            "total": 2138,
+            "passed": 2135,
+            "failed": 2,
+            "skipped": 1,
+            "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-verify-final.log",
+            "corrections": "Two stale integration test assertions corrected: route count24to40 with new unique route assertions; resume setup action added to expected list. No production change.",
+            "focusedAfterCorrection": {
+              "routes": {
+                "passed": 2,
+                "failed": 0,
+                "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-routes-focused.log"
+              },
+              "sessions": {
+                "passed": 55,
+                "failed": 0,
+                "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-sessions-focused.log"
+              }
+            },
+            "skip": "Optional systemd/cgroup workflow memory proof requires VIBE64_WORKFLOW_TEST_OWNER and a configured host. Not related to package migration; not executed."
+          },
+          "client": {
+            "files": 108,
+            "passedFiles": 100,
+            "failedFiles": 8,
+            "tests": 1126,
+            "passed": 1119,
+            "failed": 7,
+            "suiteLoadFailures": 1,
+            "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-full.log",
+            "status": "All 8 affected files passed 44 focused checks on Node 26.5.0 after test-only corrections; no repeated full client run.",
+            "focusedAfterCorrection": {
+              "node": "v26.5.0",
+              "executable": "/home/merc/.nvm/versions/node/v26.5.0/bin/node",
+              "runtimeEvidence": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-node26-runtime.json",
+              "execution": "Each file run separately and sequentially using PATH=/home/merc/.nvm/versions/node/v26.5.0/bin:$PATH node node_modules/vitest/vitest.mjs run <one explicit file>",
+              "files": [
+                {
+                  "file": "tests/client/databaseErdLayout.vitest.js",
+                  "passed": 4,
+                  "sha256": "869f22c981fa2910e683844effae1421976e415684d3452a24453bd6b53d12ed",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-databaseErdLayout-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/integrationCallbackDefaults.vitest.js",
+                  "passed": 3,
+                  "sha256": "a26ed618a77f6a86f6be2de6d8fca0ccc2969151d6a26972429f5b4624391e0b",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-integrationCallbackDefaults-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/vibe64RecoveryChatAttention.vitest.js",
+                  "passed": 1,
+                  "sha256": "f0750d35219a781a4cfa43fe394b5005006a64fa4d45419a4004a2901731cd56",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-vibe64RecoveryChatAttention-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/databaseErdFullscreen.vitest.js",
+                  "passed": 2,
+                  "sha256": "fd6486b6fa333a3b0765b1546b1b9ee9daa8a47e9f0b130f00811f9318272862",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-databaseErdFullscreen-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/useVibe64AutopilotViewRouteHydration.vitest.js",
+                  "passed": 17,
+                  "sha256": "425f89379ef9ee8cca5fd5ec9abb70e74c442c6e2d83b50aa585d3e98fc853fa",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-useVibe64AutopilotViewRouteHydration-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/useVibe64SourceEditorFileSync.vitest.js",
+                  "passed": 2,
+                  "sha256": "86106a41859b46b85ff7def986678622e4d630e1777d4d2d467d9e9af04c3858",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-useVibe64SourceEditorFileSync-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/vibe64AutopilotViewCommandSpy.vitest.js",
+                  "passed": 12,
+                  "sha256": "090acfb96e4a171178c1fe664efe02edfdf27c628814b961d232be8c07f198d8",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-vibe64AutopilotViewCommandSpy-node26-targeted.log"
+                },
+                {
+                  "file": "tests/client/vibe64DashboardPlacements.vitest.js",
+                  "passed": 3,
+                  "sha256": "967a6539b05a9a7638f0a97c452ad5a979689a0edebd4834b91406c178eaa915",
+                  "sourceCopyIdentical": true,
+                  "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-vibe64DashboardPlacements-node26-targeted.log"
+                }
+              ],
+              "totalPassed": 44,
+              "incidentalNode24Evidence": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-targeted-evidence-node24-incidental.json"
+            },
+            "incidentalRun": "The first 44 targeted checks accidentally used Node 24; they were repeated explicitly on Node 26.5.0. Node 24 evidence is retained separately and excluded from app acceptance."
+          },
+          "build": {
+            "result": "passed",
+            "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-build.log",
+            "warning": "Existing chunks exceed700kB"
+          },
+          "packageBoundaries": {
+            "result": "passed",
+            "workspacePackages": 15,
+            "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-package-boundaries.log"
+          },
+          "affectedLint": {
+            "result": "passed",
+            "logs": [
+              "/tmp/jskit-v2-rollout-42tSXQ/vibe64-client-fixture-lint.log",
+              "/tmp/jskit-v2-rollout-42tSXQ/vibe64-final-test-lint.log"
+            ]
+          }
+        }
+      },
+      "installedArtifacts": {
+        "public": {
+          "packages": 5,
+          "files": 356,
+          "evidence": "/tmp/jskit-v2-rollout-42tSXQ/installed-seed-jskit.json"
+        },
+        "vibe64": {
+          "packages": 16,
+          "files": 1412,
+          "evidence": "/tmp/jskit-v2-rollout-42tSXQ/installed-vibe64.json"
+        },
+        "accounts": {
+          "packages": 21,
+          "files": 853,
+          "evidence": "/tmp/jskit-v2-rollout-42tSXQ/installed-seed-jskit-accounts.json",
+          "libraryRuntimeDeclarationFiles": 130,
+          "libraryPackageFiles": 1,
+          "libraryEvidence": "/tmp/jskit-v2-rollout-42tSXQ/library-installed-seed-jskit-accounts.json"
+        }
+      },
+      "publishDryRun": {
+        "result": "passed",
+        "packages": 40,
+        "published": false,
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/publish-dry-run.log"
+      },
+      "seedBrowsers": {
+        "public": {
+          "passed": 9,
+          "failed": 0,
+          "skipped": 0,
+          "evidence": "/tmp/jskit-v2-rollout-42tSXQ/browser-public/result.json"
+        },
+        "accounts": {
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "evidence": "/tmp/jskit-v2-rollout-42tSXQ/browser-accounts/result.json"
+        },
+        "node": "26.5.0",
+        "workers": 1,
+        "responses": "Actual owned servers; no replaced responses",
+        "cleanup": "Owned HTTP servers and browser runners exited; shared MySQL/registry remain for current acceptance"
+      },
+      "accountsPerformance": {
+        "result": "passed",
+        "node": "26.5.0",
+        "database": "MySQL8.0.46",
+        "baselineLibrary": "1.0.28",
+        "candidateLibrary": "2.0.0",
+        "warmups": 2,
+        "measuredRounds": 10,
+        "equalStatementCounts": {
+          "register": 20,
+          "login": 8,
+          "patch": 49,
+          "settingsGet": 18
+        },
+        "equalFinalProfiles": true,
+        "equalMigrationNames": true,
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/performance/comparison.json",
+        "limitation": "Concurrent local acceptance work; timing/memory samples are observations, not evidence of a speed change. Both owned schemas dropped and absence verified."
+      },
+      "vibe64Browser": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "node": "26.5.0",
+        "workers": 1,
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/browser-vibe64/result.json",
+        "scope": "Actual built application and JSKIT client; existing strict Studio API mocks.",
+        "firstAttempt": "Both cases failed for a stale missing assistant-capabilities fixture. Added the current empty/unavailable catalog response, with no production changes.",
+        "initialEvidence": "/tmp/jskit-v2-rollout-42tSXQ/browser-vibe64-before-capabilities-fixture/result.json"
+      },
+      "candidateSeedCreation": {
+        "result": "passed",
+        "node": "26.5.0",
+        "genesisStack": "1.1.2",
+        "publicSnapshot": "9a4c0cd8e2ad1818acb7ed292dc284f0c8f3d00b",
+        "accountsSnapshot": "68b5d4bdd247fd424226e1e2ec3e15a0ad1f286a",
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/candidate-creation/results.json",
+        "report": "/tmp/jskit-v2-rollout-42tSXQ/candidate-creation/README.md",
+        "sourceFix": "Both seed genesis/stack.md files now declare project-owned Resource estimates. README notes identify initial unmeasured planning hints; accounts excludes the shared database footprint.",
+        "workflow": "Actual Vibe64 managed-project initialization/service plus real Genesis supported templateSources; new to ready; exact sources; preserved destination HEAD/origin/collaboration; rejected reapplication.",
+        "freshInstallBuildGraph": "Both passed; installed sources and locks unchanged.",
+        "http": {
+          "public": [
+            "health200",
+            "home200",
+            "bootstrap200"
+          ],
+          "accounts": [
+            "health200",
+            "home200",
+            "bootstrap200"
+          ]
+        },
+        "accountsDatabase": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "scope": "Actual shipped preparation, restart, persisted profiles and two-user isolation.",
+          "cleanup": "Owned creation schema created and dropped; absence verified."
+        },
+        "scopeLimitation": "Local candidate Git templates and actual packed registry fixture; official remote branches remain unmodified."
+      },
+      "publicationAvailability": {
+        "checkedAt": "2026-09-13T09:17:36.031373+00:00",
+        "packages": 40,
+        "alreadyPublished": 0,
+        "evidence": "/tmp/jskit-v2-rollout-42tSXQ/publication-availability.json"
+      },
+      "vibe64PackedInstall": {
+        "result": "passed",
+        "node": "26.5.0",
+        "package": "vibe64@0.1.26 (local candidate; no publication or release version bump)",
+        "log": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-pack-install.log",
+        "startupEvidence": "/tmp/jskit-v2-rollout-42tSXQ/packed-vibe64/result.json",
+        "artifactEvidence": "/tmp/jskit-v2-rollout-42tSXQ/vibe64-packed-installed-artifacts.json",
+        "uniqueJskitPackages": 13,
+        "jskitInstallations": 15,
+        "filesCompared": 1187,
+        "duplicateCopies": [
+          "@jskit-ai/kernel",
+          "@jskit-ai/connectors-core"
+        ],
+        "topology": "Same-version, identical-byte bundled and outer copies; arrangement already present in published Vibe64. Actual reviewed runtime paths keep identity-sensitive class ownership within one copy. Not a general guarantee for arbitrary cross-copy values.",
+        "topologyReview": "/tmp/jskit-v2-rollout-42tSXQ/packed-topology-review.md",
+        "initialAuditCorrection": "The standalone-app audit rejects all nested JSKIT packages; the packed app legitimately bundles transitive packages. The packed audit verifies every copy and records duplication rather than pretending it is deduplicated."
+      }
+    },
+    "pending": [],
+    "master": {
+      "complete": 250,
+      "total": 250,
+      "open": 0
+    },
+    "behaviorAcceptanceClosures": [
+      "M-05",
+      "M-11",
+      "R-A4-04",
+      "R-A4-08",
+      "R-A4-12",
+      "R-A4-13",
+      "R-A4-16",
+      "R-A4-18",
+      "R-A5-06",
+      "R-A6-16",
+      "R-A7-07",
+      "R-A8-04",
+      "R-A8-12",
+      "R-A10-08",
+      "R-A10-09",
+      "R-B0-11",
+      "R-B1-02",
+      "R-B1-04",
+      "R-B2-01",
+      "R-B2-07",
+      "R-B2-10",
+      "R-B4-02",
+      "R-B4-07"
+    ],
+    "services": {
+      "result": "Owned registry, MySQL and application/browser servers stopped; inactive fixtures retained for evidence/review.",
+      "cleanupEvidence": "/tmp/jskit-v2-rollout-42tSXQ/final-service-cleanup.json",
+      "restartNote": "Do not rerun start-mysql.mjs against retained data: it initializes a new fixture. If needed, restart the owned binary using mysql.json args and the recorded LD_LIBRARY_PATH, verify datadir, and record the new PID/start ticks. Never rerun release:npm:prepare."
+    },
+    "proposedConsumerDependencyChanges": [
+      {
+        "repository": "vibe64",
+        "node": "26.x",
+        "sourceHead": "c14eb989d4e54785fa55f5c863830257f932d977",
+        "rootDependencyChanges": [
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/connectors-core",
+            "from": "0.1.1",
+            "to": "0.1.3"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/connectors-web",
+            "from": "0.1.1",
+            "to": "0.1.3"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/connector-google-calendar",
+            "from": "0.1.1",
+            "to": "0.1.3"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/http-runtime",
+            "from": "0.1.182",
+            "to": "0.1.184"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/http-web",
+            "from": "0.1.29",
+            "to": "0.1.31"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/kernel",
+            "from": "0.1.184",
+            "to": "0.1.186"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/realtime",
+            "from": "0.1.181",
+            "to": "0.1.183"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/shell-web",
+            "from": "0.1.188",
+            "to": "0.1.190"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/uploads-runtime",
+            "from": "0.1.159",
+            "to": "0.1.161"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/connectors-catalog",
+            "from": "0.1.1",
+            "to": "0.1.3"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/payments-core",
+            "from": "0.1.1",
+            "to": "0.1.3"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/agent-docs",
+            "from": "0.1.156",
+            "to": "0.1.158"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/config-eslint",
+            "from": "0.1.181",
+            "to": "0.1.183"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/jskit-catalog",
+            "from": "0.1.209",
+            "to": "0.1.211"
+          }
+        ]
+      },
+      {
+        "repository": "seed-jskit",
+        "node": "26.x",
+        "sourceHead": "02cf10cef15a2a44b73adf52e5cd60e53b7bf9bf",
+        "rootDependencyChanges": [
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/kernel",
+            "from": "0.1.181",
+            "to": "0.1.186"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/http-runtime",
+            "from": "0.1.179",
+            "to": "0.1.184"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/shell-web",
+            "from": "0.1.185",
+            "to": "0.1.190"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/config-eslint",
+            "from": "0.1.178",
+            "to": "0.1.183"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/jskit-catalog",
+            "from": "0.1.206",
+            "to": "0.1.211"
+          }
+        ]
+      },
+      {
+        "repository": "seed-jskit-accounts",
+        "node": "26.x",
+        "sourceHead": "91dad8e418ada6594001b8282c2b87c41e8fc3e5",
+        "rootDependencyChanges": [
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/auth-provider-local-core",
+            "from": "0.1.82",
+            "to": "0.1.87"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/auth-provider-local-db-core",
+            "from": "0.1.73",
+            "to": "0.1.78"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/auth-web",
+            "from": "0.1.181",
+            "to": "0.1.186"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/database-runtime-mysql",
+            "from": "0.1.179",
+            "to": "0.1.184"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/http-runtime",
+            "from": "0.1.179",
+            "to": "0.1.184"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/kernel",
+            "from": "0.1.181",
+            "to": "0.1.186"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/shell-web",
+            "from": "0.1.185",
+            "to": "0.1.190"
+          },
+          {
+            "section": "dependencies",
+            "package": "@jskit-ai/users-web",
+            "from": "0.1.199",
+            "to": "0.1.204"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/config-eslint",
+            "from": "0.1.178",
+            "to": "0.1.183"
+          },
+          {
+            "section": "devDependencies",
+            "package": "@jskit-ai/jskit-catalog",
+            "from": "0.1.206",
+            "to": "0.1.211"
+          }
+        ]
+      }
+    ],
+    "sourceSnapshot": {
+      "recordedAt": "2026-09-13T09:29:09.851552+00:00",
+      "repositories": {
+        "jskit-ai": {
+          "head": "ba6b49252baead0cce791b3ceb39d04c13feb48b",
+          "changedFiles": {
+            "package-lock.json": "4b569e05fd6366c699e6e61c83f4be6cb862493e10c0f545c6345ec08f5c2a22",
+            "package.json": "dd2317e887741c59cd53ec7291b4433cbbaf745dba25c5c285538399d7b8cedf",
+            "packages/agent-docs/package.json": "49ac1324ecf80a49f41a115418a5c1b1de5822a5b3f7c3a9c160118edf76f0ab",
+            "packages/agent-docs/patterns/feature-package/example/booking-engine/package.json": "7825f6d28cf622a73e8523d56056ac8cf2db4f1d8aaeeec24210d5405956b25f",
+            "packages/agent-docs/patterns/minimal-foundation/example/package.json": "f7aa15c33778c8c7e5f9c53d8ed79e249cf133611f7490400c5ca09163b98a94",
+            "packages/agent-docs/patterns/shell-foundation/example/package.json": "f9d4fc9ec4343cfab4ba2204a5d1900300037b2c4d78dd15589a8eed7a7288c3",
+            "packages/agent-docs/patterns/shell-foundation/example/packages/main/package.json": "b72d39eaba127750dfb8b7bcccb4ad57e0305f48f2d451758297216ad0bf9e71",
+            "packages/agent-docs/reference/autogen/PATTERN_INDEX.md": "f4a7a2fbf63a539ca5a8427fd5c1a73e16b6ee672511554a9e5eb5ce53e01968",
+            "packages/agent-docs/site/patterns/app/minimal-foundation.md": "0131a13f0dd2de278529998166fff08c9c436e3dedb0f0164f8d683eee70aa58",
+            "packages/agent-docs/site/patterns/app/shell-foundation.md": "c1de29fb85e4ff7939dc34b9ec6d4449d4b12b81c540d3b5b9ffdc9297444e16",
+            "packages/agent-docs/site/patterns/assistant/assistant-surface.md": "ac0f67e7259bfcc21fabb224b1ebc8c48e6f1a5b7526caaff4138422f56e1ca5",
+            "packages/agent-docs/site/patterns/auth/auth-surface.md": "05c0b906cfd660e02f702a496084325cf1fecb030e59e6c83780bee5ff99ad26",
+            "packages/agent-docs/site/patterns/auth/supabase-auth.md": "ffa160768fde35a43d6862729b8dad3d5982784b342f3cc4d991049b14e1651e",
+            "packages/agent-docs/site/patterns/connectors/ai-connections.md": "9a3c24ee8c3bf5838e951c4a6baf8daf7a0cdb0d4543115b2f878086eed970d2",
+            "packages/agent-docs/site/patterns/connectors/api-key-connection.md": "689212537a0536ad53e61ddf5f137b4ab266d1fba8d944f8de72541bace743cf",
+            "packages/agent-docs/site/patterns/connectors/assistant-mcp-oauth.md": "b3dd2549a037f6163ee6e7e8d7c71d40222db6d9046961b20b34d4b6f6749136",
+            "packages/agent-docs/site/patterns/connectors/assistant-mcp.md": "c4eee3971041baf4d9ecd02f16739e6dcd65fec3f94a430a8f25e44077f2d0cb",
+            "packages/agent-docs/site/patterns/connectors/aws-storage-queries.md": "0af7eb6c4a849d62d60f736a5d50638c49171628d99c6106228350918b845ecd",
+            "packages/agent-docs/site/patterns/connectors/calendar-cli.md": "ee24a4a5c1b3e95b52e1280d120eeb964e9f52ab61ef95afe5a1439af97378b9",
+            "packages/agent-docs/site/patterns/connectors/event-delivery.md": "40de4451469906e71467e4b5d36d6c47ba34dba26f0ee0a0e5cd3f55a2e32be8",
+            "packages/agent-docs/site/patterns/connectors/firebase-messaging.md": "3cd52f3812e663d58d5516a25471d2b03e8f148f1752f0dc429560a7e51afa82",
+            "packages/agent-docs/site/patterns/connectors/google-ads-search.md": "7ca33127b58a4d0561413f0fb0db015a210cda03f968ebb6a1064ebc6677d2c3",
+            "packages/agent-docs/site/patterns/connectors/oauth-connection.md": "ddc7e3356ba2827d3929165dcada8938550003beb7258a48965de580c066f210",
+            "packages/agent-docs/site/patterns/connectors/paddle-catalogue.md": "df3ba90a0f4f2ce1665521692cba94fcbfcef2636da8b5fa2dbc6bc96c8b382d",
+            "packages/agent-docs/site/patterns/connectors/public-image.md": "6ca01fcefefc45e09582c2151d88d37c3b8fd3ec2d9bfce0aff2e2272696a1bf",
+            "packages/agent-docs/site/patterns/connectors/redshift-queries.md": "94afb78ba4d91ad9e5530790fb899a997b59fa92a0878a12c52dde0306f6bd3b",
+            "packages/agent-docs/site/patterns/connectors/source-scanning.md": "976f720a625159ec6481080322e081e01e3644558dfb79176cc3953dee8606ba",
+            "packages/agent-docs/site/patterns/console/console-surface.md": "2db41c76fc7ba8c302387354dc41d5179209e23bdb6072d90155fc8bf454b1c7",
+            "packages/agent-docs/site/patterns/crud/crud-screen-set.md": "988e251a33453b9c23fe6cdd8d029b0efdad4a75623b32fbff51c3ed0d32d8f8",
+            "packages/agent-docs/site/patterns/crud/json-api-resource-package.md": "961b06c01b7d64e14a15fc2f924b903ed15c084f2b0a6a559ac864fb7cf0ed29",
+            "packages/agent-docs/site/patterns/crud/resource-contract.md": "b83d8696b30d6b7921bdb78f7cc12068ac81a3c9842255f43e67ceb5bd540ee9",
+            "packages/agent-docs/site/patterns/database/mysql-application.md": "1bb63732892e375254b15d25c3163323c3c66927f7d81be82d4031f9839b6311",
+            "packages/agent-docs/site/patterns/database/postgres-application.md": "5b93521366cc687aef48f076847e9c0af9bc46ef8944c1a168d9cc8e54c7aaad",
+            "packages/agent-docs/site/patterns/index.md": "9fb95530477347546e20428c525b9591f07fa94cc48f5c0fa623b2b6129b5984",
+            "packages/agent-docs/site/patterns/mobile/android-application.md": "2d3cfcd42989c80b52a7f93dcf464429ade091d34517b227624a8e96ed4278af",
+            "packages/agent-docs/site/patterns/realtime/realtime-application.md": "63b369d6e29db68484a235c766a2c3f6cff2852141e7e4ef0d086bb0721c3ef0",
+            "packages/agent-docs/site/patterns/rewards/google-rewarded.md": "7030dc2003e27471d3e0505eb33379422dceaf289d6cbdb512c1b2c34a48120c",
+            "packages/agent-docs/site/patterns/server/feature-package.md": "d0777933f1dd8b8a7042bd7d9416ad362b902f4faf2a720f4a6f45468685f4ac",
+            "packages/agent-docs/site/patterns/shell/application-shell.md": "89ab2957b06058b2c59f73be48564b4602a52eb2071789d8db05e764dfddf66f",
+            "packages/agent-docs/site/patterns/ui/page-and-placement.md": "0f023a4eebb8a5ad6b4f893e89e157894edc2d98c1fc4a80abd7b30187c6a247",
+            "packages/agent-docs/site/patterns/users/account-settings.md": "e1f8ee241b26b13931a626783505c6671876519ebdab442a9e627e165cc4e97e",
+            "packages/agent-docs/site/patterns/users/user-administration-server.md": "e7dd93ade1ba848e562ea0ae827c28e5c2bf7c9ba97fe6a2f56edf1784ab13c8",
+            "packages/agent-docs/site/patterns/workspaces/workspace-server.md": "dde89f490319738719a49b2720f1c5843ee5257738f51a7943f035373b7990eb",
+            "packages/agent-docs/site/patterns/workspaces/workspace-surfaces.md": "5f886b675139d52dbf95f70a8120580f3797075ebca68826801bee33d641b35e",
+            "packages/agent-docs/skills/jskit/references/pattern-index.md": "b35896178e0aa2b20d644f6640554c74c878404f46cb869e19ba36844da00c1c",
+            "packages/agent-docs/skills/jskit/references/patterns/app/minimal-foundation/example/package.json": "f7aa15c33778c8c7e5f9c53d8ed79e249cf133611f7490400c5ca09163b98a94",
+            "packages/agent-docs/skills/jskit/references/patterns/app/shell-foundation/example/package.json": "f9d4fc9ec4343cfab4ba2204a5d1900300037b2c4d78dd15589a8eed7a7288c3",
+            "packages/agent-docs/skills/jskit/references/patterns/app/shell-foundation/example/packages/main/package.json": "b72d39eaba127750dfb8b7bcccb4ad57e0305f48f2d451758297216ad0bf9e71",
+            "packages/agent-docs/skills/jskit/references/patterns/auth/supabase-auth/example/package.json": "30c6894adbb117eb1c69438a0785e06d52c6e2603f8583e096182149487e1df1",
+            "packages/agent-docs/skills/jskit/references/patterns/connectors/calendar-cli/example/package.json": "34dbb6ecebbd5a5a181645b04d451968a54d8abe8943567d60dc177b4881e80e",
+            "packages/agent-docs/skills/jskit/references/patterns/crud/json-api-resource-package/example/packages/books/package.json": "f4c4c35b5cbbd584ca38a989beb92861fb04025e865819c87dda231254a57957",
+            "packages/agent-docs/skills/jskit/references/patterns/database/mysql-application/example/package.json": "55840c57bf032d0b1e7c42c4755145fd99acd606eb12f3d78fedb24ac5fc3d4e",
+            "packages/agent-docs/skills/jskit/references/patterns/database/postgres-application/example/package.json": "a419b0d256eb6bebab65bad6b2490861e3d309e8aada9739cb2345e895a7bb20",
+            "packages/agent-docs/skills/jskit/references/patterns/realtime/realtime-application/example/package.json": "9be2cb43576cc1a06d3bea4af6f1a54ae5373b217481bade4fbdac29225854b1",
+            "packages/agent-docs/skills/jskit/references/patterns/server/feature-package/example/booking-engine/package.json": "7825f6d28cf622a73e8523d56056ac8cf2db4f1d8aaeeec24210d5405956b25f",
+            "packages/agent-docs/skills/jskit/references/patterns/users/user-administration-server/example/packages/users-workspace/package.json": "6613553cd9505b0daf90214aeee7cccd9d857108fe5e914409b9ead490c355c5",
+            "packages/agent-docs/skills/jskit/references/patterns/users/user-administration-server/example/packages/users/package.json": "5d2e279a16efaf70e4b00b08882f98788160e3950355e9f6915f8fcf337abc1f",
+            "packages/assistant-core/package.json": "b43bd12b6b182e9c034e1175c94a6c1df33cea029c2397ab428a84386865b570",
+            "packages/assistant-runtime/package.json": "0b40565ea2d12dcaedb11a4a978cb6e2279fc27987dc3a1a3e6267d0b059841b",
+            "packages/auth-core/package.json": "3a00d47918557f803968c2554ee5c2f129aedce924029bbdb68d5571f6fbc827",
+            "packages/auth-provider-local-core/package.json": "ecf1f4fd03aac6a7f9f97d91be6ab78f558c9c948f8eba525ebfca653687ea58",
+            "packages/auth-provider-local-db-core/package.json": "957dbc082e0efe6f294b1850236a2b8a3d915c77b9e92aafda7baf668847383c",
+            "packages/auth-provider-supabase-core/package.json": "aae8fe7dfac4f6094c46c62a319c9b0372c452f1bc96eb366b76a2983f4d6bdb",
+            "packages/auth-provider-supabase-core/patterns/supabase-auth/example/package.json": "30c6894adbb117eb1c69438a0785e06d52c6e2603f8583e096182149487e1df1",
+            "packages/auth-web/package.json": "dcfda5e8a0078f855fb9000e4d8483ab6f906a45bbee59e69e3fd7ba3e178fb2",
+            "packages/connector-google-calendar/package.json": "958d66522012d3d5f5827190745b8e21fe1e7bd5d77571cf3d7b146b959a10e8",
+            "packages/connector-google-calendar/patterns/calendar-cli/example/package.json": "34dbb6ecebbd5a5a181645b04d451968a54d8abe8943567d60dc177b4881e80e",
+            "packages/connectors-catalog/package.json": "abfadccae2fd834325491a05bd00ced40c6bac5f753f80ce5f23eada50d27dd6",
+            "packages/connectors-core/package.json": "e773dc0331a0b5ed17ddb4cc1bfe4d9108dfb30ef25cceaaec5ea4c9bf86f1e4",
+            "packages/connectors-web/package.json": "bc90fe96de71d425486afdd6690b4651789d2e61cbf9f1925fed01b17fcb2720",
+            "packages/console-core/package.json": "31991331efc8fc95122598501172de38aa03722d0d9f41cfd21401039082f4ee",
+            "packages/console-web/package.json": "9aeab32ed49fb0e1acaa5f250b42137c013c1ea2d0d07a284276534562bdb0bc",
+            "packages/crud-core/package.json": "542a806d2aa974294a37a9d13e00eaf1e24ee9a504a5ce614f3fc79cdc976494",
+            "packages/crud-core/patterns/json-api-resource-package/example/packages/books/package.json": "f4c4c35b5cbbd584ca38a989beb92861fb04025e865819c87dda231254a57957",
+            "packages/database-runtime-mysql/package.json": "bb1a49a2d6086040f4256b219e59cce4cacb8ede79ac2a6d29c9c3658e2dd22c",
+            "packages/database-runtime-mysql/patterns/mysql-application/example/package.json": "55840c57bf032d0b1e7c42c4755145fd99acd606eb12f3d78fedb24ac5fc3d4e",
+            "packages/database-runtime-postgres/package.json": "0f63c8661b845200f73af9543004b5f72919afca96e0871211b809aacc9b9c91",
+            "packages/database-runtime-postgres/patterns/postgres-application/example/package.json": "a419b0d256eb6bebab65bad6b2490861e3d309e8aada9739cb2345e895a7bb20",
+            "packages/database-runtime/package.json": "6324ecae02900c97ae124b1719af4a67502e5ae34ae591ef206d1aaca84df6fd",
+            "packages/http-runtime/package.json": "997e62cbb405c14082f911c1112272750b3b1278c901c8ae57d79eab89957ba3",
+            "packages/http-web/package.json": "e92d7efa00db5eb49742af8b85138bb193a3e4f811cf41eccf0e6a3bac350f2d",
+            "packages/json-rest-api-core/package.json": "468633e3a18048264a691310bcf7e1077b81d2bc53c42498e41c4c0df800cba1",
+            "packages/kernel/package.json": "7a0230759433624c45d4d7402a94031a7271029d37318e9d633b0000513ae60a",
+            "packages/mobile-capacitor/package.json": "6047e181aa2b44c63463be90b10080bd6f5e6a2c3477a3edbb90ea41c6e9cc7a",
+            "packages/payments-core/package.json": "b6dcdb37e5eca4306c185fbaa713b9d20b38efdb758ab8e5b3634955abf1d5d1",
+            "packages/payments-web/package.json": "be2b6705cf481089f6fd3292ca31a0dc7f59075988190efb36282e2cb0129f1f",
+            "packages/realtime/package.json": "1c9aa1b829c4d4bd40b3732a40c2177141801dff52215e4845d07bf6ca3e8018",
+            "packages/realtime/patterns/realtime-application/example/package.json": "9be2cb43576cc1a06d3bea4af6f1a54ae5373b217481bade4fbdac29225854b1",
+            "packages/resource-core/package.json": "1e9cdc6c482707b18d9e00042e7cf3431972fd06900093151a3322fe50f9dc75",
+            "packages/resource-crud-core/package.json": "3bd89e7e6a09d4a9dadffc8e922de0e4143573facf0a54d2569d638f9fd6ff0d",
+            "packages/rewarded-core/package.json": "a9356aba740b84af8f5ebe016f40d246c118897910ad48738f275d8df24a8129",
+            "packages/rewarded-web/package.json": "841b610306bf42a5eb73c79f9a61efa9cda3eefa7641aef3c328f1a3fb2cee7d",
+            "packages/shell-web/package.json": "5aa01a81447267fe3f69aa5d716d956a6389a03690d10035113eb8227b15ba4a",
+            "packages/storage-runtime/package.json": "d89a6eaaa58a4f453c96d6be628f8afe696bc6e75e0d059fde19ff1758387f79",
+            "packages/uploads-image-web/package.json": "eba195b3fcf0fccfa99112cc245b8c4363e7001993fc7170961726f43523333d",
+            "packages/uploads-runtime/package.json": "944cfe92702b03a01d29ab67c4757529fe8295f7dffa45f76d5c1789be92dfec",
+            "packages/users-core/package.json": "42c1f024f827598daf30f177f84b8fec93fe4758ea02113e4290adcbb775bd1d",
+            "packages/users-core/patterns/user-administration-server/example/packages/users-workspace/package.json": "6613553cd9505b0daf90214aeee7cccd9d857108fe5e914409b9ead490c355c5",
+            "packages/users-core/patterns/user-administration-server/example/packages/users/package.json": "5d2e279a16efaf70e4b00b08882f98788160e3950355e9f6915f8fcf337abc1f",
+            "packages/users-web/package.json": "b6f2a0c4c21fbafc50246b5c05abf361dbe5aff3cc8a825435a1235d5f50056d",
+            "packages/workspaces-core/package.json": "5a3a5a0962bcd69a2a5c56bd5cde92825e8b2b40ad960dc97627f28043270b88",
+            "packages/workspaces-web/package.json": "5aaced67d7a13a8b1aa223a61d9d4a74d3a90e417c69960034661375a5526612",
+            "tooling/config-eslint/package.json": "ec3c05fa78ffe21793cdf7d7068622017712a0bacac1dea3ad276e0d1b213a00",
+            "tooling/jskit-catalog/catalog/packages.json": "30e94cc3d88ba83a6610c697c9329c399c613eef40aa96a6d53187e1bc5aa951",
+            "tooling/jskit-catalog/package.json": "56c8eaef77568358e23a3bf9a935d71b05bed74439608544749e69718052f767"
+          }
+        },
+        "vibe64": {
+          "head": "c14eb989d4e54785fa55f5c863830257f932d977",
+          "changedFiles": {
+            "tests/client/databaseErdFullscreen.vitest.js": "fd6486b6fa333a3b0765b1546b1b9ee9daa8a47e9f0b130f00811f9318272862",
+            "tests/client/integrationCallbackDefaults.vitest.js": "a26ed618a77f6a86f6be2de6d8fca0ccc2969151d6a26972429f5b4624391e0b",
+            "tests/client/useVibe64AutopilotViewRouteHydration.vitest.js": "425f89379ef9ee8cca5fd5ec9abb70e74c442c6e2d83b50aa585d3e98fc853fa",
+            "tests/client/useVibe64SourceEditorFileSync.vitest.js": "86106a41859b46b85ff7def986678622e4d630e1777d4d2d467d9e9af04c3858",
+            "tests/client/vibe64AutopilotViewCommandSpy.vitest.js": "090acfb96e4a171178c1fe664efe02edfdf27c628814b961d232be8c07f198d8",
+            "tests/client/vibe64DashboardPlacements.vitest.js": "967a6539b05a9a7638f0a97c452ad5a979689a0edebd4834b91406c178eaa915",
+            "tests/client/vibe64RecoveryChatAttention.vitest.js": "f0750d35219a781a4cfa43fe394b5005006a64fa4d45419a4004a2901731cd56",
+            "tests/e2e/self-contained-smoke.spec.ts": "0429b9dde84020d32875f8c905382799b86e54283bb2b3058d557cbfb3c99c07",
+            "tests/server/vibe64IntegrationSetupCommand.unit.test.js": "b8e0e0ff171542c2b3c69431b23bd2fbf686d90070b3ff80951b96a0a20e2a21",
+            "tests/server/vibe64RemainingFeaturesRuntime.unit.test.js": "9c8e68ef71f2f892e6e4ea1bf322c24daab974f4ce583dbbd2b535b614690e4d",
+            "tests/server/vibe64SessionsDirect.unit.test.js": "23ff0653f5c7ee0c0efb631d6bbac0b920f4e5296610c901e5bd85142a9b4892"
+          }
+        },
+        "seed-jskit": {
+          "head": "02cf10cef15a2a44b73adf52e5cd60e53b7bf9bf",
+          "changedFiles": {
+            "README.md": "6b41690e3539aaf6d79b31126ffe6db3cb8d4579053e15b8266509acb53af92c",
+            "genesis/stack.md": "f8cfea5a7f36e6aaf9c30f4b6ba09ff5e9f31d903654bedf3295d737652d157d"
+          }
+        },
+        "seed-jskit-accounts": {
+          "head": "91dad8e418ada6594001b8282c2b87c41e8fc3e5",
+          "changedFiles": {
+            ".github/workflows/verify.yml": "bf8406724e1043820ac92b2291ef19ac5018f49552168f6fa84e6e405c4b9d45",
+            "README.md": "0806368fd1529cc07c680b3fb11d704f87bca2ed5fdc17db5cbd40bb253a95d2",
+            "genesis/stack.md": "947c169bf8c8a6c37d828048bfd54aecb1a7b2a358c4f9e851fab02c4c78146a",
+            "package-lock.json": "9d810aa2975d989a03616bbc37170cb47df1773298ccdd192397a8cd1a07e424",
+            "package.json": "28528a71e81a5dfe334fe5fa1be01e9092b412add8ccad7c4fdbd1253e19e887",
+            "tests/server/account-persistence.integration.js": "56e8898cb8784233fd1f890471934a7c9309629ce451a0893303e9adede423aa"
+          }
+        }
+      },
+      "note": "Accounts README/package/integration-test work was already present at goal start and is preserved in the reviewed result. Vibe64 Online remains clean and untouched."
+    },
+    "finalReview": {
+      "recordedAt": "2026-09-13T09:45:43.510733+00:00",
+      "acceptedItems": [
+        "C1-03",
+        "C1-05",
+        "C1-06",
+        "C2-03"
+      ],
+      "scope": "Selected candidate library, JSKIT, Vibe64, public/accounts seed sources and prepared actual publication artifacts. Canonical dependency locks and registry rollout remain open; five other canonical app ports are owner-managed.",
+      "sourceIdentity": "Fresh comparisons match 2161 packed JSKIT files, 131 library runtime/declaration/manifest files at f97dc859321aee41915f3b0e256a861c382bc1b3, 46 accepted JSKIT migration paths and current 105/11/2/6 changed-file snapshots.",
+      "reports": [
+        {
+          "path": "/tmp/jskit-v2-rollout-42tSXQ/final-interaction-review.md",
+          "sha256": "8b3d921189ef0862954d4ae87dac265393b0c4494726889750b075edb8f4ef2c"
+        },
+        {
+          "path": "/tmp/jskit-v2-rollout-42tSXQ/final-simplicity-review.md",
+          "sha256": "6203f20b3e283b713d3de316c213193097afd1db2cfa8a72a4620c4cb2778835"
+        },
+        {
+          "path": "/tmp/jskit-v2-rollout-42tSXQ/final-cost-comparison.md",
+          "sha256": "dff5897fe9e92d9fcbb24852d09b82693c1ce1bcec0d56f44273243a69e5098e"
+        }
+      ],
+      "durableRecords": [
+        "old/docs/development/pending-jskit-ai/preparation-status.md#final-candidate-review-2026-09-13",
+        "old/docs/development/query-measurements.md#final-cost-comparison-against-a0-2026-09-13-c2-03"
+      ],
+      "runtimeCallerSearchFiles": {
+        "json-rest-api": 158,
+        "jskit-ai": 1383,
+        "vibe64": 531,
+        "seed-jskit": 38,
+        "seed-jskit-accounts": 44
+      },
+      "result": "No new concrete regression or compatibility framework found in the bounded reviewed paths. Retained domain utility overlap, weak shared registries and packed same-version duplicates are explicitly classified.",
+      "comparisonLimits": [
+        "A0 uses Node 22.16; accepted library uses Node 24.6. Contracts/harness evolved. Operation-shape statement comparisons are not identical complete workload or controlled latency comparisons.",
+        "Accounts comparison uses v1.0.28 versus f97 v2 coordinated graphs, both Node 26.5/MySQL 8.0.46. Fastify.inject uses actual database/application routes but excludes network transport. Two warmups/ten pairs during other acceptance work cannot establish a speed change.",
+        "A0 has no whole-library startup measurement. Historical isolated compiler experiments are not new f97 endpoint benchmarks.",
+        "Exact f97 package is 173 files, 441672 packed bytes and 1733356 unpacked bytes. Smaller artifact partly excludes development files; later uncommitted guide additions are outside it."
+      ],
+      "testsOrBenchmarksRerun": false,
+      "servicesStarted": false,
+      "publicationApproved": false,
+      "remainingItems": []
+    },
+    "publication": {
+      "authorization": "User: Publish them! Then continue and finish everything off.",
+      "approved": true,
+      "status": "Completed and independently verified against actual registry metadata and downloaded artifacts.",
+      "preflight": "/tmp/jskit-v2-rollout-42tSXQ/publication-approved-preflight.json",
+      "command": "npm run release:npm:publish",
+      "runtime": "Node 24.6.0",
+      "registry": "https://registry.npmjs.org",
+      "versionPreparationRepeated": false,
+      "commandExitCode": 0,
+      "publishedCommandCount": 40,
+      "log": "/tmp/jskit-v2-rollout-42tSXQ/publication.log",
+      "initialVerification": "/tmp/jskit-v2-rollout-42tSXQ/publication-verified-first-attempt.json",
+      "verifiedAt": "2026-09-13T10:05:00.019231+00:00",
+      "verification": "/tmp/jskit-v2-rollout-42tSXQ/registry-installed-accounts-final.json",
+      "registryVersions": 40,
+      "byteIdenticalPreparedArchives": 39,
+      "allPreparedFilesMatch": true,
+      "preparedFileCount": 2161,
+      "publishedFileCount": 2162,
+      "packagingException": {
+        "package": "@jskit-ai/connectors-web",
+        "version": "0.1.3",
+        "extraFile": "test-results/.last-run.json",
+        "bytes": 45,
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903",
+        "effect": "Harmless Playwright result accidentally included during publication. Every prepared source/manifest file matches exactly; consumer locks use actual registry integrity. No runtime difference and no extra version cohort introduced."
+      },
+      "packages": [
+        {
+          "name": "@jskit-ai/agent-docs",
+          "version": "0.1.158",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/agent-docs/-/agent-docs-0.1.158.tgz",
+          "integrity": "sha512-LFDF6y8PF0c67DCzzbnivHlrGZl7Fy/G12V27JFAoKbqVDgAgLmsVyEn4MDETkxkVhH4O83HLDZoFtAP/0a2KQ==",
+          "shasum": "4bc5663380063119761c2d88c59cc8d9b5fa9afe",
+          "bytes": 247829,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 420,
+          "publishedFiles": 420
+        },
+        {
+          "name": "@jskit-ai/assistant-core",
+          "version": "0.1.162",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/assistant-core/-/assistant-core-0.1.162.tgz",
+          "integrity": "sha512-pwCQyG/PSZEFXc5S3QB47Av4x2KgjoOVlALpm0or7jO7BwnxBnQIrJm7W/+QbRKJyC9uWSznKTIlwGga3xOY5Q==",
+          "shasum": "0bcc04b03d97d047f03c84ab05be13d89725aa06",
+          "bytes": 39016,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 44,
+          "publishedFiles": 44
+        },
+        {
+          "name": "@jskit-ai/assistant-runtime",
+          "version": "0.1.157",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/assistant-runtime/-/assistant-runtime-0.1.157.tgz",
+          "integrity": "sha512-CELwft71cZv8ix7S+/buvuQNwiiZRyMGsa8CBwwP+2P24ggb2+UwzNsQVlN1uqzS0X5HKpZWX+NINxjgm+NgCA==",
+          "shasum": "1c49b7a4c41a26587fa57bf05ecbfc1dc44a52f7",
+          "bytes": 43816,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 49,
+          "publishedFiles": 49
+        },
+        {
+          "name": "@jskit-ai/auth-core",
+          "version": "0.1.184",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/auth-core/-/auth-core-0.1.184.tgz",
+          "integrity": "sha512-e2XmuZ46FbYv4lk7p7N8rRimJxDRv4XVotLvbmDFwEyFuaTzvsi7bOFV8uzA/2vfJBCwp/qPuGRjbeYi5wTchQ==",
+          "shasum": "2e2f0004f656dcb0a359ab4e1c8f4eaebd06a40d",
+          "bytes": 30890,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 75,
+          "publishedFiles": 75
+        },
+        {
+          "name": "@jskit-ai/auth-provider-local-core",
+          "version": "0.1.87",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/auth-provider-local-core/-/auth-provider-local-core-0.1.87.tgz",
+          "integrity": "sha512-NUgnfXxmZ5xRp4A2GWRyvUijpZ5iQrLvFUCWxHqdojwESdN0/3Fs10Fc1ngLAXSTsOrE9/+jiR8sL/uD3cUH3w==",
+          "shasum": "9005d0b037b1049ad59823a2d4bbb707e6149c9c",
+          "bytes": 18828,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 10,
+          "publishedFiles": 10
+        },
+        {
+          "name": "@jskit-ai/auth-provider-local-db-core",
+          "version": "0.1.78",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/auth-provider-local-db-core/-/auth-provider-local-db-core-0.1.78.tgz",
+          "integrity": "sha512-obJonTKuqNiVFIAqHlb1kQ1KIUOq2NdCLdxRynq7vy1taIK/KL4IrRSew0ZzNPPYeqKL3o0WG8ZPSg4p/MQbzg==",
+          "shasum": "5d213a838ee5de2579c5bb31aeb9ada0b71a35ba",
+          "bytes": 6715,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 6,
+          "publishedFiles": 6
+        },
+        {
+          "name": "@jskit-ai/auth-provider-supabase-core",
+          "version": "0.1.183",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/auth-provider-supabase-core/-/auth-provider-supabase-core-0.1.183.tgz",
+          "integrity": "sha512-I4eVBghSH2nBUMR0udzjN3RXzFoF/ZPiLp07JV3Ulu3cwI5T1X+KoSJuSJi86EILgkyVplTyZ4VbZE3pw2AvQw==",
+          "shasum": "4641c5c86fb30b5bcdbbad26db00672765c79468",
+          "bytes": 31091,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 38,
+          "publishedFiles": 38
+        },
+        {
+          "name": "@jskit-ai/auth-web",
+          "version": "0.1.186",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/auth-web/-/auth-web-0.1.186.tgz",
+          "integrity": "sha512-43/Dj6wXmUz1bENzcgJgPuSdeYeErrwNLv1wsWeFtW+GCEHpPEmsCo+uTjw1nS0DhvYjMFDaOURM/hAEQOyLhw==",
+          "shasum": "d5e7a1473c9725e083a5effc5125df3eb92d76e6",
+          "bytes": 49239,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 70,
+          "publishedFiles": 70
+        },
+        {
+          "name": "@jskit-ai/connector-google-calendar",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/connector-google-calendar/-/connector-google-calendar-0.1.3.tgz",
+          "integrity": "sha512-mTvECNfi45xh9jYAVakS+R8WQTEAoeABrDaXCK63vRutbWyYPRY9rO/O1ECpFIxcuPUD+C/6PWuW8f78cusheQ==",
+          "shasum": "9be226081373a4d509ed0f835b17b4fd724f4210",
+          "bytes": 13307,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 11,
+          "publishedFiles": 11
+        },
+        {
+          "name": "@jskit-ai/connectors-catalog",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/connectors-catalog/-/connectors-catalog-0.1.3.tgz",
+          "integrity": "sha512-cpXcoCJ+LAbQT3X0X7wJvikf5qOcjV+w04ErDjNiaF/GBWcpYPcC2RJrtL2qplGzOeXfIw5b42KeyL9WVCsJXg==",
+          "shasum": "f1a520b5f6c23133649ff7be97e8b66059a5e82c",
+          "bytes": 1165856,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 399,
+          "publishedFiles": 399
+        },
+        {
+          "name": "@jskit-ai/connectors-core",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/connectors-core/-/connectors-core-0.1.3.tgz",
+          "integrity": "sha512-WeuqvE4Pnhxfnd+6oLc1tMYkrnjdcLZ8dd3HRycbvODzCblAXwT9rlFPRkwMNihxXViOXXuqAxY7nSAfQuYvpQ==",
+          "shasum": "68950b05464ff888c23c0af4e25a9017a5918196",
+          "bytes": 56397,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 22,
+          "publishedFiles": 22
+        },
+        {
+          "name": "@jskit-ai/connectors-web",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/connectors-web/-/connectors-web-0.1.3.tgz",
+          "integrity": "sha512-HLQBAqHXaLgJxMbvsi1ITyogwZCn4sL9mfClLqtykK+qijq8BoSGe2xRiixnbdZhkaIW961kdS4LY1am5vevlw==",
+          "shasum": "33d2d50a2919af733c29c3850860c2d85d49525b",
+          "bytes": 14865,
+          "exactPreparedArchive": false,
+          "preparedFilesCompared": 10,
+          "publishedFiles": 11
+        },
+        {
+          "name": "@jskit-ai/console-core",
+          "version": "0.1.149",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/console-core/-/console-core-0.1.149.tgz",
+          "integrity": "sha512-K1kKZYqMZc2G4fiqcmy8t8PnXUuLQRRQSwWPzqoASt0GlKx8yYBMuNuuzfyjsBfKWHymkNACuO9I8RJ/Sepdsw==",
+          "shasum": "859de5f294069f9b799b9e77b7fb46c17ea06c12",
+          "bytes": 9278,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 21,
+          "publishedFiles": 21
+        },
+        {
+          "name": "@jskit-ai/console-web",
+          "version": "0.1.154",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/console-web/-/console-web-0.1.154.tgz",
+          "integrity": "sha512-EHbTN4hS9oXTsdZQJ1JlRmX6PuHW/wUtF0R/CrWXe/mk+F5pUPGqzWXROKpxZY+Mvb5JbsWv5g0yZhsjEqwLZA==",
+          "shasum": "67c0c67d22488d79e64426b6fb5a000fa6a270c1",
+          "bytes": 3436,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 7,
+          "publishedFiles": 7
+        },
+        {
+          "name": "@jskit-ai/crud-core",
+          "version": "0.1.197",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/crud-core/-/crud-core-0.1.197.tgz",
+          "integrity": "sha512-/wWbQ2ppZrUDh7etiBH0zQ8NVLqUS9YR+bPlrScnG8BFDP2l87q0YR1uf2jie6IMFPns9gE41zqc5dmviLumqQ==",
+          "shasum": "63c287d366396798b6a7a7a46fee8f4171881014",
+          "bytes": 75681,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 45,
+          "publishedFiles": 45
+        },
+        {
+          "name": "@jskit-ai/database-runtime",
+          "version": "0.1.186",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/database-runtime/-/database-runtime-0.1.186.tgz",
+          "integrity": "sha512-1QFrnXzdtLodeTYJEa1Swffrq4y5ErE0tYVjdx1UAseJQFJRWH0qiN91wUJCD0EUZyTfH9jpQOaYs1HyAVesrw==",
+          "shasum": "1226a9f5fa07fbbacdd6600e3d9bf61a573ae36a",
+          "bytes": 17905,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 35,
+          "publishedFiles": 35
+        },
+        {
+          "name": "@jskit-ai/database-runtime-mysql",
+          "version": "0.1.184",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/database-runtime-mysql/-/database-runtime-mysql-0.1.184.tgz",
+          "integrity": "sha512-TeAwhsTzGqd0vUIfn5Je+uaYWKjBXNUIZfpgCdQCobEX6TJnPl7GV7UmkiH1E9pJe1PhvcL08LeD/sB+hxW3fA==",
+          "shasum": "ec6213bf0f48759140b490813477e0464d2c60ef",
+          "bytes": 10975,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 17,
+          "publishedFiles": 17
+        },
+        {
+          "name": "@jskit-ai/database-runtime-postgres",
+          "version": "0.1.183",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/database-runtime-postgres/-/database-runtime-postgres-0.1.183.tgz",
+          "integrity": "sha512-GkRPETqRuO3dK0CzlWwrc7mD9S9ojSd/dzsqnqRuKxuMVLh26OOVJG9AmUG8l8lT/4J9pAKofbYcXXjpc+8/mw==",
+          "shasum": "5f0c28e30257b6495f5c18ad675689faa929f14b",
+          "bytes": 4254,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 15,
+          "publishedFiles": 15
+        },
+        {
+          "name": "@jskit-ai/http-runtime",
+          "version": "0.1.184",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/http-runtime/-/http-runtime-0.1.184.tgz",
+          "integrity": "sha512-m1Iw1cBE9+bkVkcWw8b3Q6VGl3UuNnsq8vcca2lAMMaNGqVdYuAOngwczNbncpoJUShxYgDN0lMYeXzeNcQT/w==",
+          "shasum": "cae21b66b0cedf40376999d084a98a30d2dc5d90",
+          "bytes": 40443,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 46,
+          "publishedFiles": 46
+        },
+        {
+          "name": "@jskit-ai/http-web",
+          "version": "0.1.31",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/http-web/-/http-web-0.1.31.tgz",
+          "integrity": "sha512-jSN8aikf/nTzRPmujvoSQaBCZI37w5Yu3ONndhbfCTKgdVJ6pPOniBuJMDFBsyzcVRuaMqNJjGMkBO5aU23e2Q==",
+          "shasum": "0dc7376b9986aec06face69b44ae11be545ae831",
+          "bytes": 91393,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 119,
+          "publishedFiles": 119
+        },
+        {
+          "name": "@jskit-ai/json-rest-api-core",
+          "version": "0.1.130",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/json-rest-api-core/-/json-rest-api-core-0.1.130.tgz",
+          "integrity": "sha512-klkA9ICmh+zB+0FhiAHxKAY13NXg45/4A9zuOFlxVagVpDybivQB1ra9ZazXOe/nv4OcLYHFW+gpaS8DzFrxwA==",
+          "shasum": "5542defc4f9e5d4d8d4965979fb10bf97341b1ce",
+          "bytes": 10051,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 4,
+          "publishedFiles": 4
+        },
+        {
+          "name": "@jskit-ai/kernel",
+          "version": "0.1.186",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/kernel/-/kernel-0.1.186.tgz",
+          "integrity": "sha512-BA0i7Rauzl/B2d6VjT85xU6P9L8kJeghkUdUHq/wN8pSkhpOACezUtJ0ZgOeTiekwcdE5wsPlbtKmqeixVg6aA==",
+          "shasum": "94f0b9eb3691f9fa4e6b41dbb47d20ac0232a680",
+          "bytes": 144948,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 189,
+          "publishedFiles": 189
+        },
+        {
+          "name": "@jskit-ai/mobile-capacitor",
+          "version": "0.1.121",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/mobile-capacitor/-/mobile-capacitor-0.1.121.tgz",
+          "integrity": "sha512-MqUaf379CTFJUVXnj3orfDkbdb3zQCrh/AR4LMf15WI2BuTSKf+XcheIGm0q7kBGzy06PT7aXq2K5TWl8vObQg==",
+          "shasum": "a82deca0fa12f1a6d8117ca4eb1d7a499f203c07",
+          "bytes": 8421,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 11,
+          "publishedFiles": 11
+        },
+        {
+          "name": "@jskit-ai/payments-core",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/payments-core/-/payments-core-0.1.3.tgz",
+          "integrity": "sha512-WodXLZGtuxcfzMkttbtyZN3sgHb+4rdxofn0ZFaaw0DQ59Uvo4xSiY3vttKADvb5YPOM7B9+4tqABqltmlJYAQ==",
+          "shasum": "71f9737442c8c00e7eb6ff75c123c294e0edb94b",
+          "bytes": 39421,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 23,
+          "publishedFiles": 23
+        },
+        {
+          "name": "@jskit-ai/payments-web",
+          "version": "0.1.3",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/payments-web/-/payments-web-0.1.3.tgz",
+          "integrity": "sha512-gtaeSjyMCbAyTKC324IREz8sOt+ndEcwrmRHi0df/PMvp7gBkBsuMi+9sBMazh/Nce0SDzZl+gy6rxV5kzHS+Q==",
+          "shasum": "13ac310aa83c60f355ec5517784aab6b7b4b53bb",
+          "bytes": 10214,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 8,
+          "publishedFiles": 8
+        },
+        {
+          "name": "@jskit-ai/realtime",
+          "version": "0.1.183",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/realtime/-/realtime-0.1.183.tgz",
+          "integrity": "sha512-0kOrVBIlpNW2fZObC5GeIRfAEyWHXYBhw7TM+ivU/0tFb+mZZUsy3y77I+AtZeF4LAmTBdQGXbLFJVLk5CDQ5Q==",
+          "shasum": "c786111d46bb19e502cdf1d412c418fbb4f27370",
+          "bytes": 17271,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 19,
+          "publishedFiles": 19
+        },
+        {
+          "name": "@jskit-ai/resource-core",
+          "version": "0.1.128",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/resource-core/-/resource-core-0.1.128.tgz",
+          "integrity": "sha512-/wqq3mNZPVHoY1u9fI5a99CHoBWaxSK6DMnHH+O0ZGEq0oYodsvNVS74lV+rx9PBrgWAEMN6lIFSzsTBdAEMEg==",
+          "shasum": "667df4c3952f58128e634b01ddc1ae4277609d74",
+          "bytes": 2298,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 3,
+          "publishedFiles": 3
+        },
+        {
+          "name": "@jskit-ai/resource-crud-core",
+          "version": "0.1.128",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/resource-crud-core/-/resource-crud-core-0.1.128.tgz",
+          "integrity": "sha512-PfGqavO8beuDOOjBt5gfsQTbW0T8NMQo+oJiDzqyWZbnm+pgPDsu5xXNFuqpZPJIAwOOD/V30eLDa9DKD2yFtA==",
+          "shasum": "75dff46a242bbcf9a5e7886cf14f16e82bdfcd24",
+          "bytes": 17019,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 14,
+          "publishedFiles": 14
+        },
+        {
+          "name": "@jskit-ai/rewarded-core",
+          "version": "0.1.122",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/rewarded-core/-/rewarded-core-0.1.122.tgz",
+          "integrity": "sha512-INI0oyYYCKPqeTyDofXTewAMkAxy0fvDEkR1ghpuIhnc5yL8MbpgEpX00p3lZDQOwI9J3YLoxIbLTtbrRD1M9w==",
+          "shasum": "55696b592855edb1bc8e3a5541da9f18e94f3816",
+          "bytes": 20538,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 24,
+          "publishedFiles": 24
+        },
+        {
+          "name": "@jskit-ai/rewarded-web",
+          "version": "0.1.122",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/rewarded-web/-/rewarded-web-0.1.122.tgz",
+          "integrity": "sha512-sV4r4nac5/RZtVnm1xRot8Dnvo6pnMxbdZyJjcag+xnLb3B4yxloWlEVtOlI/eqADZ0DPiFRfl/+QWWXZXv4lg==",
+          "shasum": "2f569a4a1f1513fbf8a0b87c7291325186dbb652",
+          "bytes": 9942,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 14,
+          "publishedFiles": 14
+        },
+        {
+          "name": "@jskit-ai/shell-web",
+          "version": "0.1.190",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/shell-web/-/shell-web-0.1.190.tgz",
+          "integrity": "sha512-Vxz2oSlBjD068X7e+uk5PrXDeQM7X1D/COddEXd9PRuVJyttCGSa3Mdn4LwKYhEau9ry+T9PB+nenu0XAQeBvw==",
+          "shasum": "5b3e1fe349fed3e15227fd6f7a02edd071e5e422",
+          "bytes": 75930,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 105,
+          "publishedFiles": 105
+        },
+        {
+          "name": "@jskit-ai/storage-runtime",
+          "version": "0.1.183",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/storage-runtime/-/storage-runtime-0.1.183.tgz",
+          "integrity": "sha512-x15F+GaRCTdpROkBoRMKOT15WS2/bIlzaRwsvL6l7aFgZ21WUfVGX6Y4V6FnglSshqsLcRFYqvJcpqKzZ6IUqA==",
+          "shasum": "768818611fff901a1ff217b275fb6b38c6b76a16",
+          "bytes": 1631,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 5,
+          "publishedFiles": 5
+        },
+        {
+          "name": "@jskit-ai/uploads-image-web",
+          "version": "0.1.161",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/uploads-image-web/-/uploads-image-web-0.1.161.tgz",
+          "integrity": "sha512-ssxUxqowDD74PNpT+soiKcYj0IWOx0ab59Awa9i0ln/4DhFoNmf4Lu+8w8crOWymhGF3AvSNMFqL+sdYRZ3U4w==",
+          "shasum": "75df2b3c9cdad0ef8e5368da23f9000d62c37ce8",
+          "bytes": 8012,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 12,
+          "publishedFiles": 12
+        },
+        {
+          "name": "@jskit-ai/uploads-runtime",
+          "version": "0.1.161",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/uploads-runtime/-/uploads-runtime-0.1.161.tgz",
+          "integrity": "sha512-hJbJEtqlZCGvDGZ5+FYDt2kcHx+QRvN48kaHlK+dogR5wTS6TDUqHnkKM+iIJoibWZ0IQqX5nj+HED7zlGoxBg==",
+          "shasum": "477842f94a9f53795ef388c83fc160b39df30653",
+          "bytes": 6116,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 16,
+          "publishedFiles": 16
+        },
+        {
+          "name": "@jskit-ai/users-core",
+          "version": "0.1.199",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/users-core/-/users-core-0.1.199.tgz",
+          "integrity": "sha512-+9z2S1Jc6V1cAn+FwbjyWyLz/kbWPPFyT9UWgWEgzGpHBAKEzfze9Tdryx6lH4MGmrdzlOkpEo0sZdc9W/+ZmA==",
+          "shasum": "f77ec1b8b96253b611efeb2650f63c1fc05e2943",
+          "bytes": 35636,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 66,
+          "publishedFiles": 66
+        },
+        {
+          "name": "@jskit-ai/users-web",
+          "version": "0.1.204",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/users-web/-/users-web-0.1.204.tgz",
+          "integrity": "sha512-c1PqboniWvGYIRzK95HnRYIqEKgRZAKco1CC3IFYNlyQDE2pL5yQQHDYc6EH/QC8OqFPqFzKqA0v/Z4mUyg7lA==",
+          "shasum": "489efa48bacb20526444f32810cce0f91e5f2e96",
+          "bytes": 18738,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 26,
+          "publishedFiles": 26
+        },
+        {
+          "name": "@jskit-ai/workspaces-core",
+          "version": "0.1.164",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/workspaces-core/-/workspaces-core-0.1.164.tgz",
+          "integrity": "sha512-lxkfR2lmSXMCwiozrRZSd4fkkuDe8BlXfvxcIOy6dZoTULAnaQcNzMRatkYrrmV9mLZ1cSEoahGphevtgPC+3Q==",
+          "shasum": "e7d957434a5ff4be709cd707c413045de73270d4",
+          "bytes": 73889,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 89,
+          "publishedFiles": 89
+        },
+        {
+          "name": "@jskit-ai/workspaces-web",
+          "version": "0.1.165",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/workspaces-web/-/workspaces-web-0.1.165.tgz",
+          "integrity": "sha512-JoEh/xaJerUdPBGoI3XnWf5K73z6kyKAgUftKh9CX4TsOkbvV6t3Vcw8i6qGwXRcshkYx8MJTbQslChZErQmKg==",
+          "shasum": "103132199cb2209aa5f59b7a594c51a6132b3b74",
+          "bytes": 47988,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 58,
+          "publishedFiles": 58
+        },
+        {
+          "name": "@jskit-ai/config-eslint",
+          "version": "0.1.183",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/config-eslint/-/config-eslint-0.1.183.tgz",
+          "integrity": "sha512-6FSFeSB2OAsfcBc5sTQtonP0xGMxJooqtcv3sugwVhYk5UMLZkZC7LwQUo2ad7bRxCVu34Iv1sN63D8tahgRIA==",
+          "shasum": "8aabd2aaff03152fa39d1670e81a2ea87e959a37",
+          "bytes": 1681,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 9,
+          "publishedFiles": 9
+        },
+        {
+          "name": "@jskit-ai/jskit-catalog",
+          "version": "0.1.211",
+          "tarball": "https://registry.npmjs.org/@jskit-ai/jskit-catalog/-/jskit-catalog-0.1.211.tgz",
+          "integrity": "sha512-24faG2SFr5jTrv7QrleCMwxPd0fKtoajB4sQk15ZFYq+2OcJs8bZsUKklI+iogST2mCno1aw1m4wbs/wZ00kqA==",
+          "shasum": "d8673eb1166b3af0c8593f1f54eea7f3b0302704",
+          "bytes": 29453,
+          "exactPreparedArchive": true,
+          "preparedFilesCompared": 7,
+          "publishedFiles": 7
+        }
+      ]
+    },
+    "registryAcceptance": {
+      "public": "/tmp/jskit-v2-rollout-42tSXQ/public-registry-acceptance.json",
+      "accounts": "/tmp/jskit-v2-rollout-42tSXQ/accounts-registry-checks.json",
+      "vibe64": "/tmp/jskit-v2-rollout-42tSXQ/registry-vibe64-acceptance/result.json",
+      "installedAccounts": "/tmp/jskit-v2-rollout-42tSXQ/registry-installed-accounts-final.json",
+      "installedSeeds": "/tmp/jskit-v2-rollout-42tSXQ/registry-installed-seeds-final.json",
+      "installedVibe64Canonical": "/tmp/jskit-v2-rollout-42tSXQ/registry-installed-vibe64-canonical.json",
+      "installedVibe64Fresh": "/tmp/jskit-v2-rollout-42tSXQ/registry-installed-vibe64-fresh.json",
+      "libraryFullPackage": "/tmp/jskit-v2-rollout-42tSXQ/library-registry-accounts.json",
+      "runtime": "Node26.5.0",
+      "nodePath": "/home/merc/.nvm/versions/node/v26.5.0/bin/node",
+      "freshChecks": {
+        "publicSmoke": {
+          "tests": 1,
+          "pass": 1,
+          "fail": 0,
+          "skip": 0
+        },
+        "accountsSmoke": {
+          "tests": 1,
+          "pass": 1,
+          "fail": 0,
+          "skip": 0
+        },
+        "accountsPersistence": {
+          "tests": 1,
+          "pass": 1,
+          "fail": 0,
+          "skip": 0
+        },
+        "vibe64Smoke": {
+          "tests": 7,
+          "pass": 7,
+          "fail": 0,
+          "skip": 0
+        }
+      },
+      "otherChecks": "All three fresh npm ci and graph checks pass; both seed production builds pass; Vibe64 15 package boundaries pass. No broad suites repeated.",
+      "environmentFailure": "Initial Vibe64 updater and registry verifier encountered ENOSPC on /tmp. Updater restored all source/lock/fixture state. Only inactive owned rehearsal dependencies were removed; normal retry passed without force or legacy peer options.",
+      "cleanup": [
+        "/tmp/jskit-v2-rollout-42tSXQ/inactive-installation-cleanup.json",
+        "/tmp/jskit-v2-rollout-42tSXQ/accounts-registry-database-cleanup.json",
+        "/tmp/jskit-v2-rollout-42tSXQ/mysql-registry.json"
+      ]
+    },
+    "finalSourceState": {
+      "recordedAt": "2026-09-13T10:13:43.660486+00:00",
+      "repositories": {
+        "jskit-ai": {
+          "base": "ba6b49252baead0cce791b3ceb39d04c13feb48b",
+          "commit": "e52ce97f921e471ceaaa6ce4dcdc62aa0b09d077",
+          "branch": "main",
+          "clean": true,
+          "pushed": false,
+          "files": {
+            "package-lock.json": "4b569e05fd6366c699e6e61c83f4be6cb862493e10c0f545c6345ec08f5c2a22",
+            "package.json": "dd2317e887741c59cd53ec7291b4433cbbaf745dba25c5c285538399d7b8cedf",
+            "packages/agent-docs/package.json": "49ac1324ecf80a49f41a115418a5c1b1de5822a5b3f7c3a9c160118edf76f0ab",
+            "packages/agent-docs/patterns/feature-package/example/booking-engine/package.json": "7825f6d28cf622a73e8523d56056ac8cf2db4f1d8aaeeec24210d5405956b25f",
+            "packages/agent-docs/patterns/minimal-foundation/example/package.json": "f7aa15c33778c8c7e5f9c53d8ed79e249cf133611f7490400c5ca09163b98a94",
+            "packages/agent-docs/patterns/shell-foundation/example/package.json": "f9d4fc9ec4343cfab4ba2204a5d1900300037b2c4d78dd15589a8eed7a7288c3",
+            "packages/agent-docs/patterns/shell-foundation/example/packages/main/package.json": "b72d39eaba127750dfb8b7bcccb4ad57e0305f48f2d451758297216ad0bf9e71",
+            "packages/agent-docs/reference/autogen/PATTERN_INDEX.md": "f4a7a2fbf63a539ca5a8427fd5c1a73e16b6ee672511554a9e5eb5ce53e01968",
+            "packages/agent-docs/site/patterns/app/minimal-foundation.md": "0131a13f0dd2de278529998166fff08c9c436e3dedb0f0164f8d683eee70aa58",
+            "packages/agent-docs/site/patterns/app/shell-foundation.md": "c1de29fb85e4ff7939dc34b9ec6d4449d4b12b81c540d3b5b9ffdc9297444e16",
+            "packages/agent-docs/site/patterns/assistant/assistant-surface.md": "ac0f67e7259bfcc21fabb224b1ebc8c48e6f1a5b7526caaff4138422f56e1ca5",
+            "packages/agent-docs/site/patterns/auth/auth-surface.md": "05c0b906cfd660e02f702a496084325cf1fecb030e59e6c83780bee5ff99ad26",
+            "packages/agent-docs/site/patterns/auth/supabase-auth.md": "ffa160768fde35a43d6862729b8dad3d5982784b342f3cc4d991049b14e1651e",
+            "packages/agent-docs/site/patterns/connectors/ai-connections.md": "9a3c24ee8c3bf5838e951c4a6baf8daf7a0cdb0d4543115b2f878086eed970d2",
+            "packages/agent-docs/site/patterns/connectors/api-key-connection.md": "689212537a0536ad53e61ddf5f137b4ab266d1fba8d944f8de72541bace743cf",
+            "packages/agent-docs/site/patterns/connectors/assistant-mcp-oauth.md": "b3dd2549a037f6163ee6e7e8d7c71d40222db6d9046961b20b34d4b6f6749136",
+            "packages/agent-docs/site/patterns/connectors/assistant-mcp.md": "c4eee3971041baf4d9ecd02f16739e6dcd65fec3f94a430a8f25e44077f2d0cb",
+            "packages/agent-docs/site/patterns/connectors/aws-storage-queries.md": "0af7eb6c4a849d62d60f736a5d50638c49171628d99c6106228350918b845ecd",
+            "packages/agent-docs/site/patterns/connectors/calendar-cli.md": "ee24a4a5c1b3e95b52e1280d120eeb964e9f52ab61ef95afe5a1439af97378b9",
+            "packages/agent-docs/site/patterns/connectors/event-delivery.md": "40de4451469906e71467e4b5d36d6c47ba34dba26f0ee0a0e5cd3f55a2e32be8",
+            "packages/agent-docs/site/patterns/connectors/firebase-messaging.md": "3cd52f3812e663d58d5516a25471d2b03e8f148f1752f0dc429560a7e51afa82",
+            "packages/agent-docs/site/patterns/connectors/google-ads-search.md": "7ca33127b58a4d0561413f0fb0db015a210cda03f968ebb6a1064ebc6677d2c3",
+            "packages/agent-docs/site/patterns/connectors/oauth-connection.md": "ddc7e3356ba2827d3929165dcada8938550003beb7258a48965de580c066f210",
+            "packages/agent-docs/site/patterns/connectors/paddle-catalogue.md": "df3ba90a0f4f2ce1665521692cba94fcbfcef2636da8b5fa2dbc6bc96c8b382d",
+            "packages/agent-docs/site/patterns/connectors/public-image.md": "6ca01fcefefc45e09582c2151d88d37c3b8fd3ec2d9bfce0aff2e2272696a1bf",
+            "packages/agent-docs/site/patterns/connectors/redshift-queries.md": "94afb78ba4d91ad9e5530790fb899a997b59fa92a0878a12c52dde0306f6bd3b",
+            "packages/agent-docs/site/patterns/connectors/source-scanning.md": "976f720a625159ec6481080322e081e01e3644558dfb79176cc3953dee8606ba",
+            "packages/agent-docs/site/patterns/console/console-surface.md": "2db41c76fc7ba8c302387354dc41d5179209e23bdb6072d90155fc8bf454b1c7",
+            "packages/agent-docs/site/patterns/crud/crud-screen-set.md": "988e251a33453b9c23fe6cdd8d029b0efdad4a75623b32fbff51c3ed0d32d8f8",
+            "packages/agent-docs/site/patterns/crud/json-api-resource-package.md": "961b06c01b7d64e14a15fc2f924b903ed15c084f2b0a6a559ac864fb7cf0ed29",
+            "packages/agent-docs/site/patterns/crud/resource-contract.md": "b83d8696b30d6b7921bdb78f7cc12068ac81a3c9842255f43e67ceb5bd540ee9",
+            "packages/agent-docs/site/patterns/database/mysql-application.md": "1bb63732892e375254b15d25c3163323c3c66927f7d81be82d4031f9839b6311",
+            "packages/agent-docs/site/patterns/database/postgres-application.md": "5b93521366cc687aef48f076847e9c0af9bc46ef8944c1a168d9cc8e54c7aaad",
+            "packages/agent-docs/site/patterns/index.md": "9fb95530477347546e20428c525b9591f07fa94cc48f5c0fa623b2b6129b5984",
+            "packages/agent-docs/site/patterns/mobile/android-application.md": "2d3cfcd42989c80b52a7f93dcf464429ade091d34517b227624a8e96ed4278af",
+            "packages/agent-docs/site/patterns/realtime/realtime-application.md": "63b369d6e29db68484a235c766a2c3f6cff2852141e7e4ef0d086bb0721c3ef0",
+            "packages/agent-docs/site/patterns/rewards/google-rewarded.md": "7030dc2003e27471d3e0505eb33379422dceaf289d6cbdb512c1b2c34a48120c",
+            "packages/agent-docs/site/patterns/server/feature-package.md": "d0777933f1dd8b8a7042bd7d9416ad362b902f4faf2a720f4a6f45468685f4ac",
+            "packages/agent-docs/site/patterns/shell/application-shell.md": "89ab2957b06058b2c59f73be48564b4602a52eb2071789d8db05e764dfddf66f",
+            "packages/agent-docs/site/patterns/ui/page-and-placement.md": "0f023a4eebb8a5ad6b4f893e89e157894edc2d98c1fc4a80abd7b30187c6a247",
+            "packages/agent-docs/site/patterns/users/account-settings.md": "e1f8ee241b26b13931a626783505c6671876519ebdab442a9e627e165cc4e97e",
+            "packages/agent-docs/site/patterns/users/user-administration-server.md": "e7dd93ade1ba848e562ea0ae827c28e5c2bf7c9ba97fe6a2f56edf1784ab13c8",
+            "packages/agent-docs/site/patterns/workspaces/workspace-server.md": "dde89f490319738719a49b2720f1c5843ee5257738f51a7943f035373b7990eb",
+            "packages/agent-docs/site/patterns/workspaces/workspace-surfaces.md": "5f886b675139d52dbf95f70a8120580f3797075ebca68826801bee33d641b35e",
+            "packages/agent-docs/skills/jskit/references/pattern-index.md": "b35896178e0aa2b20d644f6640554c74c878404f46cb869e19ba36844da00c1c",
+            "packages/agent-docs/skills/jskit/references/patterns/app/minimal-foundation/example/package.json": "f7aa15c33778c8c7e5f9c53d8ed79e249cf133611f7490400c5ca09163b98a94",
+            "packages/agent-docs/skills/jskit/references/patterns/app/shell-foundation/example/package.json": "f9d4fc9ec4343cfab4ba2204a5d1900300037b2c4d78dd15589a8eed7a7288c3",
+            "packages/agent-docs/skills/jskit/references/patterns/app/shell-foundation/example/packages/main/package.json": "b72d39eaba127750dfb8b7bcccb4ad57e0305f48f2d451758297216ad0bf9e71",
+            "packages/agent-docs/skills/jskit/references/patterns/auth/supabase-auth/example/package.json": "30c6894adbb117eb1c69438a0785e06d52c6e2603f8583e096182149487e1df1",
+            "packages/agent-docs/skills/jskit/references/patterns/connectors/calendar-cli/example/package.json": "34dbb6ecebbd5a5a181645b04d451968a54d8abe8943567d60dc177b4881e80e",
+            "packages/agent-docs/skills/jskit/references/patterns/crud/json-api-resource-package/example/packages/books/package.json": "f4c4c35b5cbbd584ca38a989beb92861fb04025e865819c87dda231254a57957",
+            "packages/agent-docs/skills/jskit/references/patterns/database/mysql-application/example/package.json": "55840c57bf032d0b1e7c42c4755145fd99acd606eb12f3d78fedb24ac5fc3d4e",
+            "packages/agent-docs/skills/jskit/references/patterns/database/postgres-application/example/package.json": "a419b0d256eb6bebab65bad6b2490861e3d309e8aada9739cb2345e895a7bb20",
+            "packages/agent-docs/skills/jskit/references/patterns/realtime/realtime-application/example/package.json": "9be2cb43576cc1a06d3bea4af6f1a54ae5373b217481bade4fbdac29225854b1",
+            "packages/agent-docs/skills/jskit/references/patterns/server/feature-package/example/booking-engine/package.json": "7825f6d28cf622a73e8523d56056ac8cf2db4f1d8aaeeec24210d5405956b25f",
+            "packages/agent-docs/skills/jskit/references/patterns/users/user-administration-server/example/packages/users-workspace/package.json": "6613553cd9505b0daf90214aeee7cccd9d857108fe5e914409b9ead490c355c5",
+            "packages/agent-docs/skills/jskit/references/patterns/users/user-administration-server/example/packages/users/package.json": "5d2e279a16efaf70e4b00b08882f98788160e3950355e9f6915f8fcf337abc1f",
+            "packages/assistant-core/package.json": "b43bd12b6b182e9c034e1175c94a6c1df33cea029c2397ab428a84386865b570",
+            "packages/assistant-runtime/package.json": "0b40565ea2d12dcaedb11a4a978cb6e2279fc27987dc3a1a3e6267d0b059841b",
+            "packages/auth-core/package.json": "3a00d47918557f803968c2554ee5c2f129aedce924029bbdb68d5571f6fbc827",
+            "packages/auth-provider-local-core/package.json": "ecf1f4fd03aac6a7f9f97d91be6ab78f558c9c948f8eba525ebfca653687ea58",
+            "packages/auth-provider-local-db-core/package.json": "957dbc082e0efe6f294b1850236a2b8a3d915c77b9e92aafda7baf668847383c",
+            "packages/auth-provider-supabase-core/package.json": "aae8fe7dfac4f6094c46c62a319c9b0372c452f1bc96eb366b76a2983f4d6bdb",
+            "packages/auth-provider-supabase-core/patterns/supabase-auth/example/package.json": "30c6894adbb117eb1c69438a0785e06d52c6e2603f8583e096182149487e1df1",
+            "packages/auth-web/package.json": "dcfda5e8a0078f855fb9000e4d8483ab6f906a45bbee59e69e3fd7ba3e178fb2",
+            "packages/connector-google-calendar/package.json": "958d66522012d3d5f5827190745b8e21fe1e7bd5d77571cf3d7b146b959a10e8",
+            "packages/connector-google-calendar/patterns/calendar-cli/example/package.json": "34dbb6ecebbd5a5a181645b04d451968a54d8abe8943567d60dc177b4881e80e",
+            "packages/connectors-catalog/package.json": "abfadccae2fd834325491a05bd00ced40c6bac5f753f80ce5f23eada50d27dd6",
+            "packages/connectors-core/package.json": "e773dc0331a0b5ed17ddb4cc1bfe4d9108dfb30ef25cceaaec5ea4c9bf86f1e4",
+            "packages/connectors-web/package.json": "bc90fe96de71d425486afdd6690b4651789d2e61cbf9f1925fed01b17fcb2720",
+            "packages/console-core/package.json": "31991331efc8fc95122598501172de38aa03722d0d9f41cfd21401039082f4ee",
+            "packages/console-web/package.json": "9aeab32ed49fb0e1acaa5f250b42137c013c1ea2d0d07a284276534562bdb0bc",
+            "packages/crud-core/package.json": "542a806d2aa974294a37a9d13e00eaf1e24ee9a504a5ce614f3fc79cdc976494",
+            "packages/crud-core/patterns/json-api-resource-package/example/packages/books/package.json": "f4c4c35b5cbbd584ca38a989beb92861fb04025e865819c87dda231254a57957",
+            "packages/database-runtime-mysql/package.json": "bb1a49a2d6086040f4256b219e59cce4cacb8ede79ac2a6d29c9c3658e2dd22c",
+            "packages/database-runtime-mysql/patterns/mysql-application/example/package.json": "55840c57bf032d0b1e7c42c4755145fd99acd606eb12f3d78fedb24ac5fc3d4e",
+            "packages/database-runtime-postgres/package.json": "0f63c8661b845200f73af9543004b5f72919afca96e0871211b809aacc9b9c91",
+            "packages/database-runtime-postgres/patterns/postgres-application/example/package.json": "a419b0d256eb6bebab65bad6b2490861e3d309e8aada9739cb2345e895a7bb20",
+            "packages/database-runtime/package.json": "6324ecae02900c97ae124b1719af4a67502e5ae34ae591ef206d1aaca84df6fd",
+            "packages/http-runtime/package.json": "997e62cbb405c14082f911c1112272750b3b1278c901c8ae57d79eab89957ba3",
+            "packages/http-web/package.json": "e92d7efa00db5eb49742af8b85138bb193a3e4f811cf41eccf0e6a3bac350f2d",
+            "packages/json-rest-api-core/package.json": "468633e3a18048264a691310bcf7e1077b81d2bc53c42498e41c4c0df800cba1",
+            "packages/kernel/package.json": "7a0230759433624c45d4d7402a94031a7271029d37318e9d633b0000513ae60a",
+            "packages/mobile-capacitor/package.json": "6047e181aa2b44c63463be90b10080bd6f5e6a2c3477a3edbb90ea41c6e9cc7a",
+            "packages/payments-core/package.json": "b6dcdb37e5eca4306c185fbaa713b9d20b38efdb758ab8e5b3634955abf1d5d1",
+            "packages/payments-web/package.json": "be2b6705cf481089f6fd3292ca31a0dc7f59075988190efb36282e2cb0129f1f",
+            "packages/realtime/package.json": "1c9aa1b829c4d4bd40b3732a40c2177141801dff52215e4845d07bf6ca3e8018",
+            "packages/realtime/patterns/realtime-application/example/package.json": "9be2cb43576cc1a06d3bea4af6f1a54ae5373b217481bade4fbdac29225854b1",
+            "packages/resource-core/package.json": "1e9cdc6c482707b18d9e00042e7cf3431972fd06900093151a3322fe50f9dc75",
+            "packages/resource-crud-core/package.json": "3bd89e7e6a09d4a9dadffc8e922de0e4143573facf0a54d2569d638f9fd6ff0d",
+            "packages/rewarded-core/package.json": "a9356aba740b84af8f5ebe016f40d246c118897910ad48738f275d8df24a8129",
+            "packages/rewarded-web/package.json": "841b610306bf42a5eb73c79f9a61efa9cda3eefa7641aef3c328f1a3fb2cee7d",
+            "packages/shell-web/package.json": "5aa01a81447267fe3f69aa5d716d956a6389a03690d10035113eb8227b15ba4a",
+            "packages/storage-runtime/package.json": "d89a6eaaa58a4f453c96d6be628f8afe696bc6e75e0d059fde19ff1758387f79",
+            "packages/uploads-image-web/package.json": "eba195b3fcf0fccfa99112cc245b8c4363e7001993fc7170961726f43523333d",
+            "packages/uploads-runtime/package.json": "944cfe92702b03a01d29ab67c4757529fe8295f7dffa45f76d5c1789be92dfec",
+            "packages/users-core/package.json": "42c1f024f827598daf30f177f84b8fec93fe4758ea02113e4290adcbb775bd1d",
+            "packages/users-core/patterns/user-administration-server/example/packages/users-workspace/package.json": "6613553cd9505b0daf90214aeee7cccd9d857108fe5e914409b9ead490c355c5",
+            "packages/users-core/patterns/user-administration-server/example/packages/users/package.json": "5d2e279a16efaf70e4b00b08882f98788160e3950355e9f6915f8fcf337abc1f",
+            "packages/users-web/package.json": "b6f2a0c4c21fbafc50246b5c05abf361dbe5aff3cc8a825435a1235d5f50056d",
+            "packages/workspaces-core/package.json": "5a3a5a0962bcd69a2a5c56bd5cde92825e8b2b40ad960dc97627f28043270b88",
+            "packages/workspaces-web/package.json": "5aaced67d7a13a8b1aa223a61d9d4a74d3a90e417c69960034661375a5526612",
+            "tooling/config-eslint/package.json": "ec3c05fa78ffe21793cdf7d7068622017712a0bacac1dea3ad276e0d1b213a00",
+            "tooling/jskit-catalog/catalog/packages.json": "30e94cc3d88ba83a6610c697c9329c399c613eef40aa96a6d53187e1bc5aa951",
+            "tooling/jskit-catalog/package.json": "56c8eaef77568358e23a3bf9a935d71b05bed74439608544749e69718052f767"
+          }
+        },
+        "vibe64": {
+          "base": "c14eb989d4e54785fa55f5c863830257f932d977",
+          "commit": "777a6b1acf37d47326a665a8b3a8836c6551b278",
+          "branch": "main",
+          "clean": true,
+          "pushed": false,
+          "files": {
+            "package-lock.json": "3b74d600c2044e2a30f48750c832543b40ccbf4292dcfba4db7e7662d6dfc080",
+            "package.json": "6f6144604a8d711d55d713c2731689358b44ce3ea95154e85ca47cd5438896f2",
+            "packages/current-app/package.json": "9d057281487a7c08761e757d22d2c3f9e552ec9e550545800759f6d12099e80f",
+            "packages/main/package.json": "130ec465af41f378aafcec3454722ab94771a6fb328f8a0ef019464fdacb6ee9",
+            "packages/studio-health/package.json": "3f66612b12e6ff590f27edfa5bcb72855975041ca1192a66c078ab4512e88f4a",
+            "packages/vibe64-accounts/package.json": "8d7919f424fa5721b7df0654af33585bb800efdb969ba6a961bee21ab2774022",
+            "packages/vibe64-core/package.json": "36a47193ca54199e653d1a73f9a2f12d95d4af2ee922111a7a192bf2c6855c57",
+            "packages/vibe64-database-tools/package.json": "df70b33b0b60e6cfa0ad98e8261115cb674131d89e02eb68dc38bccef60777e6",
+            "packages/vibe64-project/package.json": "88ab94fe7bfd1732156430d9e5a3daa664452e1aae69f5785e9750b9e2b4ae85",
+            "packages/vibe64-sessions/package.json": "cc0fe762be75e97383ef3abc608cea4cbb3c68edbf6ffe7aca1d944831fc16ab",
+            "packages/vibe64-source-editor/package.json": "f8dbfad377aa201a75b7f8e16f2c34b51b9d2822a043fac830b63345c37e1824",
+            "packages/vibe64-system-graph/package.json": "16e6c2b8af6ca9ff0b2e469f53d2d7094b0ae1c4fd71f2e8524bd7d4c7896079",
+            "packages/vibe64-terminals/package.json": "eece15799a9d5a9b638f213b45bb9a17b96832edf2f1840ef8e5f774f785814d",
+            "tests/client/databaseErdFullscreen.vitest.js": "fd6486b6fa333a3b0765b1546b1b9ee9daa8a47e9f0b130f00811f9318272862",
+            "tests/client/integrationCallbackDefaults.vitest.js": "a26ed618a77f6a86f6be2de6d8fca0ccc2969151d6a26972429f5b4624391e0b",
+            "tests/client/useVibe64AutopilotViewRouteHydration.vitest.js": "425f89379ef9ee8cca5fd5ec9abb70e74c442c6e2d83b50aa585d3e98fc853fa",
+            "tests/client/useVibe64SourceEditorFileSync.vitest.js": "86106a41859b46b85ff7def986678622e4d630e1777d4d2d467d9e9af04c3858",
+            "tests/client/vibe64AutopilotViewCommandSpy.vitest.js": "090acfb96e4a171178c1fe664efe02edfdf27c628814b961d232be8c07f198d8",
+            "tests/client/vibe64DashboardPlacements.vitest.js": "967a6539b05a9a7638f0a97c452ad5a979689a0edebd4834b91406c178eaa915",
+            "tests/client/vibe64RecoveryChatAttention.vitest.js": "f0750d35219a781a4cfa43fe394b5005006a64fa4d45419a4004a2901731cd56",
+            "tests/e2e/self-contained-smoke.spec.ts": "0429b9dde84020d32875f8c905382799b86e54283bb2b3058d557cbfb3c99c07",
+            "tests/server/vibe64IntegrationSetupCommand.unit.test.js": "b8e0e0ff171542c2b3c69431b23bd2fbf686d90070b3ff80951b96a0a20e2a21",
+            "tests/server/vibe64RemainingFeaturesRuntime.unit.test.js": "9c8e68ef71f2f892e6e4ea1bf322c24daab974f4ce583dbbd2b535b614690e4d",
+            "tests/server/vibe64SessionsDirect.unit.test.js": "23ff0653f5c7ee0c0efb631d6bbac0b920f4e5296610c901e5bd85142a9b4892"
+          }
+        },
+        "seed-jskit": {
+          "base": "02cf10cef15a2a44b73adf52e5cd60e53b7bf9bf",
+          "commit": "25d34e282fd571e2b1b44104d20b2d36b58828fe",
+          "branch": "public",
+          "clean": true,
+          "pushed": false,
+          "files": {
+            "README.md": "6b41690e3539aaf6d79b31126ffe6db3cb8d4579053e15b8266509acb53af92c",
+            "genesis/stack.md": "f8cfea5a7f36e6aaf9c30f4b6ba09ff5e9f31d903654bedf3295d737652d157d",
+            "package-lock.json": "c66ba4227579f7c02ef2db7119848bb7f795488fba93af58412ce0e96106d77c",
+            "package.json": "292ede33c5a52d18a87c4879d5d00f9133bc6eeb6cd0ebfba3a535d80f33d41d",
+            "packages/main/package.json": "b72d39eaba127750dfb8b7bcccb4ad57e0305f48f2d451758297216ad0bf9e71"
+          }
+        },
+        "seed-jskit-accounts": {
+          "base": "91dad8e418ada6594001b8282c2b87c41e8fc3e5",
+          "commit": "f1617363e3e4e3180612cb1dd53eaaa120c3777d",
+          "branch": "accounts",
+          "clean": true,
+          "pushed": false,
+          "files": {
+            ".github/workflows/verify.yml": "bf8406724e1043820ac92b2291ef19ac5018f49552168f6fa84e6e405c4b9d45",
+            "README.md": "0806368fd1529cc07c680b3fb11d704f87bca2ed5fdc17db5cbd40bb253a95d2",
+            "genesis/stack.md": "947c169bf8c8a6c37d828048bfd54aecb1a7b2a358c4f9e851fab02c4c78146a",
+            "package-lock.json": "d9583216a350e8abb4ca6cf4e6a47234d1a7e5357d84b469364316508ad27553",
+            "package.json": "bc7b47fb9e7049313706b448e571580e6948801f68728f132e0c2367c20cfb74",
+            "packages/main/package.json": "ab92c0b1dc4788971989a5edd52d70f8a02d963b08cba7a0d4db75aad03e3604",
+            "tests/server/account-persistence.integration.js": "56e8898cb8784233fd1f890471934a7c9309629ce451a0893303e9adede423aa"
+          }
+        }
+      },
+      "libraryRuntime": "f97dc859321aee41915f3b0e256a861c382bc1b3",
+      "libraryExecutableDiffFromRuntime": []
+    },
+    "completion": {
+      "completedItems": [
+        "M-10",
+        "M-14",
+        "R-A10-10",
+        "R-B0-09",
+        "C1-01",
+        "C1-02",
+        "C1-04",
+        "C1-07",
+        "C2-01",
+        "C2-02",
+        "C2-04",
+        "C2-05",
+        "C2-06",
+        "C2-07"
+      ],
+      "report": "old/docs/development/pending-jskit-ai/preparation-status.md#completed-rollout-2026-09-13",
+      "master": "250/250 complete; zero open",
+      "scopeExclusions": [
+        "Git branch pushes and official remote seed branch updates",
+        "Online deployment",
+        "Owner-managed ports of the five other canonical apps"
+      ],
+      "acceptedPackagingLimit": "connectors-web0.1.3 additional45byte test-result artifact; every prepared runtime/manifest file unchanged",
+      "broadTestsRepeatedAfterPublication": false,
+      "finalAudit": {
+        "path": "/tmp/jskit-v2-rollout-42tSXQ/final-completion-audit.json",
+        "sha256": "7cc0e7f79e9edca20184f970e837d5ad39f5f7617e0da34d33f4ad8a4ccebd22",
+        "result": {
+          "checkedAt": "2026-09-13T10:14:40.566227+00:00",
+          "master": "250/250",
+          "originalManifestFieldsPreserved": true,
+          "consumerCommitsAndHashesVerified": true,
+          "migrationGuideUnchanged": true,
+          "libraryExecutableUnchanged": true,
+          "services": [
+            {
+              "metadata": "mysql.json",
+              "pid": 1640100,
+              "process": "absent",
+              "port": 44345,
+              "portClosed": true
+            },
+            {
+              "metadata": "mysql-registry.json",
+              "pid": 1802604,
+              "process": "absent",
+              "port": 37695,
+              "portClosed": true
+            },
+            {
+              "metadata": "registry.json",
+              "pid": 1637588,
+              "process": "absent",
+              "port": 44751,
+              "portClosed": true
+            }
+          ],
+          "testsRerun": false
+        }
+      },
+      "independentFinalSeedReview": {
+        "path": "/tmp/jskit-v2-rollout-42tSXQ/final-seed-source-review.json",
+        "sourceFiles": 139,
+        "result": "All source bytes match accepted registry copies; no unintended manifest/lock/source changes."
+      },
+      "independentFinalVibe64Review": {
+        "path": "/tmp/jskit-v2-rollout-42tSXQ/registry-vibe64-acceptance/final-identity.json",
+        "sourceFiles": 898,
+        "result": "All source/lock/fixture bytes match; no unrelated third-party changes. Owned home cache removed, four unrelated idle processes untouched."
+      },
+      "independentFinalReportReview": "Passed: counts, exact artifact exception, all173libraryfiles, tenfreshchecks, staged failures/skips and existing rollout exclusions agree with evidence. No correction or additional execution needed."
+    }
   }
 }
