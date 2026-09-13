@@ -3539,5 +3539,1283 @@
       },
       "independentFinalReportReview": "Passed: counts, exact artifact exception, all173libraryfiles, tenfreshchecks, staged failures/skips and existing rollout exclusions agree with evidence. No correction or additional execution needed."
     }
+  },
+  "publicationFollowup": {
+    "requestedOrder": "Source pushes and npm publication first; five canonical application migrations follow. Hosted deployment requires its own explicit request.",
+    "status": "Source delivery and publication phase complete; five canonical application migrations remain pending.",
+    "library": {
+      "name": "json-rest-api",
+      "version": "2.0.0",
+      "latest": true,
+      "dist": {
+        "tarball": "https://registry.npmjs.org/json-rest-api/-/json-rest-api-2.0.0.tgz",
+        "integrity": "sha512-b2AFpqS6g/EycGSYFBZiSOz5zljZHdJv+MBDSXr5MV6Xj1Y6EQrAD2NKna4JPfq0w0ErIhrM5dQ1yhjX9YIy5A==",
+        "shasum": "c1b039ec30ea11e5699f2a6831ada45fd36f5435",
+        "fileCount": 173
+      },
+      "downloadedArchiveByteIdentical": true,
+      "testedRuntimeCommit": "f97dc859321aee41915f3b0e256a861c382bc1b3",
+      "publishedSourceCommit": "54238bf5a1c90ce43bcfc557525ba877a645d554",
+      "verifiedSourceCommit": "b25634c9d983dc4d020a7d7f8d8865f4055d12ff",
+      "runtimeAndDeclarationsUnchanged": true,
+      "changesSinceTestedArtifact": [
+        "docs/GUIDE/33-migrating-to-v2.md"
+      ],
+      "prePushTests": {
+        "node": "24.6.0",
+        "pass": 6272,
+        "fail": 0,
+        "skip": 1,
+        "skipReason": "Ordinary suite canonical-only fixture; canonical suite executes it."
+      },
+      "ci": {
+        "conclusion": "success",
+        "headSha": "b25634c9d983dc4d020a7d7f8d8865f4055d12ff",
+        "jobs": [
+          {
+            "name": "Library / Node 24",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103716652378"
+          },
+          {
+            "name": "Database / Node 24 / redis",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103716652383"
+          },
+          {
+            "name": "Database / Node 24 / mysql2",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103716652409"
+          },
+          {
+            "name": "Database / Node 24 / pg",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103716652416"
+          },
+          {
+            "name": "Clean package / Node 24",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103716652417"
+          },
+          {
+            "name": "Verification",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689/job/103717872929"
+          }
+        ],
+        "status": "completed",
+        "url": "https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689"
+      },
+      "pages": {
+        "commit": "b25634c9d983dc4d020a7d7f8d8865f4055d12ff",
+        "status": "built"
+      },
+      "ciSetupRepair": "APT disposable-binary download ignores preinstalled versions unavailable from configured repositories. Original failure reproduced; corrected command selects all nine repository binaries. Replacement full CI passed.",
+      "evidenceRoot": "/home/merc/.cache/json-rest-api-publication-20260913"
+    },
+    "jskit": {
+      "source": {
+        "reviewedCommit": "859705a819005a6be2d1175df26cc942b90baa21",
+        "mainAndRemoteCommit": "3bfa1d218656e0a5c00039724e52dcbf4daa3d1a",
+        "pr": "https://github.com/mobily-enterprises/jskit-ai/pull/421",
+        "merge": "normal merge, no bypass",
+        "workingTreeClean": true
+      },
+      "publication": {
+        "preparedOnce": true,
+        "officialPublisherExitCode": 0,
+        "packagesPublished": 40,
+        "packagesVerifiedAsLatest": 40,
+        "actualArchivesByteIdentical": 40,
+        "publishedFiles": 2155,
+        "integrityExceptions": [],
+        "catalog": "0.1.212",
+        "jsonRestApiHost": "0.1.131",
+        "crudCore": "0.1.198",
+        "connectorsWeb": "0.1.4",
+        "packageVersionsAndIntegrities": "artifacts.json",
+        "registryEvidence": "publication-verification-20260913T113526.json"
+      },
+      "library": {
+        "dependency": "exact npm 2.0.0 in host and CRUD",
+        "registryUrl": "https://registry.npmjs.org/json-rest-api/-/json-rest-api-2.0.0.tgz",
+        "sha1": "c1b039ec30ea11e5699f2a6831ada45fd36f5435",
+        "installedFilesVerified": 173,
+        "changeFromTestedGitArtifact": "only docs/GUIDE/33-migrating-to-v2.md",
+        "remainingGitDependencyReferences": 0
+      },
+      "verification": {
+        "node24FocusedTests": {
+          "tests": 41,
+          "pass": 41,
+          "fail": 0,
+          "skip": 0
+        },
+        "checks": [
+          "runtime dependencies",
+          "package boundaries",
+          "deterministic generated outputs",
+          "git diff --check"
+        ],
+        "packedRuntimeFilesUnchanged": 787,
+        "exportTargetsExist": 431,
+        "unrelatedLockChanges": 0,
+        "ciRuns": [
+          {
+            "id": 34754569599,
+            "event": "pull_request",
+            "headSha": "859705a819005a6be2d1175df26cc942b90baa21",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599",
+            "jobs": [
+              {
+                "id": 103716660191,
+                "name": "verify (24)",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599/job/103716660191",
+                "failedSteps": []
+              },
+              {
+                "id": 103716660253,
+                "name": "browser-contracts",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599/job/103716660253",
+                "failedSteps": []
+              },
+              {
+                "id": 103716660281,
+                "name": "verify (26)",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599/job/103716660281",
+                "failedSteps": []
+              },
+              {
+                "id": 103716933240,
+                "name": "deploy-docs",
+                "status": "completed",
+                "conclusion": "skipped",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599/job/103716933240",
+                "failedSteps": []
+              }
+            ]
+          },
+          {
+            "id": 34754602110,
+            "event": "push",
+            "headSha": "3bfa1d218656e0a5c00039724e52dcbf4daa3d1a",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110",
+            "jobs": [
+              {
+                "id": 103716746466,
+                "name": "verify (24)",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110/job/103716746466",
+                "failedSteps": []
+              },
+              {
+                "id": 103716746527,
+                "name": "verify (26)",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110/job/103716746527",
+                "failedSteps": []
+              },
+              {
+                "id": 103716746530,
+                "name": "browser-contracts",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110/job/103716746530",
+                "failedSteps": []
+              },
+              {
+                "id": 103717000535,
+                "name": "deploy-docs",
+                "status": "completed",
+                "conclusion": "success",
+                "url": "https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110/job/103717000535",
+                "failedSteps": []
+              }
+            ]
+          }
+        ],
+        "ciSkip": "PR docs deployment intentionally skips; main docs deployment succeeded"
+      },
+      "packaging": {
+        "connectorsWebFiles": 4,
+        "included": [
+          "src/client/index.js",
+          "src/client/IntegrationConfigurationFields.vue",
+          "README.md",
+          "package.json"
+        ],
+        "excluded": "test fixtures and generated Playwright result; published 0.1.3 remains immutable"
+      },
+      "scope": "JSKIT publication/push finished; selected consumer refreshes owned by parent; five business-app ports remain deferred.",
+      "registryPackages": [
+        {
+          "name": "@jskit-ai/assistant-core",
+          "version": "0.1.163",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 44,
+          "url": "https://registry.npmjs.org/@jskit-ai/assistant-core/-/assistant-core-0.1.163.tgz",
+          "integrity": "sha512-j59qrKr+ZIBH+9aKNknbat6aff9SwdruAD4pWp6Ma+/a72t1shVpjwH/mGx5Eez0kN6ewggV4C73Y8u7ghhxtQ==",
+          "sha1": "cdbcfe30a6dda2d215013ab3619e2660af44fd64",
+          "size": 39014,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/assistant-runtime",
+          "version": "0.1.158",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 49,
+          "url": "https://registry.npmjs.org/@jskit-ai/assistant-runtime/-/assistant-runtime-0.1.158.tgz",
+          "integrity": "sha512-3VyY1YzF0QDHnEqE8ewJpat7542ggnovS9Ycz4jgNxGopqcRvBk2DjLUxF5uEjZFYMAlnDv01DxHOXCPyx+fUg==",
+          "sha1": "87d9d679d1611e875ae342efd40f93fddfd092ac",
+          "size": 43816,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/auth-core",
+          "version": "0.1.185",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 75,
+          "url": "https://registry.npmjs.org/@jskit-ai/auth-core/-/auth-core-0.1.185.tgz",
+          "integrity": "sha512-jktIZjDRz/5aY6NWnMAcaCFnwsoNuQivkW4BnN35I+oTkP93KYFkc/ns0mkH/th8EFGFpuvyzt0JD1/Abwvz4w==",
+          "sha1": "d1d937cd83f6dd4ae8c44ac868def2ea81801831",
+          "size": 30888,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/auth-provider-local-core",
+          "version": "0.1.88",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 10,
+          "url": "https://registry.npmjs.org/@jskit-ai/auth-provider-local-core/-/auth-provider-local-core-0.1.88.tgz",
+          "integrity": "sha512-LDEL36Sl7xX75qAMoGvlOAKCUSS0yU1GU9W+UtlenDtjMI2i+n5yRFdSKDq85UjJx9Qp2M+ZcVc9ti8oGIGrEw==",
+          "sha1": "8b505f90f869f6c1adfe44e9942082bbb6690421",
+          "size": 18829,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/auth-provider-supabase-core",
+          "version": "0.1.184",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 38,
+          "url": "https://registry.npmjs.org/@jskit-ai/auth-provider-supabase-core/-/auth-provider-supabase-core-0.1.184.tgz",
+          "integrity": "sha512-GBV0RrBE8Zq1QjTGGurtymtavdabyjNFx4taVhB83tZQL0rCgOIzOMRijkeQSErjh12RqPaXL3SyAK7KZIGrqg==",
+          "sha1": "871c0e92ef4815de1e1170c677fb60389d1bc5dd",
+          "size": 31092,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/connector-google-calendar",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 11,
+          "url": "https://registry.npmjs.org/@jskit-ai/connector-google-calendar/-/connector-google-calendar-0.1.4.tgz",
+          "integrity": "sha512-a48poj8Ms411GPAjxGciLdv2HDugrF2iFzWMvyciFXDMPDTV2RktzyKV7JZFK+JrgHkB4LwN0YgG3aApRX311Q==",
+          "sha1": "9ff4e226b41f4cef4d1b8c9bd9e67e058390b470",
+          "size": 13308,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/connectors-core",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 22,
+          "url": "https://registry.npmjs.org/@jskit-ai/connectors-core/-/connectors-core-0.1.4.tgz",
+          "integrity": "sha512-/4Gvrs2xvpbuDz2gsH19m3Bhx1z7jjB0AAYenEyB5Pm/NnTxZPcbqnE0rA1fwE/vWs+5nUQxN56xT9lqb7OIlA==",
+          "sha1": "7994fed701734406657e9c807257356712dd04ff",
+          "size": 56397,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/console-core",
+          "version": "0.1.150",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 21,
+          "url": "https://registry.npmjs.org/@jskit-ai/console-core/-/console-core-0.1.150.tgz",
+          "integrity": "sha512-k7TSnxHnGOnzB25DN7H9q9Z4nLMp8QSiQyrXpyEWkTumEwcLmYReT9Dr9mNeDqGRfq4ChImX6A4uF8k6mzqFyQ==",
+          "sha1": "781fbde3a660b0a4b270ebaccc0e5a5178e53e8b",
+          "size": 9278,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/console-web",
+          "version": "0.1.155",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 7,
+          "url": "https://registry.npmjs.org/@jskit-ai/console-web/-/console-web-0.1.155.tgz",
+          "integrity": "sha512-bVAQrCT6EUsKiyp2w1A8xZ7kvP5gDnD0UVR/KhfEYr5WqRKmAEl9dptt/BuX4S5H426tDs0hm1G7VkWJpUpkjA==",
+          "sha1": "49012985cf9b6bea515925bf00841c62b4c43993",
+          "size": 3432,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/database-runtime",
+          "version": "0.1.187",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 35,
+          "url": "https://registry.npmjs.org/@jskit-ai/database-runtime/-/database-runtime-0.1.187.tgz",
+          "integrity": "sha512-ja3QLcJEipl2uSfEl0s2Y9BSNsUvbkf/a4Sxk0czsKBwkdjKUOogwdgoB8c2+bhT33CUadDVAYfezEXKOxCF8Q==",
+          "sha1": "be4c1069003a610316f7618112cf03bac6084382",
+          "size": 17905,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/database-runtime-mysql",
+          "version": "0.1.185",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 17,
+          "url": "https://registry.npmjs.org/@jskit-ai/database-runtime-mysql/-/database-runtime-mysql-0.1.185.tgz",
+          "integrity": "sha512-/xYR4G4uG2oSc1Wkoj9s6p7leUJQz63PPEF0cruzmX/3E4byHbzWWhxcby45LrfS7uGfAZWb3p52zwaa+4zVlg==",
+          "sha1": "abc91dc384acfaf79f3590cc3b2a2adcae474fd1",
+          "size": 10975,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/database-runtime-postgres",
+          "version": "0.1.184",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 15,
+          "url": "https://registry.npmjs.org/@jskit-ai/database-runtime-postgres/-/database-runtime-postgres-0.1.184.tgz",
+          "integrity": "sha512-KVzqbyZft7BqJruWy7a3HacL3m06Du7Mmr3NmtmcxRCTsu2sabV6yo80KMRtyOwxgpoxvIFHOc9MILUO8JhjHA==",
+          "sha1": "072b55c83ab80511efa05101ff896f764b6e0cf7",
+          "size": 4254,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/http-runtime",
+          "version": "0.1.185",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 46,
+          "url": "https://registry.npmjs.org/@jskit-ai/http-runtime/-/http-runtime-0.1.185.tgz",
+          "integrity": "sha512-x8XUOIwlqhiiYTK8qp1bz9ZTyN2p7odC07YLbm4Fi1t74rg+Z9hLKKHB3JckpGBqDQsxCct/Jta4qO8GSQj1ig==",
+          "sha1": "a6cc80a1693feb5b306af6e7b38bf40dce6b15dd",
+          "size": 40444,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/resource-core",
+          "version": "0.1.129",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 3,
+          "url": "https://registry.npmjs.org/@jskit-ai/resource-core/-/resource-core-0.1.129.tgz",
+          "integrity": "sha512-zL/zSnuGcR5CNRwNbYchmkK6XI0uoM1xvfF1/ax1PaPKphWzmrOXsWmKBXZMCuPo4MIY26gT+GwZrCJGhgWNmw==",
+          "sha1": "4d9d1fb8e01d8acf82d7c5bd251da8dcad07897e",
+          "size": 2299,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/resource-crud-core",
+          "version": "0.1.129",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 14,
+          "url": "https://registry.npmjs.org/@jskit-ai/resource-crud-core/-/resource-crud-core-0.1.129.tgz",
+          "integrity": "sha512-qTgcP5Vk7fBAeQcW2x4cBWP3Ay1nMWKqtR7HbQx8E1uy0U59iNGoewHGMII7QpzJXwK2ZyFUpwmXCckPG0ZbNA==",
+          "sha1": "193c46b1a92de6779c25b76021251b30f8b5341b",
+          "size": 17019,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/rewarded-web",
+          "version": "0.1.123",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 14,
+          "url": "https://registry.npmjs.org/@jskit-ai/rewarded-web/-/rewarded-web-0.1.123.tgz",
+          "integrity": "sha512-VNUQTigf7id3F2wUplVX4Ptbz1Phs4N+RK7Ud/vfiYlXB+H7/mSkDx827c1I3OaNGXQGztdUsrMLMKQ9jp006Q==",
+          "sha1": "2537186f54a021d5993d97b55e1d94779a8dfe07",
+          "size": 9942,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/shell-web",
+          "version": "0.1.191",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 105,
+          "url": "https://registry.npmjs.org/@jskit-ai/shell-web/-/shell-web-0.1.191.tgz",
+          "integrity": "sha512-gDzmqSGQyjzl6I9+4CTRsy/6oZ0hVpZ90xGSasqCayNzMiYnGuNRG3+gPAwZFVNrFJW+7lK/DvbzC2uVuIhJpA==",
+          "sha1": "28a3aad724470f681251510ea3dd198620eb4347",
+          "size": 75930,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/storage-runtime",
+          "version": "0.1.184",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 5,
+          "url": "https://registry.npmjs.org/@jskit-ai/storage-runtime/-/storage-runtime-0.1.184.tgz",
+          "integrity": "sha512-Z68aNfutvbrxe9bYf3QRz4n+q/Sx1ItRFlYps5fS6W8Og5AaFAqn9BDUeg0akuZGUK5Lqzysvj9KnoW607oaDA==",
+          "sha1": "1278fe07a0cdb278777cb75f99e23c1b51fd1fce",
+          "size": 1631,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/uploads-image-web",
+          "version": "0.1.162",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 12,
+          "url": "https://registry.npmjs.org/@jskit-ai/uploads-image-web/-/uploads-image-web-0.1.162.tgz",
+          "integrity": "sha512-4HXdJJpUJskHCkBPNYC+rdEap/9/IzGcaPgnrrKzOGdOK/d/csQdXlVrjvzH99UO0PRPf5xMM8cr0tdfiQIV6w==",
+          "sha1": "d5eea253aa166ed939a858a90d887336a2f4c65a",
+          "size": 8013,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/uploads-runtime",
+          "version": "0.1.162",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 16,
+          "url": "https://registry.npmjs.org/@jskit-ai/uploads-runtime/-/uploads-runtime-0.1.162.tgz",
+          "integrity": "sha512-mES04ZBawtKPS83SFuRUa737SEboWAKEHTJ4ipWgupco8Iv5c+MZN+eA8JuCLHqhdHvHgvRxlcCEe45vvHwqzw==",
+          "sha1": "96baae73e8968cb2d79d903238724f9ca75ca8f3",
+          "size": 6115,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/users-core",
+          "version": "0.1.200",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 66,
+          "url": "https://registry.npmjs.org/@jskit-ai/users-core/-/users-core-0.1.200.tgz",
+          "integrity": "sha512-tBMTXL/i0FMhopfBJqPDBIPgRnHljJxDqtoyoSb4WM3iMCq+1L6l9kDX/bjGSGKUcPt5EefWlz85UAd8J5s7qg==",
+          "sha1": "d7732b86da5e1905294c117ceb679ed30b925a3c",
+          "size": 35637,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/workspaces-core",
+          "version": "0.1.165",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 89,
+          "url": "https://registry.npmjs.org/@jskit-ai/workspaces-core/-/workspaces-core-0.1.165.tgz",
+          "integrity": "sha512-kqrncXoa7SqjRneEXcFAlvuQygitFef3/mIdh4uNprHnaPmXRKvUhrkrxeRK3UqzyRQqwH0G1SASSnNWf1DgUg==",
+          "sha1": "8636314187fb19e1265cb09062bfcbae626e44a7",
+          "size": 73890,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/workspaces-web",
+          "version": "0.1.166",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 58,
+          "url": "https://registry.npmjs.org/@jskit-ai/workspaces-web/-/workspaces-web-0.1.166.tgz",
+          "integrity": "sha512-EUQ/n4YnVhQs81R6Y6jOgHmf3m9gOj3PF/q13qjKKthy2moHY+Y667RfE1tVGEuEL9c4xcJWjK1hBU0GoioCBg==",
+          "sha1": "5ef1970331d1ba92b7feba69c8e247177ccd645a",
+          "size": 47989,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/config-eslint",
+          "version": "0.1.184",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 9,
+          "url": "https://registry.npmjs.org/@jskit-ai/config-eslint/-/config-eslint-0.1.184.tgz",
+          "integrity": "sha512-e/RPVqH5TsNzP84EUKrZbXAEsV/5zCxfmnoWruWDHFGHL5bV1XI3lwO6NMqXNeJQb9o0bBDDyOHHznZ4Pjxc0Q==",
+          "sha1": "7fab7339cfcc226025abfc1c6e47b82bc88abc80",
+          "size": 1681,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/jskit-catalog",
+          "version": "0.1.212",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 7,
+          "url": "https://registry.npmjs.org/@jskit-ai/jskit-catalog/-/jskit-catalog-0.1.212.tgz",
+          "integrity": "sha512-rV67f1GKdMGxg2/Ch3mrLDfRIx+37EOJmlVWDfNmFsNyUIlTwCpBXJyKZeq5tb5snpI+L6W0qVPKEMUrum+Z+w==",
+          "sha1": "5b0b99b1c82f79d06ac332bf23fc21b4cbe9e18d",
+          "size": 29381,
+          "checkedAt": "2026-09-13T11:33:22.373993+00:00"
+        },
+        {
+          "name": "@jskit-ai/agent-docs",
+          "version": "0.1.159",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 420,
+          "url": "https://registry.npmjs.org/@jskit-ai/agent-docs/-/agent-docs-0.1.159.tgz",
+          "integrity": "sha512-N64YAQ4RsQLpocs5l6EdlrxrHlBKVo5OURsAlOOyIVGTqt0Go5GN1+dabGMJe2jNguT/ePLxiVPf2aXChqcHrQ==",
+          "sha1": "b48d936105b53e3a1c4b68ad463a887cdbce89f4",
+          "size": 247833,
+          "checkedAt": "2026-09-13T11:35:22.671001+00:00"
+        },
+        {
+          "name": "@jskit-ai/auth-provider-local-db-core",
+          "version": "0.1.79",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 6,
+          "url": "https://registry.npmjs.org/@jskit-ai/auth-provider-local-db-core/-/auth-provider-local-db-core-0.1.79.tgz",
+          "integrity": "sha512-AZRETuAqzcLtEhvypyO7exxCC1vlUri6lihHtvt/gdmjWo2IR6pYI2hamlrVYbJkhC9Q6mBXcUi5h9X8+BiOAQ==",
+          "sha1": "6d69914da9109a388b8e998b7a1ae50aefe3f4eb",
+          "size": 6715,
+          "checkedAt": "2026-09-13T11:35:22.378356+00:00"
+        },
+        {
+          "name": "@jskit-ai/auth-web",
+          "version": "0.1.187",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 70,
+          "url": "https://registry.npmjs.org/@jskit-ai/auth-web/-/auth-web-0.1.187.tgz",
+          "integrity": "sha512-DhqYSAU7BVj2VgKm0Wjru/raYiq0CdQhLpzliGoxpCGcWGDPaskfq7+gcvo9llmEnRWCMchDpXtqHcgiKtIs1w==",
+          "sha1": "8656bb5ec84276f09592d56c171b4d4e0422550f",
+          "size": 49239,
+          "checkedAt": "2026-09-13T11:35:22.451694+00:00"
+        },
+        {
+          "name": "@jskit-ai/connectors-catalog",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 399,
+          "url": "https://registry.npmjs.org/@jskit-ai/connectors-catalog/-/connectors-catalog-0.1.4.tgz",
+          "integrity": "sha512-dUmC+WJ5WJc5j9x3scVkfnTb4ibp23qszQUFdK8z0tiSFEbog8aPYdUkT8FwUAC5J0UthBB/MhnRhUq8Uy9mbg==",
+          "sha1": "871ab1534a1db180c4d50576eea16c896bd53ee3",
+          "size": 1165857,
+          "checkedAt": "2026-09-13T11:35:22.391758+00:00"
+        },
+        {
+          "name": "@jskit-ai/connectors-web",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 4,
+          "url": "https://registry.npmjs.org/@jskit-ai/connectors-web/-/connectors-web-0.1.4.tgz",
+          "integrity": "sha512-EusXiKUJDOpdpo0PIDLW54AD6/lG/myh2S33qcxXGRvBkt1PPGICNeUua+TMQ9eArWJdKbWEXUwKWjTVzg9DAA==",
+          "sha1": "18f67cf47321bdd9fc6c1cd060c8db950e0e0806",
+          "size": 7390,
+          "checkedAt": "2026-09-13T11:35:23.318861+00:00"
+        },
+        {
+          "name": "@jskit-ai/crud-core",
+          "version": "0.1.198",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 45,
+          "url": "https://registry.npmjs.org/@jskit-ai/crud-core/-/crud-core-0.1.198.tgz",
+          "integrity": "sha512-8IXRoITdmHA2dygdeiMXc7rX5GTMZkOq7IJiGDlMVCz059ItDlw5gMpBKGkPgKGpT/ikg7yv57wUPyPsx8pfIQ==",
+          "sha1": "d19ae059e6700c09ab10a51a196ef2a84020370e",
+          "size": 75604,
+          "checkedAt": "2026-09-13T11:35:23.536777+00:00"
+        },
+        {
+          "name": "@jskit-ai/http-web",
+          "version": "0.1.32",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 119,
+          "url": "https://registry.npmjs.org/@jskit-ai/http-web/-/http-web-0.1.32.tgz",
+          "integrity": "sha512-l8spgo+pUtQhrt4UvjgxldvOpZ1P8xN2wyogSjc0HjcOs317FSS4v+syrEyOMjTj9+IIi76K6KEs7aHCJyAjAA==",
+          "sha1": "018537dafb518617552a79b5ce087b71cb518a0a",
+          "size": 91392,
+          "checkedAt": "2026-09-13T11:35:23.966833+00:00"
+        },
+        {
+          "name": "@jskit-ai/json-rest-api-core",
+          "version": "0.1.131",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 4,
+          "url": "https://registry.npmjs.org/@jskit-ai/json-rest-api-core/-/json-rest-api-core-0.1.131.tgz",
+          "integrity": "sha512-vtxW7zc1xYTO8FBWuAJBSPmp7Qqq9XMYrK3c3Pn+seG2aVFqCH4oiqrmcDUzHD28a8bLXhV0hugMDkXPfWYqfQ==",
+          "sha1": "555f38eb75fff044784b76d6a89edd2d2b359fa9",
+          "size": 9972,
+          "checkedAt": "2026-09-13T11:35:23.942719+00:00"
+        },
+        {
+          "name": "@jskit-ai/kernel",
+          "version": "0.1.187",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 189,
+          "url": "https://registry.npmjs.org/@jskit-ai/kernel/-/kernel-0.1.187.tgz",
+          "integrity": "sha512-JCMNr+1uTzPeelLqFv+dJ5ARcGPVJUyt7IJDwAPXOMSusUiJDjXpbdtjuVSYCS1Zqn3NEH/kkX0jUZ8pB2dVzQ==",
+          "sha1": "fcc39bab30124c856ad348cf2bade569bd65bbcf",
+          "size": 144948,
+          "checkedAt": "2026-09-13T11:35:24.533645+00:00"
+        },
+        {
+          "name": "@jskit-ai/mobile-capacitor",
+          "version": "0.1.122",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 11,
+          "url": "https://registry.npmjs.org/@jskit-ai/mobile-capacitor/-/mobile-capacitor-0.1.122.tgz",
+          "integrity": "sha512-m9wwTOzSXj4aKriwnM5xjJYcai5YSl2Ev5UhelBktZnELVuDtqojapQwnceCRUFjqIrPUXKza9uCJ41KSr7Ohw==",
+          "sha1": "4f97da0b6678a1d7dd12afe944535d596f9e3b7a",
+          "size": 8420,
+          "checkedAt": "2026-09-13T11:35:25.038605+00:00"
+        },
+        {
+          "name": "@jskit-ai/payments-core",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 23,
+          "url": "https://registry.npmjs.org/@jskit-ai/payments-core/-/payments-core-0.1.4.tgz",
+          "integrity": "sha512-wwHh52Y0+fJolXw+5FBOQhn2Vnh8+HBCdisJEBz6xGsM7CjDdymlEwxEulK7aSU4+H2jKsjqoo6AXYyyFWRpTg==",
+          "sha1": "4e3635be7c302cc9d6bd1d0b6a10696a46839452",
+          "size": 39421,
+          "checkedAt": "2026-09-13T11:35:25.293362+00:00"
+        },
+        {
+          "name": "@jskit-ai/payments-web",
+          "version": "0.1.4",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 8,
+          "url": "https://registry.npmjs.org/@jskit-ai/payments-web/-/payments-web-0.1.4.tgz",
+          "integrity": "sha512-NZ9Bb7Tx4ueUQkOi97hajc3bG0mA6/sqTGNZkTM7EQ8Hni8EGX0LNFBQhg5orTiV3nfpyMWHvQsC+UCLroRfWA==",
+          "sha1": "5edc178536e35d8f5530b7650348737033e7239e",
+          "size": 10216,
+          "checkedAt": "2026-09-13T11:35:25.637033+00:00"
+        },
+        {
+          "name": "@jskit-ai/realtime",
+          "version": "0.1.184",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 19,
+          "url": "https://registry.npmjs.org/@jskit-ai/realtime/-/realtime-0.1.184.tgz",
+          "integrity": "sha512-AdIeTKExoSieahNS8ZCi/fuTt/Pvtul74+rlZxRcZtwdqTIaOkTf5E+Do5sVBUqn9cqw4HsDV4xu2Qmqo7tiuw==",
+          "sha1": "291593c086ec20557ffbb0774e400ab55ddc4ff8",
+          "size": 17271,
+          "checkedAt": "2026-09-13T11:35:25.934400+00:00"
+        },
+        {
+          "name": "@jskit-ai/rewarded-core",
+          "version": "0.1.123",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 24,
+          "url": "https://registry.npmjs.org/@jskit-ai/rewarded-core/-/rewarded-core-0.1.123.tgz",
+          "integrity": "sha512-m9RdVdk4WL1bbZxzr283wMjCgkbfAC9inI9yDXhUlc+LSFsvKTH8Ojoi9Q1Q2QJVjmsQbQ11Tkeus10IYOAXgQ==",
+          "sha1": "df94e0faa5ed65419507c5bd9c80ee73ed8041e7",
+          "size": 20540,
+          "checkedAt": "2026-09-13T11:35:26.410872+00:00"
+        },
+        {
+          "name": "@jskit-ai/users-web",
+          "version": "0.1.205",
+          "latest": true,
+          "byteIdentical": true,
+          "files": 26,
+          "url": "https://registry.npmjs.org/@jskit-ai/users-web/-/users-web-0.1.205.tgz",
+          "integrity": "sha512-h8+MUav7VPA4sEbBoPg5dhPwgi0k7Vet5UeZGZi66ZQ68JZtMWfIdp1R9Zm6wcWCTzyFCVKQVIsj8JasOOU3pA==",
+          "sha1": "3da5459b28eb8546cfd270152a412e4e17acbca0",
+          "size": 18737,
+          "checkedAt": "2026-09-13T11:35:26.751982+00:00"
+        }
+      ],
+      "evidenceRoot": "/home/merc/.cache/jskit-npm-release-uf6v9m4a"
+    },
+    "seeds": {
+      "checkedAt": "2026-09-13T11:42:49.754503+00:00",
+      "node": "v26.5.0",
+      "catalog": "0.1.212",
+      "accountsLibraryRefresh": {
+        "commands": [
+          "npm update json-rest-api --package-lock-only --ignore-scripts",
+          "npm ci"
+        ],
+        "reason": "npm retained old Git2.0.0 source after the host changed to an exact npm2.0.0 declaration.",
+        "lockChangesDuringRefresh": [
+          "node_modules/json-rest-api.resolved",
+          "node_modules/json-rest-api.integrity"
+        ],
+        "manualLockEdits": false
+      },
+      "persistenceEvidenceReused": "Prior real MySQL persistence acceptance; published JSKIT artifact review proves no runtime source changes, and published library differs from previously tested Git package only in migration guide prose.",
+      "smokeScope": "Exactly tests/server/smoke.test.js once per seed. Accounts health and anonymous session passed; boot logged access denied for the deliberately unconfigured local test DB identity. This smoke is not database persistence coverage.",
+      "excluded": [
+        "business-app migrations",
+        "official source import rehearsal",
+        "Online deployment",
+        "full suites",
+        "database starts"
+      ],
+      "seeds": [
+        {
+          "repo": "seed-jskit",
+          "branch": "public",
+          "head": "9598ef0d93284763950a4de170f70c02184a9e48",
+          "remoteHead": "9598ef0d93284763950a4de170f70c02184a9e48",
+          "clean": true,
+          "jskitInstallations": 5,
+          "installedJskitFilesVerified": 356,
+          "libraryFilesVerified": 0,
+          "graphPassed": true,
+          "npmLsPassed": true,
+          "smoke": {
+            "tests": 1,
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "thirdPartyChanges": [],
+          "lockSha256": "930b4cbff1f6588120041619b78b31d102b055a4a2383c503cd8a7f33c23dd87"
+        },
+        {
+          "repo": "seed-jskit-accounts",
+          "branch": "accounts",
+          "head": "6b22eb2ccc6ed379a259633d8a55180546e5a357",
+          "remoteHead": "6b22eb2ccc6ed379a259633d8a55180546e5a357",
+          "clean": true,
+          "jskitInstallations": 21,
+          "installedJskitFilesVerified": 853,
+          "libraryFilesVerified": 173,
+          "graphPassed": true,
+          "npmLsPassed": true,
+          "smoke": {
+            "tests": 1,
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "thirdPartyChanges": [],
+          "lockSha256": "b6f6c61576abf8c2b2b5cd7609a3cc9052e58337ff9df93a84424e247b79c00c"
+        }
+      ],
+      "automaticCi": {
+        "public": {
+          "commit": "9598ef0d93284763950a4de170f70c02184a9e48",
+          "status": "not configured",
+          "workflowRuns": 0,
+          "checkRuns": 0
+        },
+        "accounts": {
+          "commit": "6b22eb2ccc6ed379a259633d8a55180546e5a357",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/vibe64-dev/seed-jskit/actions/runs/34755127296",
+          "node": "26.8.2",
+          "database": "MariaDB11.4",
+          "checks": [
+            "npmci",
+            "database prepare",
+            "database persistence1/1",
+            "graph2manifests/21installations",
+            "ESLint",
+            "server smoke1/1",
+            "client1/1",
+            "production build"
+          ]
+        }
+      },
+      "evidenceRoot": "/home/merc/.cache/jskit-seeds-npm-212-fg9ayxhx"
+    },
+    "pending": [
+      "Migrate sas/compas-next",
+      "Migrate sas/racing",
+      "Migrate sas/dogandgroom",
+      "Migrate matt/beepollen",
+      "Migrate pass/whs2"
+    ],
+    "historicalScope": "The earlier currentRollout section and 250/250 master count describe the previous completed scope. This follow-up does not change that historical result or claim these five additional migrations are complete.",
+    "vibe64": {
+      "version": "0.1.27",
+      "source": {
+        "localHead": "411c0b8dd51321314196345e6172f60a328af679",
+        "remoteMain": "411c0b8dd51321314196345e6172f60a328af679",
+        "clean": true,
+        "releaseVersionCommit": "b2cdcee446eb491eb9c5fded1c38ca2e92667d91",
+        "ciSetupCommit": "dc911dc481ad636b3bada5d55fb78d0c5ac250e4",
+        "testFixtureCommit": "411c0b8dd51321314196345e6172f60a328af679"
+      },
+      "release": {
+        "exitCode": 0,
+        "seconds": 180.56,
+        "log": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/release.log"
+      },
+      "registry": "Actual public tarball downloaded; registry integrity, source manifest, owned file bytes and latest verified.",
+      "installedStartup": {
+        "finishedAt": "2026-09-13T12:02:37.433Z",
+        "node": "v26.5.0",
+        "pid": 1941701,
+        "package": "vibe64@0.1.27",
+        "installRoot": "/home/merc/.cache/vibe64-npm-027-startup-uz7pqr_7/consumer",
+        "appRoot": "/home/merc/.cache/vibe64-npm-027-startup-uz7pqr_7/consumer/node_modules/vibe64",
+        "baseURL": "http://127.0.0.1:45441",
+        "passed": true,
+        "serverClosed": true,
+        "bundledLocalPackages": [
+          "@local/vibe64-accounts",
+          "@local/vibe64-core",
+          "@local/vibe64-database-tools",
+          "@local/vibe64-execution",
+          "@local/vibe64-genesis",
+          "@local/vibe64-project",
+          "@local/vibe64-runtime",
+          "@local/vibe64-sessions",
+          "@local/vibe64-source-editor",
+          "@local/vibe64-system-graph",
+          "@local/vibe64-terminals",
+          "@local/current-app",
+          "@local/main",
+          "@local/studio-health",
+          "@local/studio-terminal-core"
+        ],
+        "responses": [
+          {
+            "path": "/api/health",
+            "status": 200
+          },
+          {
+            "path": "/app",
+            "status": 200
+          },
+          {
+            "path": "/assets/index-Dp1oJLDS.js",
+            "status": 200,
+            "bytes": 1718259
+          }
+        ],
+        "scope": "One actual published npm installation startup. No browser, business-app migration, hosted deployment or broad tests."
+      },
+      "publication": {
+        "name": "vibe64",
+        "version": "0.1.27",
+        "latest": "0.1.27",
+        "gitHead": "f7c1420c240b7214c18e4de9b5aa54ba13f8fbd5",
+        "tarball": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/vibe64-0.1.27.tgz",
+        "tarballBytes": 51155332,
+        "integrity": "sha512-CXqu20PoUnI7vvkIftSp7TLtTicv1QBosNV6IAYDocn/euin9csCPwcKwtZ6vfxJcPJn0ZOdmG44G+LFk4UGhA==",
+        "fileCount": 23918,
+        "sourceManifestEqual": true,
+        "ownedFilesCompared": 731,
+        "ownedFileMismatches": [],
+        "ownedResidue": [],
+        "requiredFiles": {
+          "package.json": true,
+          "bin/run.js": true,
+          "bin/server.js": true,
+          "server.js": true,
+          "dist/index.html": true,
+          "app.json": true
+        },
+        "jsPackages": [
+          {
+            "path": "node_modules/@jskit-ai/connector-google-calendar/package.json",
+            "name": "@jskit-ai/connector-google-calendar",
+            "version": "0.1.4",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/connectors-catalog/package.json",
+            "name": "@jskit-ai/connectors-catalog",
+            "version": "0.1.4",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/connectors-core/package.json",
+            "name": "@jskit-ai/connectors-core",
+            "version": "0.1.4",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/http-web/package.json",
+            "name": "@jskit-ai/http-web",
+            "version": "0.1.32",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/kernel/package.json",
+            "name": "@jskit-ai/kernel",
+            "version": "0.1.187",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/payments-core/package.json",
+            "name": "@jskit-ai/payments-core",
+            "version": "0.1.4",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/realtime/package.json",
+            "name": "@jskit-ai/realtime",
+            "version": "0.1.184",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/resource-core/package.json",
+            "name": "@jskit-ai/resource-core",
+            "version": "0.1.129",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/resource-crud-core/package.json",
+            "name": "@jskit-ai/resource-crud-core",
+            "version": "0.1.129",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/shell-web/package.json",
+            "name": "@jskit-ai/shell-web",
+            "version": "0.1.191",
+            "matchesInstalledVersion": true
+          },
+          {
+            "path": "node_modules/@jskit-ai/uploads-runtime/package.json",
+            "name": "@jskit-ai/uploads-runtime",
+            "version": "0.1.162",
+            "matchesInstalledVersion": true
+          }
+        ],
+        "nodePtyWindowsFiles": []
+      },
+      "installedArtifact": {
+        "package": "vibe64@0.1.27",
+        "actualTarball": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/vibe64-0.1.27.tgz",
+        "tarballSha1": "89511caaf6a4b08653c0f802ad3562da1976f44d",
+        "tarballIntegrity": "sha512-CXqu20PoUnI7vvkIftSp7TLtTicv1QBosNV6IAYDocn/euin9csCPwcKwtZ6vfxJcPJn0ZOdmG44G+LFk4UGhA==",
+        "publishedVibeFilesMatched": 23918,
+        "jskitInstallations": [
+          {
+            "path": "node_modules/@jskit-ai/connectors-core",
+            "name": "@jskit-ai/connectors-core",
+            "version": "0.1.4",
+            "files": 22,
+            "inBundle": false
+          },
+          {
+            "path": "node_modules/@jskit-ai/connectors-web",
+            "name": "@jskit-ai/connectors-web",
+            "version": "0.1.4",
+            "files": 4,
+            "inBundle": false
+          },
+          {
+            "path": "node_modules/@jskit-ai/http-runtime",
+            "name": "@jskit-ai/http-runtime",
+            "version": "0.1.185",
+            "files": 46,
+            "inBundle": false
+          },
+          {
+            "path": "node_modules/@jskit-ai/kernel",
+            "name": "@jskit-ai/kernel",
+            "version": "0.1.187",
+            "files": 189,
+            "inBundle": false
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/connector-google-calendar",
+            "name": "@jskit-ai/connector-google-calendar",
+            "version": "0.1.4",
+            "files": 11,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/connectors-catalog",
+            "name": "@jskit-ai/connectors-catalog",
+            "version": "0.1.4",
+            "files": 399,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/connectors-core",
+            "name": "@jskit-ai/connectors-core",
+            "version": "0.1.4",
+            "files": 22,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/http-web",
+            "name": "@jskit-ai/http-web",
+            "version": "0.1.32",
+            "files": 119,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/kernel",
+            "name": "@jskit-ai/kernel",
+            "version": "0.1.187",
+            "files": 189,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/payments-core",
+            "name": "@jskit-ai/payments-core",
+            "version": "0.1.4",
+            "files": 23,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/realtime",
+            "name": "@jskit-ai/realtime",
+            "version": "0.1.184",
+            "files": 19,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/resource-core",
+            "name": "@jskit-ai/resource-core",
+            "version": "0.1.129",
+            "files": 3,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/resource-crud-core",
+            "name": "@jskit-ai/resource-crud-core",
+            "version": "0.1.129",
+            "files": 14,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/shell-web",
+            "name": "@jskit-ai/shell-web",
+            "version": "0.1.191",
+            "files": 105,
+            "inBundle": true
+          },
+          {
+            "path": "node_modules/vibe64/node_modules/@jskit-ai/uploads-runtime",
+            "name": "@jskit-ai/uploads-runtime",
+            "version": "0.1.162",
+            "files": 16,
+            "inBundle": true
+          }
+        ],
+        "jskitNames": 13,
+        "jskitFilesMatched": 1181,
+        "duplicates": {
+          "@jskit-ai/connectors-core": [
+            "node_modules/@jskit-ai/connectors-core",
+            "node_modules/vibe64/node_modules/@jskit-ai/connectors-core"
+          ],
+          "@jskit-ai/kernel": [
+            "node_modules/@jskit-ai/kernel",
+            "node_modules/vibe64/node_modules/@jskit-ai/kernel"
+          ]
+        },
+        "lockSha256": "0a84c9ab4f19b81eae8df132887e6e80d06f25affa24005601ee75f8218e7e69"
+      },
+      "shutdown": {
+        "pid": 1941701,
+        "processExited": true,
+        "listenerClosed": true,
+        "npmLsPassed": true
+      },
+      "initialCi": {
+        "status": "completed",
+        "conclusion": "failure",
+        "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34755680113",
+        "jobs": [
+          {
+            "name": "verify",
+            "status": "completed",
+            "conclusion": "failure",
+            "startedAt": "2026-09-13T11:55:08Z",
+            "completedAt": "2026-09-13T11:58:42Z"
+          }
+        ]
+      },
+      "ciSetupRepair": "Workflow installs the locked Playwright Chromium runtime and required OS dependencies before existing verification. Initial CI failed because browser binaries were absent. Browser checks and final full CI now pass.",
+      "browserFixedCi": {
+        "conclusion": "failure",
+        "jobs": [
+          {
+            "completedAt": "2026-09-13T12:09:22Z",
+            "conclusion": "failure",
+            "databaseId": 103720553377,
+            "name": "verify",
+            "startedAt": "2026-09-13T12:04:10Z",
+            "status": "completed",
+            "steps": [
+              {
+                "conclusion": "success",
+                "name": "Set up job",
+                "number": 1,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Checkout",
+                "number": 2,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Setup Node",
+                "number": 3,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Install dependencies",
+                "number": 4,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Install test browser",
+                "number": 5,
+                "status": "completed"
+              },
+              {
+                "conclusion": "failure",
+                "name": "Run verification",
+                "number": 6,
+                "status": "completed"
+              },
+              {
+                "conclusion": "skipped",
+                "name": "Post Setup Node",
+                "number": 11,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Post Checkout",
+                "number": 12,
+                "status": "completed"
+              },
+              {
+                "conclusion": "success",
+                "name": "Complete job",
+                "number": 13,
+                "status": "completed"
+              }
+            ],
+            "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34756076405/job/103720553377"
+          }
+        ],
+        "status": "completed",
+        "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34756076405"
+      },
+      "testFixtureRepair": "Removed only the real-child umask fixture readiness override of 2000ms to use the existing bounded60000ms default. All umask, cleanup and deliberate short-timeout assertions remain. The exact87-test Node26 file and final full CI pass. Runner scheduling exhaustion is inferred from the earlier234ms pass, not a demonstrated runtime defect.",
+      "testFixtureCheck": {
+        "node": "26.5.0",
+        "command": "npm test -- tests/server/codexAppServerProvider.unit.test.js",
+        "tests": 87,
+        "pass": 87,
+        "fail": 0,
+        "seconds": 13.08,
+        "scope": "One exact server file; no full local suite or additional npm publication."
+      },
+      "automaticCi": [
+        {
+          "id": 34755680113,
+          "commit": "b2cdcee446eb491eb9c5fded1c38ca2e92667d91",
+          "conclusion": "failure",
+          "cause": "Missing declared Playwright Chromium runtime in CI setup. Four server failures including parent group; 2124 passed, 6 skipped. Client checks not reached.",
+          "fix": "dc911dc481ad636b3bada5d55fb78d0c5ac250e4 installs declared browser before verification.",
+          "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34755680113"
+        },
+        {
+          "id": 34756076405,
+          "commit": "dc911dc481ad636b3bada5d55fb78d0c5ac250e4",
+          "conclusion": "failure",
+          "cause": "Browser checks passed; one real-process managed-umask fixture exceeded its explicit 2000 ms readiness limit. 2127 server cases passed, 6 skipped. Client checks not reached.",
+          "fix": "411c0b8dd51321314196345e6172f60a328af679 removes only this fixture override, using existing bounded 60000 ms default. Scheduling exhaustion is inferred, supported by same test passing in 234 ms in preceding run.",
+          "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34756076405"
+        },
+        {
+          "id": 34756593350,
+          "commit": "411c0b8dd51321314196345e6172f60a328af679",
+          "conclusion": "success",
+          "status": "completed",
+          "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34756593350",
+          "server": {
+            "total": 2134,
+            "pass": 2128,
+            "fail": 0,
+            "skip": 6,
+            "durationMs": 234706.333534
+          },
+          "client": {
+            "files": 108,
+            "pass": 1130,
+            "fail": 0
+          },
+          "lint": {
+            "errors": 0,
+            "warnings": 71
+          },
+          "buildSeconds": 22.67,
+          "workspaceContracts": 15,
+          "umaskFixtureDurationMs": 335.633345,
+          "log": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/umask-fixture-ci-success.log"
+        }
+      ],
+      "finalVerification": {
+        "graph": "pass",
+        "focusedSmoke": {
+          "pass": 7,
+          "fail": 0
+        },
+        "prepack": "15 package boundary checks and production build passed",
+        "installedArtifactFilesMatched": 23918,
+        "installedJskitFilesMatched": 1181,
+        "installedStartup": {
+          "pass": true,
+          "httpStatuses": [
+            200,
+            200,
+            200
+          ],
+          "ownedProcessExited": true,
+          "ownedListenerClosed": true,
+          "evidence": "/home/merc/.cache/vibe64-npm-027-startup-uz7pqr_7"
+        },
+        "focusedUmaskFixtureFile": {
+          "pass": 87,
+          "fail": 0,
+          "skip": 0,
+          "durationMs": 13075.990704,
+          "node": "26.5.0",
+          "log": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/umask-fixture-test.log"
+        }
+      },
+      "publishedFilesChangedByCiAndFixtureFixes": false,
+      "evidenceRoot": "/home/merc/.cache/vibe64-public-release-20260913.37Mxpo"
+    },
+    "scopeLimits": {
+      "online": "Unchanged; not upgraded or deployed. Hosted deployment is separate.",
+      "seeds": "Private applications delivered by official public/accounts Git branches; no seed npm package publication.",
+      "historicalPackaging": "connectors-web0.1.3 retains its immutable test-result extra. Current0.1.4 publishes only the four reviewed files.",
+      "fullLocalSuitesRepeatedForMetadata": false
+    },
+    "completedAt": "2026-09-13T12:23:47.697285+00:00"
   }
 }

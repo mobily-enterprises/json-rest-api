@@ -1,72 +1,126 @@
 # Current v2 migration preparation
 
-## Follow-up rollout and local cleanup, 2026-09-13
+## Follow-up source delivery and publication, 2026-09-13
 
-After the completed scope below, the user requested source pushes (including
-the official seed branches), hosted Vibe64/Online deployment when requested,
-and migration of `sas/compas-next`, `sas/racing`, `sas/dogandgroom`,
-`matt/beepollen` and `pass/whs2`. That follow-up goal is incomplete. The historical
-250/250 count below does not claim completion of these additional projects.
+The user resumed pushes and migrations, then requested “push and publish
+everything first.” This section records that publication phase. The five
+additional application migrations are still pending: `sas/compas-next`,
+`sas/racing`, `sas/dogandgroom`, `matt/beepollen` and `pass/whs2`. Hosted
+Vibe64/Online deployment remains separate and requires an explicit request.
+Online has not been upgraded or deployed in this phase.
 
-The subsequent “Actually wait” request prompted a focused local deslop. The user
-then explicitly resumed pushes and migrations, followed by “I want you to push
-and publish everything first.” Source delivery and npm releases now take
-priority; the five application migrations wait for that publication phase.
-Hosted deployment remains subject to the separate explicit deployment request.
-The reviewed cleanup consists of:
+### Delivered releases and source
 
-- Vibe64's file-sync test uses an ordinary active ref instead of extracting and
-  executing template expressions. It preserves ref/getter inputs, close/reopen,
-  stale-event and disposal checks. Parent/child binding assertions are explicitly
-  source checks, not mounted integration tests. No new test renderer or compiler
-  remains; the file is ten lines shorter.
-- The accounts seed's persistence test names request results and expands dense
-  payloads. Request/assertion order, database guards, restart, isolation and
-  cleanup are preserved.
-- JSKIT's `connectors-web` package explicitly publishes `src`. The package check
-  retains both runtime files, README and manifest, excluding six test/fixture
-  files and the generated Playwright result. Published `0.1.3` is unchanged;
-  applying this packaging policy to npm requires a future version.
+| Component | Delivery |
+| --- | --- |
+| JSON REST API | `json-rest-api@2.0.0` is public npm `latest`. All 173 downloaded files and the archive match the reviewed release; SHA-1 `c1b039ec30ea11e5699f2a6831ada45fd36f5435`. Source and the CI setup repair are pushed through `b25634c`. |
+| JSKIT | All 40 new package versions are published, tagged `latest`, and their actual downloaded tarballs are byte-identical to the reviewed artifacts: 2,155 files, zero exceptions. Catalog `0.1.212`, host `0.1.131`, CRUD `0.1.198`, kernel `0.1.187` and connectors-web `0.1.4`. Source merged through normal [PR #421](https://github.com/mobily-enterprises/jskit-ai/pull/421), main `3bfa1d2`; no protection bypass. |
+| Public seed | Official `public` branch updated through the supported catalog updater and pushed at `9598ef0`. |
+| Accounts seed | Official `accounts` branch updated and pushed at `6b22eb2`. Its library lock resolves to the actual npm `2.0.0` tarball. |
+| Vibe64 | `vibe64@0.1.27` is public npm `latest`. Its actual downloaded archive matches registry integrity, the source manifest and all 731 compared owned files. Release source pushed at `b2cdcee`, followed by CI/test-only fixes through `411c0b8`; npm records source commit `f7c1420` before the release version commit. |
 
-Focused checks: Vibe64 Node 26.5.0 **3/3 pass**; accounts Node 26.5.0 syntax/lint
-pass and real MySQL persistence **1/1 pass**; JSKIT Node 24.6.0 package dry-run
-confirms all four required files. The accounts test runner's outer cleanup
-initially rejected a process transitioning through shutdown; a subsequent
-ownership check confirmed it stopped, and the disposable database directory is
-absent. The test was not rerun for that observation race. Independent review
-found no account-sequencing or package-runtime omissions.
+Both seed repositories are private applications distributed by their official
+Git branches; there is no seed npm publication. The new JSKIT host and CRUD
+packages both declare exact npm `json-rest-api: 2.0.0`. No temporary Git library
+reference remains in the refreshed consumer locks. The official updater changed
+only the expected JSKIT package metadata and dependency graph. No unrelated
+third-party package versions changed.
 
-The library pre-push test already running when the user requested the deslop
-finished with **6,272 passes, zero failures and one canonical-only skip**. No new
-library suite was started for this cleanup, and no production runtime changed.
-Local evidence is retained under
-`/home/merc/.cache/json-rest-api-canonical-rollout-20260913/`.
+The first coordinated cohort remains immutable. In particular,
+`connectors-web@0.1.3` still contains its previously recorded 45-byte test-result
+file. New `0.1.4` uses the reviewed `files: ["src"]` whitelist and publishes only
+its two runtime files, README and manifest.
 
-Registry preflight found `json-rest-api@1.0.29` still tagged `latest`; the first
-published JSKIT cohort uses the immutable v2 Git commit. The publication phase
-will release the current `json-rest-api@2.0.0`, then prepare one new coordinated
-JSKIT cohort using exact npm `2.0.0` and the reviewed package whitelist. Existing
-published versions remain immutable. Consumer pins will follow the published
-cohort through the supported updater; no application runtime migration starts
-before this phase finishes.
+### Cleanup and verification
 
-Publication progress: `json-rest-api@2.0.0` is now public npm `latest`; its
-downloaded tarball is byte-identical to the reviewed 173-file release (SHA-1
-`c1b039ec30ea11e5699f2a6831ada45fd36f5435`). Source commit `54238bf` is pushed,
-and GitHub Pages successfully built that commit. The official seed branches
-were also pushed before the next cohort refresh: public `25d34e2`, accounts
-`59a4896`.
+Vibe64's file-sync test now uses an ordinary active ref, preserving ref/getter,
+close/reopen, stale-event and disposal cases. Parent/child binding assertions are
+explicit source checks, not mounted integration tests. No expression evaluation,
+new renderer or compiler remains; the test file is ten lines shorter. Its focused
+Node 26 check passes 3/3.
 
-The automatic Verify run for `54238bf` passed the full Node 24 library and clean
-package jobs. All three database jobs failed before tests: apt selected a
-preinstalled PostgreSQL PGDG version absent from the runner's configured
-repositories. The workflow now ignores installed package status when downloading
-its disposable binaries. A targeted reproduction returns the original apt exit
-100 with the unavailable installed version; the corrected command selects all
-nine repository downloads successfully. This changes CI setup only; the
-published runtime remains unchanged.
+The accounts persistence test names responses and expands dense payloads without
+changing its sixteen requests, twenty-one assertions, database guards, restart,
+isolation or cleanup. Node 26 syntax/lint and real MySQL persistence pass. The
+outer cleanup helper initially rejected a process transitioning through shutdown;
+an ownership check confirmed it stopped and its disposable database directory
+was removed. The test was not repeated for that observation race.
+
+The library pre-push suite already running at the cleanup request finished with
+6,272 passes, zero failures and one canonical-only skip. The initial automatic CI
+passed library/clean-package checks but its database setup selected a preinstalled
+PostgreSQL package version absent from the runner's apt repositories. The CI-only
+repair ignores installed package status when downloading disposable server
+binaries. A focused reproduction confirms the original failure and corrected
+selection of all nine downloads. [Replacement CI](https://github.com/mobily-enterprises/json-rest-api/actions/runs/34754566689)
+passes every Node 24 library, PostgreSQL, MySQL, Redis and clean-package job.
+GitHub Pages built the verified source successfully.
+
+JSKIT has 41/41 focused Node 24 passes, valid runtime dependencies, package
+boundaries and deterministic generated outputs. All 787 packed runtime files
+are unchanged from the earlier tested cohort and all 431 export targets exist.
+Both the [PR](https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754569599)
+and [merged-source CI](https://github.com/mobily-enterprises/jskit-ai/actions/runs/34754602110)
+pass, including the repository's existing Node 24/26 matrix and browser checks;
+merged-source documentation deployment succeeds. Local JSKIT checks remain on
+Node 24.
+
+Both seeds pass their single server smoke file on Node 26, graph checks and
+`npm ls`. Public seed: five JSKIT installations/356 verified files. Accounts:
+twenty-one/853, plus all 173 actual npm library files. Accounts smoke exercises
+health and anonymous sessions; its deliberately unconfigured local database
+identity is not persistence coverage. The separate real MySQL proof is retained
+for the unchanged runtime bytes. Normal `npm update json-rest-api
+--package-lock-only --ignore-scripts` and `npm ci` replaced npm's stale same-version
+Git lock in accounts; only its resolved URL and integrity changed in that step.
+[Accounts branch CI](https://github.com/vibe64-dev/seed-jskit/actions/runs/34755127296)
+also passes on Node 26.8.2 with MariaDB 11.4: database preparation and persistence,
+graph, lint, server/client checks and production build. The public branch has
+no configured GitHub workflow; its local acceptance above remains the evidence.
+
+Vibe64 passes its focused server smoke 7/7, all fifteen workspace boundaries and
+its production build. The actual npm installation on Node 26 passes the complete
+installed dependency inventory and matches all 23,918 packaged files. Its fifteen
+JSKIT installations contain thirteen names and 1,181 verified published files.
+The previously reviewed same-version kernel/connectors-core bundled/outer copies
+remain; this package is not claimed to be globally deduplicated. All fifteen
+private local packages and the installed CLI/server entry points exist. One
+startup of the installed server returns HTTP 200 for health, application HTML
+and its referenced built JavaScript. It closes normally; an independent check
+confirms its process exited and its port closed. No local browser was launched.
+Startup evidence lives at
+`/home/merc/.cache/vibe64-npm-027-startup-uz7pqr_7/`.
+
+Vibe64's first automatic CI failed because its browser integration fixtures had
+no installed Chromium runtime. A CI-only step now installs the locked Playwright
+browser and OS dependencies before verification. The next run passed those
+checks but its real-process umask fixture exceeded an explicit two-second
+readiness limit; the same fixture passed in 234 ms in the earlier run. Removing
+only that override uses the existing bounded sixty-second default and preserves
+all permission, process cleanup and dedicated short-timeout assertions. Its
+single Node 26 test file passes 87/87. Scheduling exhaustion is an inference,
+not a demonstrated production startup defect. [Final CI](https://github.com/mobily-enterprises/vibe64/actions/runs/34756593350)
+passes 2,128 server and 1,130 client tests, the build and all fifteen package
+contracts; six existing server skips remain. Both earlier failed runs remain
+recorded in the manifest. The CI and test changes alter no published file, so
+`vibe64@0.1.27` remains the verified
+release; no second Vibe64 publication or local full-suite repeat was needed.
+
+No comprehensive local suite was repeated for metadata or archived records.
+Automatic CI runs are reported separately. Earlier staged failures and skips
+below remain historical results, not silently relabelled successes. The actual
+published packages, current source identities and acceptance scopes are in the
+adjacent manifest's `publicationFollowup` field. Raw evidence is retained under
+`/home/merc/.cache/json-rest-api-publication-20260913/`,
+`/home/merc/.cache/jskit-npm-release-uf6v9m4a/`,
+`/home/merc/.cache/jskit-seeds-npm-212-fg9ayxhx/` and
+`/home/merc/.cache/vibe64-public-release-20260913.37Mxpo/`.
 
 ## Completed rollout, 2026-09-13
+
+This is the historical first cohort and its then-agreed scope. The follow-up
+publication above supersedes its delivery status and package versions; its
+original evidence, failures and exclusions are preserved below.
 
 **The scoped master plan is complete: 250/250 items, zero open.** The 40 prepared
 JSKIT packages are published to public npm. Canonical local Vibe64 and both seed
