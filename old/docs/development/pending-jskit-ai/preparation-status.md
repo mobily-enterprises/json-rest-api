@@ -1,5 +1,55 @@
 # Current v2 migration preparation
 
+## Follow-up rollout and local cleanup, 2026-09-13
+
+After the completed scope below, the user requested source pushes (including
+the official seed branches), hosted Vibe64/Online deployment when requested,
+and migration of `sas/compas-next`, `sas/racing`, `sas/dogandgroom`,
+`matt/beepollen` and `pass/whs2`. That follow-up goal is incomplete. The historical
+250/250 count below does not claim completion of these additional projects.
+
+The subsequent “Actually wait” request prompted a focused local deslop. The user
+then explicitly resumed pushes and migrations, followed by “I want you to push
+and publish everything first.” Source delivery and npm releases now take
+priority; the five application migrations wait for that publication phase.
+Hosted deployment remains subject to the separate explicit deployment request.
+The reviewed cleanup consists of:
+
+- Vibe64's file-sync test uses an ordinary active ref instead of extracting and
+  executing template expressions. It preserves ref/getter inputs, close/reopen,
+  stale-event and disposal checks. Parent/child binding assertions are explicitly
+  source checks, not mounted integration tests. No new test renderer or compiler
+  remains; the file is ten lines shorter.
+- The accounts seed's persistence test names request results and expands dense
+  payloads. Request/assertion order, database guards, restart, isolation and
+  cleanup are preserved.
+- JSKIT's `connectors-web` package explicitly publishes `src`. The package check
+  retains both runtime files, README and manifest, excluding six test/fixture
+  files and the generated Playwright result. Published `0.1.3` is unchanged;
+  applying this packaging policy to npm requires a future version.
+
+Focused checks: Vibe64 Node 26.5.0 **3/3 pass**; accounts Node 26.5.0 syntax/lint
+pass and real MySQL persistence **1/1 pass**; JSKIT Node 24.6.0 package dry-run
+confirms all four required files. The accounts test runner's outer cleanup
+initially rejected a process transitioning through shutdown; a subsequent
+ownership check confirmed it stopped, and the disposable database directory is
+absent. The test was not rerun for that observation race. Independent review
+found no account-sequencing or package-runtime omissions.
+
+The library pre-push test already running when the user requested the deslop
+finished with **6,272 passes, zero failures and one canonical-only skip**. No new
+library suite was started for this cleanup, and no production runtime changed.
+Local evidence is retained under
+`/home/merc/.cache/json-rest-api-canonical-rollout-20260913/`.
+
+Registry preflight found `json-rest-api@1.0.29` still tagged `latest`; the first
+published JSKIT cohort uses the immutable v2 Git commit. The publication phase
+will release the current `json-rest-api@2.0.0`, then prepare one new coordinated
+JSKIT cohort using exact npm `2.0.0` and the reviewed package whitelist. Existing
+published versions remain immutable. Consumer pins will follow the published
+cohort through the supported updater; no application runtime migration starts
+before this phase finishes.
+
 ## Completed rollout, 2026-09-13
 
 **The scoped master plan is complete: 250/250 items, zero open.** The 40 prepared
