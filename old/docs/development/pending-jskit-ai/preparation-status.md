@@ -1,5 +1,107 @@
 # Current v2 migration preparation
 
+## Newer Vibe64 push review and republication, 2026-09-13
+
+The user requested review of newly pushed repositories and republication where
+needed, then explicitly resumed the fixes. The reviewed Vibe64 source is
+`14269a23`; fixes are pushed at `c233ac8a`. Its new Save Work recovery, Codex goal
+controls and mobile Files layout require a new Vibe64 package. The other npm
+releases below remain current. The five canonical application migrations remain
+paused. The user subsequently authorized hosted deployment with “deploy too”,
+then explicitly required the existing Online checkout for the documentation-only
+rearrangement. Its Markdown/text moves and index updates were committed and
+pushed there; the unused temporary clone was removed. The ordinary deployment
+workflow runs from the canonical Online checkout. `vibe64@0.1.28` is now public
+npm `latest`, with release source pushed at `ff02705a`. The downloaded archive
+and a fresh installed-package startup have been verified.
+
+The bounded review found and fixed:
+
+- Resume bypassed the existing Save/Update admission lock, and its response
+  preceded the native next turn. Matching active goal state now protects that
+  interval from Save, renewal and a new chat turn; normal steering and Pause
+  remain available.
+- Goal controls omitted provider options when subscribing, creating duplicate
+  listeners. They now reuse the existing subscription identity.
+- Goal clearing failed to release retained goal ownership, and old subscribed
+  thread events could reconcile a replacement conversation. Clearing now settles
+  the existing state, and mismatching threads return before reconciliation.
+- The mobile Download slot replaced the requested icon with text. Mobile now
+  renders the icon; desktop keeps its icon and label.
+- Creating a file on mobile selected the file but left the file list open and
+  the editor hidden. Successful creation now reveals the editor.
+
+Independent review found no further concrete defect in the revised goal paths
+or the user's Save Work recovery changes. Node 26.5.0 focused checks pass:
+153 lifecycle tests, 121 renewal tests, and three browser cases at 390, 768 and
+1280 pixels, with no skips or retries. The browser run built fresh source and
+closed its owned server and browser processes. An earlier new test fixture
+supplied inconsistent final-answer text; its correction and initial failure
+remain recorded rather than relabelled as a pass.
+
+All 898 tracked files were compared with the reviewed user push; exactly the
+eight intended source/test files changed. [Automatic Verify CI](https://github.com/mobily-enterprises/vibe64/actions/runs/34759773314)
+passed on the combined source: 2,147 server tests passed, zero failed, six existing
+environment-dependent skips; 1,133 client tests passed. Lint has zero errors and
+71 warnings; the production build and all 15 workspace contracts passed. The
+subsequent release commit changes only three version fields in two manifest/lock
+files. No comprehensive local suite was repeated.
+
+The actual published `0.1.28` archive contains 23,918 files. Its registry integrity,
+source manifest and all 731 compared owned files match, with no owned residue.
+A fresh npm installation passes `npm ls`, matches all archive files and 1,181
+files across 15 JSKIT installations, and serves health, `/app` and its actual
+built JavaScript with HTTP 200. Its owned process and listener closed. The first
+startup fixture omitted the requested target directory; that failed result is
+retained separately. Creating the fixture directory and rerunning only startup
+and shutdown passed without a package change.
+
+### Hosted deployment and AJV packaging repair
+
+The first hosted artifact, `20260913134916-826543c`, failed on the first tenant,
+SAS, because its server bundle imported `ajv` from the app root after production
+pruning. AJV is genuinely used by the payments package to validate configuration:
+that package already owns its runtime AJV 8 dependency. Online's external-bundle
+rules displaced the nested import, while the root's dev-only AJV was pruned.
+No dependency was added or changed to a peer.
+
+The failed rollout was stopped and, under the normal installer lock, the previous
+release `20260909052025-38283be` restored. Only SAS needed restarting; public
+`/app` returned HTTP 200 afterward. The other thirteen tenants had not advanced.
+The early `runningGeneration` update did not establish application readiness.
+
+Online commit `f8ca8dd` removes the four AJV/AJV-formats external patterns so the
+bundled payment code includes its real dependencies. A regression executes the
+real payment validator from an isolated generated bundle with no `node_modules`:
+it reproduced the missing-AJV failure before the fix and passes afterward.
+The related runtime-bundle and deployment-cleanup test files pass on Node 26.5.0.
+Artifact creation now imports the finished production server after pruning and
+checks its exports before upload, without starting a listener.
+
+Corrected release `20260913141226-d7d4c8f`, built from Online `d7d4c8f` and public
+Vibe64 `ff02705a`, passed that production import check and completed the normal
+full fleet deployment at 14:24 UTC. An independent read-only check at 14:24:40 UTC
+confirmed the same fourteen tenants as preflight: all running the exact artifact
+release, active services, ready restart status without pending restarts, and
+HTTP 200 from each `/app`. SAS public `/app` and `/api/health`, and private voice
+health, return HTTP 200. All four host services are active. The normal deployment
+also passed every tenant's daemon identity and Playwright runtime checks, pruned
+old releases and cleaned its uploaded installer/artifact.
+
+The corrected attempt reused the unchanged, freshly installed source dependency
+graphs through the supported skip-install flag; production pruning and the new
+import check still ran. Online's subsequent `13c6100` commit changes only README
+guidance; it does not require another runtime deployment. Public Vibe64 remains
+clean and published at `ff02705a`. The five canonical application migrations
+remain paused; deploying their hosted editors did not migrate those projects.
+
+Separately, the existing Deploy Docs workflow fails at Configure Pages because
+the repository's Pages site returns 404. Installation, docs build and deployment
+never run. This is a repository Pages configuration issue, separate from the
+successful source Verify run and the hosted deployment above. No Pages settings
+were changed. Evidence is retained under
+`/home/merc/.cache/vibe64-republish-20260913-g82tby59/`.
+
 ## Follow-up source delivery and publication, 2026-09-13
 
 The user resumed pushes and migrations, then requested “push and publish
@@ -8,6 +110,33 @@ additional application migrations are still pending: `sas/compas-next`,
 `sas/racing`, `sas/dogandgroom`, `matt/beepollen` and `pass/whs2`. Hosted
 Vibe64/Online deployment remains separate and requires an explicit request.
 Online has not been upgraded or deployed in this phase.
+
+### Canonical application migrations paused
+
+Publication is complete. The user subsequently paused the five application
+migrations, then requested review and republication of newer repository pushes.
+Those migrations remain paused during that work. The following items close only after
+source changes, relevant verification and canonical source publication are
+complete. The earlier 250/250 master count remains historical.
+
+- [ ] `sas/compas-next`: update the published package graph and custom resource
+  calls; preserve minimal responses, locking and its two-database ownership;
+  verify affected workflows and publish the source.
+- [ ] `sas/racing`: update the published graph; verify authentication, CRUD,
+  scoping and response shapes; publish the source.
+- [ ] `sas/dogandgroom`: update the graph, managed transaction owners, duplicate
+  retries and upload compensation; verify affected workflows and publish.
+- [ ] `matt/beepollen`: update the graph and move allocation retries outside
+  failed transaction owners; verify concurrency/failure behavior and publish.
+- [ ] `pass/whs2`: consolidate copied resource repositories while preserving
+  custom SQL, scoping and domain behavior; verify and publish canonical source.
+
+Refresh each application's actual canonical revision and repository guidance
+before editing. Preserve existing data and authored migrations; use isolated
+test data for destructive verification. Apps remain on Node 26; any additional
+library or JSKIT checks remain on Node 24. Run affected tests during development
+and comprehensive checks when needed to validate the completed app changes.
+Production application and hosted-platform deployment are separate operations.
 
 ### Delivered releases and source
 

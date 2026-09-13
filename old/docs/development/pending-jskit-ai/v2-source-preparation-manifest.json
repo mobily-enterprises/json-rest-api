@@ -4817,5 +4817,483 @@
       "fullLocalSuitesRepeatedForMetadata": false
     },
     "completedAt": "2026-09-13T12:23:47.697285+00:00"
+  },
+  "publicationRefresh": {
+    "status": "Vibe64 0.1.28 published, installed-package startup verified, corrected hosted fleet deployed and independently verified",
+    "requestedScope": "Review newer pushed repositories, fix confirmed regressions, republish changed npm packages, and deploy the hosted editor from the existing canonical Online checkout. Five canonical application migrations remain paused.",
+    "source": {
+      "commit": "c233ac8ac27358f6167a1abeaca647955b69da82",
+      "originMain": "c233ac8ac27358f6167a1abeaca647955b69da82",
+      "reviewedUserCommit": "14269a2339d04df1fb864ead85b5a370c252e4db",
+      "reviewedSourceFiles": 898,
+      "workingTreeClean": true,
+      "releaseCommit": "ff02705a4f15e5aff701fae104fd26cee0e4020c",
+      "releaseOriginMain": "ff02705a4f15e5aff701fae104fd26cee0e4020c",
+      "releaseOnlyChange": "Three version fields in package.json and package-lock.json; verified runtime unchanged from c233ac8a."
+    },
+    "fixes": [
+      "Resume uses existing session agent-write admission shared with Save, Update and workspace preparation.",
+      "Existing provider goal state is recorded and actual native turns reconciled before Resume releases admission; no synthetic running turn or new scheduler.",
+      "Save and renewal reject a matching active goal while native scheduling has not started a turn.",
+      "Pause remains available during active work and while agent-write admission is occupied.",
+      "The actual registered provider options reuse one event subscription.",
+      "Matching active goals awaiting native turn identity use the existing retryable chat response; normal steering and paused-goal chat remain available.",
+      "Cleared goals release pending ownership and settle retained final answers; old subscribed-thread events neither overwrite current goal state nor read the old provider.",
+      "Mobile Download renders the intended icon; successful file creation reveals the editor."
+    ],
+    "localVerification": {
+      "node": "26.5.0",
+      "server": [
+        {
+          "command": "npm test -- tests/server/codexTemporaryConversationLifecycle.unit.test.js",
+          "log": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/goal-lifecycle-tests-final.log",
+          "exitCode": 0,
+          "tests": 153,
+          "pass": 153,
+          "fail": 0,
+          "skip": 0,
+          "durationMs": 39919.247097
+        },
+        {
+          "command": "npm test -- tests/server/sessionRenewal.unit.test.js",
+          "log": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/goal-renewal-tests-final.log",
+          "exitCode": 0,
+          "tests": 121,
+          "pass": 121,
+          "fail": 0,
+          "skip": 0,
+          "durationMs": 8069.362158
+        }
+      ],
+      "browser": {
+        "pass": 3,
+        "fail": 0,
+        "skip": 0,
+        "flaky": 0,
+        "widths": [
+          390,
+          768,
+          1280
+        ],
+        "durationMs": 180762.28699999998,
+        "ownedServerClosed": true,
+        "knownOwnedProcessesRemaining": []
+      },
+      "earlierFixtureFailure": {
+        "log": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/goal-lifecycle-tests.log",
+        "tests": 152,
+        "pass": 151,
+        "fail": 1,
+        "description": "New finalizing/clear fixture emitted one answer but readThread returned its default different answer. Runtime settled correctly. Fixture now supplies matching provider snapshot; final run passed."
+      },
+      "fullLocalSuiteRepeated": false
+    },
+    "evidenceRoot": "/home/merc/.cache/vibe64-republish-20260913-g82tby59",
+    "scopeLimits": {
+      "canonicalApps": "All five migrations remain paused; no app source or data changed.",
+      "online": "Hosted editor deployment complete for all fourteen tenants from the existing canonical checkout. No business-app source/data migration. The subsequent Online README-only commit needs no redeployment.",
+      "otherPackages": "Fetched library/JSKIT/seed heads remain current; no additional npm publication needed.",
+      "docsHosting": "Existing public Deploy Docs workflow fails at Configure Pages (site 404); no GitHub Pages configuration change made."
+    },
+    "version": "0.1.28",
+    "publication": {
+      "name": "vibe64",
+      "version": "0.1.28",
+      "latest": "0.1.28",
+      "gitHead": "c233ac8ac27358f6167a1abeaca647955b69da82",
+      "tarball": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/vibe64-0.1.28.tgz",
+      "tarballBytes": 51165588,
+      "integrity": "sha512-98f+tS33pPoXO2e+rVPuTMY/AffCuURI3Hmj98yOk7uq7qXumTNHhxOEjJFtUG2kmYZn0shiyGULXbaeOM/v/w==",
+      "fileCount": 23918,
+      "sourceManifestEqual": true,
+      "ownedFilesCompared": 731,
+      "ownedFileMismatches": [],
+      "ownedResidue": [],
+      "requiredFiles": {
+        "package.json": true,
+        "bin/run.js": true,
+        "bin/server.js": true,
+        "server.js": true,
+        "dist/index.html": true,
+        "app.json": true
+      },
+      "jsPackages": [
+        {
+          "path": "node_modules/@jskit-ai/connector-google-calendar/package.json",
+          "name": "@jskit-ai/connector-google-calendar",
+          "version": "0.1.4",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/connectors-catalog/package.json",
+          "name": "@jskit-ai/connectors-catalog",
+          "version": "0.1.4",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/connectors-core/package.json",
+          "name": "@jskit-ai/connectors-core",
+          "version": "0.1.4",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/http-web/package.json",
+          "name": "@jskit-ai/http-web",
+          "version": "0.1.32",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/kernel/package.json",
+          "name": "@jskit-ai/kernel",
+          "version": "0.1.187",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/payments-core/package.json",
+          "name": "@jskit-ai/payments-core",
+          "version": "0.1.4",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/realtime/package.json",
+          "name": "@jskit-ai/realtime",
+          "version": "0.1.184",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/resource-core/package.json",
+          "name": "@jskit-ai/resource-core",
+          "version": "0.1.129",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/resource-crud-core/package.json",
+          "name": "@jskit-ai/resource-crud-core",
+          "version": "0.1.129",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/shell-web/package.json",
+          "name": "@jskit-ai/shell-web",
+          "version": "0.1.191",
+          "matchesInstalledVersion": true
+        },
+        {
+          "path": "node_modules/@jskit-ai/uploads-runtime/package.json",
+          "name": "@jskit-ai/uploads-runtime",
+          "version": "0.1.162",
+          "matchesInstalledVersion": true
+        }
+      ],
+      "nodePtyWindowsFiles": []
+    },
+    "installedArtifact": {
+      "package": "vibe64@0.1.28",
+      "actualTarball": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/vibe64-0.1.28.tgz",
+      "tarballSha1": "564d013d526dad70da2d49cf71d3906bb46fef6e",
+      "tarballIntegrity": "sha512-98f+tS33pPoXO2e+rVPuTMY/AffCuURI3Hmj98yOk7uq7qXumTNHhxOEjJFtUG2kmYZn0shiyGULXbaeOM/v/w==",
+      "publishedVibeFilesMatched": 23918,
+      "jskitInstallations": [
+        {
+          "path": "node_modules/@jskit-ai/connectors-core",
+          "name": "@jskit-ai/connectors-core",
+          "version": "0.1.4",
+          "files": 22,
+          "inBundle": false
+        },
+        {
+          "path": "node_modules/@jskit-ai/connectors-web",
+          "name": "@jskit-ai/connectors-web",
+          "version": "0.1.4",
+          "files": 4,
+          "inBundle": false
+        },
+        {
+          "path": "node_modules/@jskit-ai/http-runtime",
+          "name": "@jskit-ai/http-runtime",
+          "version": "0.1.185",
+          "files": 46,
+          "inBundle": false
+        },
+        {
+          "path": "node_modules/@jskit-ai/kernel",
+          "name": "@jskit-ai/kernel",
+          "version": "0.1.187",
+          "files": 189,
+          "inBundle": false
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/connector-google-calendar",
+          "name": "@jskit-ai/connector-google-calendar",
+          "version": "0.1.4",
+          "files": 11,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/connectors-catalog",
+          "name": "@jskit-ai/connectors-catalog",
+          "version": "0.1.4",
+          "files": 399,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/connectors-core",
+          "name": "@jskit-ai/connectors-core",
+          "version": "0.1.4",
+          "files": 22,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/http-web",
+          "name": "@jskit-ai/http-web",
+          "version": "0.1.32",
+          "files": 119,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/kernel",
+          "name": "@jskit-ai/kernel",
+          "version": "0.1.187",
+          "files": 189,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/payments-core",
+          "name": "@jskit-ai/payments-core",
+          "version": "0.1.4",
+          "files": 23,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/realtime",
+          "name": "@jskit-ai/realtime",
+          "version": "0.1.184",
+          "files": 19,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/resource-core",
+          "name": "@jskit-ai/resource-core",
+          "version": "0.1.129",
+          "files": 3,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/resource-crud-core",
+          "name": "@jskit-ai/resource-crud-core",
+          "version": "0.1.129",
+          "files": 14,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/shell-web",
+          "name": "@jskit-ai/shell-web",
+          "version": "0.1.191",
+          "files": 105,
+          "inBundle": true
+        },
+        {
+          "path": "node_modules/vibe64/node_modules/@jskit-ai/uploads-runtime",
+          "name": "@jskit-ai/uploads-runtime",
+          "version": "0.1.162",
+          "files": 16,
+          "inBundle": true
+        }
+      ],
+      "jskitNames": 13,
+      "jskitFilesMatched": 1181,
+      "duplicates": {
+        "@jskit-ai/connectors-core": [
+          "node_modules/@jskit-ai/connectors-core",
+          "node_modules/vibe64/node_modules/@jskit-ai/connectors-core"
+        ],
+        "@jskit-ai/kernel": [
+          "node_modules/@jskit-ai/kernel",
+          "node_modules/vibe64/node_modules/@jskit-ai/kernel"
+        ]
+      },
+      "lockSha256": "b401e9014cc5f87f206c0c57e4aa1739cc38db0c3dc9939a945f24e8bf8332f9"
+    },
+    "installedStartup": {
+      "finishedAt": "2026-09-13T14:02:17.035Z",
+      "node": "v26.5.0",
+      "pid": 2072770,
+      "package": "vibe64@0.1.28",
+      "installRoot": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/npm-028-startup/consumer",
+      "appRoot": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/npm-028-startup/consumer/node_modules/vibe64",
+      "baseURL": "http://127.0.0.1:34439",
+      "passed": true,
+      "serverClosed": true,
+      "bundledLocalPackages": [
+        "@local/vibe64-accounts",
+        "@local/vibe64-core",
+        "@local/vibe64-database-tools",
+        "@local/vibe64-execution",
+        "@local/vibe64-genesis",
+        "@local/vibe64-project",
+        "@local/vibe64-runtime",
+        "@local/vibe64-sessions",
+        "@local/vibe64-source-editor",
+        "@local/vibe64-system-graph",
+        "@local/vibe64-terminals",
+        "@local/current-app",
+        "@local/main",
+        "@local/studio-health",
+        "@local/studio-terminal-core"
+      ],
+      "responses": [
+        {
+          "path": "/api/health",
+          "status": 200
+        },
+        {
+          "path": "/app",
+          "status": 200
+        },
+        {
+          "path": "/assets/index-C4KnwA0g.js",
+          "status": 200,
+          "bytes": 1718259
+        }
+      ],
+      "scope": "One actual published npm installation startup. No browser, business-app migration, hosted deployment or broad tests."
+    },
+    "installedShutdown": {
+      "pid": 2072770,
+      "processExited": true,
+      "listenerClosed": true
+    },
+    "initialInstalledStartupFailure": {
+      "cause": "Verification fixture omitted its requested target directory. Created fixture directories and repeated only startup/shutdown; no package or source change.",
+      "evidence": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/npm-028-startup/startup-result-first.json"
+    },
+    "automaticCi": {
+      "runId": 34759773314,
+      "url": "https://github.com/mobily-enterprises/vibe64/actions/runs/34759773314",
+      "headSha": "c233ac8ac27358f6167a1abeaca647955b69da82",
+      "conclusion": "success",
+      "node": "v26.8.2",
+      "server": {
+        "tests": 2153,
+        "pass": 2147,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 6,
+        "todo": 0
+      },
+      "client": {
+        "filesPassed": 108,
+        "testsPassed": 1133,
+        "durationSeconds": 17.34
+      },
+      "lint": {
+        "conclusion": "success",
+        "errors": 0,
+        "warnings": 71
+      },
+      "build": {
+        "conclusion": "success",
+        "seconds": 22.68,
+        "modulesTransformed": 1573,
+        "warnings": [
+          {
+            "line": 3588,
+            "text": "verify\tRun verification\t2026-09-13T13:30:24.8178188Z Module \"node_modules/@jskit-ai/payments-core/src/shared/configuration.js\" tried to import \"node_modules/@jskit-ai/payments-core/contracts/configuration.schema.json\" with \"type\": \"json\" attributes, but it was already imported elsewhere with no attributes. Please ensure that import attributes for the same module are always consistent."
+          },
+          {
+            "line": 3609,
+            "text": "verify\tRun verification\t2026-09-13T13:30:45.9435070Z (!) Some chunks are larger than 700 kB after minification. Consider:"
+          }
+        ]
+      },
+      "packageBoundaries": {
+        "conclusion": "success",
+        "workspaceContracts": 15
+      },
+      "skipReasons": {
+        "Codex CLI missing": 1,
+        "systemd test owner not configured": 1,
+        "ripgrep missing": 4
+      }
+    },
+    "hostedDeployment": {
+      "status": "complete",
+      "release": "20260913141226-d7d4c8f",
+      "onlineCommit": "d7d4c8f24a65890beb053517bbb228234a77b391",
+      "publicCommit": "ff02705a4f15e5aff701fae104fd26cee0e4020c",
+      "command": "npm run deploy",
+      "checkout": "/home/merc/Development/current/vibe64-online",
+      "node": "26.5.0",
+      "supportedInstallReuse": "VIBE64_SKIP_NPM_CI=1 on corrected attempt; private/public manifests and locks unchanged since the initial fresh installs. Production pruning and post-prune server import still ran.",
+      "firstFailure": {
+        "release": "20260913134916-826543c",
+        "affectedTenant": "sas",
+        "error": "ERR_MODULE_NOT_FOUND: ajv from app-root server.bundle.mjs after production pruning",
+        "cause": "Online external rules displaced the bundled payment package nested AJV 8 import to the root, whose dev-only AJV was pruned.",
+        "recovery": "Stopped the owned rollout; restored previous release 20260909052025-38283be under installer lock; restarted only SAS and verified public app HTTP 200. Other thirteen tenants had not advanced.",
+        "evidence": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/hosted-deployment/rollback-sas.json"
+      },
+      "fix": {
+        "commit": "f8ca8ddad60ab2e6d2722de06963ccabe38dccfd",
+        "description": "Remove four AJV/AJV-formats external patterns; bundle the actual payment-validator dependencies. Import the finished production server after pruning before upload.",
+        "dependenciesChanged": false,
+        "dependencyOwnership": "AJV remains the payments-core runtime dependency; no new top-level or peer dependency.",
+        "regression": "Real payment validator in isolated generated bundle fails before fix and passes after; existing runtimeBundles and deployArtifactCleanup files pass.",
+        "fullLocalSuiteRepeated": false,
+        "productionImportCheck": "passed"
+      },
+      "evidenceRoot": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/hosted-deployment",
+      "result": {
+        "command": "npm run deploy",
+        "checkout": "/home/merc/Development/current/vibe64-online",
+        "node": "26.5.0",
+        "startedAt": "2026-09-13T14:12:19.033342+00:00",
+        "finishedAt": "2026-09-13T14:24:01.533877+00:00",
+        "exitCode": 0,
+        "log": "/home/merc/.cache/vibe64-republish-20260913-g82tby59/hosted-deployment/deploy-corrected.log",
+        "dependencyInstallation": "Reused the preceding fresh npm ci; both published manifests and locks are unchanged. Production prune and finished-server import still run."
+      },
+      "finalVerification": {
+        "checkedAt": "2026-09-13T14:24:40.387527+00:00",
+        "exitCode": 0,
+        "tenantCount": 14,
+        "tenantSetMatchesPreflight": true,
+        "releaseMatchesArtifact": true,
+        "allTenantHttpApp": 200,
+        "publicSasApp": "200",
+        "publicSasHealth": "200",
+        "voiceHealth": "200",
+        "tenants": [
+          "ahs",
+          "andrei",
+          "chiara",
+          "dave",
+          "digi",
+          "luca",
+          "massimo",
+          "matt",
+          "mercmobily",
+          "pass",
+          "pete",
+          "raphael",
+          "sas",
+          "vibe64tpl"
+        ],
+        "allServicesActive": true,
+        "allRestartStatesReady": true
+      },
+      "laterOnlineCommit": {
+        "commit": "13c6100a7a86513a92f32ad93ce3bb3eaf0f3263",
+        "changedFiles": [
+          "README.md"
+        ],
+        "runtimeChanged": false,
+        "sourceAndOriginMatch": true,
+        "workingTreeClean": true
+      }
+    },
+    "recordedAt": "2026-09-13T14:19:25.819922+00:00",
+    "completedAt": "2026-09-13T14:25:21.184122+00:00",
+    "verificationScope": "Focused development tests and normal automatic public Verify CI; one actual npm installation startup; actual production-pruned artifact import and normal full hosted fleet rollout/readiness. No comprehensive local suite repeated for records or metadata."
   }
 }
