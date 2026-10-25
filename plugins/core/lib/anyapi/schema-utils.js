@@ -178,7 +178,8 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
     table.string('resource').notNullable()
     table.text('schema_json').notNullable()
     table.text('relationships_json').notNullable()
-    table.text('definition_json')
+    // Holds the search schema and runtime additions too: MySQL TEXT stops at 64 KB.
+    table.text('definition_json', 'longtext')
     table.integer('schema_version').notNullable().defaultTo(1)
     table.dateTime('created_at').defaultTo(knex.fn.now()).notNullable()
     table.dateTime('updated_at').defaultTo(knex.fn.now()).notNullable()
@@ -186,7 +187,7 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
     table.unique(['tenant_id', 'resource'])
   })
   await ensureColumn(knex, 'any_resource_configs', 'definition_json', (table) => {
-    table.text('definition_json')
+    table.text('definition_json', 'longtext')
   })
   await ensureColumn(knex, 'any_resource_configs', 'schema_version', (table) => {
     table.integer('schema_version').notNullable().defaultTo(1)

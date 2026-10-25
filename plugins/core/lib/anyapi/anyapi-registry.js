@@ -1,4 +1,4 @@
-import { createKnexTransaction } from '../../../../lib/knex-transaction.js'
+import { createKnexTransaction, readCommittedTransaction } from '../../../../lib/knex-transaction.js'
 import { applyInsertReturning, getDatabaseCapabilities } from '../querying-writing/database-capabilities.js'
 import { DEFAULT_CANONICAL_CONFIG, TYPE_TO_POOL, ensureAnyApiSchema, readSlotPools } from './schema-utils.js'
 import { toStoredJson } from './stored-definition.js'
@@ -203,7 +203,7 @@ export class AnyapiRegistry {
   }
 
   async #registerOnce (definition, options) {
-    const context = { method: 'registerResource', tenant: definition?.tenant, resource: definition?.resource }
+    const context = { method: 'registerResource', tenant: definition?.tenant, resource: definition?.resource, [readCommittedTransaction]: true }
     try {
       this.#validateDefinition(definition)
       const { descriptor, changed } = await this.#register(definition, options.transaction, context)
@@ -244,7 +244,7 @@ export class AnyapiRegistry {
   }
 
   async #allocate (options, method, readParams) {
-    const context = { method }
+    const context = { method, [readCommittedTransaction]: true }
     let trx; let managed = false
     try {
       const { tenant, resource, fields, searchSchema } = readParams()

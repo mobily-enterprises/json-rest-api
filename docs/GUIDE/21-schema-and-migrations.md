@@ -339,7 +339,10 @@ including the consequences for hooks that were previously overwritten.
 Registering an unchanged declaration writes nothing. Concurrent schema changes
 to one resource queue on its metadata row, and a unique index stops two fields
 from sharing a slot. Each committed change increments the resource's
-`schema_version`.
+`schema_version`. On MySQL, the registry runs its own transactions at READ
+COMMITTED, because REPEATABLE READ makes concurrent creation of different
+resources or tenants deadlock. A transaction you pass in keeps its own isolation
+level.
 
 ### AnyAPI across several servers
 

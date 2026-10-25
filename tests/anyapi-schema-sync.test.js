@@ -273,6 +273,19 @@ syncCase('tenant instances share one registry and leave the shared connection op
   await assert.rejects(server(knex, { pluginOptions: { registry: new AnyapiRegistry({ knex: { client: {} } }) } }), /same knex instance/)
 })
 
+// Native pools run these registrations concurrently; in-memory SQLite queues them.
+syncCase('tenants created at once register without deadlocks', async (knex) => {
+  const registry = new AnyapiRegistry({ knex })
+  await server(knex, { tenantId: 'tenant_seed', pluginOptions: { registry, ownsKnex: false } })
+  const tenants = Array.from({ length: 12 }, (_, index) => `tenant_${index}`)
+  const apis = await Promise.all(tenants.map(tenantId => server(knex, {
+    tenantId, pluginOptions: { registry, ensureSchema: false, ownsKnex: false }
+  })))
+  for (const api of apis) assert.equal((await post(api, { name: 'Tenant item' })).data.attributes.name, 'Tenant item')
+  const configs = await knex('any_resource_configs').whereIn('tenant_id', tenants).count({ count: '*' }).first()
+  assert.equal(Number(configs.count), tenants.length * 2)
+})
+
 syncCase('a migration raises slot limits for every server', async (knex) => {
   const api = await server(knex)
   const registry = api.anyapi.registry
