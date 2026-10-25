@@ -27,8 +27,8 @@ npm run test:databases:mysql
 
 The default command discovers every `tests/conformance-*.test.js` file and adds
 the environment suite, `db-schema-conformance`, `db-field-alterations`,
-`anyapi-temporal-migration`, `anyapi-field-evolution`, `anyapi-registry-failures`
-and `anyapi-descriptor-failures`. The runner discovers
+`anyapi-temporal-migration`, `anyapi-field-evolution`, `anyapi-registry-failures`,
+`anyapi-descriptor-failures` and `anyapi-schema-sync`. The runner discovers
 new conformance files automatically; the latest executed set is recorded in the
 verification log.
 Every shared conformance fixture uses the selected real driver. This includes
