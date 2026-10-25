@@ -1,6 +1,7 @@
 import type { DirectResourceId, ResourceFormat, WriteReturning } from './representations.js'
 import type { RemovedResourceOptions } from './resource-methods.js'
 import type { Knex } from 'knex'
+import type { AnyapiRegistry, AnyapiSchemaChange, AnyapiSlotCounts } from './anyapi.js'
 
 export type RestApiPluginOptions = RemovedResourceOptions & {
   format?: ResourceFormat
@@ -42,6 +43,17 @@ export interface RestApiKnexPluginOptions {
 }
 export interface RestApiAnyapiKnexPluginOptions extends RestApiKnexPluginOptions {
   tenantId?: string
+  // Share one registry across tenant APIs on the same Knex instance.
+  registry?: AnyapiRegistry
+  // false when migrations own the canonical tables.
+  ensureSchema?: boolean
+  // false leaves a shared Knex instance open when this API is released.
+  ownsKnex?: boolean
+  slots?: AnyapiSlotCounts
+  // Called after a committed schema change, for example to notify other servers.
+  onSchemaChanged?: (change: AnyapiSchemaChange) => void | Promise<void>
+  // Milliseconds between schema version checks; 0 checks on every request.
+  schemaCheckInterval?: number
 }
 export interface BulkOperationsPluginOptions {
   maxBulkOperations?: number

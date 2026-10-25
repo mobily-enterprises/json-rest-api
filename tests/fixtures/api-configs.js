@@ -19,14 +19,15 @@ import { ensureAnyApiSchema } from '../../plugins/core/lib/anyapi/schema-utils.j
 import { storageMode } from '../helpers/storage-mode.js'
 import { createStorageAdapter } from '../../plugins/core/lib/storage/storage-adapter.js'
 
-async function useStoragePlugin (api, knex, { tenantId, storage = storageMode.mode } = {}) {
+async function useStoragePlugin (api, knex, { tenantId, storage = storageMode.mode, pluginOptions = {} } = {}) {
   if (storage === 'anyapi') {
-    await ensureAnyApiSchema(knex)
+    // ensureSchema: false models a deployment whose migrations own the tables.
+    if (pluginOptions.ensureSchema !== false) await ensureAnyApiSchema(knex)
     const sanitizedName = api?.name ? api.name.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() : 'tenant'
     const effectiveTenantId = tenantId || api?.anyapi?.tenantId || `${sanitizedName}_tenant`
     api.anyapi = api.anyapi || {}
     api.anyapi.tenantId = effectiveTenantId
-    await api.use(RestApiAnyapiKnexPlugin, { knex, tenantId: effectiveTenantId })
+    await api.use(RestApiAnyapiKnexPlugin, { ...pluginOptions, knex, tenantId: effectiveTenantId })
     storageMode.setCurrentTenant(effectiveTenantId)
   } else if (storage === 'knex') {
     await api.use(RestApiKnexPlugin, { knex })
@@ -597,10 +598,23 @@ export async function createRegularSchemaApi (knex, resourceOptions = {}) {
   return api
 }
 
-export async function createAnyApiFieldEvolutionApi (knex, { fields = {}, canonicalFieldsMap, searchSchema, createTable = true, tenantId = 'field_evolution' } = {}) {
-  const api = new JsonRestApi({ name: 'field-evolution' })
+export async function createAnyApiFieldEvolutionApi (knex, {
+  fields = {}, canonicalFieldsMap, searchSchema, createTable = true, tenantId = 'field_evolution',
+  pluginOptions, declare = true, logger, includeExpress = false, codeOnlyResource = false
+} = {}) {
+  const api = new JsonRestApi({ name: 'field-evolution', logger })
   await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full' })
-  await useStoragePlugin(api, knex, { storage: 'anyapi', tenantId })
+  await useStoragePlugin(api, knex, { storage: 'anyapi', tenantId, pluginOptions })
+  if (includeExpress) await api.use(ExpressPlugin, { mountPath: '/api' })
+  // Stored JSON cannot carry normalizeId, so only code can declare this resource.
+  if (codeOnlyResource) {
+    await api.addResource('scored', {
+      schema: { id: { type: 'id' }, name: { type: 'string' } },
+      normalizeId: value => String(value)
+    })
+  }
+  // Undeclared instances load stored resources on demand.
+  if (!declare) return api
   await api.addResource('groups', { schema: { id: { type: 'id' }, name: { type: 'string', required: true } } })
   await api.addResource('items', {
     schema: { id: { type: 'id' }, name: { type: 'string', required: true }, ...fields },

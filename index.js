@@ -13,6 +13,8 @@ export { SocketIOPlugin } from './plugins/core/socketio-plugin.js'
 // Database plugins
 export { RestApiKnexPlugin } from './plugins/core/rest-api-knex-plugin.js'
 export { RestApiAnyapiKnexPlugin } from './plugins/core/rest-api-anyapi-knex-plugin.js'
+export { AnyapiRegistry } from './plugins/core/lib/anyapi/anyapi-registry.js'
+export { ensureAnyApiSchema } from './plugins/core/lib/anyapi/schema-utils.js'
 
 // Connector plugins
 export { ExpressPlugin } from './plugins/core/connectors/express-plugin.js'

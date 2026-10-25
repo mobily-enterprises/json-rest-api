@@ -1,14 +1,15 @@
 import {
   JsonRestApi, RestApiError, RestApiPlugin, RestApiKnexPlugin, AutoFilterPlugin, FastifyPlugin,
   LocalStorage, RestApiWriteError, RestApiVersionConflictError,
-  getUrlPrefix, REST_API_INCLUDE_ERROR_CODE
+  getUrlPrefix, REST_API_INCLUDE_ERROR_CODE, AnyapiRegistry, ensureAnyApiSchema
 } from 'json-rest-api'
 import type {
   ResourceCoreMethods, TransactionMethods, RestApiPluginOptions,
   AutoFilterPluginOptions, RowPolicyPluginOptions, FileStorage,
   ResourceVersionOptions, BulkResourceMethods, RelationshipMethods,
   ToManyRelationship, HttpConnectorOptions, CorsPluginOptions, JsonApiDocument, JsonApiResource,
-  ResourceSchema, InferInput, InferOutput, RuntimeCustomization, HookHandler
+  ResourceSchema, InferInput, InferOutput, RuntimeCustomization, HookHandler,
+  RestApiAnyapiKnexPluginOptions, AnyapiSchemaChange
 } from 'json-rest-api'
 
 const options = { format: 'plain', returning: 'minimal' } satisfies RestApiPluginOptions
@@ -33,7 +34,20 @@ await api.transaction(async transaction => {
 })
 const filters: AutoFilterPluginOptions = { resolvers: { workspace: () => 'w1' } }
 const policies: RowPolicyPluginOptions = { policies: { denied: () => false } }
-void [options, plugins, storage, prefix, code, writeError, conflict, title, filters, policies, importedTitle, jsonPlain]
+declare const knex: RestApiAnyapiKnexPluginOptions['knex']
+await ensureAnyApiSchema(knex, { slots: { string: 30 } })
+const registry = new AnyapiRegistry({ knex, cacheSize: 1000 })
+const tenantOptions = {
+  knex,
+  tenantId: 'account_1',
+  registry,
+  ensureSchema: false,
+  ownsKnex: false,
+  schemaCheckInterval: 5000,
+  onSchemaChanged: (change: AnyapiSchemaChange) => { void change.version }
+} satisfies RestApiAnyapiKnexPluginOptions
+const version: number | null = await registry.getSchemaVersion('account_1', 'books')
+void [options, plugins, storage, prefix, code, writeError, conflict, title, filters, policies, importedTitle, jsonPlain, tenantOptions, version]
 
 // @ts-expect-error Removed options must remain rejected through the package entry point.
 const legacy: RestApiPluginOptions = { simplified: true }

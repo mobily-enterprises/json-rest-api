@@ -62,11 +62,14 @@ changes can be omitted with warnings, and destructive `down` migrations are not
 generated automatically. SQLite check/enum changes can require a reviewed table
 rebuild. Native SET fields require an explicit MySQL target.
 
-AnyAPI field additions persist slot metadata; `alterKnexFields` is unsupported.
-Re-registering populated resources cannot remove or remap stored fields. Preserve
-slot maps and migrate stored data explicitly when changing layouts. Old canonical
-temporal storage needs the documented data migration, not just a package update.
-See [table helpers and migration limits](21-schema-and-migrations.md).
+AnyAPI field additions persist slot metadata and their definitions;
+`alterKnexFields` is unsupported. Registration keeps stored fields in their slots
+and keeps the mapping of populated fields a declaration omits; changing a populated
+field's storage type needs an explicit data migration. Servers sharing a database
+see each other's additions after a reload, notification or schema check, and slot
+limits follow the columns the database has. Old canonical temporal storage needs
+the documented data migration, not just a package update. See
+[table helpers and migration limits](21-schema-and-migrations.md#anyapi-across-several-servers).
 
 ## Transaction ownership and failures
 

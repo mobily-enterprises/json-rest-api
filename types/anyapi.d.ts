@@ -1,0 +1,30 @@
+import type { Knex } from 'knex'
+
+export type AnyapiSlotPool = 'string' | 'number' | 'boolean' | 'date' | 'json' | 'belongsTo'
+export type AnyapiSlotCounts = Partial<Record<AnyapiSlotPool, number>>
+
+export interface AnyapiSchemaChange {
+  tenant: string
+  resource: string
+  version: number
+}
+
+export interface AnyapiRegistryOptions {
+  knex: Knex
+  log?: Partial<Record<'debug' | 'info' | 'warn' | 'error', (...args: unknown[]) => unknown>>
+  // Descriptors cached across every tenant API that shares the registry.
+  cacheSize?: number
+}
+
+/** Canonical metadata shared by tenant APIs that use one Knex instance. */
+export class AnyapiRegistry {
+  constructor(options: AnyapiRegistryOptions)
+  readonly knex: Knex
+  readonly cacheSize: number
+  ensureSchema(options?: { slots?: AnyapiSlotCounts }): Promise<void>
+  getSchemaVersion(tenant: string, resource: string, options?: { transaction?: Knex.Transaction }): Promise<number | null>
+  invalidateDescriptor(tenant: string, resource: string): void
+}
+
+/** Create or upgrade the canonical tables; counts only ever add slot columns. */
+export function ensureAnyApiSchema(knex: Knex, options?: { slots?: AnyapiSlotCounts }): Promise<void>

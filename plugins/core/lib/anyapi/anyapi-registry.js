@@ -1,8 +1,10 @@
 import { createKnexTransaction } from '../../../../lib/knex-transaction.js'
-import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
-import { DEFAULT_CANONICAL_CONFIG, SLOT_LIMITS, SLOT_POOLS, TYPE_TO_POOL } from './schema-utils.js'
+import { applyInsertReturning, getDatabaseCapabilities } from '../querying-writing/database-capabilities.js'
+import { DEFAULT_CANONICAL_CONFIG, TYPE_TO_POOL, ensureAnyApiSchema, readSlotPools } from './schema-utils.js'
+import { toStoredJson } from './stored-definition.js'
 import { beginWriteTransaction, commitTransaction, endWriteOperation, getOperationDiagnosticContext, rollbackAfterError, wrapUnexpectedError, wrapWriteError } from '../../../../lib/error-context.js'
 import { createEnhancedLogger } from '../../../../lib/enhanced-logger.js'
+import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { assertFieldName, assertFieldNameMap } from '../querying-writing/field-utils.js'
 import { validateRelationshipFieldNames, validateSchemaFieldNames } from '../querying-writing/scope-validations.js'
 
@@ -14,7 +16,12 @@ const clone = (value) => {
 }
 
 const SUPPORTED_TYPES = new Set([...TYPE_TO_POOL.keys(), 'id'])
-const MAX_CACHED_DESCRIPTORS = 100
+const DEFAULT_CACHE_SIZE = 100
+const EMPTY_RUNTIME = Object.freeze({ schema: {}, searchSchema: {}, callbacks: [] })
+
+// Errors from two servers inserting the same new resource at once.
+const WRITE_CONFLICT_CODES = new Set(['23505', '40001', '40P01', 'ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK', 'SQLITE_BUSY', 'SQLITE_CONSTRAINT_UNIQUE'])
+const creationRaces = new WeakSet()
 
 const resolveIdProperty = (schema = {}, explicitIdProperty = null) => {
   if (explicitIdProperty) return explicitIdProperty
@@ -49,11 +56,20 @@ const SLOT_PATTERNS = {
 
 const BELONGS_TO_ID_PATTERN = /^rel_(\d+)_id$/
 
-const parseSimpleSlotColumn = (column) => {
+const slotsExhausted = pool => Object.assign(new Error(`No available ${pool} slots remaining`), { slotsExhausted: true })
+
+const slotPoolFor = (fieldDef = {}) => {
+  if (fieldDef.belongsTo) return 'belongsTo'
+  return fieldDef.type === 'id' ? 'string' : TYPE_TO_POOL.get(fieldDef.type)
+}
+
+const belongsToColumns = index => [`rel_${index}_id`, `rel_${index}_type`]
+
+const parseSimpleSlotColumn = (column, pools) => {
   for (const [type, pattern] of Object.entries(SLOT_PATTERNS)) {
     const match = pattern.exec(column)
     if (match) {
-      if (!SLOT_POOLS[type].includes(column)) {
+      if (!pools[type].includes(column)) {
         throw new Error(`Canonical slot '${column}' is out of range`)
       }
       return { slotType: type, slotIndex: Number(match[1]) }
@@ -62,7 +78,7 @@ const parseSimpleSlotColumn = (column) => {
   throw new Error(`Invalid canonical slot column '${column}'`)
 }
 
-const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
+const parseBelongsToSlots = ({ idSlot, typeSlot }, pools) => {
   if (!idSlot || typeof idSlot !== 'string') {
     throw new Error('BelongsTo canonical mapping requires idSlot')
   }
@@ -71,7 +87,7 @@ const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
     throw new Error(`Invalid belongsTo id slot '${idSlot}'`)
   }
   const index = Number(idMatch[1])
-  if (index < 1 || index > SLOT_LIMITS.belongsTo || idSlot !== `rel_${index}_id`) {
+  if (!pools.belongsTo.includes(index) || idSlot !== `rel_${index}_id`) {
     throw new Error(`BelongsTo slot '${idSlot}' is out of range`)
   }
   const expectedTypeSlot = `rel_${index}_type`
@@ -82,14 +98,80 @@ const parseBelongsToSlots = ({ idSlot, typeSlot }) => {
   return { slotType: 'belongsTo', slotIndex: index, idColumn: idSlot, typeColumn: actualTypeSlot }
 }
 
+const reserveSlots = (used, columns) => {
+  if (columns.some(column => used.has(column))) {
+    throw new Error(columns.length > 1 ? `Canonical slots '${columns[0]}'/'${columns[1]}' already in use` : `Canonical slot '${columns[0]}' already in use`)
+  }
+  columns.forEach(column => used.add(column))
+}
+
+const FIELD_ROW_COLUMNS = ['field_name', 'slot_type', 'slot_index', 'slot_column', 'nullable', 'required', 'target_resource', 'alias', 'meta_json']
+const RELATIONSHIP_ROW_COLUMNS = ['relationship_name', 'relationship_type', 'target_resource', 'slot_index', 'id_column', 'type_column', 'relationship_key', 'through', 'foreign_key', 'other_key', 'alias', 'meta_json']
+
+// Drivers return booleans and integers in different shapes; compare meaning only.
+const rowsSignature = (rows, columns) => JSON.stringify(rows.map(row => columns.map(column => {
+  const value = row[column]
+  if (column === 'nullable' || column === 'required') return Boolean(value)
+  if (column === 'slot_index') return value == null ? null : Number(value)
+  return value ?? null
+})).sort((left, right) => String(left[0]).localeCompare(String(right[0]))))
+
+const isWriteConflict = error => WRITE_CONFLICT_CODES.has(error?.code) || [1062, 1213].includes(error?.errno)
+
+/**
+ * Canonical resource metadata. One registry can serve every tenant API that
+ * shares a Knex instance: start-up checks, capabilities and the slot layout are
+ * read once, and descriptors are cached per tenant and resource.
+ */
 export class AnyapiRegistry {
-  constructor ({ knex, log } = {}) {
+  #shared = new Map()
+
+  constructor ({ knex, log, cacheSize = DEFAULT_CACHE_SIZE } = {}) {
     if (!knex) {
       throw new Error('AnyapiRegistry requires a knex instance')
     }
+    if (!Number.isInteger(cacheSize) || cacheSize < 1) {
+      throw new Error('AnyapiRegistry cacheSize must be a positive integer')
+    }
     this.knex = knex
     this.log = log || console
+    this.cacheSize = cacheSize
     this.cache = new Map()
+  }
+
+  #once (key, run) {
+    if (!this.#shared.has(key)) {
+      const result = run()
+      this.#shared.set(key, result)
+      result.catch(() => { if (this.#shared.get(key) === result) this.#shared.delete(key) })
+    }
+    return this.#shared.get(key)
+  }
+
+  ensureSchema ({ slots } = {}) {
+    return this.#once(`schema:${JSON.stringify(slots ?? null)}`, async () => {
+      await ensureAnyApiSchema(this.knex, { slots })
+      this.#shared.delete('slots')
+    })
+  }
+
+  getCapabilities (log = this.log) {
+    return this.#once('capabilities', () => getDatabaseCapabilities(this.knex, log))
+  }
+
+  getSlotPools ({ db = this.knex, refresh = false } = {}) {
+    if (refresh) this.#shared.delete('slots')
+    return this.#once('slots', () => readSlotPools(db))
+  }
+
+  async #withSlotPools (db, plan) {
+    try {
+      return plan(await this.getSlotPools({ db }))
+    } catch (error) {
+      // A migration may have added slot columns since the layout was read.
+      if (!error?.slotsExhausted) throw error
+      return plan(await this.getSlotPools({ db, refresh: true }))
+    }
   }
 
   #key (tenant, resource) {
@@ -100,16 +182,33 @@ export class AnyapiRegistry {
     const key = this.#key(descriptor.tenant, descriptor.resource)
     this.cache.delete(key)
     this.cache.set(key, descriptor)
-    if (this.cache.size > MAX_CACHED_DESCRIPTORS) this.cache.delete(this.cache.keys().next().value)
+    if (this.cache.size > this.cacheSize) this.cache.delete(this.cache.keys().next().value)
   }
 
   async registerResource (definition, options = {}) {
+    return (await this.register(definition, options)).descriptor
+  }
+
+  /**
+   * Register a declaration and report whether stored metadata changed.
+   * @returns {Promise<{ descriptor: Record<string, any>, changed: boolean }>}
+   */
+  async register (definition, options = {}) {
+    try {
+      return await this.#registerOnce(definition, options)
+    } catch (error) {
+      if (options.transaction || !creationRaces.has(error?.cause)) throw error
+      return this.#registerOnce(definition, options)
+    }
+  }
+
+  async #registerOnce (definition, options) {
     const context = { method: 'registerResource', tenant: definition?.tenant, resource: definition?.resource }
     try {
       this.#validateDefinition(definition)
-      const descriptor = await this.#register(definition, options.transaction, context)
+      const { descriptor, changed } = await this.#register(definition, options.transaction, context)
       if (!options.transaction) this.#rememberDescriptor(descriptor)
-      return clone(descriptor)
+      return { descriptor: clone(descriptor), changed }
     } catch (error) {
       throw wrapWriteError(error, context, context.transaction || options.transaction)
     } finally {
@@ -118,127 +217,73 @@ export class AnyapiRegistry {
   }
 
   async allocateField (params, options = {}) {
-    const context = { method: 'allocateField' }
-    let trx; let managed = false
-    try {
-      const { tenant, resource, fieldName, definition, canonicalField } = params || {}
-      Object.assign(context, { tenant, resource })
+    return this.#allocate(options, 'allocateField', () => {
+      const { tenant, resource, fieldName, definition, declaration, canonicalField } = params || {}
       if (!tenant || !resource || !fieldName || !definition) {
         throw new Error('allocateField requires tenant, resource, fieldName, and definition')
       }
-      validateSchemaFieldNames({ [fieldName]: definition }, resource)
+      return { tenant, resource, fields: { [fieldName]: { definition, declaration, canonicalField } } }
+    })
+  }
+
+  /**
+   * Allocate several fields under one lock and one schema version.
+   * `declaration` is the uncompiled definition stored for other servers.
+   */
+  async allocateFields (params, options = {}) {
+    return this.#allocate(options, 'allocateFields', () => {
+      const { tenant, resource, fields, searchSchema } = params || {}
+      if (!tenant || !resource || !fields || typeof fields !== 'object' || !Object.keys(fields).length) {
+        throw new Error('allocateFields requires tenant, resource, and fields')
+      }
+      for (const field of Object.values(fields)) {
+        if (!field?.definition) throw new Error('allocateFields requires a definition for each field')
+      }
+      return { tenant, resource, fields, searchSchema }
+    })
+  }
+
+  async #allocate (options, method, readParams) {
+    const context = { method }
+    let trx; let managed = false
+    try {
+      const { tenant, resource, fields, searchSchema } = readParams()
+      Object.assign(context, { tenant, resource })
+      for (const [fieldName, { definition }] of Object.entries(fields)) {
+        validateSchemaFieldNames({ [fieldName]: definition }, resource)
+      }
+      assertFieldNameMap(searchSchema, `added search schema in '${resource}'`)
 
       managed = !options.transaction
       trx = await beginWriteTransaction(context, options.transaction, ownerContext => createKnexTransaction(this.knex, ownerContext))
-      const descriptor = await this.#loadDescriptor(tenant, resource, trx)
+      const resourceRow = await this.#lockResourceRow(trx, tenant, resource)
+      const descriptor = resourceRow && await this.#loadDescriptor(tenant, resource, trx)
       if (!descriptor) throw new Error(`Resource '${resource}' not registered for tenant '${tenant}'`)
-      if (fieldName === descriptor.idProperty || Object.hasOwn(descriptor.schema, fieldName)) {
-        throw new Error(`Field '${resource}.${fieldName}' already exists`)
-      }
-      if (canonicalField && (definition.belongsToPolymorphic || definition.computed || definition.virtual)) {
-        throw new Error(`canonicalFieldsMap should not include non-stored field '${fieldName}'`)
-      }
-      const usedSlots = new Set(Object.values(descriptor.fields).map(info => info.slot))
-      for (const info of Object.values(descriptor.belongsTo)) {
-        usedSlots.add(info.idColumn)
-        usedSlots.add(info.typeColumn)
-      }
-      const resourceRow = await trx('any_resource_configs')
-        .where({ tenant_id: tenant, resource })
-        .first()
+      const plan = await this.#withSlotPools(trx, pools => this.#planAllocation(descriptor, fields, pools))
 
-      if (!resourceRow) {
-        throw new Error(`Resource '${resource}' not found in metadata`)
+      for (const row of plan.fieldRows) {
+        await trx('any_field_configs').insert({ resource_config_id: resourceRow.id, ...row })
+      }
+      for (const row of plan.relationshipRows) {
+        await trx('any_relationship_configs').insert({ resource_config_id: resourceRow.id, ...row })
       }
 
-      if (definition?.belongsToPolymorphic) {
-        const alias = definition.as || fieldName
-        const { typeField, idField, types = [] } = definition.belongsToPolymorphic
-
-        await trx('any_relationship_configs').insert({
-          resource_config_id: resourceRow.id,
-          relationship_name: alias,
-          relationship_type: 'belongsToPolymorphic',
-          target_resource: null,
-          slot_index: null,
-          id_column: idField,
-          type_column: typeField,
-          relationship_key: null,
-          through: null,
-          foreign_key: null,
-          other_key: null,
-          alias,
-          meta_json: JSON.stringify({ types }),
-        })
-      } else if (!definition.computed && !definition.virtual) {
-        let override = null
-        if (canonicalField) {
-          if (definition.belongsTo) {
-            const normalized = typeof canonicalField === 'string'
-              ? { idSlot: canonicalField }
-              : canonicalField
-            if (!normalized || !normalized.idSlot) {
-              throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
-            }
-            const parsed = parseBelongsToSlots(normalized)
-            if (usedSlots.has(parsed.idColumn) || usedSlots.has(parsed.typeColumn)) {
-              throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`)
-            }
-            usedSlots.add(parsed.idColumn)
-            usedSlots.add(parsed.typeColumn)
-            override = normalized
-          } else {
-            const slotColumn = typeof canonicalField === 'string'
-              ? canonicalField
-              : canonicalField?.slot || canonicalField?.slotColumn
-            if (!slotColumn) {
-              throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
-            }
-            if (usedSlots.has(slotColumn)) {
-              throw new Error(`Canonical slot '${slotColumn}' already in use`)
-            }
-            usedSlots.add(slotColumn)
-            override = { slotColumn }
-          }
-        }
-        const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, descriptor.slotState, override)
-        if (!fieldSlot) throw new Error(`Field '${resource}.${fieldName}' requires a supported type`)
-        const meta = definition.meta ? JSON.stringify(definition.meta) : null
-
-        await trx('any_field_configs').insert({
-          resource_config_id: resourceRow.id,
-          field_name: fieldName,
-          slot_type: fieldSlot.slotType,
-          slot_index: fieldSlot.slotIndex,
-          slot_column: fieldSlot.slotColumn,
-          nullable: definition.nullable === true,
-          required: definition.required === true,
-          target_resource: definition.belongsTo || null,
-          alias: definition.as || null,
-          meta_json: meta,
-        })
-
-        if (fieldSlot.relationshipRow) {
-          const relationshipRow = {
-            resource_config_id: resourceRow.id,
-            relationship_name: fieldSlot.relationshipRow.name,
-            relationship_type: fieldSlot.relationshipRow.type,
-            target_resource: fieldSlot.relationshipRow.target,
-            slot_index: fieldSlot.relationshipRow.slotIndex,
-            id_column: fieldSlot.relationshipRow.idColumn,
-            type_column: fieldSlot.relationshipRow.typeColumn,
-            relationship_key: fieldSlot.relationshipRow.relationshipKey,
-            through: fieldSlot.relationshipRow.through,
-            foreign_key: fieldSlot.relationshipRow.foreignKey,
-            other_key: fieldSlot.relationshipRow.otherKey,
-            alias: fieldSlot.relationshipRow.alias,
-            meta_json: fieldSlot.relationshipRow.meta ? JSON.stringify(fieldSlot.relationshipRow.meta) : null,
-          }
-          await trx('any_relationship_configs').insert(relationshipRow)
+      const stored = descriptor.definition || { options: null, callbacks: [] }
+      const runtime = clone(stored.runtime || EMPTY_RUNTIME)
+      for (const [kind, entries] of [
+        ['schema', Object.entries(fields).map(([name, field]) => [name, field.declaration ?? field.definition])],
+        ['searchSchema', Object.entries(searchSchema || {})]
+      ]) {
+        for (const [name, value] of entries) {
+          const { json, callbacks } = toStoredJson(value)
+          runtime[kind][name] = json
+          runtime.callbacks.push(...callbacks.map(path => [kind, name, ...path]))
         }
       }
-      await trx('any_resource_configs').where({ id: resourceRow.id }).update({
-        schema_json: JSON.stringify({ ...descriptor.schema, [fieldName]: definition })
+      await this.#bumpVersion(trx, resourceRow, {
+        schema_json: JSON.stringify({ ...descriptor.schema, ...plan.definitions }),
+        definition_json: JSON.stringify({ ...stored, runtime }),
+        updated_at: this.knex.fn.now()
       })
       const updated = await this.#loadDescriptor(tenant, resource, trx)
       if (managed) {
@@ -254,6 +299,142 @@ export class AnyapiRegistry {
     } finally {
       endWriteOperation(context)
     }
+  }
+
+  #planAllocation (descriptor, fields, pools) {
+    const { resource } = descriptor
+    const used = new Set(Object.values(descriptor.fields).map(info => info.slot))
+    for (const info of Object.values(descriptor.belongsTo)) {
+      used.add(info.idColumn)
+      used.add(info.typeColumn)
+    }
+    const fieldRows = []
+    const relationshipRows = []
+    const definitions = {}
+
+    for (const [fieldName, { definition, canonicalField }] of Object.entries(fields)) {
+      if (fieldName === descriptor.idProperty || Object.hasOwn(descriptor.schema, fieldName) || Object.hasOwn(definitions, fieldName)) {
+        throw new Error(`Field '${resource}.${fieldName}' already exists`)
+      }
+      if (canonicalField && (definition.belongsToPolymorphic || definition.computed || definition.virtual)) {
+        throw new Error(`canonicalFieldsMap should not include non-stored field '${fieldName}'`)
+      }
+      definitions[fieldName] = definition
+
+      if (definition?.belongsToPolymorphic) {
+        const alias = definition.as || fieldName
+        const { typeField, idField, types = [] } = definition.belongsToPolymorphic
+        relationshipRows.push({
+          relationship_name: alias,
+          relationship_type: 'belongsToPolymorphic',
+          target_resource: null,
+          slot_index: null,
+          id_column: idField,
+          type_column: typeField,
+          relationship_key: null,
+          through: null,
+          foreign_key: null,
+          other_key: null,
+          alias,
+          meta_json: JSON.stringify({ types }),
+        })
+        continue
+      }
+      if (definition.computed || definition.virtual) continue
+
+      let override = null
+      if (canonicalField) {
+        if (definition.belongsTo) {
+          const normalized = typeof canonicalField === 'string'
+            ? { idSlot: canonicalField }
+            : canonicalField
+          if (!normalized || !normalized.idSlot) {
+            throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
+          }
+          const parsed = parseBelongsToSlots(normalized, pools)
+          reserveSlots(used, [parsed.idColumn, parsed.typeColumn])
+          override = normalized
+        } else {
+          const slotColumn = typeof canonicalField === 'string'
+            ? canonicalField
+            : canonicalField?.slot || canonicalField?.slotColumn
+          if (!slotColumn) {
+            throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
+          }
+          reserveSlots(used, [slotColumn])
+          override = { slotColumn }
+        }
+      }
+      const fieldSlot = this.#assignFieldSlot({ ...definition, fieldName }, used, override, pools)
+      if (!fieldSlot) throw new Error(`Field '${resource}.${fieldName}' requires a supported type`)
+      fieldRows.push(this.#fieldRow(fieldName, definition, fieldSlot))
+      if (fieldSlot.relationshipRow) relationshipRows.push(this.#relationshipRow(fieldSlot.relationshipRow))
+    }
+    return { fieldRows, relationshipRows, definitions }
+  }
+
+  #fieldRow (fieldName, fieldDef, allocation) {
+    return {
+      field_name: fieldName,
+      slot_type: allocation.slotType,
+      slot_index: allocation.slotIndex,
+      slot_column: allocation.slotColumn,
+      nullable: fieldDef.nullable === true,
+      required: fieldDef.required === true,
+      target_resource: fieldDef.belongsTo || null,
+      alias: fieldDef.as || null,
+      meta_json: fieldDef.meta ? JSON.stringify(fieldDef.meta) : null,
+    }
+  }
+
+  #relationshipRow (relationship) {
+    return {
+      relationship_name: relationship.name,
+      relationship_type: relationship.type,
+      target_resource: relationship.target,
+      slot_index: relationship.slotIndex,
+      id_column: relationship.idColumn,
+      type_column: relationship.typeColumn,
+      relationship_key: relationship.relationshipKey,
+      through: relationship.through,
+      foreign_key: relationship.foreignKey,
+      other_key: relationship.otherKey,
+      alias: relationship.alias,
+      meta_json: relationship.meta ? JSON.stringify(relationship.meta) : null,
+    }
+  }
+
+  // Concurrent schema changes to one resource queue on its metadata row.
+  #lockResourceRow (trx, tenant, resource) {
+    return trx('any_resource_configs').where({ tenant_id: tenant, resource }).forUpdate().first()
+  }
+
+  async #bumpVersion (trx, resourceRow, values) {
+    const version = Number(resourceRow.schema_version ?? 1)
+    const updated = await trx('any_resource_configs')
+      .where({ id: resourceRow.id, schema_version: version })
+      .update({ ...values, schema_version: version + 1 })
+    if (Number(updated) !== 1) {
+      throw new RestApiResourceError(`AnyAPI resource '${resourceRow.resource}' changed concurrently; retry the schema change`, {
+        subtype: 'conflict', resourceType: 'anyapi_resource', resourceId: resourceRow.resource
+      })
+    }
+    return version + 1
+  }
+
+  async #hasRecords (trx, descriptor) {
+    const { canonical } = descriptor
+    return Boolean(await trx(canonical.tableName)
+      .where(canonical.tenantColumn, descriptor.tenant)
+      .where(canonical.resourceColumn, descriptor.resource)
+      .first('id'))
+  }
+
+  async getSchemaVersion (tenant, resource, { transaction } = {}) {
+    const row = await (transaction || this.knex)('any_resource_configs')
+      .where({ tenant_id: tenant, resource })
+      .first('schema_version')
+    return row ? Number(row.schema_version) : null
   }
 
   async getDescriptor (tenant, resource, options = {}) {
@@ -342,247 +523,92 @@ export class AnyapiRegistry {
     try {
       trx = await beginWriteTransaction(context, externalTrx, ownerContext => createKnexTransaction(this.knex, ownerContext))
       const now = this.knex.fn.now()
-      let resourceRow = await trx('any_resource_configs')
-        .where({ tenant_id: tenant, resource })
-        .first()
+      const resourceRow = await this.#lockResourceRow(trx, tenant, resource)
+      // Validate persisted mappings before registration can replace migration evidence.
+      const previous = resourceRow ? await this.#loadState(tenant, resource, trx, { idProperty }) : null
+      const previousDescriptor = previous?.descriptor
+      const stored = previousDescriptor?.definition || null
+      const runtime = clone(stored?.runtime || EMPTY_RUNTIME)
+      let populated
+      const isPopulated = () => (populated ??= this.#hasRecords(trx, previousDescriptor))
 
-      const schemaJson = JSON.stringify(schema)
-      const relationshipsJson = JSON.stringify(relationships || {})
-      let previousDescriptor
+      // Registration never drops a mapping other servers may still use. Runtime
+      // additions stay published; a populated field the declaration omits keeps
+      // its slot but is no longer published. Metadata written before
+      // definitions were stored cannot tell the two apart, so it keeps both.
+      const retained = {}
+      for (const [fieldName, fieldDef] of Object.entries(previousDescriptor?.schema || {})) {
+        if (Object.hasOwn(schema, fieldName)) continue
+        if (!stored?.options && !Object.hasOwn(runtime.schema, fieldName)) runtime.schema[fieldName] = fieldDef
+        if (Object.hasOwn(runtime.schema, fieldName) || await isPopulated()) retained[fieldName] = fieldDef
+      }
+      const storageSchema = { ...schema, ...retained }
 
+      const plan = await this.#withSlotPools(trx, pools => this.#planRegistration({
+        tenant, resource, schema, storageSchema, relationships, canonicalFieldMap, idProperty, previousDescriptor, pools
+      }))
+      const declaration = toStoredJson(definition.declaration ?? { schema, relationships })
+      const row = {
+        schema_json: JSON.stringify(storageSchema),
+        relationships_json: JSON.stringify(relationships || {}),
+        definition_json: JSON.stringify({ options: declaration.json, callbacks: declaration.callbacks, runtime }),
+      }
+      const unchanged = previous &&
+        Object.entries(row).every(([column, value]) => previous.resourceRow[column] === value) &&
+        rowsSignature(previous.fieldRows, FIELD_ROW_COLUMNS) === rowsSignature(plan.fieldRows, FIELD_ROW_COLUMNS) &&
+        rowsSignature(previous.relationshipRows, RELATIONSHIP_ROW_COLUMNS) === rowsSignature(plan.relationshipRows, RELATIONSHIP_ROW_COLUMNS)
+      if (unchanged) {
+        if (managed) await commitTransaction(trx, context)
+        return { descriptor: previousDescriptor, changed: false }
+      }
+
+      let resourceConfigId = resourceRow?.id
       if (resourceRow) {
-        // Validate persisted mappings before registration can replace migration evidence.
-        previousDescriptor = await this.#loadDescriptor(tenant, resource, trx, { idProperty })
-        await trx('any_resource_configs')
-          .where({ id: resourceRow.id })
-          .update({
-            schema_json: schemaJson,
-            relationships_json: relationshipsJson,
-            updated_at: now,
-          })
+        await trx('any_field_configs').where({ resource_config_id: resourceRow.id }).delete()
+        await trx('any_relationship_configs').where({ resource_config_id: resourceRow.id }).delete()
+        await this.#bumpVersion(trx, resourceRow, { ...row, updated_at: now })
       } else {
-        const [inserted] = await applyInsertReturning(trx('any_resource_configs').insert({
-          tenant_id: tenant,
-          resource,
-          schema_json: schemaJson,
-          relationships_json: relationshipsJson,
-          created_at: now,
-          updated_at: now,
-        }), 'id')
-
-        resourceRow = {
-          id: inserted && typeof inserted === 'object' ? inserted.id : inserted,
-          tenant_id: tenant,
-          resource,
-          schema_json: schemaJson,
-          relationships_json: relationshipsJson,
+        try {
+          const [inserted] = await applyInsertReturning(trx('any_resource_configs').insert({
+            tenant_id: tenant,
+            resource,
+            ...row,
+            schema_version: 1,
+            created_at: now,
+            updated_at: now,
+          }), 'id')
+          resourceConfigId = inserted && typeof inserted === 'object' ? inserted.id : inserted
+        } catch (error) {
+          if (isWriteConflict(error)) creationRaces.add(error)
+          throw error
         }
       }
 
-      await trx('any_field_configs').where({ resource_config_id: resourceRow.id }).delete()
-      await trx('any_relationship_configs').where({ resource_config_id: resourceRow.id }).delete()
-
-      const slotState = this.#initializeSlotState()
-      const usedSlotColumns = new Set()
-      let canonicalOverrides = null
-      if (canonicalFieldMap) {
-        canonicalOverrides = new Map(Object.entries(canonicalFieldMap))
+      const stamp = { resource_config_id: resourceConfigId, created_at: now, updated_at: now }
+      if (plan.fieldRows.length > 0) {
+        await trx('any_field_configs').insert(plan.fieldRows.map(fieldRow => ({ ...fieldRow, ...stamp })))
       }
-      const fieldInserts = []
-      const relationshipInserts = []
-
-      // ID attributes previously had no slot; append them without moving existing slots.
-      const fields = Object.entries(schema).sort(([, left], [, right]) =>
-        Number(left?.type === 'id' && !left.belongsTo) - Number(right?.type === 'id' && !right.belongsTo)
-      )
-      for (const [fieldName, fieldDef] of fields) {
-        if (fieldName === 'id' || (fieldName === idProperty && fieldDef?.type === 'id')) {
-          if (canonicalOverrides) {
-            canonicalOverrides.delete(fieldName)
-          }
-          continue
-        }
-
-        if (fieldDef?.belongsToPolymorphic) {
-          if (canonicalOverrides?.has(fieldName)) {
-            throw new Error(`canonicalFieldsMap should not include polymorphic field '${fieldName}'`)
-          }
-          const alias = fieldDef.as || fieldName
-          const { typeField, idField, types = [] } = fieldDef.belongsToPolymorphic
-
-          relationshipInserts.push({
-            resource_config_id: resourceRow.id,
-            relationship_name: alias,
-            relationship_type: 'belongsToPolymorphic',
-            target_resource: null,
-            slot_index: null,
-            id_column: idField,
-            type_column: typeField,
-            relationship_key: null,
-            through: null,
-            foreign_key: null,
-            other_key: null,
-            alias,
-            meta_json: JSON.stringify({ types }),
-            created_at: this.knex.fn.now(),
-            updated_at: this.knex.fn.now(),
-          })
-          continue
-        }
-
-        if (fieldDef?.computed) {
-          if (canonicalOverrides?.has(fieldName)) {
-            throw new Error(`canonicalFieldsMap should not include computed field '${fieldName}'`)
-          }
-          continue
-        }
-
-        if (fieldDef?.virtual === true) {
-          if (canonicalOverrides?.has(fieldName)) {
-            throw new Error(`canonicalFieldsMap should not include virtual field '${fieldName}'`)
-          }
-          continue
-        }
-
-        let override = null
-        if (canonicalOverrides) {
-          if (!canonicalOverrides.has(fieldName)) {
-            throw new Error(`canonicalFieldsMap missing entry for field '${fieldName}'`)
-          }
-          const rawOverride = canonicalOverrides.get(fieldName)
-          canonicalOverrides.delete(fieldName)
-
-          if (fieldDef.belongsTo) {
-            const normalized = typeof rawOverride === 'string'
-              ? { idSlot: rawOverride }
-              : rawOverride
-            if (!normalized || !normalized.idSlot) {
-              throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
-            }
-            const parsed = parseBelongsToSlots(normalized)
-            if (usedSlotColumns.has(parsed.idColumn) || usedSlotColumns.has(parsed.typeColumn)) {
-              throw new Error(`Canonical slots '${parsed.idColumn}'/'${parsed.typeColumn}' already in use`)
-            }
-            usedSlotColumns.add(parsed.idColumn)
-            usedSlotColumns.add(parsed.typeColumn)
-            override = normalized
-          } else {
-            const slotColumn = typeof rawOverride === 'string'
-              ? rawOverride
-              : rawOverride?.slot || rawOverride?.slotColumn
-            if (!slotColumn) {
-              throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
-            }
-            const parsed = parseSimpleSlotColumn(slotColumn)
-            if (usedSlotColumns.has(slotColumn)) {
-              throw new Error(`Canonical slot '${slotColumn}' already in use`)
-            }
-            usedSlotColumns.add(slotColumn)
-            override = { slotColumn, slotType: parsed.slotType, slotIndex: parsed.slotIndex }
-          }
-        }
-
-        const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, slotState, override)
-        if (!allocation) continue
-
-        const meta = fieldDef.meta ? JSON.stringify(fieldDef.meta) : null
-        fieldInserts.push({
-          resource_config_id: resourceRow.id,
-          field_name: fieldName,
-          slot_type: allocation.slotType,
-          slot_index: allocation.slotIndex,
-          slot_column: allocation.slotColumn,
-          nullable: fieldDef.nullable === true,
-          required: fieldDef.required === true,
-          target_resource: fieldDef.belongsTo || null,
-          alias: fieldDef.as || null,
-          meta_json: meta,
-          created_at: this.knex.fn.now(),
-          updated_at: this.knex.fn.now(),
-        })
-
-        if (allocation.relationshipRow) {
-          const relationshipRow = {
-            resource_config_id: resourceRow.id,
-            relationship_name: allocation.relationshipRow.name,
-            relationship_type: allocation.relationshipRow.type,
-            target_resource: allocation.relationshipRow.target,
-            slot_index: allocation.relationshipRow.slotIndex,
-            id_column: allocation.relationshipRow.idColumn,
-            type_column: allocation.relationshipRow.typeColumn,
-            relationship_key: allocation.relationshipRow.relationshipKey,
-            through: allocation.relationshipRow.through,
-            foreign_key: allocation.relationshipRow.foreignKey,
-            other_key: allocation.relationshipRow.otherKey,
-            alias: allocation.relationshipRow.alias,
-            meta_json: allocation.relationshipRow.meta ? JSON.stringify(allocation.relationshipRow.meta) : null,
-            created_at: this.knex.fn.now(),
-            updated_at: this.knex.fn.now(),
-          }
-          relationshipInserts.push(relationshipRow)
-        }
-
-        usedSlotColumns.add(allocation.slotColumn)
-        if (allocation.relationshipRow?.typeColumn) {
-          usedSlotColumns.add(allocation.relationshipRow.typeColumn)
-        }
-      }
-
-      if (canonicalOverrides && canonicalOverrides.size > 0) {
-        const unknownFields = [...canonicalOverrides.keys()].join(', ')
-        throw new Error(`canonicalFieldsMap contains unknown fields: ${unknownFields}`)
-      }
-
-      for (const [relName, relDef] of Object.entries(relationships || {})) {
-        if (relDef?.type === 'manyToMany') {
-          relationshipInserts.push({
-            resource_config_id: resourceRow.id,
-            relationship_name: relName,
-            relationship_type: 'manyToMany',
-            target_resource: relDef.target || relName,
-            relationship_key: relDef.relationship || `${tenant}:${resource}:${relName}`,
-            through: relDef.through,
-            foreign_key: relDef.foreignKey,
-            other_key: relDef.otherKey,
-            alias: relDef.as || relName,
-            meta_json: JSON.stringify(relDef.meta || {}),
-            created_at: this.knex.fn.now(),
-            updated_at: this.knex.fn.now(),
-          })
-        }
-      }
-
-      if (fieldInserts.length > 0) {
-        await trx('any_field_configs').insert(fieldInserts)
-      }
-      if (relationshipInserts.length > 0) {
-        await trx('any_relationship_configs').insert(relationshipInserts)
+      if (plan.relationshipRows.length > 0) {
+        await trx('any_relationship_configs').insert(plan.relationshipRows.map(relationshipRow => ({ ...relationshipRow, ...stamp })))
       }
 
       const descriptor = await this.#loadDescriptor(tenant, resource, trx, { idProperty })
       const changedField = Object.keys(previousDescriptor?.fields || {}).find(fieldName => {
-        const previous = previousDescriptor.fields[fieldName]
+        const previousField = previousDescriptor.fields[fieldName]
         const current = descriptor.fields[fieldName]
-        if (!current || previous.slot !== current.slot || previous.slotType !== current.slotType) return true
-        return previous.slotType === 'belongsTo' &&
-          previousDescriptor.belongsTo[previous.alias]?.typeColumn !== descriptor.belongsTo[current.alias]?.typeColumn
+        if (!current || previousField.slot !== current.slot || previousField.slotType !== current.slotType) return true
+        return previousField.slotType === 'belongsTo' &&
+          previousDescriptor.belongsTo[previousField.alias]?.typeColumn !== descriptor.belongsTo[current.alias]?.typeColumn
       })
-      if (changedField) {
-        const { canonical } = previousDescriptor
-        const storedRecord = await trx(canonical.tableName)
-          .where(canonical.tenantColumn, tenant)
-          .where(canonical.resourceColumn, resource)
-          .first()
-        if (storedRecord) {
-          throw new Error(`Canonical storage migration required for '${resource}.${changedField}': registration cannot remove or remap stored fields while records exist. Preserve canonicalFieldsMap or migrate the stored data before changing the schema.`)
-        }
+      if (changedField && await isPopulated()) {
+        throw new Error(`Canonical storage migration required for '${resource}.${changedField}': registration cannot remove or remap stored fields while records exist. Preserve canonicalFieldsMap or migrate the stored data before changing the schema.`)
       }
 
       if (managed) {
         await commitTransaction(trx, context)
       }
 
-      return descriptor
+      return { descriptor, changed: true }
     } catch (error) {
       if (managed) {
         await this.#handleWriteFailure(error, trx || context.transaction, context)
@@ -591,12 +617,146 @@ export class AnyapiRegistry {
     }
   }
 
+  #planRegistration ({ tenant, resource, schema, storageSchema, relationships, canonicalFieldMap, idProperty, previousDescriptor, pools }) {
+    const used = new Set()
+    const canonicalOverrides = canonicalFieldMap ? new Map(Object.entries(canonicalFieldMap)) : null
+    const entries = []
+    const fieldRows = []
+    const relationshipRows = []
+
+    // ID attributes previously had no slot; append them without moving existing slots.
+    const fields = Object.entries(storageSchema).sort(([, left], [, right]) =>
+      Number(left?.type === 'id' && !left.belongsTo) - Number(right?.type === 'id' && !right.belongsTo)
+    )
+    for (const [fieldName, fieldDef] of fields) {
+      if (fieldName === 'id' || (fieldName === idProperty && fieldDef?.type === 'id')) {
+        canonicalOverrides?.delete(fieldName)
+        continue
+      }
+
+      if (fieldDef?.belongsToPolymorphic) {
+        if (canonicalOverrides?.has(fieldName)) {
+          throw new Error(`canonicalFieldsMap should not include polymorphic field '${fieldName}'`)
+        }
+        const alias = fieldDef.as || fieldName
+        const { typeField, idField, types = [] } = fieldDef.belongsToPolymorphic
+        relationshipRows.push({
+          relationship_name: alias,
+          relationship_type: 'belongsToPolymorphic',
+          target_resource: null,
+          slot_index: null,
+          id_column: idField,
+          type_column: typeField,
+          relationship_key: null,
+          through: null,
+          foreign_key: null,
+          other_key: null,
+          alias,
+          meta_json: JSON.stringify({ types }),
+        })
+        continue
+      }
+
+      if (fieldDef?.computed) {
+        if (canonicalOverrides?.has(fieldName)) {
+          throw new Error(`canonicalFieldsMap should not include computed field '${fieldName}'`)
+        }
+        continue
+      }
+
+      if (fieldDef?.virtual === true) {
+        if (canonicalOverrides?.has(fieldName)) {
+          throw new Error(`canonicalFieldsMap should not include virtual field '${fieldName}'`)
+        }
+        continue
+      }
+
+      let override = null
+      // Retained fields are not part of the declaration, so its map does not cover them.
+      if (canonicalOverrides && Object.hasOwn(schema, fieldName)) {
+        if (!canonicalOverrides.has(fieldName)) {
+          throw new Error(`canonicalFieldsMap missing entry for field '${fieldName}'`)
+        }
+        const rawOverride = canonicalOverrides.get(fieldName)
+        canonicalOverrides.delete(fieldName)
+
+        if (fieldDef.belongsTo) {
+          const normalized = typeof rawOverride === 'string'
+            ? { idSlot: rawOverride }
+            : rawOverride
+          if (!normalized || !normalized.idSlot) {
+            throw new Error(`canonicalFieldsMap for belongsTo field '${fieldName}' requires idSlot`)
+          }
+          const parsed = parseBelongsToSlots(normalized, pools)
+          reserveSlots(used, [parsed.idColumn, parsed.typeColumn])
+          override = normalized
+        } else {
+          const slotColumn = typeof rawOverride === 'string'
+            ? rawOverride
+            : rawOverride?.slot || rawOverride?.slotColumn
+          if (!slotColumn) {
+            throw new Error(`canonicalFieldsMap for field '${fieldName}' must provide a slot column`)
+          }
+          parseSimpleSlotColumn(slotColumn, pools)
+          reserveSlots(used, [slotColumn])
+          override = { slotColumn }
+        }
+      }
+      entries.push({ fieldName, fieldDef, override })
+    }
+
+    if (canonicalOverrides && canonicalOverrides.size > 0) {
+      const unknownFields = [...canonicalOverrides.keys()].join(', ')
+      throw new Error(`canonicalFieldsMap contains unknown fields: ${unknownFields}`)
+    }
+
+    // Stored fields keep their slots, so declaration order never moves data.
+    for (const entry of entries) {
+      const previous = previousDescriptor?.fields?.[entry.fieldName]
+      if (entry.override || !previous || previous.slotType !== slotPoolFor(entry.fieldDef)) continue
+      const columns = previous.slotType === 'belongsTo' ? belongsToColumns(previous.slotIndex) : [previous.slot]
+      const available = previous.slotType === 'belongsTo'
+        ? pools.belongsTo.includes(previous.slotIndex)
+        : pools[previous.slotType]?.includes(previous.slot)
+      if (!available || columns.some(column => used.has(column))) continue
+      columns.forEach(column => used.add(column))
+      entry.override = previous.slotType === 'belongsTo' ? { idSlot: columns[0], typeSlot: columns[1] } : { slotColumn: previous.slot }
+    }
+
+    for (const { fieldName, fieldDef, override } of entries) {
+      const allocation = this.#assignFieldSlot({ ...fieldDef, fieldName }, used, override, pools)
+      if (!allocation) continue
+      fieldRows.push(this.#fieldRow(fieldName, fieldDef, allocation))
+      if (allocation.relationshipRow) relationshipRows.push(this.#relationshipRow(allocation.relationshipRow))
+    }
+
+    for (const [relName, relDef] of Object.entries(relationships || {})) {
+      if (relDef?.type === 'manyToMany') {
+        relationshipRows.push(this.#relationshipRow({
+          name: relName,
+          type: 'manyToMany',
+          target: relDef.target || relName,
+          relationshipKey: relDef.relationship || `${tenant}:${resource}:${relName}`,
+          through: relDef.through,
+          foreignKey: relDef.foreignKey,
+          otherKey: relDef.otherKey,
+          alias: relDef.as || relName,
+          meta: relDef.meta || {},
+        }))
+      }
+    }
+
+    return { fieldRows, relationshipRows }
+  }
+
   async #loadDescriptor (tenant, resource, trx, options = {}) {
-    const query = (trx || this.knex)('any_resource_configs')
+    return (await this.#loadState(tenant, resource, trx, options))?.descriptor || null
+  }
+
+  async #loadState (tenant, resource, trx, options = {}) {
+    const resourceRow = await (trx || this.knex)('any_resource_configs')
       .where({ tenant_id: tenant, resource })
       .first()
-
-    const resourceRow = await query
     if (!resourceRow) return null
 
     const fieldRows = await (trx || this.knex)('any_field_configs')
@@ -642,8 +802,10 @@ export class AnyapiRegistry {
     }
 
     descriptor.canonicalFieldMap = canonicalFieldMap
+    descriptor.schemaVersion = Number(resourceRow.schema_version ?? 1)
+    descriptor.definition = resourceRow.definition_json ? JSON.parse(resourceRow.definition_json) : null
 
-    return descriptor
+    return { resourceRow, fieldRows, relationshipRows, descriptor }
   }
 
   #buildDescriptor ({ tenant, resource, schema, relationships, slotState, fieldRows, relationshipRows, idProperty }) {
@@ -761,9 +923,11 @@ export class AnyapiRegistry {
     }
   }
 
-  #assignFieldSlot (fieldDef, slotState, canonicalOverride = null) {
+  // Callers reserve explicit and preserved slots in `used` before assigning;
+  // other fields take the first free slot of their pool.
+  #assignFieldSlot (fieldDef, used, canonicalOverride, pools) {
     if (fieldDef.belongsTo) {
-      return this.#assignBelongsTo(fieldDef, slotState, canonicalOverride)
+      return this.#assignBelongsTo(fieldDef, used, canonicalOverride, pools)
     }
 
     const { type } = fieldDef
@@ -774,7 +938,7 @@ export class AnyapiRegistry {
       throw new Error(`Unsupported field type '${type}'`)
     }
 
-    const pool = type === 'id' ? 'string' : TYPE_TO_POOL.get(type)
+    const pool = slotPoolFor(fieldDef)
     if (!pool) {
       throw new Error(`No slot pool defined for type '${type}'`)
     }
@@ -786,103 +950,58 @@ export class AnyapiRegistry {
       if (!slotColumn) {
         throw new Error(`Canonical mapping for field '${fieldDef.fieldName}' must provide a slot column`)
       }
-      const { slotType, slotIndex } = parseSimpleSlotColumn(slotColumn)
+      const { slotType, slotIndex } = parseSimpleSlotColumn(slotColumn, pools)
       if (slotType !== pool) {
         throw new Error(
           `Canonical slot '${slotColumn}' does not match expected type '${pool}' for field '${fieldDef.fieldName}'`
         )
       }
-      slotState[pool] = Math.max(slotState[pool], slotIndex)
-      return {
-        slotType: pool,
-        slotIndex,
-        slotColumn,
-        updatedState: slotState,
-      }
+      used.add(slotColumn)
+      return { slotType: pool, slotIndex, slotColumn }
     }
 
-    const nextIndex = slotState[pool] + 1
-    if (nextIndex > SLOT_LIMITS[pool]) {
-      throw new Error(`No available ${pool} slots remaining`)
+    const slotColumn = pools[pool].find(column => !used.has(column))
+    if (!slotColumn) {
+      throw slotsExhausted(pool)
     }
-
-    slotState[pool] = nextIndex
-    const slotColumn = SLOT_POOLS[pool][nextIndex - 1]
-
-    return {
-      slotType: pool,
-      slotIndex: nextIndex,
-      slotColumn,
-      updatedState: slotState,
-    }
+    used.add(slotColumn)
+    return { slotType: pool, slotIndex: pools[pool].indexOf(slotColumn) + 1, slotColumn }
   }
 
-  #assignBelongsTo (fieldDef, slotState, canonicalOverride = null) {
+  #assignBelongsTo (fieldDef, used, canonicalOverride, pools) {
     const alias = BELONGS_TO_ALIAS(fieldDef.fieldName || '', fieldDef)
     const relationshipKey = fieldDef.relationshipKey || null
 
+    let slotIndex
     if (canonicalOverride) {
       const normalized = typeof canonicalOverride === 'string'
         ? { idSlot: canonicalOverride }
         : canonicalOverride
-      const { slotIndex, idColumn, typeColumn } = parseBelongsToSlots(normalized || {})
-      slotState.belongsTo = Math.max(slotState.belongsTo, slotIndex)
-      return {
-        slotType: 'belongsTo',
-        slotIndex,
-        slotColumn: idColumn,
-        relationshipRow: {
-          name: alias,
-          type: 'belongsTo',
-          target: fieldDef.belongsTo,
-          slotIndex,
-          idColumn,
-          typeColumn,
-          relationshipKey,
-          alias,
-        },
-        belongsToInfo: {
-          alias,
-          target: fieldDef.belongsTo,
-          slotIndex,
-          idColumn,
-          typeColumn,
-          nullable: fieldDef.nullable === true,
-        },
-        updatedState: slotState,
+      slotIndex = parseBelongsToSlots(normalized || {}, pools).slotIndex
+    } else {
+      slotIndex = pools.belongsTo.find(index => belongsToColumns(index).every(column => !used.has(column)))
+      if (slotIndex === undefined) {
+        throw slotsExhausted('belongsTo')
       }
     }
-
-    const nextIndex = slotState.belongsTo + 1
-    if (nextIndex > SLOT_LIMITS.belongsTo) {
-      throw new Error('No available belongsTo slots remaining')
-    }
-
-    slotState.belongsTo = nextIndex
+    const [idColumn, typeColumn] = belongsToColumns(slotIndex)
+    used.add(idColumn)
+    used.add(typeColumn)
 
     return {
       slotType: 'belongsTo',
-      slotIndex: nextIndex,
-      slotColumn: `rel_${nextIndex}_id`,
+      slotIndex,
+      slotColumn: idColumn,
       relationshipRow: {
         name: alias,
         type: 'belongsTo',
         target: fieldDef.belongsTo,
-        slotIndex: nextIndex,
-        idColumn: `rel_${nextIndex}_id`,
-        typeColumn: `rel_${nextIndex}_type`,
+        slotIndex,
+        idColumn,
+        typeColumn,
         relationshipKey,
         alias,
       },
-      belongsToInfo: {
-        alias,
-        target: fieldDef.belongsTo,
-        slotIndex: nextIndex,
-        idColumn: `rel_${nextIndex}_id`,
-        typeColumn: `rel_${nextIndex}_type`,
-        nullable: fieldDef.nullable === true,
-      },
-      updatedState: slotState,
     }
   }
 }

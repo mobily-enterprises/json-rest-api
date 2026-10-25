@@ -342,31 +342,52 @@ if (storageMode.isAnyApi()) {
     })
   }
 
-  for (const [name, enrich] of [
-    ['changes an existing slot pool', context => { context.fields.amount.type = 'integer' }],
-    ['removes a stored field', context => { delete context.fields.obsolete }],
-    ['moves an existing slot', context => { context.fields = { prefix: { type: 'string' }, ...context.fields } }]
+  const layoutHooks = enrich => ({ 'schema:enrich': { functionName: 'change-existing-layout', handler: ({ context }) => enrich(context) } })
+  const layoutSnapshot = async knex => {
+    const result = {}
+    for (const table of ['any_records', 'any_links', 'any_resource_configs', 'any_field_configs', 'any_relationship_configs']) {
+      result[table] = await knex(table).orderBy('id')
+    }
+    return result
+  }
+  const fieldSlots = async knex => Object.fromEntries((await knex('any_field_configs').orderBy('id')).map(row => [row.field_name, row.slot_column]))
+
+  for (const [name, enrich, populated] of [
+    ['changes an existing slot pool', context => { context.fields.amount.type = 'integer' }, async ({ fixture, item, enrich }) => {
+      const original = await layoutSnapshot(fixture.knex)
+      await assert.rejects(createSchemaEnrichmentApi(fixture.knex, { hooks: layoutHooks(enrich) }), /Canonical storage migration required/)
+      assert.deepEqual(await layoutSnapshot(fixture.knex), original)
+      assert.deepEqual((await fixture.api.resources.items.get({ id: item.id })).data.attributes, item.attributes)
+    }],
+    ['removes a stored field', context => { delete context.fields.obsolete }, async ({ fixture, item, enrich }) => {
+      // Older servers may still read the field, so its slot and data stay; this declaration just stops publishing it.
+      const slots = await fieldSlots(fixture.knex)
+      const changed = await createSchemaEnrichmentApi(fixture.knex, { hooks: layoutHooks(enrich) })
+      const { obsolete, ...published } = item.attributes
+      assert.equal(obsolete, 'Keep me')
+      assert.deepEqual((await changed.resources.items.get({ id: item.id })).data.attributes, published)
+      assert.deepEqual(await fieldSlots(fixture.knex), slots)
+      const added = await changed.resources.items.post({ document: createJsonApiDocument('items', { name: 'Later', amount: '8' }) })
+      assert.equal(Object.hasOwn(added.data.attributes, 'obsolete'), false)
+    }],
+    ['moves an existing slot', context => { context.fields = { prefix: { type: 'string' }, ...context.fields } }, async ({ fixture, item, enrich }) => {
+      const slots = await fieldSlots(fixture.knex)
+      const changed = await createSchemaEnrichmentApi(fixture.knex, { hooks: layoutHooks(enrich) })
+      const current = await fieldSlots(fixture.knex)
+      assert.deepEqual(Object.fromEntries(Object.keys(slots).map(field => [field, current[field]])), slots)
+      assert.equal(Object.values(slots).includes(current.prefix), false)
+      const read = (await changed.resources.items.get({ id: item.id })).data.attributes
+      assert.deepEqual({ ...read, prefix: undefined }, { ...item.attributes, prefix: undefined })
+    }]
   ]) {
     describe(`Canonical schema migration guard: ${name}`, () => {
       let fixture
       before(async () => { fixture = await createConformanceFixture({ createApi: createSchemaEnrichmentApi, tables }) })
       beforeEach(async () => fixture.reset())
       after(async () => fixture?.close())
-      it('rejects registration without changing stored rows or metadata', async () => {
+      it('protects populated stored rows and metadata', async () => {
         const item = await fixture.seed('items', { name: 'Original', amount: '7', obsolete: 'Keep me' })
-        const snapshot = async () => {
-          const result = {}
-          for (const table of ['any_records', 'any_links', 'any_resource_configs', 'any_field_configs', 'any_relationship_configs']) {
-            result[table] = await fixture.knex(table).orderBy('id')
-          }
-          return result
-        }
-        const original = await snapshot()
-        await assert.rejects(createSchemaEnrichmentApi(fixture.knex, {
-          hooks: { 'schema:enrich': { functionName: 'change-existing-layout', handler: ({ context }) => enrich(context) } }
-        }), /Canonical storage migration required/)
-        assert.deepEqual(await snapshot(), original)
-        assert.deepEqual((await fixture.api.resources.items.get({ id: item.id })).data.attributes, item.attributes)
+        await populated({ fixture, item, enrich })
         const restarted = await createSchemaEnrichmentApi(fixture.knex)
         assert.deepEqual((await restarted.resources.items.get({ id: item.id })).data.attributes, item.attributes)
       })

@@ -1466,6 +1466,16 @@ Missing `fields`, duplicate fields and invalid maps now throw instead of silentl
 succeeding or leaving unusable metadata. See
 [AnyAPI field additions](21-schema-and-migrations.md#anyapi-field-additions).
 
+`ensureAnyApiSchema` now adds `schema_version` and `definition_json` to
+`any_resource_configs` and a unique slot index to `any_field_configs`. It refuses
+to add the index while two fields of one resource share a slot, naming the slot;
+reassign one of them first. Deployments using `ensureSchema: false` must run
+`ensureAnyApiSchema` in a migration. Registration no longer rejects a declaration
+that omits a populated field or reorders fields: stored slots stay where they
+are, and omitted populated fields keep their data without being published.
+Fields added before this release that the declaration does not repeat are kept
+and published from their stored definitions.
+
 Explicit maps take effect during registration, before `createKnexTable()`.
 Repeating that method no longer re-registers the initial schema and discards
 additions. Keep the expanded declaration and complete map in app source for
@@ -2805,13 +2815,14 @@ compilation. Canonical metadata no longer invents an attribute declaration for
 an implicit resource ID; metadata consumers should use `schemaInfo.idProperty`
 to identify the resource ID configuration.
 
-Enrichment runs once at resource registration, and once for each canonical
-`addKnexFields` compilation. Repeated canonical `createKnexTable()` refreshes
-storage metadata without rerunning enrichment or restoring removed search
-fields. Deep registry allocation does not update a running resource's compiled
-schema; use the resource helper and retain its expanded declaration in source.
-Declare callbacks in source again after restart: persisted JSON cannot restore
-functions. Ordinary `addKnexFields` retains its DDL-only behavior.
+Enrichment runs once at resource registration, once for each canonical
+`addKnexFields` compilation, and once for a reload that changes the field set.
+Repeated canonical `createKnexTable()` refreshes storage metadata without
+rerunning enrichment or restoring removed search fields. Deep registry allocation
+does not update a running resource's compiled schema; use the resource helper or
+`reloadSchema()`. Additions survive restarts without being declared again, but
+persisted JSON cannot restore functions: declare fields with callbacks in source,
+or servers hide them. Ordinary `addKnexFields` retains its DDL-only behavior.
 
 Fastify now resolves the current cached request contract when validating a
 payload. A belongs-to alias added through canonical `addKnexFields` can be used

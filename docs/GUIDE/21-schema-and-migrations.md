@@ -307,26 +307,122 @@ separate DDL behavior.
 
 Existing rows are not backfilled: unused slots stay null, and defaults apply to
 subsequent writes. Function defaults do not run during allocation. Backfill old
-rows explicitly when needed. Declare the expanded schema and complete slot map
-in app source for restart, including callbacks that persisted JSON cannot store.
+rows explicitly when needed.
+
+Additions are stored with their search schema, so they survive a restart
+without being declared again. Persisted JSON cannot hold callbacks: getters,
+setters, function defaults, serializers and `compute` functions exist only in the
+process that added them. A server that loads such a field without declaring it
+in code hides the field and logs a warning instead of serving it without its
+callbacks. Declare fields with callbacks in app source on every server; a
+declared field always takes precedence over a stored addition of the same name.
 
 Explicit maps now take effect during registration. Repeating `createKnexTable()`
 ensures canonical tables and refreshes schema information without replacing
 field metadata or removing additions.
 
-Canonical registration allocates slots from the enriched compiled definitions;
-it does not compile a second schema from persisted JSON. Schema/search hooks run
-once per registration or `addKnexFields` compilation. Repeated table creation
-does not rerun them. Search hook changes therefore survive descriptor refresh.
+Canonical registration allocates slots from the enriched compiled definitions.
+Stored additions that the declaration does not repeat are compiled from their
+persisted JSON. Schema/search hooks run once per registration, `addKnexFields`
+compilation or reload that changes the field set. Repeated table creation does
+not rerun them. Search hook changes therefore survive descriptor refresh.
 
-Re-registration rejects removing or remapping existing stored fields while the
-resource has records. Preserve a complete `canonicalFieldsMap` when declaration
-order changes, and perform an explicit data migration for layout changes. See
-the [schema enrichment migration steps](33-migrating-to-v2.md#schema-enrichment-and-canonical-registration),
+Registration never moves a stored field: existing fields keep their slots
+whatever the declaration order, and new fields take the first free slot. A field
+the declaration omits keeps its mapping while the resource has records, because
+servers still running older code may use it; this declaration stops publishing
+it. Unpopulated omitted fields are released. Changing a populated field's storage
+type is still rejected and needs an explicit data migration. See the
+[schema enrichment migration steps](33-migrating-to-v2.md#schema-enrichment-and-canonical-registration),
 including the consequences for hooks that were previously overwritten.
 
-Deep `AnyapiRegistry.allocateField` calls persist the field definition and its
-allocation together. Borrowed transactions own their reads/writes and bypass the
+Registering an unchanged declaration writes nothing. Concurrent schema changes
+to one resource queue on its metadata row, and a unique index stops two fields
+from sharing a slot. Each committed change increments the resource's
+`schema_version`.
+
+### AnyAPI across several servers
+
+Each server compiles resources into memory. When one server adds fields, the
+others keep their published schema until they reload it:
+
+```js
+await api.use(RestApiAnyapiKnexPlugin, {
+  knex,
+  tenantId,
+  // Runs after each committed change; publish it to the other servers.
+  onSchemaChanged: change => notifyServers(change),
+  // Safety net for missed notifications.
+  schemaCheckInterval: 5000
+})
+
+// On a server that receives a notification:
+await api.anyapi.handleSchemaChange(change)
+```
+
+`handleSchemaChange({ tenant, resource, version })` reloads the resource only when
+the version is newer than the published one, and returns whether it did.
+`api.resources.items.reloadSchema()` reloads unconditionally and resolves to the
+published version. Reloads are read-only: they combine the stored definition
+with this server's declaration and never re-register it.
+
+With `schemaCheckInterval`, request methods compare the stored version at most
+once per interval; `0` checks on every request. A request rejected by validation
+also checks the version once and, if the resource changed, reloads and retries.
+A write whose transaction may have committed is never retried. Calls given a
+caller transaction skip both checks, because that transaction may hold
+uncommitted metadata. A rejected `onSchemaChanged` callback is logged; the
+committed change stands.
+
+A server can serve resources it never declared. `await api.anyapi.loadResource('items')`
+loads a stored resource, with the resources it relates to, and resolves to it, or to
+`null` when none is stored. `api.anyapi.loadResources()` loads every stored resource
+of the tenant. A stored resource whose non-field options needed callbacks, such as
+`normalizeId`, must be declared in code. To load resources on demand over HTTP,
+call `loadResource` from middleware placed before the API router.
+
+### AnyAPI tenant instances
+
+One API instance per tenant stays cheap when the instances share their start-up work:
+
+```js
+// In a migration:
+await ensureAnyApiSchema(knex, { slots: { string: 60, number: 30, boolean: 20, date: 20, json: 10, belongsTo: 15 } })
+
+// In the application:
+const registry = new AnyapiRegistry({ knex, cacheSize: 5000 })
+const tenantApi = async tenantId => {
+  const api = new JsonRestApi()
+  await api.use(RestApiPlugin)
+  await api.use(RestApiAnyapiKnexPlugin, { knex, tenantId, registry, ensureSchema: false, ownsKnex: false })
+  await api.anyapi.loadResources()
+  return api
+}
+```
+
+A shared registry reads database capabilities and the slot layout once, and holds
+one descriptor cache, bounded by `cacheSize` (default 100). `ensureSchema: false`
+skips table checks and the logical ID backfill at start-up and in `createKnexTable()`;
+migrations must then run `ensureAnyApiSchema`. `ownsKnex: false` keeps `api.release()`
+from destroying the shared Knex instance. A dropped instance needs no other cleanup.
+
+### AnyAPI slot limits
+
+Slot limits belong to the database: every server reads the slot columns that
+`any_records` actually has. The defaults are 10 string, 10 number, 5 boolean, 5
+date, 5 JSON and 5 belongsTo slots. `ensureAnyApiSchema(knex, { slots })`, or the
+plugin's `slots` option when it ensures the schema, adds missing columns. Lower
+counts never drop columns. A server whose pool is exhausted rereads the layout
+once, so a migration that adds slots takes effect without a restart.
+
+On PostgreSQL, adding a nullable column without a default does not rewrite the
+table. MySQL can add columns instantly from 8.0.29; earlier versions may copy the
+table. MySQL limits a row to 65,535 bytes and each belongsTo slot adds two
+string columns, so check the row size before raising that pool substantially.
+
+Deep `AnyapiRegistry.allocateField` and `allocateFields` calls persist the field
+definitions and their allocation together. `allocateFields` adds a batch under one
+version; pass each field's uncompiled `declaration` to store it for other servers. Borrowed transactions own their reads/writes and bypass the
 global descriptor cache; the registry does not commit, roll back or publish their
 uncommitted descriptors globally. After commit, call
 `invalidateDescriptor(tenant, resource)` before an ordinary cached read. Deep
