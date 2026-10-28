@@ -417,6 +417,22 @@ export function normalizeAttributes (attributes, schemaStructure, {
 }
 
 /**
+ * Convert one value read from a field's storage column to its public value,
+ * without the field's getter.
+ * @param {unknown} value
+ * @param {Record<string, any>} definition
+ * @param {{ fieldName: string, resourceType?: string }} options
+ */
+export function normalizeStoredFieldValue (value, definition, { fieldName, resourceType }) {
+  if (value == null) return null
+  if (definition.type === 'id') return String(value)
+  const decimal = definition.precision !== undefined && definition.scale !== undefined
+  // Drivers return some numeric columns as strings; decimals keep theirs to avoid rounding.
+  if (['number', 'integer'].includes(definition.type) && typeof value === 'string' && !decimal) return Number(value)
+  return normalizeAttributes({ [fieldName]: value }, { [fieldName]: definition }, { resourceType })[fieldName]
+}
+
+/**
  * Normalize a JSON:API document or one plain resource using compiled output fields.
  * JSON:API primary/included attributes are replaced on the supplied document;
  * plain resources are copied recursively with shared/cyclic identities tracked.

@@ -23,6 +23,24 @@ export interface QueryParams extends SelectionParams {
   sort?: string[]
   page?: PageParams
 }
+export type AggregateFunction = 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'
+// One function per measure; only count accepts '*'.
+export type AggregateMeasure = { count: string } | { [Function in Exclude<AggregateFunction, 'count'>]: { [Name in Function]: string } }[Exclude<AggregateFunction, 'count'>]
+export interface AggregateParams extends TransactionParam {
+  groupBy?: string[]
+  measures: Record<string, AggregateMeasure>
+  queryParams?: {
+    filters?: Record<string, unknown>
+    // Grouped field or measure names, '-' for descending.
+    sort?: string[]
+    // Grouped results only.
+    page?: { size?: number; number?: number }
+  }
+}
+export interface AggregateResult {
+  data: Array<Record<string, unknown>>
+  meta?: { page: { size: number; number: number; hasMore: boolean } }
+}
 export interface TransactionParam {
   transaction?: Knex.Transaction
 }
@@ -78,6 +96,7 @@ export interface ResourceCoreMethods<
   query<Format extends ResourceFormat = DefaultFormat>(
     params?: RemovedResourceOptions & TransactionParam & { format?: Format; queryParams?: QueryParams }, context?: Context
   ): Promise<CollectionResult<Format, Fields, Type>>
+  aggregate(params: AggregateParams, context?: Context): Promise<AggregateResult>
   post<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(
     params: WriteOptions<Format, Returning> & ResourceWriteInput<Input, Type> & {
       expectedVersion?: never

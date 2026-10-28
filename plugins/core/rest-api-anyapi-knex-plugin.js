@@ -15,7 +15,7 @@ import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
 
 const DEFAULT_TENANT = 'default'
 // Methods that read a published schema; schema checks wrap these.
-const REQUEST_METHODS = ['query', 'get', 'post', 'put', 'patch', 'delete', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship']
+const REQUEST_METHODS = ['query', 'aggregate', 'get', 'post', 'put', 'patch', 'delete', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship']
 
 const optionsSignature = options => JSON.stringify([Object.keys(options.schema || {}).sort(), Object.keys(options.searchSchema || {}).sort()])
 

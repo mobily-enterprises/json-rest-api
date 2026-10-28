@@ -307,6 +307,27 @@ export interface DataReadHelpers<GetResult> {
       queryParams: NonNullable<DataReadContext['queryParams']>
     }
   }) => Promise<DataDocument<DataResource[]>>
+  // The plan comes from compileAggregateRequest; filters are in context.queryParams.
+  dataAggregate: (request: DataReadRequest & {
+    runHooks: NonNullable<DataReadRequest['runHooks']>
+    context: DataReadContext & {
+      queryParams: NonNullable<DataReadContext['queryParams']>
+    }
+    plan: AggregatePlan
+  }) => Promise<AggregateResult>
+}
+
+// Compiled by compileAggregateRequest: outputs carry SQL aliases.
+export interface AggregatePlan {
+  scopeName: string
+  groups: Array<{ name: string; field: string; definition: StorageFieldDefinition; alias: string }>
+  measures: Array<{ name: string; fn: 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'; field: string; definition: StorageFieldDefinition | null; alias: string }>
+  sort: Array<{ alias: string; direction: 'asc' | 'desc' }>
+  page: { size: number; number: number } | null
+}
+export interface AggregateResult {
+  data: Array<Record<string, unknown>>
+  meta?: { page: { size: number; number: number; hasMore: boolean } }
 }
 
 export type OrdinaryDataReadHelpers = DataReadHelpers<DataDocument<DataResource>>

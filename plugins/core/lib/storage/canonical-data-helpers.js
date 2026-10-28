@@ -5,6 +5,7 @@ import { applySortDescriptorOrder, buildEffectiveSortList, parseSortEntry, resol
 import { normalizeId, resolveFieldInfo } from '../anyapi/utils/descriptor-helpers.js'
 import { decorateResourceLinks, getAllowedQueryFieldNames } from '../anyapi/canonical-relationship-reader.js'
 import { applyQueryConstraint } from '../querying/query-constraint.js'
+import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { calculatePaginationMeta, generatePaginationLinks, generateCursorPaginationLinks, buildCursorMeta, applyPaginationToQuery } from '../querying/knex-pagination-helpers.js'
 import { getUrlPrefix, buildJsonApiLink } from '../querying/url-helpers.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
@@ -670,6 +671,33 @@ export function createCanonicalDataHelpers ({
     return response
   }
 
+  /** @type {CanonicalDataReadHelpers['dataAggregate']} */
+  const dataAggregate = async ({ scopeName, context, runHooks, plan }) => {
+    const storageAdapter = getScopeStorageAdapter(scopeName)
+    if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
+    context.storageAdapter = storageAdapter
+    const descriptor = getDescriptor(scopeName)
+    const db = context.db || context.transaction || api.knex.instance
+    const tableAlias = context.schemaInfo.tableName || descriptor.resource
+
+    const filteredState = await withQueryFilteringContext(context, {
+      query: storageAdapter.buildBaseQuery({ transaction: db, tableAlias }),
+      filters: context.queryParams.filters,
+      schemaInfo: context.schemaInfo,
+      scopeName,
+      tableName: tableAlias,
+      db,
+      queryPurpose: 'aggregate',
+      isAnyApi: true,
+      adapter: storageAdapter,
+      storageAdapter,
+    }, async () => {
+      await applyBuiltInAnyApiQueryFilters(context)
+      await runHooks('knexQueryFiltering')
+    })
+    return runAggregateQuery({ source: filteredState.query, sourceTable: tableAlias, storageAdapter, db, plan })
+  }
+
   return {
     dataExists,
     dataPost,
@@ -678,6 +706,7 @@ export function createCanonicalDataHelpers ({
     dataDelete,
     dataGet,
     dataQuery,
+    dataAggregate,
     dataGetMinimal
   }
 }

@@ -24,6 +24,10 @@ export const defaultDataHelpers = {
     throw new Error('No storage implementation for query. Install a storage plugin.')
   },
 
+  dataAggregate: async function (request) {
+    throw new Error('No storage implementation for aggregate. Install a storage plugin.')
+  },
+
   dataPost: async function (request) {
     throw new Error('No storage implementation for post. Install a storage plugin.')
   },

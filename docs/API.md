@@ -78,6 +78,7 @@ a separate context for each enlisted operation. See [transaction support](#trans
    - [PUT - Replace Resource](#put---replace-resource)
    - [PATCH - Update Resource](#patch---update-resource)
    - [DELETE - Remove Resource](#delete---remove-resource)
+   - [AGGREGATE - Grouped Totals](#aggregate---grouped-totals)
 3. [Relationship Methods](#relationship-methods)
    - [getRelated - Retrieve Related Resources](#getrelated---retrieve-related-resources)
    - [getRelationship - Retrieve Relationship Identifiers](#getrelationship---retrieve-relationship-identifiers)
@@ -1133,6 +1134,68 @@ Writes without a transaction own their completion. To compose writes, pass the
 handle supplied by `api.transaction`; the helper awaits the callback, commits and
 then runs completion hooks, or rolls back when the unit fails. Raw transactions and
 savepoints cannot own library writes.
+
+---
+
+### AGGREGATE - Grouped Totals
+
+Groups the records a collection query would select and computes measures for
+each group, on ordinary and AnyAPI storage alike.
+
+#### Method Signature
+
+```javascript
+await api.resources.sales.aggregate(params, context)
+```
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `groupBy` | string[] | Fields to group by. Omit for one row over all selected records. |
+| `measures` | object | Output names mapped to `{ count \| countDistinct \| sum \| avg \| min \| max: field }`. Only `count` accepts `'*'`. |
+| `queryParams.filters` | object | Search schema filters, validated as for `query`. |
+| `queryParams.sort` | string[] | Grouped field or measure names, `-` for descending. Grouped fields break ties. |
+| `queryParams.page` | object | `size` and `number`, for grouped results only. `size` defaults to `queryDefaultLimit` and cannot exceed `queryMaxLimit`. |
+| `transaction` | Knex transaction | Optional transaction to read in. |
+
+`sum` and `avg` take numeric fields; `min` and `max` also take strings, dates and
+times. Grouping and counting accept any scalar stored field, including belongs-to
+foreign keys. Fields that are `hidden`, virtual, computed, or that have a getter or
+`storage.serialize` are rejected, because SQL would group or sum values other than
+the ones clients read. `normallyHidden` fields are allowed.
+
+#### Return Value
+
+```javascript
+{
+  data: [{ salesperson: 'Ann', total: 150.5, count: 2 }],
+  meta: { page: { size: 20, number: 1, hasMore: false } } // grouped results only
+}
+```
+
+Both formats return these plain rows. Group values and `min`/`max` use the
+field's public representation; counts are numbers, and `sum`/`avg` are numbers
+except on decimal fields (`precision` and `scale`), which keep the driver's value.
+NULL sorts as the lowest value on every database.
+
+#### Security
+
+`aggregate` checks permissions as a `query` (`method: 'query'`, with
+`originalContext.method === 'aggregate'`). Row policies, autofilters and other
+`knexQueryFiltering` hooks run with `queryPurpose: 'aggregate'`. The aggregate reads
+only the IDs the filtered query selects, so joins added by filters or policies
+never count a record twice.
+
+#### Examples
+
+```javascript
+const totals = await api.resources.sales.aggregate({
+  groupBy: ['salesperson'],
+  measures: { total: { sum: 'amount' }, count: { count: '*' }, avg: { avg: 'amount' } },
+  queryParams: { filters: { closed: true }, sort: ['-total'], page: { size: 10 } }
+}, { subject })
+```
 
 ---
 

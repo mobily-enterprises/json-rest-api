@@ -85,6 +85,59 @@ export async function createConformanceApi (knex, { storage = storageMode.mode, 
   return api
 }
 
+export async function createAggregateApi (knex, { storage = storageMode.mode } = {}) {
+  const api = new JsonRestApi({ name: 'aggregate' })
+  await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', queryDefaultLimit: 2, queryMaxLimit: 4 })
+  await useStoragePlugin(api, knex, { storage, tenantId: 'aggregate' })
+  await api.use(RowPolicyPlugin, {
+    policies: {
+      region: ({ query, context, queryPurpose, column, value }) => {
+        context.policyPurposes?.push(queryPurpose)
+        if (context.region === undefined) return true
+        query.where(column('region'), value('region', context.region))
+        return true
+      }
+    }
+  })
+  await api.use(AutoFilterPlugin, {
+    resolvers: { workspace: ({ context }) => context.workspace },
+    presets: { workspace: { filters: [{ field: 'workspace', resolver: 'workspace', required: false }] } }
+  })
+  await api.addResource('customers', {
+    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, workspace: { type: 'string', nullable: true } },
+    relationships: { sales: { type: 'hasMany', target: 'sales', foreignKey: 'customerId' } },
+    searchSchema: { saleRegion: { type: 'string', actualField: 'sales.region' } },
+    autofilter: 'workspace',
+    tableName: 'aggregate_customers'
+  })
+  await api.resources.customers.createKnexTable()
+  mapTable(knex, api, 'aggregate_customers', 'customers')
+  await api.addResource('sales', {
+    schema: {
+      id: { type: 'id' },
+      salesperson: { type: 'string', nullable: true, search: true },
+      region: { type: 'string', required: true, indexed: true, search: true },
+      amount: { type: 'number', required: true },
+      units: { type: 'integer', required: true },
+      closed: { type: 'boolean', defaultTo: false, search: true },
+      closedOn: { type: 'date', nullable: true },
+      closedAt: { type: 'dateTime', nullable: true },
+      workspace: { type: 'string', nullable: true },
+      secret: { type: 'number', nullable: true, hidden: true },
+      internal: { type: 'number', nullable: true, normallyHidden: true },
+      cents: { type: 'integer', nullable: true, getter: value => value == null ? null : value / 100 },
+      customerId: { type: 'id', belongsTo: 'customers', as: 'customer', nullable: true, search: true }
+    },
+    rowPolicy: 'region',
+    autofilter: 'workspace',
+    tableName: 'aggregate_sales'
+  })
+  await api.resources.sales.createKnexTable()
+  mapTable(knex, api, 'aggregate_sales', 'sales')
+  return api
+}
+
+// `fields` adds fields to the contacts resource, for registration checks.
 export async function createFieldDependenciesApi (knex, { storage = storageMode.mode, onCall = () => {} } = {}) {
   const options = resourceType => ({
     idProperty: 'record_key',

@@ -286,6 +286,7 @@ Policies are reused for the resource selections that define externally visible d
 | --- | --- |
 | `collection` | Top-level collection query, before sorting and pagination. On AnyAPI this filtered builder is also cloned for the matching count. |
 | `count` | A separate count query, including native offset-pagination counts and standalone count helpers. |
+| `aggregate` | The records a resource `aggregate()` call groups and measures. |
 | `single` | Minimal lookup used by `get`, and by existing-record preflights for `put`, `patch`, and `delete`. |
 | `include` | A target resource loaded into JSON:API `included` data. |
 | `search-join` | A related resource used by a cross-resource or polymorphic search, reference filter, or reference sort, including intermediate search path segments. |

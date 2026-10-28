@@ -47,7 +47,17 @@ const tenantOptions = {
   onSchemaChanged: (change: AnyapiSchemaChange) => { void change.version }
 } satisfies RestApiAnyapiKnexPluginOptions
 const version: number | null = await registry.getSchemaVersion('account_1', 'books')
-void [options, plugins, storage, prefix, code, writeError, conflict, title, filters, policies, importedTitle, jsonPlain, tenantOptions, version]
+const totals = await books.aggregate({
+  groupBy: ['author'],
+  measures: { pages: { sum: 'pages' }, rows: { count: '*' } },
+  queryParams: { filters: { genre: 'fiction' }, sort: ['-pages'], page: { size: 10, number: 2 } }
+})
+const hasMore: boolean | undefined = totals.meta?.page.hasMore
+void [options, plugins, storage, prefix, code, writeError, conflict, title, filters, policies, importedTitle, jsonPlain, tenantOptions, version, hasMore]
+// @ts-expect-error A measure names one aggregate function.
+await books.aggregate({ measures: { pages: { median: 'pages' } } })
+// @ts-expect-error Aggregates page by number, not cursor.
+await books.aggregate({ groupBy: ['author'], measures: { rows: { count: '*' } }, queryParams: { page: { after: 'x' } } })
 
 // @ts-expect-error Removed options must remain rejected through the package entry point.
 const legacy: RestApiPluginOptions = { simplified: true }

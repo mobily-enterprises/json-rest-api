@@ -9,6 +9,7 @@ import { toJsonApiRecordWithBelongsTo } from '../querying-writing/knex-json-api-
 import { processIncludes } from '../querying/knex-process-includes.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
 import { applyQueryConstraint } from '../querying/query-constraint.js'
+import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { getOperationDiagnosticContext } from '../../../../lib/error-context.js'
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
@@ -505,6 +506,29 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     return buildJsonApiResponse(scope, records, included, false, scopeName, context)
   }
 
+  /** @type {OrdinaryDataReadHelpers['dataAggregate']} */
+  const dataAggregate = async ({ scopeName, context, runHooks, plan }) => {
+    const storageAdapter = getScopeStorageAdapter(scopeName)
+    context.storageAdapter = storageAdapter
+    const tableName = storageAdapter.getTableName()
+    const db = context.db || api.knex.instance
+
+    const filteredState = await withQueryFilteringContext(context, {
+      query: db(tableName),
+      filters: context.queryParams.filters,
+      schemaInfo: context.schemaInfo,
+      scopeName,
+      tableName,
+      db,
+      queryPurpose: 'aggregate',
+      adapter: storageAdapter,
+      storageAdapter,
+    }, async () => {
+      await runHooks('knexQueryFiltering')
+    })
+    return runAggregateQuery({ source: filteredState.query, sourceTable: tableName, storageAdapter, db, plan })
+  }
+
   /** @type {OrdinaryDataWriteHelpers['dataPost']} */
   const dataPost = async ({ scopeName, context }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
@@ -701,6 +725,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     dataExists,
     dataGet,
     dataQuery,
+    dataAggregate,
     dataPost,
     dataPut,
     dataPatch,

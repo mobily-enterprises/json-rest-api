@@ -10,6 +10,7 @@ import registerRelationshipRoutes from './rest-api-plugin-hooks/register-relatio
 
 // Import method functions
 import queryMethod from './rest-api-plugin-methods/query.js'
+import aggregateMethod from './rest-api-plugin-methods/aggregate.js'
 import getMethod from './rest-api-plugin-methods/get.js'
 import postMethod from './rest-api-plugin-methods/post.js'
 import putMethod from './rest-api-plugin-methods/put.js'
@@ -90,6 +91,7 @@ export const RestApiPlugin = {
 
     // Main REST methods
     addResourceMethod('query', withAvailableContext(queryMethod))
+    addResourceMethod('aggregate', withAvailableContext(aggregateMethod))
     addResourceMethod('get', withAvailableContext(getMethod))
     addResourceMethod('post', withWriteOutcome(postMethod))
     addResourceMethod('put', withWriteOutcome(putMethod))
