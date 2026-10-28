@@ -7,6 +7,8 @@ import { resolveSortField } from './query-field-sort-helpers.js'
 import { databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 
 const referenceVisibility = Symbol('referenceVisibility')
+// SQL never matches null against a non-null operand with these.
+const NULL_REJECTING_OPERATORS = new Set(['=', '==', '!=', '<>', '<', '<=', '>', '>=', 'in', 'between', 'like', 'contains', 'startswith', 'endswith'])
 
 async function buildSearchJoinQuery ({ scopeName, scopes, context, adapterUtils, db }) {
   const scope = scopes[scopeName]
@@ -135,12 +137,20 @@ export function applyWhereForOperator ({ builder, columnRef, operator, value, kn
       if (selections.length === 0) this.whereRaw('1 = 0')
       for (const selection of selections) this.orWhereExists(selection)
     }
+    const visibleMatch = function () {
+      this.where(visible)
+      applyWhereForOperator({ builder: this, columnRef: columnRef.column, operator, value, knex })
+    }
+    // A hidden reference reads as null. When null cannot match, leave that branch
+    // out: an OR with it keeps planners from using an index on the column.
+    const values = Array.isArray(value) ? value : [value]
+    if (NULL_REJECTING_OPERATORS.has(String(operator || '=').toLowerCase()) && values.length && values.every(item => item != null)) {
+      builder[method](visibleMatch)
+      return
+    }
     // Compare the column itself to preserve driver affinity and collation.
     builder[method](function () {
-      this.where(function () {
-        this.where(visible)
-        applyWhereForOperator({ builder: this, columnRef: columnRef.column, operator, value, knex })
-      }).orWhere(function () {
+      this.where(visibleMatch).orWhere(function () {
         this.whereNot(visible)
         applyWhereForOperator({ builder: this, columnRef: knex.raw('null'), operator, value, knex })
       })

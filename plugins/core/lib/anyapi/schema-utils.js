@@ -1,7 +1,7 @@
-import { hasKnexTableIndex } from '../dbIntrospection.js'
+import { hasKnexTableIndex, listKnexTableIndexes } from '../dbIntrospection.js'
 
-// Default layout of a new any_records table. The registry reads the actual
-// columns, so a migration that adds slots raises the limits for every server.
+// Default layout of any_records. The registry reads the actual columns, so a
+// migration that adds slots raises the limits for every server.
 export const SLOT_LIMITS = Object.freeze({
   string: 10,
   number: 10,
@@ -10,6 +10,18 @@ export const SLOT_LIMITS = Object.freeze({
   json: 5,
   belongsTo: 5,
 })
+
+// Indexed slots carry a (tenant_id, resource, slot) index. Fields declared
+// `indexed: true` take them; every index costs each write to any_records.
+export const INDEXED_SLOT_LIMITS = Object.freeze({
+  string: 5,
+  number: 3,
+  boolean: 0,
+  date: 2,
+})
+
+// Indexed string slots are VARCHAR so MySQL can index them whole.
+export const INDEXED_STRING_LENGTH = 255
 
 const SLOT_COLUMNS = {
   string: index => [`string_${index}`],
@@ -20,24 +32,36 @@ const SLOT_COLUMNS = {
   belongsTo: index => [`rel_${index}_id`, `rel_${index}_type`],
 }
 
+export const indexedSlotColumn = (pool, index) => `indexed_${pool}_${index}`
+
 const addSlotColumn = (table, column) => {
-  if (column.startsWith('number_')) table.double(column)
-  else if (column.startsWith('boolean_')) table.boolean(column)
-  else if (column.startsWith('date_')) table.dateTime(column, { precision: 6 })
-  else if (column.startsWith('rel_')) table.string(column)
+  const [, indexed, pool] = /^(indexed_)?([a-z]+)_/.exec(column)
+  if (pool === 'number') table.double(column)
+  else if (pool === 'boolean') table.boolean(column)
+  else if (pool === 'date') table.dateTime(column, { precision: 6 })
+  else if (pool === 'rel' || indexed) table.string(column, INDEXED_STRING_LENGTH)
   else table.text(column)
 }
 
-const resolveSlotCounts = (slots = {}) => {
+const resolveSlotCounts = (slots = {}, limits = SLOT_LIMITS, { label = 'slot', minimum = 1 } = {}) => {
   if (!slots || typeof slots !== 'object' || Array.isArray(slots)) {
-    throw new Error('AnyAPI slots must be an object of slot counts')
+    throw new Error(`AnyAPI ${label}s must be an object of slot counts`)
   }
   for (const [pool, count] of Object.entries(slots)) {
-    if (!Object.hasOwn(SLOT_LIMITS, pool)) throw new Error(`Unknown AnyAPI slot pool '${pool}'`)
-    if (!Number.isInteger(count) || count < 1) throw new Error(`AnyAPI ${pool} slot count must be a positive integer`)
+    if (!Object.hasOwn(limits, pool)) throw new Error(`Unknown AnyAPI ${label} pool '${pool}'`)
+    if (!Number.isInteger(count) || count < minimum) {
+      throw new Error(`AnyAPI ${pool} ${label} count must be ${minimum ? 'a positive' : 'a non-negative'} integer`)
+    }
   }
-  return { ...SLOT_LIMITS, ...slots }
+  return { ...limits, ...slots }
 }
+
+const layoutColumns = (counts, indexedCounts) => [
+  ...Object.entries(counts).flatMap(([pool, count]) => Array.from({ length: count }, (_, index) => SLOT_COLUMNS[pool](index + 1)).flat()),
+  ...Object.entries(indexedCounts).flatMap(([pool, count]) => Array.from({ length: count }, (_, index) => indexedSlotColumn(pool, index + 1)))
+]
+
+const slotIndexName = column => `any_records_${column}_idx`
 
 export const DEFAULT_CANONICAL_CONFIG = {
   scopeName: 'anyapi_records',
@@ -53,52 +77,121 @@ export const DEFAULT_CANONICAL_CONFIG = {
   rightResourceColumn: 'right_resource',
 }
 
-const ensureTable = async (knex, tableName, tableBuilder) => {
-  const exists = await knex.schema.hasTable(tableName)
-  if (!exists) {
-    await knex.schema.createTable(tableName, tableBuilder)
+// Several servers may start at once: DDL another one completed first is success.
+const tolerateConcurrentDdl = async (run, done) => {
+  try {
+    await run()
+  } catch (error) {
+    if (!await done().catch(() => false)) throw error
   }
+}
+
+// Returns whether the table was missing, so its indexes can be built offline.
+const ensureTable = async (knex, tableName, tableBuilder) => {
+  if (await knex.schema.hasTable(tableName)) return false
+  await tolerateConcurrentDdl(() => knex.schema.createTable(tableName, tableBuilder), () => knex.schema.hasTable(tableName))
+  return true
 }
 
 const ensureColumn = async (knex, tableName, columnName, columnBuilder) => {
   const exists = await knex.schema.hasTable(tableName)
   if (!exists) return
 
-  const hasColumn = await knex.schema.hasColumn(tableName, columnName)
-  if (!hasColumn) {
-    await knex.schema.table(tableName, columnBuilder)
+  const hasColumn = () => knex.schema.hasColumn(tableName, columnName)
+  if (!await hasColumn()) {
+    await tolerateConcurrentDdl(() => knex.schema.table(tableName, columnBuilder), hasColumn)
   }
 }
 
 const ensureUniqueIndex = async (knex, tableName, columns, indexName) => {
   const exists = await knex.schema.hasTable(tableName)
   if (!exists) return
-  const hasIndex = await hasKnexTableIndex(knex, tableName, indexName)
-  if (!hasIndex) {
-    await knex.schema.table(tableName, (table) => {
+  const hasIndex = () => hasKnexTableIndex(knex, tableName, indexName)
+  if (!await hasIndex()) {
+    await tolerateConcurrentDdl(() => knex.schema.table(tableName, (table) => {
       table.unique(columns, indexName)
-    })
+    }), hasIndex)
+  }
+}
+
+/**
+ * Create missing secondary indexes. On an existing table they are built without
+ * blocking writes: in place on MySQL, and concurrently on PostgreSQL unless the
+ * pool has a single connection. Either way the build reads the whole table, so
+ * on a big table run it from a migration before the deploy.
+ */
+const ensureIndexes = async (knex, tableName, indexes, { online }) => {
+  const client = knex.client.config.client
+  const pg = ['pg', 'postgresql'].includes(client)
+  const mysql = ['mysql', 'mysql2'].includes(client)
+  // The build lock needs a connection of its own beside the builds.
+  const concurrently = online && pg && !knex.isTransaction && (knex.client.pool?.max ?? 0) > 1
+  const missing = async () => {
+    const existing = await listKnexTableIndexes(knex, tableName)
+    return indexes.filter(({ name }) => !existing.get(name)?.valid && !existing.get(name)?.building)
+      .map(index => ({ ...index, invalid: existing.has(index.name) }))
+  }
+  const build = async () => {
+    for (const { name, columns, invalid } of await missing()) {
+      const list = columns.map(() => '??').join(', ')
+      if (invalid) await knex.raw(`drop index ${concurrently ? 'concurrently ' : ''}if exists ??`, [name])
+      if (mysql) {
+        await tolerateConcurrentDdl(
+          () => knex.raw(`alter table ?? add index ?? (${list})${online ? ', algorithm=inplace, lock=none' : ''}`, [tableName, name, ...columns]),
+          () => hasKnexTableIndex(knex, tableName, name)
+        )
+      } else {
+        await tolerateConcurrentDdl(
+          () => knex.raw(`create index ${concurrently ? 'concurrently ' : ''}if not exists ?? on ?? (${list})`, [name, tableName, ...columns]),
+          async () => (await listKnexTableIndexes(knex, tableName)).has(name)
+        )
+      }
+    }
+  }
+  if (!(await missing()).length) return
+  if (concurrently) await withPgIndexBuildLock(knex, tableName, build)
+  else await build()
+}
+
+// Concurrent builds on one table deadlock each other, so one server builds at a
+// time. The lock lives on an idle session, which concurrent builds never wait
+// for. A server that finds it taken carries on: the holder builds the same indexes.
+const withPgIndexBuildLock = async (knex, tableName, build) => {
+  const connection = await knex.client.acquireConnection()
+  const lock = name => knex.select(knex.raw(`${name}(hashtext(?)) as result`, [`json-rest-api:indexes:${tableName}`]))
+    .connection(connection).first()
+  try {
+    if (!(await lock('pg_try_advisory_lock')).result) return
+    try {
+      await build()
+    } finally {
+      await lock('pg_advisory_unlock')
+    }
+  } finally {
+    await knex.client.releaseConnection(connection)
   }
 }
 
 /**
  * Create or upgrade the shared canonical tables. Run it from a migration, or let
- * the plugin run it at start-up. `slots` only adds missing slot columns; lowering
- * a count never drops columns that may hold data.
+ * the plugin run it at start-up. Counts only add missing slot columns, never
+ * drop them; any_records always has at least the default layout.
  * @param {import('knex').Knex} knex
- * @param {{ slots?: Partial<Record<keyof typeof SLOT_LIMITS, number>> }} [options]
+ * @param {{
+ *   slots?: Partial<Record<keyof typeof SLOT_LIMITS, number>>,
+ *   indexedSlots?: Partial<Record<keyof typeof INDEXED_SLOT_LIMITS, number>>
+ * }} [options]
  */
-export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
+export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => {
   const counts = resolveSlotCounts(slots)
-  await ensureTable(knex, 'any_records', (table) => {
+  const indexedCounts = resolveSlotCounts(indexedSlots, INDEXED_SLOT_LIMITS, { label: 'indexed slot', minimum: 0 })
+  const created = await ensureTable(knex, 'any_records', (table) => {
     table.increments('id').primary()
     table.string('logical_id')
     table.string('tenant_id').notNullable()
     table.string('resource').notNullable()
 
-    for (const [pool, count] of Object.entries(counts)) {
-      for (let index = 1; index <= count; index += 1) SLOT_COLUMNS[pool](index).forEach(column => addSlotColumn(table, column))
-    }
+    layoutColumns(counts, indexedCounts).forEach(column => addSlotColumn(table, column))
 
     table.dateTime('created_at').defaultTo(knex.fn.now()).notNullable()
     table.dateTime('updated_at').defaultTo(knex.fn.now()).notNullable()
@@ -109,14 +202,18 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
     table.index(['resource'])
   })
 
-  if (slots) {
-    const existing = new Set(Object.keys(await knex('any_records').columnInfo()))
-    const missing = Object.entries(counts).flatMap(([pool, count]) => Array.from({ length: count }, (_, index) => SLOT_COLUMNS[pool](index + 1)))
-      .flat()
-      .filter(column => !existing.has(column))
-    if (missing.length) {
-      await knex.schema.alterTable('any_records', (table) => missing.forEach(column => addSlotColumn(table, column)))
-    }
+  const readColumns = async () => new Set(Object.keys(await knex('any_records').columnInfo()))
+  let recordColumns = await readColumns()
+  const missing = layoutColumns(counts, indexedCounts).filter(column => !recordColumns.has(column))
+  if (missing.length) {
+    await tolerateConcurrentDdl(
+      () => knex.schema.alterTable('any_records', (table) => missing.forEach(column => addSlotColumn(table, column))),
+      async () => {
+        const columns = await readColumns()
+        return missing.every(column => columns.has(column))
+      }
+    )
+    recordColumns = await readColumns()
   }
 
   const client = knex.client.config.client
@@ -125,7 +222,7 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
       .select({ column: 'column_name', precision: 'datetime_precision' })
       .where('table_schema', knex.raw(client === 'pg' || client === 'postgresql' ? 'current_schema()' : 'DATABASE()'))
       .where('table_name', 'any_records'))
-      .filter(column => /^date_\d+$/.test(column.column))
+      .filter(column => /^(indexed_)?date_\d+$/.test(column.column))
     if (!columns.length || columns.some(column => Number(column.precision) !== 6)) {
       throw new Error('AnyAPI temporal storage migration required: every any_records date slot must use timestamp/datetime precision 6. See 33-migrating-to-v2.md.')
     }
@@ -151,7 +248,7 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
       .update({ logical_id: String(row.id) })
   }
 
-  await ensureTable(knex, 'any_links', (table) => {
+  const linksCreated = await ensureTable(knex, 'any_links', (table) => {
     table.increments('id').primary()
     table.string('tenant_id').notNullable()
     table.string('relationship').notNullable()
@@ -171,6 +268,17 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
     table.index(['relationship'])
     table.index(['inverse_relationship'])
   })
+
+  // Filters on indexed fields, child lookups by parent id and link lookups by
+  // record id all stay inside one tenant's rows.
+  const recordIndexes = [...recordColumns]
+    .filter(column => /^(indexed_[a-z]+_\d+|rel_\d+_id)$/.test(column))
+    .map(column => ({ name: slotIndexName(column), columns: ['tenant_id', 'resource', column] }))
+  await ensureIndexes(knex, 'any_records', recordIndexes, { online: !created })
+  await ensureIndexes(knex, 'any_links', [
+    { name: 'any_links_tenant_left_id_idx', columns: ['tenant_id', 'left_id'] },
+    { name: 'any_links_tenant_right_id_idx', columns: ['tenant_id', 'right_id'] }
+  ], { online: !linksCreated })
 
   await ensureTable(knex, 'any_resource_configs', (table) => {
     table.increments('id').primary()
@@ -249,23 +357,35 @@ export const ensureAnyApiSchema = async (knex, { slots } = {}) => {
   })
 }
 
-const buildSlotPools = (hasColumns) => Object.fromEntries(Object.keys(SLOT_LIMITS).map(pool => {
-  const indexes = []
-  for (let index = 1; hasColumns(pool, index); index += 1) indexes.push(index)
+// The default unindexed layout, for migrations written against it.
+export const SLOT_POOLS = Object.fromEntries(Object.entries(SLOT_LIMITS).map(([pool, count]) => {
+  const indexes = Array.from({ length: count }, (_, index) => index + 1)
   return [pool, pool === 'belongsTo' ? indexes : indexes.map(index => SLOT_COLUMNS[pool](index)[0])]
 }))
 
-export const SLOT_POOLS = buildSlotPools((pool, index) => index <= SLOT_LIMITS[pool])
-
 /**
  * Read the slot columns any_records actually has. Slots are numbered from 1
- * without gaps; a pool ends at its first missing column.
+ * without gaps; a pool ends at its first missing column. `indexed` lists the
+ * indexed columns of each pool that has them.
  * @param {import('knex').Knex | import('knex').Knex.Transaction} db
  */
 export const readSlotPools = async (db) => {
   const columns = new Set(Object.keys(await db('any_records').columnInfo()))
   if (!columns.size) throw new Error('AnyAPI storage tables are missing; run ensureAnyApiSchema in a migration')
-  return buildSlotPools((pool, index) => SLOT_COLUMNS[pool](index).every(column => columns.has(column)))
+  const run = columnsAt => {
+    const indexes = []
+    for (let index = 1; columnsAt(index).every(column => columns.has(column)); index += 1) indexes.push(index)
+    return indexes
+  }
+  return {
+    ...Object.fromEntries(Object.keys(SLOT_LIMITS).map(pool => {
+      const indexes = run(SLOT_COLUMNS[pool])
+      return [pool, pool === 'belongsTo' ? indexes : indexes.map(index => SLOT_COLUMNS[pool](index)[0])]
+    })),
+    indexed: Object.fromEntries(Object.keys(INDEXED_SLOT_LIMITS).map(pool => [
+      pool, run(index => [indexedSlotColumn(pool, index)]).map(index => indexedSlotColumn(pool, index))
+    ]))
+  }
 }
 
 export const TYPE_TO_POOL = new Map([

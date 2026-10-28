@@ -299,18 +299,19 @@ for (const hiddenBy of ['policy', 'workspace']) {
       if (fixture.api.anyapi) {
         const { registry, tenantId } = fixture.api.anyapi
         const descriptor = await registry.getDescriptor(tenantId, 'notes', { bypassCache: true })
-        assert.equal(descriptor.fields.name.slot, 'string_1')
-        assert.equal(descriptor.fields.subject_type.slot, 'string_5')
-        assert.equal(descriptor.fields.subject_id.slot, 'string_6')
-        assert.equal(descriptor.fields.external_id.slot, 'string_7')
+        // Fields declared indexed take indexed slots; ID attributes come last.
+        assert.equal(descriptor.fields.name.slot, 'indexed_string_1')
+        assert.equal(descriptor.fields.subject_type.slot, 'indexed_string_3')
+        assert.equal(descriptor.fields.subject_id.slot, 'indexed_string_4')
+        assert.equal(descriptor.fields.external_id.slot, 'indexed_string_5')
         assert.equal(descriptor.fields.notes_key, undefined, 'the resource ID does not allocate an undeclared scalar attribute')
         await registry.registerResource({ tenant: tenantId, resource: 'notes', schema: descriptor.schema, relationships: descriptor.relationships, idProperty: descriptor.idProperty })
         const reloaded = await registry.getDescriptor(tenantId, 'notes', { bypassCache: true })
         assert.deepEqual(reloaded.fields, descriptor.fields)
         const stored = await fixture.api.knex.helpers.getStorageAdapter('notes').buildBaseQuery().where('logical_id', note.id).first()
-        assert.equal(stored.string_5, 'groups')
-        assert.equal(stored.string_6, group.id)
-        assert.equal(stored.string_7, '7')
+        assert.equal(stored.indexed_string_3, 'groups')
+        assert.equal(stored.indexed_string_4, group.id)
+        assert.equal(stored.indexed_string_5, '7')
       }
       assertIds(await query('notes', { external_id: 7 }), [note])
     })

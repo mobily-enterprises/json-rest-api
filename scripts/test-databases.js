@@ -35,7 +35,8 @@ const files = requestedFiles.length
         'tests/anyapi-registry-failures.test.js',
         'tests/anyapi-descriptor-failures.test.js',
         'tests/anyapi-schema-sync.test.js',
-        'tests/anyapi-field-migration.test.js'
+        'tests/anyapi-field-migration.test.js',
+        'tests/anyapi-indexed-slots.test.js'
       ]
 const jobs = new Set()
 let interrupted

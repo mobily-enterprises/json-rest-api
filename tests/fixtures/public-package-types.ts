@@ -35,7 +35,9 @@ await api.transaction(async transaction => {
 const filters: AutoFilterPluginOptions = { resolvers: { workspace: () => 'w1' } }
 const policies: RowPolicyPluginOptions = { policies: { denied: () => false } }
 declare const knex: RestApiAnyapiKnexPluginOptions['knex']
-await ensureAnyApiSchema(knex, { slots: { string: 30 } })
+await ensureAnyApiSchema(knex, { slots: { string: 30 }, indexedSlots: { string: 8, boolean: 1 } })
+// @ts-expect-error JSON slots cannot be indexed.
+await ensureAnyApiSchema(knex, { indexedSlots: { json: 1 } })
 const registry = new AnyapiRegistry({ knex, cacheSize: 1000 })
 const tenantOptions = {
   knex,
@@ -43,6 +45,7 @@ const tenantOptions = {
   registry,
   ensureSchema: false,
   ownsKnex: false,
+  indexedSlots: { number: 4 },
   schemaCheckInterval: 5000,
   onSchemaChanged: (change: AnyapiSchemaChange) => { void change.version }
 } satisfies RestApiAnyapiKnexPluginOptions

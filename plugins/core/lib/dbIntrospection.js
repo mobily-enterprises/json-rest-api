@@ -1237,6 +1237,34 @@ export async function hasKnexTableIndex (knex, tableName, indexName) {
   throw new Error(`Unsupported knex client '${client}' for hasKnexTableIndex`)
 }
 
+/**
+ * Index names of one table. On PostgreSQL an interrupted concurrent build leaves
+ * an invalid index; `building` tells it from one another session is building.
+ * @returns {Promise<Map<string, { valid: boolean, building: boolean }>>}
+ */
+export async function listKnexTableIndexes (knex, tableName) {
+  const client = knex.client.config.client
+  let rows
+  if (['sqlite3', 'better-sqlite3'].includes(client)) {
+    rows = normalizeRows(await knex.raw('PRAGMA index_list(??)', [tableName])).map(row => ({ name: row.name }))
+  } else if (['mysql', 'mysql2'].includes(client)) {
+    rows = (await knex('information_schema.statistics').distinct({ name: 'INDEX_NAME' })
+      .where({ TABLE_SCHEMA: knex.raw('DATABASE()'), TABLE_NAME: tableName }))
+  } else if (['pg', 'postgresql'].includes(client)) {
+    rows = normalizeRows(await knex.raw(`
+      select c.relname as name, i.indisvalid as valid,
+        exists (select 1 from pg_stat_progress_create_index p where p.index_relid = i.indexrelid) as building
+      from pg_index i
+      join pg_class c on c.oid = i.indexrelid
+      join pg_class t on t.oid = i.indrelid
+      join pg_namespace n on n.oid = t.relnamespace
+      where t.relname = ? and n.nspname = current_schema()`, [tableName]))
+  } else {
+    throw new Error(`Unsupported knex client '${client}' for listKnexTableIndexes`)
+  }
+  return new Map(rows.map(row => [row.name, { valid: row.valid !== false, building: row.building === true }]))
+}
+
 // Column-only ALTER must not impose the resource snapshot's ID or index restrictions.
 export async function introspectKnexColumnConstraints (knex, tableName) {
   requireKnexRaw(knex)

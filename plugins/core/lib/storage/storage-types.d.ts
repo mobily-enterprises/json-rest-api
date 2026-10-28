@@ -79,6 +79,8 @@ export interface StorageInfo {
 export interface CanonicalFieldSlot {
   slot: string
   slotType: string
+  // The slot has a (tenant_id, resource, slot) index; belongsTo slots always do.
+  indexed?: boolean
   alias?: string
 }
 

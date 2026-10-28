@@ -1485,6 +1485,17 @@ are, and omitted populated fields keep their data without being published.
 Fields added before this release that the declaration does not repeat are kept
 and published from their stored definitions.
 
+`ensureAnyApiSchema` also adds indexed slot columns (`indexed_string_N` and so on),
+indexes on `(tenant_id, resource, slot)` for them and for every belongs-to slot,
+and `(tenant_id, left_id)` and `(tenant_id, right_id)` indexes on `any_links`. On
+an existing table the plugin builds them at start-up without blocking writes, but
+the build reads the whole table: for a large one, run `ensureAnyApiSchema` in a
+migration before deploying. On AnyAPI, `indexed: true` now places fields. A new
+field declaring it takes an indexed slot, and registration fails when none is
+free, when the field is an `object` or `array`, or when a string field's `max`
+exceeds 255. Existing fields stay in their slots; see
+[AnyAPI indexed fields](21-schema-and-migrations.md#anyapi-indexed-fields).
+
 Explicit maps take effect during registration, before `createKnexTable()`.
 Repeating that method no longer re-registers the initial schema and discards
 additions. Keep the expanded declaration and complete map in app source for

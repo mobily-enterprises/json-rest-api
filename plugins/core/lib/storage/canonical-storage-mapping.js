@@ -1,6 +1,8 @@
 // @ts-check
 import { serializeFieldValueForStorage } from './storage-mapping.js'
 import { getPolymorphicLinkage } from '../querying-writing/relationship-contracts.js'
+import { INDEXED_STRING_LENGTH } from '../anyapi/schema-utils.js'
+import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
 /** @import { CanonicalDescriptor, StorageRow, StorageSchemaInfo, StorageWriteOptions } from './storage-types.js' */
 
@@ -34,6 +36,15 @@ export const translateCanonicalAttributesForStorage = (attributes = {}, descript
         textStorage: slot.slotType === 'string'
       })
       row[slot.slot] = definition?.type === 'id' && serialized != null ? String(serialized) : serialized
+      const stored = row[slot.slot]
+      // Databases count code points; one surrogate pair is one character.
+      if (slot.indexed && typeof stored === 'string' && stored.length > INDEXED_STRING_LENGTH && [...stored].length > INDEXED_STRING_LENGTH) {
+        const field = `data.attributes.${fieldName}`
+        throw new RestApiValidationError(`Field '${fieldName}' holds at most ${INDEXED_STRING_LENGTH} characters in its indexed slot.`, {
+          fields: [field],
+          violations: [{ field, rule: 'storage_range', message: `Indexed string slots hold at most ${INDEXED_STRING_LENGTH} characters.` }]
+        })
+      }
     }
 
     if (slot.slotType === 'belongsTo') {

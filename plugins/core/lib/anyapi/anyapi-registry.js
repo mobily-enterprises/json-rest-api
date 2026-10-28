@@ -1,6 +1,6 @@
 import { createKnexTransaction, readCommittedTransaction } from '../../../../lib/knex-transaction.js'
 import { applyInsertReturning, getDatabaseCapabilities } from '../querying-writing/database-capabilities.js'
-import { DEFAULT_CANONICAL_CONFIG, TYPE_TO_POOL, ensureAnyApiSchema, readSlotPools } from './schema-utils.js'
+import { DEFAULT_CANONICAL_CONFIG, INDEXED_STRING_LENGTH, TYPE_TO_POOL, ensureAnyApiSchema, readSlotPools } from './schema-utils.js'
 import { toStoredJson } from './stored-definition.js'
 import { beginWriteTransaction, commitTransaction, endWriteOperation, getOperationDiagnosticContext, rollbackAfterError, wrapUnexpectedError, wrapWriteError } from '../../../../lib/error-context.js'
 import { createEnhancedLogger } from '../../../../lib/enhanced-logger.js'
@@ -46,17 +46,13 @@ const BELONGS_TO_ALIAS = (fieldName, fieldDef) => {
   return fieldName
 }
 
-const SLOT_PATTERNS = {
-  string: /^string_(\d+)$/,
-  number: /^number_(\d+)$/,
-  boolean: /^boolean_(\d+)$/,
-  date: /^date_(\d+)$/,
-  json: /^json_(\d+)$/,
-}
+const SIMPLE_SLOT_PATTERN = /^(indexed_)?(string|number|boolean|date|json)_(\d+)$/
 
 const BELONGS_TO_ID_PATTERN = /^rel_(\d+)_id$/
 
-const slotsExhausted = pool => Object.assign(new Error(`No available ${pool} slots remaining`), { slotsExhausted: true })
+const slotsExhausted = (pool, indexed) => Object.assign(new Error(indexed
+  ? `No available indexed ${pool} slots remaining; add them with ensureAnyApiSchema(knex, { indexedSlots: { ${pool}: count } })`
+  : `No available ${pool} slots remaining`), { slotsExhausted: true })
 
 const slotPoolFor = (fieldDef = {}) => {
   if (fieldDef.belongsTo) return 'belongsTo'
@@ -65,17 +61,18 @@ const slotPoolFor = (fieldDef = {}) => {
 
 const belongsToColumns = index => [`rel_${index}_id`, `rel_${index}_type`]
 
+const isIndexedSlot = column => column.startsWith('indexed_')
+
+const slotColumnsOf = (pools, pool, indexed) => (indexed ? pools.indexed?.[pool] : pools[pool]) || []
+
 const parseSimpleSlotColumn = (column, pools) => {
-  for (const [type, pattern] of Object.entries(SLOT_PATTERNS)) {
-    const match = pattern.exec(column)
-    if (match) {
-      if (!pools[type].includes(column)) {
-        throw new Error(`Canonical slot '${column}' is out of range`)
-      }
-      return { slotType: type, slotIndex: Number(match[1]) }
-    }
+  const match = SIMPLE_SLOT_PATTERN.exec(column)
+  if (!match) throw new Error(`Invalid canonical slot column '${column}'`)
+  const [, indexed, slotType, slotIndex] = match
+  if (!slotColumnsOf(pools, slotType, Boolean(indexed)).includes(column)) {
+    throw new Error(`Canonical slot '${column}' is out of range`)
   }
-  throw new Error(`Invalid canonical slot column '${column}'`)
+  return { slotType, slotIndex: Number(slotIndex) }
 }
 
 const parseBelongsToSlots = ({ idSlot, typeSlot }, pools) => {
@@ -148,9 +145,9 @@ export class AnyapiRegistry {
     return this.#shared.get(key)
   }
 
-  ensureSchema ({ slots } = {}) {
-    return this.#once(`schema:${JSON.stringify(slots ?? null)}`, async () => {
-      await ensureAnyApiSchema(this.knex, { slots })
+  ensureSchema ({ slots, indexedSlots } = {}) {
+    return this.#once(`schema:${JSON.stringify([slots ?? null, indexedSlots ?? null])}`, async () => {
+      await ensureAnyApiSchema(this.knex, { slots, indexedSlots })
       this.#shared.delete('slots')
     })
   }
@@ -757,9 +754,10 @@ export class AnyapiRegistry {
       const previous = previousDescriptor?.fields?.[entry.fieldName]
       if (entry.override || !previous || previous.slotType !== slotPoolFor(entry.fieldDef)) continue
       const columns = previous.slotType === 'belongsTo' ? belongsToColumns(previous.slotIndex) : [previous.slot]
+      // A field keeps its slot even when its `indexed` declaration changed.
       const available = previous.slotType === 'belongsTo'
         ? pools.belongsTo.includes(previous.slotIndex)
-        : pools[previous.slotType]?.includes(previous.slot)
+        : slotColumnsOf(pools, previous.slotType, isIndexedSlot(previous.slot)).includes(previous.slot)
       if (!available || columns.some(column => used.has(column))) continue
       columns.forEach(column => used.add(column))
       entry.override = previous.slotType === 'belongsTo' ? { idSlot: columns[0], typeSlot: columns[1] } : { slotColumn: previous.slot }
@@ -869,6 +867,8 @@ export class AnyapiRegistry {
         slot: row.slot_column,
         slotType: row.slot_type,
         slotIndex: row.slot_index,
+        // belongsTo slots are always indexed by parent id.
+        indexed: row.slot_type === 'belongsTo' || isIndexedSlot(row.slot_column),
         nullable: row.nullable === 1 || row.nullable === true,
         required: row.required === 1 || row.required === true,
         target: row.target_resource,
@@ -998,16 +998,29 @@ export class AnyapiRegistry {
           `Canonical slot '${slotColumn}' does not match expected type '${pool}' for field '${fieldDef.fieldName}'`
         )
       }
+      this.#assertFitsSlot(fieldDef, pool, slotColumn)
       used.add(slotColumn)
       return { slotType: pool, slotIndex, slotColumn }
     }
 
-    const slotColumn = pools[pool].find(column => !used.has(column))
-    if (!slotColumn) {
-      throw slotsExhausted(pool)
+    const indexed = fieldDef.indexed === true
+    if (indexed && !pools.indexed?.[pool]) {
+      throw new Error(`Field '${fieldDef.fieldName}' is declared indexed, but AnyAPI ${pool} slots cannot be indexed`)
     }
+    const columns = slotColumnsOf(pools, pool, indexed)
+    const slotColumn = columns.find(column => !used.has(column))
+    if (!slotColumn) {
+      throw slotsExhausted(pool, indexed)
+    }
+    this.#assertFitsSlot(fieldDef, pool, slotColumn)
     used.add(slotColumn)
-    return { slotType: pool, slotIndex: pools[pool].indexOf(slotColumn) + 1, slotColumn }
+    return { slotType: pool, slotIndex: columns.indexOf(slotColumn) + 1, slotColumn }
+  }
+
+  #assertFitsSlot (fieldDef, pool, slotColumn) {
+    if (pool === 'string' && isIndexedSlot(slotColumn) && Number(fieldDef.max) > INDEXED_STRING_LENGTH) {
+      throw new Error(`Field '${fieldDef.fieldName}' allows ${fieldDef.max} characters, but indexed string slots hold at most ${INDEXED_STRING_LENGTH}`)
+    }
   }
 
   #assignBelongsTo (fieldDef, used, canonicalOverride, pools) {

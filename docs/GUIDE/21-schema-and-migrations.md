@@ -457,7 +457,8 @@ Slot limits belong to the database: every server reads the slot columns that
 date, 5 JSON and 5 belongsTo slots. `ensureAnyApiSchema(knex, { slots })`, or the
 plugin's `slots` option when it ensures the schema, adds missing columns. Lower
 counts never drop columns. A server whose pool is exhausted rereads the layout
-once, so a migration that adds slots takes effect without a restart.
+once, so a migration that adds slots takes effect without a restart. Indexed
+slots have their own counts; see [AnyAPI indexed fields](#anyapi-indexed-fields).
 
 On PostgreSQL, adding a nullable column without a default does not rewrite the
 table. MySQL can add columns instantly from 8.0.29; earlier versions may copy the
@@ -497,6 +498,61 @@ failures instead of returning partial linkage or includes. Direct registry
 lookups return null for absent metadata; operations requiring that relationship
 descriptor reject a missing descriptor. Schema errors and database failures
 are distinct from a valid relationship with no matching records.
+
+### AnyAPI indexed fields
+
+All AnyAPI resources share `any_records`, so plain slots have no indexes: a filter
+or sort on one reads every record of that tenant's resource. Indexed slots
+(`indexed_string_N`, `indexed_number_N`, `indexed_boolean_N`, `indexed_date_N`)
+each carry an index on `(tenant_id, resource, slot)`. A field declared
+`indexed: true` takes the first free indexed slot of its type:
+
+```js
+await api.addResource('contacts', {
+  schema: {
+    email: { type: 'email', indexed: true, search: true },
+    score: { type: 'integer', indexed: true },
+    notes: { type: 'string' }
+  }
+})
+```
+
+New tables get 5 string, 3 number and 2 date indexed slots, and no boolean ones.
+`ensureAnyApiSchema(knex, { indexedSlots: { string: 8, boolean: 2 } })`, or the
+plugin's `indexedSlots` option, adds more; JSON slots cannot be indexed. When a
+resource has no free indexed slot of a type, registration and `addKnexFields`
+fail with an error naming `indexedSlots`. The registry rereads the layout once,
+so a migration that adds slots takes effect without a restart. Every index adds
+work to each write to `any_records`, whatever the resource, so reserve indexed
+slots for fields that large resources filter or sort on.
+
+Indexed string slots are `VARCHAR(255)`, so MySQL can index them whole. A field
+whose `max` is larger cannot take one, and longer values fail validation with a
+`storage_range` violation on every database. Lengths count characters, not bytes.
+
+Slots never move on their own. A field keeps its slot when a declaration adds or
+drops `indexed`, and a server whose declaration marks a field indexed that is
+stored in a plain slot logs a warning. To index such a field, copy it into a new
+indexed field:
+
+```js
+await api.resources.contacts.migrateField({
+  from: 'phone',
+  to: { name: 'phoneKey', type: 'string', nullable: true, indexed: true, search: true }
+})
+```
+
+Belongs-to slots are always indexed by parent ID, and `any_links` by each side's
+record ID, so child lookups, includes and many-to-many reads stay inside one
+tenant's rows.
+
+`ensureAnyApiSchema` adds missing slot columns and indexes to existing tables too.
+MySQL builds indexes in place and PostgreSQL concurrently, so writes continue; on
+PostgreSQL one server builds at a time and the others start without waiting. A
+PostgreSQL pool with a single connection builds without `CONCURRENTLY`, which
+blocks writes. Either way the build reads the whole table, so for a large
+`any_records` run `ensureAnyApiSchema` from a migration before deploying. An
+interrupted concurrent build leaves an invalid index, which the next run rebuilds.
 
 ## Live Table Snapshots
 

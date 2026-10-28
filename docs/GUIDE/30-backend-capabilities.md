@@ -67,7 +67,9 @@ AnyAPI field additions persist slot metadata and their definitions;
 and keeps the mapping of populated fields a declaration omits; changing a populated
 field's storage type needs an explicit data migration. Servers sharing a database
 see each other's additions after a reload, notification or schema check, and slot
-limits follow the columns the database has. Old canonical temporal storage needs
+limits follow the columns the database has. Plain slots have no indexes; fields
+declared `indexed: true` take [indexed slots](21-schema-and-migrations.md#anyapi-indexed-fields),
+and belongs-to slots are always indexed. Old canonical temporal storage needs
 the documented data migration, not just a package update. See
 [table helpers and migration limits](21-schema-and-migrations.md#anyapi-across-several-servers).
 

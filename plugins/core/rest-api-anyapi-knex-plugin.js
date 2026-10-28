@@ -39,7 +39,7 @@ export const RestApiAnyapiKnexPlugin = {
     const options = pluginOptions || {}
     const knex = options.knex
     const tenantId = options.tenantId || DEFAULT_TENANT
-    const { ensureSchema = true, ownsKnex = true, onSchemaChanged, schemaCheckInterval, slots } = options
+    const { ensureSchema = true, ownsKnex = true, onSchemaChanged, schemaCheckInterval, slots, indexedSlots } = options
 
     if (!knex) {
       throw new Error('AnyapiKnexPlugin requires a knex instance')
@@ -55,7 +55,7 @@ export const RestApiAnyapiKnexPlugin = {
     }
 
     const registry = options.registry || new AnyapiRegistry({ knex, log })
-    if (ensureSchema) await registry.ensureSchema({ slots })
+    if (ensureSchema) await registry.ensureSchema({ slots, indexedSlots })
 
     api.anyapi = api.anyapi || {}
     api.anyapi.registry = registry
@@ -132,6 +132,15 @@ export const RestApiAnyapiKnexPlugin = {
       if (hidden.length || hiddenFilters.length) {
         await log.warn(`AnyAPI resource '${scopeName}' hides stored fields whose callbacks this server does not declare`, {
           tenant: tenantId, scopeName, fields: hidden, filters: hiddenFilters
+        })
+      }
+      // Fields never move on their own; migrateField copies one into an indexed slot.
+      const unindexed = Object.entries(scopeOptions.schema || {})
+        .filter(([name, definition]) => definition?.indexed === true && descriptor.fields[name]?.indexed === false)
+        .map(([name]) => name)
+      if (unindexed.length) {
+        await log.warn(`AnyAPI resource '${scopeName}' declares indexed fields stored in unindexed slots`, {
+          tenant: tenantId, scopeName, fields: unindexed
         })
       }
       const signature = optionsSignature(scopeOptions)
@@ -330,7 +339,7 @@ export const RestApiAnyapiKnexPlugin = {
     })
 
     addResourceMethod('createKnexTable', async ({ scopeName }) => {
-      if (ensureSchema) await ensureAnyApiSchema(knex, { slots })
+      if (ensureSchema) await ensureAnyApiSchema(knex, { slots, indexedSlots })
       const descriptor = await registry.getDescriptor(tenantId, scopeName)
       if (!descriptor) throw new Error(`Descriptor not found for resource '${scopeName}'`)
       await publish(scopeName, descriptor)
@@ -453,14 +462,21 @@ export const RestApiAnyapiKnexPlugin = {
           lastId = row.id
           const value = normalizeStoredFieldValue(row[source], fromDefinition, { fieldName: from, resourceType: descriptor.resource })
           const next = transform ? await transform(value, { id: String(row[idColumn]) }) : value
-          const { validatedObject, errors } = await schemaInfo.schemaInstance.patch({ [to]: next ?? null })
-          if (Object.keys(errors).length) {
-            const message = `Record '${row[idColumn]}' cannot migrate '${from}' to '${to}': ${Object.values(errors)[0].message}`
-            throw new RestApiValidationError(message, { fields: [to], violations: [{ field: to, rule: 'field_migration', message }] })
+          const rejected = reason => {
+            const message = `Record '${row[idColumn]}' cannot migrate '${from}' to '${to}': ${reason}`
+            return new RestApiValidationError(message, { fields: [to], violations: [{ field: to, rule: 'field_migration', message }] })
           }
-          const stored = translateCanonicalAttributesForStorage({ [to]: validatedObject[to] ?? null }, descriptor, {
-            schemaInfo, databaseClient: knex.client.config.client
-          })
+          const { validatedObject, errors } = await schemaInfo.schemaInstance.patch({ [to]: next ?? null })
+          if (Object.keys(errors).length) throw rejected(Object.values(errors)[0].message)
+          let stored
+          try {
+            stored = translateCanonicalAttributesForStorage({ [to]: validatedObject[to] ?? null }, descriptor, {
+              schemaInfo, databaseClient: knex.client.config.client
+            })
+          } catch (error) {
+            if (error?.type === 'rest_api_validation') throw rejected(error.message)
+            throw error
+          }
           await transaction(canonical.tableName).where('id', row.id).update({ [target]: stored[target] ?? null })
         }
       }
