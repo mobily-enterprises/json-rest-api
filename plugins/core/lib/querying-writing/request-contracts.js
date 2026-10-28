@@ -354,7 +354,7 @@ function buildWritableAttributesStructure (schemaInfo = {}) {
     if (!fieldDef) continue
     if (fieldName === idProperty) continue
     if (excludedFieldNames.has(fieldName)) continue
-    if (fieldDef.computed === true) continue
+    if (fieldDef.computed === true || fieldDef.retired === true) continue
     if (fieldDef.type === undefined) continue
     attributesStructure[fieldName] = { ...fieldDef }
   }

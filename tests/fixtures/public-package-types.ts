@@ -144,6 +144,11 @@ await inferred.patch({ id: 1, data: { pages: 'long' } })
 await inferred.patch({ id: 1, data: { titel: 'Typo' } })
 // @ts-expect-error Computed values are output-only.
 await inferred.post({ data: { summary: 'Forged' } })
+type RetiredContact = { phone: { type: 'string', retired: true }, email: { type: 'email' } }
+const retiredInput: InferInput<RetiredContact> = { email: 'a@b.co' }
+// @ts-expect-error Retired fields accept no new values.
+const retiredWrite: InferInput<RetiredContact> = { phone: '555' }
+void [retiredInput, retiredWrite]
 // @ts-expect-error Resource options are checked without an unrestricted option index.
 await inferredHost.addResource('typo', { schema: {}, sortableField: ['title'] })
 // @ts-expect-error Literal field option names are checked through the packed declaration.

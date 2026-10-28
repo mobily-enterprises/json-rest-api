@@ -138,6 +138,27 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
 }
 
 // `fields` adds fields to the contacts resource, for registration checks.
+export async function createFieldTypesApi (knex, { storage = storageMode.mode, fields = {} } = {}) {
+  const api = new JsonRestApi({ name: 'field-types' })
+  await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full' })
+  await useStoragePlugin(api, knex, { storage, tenantId: 'field_types' })
+  await api.addResource('contacts', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true },
+      email: { type: 'email', nullable: true, search: true },
+      token: { type: 'uuid', nullable: true, search: true },
+      phone: { type: 'string', retired: true, required: true, defaultTo: 'unknown', nullable: true, search: true },
+      ...fields
+    },
+    searchSchema: { emailContains: { type: 'email', actualField: 'email', filterOperator: 'contains' } },
+    tableName: 'field_type_contacts'
+  })
+  await api.resources.contacts.createKnexTable()
+  mapTable(knex, api, 'field_type_contacts', 'contacts')
+  return api
+}
+
 export async function createFieldDependenciesApi (knex, { storage = storageMode.mode, onCall = () => {} } = {}) {
   const options = resourceType => ({
     idProperty: 'record_key',

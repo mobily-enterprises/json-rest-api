@@ -213,7 +213,7 @@ export const validateCompleteReplacePayload = ({
     if (!fieldDef) continue
     if (fieldName === idProperty) continue
     if (Object.hasOwn(belongsToUpdates, fieldName)) continue
-    if (fieldDef.computed === true || fieldDef.virtual === true) continue
+    if (fieldDef.computed === true || fieldDef.virtual === true || fieldDef.retired === true) continue
     if (fieldDef.type === undefined) continue
 
     if (fieldDef.belongsTo && fieldDef.as) {
@@ -296,8 +296,16 @@ export const validateResourceAttributesBeforeWrite = async ({
   /** @type {StorageRow} */
   const attributesForValidation = { ...attributesToValidate }
   const foreignKeyViolations = []
+  const retiredViolations = []
   for (const [field, value] of Object.entries(attributesToValidate)) {
     const definition = schemaStructure[field]
+    if (definition?.retired === true && value !== undefined) {
+      retiredViolations.push({
+        field: `data.attributes.${field}`,
+        rule: 'retired_field',
+        message: `Field '${field}' is retired and accepts no new values`
+      })
+    }
     if (!definition?.belongsTo || !definition.as || Object.hasOwn(belongsToUpdates, field)) continue
     delete attributesForValidation[field]
     if (value === undefined) continue
@@ -305,6 +313,13 @@ export const validateResourceAttributesBeforeWrite = async ({
       field: `data.attributes.${field}`,
       rule: 'foreign_key_in_attributes',
       message: `Foreign key field '${field}' should not be in attributes. Use 'data.relationships.${definition.as}' instead.`
+    })
+  }
+  const [firstRetired] = retiredViolations
+  if (firstRetired) {
+    throw new RestApiValidationError(firstRetired.message, {
+      fields: retiredViolations.map(violation => violation.field),
+      violations: retiredViolations
     })
   }
   if (foreignKeyViolations.length) {

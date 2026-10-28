@@ -1,7 +1,7 @@
 import type { StorageFieldDefinition, StorageQuery } from '../plugins/core/lib/storage/storage-types.js'
 import type { FileStorage } from './file-storage.js'
 
-export type ResourceFieldType = 'string' | 'number' | 'integer' | 'boolean' | 'id' |
+export type ResourceFieldType = 'string' | 'email' | 'uuid' | 'number' | 'integer' | 'boolean' | 'id' |
   'date' | 'time' | 'dateTime' | 'epochSeconds' | 'epochMilliseconds' |
   'array' | 'object' | 'file' | 'blob' | 'serialize' | 'none'
 
@@ -46,6 +46,8 @@ export interface ResourceFieldOptions {
   normallyHidden?: boolean
   virtual?: boolean
   computed?: boolean
+  // Readable and filterable, but rejects new values.
+  retired?: boolean
   include?: ResourceRelationshipOptions['include']
   search?: boolean | ResourceSearchOptions | Record<string, ResourceSearchOptions>
   dependencies?: readonly string[]
@@ -113,7 +115,7 @@ type ObjectValue<Field, Mode extends Direction> =
     : Field extends { values: infer Values } ? Record<string, NestedValue<Values, Mode>> : Record<string, unknown>
 
 type BaseValue<Field, Mode extends Direction> =
-  Field extends { type: 'string' | 'file' | 'date' | 'time' | 'dateTime' } ? string
+  Field extends { type: 'string' | 'email' | 'uuid' | 'file' | 'date' | 'time' | 'dateTime' } ? string
   : Field extends { type: 'number'; precision: number; scale: number } ? Mode extends 'output' ? string | number : number
   : Field extends { type: 'number' | 'integer' | 'epochSeconds' | 'epochMilliseconds' } ? number
   : Field extends { type: 'boolean' } ? boolean
@@ -147,7 +149,7 @@ type StoredNull<Field> = Field extends { required: true } | { nullable: false } 
 // Attribute helpers exclude the conventional ID and relationship backing fields.
 // Hooks/defaults may supply required values, so caller input stays optional.
 export type InferInput<Schema extends object> = {
-  -readonly [Key in keyof Schema as Schema[Key] extends { computed: true } ? never : AttributeKey<Schema, Key>]?: FieldValue<Schema[Key], 'input'>
+  -readonly [Key in keyof Schema as Schema[Key] extends { computed: true } | { retired: true } ? never : AttributeKey<Schema, Key>]?: FieldValue<Schema[Key], 'input'>
 }
 
 // Resource result types add optionality for sparse fields and permissions.

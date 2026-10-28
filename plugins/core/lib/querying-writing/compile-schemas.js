@@ -5,6 +5,7 @@ import { compileQueryFields } from './query-field-helpers.js'
 import { buildEffectiveSortList } from '../querying/query-field-sort-helpers.js'
 import { assertScalarQueryField, assertFieldNameMap } from './field-utils.js'
 import { validateRelationshipFieldNames, validateSchemaFieldNames } from './scope-validations.js'
+import { assertKnownFieldTypes, installFieldTypes } from './field-types.js'
 
 /**
  * Compile one resource and publish its completed metadata in vars.schemaInfo.
@@ -74,7 +75,22 @@ export async function compileSchemas (scope, deps) {
   assertFieldNameMap(schemaContext.queryFields, `query fields in '${scopeName}'`)
 
   // Create schema object
+  // A retired field keeps its stored values readable and accepts no new ones.
+  for (const [fieldName, fieldDef] of Object.entries(schemaContext.fields)) {
+    if (fieldDef.retired === undefined) continue
+    if (typeof fieldDef.retired !== 'boolean') throw new Error(`Field '${fieldName}' in resource '${scopeName}' has a non-boolean retired option`)
+    if (fieldDef.retired && (fieldDef.belongsTo || fieldDef.virtual === true)) {
+      throw new Error(`Field '${fieldName}' in resource '${scopeName}' cannot be retired: only stored attributes can`)
+    }
+    if (fieldDef.retired) {
+      delete fieldDef.required
+      delete fieldDef.defaultTo
+    }
+  }
+
+  installFieldTypes()
   const schemaObject = createSchema(schemaContext.fields)
+  assertKnownFieldTypes(schemaObject, `resource '${scopeName}'`)
 
   // Generate searchSchema by merging explicit searchSchema with fields marked search:true.
   // This allows two ways to define searchable fields: either mark fields with search:true
@@ -98,6 +114,7 @@ export async function compileSchemas (scope, deps) {
   assertFieldNameMap(searchSchemaContext.fields, `search schema in '${scopeName}'`)
   ensureSearchFieldsAreIndexed(searchSchemaContext.fields)
   const searchSchemaObject = createSchema(searchSchemaContext.fields)
+  assertKnownFieldTypes(searchSchemaObject, `the search schema of '${scopeName}'`)
 
   // Derived fields must be rebuilt from the current candidate before publication.
   const idProperty = scopeOptions.idProperty || scope.vars.idProperty || 'id'

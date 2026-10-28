@@ -270,22 +270,17 @@ export const readSlotPools = async (db) => {
 
 export const TYPE_TO_POOL = new Map([
   ['string', 'string'],
-  ['text', 'string'],
   ['uuid', 'string'],
   ['email', 'string'],
   ['file', 'string'],
   ['number', 'number'],
   ['integer', 'number'],
-  ['float', 'number'],
-  ['decimal', 'number'],
   ['boolean', 'boolean'],
   ['date', 'string'],
-  ['datetime', 'date'],
   ['dateTime', 'date'],
   ['time', 'string'],
   ['epochMilliseconds', 'number'],
   ['epochSeconds', 'number'],
-  ['json', 'json'],
   ['object', 'json'],
   ['array', 'json'],
 ])

@@ -2102,6 +2102,21 @@ database writes; it is not a persisted UI-state field. Use a setter when a
 virtual input needs to prepare other stored attributes. A `virtualFields` array
 is not the resource declaration contract. See [virtual-field behavior](GUIDE/12-field-transformations.md).
 
+#### Email and UUID Fields
+
+`type: 'email'` and `type: 'uuid'` store trimmed strings and reject values that
+are not an email address or a UUID. Filters with a text operator (`like`,
+`contains`, `startsWith`, `endsWith`) accept fragments. Registration rejects any
+type json-rest-schema cannot cast, so a misspelt type fails at `addResource`
+rather than on the first write.
+
+#### Retired Fields
+
+`retired: true` keeps a stored field readable, filterable and sortable while
+rejecting every value written to it, including `null`, with the `retired_field`
+rule. `required` and `defaultTo` no longer apply, and PUT leaves its stored value
+alone. Only stored attributes can be retired, not belongs-to fields.
+
 #### Field Transformations
 
 Getters and setters receive a value and an injected context. Computed fields

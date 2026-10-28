@@ -1038,6 +1038,15 @@ Use `HookHandler<Event, AppContext>` for known hooks and
 `RuntimeHook<PluginContext>` for arbitrary plugin events; see the
 [hook guide](13-hooks-and-lifecycle.md).
 
+## Field type names
+
+`addResource` now rejects a field whose type json-rest-schema cannot cast, naming
+the field and type. Such fields used to register and then fail on their first
+write with `No casting function for type`. AnyAPI no longer lists `text`, `float`,
+`decimal`, `datetime` or `json`, which no storage could write; use `string`,
+`number`, `dateTime` and `object` or `array`. `email` and `uuid` are now real
+string types with format checks.
+
 ## Object and array attributes
 
 Declare structured fields using their public JSON type:
