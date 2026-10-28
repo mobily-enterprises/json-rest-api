@@ -243,22 +243,16 @@ export class AnyapiRegistry {
     })
   }
 
-  async #allocate (options, method, readParams) {
-    const context = { method, [readCommittedTransaction]: true }
-    let trx; let managed = false
-    try {
-      const { tenant, resource, fields, searchSchema } = readParams()
-      Object.assign(context, { tenant, resource })
+  #allocate (options, method, readParams) {
+    return this.#changeResource(options, method, () => {
+      const params = readParams()
+      const { resource, fields, searchSchema } = params
       for (const [fieldName, { definition }] of Object.entries(fields)) {
         validateSchemaFieldNames({ [fieldName]: definition }, resource)
       }
       assertFieldNameMap(searchSchema, `added search schema in '${resource}'`)
-
-      managed = !options.transaction
-      trx = await beginWriteTransaction(context, options.transaction, ownerContext => createKnexTransaction(this.knex, ownerContext))
-      const resourceRow = await this.#lockResourceRow(trx, tenant, resource)
-      const descriptor = resourceRow && await this.#loadDescriptor(tenant, resource, trx)
-      if (!descriptor) throw new Error(`Resource '${resource}' not registered for tenant '${tenant}'`)
+      return params
+    }, async ({ trx, resourceRow, descriptor }, { fields, searchSchema }) => {
       const plan = await this.#withSlotPools(trx, pools => this.#planAllocation(descriptor, fields, pools))
 
       for (const row of plan.fieldRows) {
@@ -280,11 +274,53 @@ export class AnyapiRegistry {
           runtime.callbacks.push(...callbacks.map(path => [kind, name, ...path]))
         }
       }
-      await this.#bumpVersion(trx, resourceRow, {
+      return {
         schema_json: JSON.stringify({ ...descriptor.schema, ...plan.definitions }),
-        definition_json: JSON.stringify({ ...stored, runtime }),
-        updated_at: this.knex.fn.now()
-      })
+        definition_json: JSON.stringify({ ...stored, runtime })
+      }
+    })
+  }
+
+  /**
+   * Mark stored fields retired: they keep their slots and values, and the
+   * published schema stops accepting writes to them. Registration keeps the mark.
+   */
+  async retireFields (params, options = {}) {
+    return this.#changeResource(options, 'retireFields', () => {
+      const { tenant, resource, fields } = params || {}
+      if (!tenant || !resource || !Array.isArray(fields) || !fields.length || fields.some(field => typeof field !== 'string')) {
+        throw new Error('retireFields requires tenant, resource, and an array of field names')
+      }
+      return { tenant, resource, fields }
+    }, ({ descriptor }, { fields }) => {
+      for (const fieldName of fields) {
+        const field = descriptor.fields[fieldName]
+        if (!field) throw new Error(`Field '${descriptor.resource}.${fieldName}' has no stored slot to retire`)
+        if (field.slotType === 'belongsTo') throw new Error(`Field '${descriptor.resource}.${fieldName}' is a relationship and cannot be retired`)
+      }
+      const stored = descriptor.definition || { options: null, callbacks: [] }
+      const retired = [...new Set([...(stored.retired || []), ...fields])]
+      return { definition_json: JSON.stringify({ ...stored, retired }) }
+    })
+  }
+
+  // Run one schema change under the resource's row lock and bump its version once.
+  // `change` returns the any_resource_configs values to write.
+  async #changeResource (options, method, readParams, change) {
+    const context = { method, [readCommittedTransaction]: true }
+    let trx; let managed = false
+    try {
+      const params = readParams()
+      const { tenant, resource } = params
+      Object.assign(context, { tenant, resource })
+
+      managed = !options.transaction
+      trx = await beginWriteTransaction(context, options.transaction, ownerContext => createKnexTransaction(this.knex, ownerContext))
+      const resourceRow = await this.#lockResourceRow(trx, tenant, resource)
+      const descriptor = resourceRow && await this.#loadDescriptor(tenant, resource, trx)
+      if (!descriptor) throw new Error(`Resource '${resource}' not registered for tenant '${tenant}'`)
+      const values = await change({ trx, resourceRow, descriptor }, params)
+      await this.#bumpVersion(trx, resourceRow, { ...values, updated_at: this.knex.fn.now() })
       const updated = await this.#loadDescriptor(tenant, resource, trx)
       if (managed) {
         await commitTransaction(trx, context)
@@ -551,7 +587,13 @@ export class AnyapiRegistry {
       const row = {
         schema_json: JSON.stringify(storageSchema),
         relationships_json: JSON.stringify(relationships || {}),
-        definition_json: JSON.stringify({ options: declaration.json, callbacks: declaration.callbacks, runtime }),
+        definition_json: JSON.stringify({
+          options: declaration.json,
+          callbacks: declaration.callbacks,
+          runtime,
+          // Retirement outlives declarations that still list the field.
+          ...(stored?.retired?.length ? { retired: stored.retired } : {})
+        }),
       }
       const unchanged = previous &&
         Object.entries(row).every(([column, value]) => previous.resourceRow[column] === value) &&

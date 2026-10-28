@@ -2115,7 +2115,9 @@ rather than on the first write.
 `retired: true` keeps a stored field readable, filterable and sortable while
 rejecting every value written to it, including `null`, with the `retired_field`
 rule. `required` and `defaultTo` no longer apply, and PUT leaves its stored value
-alone. Only stored attributes can be retired, not belongs-to fields.
+alone. Only stored attributes can be retired, not belongs-to fields. AnyAPI
+resources can retire fields at run time with
+[`retireKnexFields`](GUIDE/21-schema-and-migrations.md#retiring-and-migrating-anyapi-fields).
 
 #### Field Transformations
 

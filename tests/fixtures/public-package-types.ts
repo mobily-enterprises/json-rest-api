@@ -47,6 +47,7 @@ const tenantOptions = {
   onSchemaChanged: (change: AnyapiSchemaChange) => { void change.version }
 } satisfies RestApiAnyapiKnexPluginOptions
 const version: number | null = await registry.getSchemaVersion('account_1', 'books')
+await registry.retireFields({ tenant: 'account_1', resource: 'books', fields: ['isbn'] })
 const totals = await books.aggregate({
   groupBy: ['author'],
   measures: { pages: { sum: 'pages' }, rows: { count: '*' } },

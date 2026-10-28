@@ -297,7 +297,8 @@ This optional map may cover a subset of the new stored fields; remaining fields
 use the existing allocator. An initial resource map must still cover all stored
 fields. Invalid, occupied or unknown slots and existing field names reject the
 addition. Computed and virtual fields need no slots and cannot have overrides.
-AnyAPI `alterKnexFields` remains explicitly unsupported.
+AnyAPI `alterKnexFields` remains explicitly unsupported; change a field's type with
+[`migrateField`](#retiring-and-migrating-anyapi-fields).
 
 One call uses one owned metadata transaction. Allocation failure rolls back the
 batch and leaves the runtime schema unchanged. Added getters, setters, defaults,
@@ -365,6 +366,7 @@ await api.anyapi.handleSchemaChange(change)
 
 `handleSchemaChange({ tenant, resource, version })` reloads the resource only when
 the version is newer than the published one, and returns whether it did.
+`api.anyapi.getSchemaVersion('items')` reads the stored version with one query.
 `api.resources.items.reloadSchema()` reloads unconditionally and resolves to the
 published version. Reloads are read-only: they combine the stored definition
 with this server's declaration and never re-register it.
@@ -383,6 +385,45 @@ loads a stored resource, with the resources it relates to, and resolves to it, o
 of the tenant. A stored resource whose non-field options needed callbacks, such as
 `normalizeId`, must be declared in code. To load resources on demand over HTTP,
 call `loadResource` from middleware placed before the API router.
+
+### Retiring and migrating AnyAPI fields
+
+Slots are never released while records exist, so AnyAPI retires fields instead of
+dropping them:
+
+```js
+await api.resources.contacts.retireKnexFields(['phone'])
+```
+
+A retired field keeps its slot and its values, stays readable, filterable and
+sortable, and rejects writes as a [`retired: true`](../API.md#retired-fields) field
+does. The mark is stored with the resource definition, so a server that registers
+an older declaration still listing the field keeps it retired. Its name stays taken.
+
+`migrateField` changes a field's type by copying its values into a new field:
+
+```js
+await api.resources.contacts.migrateField({
+  from: 'phone',
+  to: { name: 'phoneNumber', type: 'number', nullable: true, search: true },
+  transform: (value, { id }) => value === null ? null : Number(value.replace(/\D/g, ''))
+})
+```
+
+In one transaction it allocates a slot for the new field, converts every record's
+value, and retires the old field. Each converted value must pass the new field's
+validation; without `transform`, that validation casts the old value directly. A
+value it rejects names the record and rolls everything back. The new field must be
+a plain stored attribute: add fields with callbacks with `addKnexFields` and
+backfill them. Values are written directly, so setters, hooks and record versions
+do not run. Records are converted one by one, which suits per-tenant tables
+better than very large ones. Other servers keep accepting writes to the old field
+until the migration commits, and those writes do not reach the new field, so run
+it while nothing writes the field.
+
+Both methods bump `schema_version` and call `onSchemaChanged` once after commit.
+`AnyapiRegistry.retireFields({ tenant, resource, fields }, { transaction })` is the
+deep form of retirement.
 
 ### AnyAPI tenant instances
 

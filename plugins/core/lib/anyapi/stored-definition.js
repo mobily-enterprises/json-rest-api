@@ -72,6 +72,9 @@ export const composeResourceOptions = ({ declaration = {}, stored = null, local 
   merge('searchSchema', searchSchema, declaredSearch, local.searchSchema, hiddenFilters)
 
   for (const name of hidden) delete schema[name]
+  for (const name of stored?.retired || []) {
+    if (Object.hasOwn(schema, name)) schema[name] = { ...schema[name], retired: true }
+  }
   for (const [name, definition] of Object.entries(searchSchema)) {
     if (hiddenFilters.has(name) || targetsOf(definition).some(target => hidden.has(target))) {
       hiddenFilters.add(name)

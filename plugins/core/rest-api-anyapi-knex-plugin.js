@@ -6,18 +6,25 @@ import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 import { ensureAnyApiSchema } from './lib/anyapi/schema-utils.js'
 import { AnyapiRegistry } from './lib/anyapi/anyapi-registry.js'
 import { composeResourceOptions, relatedResources } from './lib/anyapi/stored-definition.js'
-import { RestApiResourceError } from '../../lib/rest-api-errors.js'
+import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js'
 import { compileSchemas } from './lib/querying-writing/compile-schemas.js'
 import { snapshotResourceConfiguration } from './lib/querying-writing/schema-helpers.js'
 import { assertFieldNameMap } from './lib/querying-writing/field-utils.js'
 import { polymorphicFiltersHook, crossTableFiltersHook, basicFiltersHook } from './lib/querying/knex-query-helpers.js'
 import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
+import { translateCanonicalAttributesForStorage } from './lib/storage/canonical-storage-mapping.js'
+import { applyDatabaseReadOptions, normalizeStoredFieldValue } from './lib/querying-writing/database-value-normalizers.js'
 
 const DEFAULT_TENANT = 'default'
+const MIGRATION_BATCH_SIZE = 500
 // Methods that read a published schema; schema checks wrap these.
 const REQUEST_METHODS = ['query', 'aggregate', 'get', 'post', 'put', 'patch', 'delete', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship']
 
-const optionsSignature = options => JSON.stringify([Object.keys(options.schema || {}).sort(), Object.keys(options.searchSchema || {}).sort()])
+const optionsSignature = options => JSON.stringify([
+  Object.keys(options.schema || {}).sort(),
+  Object.keys(options.searchSchema || {}).sort(),
+  Object.entries(options.schema || {}).filter(([, definition]) => definition?.retired === true).map(([name]) => name).sort()
+])
 
 // A validation failure may come from a schema another server already changed.
 // Writes that may have committed are never repeated.
@@ -252,6 +259,7 @@ export const RestApiAnyapiKnexPlugin = {
       for (const { resource } of await registry.listResources(tenantId)) await loadResource(resource)
       return api.resources
     }
+    api.anyapi.getSchemaVersion = resource => registry.getSchemaVersion(tenantId, resource)
     api.anyapi.handleSchemaChange = async ({ tenant, resource, version } = {}) => {
       if ((tenant !== undefined && tenant !== tenantId) || typeof resource !== 'string' || !Object.hasOwn(api.resources, resource)) return false
       if (version !== undefined && publishedVersion(resource) >= version) return false
@@ -330,6 +338,43 @@ export const RestApiAnyapiKnexPlugin = {
 
     addResourceMethod('reloadSchema', async ({ scopeName }) => reload(scopeName))
 
+    // Compile the resource with the additions, so allocation stores enriched definitions.
+    const prepareAdditions = async (scopeName, { fields, searchSchema = {}, canonicalFieldsMap }) => {
+      const current = composeOptions(scopeName, api.resources[scopeName].vars.schemaInfo.descriptor).options
+      const candidate = snapshotResourceConfiguration({
+        ...current,
+        schema: { ...current.schema, ...fields },
+        searchSchema: { ...current.searchSchema, ...searchSchema }
+      })
+      const schemaInfo = await compileOptions(scopeName, candidate)
+      const allocation = {
+        tenant: tenantId,
+        resource: scopeName,
+        fields: Object.fromEntries(Object.keys(fields).map(fieldName => [fieldName, {
+          definition: schemaInfo.schemaStructure[fieldName] || schemaInfo.computed[fieldName],
+          declaration: fields[fieldName],
+          canonicalField: canonicalFieldsMap?.[fieldName]
+        }])),
+        searchSchema
+      }
+      return { candidate, schemaInfo, allocation }
+    }
+
+    const publishChange = async (scopeName, { fields = {}, searchSchema = {}, compiled } = {}) => {
+      registry.invalidateDescriptor(tenantId, scopeName)
+      if (Object.keys(fields).length || Object.keys(searchSchema).length) {
+        const local = runtimeDeclarations.get(scopeName) || {}
+        runtimeDeclarations.set(scopeName, {
+          schema: { ...local.schema, ...fields },
+          searchSchema: { ...local.searchSchema, ...searchSchema }
+        })
+      }
+      // The fresh descriptor also carries changes other servers made meanwhile.
+      const descriptor = await registry.getDescriptor(tenantId, scopeName)
+      await publish(scopeName, descriptor, { compiled })
+      await notifySchemaChanged(scopeName, descriptor.schemaVersion)
+    }
+
     addResourceMethod('addKnexFields', async ({ scopeName, params }) => {
       if (!params?.fields || typeof params.fields !== 'object' || Array.isArray(params.fields)) {
         throw new Error('fields parameter is required for addKnexFields')
@@ -337,41 +382,89 @@ export const RestApiAnyapiKnexPlugin = {
       assertFieldNameMap(params.fields, `added fields in '${scopeName}'`)
       assertFieldNameMap(params.searchSchema, `added search schema in '${scopeName}'`)
       assertFieldNameMap(params.canonicalFieldsMap, `added canonical fields in '${scopeName}'`)
-      const scope = api.resources[scopeName]
       const unknown = Object.keys(params.canonicalFieldsMap || {}).filter(field => !Object.hasOwn(params.fields, field))
       if (unknown.length) {
         throw new Error(`canonicalFieldsMap contains unknown fields for addKnexFields: ${unknown}`)
       }
       const fields = snapshotResourceConfiguration(params.fields)
       const searchSchema = snapshotResourceConfiguration(params.searchSchema || {})
-      const current = composeOptions(scopeName, scope.vars.schemaInfo.descriptor).options
-      const candidate = snapshotResourceConfiguration({
-        ...current,
-        schema: { ...current.schema, ...fields },
-        searchSchema: { ...current.searchSchema, ...searchSchema }
-      })
-      const schemaInfo = await compileOptions(scopeName, candidate)
-      await api.transaction(transaction => registry.allocateFields({
-        tenant: tenantId,
-        resource: scopeName,
-        fields: Object.fromEntries(Object.keys(fields).map(fieldName => [fieldName, {
-          definition: schemaInfo.schemaStructure[fieldName] || schemaInfo.computed[fieldName],
-          declaration: fields[fieldName],
-          canonicalField: params.canonicalFieldsMap?.[fieldName]
-        }])),
-        searchSchema
-      }, { transaction }))
-      registry.invalidateDescriptor(tenantId, scopeName)
-      const local = runtimeDeclarations.get(scopeName) || {}
-      runtimeDeclarations.set(scopeName, {
-        schema: { ...local.schema, ...fields },
-        searchSchema: { ...local.searchSchema, ...searchSchema }
-      })
-      // The fresh descriptor also carries fields other servers added meanwhile.
-      const descriptor = await registry.getDescriptor(tenantId, scopeName)
-      await publish(scopeName, descriptor, { compiled: { signature: optionsSignature(candidate), schemaInfo } })
-      await notifySchemaChanged(scopeName, descriptor.schemaVersion)
+      const { candidate, schemaInfo, allocation } = await prepareAdditions(scopeName, { fields, searchSchema, canonicalFieldsMap: params.canonicalFieldsMap })
+      await api.transaction(transaction => registry.allocateFields(allocation, { transaction }))
+      await publishChange(scopeName, { fields, searchSchema, compiled: { signature: optionsSignature(candidate), schemaInfo } })
     })
+
+    const retirable = (scopeName, fieldName) => {
+      const definition = api.resources[scopeName].vars.schemaInfo.schemaStructure[fieldName]
+      if (!definition || fieldName === 'id' || definition.virtual === true || definition.belongsTo) {
+        throw new Error(`'${scopeName}.${fieldName}' is not a stored attribute`)
+      }
+      return definition
+    }
+
+    addResourceMethod('retireKnexFields', async ({ scopeName, params }) => {
+      const fields = Array.isArray(params) ? params : params?.fields
+      if (!Array.isArray(fields) || !fields.length) throw new Error('retireKnexFields requires an array of field names')
+      fields.forEach(fieldName => retirable(scopeName, fieldName))
+      await registry.retireFields({ tenant: tenantId, resource: scopeName, fields })
+      await publishChange(scopeName)
+    })
+
+    // Change a field's type: copy its values into a new field, then retire it.
+    addResourceMethod('migrateField', async ({ scopeName, params }) => {
+      const { from, to, transform } = params || {}
+      const { name, ...declaration } = to || {}
+      if (typeof from !== 'string' || typeof name !== 'string' || !name) {
+        throw new Error('migrateField requires from and to: { name, ...definition }')
+      }
+      if (transform !== undefined && typeof transform !== 'function') throw new Error('migrateField transform must be a function')
+      const fromDefinition = retirable(scopeName, from)
+      if (fromDefinition.retired) throw new Error(`Field '${scopeName}.${from}' is already retired`)
+      if (declaration.computed || declaration.virtual || declaration.belongsTo || declaration.getter || declaration.setter || declaration.storage) {
+        throw new Error(`migrateField target '${name}' must be a plain stored attribute; add other fields with addKnexFields`)
+      }
+      assertFieldNameMap({ [name]: declaration }, `migrated field in '${scopeName}'`)
+      const fields = snapshotResourceConfiguration({ [name]: declaration })
+      const { schemaInfo, allocation } = await prepareAdditions(scopeName, { fields })
+
+      await api.transaction(async (transaction) => {
+        const descriptor = await registry.allocateFields(allocation, { transaction })
+        await copyFieldValues({ transaction, descriptor, schemaInfo, from, fromDefinition, to: name, transform })
+        await registry.retireFields({ tenant: tenantId, resource: scopeName, fields: [from] }, { transaction })
+      })
+      await publishChange(scopeName, { fields })
+    })
+
+    const copyFieldValues = async ({ transaction, descriptor, schemaInfo, from, fromDefinition, to, transform }) => {
+      const { canonical } = descriptor
+      const source = descriptor.fields[from].slot
+      const target = descriptor.fields[to].slot
+      const idColumn = canonical.logicalIdColumn
+      for (let lastId = null; ;) {
+        const query = transaction(canonical.tableName)
+          .where(canonical.tenantColumn, tenantId)
+          .where(canonical.resourceColumn, descriptor.resource)
+          .orderBy('id')
+          .limit(MIGRATION_BATCH_SIZE)
+          .select('id', idColumn, source)
+        if (lastId !== null) query.where('id', '>', lastId)
+        const rows = await applyDatabaseReadOptions(query)
+        if (!rows.length) return
+        for (const row of rows) {
+          lastId = row.id
+          const value = normalizeStoredFieldValue(row[source], fromDefinition, { fieldName: from, resourceType: descriptor.resource })
+          const next = transform ? await transform(value, { id: String(row[idColumn]) }) : value
+          const { validatedObject, errors } = await schemaInfo.schemaInstance.patch({ [to]: next ?? null })
+          if (Object.keys(errors).length) {
+            const message = `Record '${row[idColumn]}' cannot migrate '${from}' to '${to}': ${Object.values(errors)[0].message}`
+            throw new RestApiValidationError(message, { fields: [to], violations: [{ field: to, rule: 'field_migration', message }] })
+          }
+          const stored = translateCanonicalAttributesForStorage({ [to]: validatedObject[to] ?? null }, descriptor, {
+            schemaInfo, databaseClient: knex.client.config.client
+          })
+          await transaction(canonical.tableName).where('id', row.id).update({ [target]: stored[target] ?? null })
+        }
+      }
+    }
 
     addResourceMethod('alterKnexFields', async () => {
       throw new Error('alterKnexFields is not supported by AnyAPI Knex plugin yet')

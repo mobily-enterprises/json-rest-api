@@ -23,6 +23,8 @@ export class AnyapiRegistry {
   readonly cacheSize: number
   ensureSchema(options?: { slots?: AnyapiSlotCounts }): Promise<void>
   getSchemaVersion(tenant: string, resource: string, options?: { transaction?: Knex.Transaction }): Promise<number | null>
+  // Retired fields keep their slots and values and reject new writes.
+  retireFields(params: { tenant: string; resource: string; fields: string[] }, options?: { transaction?: Knex.Transaction }): Promise<Record<string, unknown>>
   invalidateDescriptor(tenant: string, resource: string): void
 }
 
