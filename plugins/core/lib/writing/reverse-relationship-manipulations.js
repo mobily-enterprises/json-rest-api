@@ -44,7 +44,7 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
   } else if (relData !== null) {
     identifiers = [relData]
   }
-  const targets = operation === 'remove' ? identifiers : await lockRelationshipTargets(api, context.transaction, identifiers)
+  const targets = operation === 'remove' ? identifiers : await lockRelationshipTargets(api, context.transaction, identifiers, { exclusive: true })
   const requested = new Map()
   for (const { id } of targets) {
     const value = adapter.translateFilterValue('id', id)

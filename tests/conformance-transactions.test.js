@@ -4,7 +4,7 @@ import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi } from './fixtures/api-configs.js'
 import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
-import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { boundLockWait, holdManagedTransaction } from './helpers/transaction-completion.js'
 
 const identifier = ({ type, id }) => ({ type, id })
 const document = (type, id, attributes, relationships) => ({
@@ -392,6 +392,29 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
       const expected = failed === 0 ? 'Writer B' : 'Writer A'
       assert.equal((await get(item)).attributes.name, expected)
       assert.equal((await get(other)).attributes.name, expected)
+    })
+
+    it('lets concurrent POST, PATCH and PUT writers reference the same target', async () => {
+      const first = await transaction()
+      const second = await transaction()
+      const references = { group: { data: identifier(group) }, subject: { data: identifier(group) } }
+      await fixture.api.resources.items.post({
+        document: document('items', '99', { name: 'Created' }, references), transaction: first.transaction
+      })
+      const restore = await boundLockWait(second.transaction)
+      try {
+        await fixture.api.resources.items.patch({
+          id: item.id, document: document('items', item.id, undefined, references), transaction: second.transaction
+        })
+        await fixture.api.resources.items.put({
+          id: other.id, document: document('items', other.id, { name: 'Replaced', active: true, score: 2 }, references), transaction: second.transaction
+        })
+      } finally { await restore() }
+      await second.commit()
+      await first.commit()
+      const expected = [item.id, other.id, '99'].sort()
+      assert.deepEqual((await linkage(group, 'items')).map(row => row.id).sort(), expected)
+      assert.deepEqual((await linkage(group, 'mentions')).map(row => row.id).sort(), expected)
     })
   }
 

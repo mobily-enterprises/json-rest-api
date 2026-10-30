@@ -422,7 +422,14 @@ its eligibility queries also run the ordinary query lifecycle in the write's
 transaction with the subscriber's trusted context.
 
 Relationship writes acquire database locks after the `beforeDataCall` hooks.
-Belongs-to and polymorphic targets are rechecked while locking them. Collection
+Belongs-to, polymorphic and many-to-many targets are rechecked under a shared
+lock (`FOR SHARE`, or `LOCK IN SHARE MODE` on MySQL): writers that reference the
+same row do not wait for each other, while its deletion waits for them. A target
+the write also changes, such as a versioned parent whose revision it advances or
+a child moved by a reverse relationship, is locked `FOR UPDATE` instead. A hook
+that updates a referenced row upgrades the shared lock and can deadlock with a
+concurrent writer doing the same; lock that row `FOR UPDATE` in `beforeDataCall`
+first. Collection
 mutations also preserve a parent row version so concurrent replacements cannot
 use stale membership; a database UPDATE trigger may run even when the parent's
 attribute values did not change. These internal operations do not invoke another

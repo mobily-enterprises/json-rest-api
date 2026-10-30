@@ -247,7 +247,9 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     if (relArray.length === 0) return
     assertVersionedRelationshipTransaction(api, relInfo, db)
 
-    await lockRelationshipTargets(api, db, relArray.map(identifier => ({ type: relInfo.target, id: identifier.id })))
+    await lockRelationshipTargets(api, db, relArray.map(identifier => ({ type: relInfo.target, id: identifier.id })), {
+      exclusive: hasVersionedInverse(api, relInfo)
+    })
 
     const ids = [...new Set(relArray.map(identifier => normalizeId(identifier.id)).filter(id => id !== null))]
     const readLinks = batchIds => buildLinkMutationQuery(options, (query, column) => query.whereIn(column, batchIds))
@@ -442,7 +444,7 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     }
     if (!relationships.length) return
     assertVersionedRelationshipTransaction(api, relationships[0].inverse, context.transaction)
-    await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }])
+    await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }], { exclusive: true })
     const id = normalizeId(context.id)
     for (const { inverse, info } of relationships) {
       const query = buildLinkMutationQuery({ ...info, db: context.transaction, allParents: true }, (query, column) => query.where(column, id))

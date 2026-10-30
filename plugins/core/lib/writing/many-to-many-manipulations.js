@@ -17,7 +17,7 @@ export async function invalidateDeletedPivotTargets (api, scopeName, context) {
   }
   if (!relationships.length) return
   assertVersionedRelationshipTransaction(api, relationships[0], context.transaction)
-  await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }])
+  await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }], { exclusive: true })
   const id = api.knex.helpers.getStorageAdapter(scopeName).translateFilterValue('id', context.id)
   for (const inverse of relationships) {
     const pivot = getPivotStorage(api, inverse)
@@ -110,7 +110,7 @@ export const updateManyToManyRelationship = async (scope, { api, context }) => {
   assertVersionedRelationshipTransaction(api, relDef, trx)
   const relData = normalizeRelationshipIdentifiers(context.relData || [], { api })
   const pivot = getPivotStorage(api, relDef)
-  const targets = await lockRelationshipTargets(api, trx, relData)
+  const targets = await lockRelationshipTargets(api, trx, relData, { exclusive: hasVersionedInverse(api, relDef) })
   const ids = [...new Set(targets.map(record => String(record.id)))]
   // Negate the complete keep-list once; independent batch deletions lose wanted links.
   const removals = trx(pivot.tableName).where(pivot.foreignKey, resourceId)
@@ -127,7 +127,7 @@ export const createPivotRecords = async (api, resourceId, relDef, relData, trx) 
   if (relData.length === 0) return
   assertVersionedRelationshipTransaction(api, relDef, trx)
   const pivot = getPivotStorage(api, relDef)
-  const targets = await lockRelationshipTargets(api, trx, relData)
+  const targets = await lockRelationshipTargets(api, trx, relData, { exclusive: hasVersionedInverse(api, relDef) })
   await insertMissingPivotRecords(trx, pivot, resourceId, targets.map(record => record.id))
   await invalidateManyToManyVersions(api, relDef, targets.map(record => record.id), trx)
 }

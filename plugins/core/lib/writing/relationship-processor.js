@@ -17,8 +17,25 @@ export const lockRelationshipParent = async ({ context, helpers, scopeName }) =>
   }
 }
 
-export const lockRelationshipTargets = async (api, transaction, identifiers) => {
+// Not PostgreSQL's FOR KEY SHARE: it would not conflict with lockRelationshipParent's
+// UPDATE, so writes from opposite ends of one many-to-many edge could both insert it.
+const lockTargetRows = (query, exclusive) => exclusive ? query.forUpdate() : query.forShare()
+
+/**
+ * Lock referenced rows and fail when one no longer exists.
+ * Targets are share-locked so writers referencing one row do not queue behind
+ * each other. A caller that later modifies a target must lock it exclusively:
+ * upgrading a shared lock deadlocks against a concurrent writer doing the same.
+ *
+ * @param {any} api
+ * @param {any} transaction
+ * @param {Array<{ type: string, id: string }>} identifiers
+ * @param {{ exclusive?: boolean | Set<string> }} [options] - Lock every target, or targets of these types, for update
+ * @returns {Promise<Array<{ type: string, id: string }>>} Each database identity once, in its first submitted spelling
+ */
+export const lockRelationshipTargets = async (api, transaction, identifiers, { exclusive = false } = {}) => {
   if (!transaction) return identifiers
+  const isExclusive = type => exclusive instanceof Set ? exclusive.has(type) : exclusive
   const targets = []
   const resolved = []
   const resources = new Map()
@@ -41,17 +58,17 @@ export const lockRelationshipTargets = async (api, transaction, identifiers) => 
     for (const [type, group] of byType) {
       const { adapter } = group[0]
       const idColumn = adapter.getIdColumn()
-      const rows = await applyDatabaseReadOptions(adapter.buildBaseQuery({ transaction })
+      const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
         .whereIn(idColumn, group.map(target => target.value))
-        .orderBy(`${adapter.getTableName()}.${idColumn}`).forUpdate().select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
+        .orderBy(`${adapter.getTableName()}.${idColumn}`), isExclusive(type)).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
       found.set(type, new Set(rows.map(row => String(row[idColumn]))))
     }
     for (const { type, id, value, adapter } of batch) {
       let storedId = String(value)
       // Let the database resolve alternate spellings under its column collation.
       if (!found.get(type).has(storedId)) {
-        const record = await applyDatabaseReadOptions(adapter.buildBaseQuery({ transaction })
-          .where(adapter.getIdColumn(), value).forUpdate().first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
+        const record = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
+          .where(adapter.getIdColumn(), value), isExclusive(type)).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
         if (!record) {
           throw new RestApiResourceError(`Related ${type} with id ${id} not found`, {
             subtype: 'not_found', resourceType: type, resourceId: id

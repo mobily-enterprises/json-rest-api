@@ -2,6 +2,7 @@ import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createQueryConformanceApi, createSchemaEnrichmentApi } from './fixtures/api-configs.js'
+import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { createPivotRecords, updateManyToManyRelationship } from '../plugins/core/lib/writing/many-to-many-manipulations.js'
 
@@ -78,6 +79,22 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
     assert.notEqual(await revision(first), token)
     assert.notEqual(await revision(second), second.attributes.revision)
   })
+
+  if (databaseClient !== 'better-sqlite3') {
+    it('locks versioned parents for update before advancing their revisions', async () => {
+      const queries = []
+      const capture = query => queries.push(query)
+      fixture.knex.on('query', capture)
+      try {
+        await fixture.seed('items', { name: 'Child' }, { ...link(first), collections: { data: [{ type: 'groups', id: second.id }] } })
+      } finally { fixture.knex.off('query', capture) }
+      // Two writers upgrading a shared lock on one parent would deadlock.
+      const parentLocks = queries.filter(({ sql, bindings }) => /for update|for share|lock in share mode/.test(sql) &&
+        (sql.includes('conformance_groups') || (sql.includes('any_records') && bindings.includes('groups'))))
+      assert.equal(parentLocks.length, 2)
+      assert.ok(parentLocks.every(({ sql }) => sql.endsWith('for update')), parentLocks.map(({ sql }) => sql).join('\n'))
+    })
+  }
 
   for (const method of ['postRelationship', 'patchRelationship', 'deleteRelationship']) {
     it(`invalidates many-to-many inverse revisions through ${method}`, async () => {

@@ -734,8 +734,8 @@ Database UPDATE triggers on the parent may therefore run for relationship-only
 writes. Resource hooks still follow their existing operation lifecycle; these
 internal locks do not invoke a second resource PATCH hook.
 If you use per-table database grants, account for parent UPDATEs and target
-`SELECT ... FOR UPDATE` statements when configuring the application's database
-role.
+locking reads (`FOR UPDATE`, or `FOR SHARE` / `LOCK IN SHARE MODE` for
+existence checks) when configuring the application's database role.
 
 Treat native deadlock, lock-timeout and serialization errors as failed transaction
 attempts. Let `api.transaction` roll back, then retry the complete callback in a

@@ -47,8 +47,7 @@ async function readInverseReferences (state, context) {
     .where(adapter.getIdColumn(), adapter.translateFilterValue('id', context.id)).forUpdate().first(selection))
 }
 
-// Capture actual stored references after authorization; hooks/setters may change the input.
-export async function captureInverseVersions ({ api, helpers, context, scopeName, isCreate = false }) {
+function inverseVersionReferences (api, scopeName, scopeSchemaInfo) {
   const references = []
   for (const [parentType, parent] of Object.entries(api.resources)) {
     const schemaInfo = parent.vars.schemaInfo
@@ -60,11 +59,25 @@ export async function captureInverseVersions ({ api, helpers, context, scopeName
       }
       if (!['hasMany', 'hasOne'].includes(relationship.type) || relationship.target !== scopeName) continue
       if (relationship.via) {
-        const inverse = context.schemaInfo.schemaRelationships[relationship.via]?.belongsToPolymorphic
+        const inverse = scopeSchemaInfo.schemaRelationships[relationship.via]?.belongsToPolymorphic
         if (inverse?.types.includes(parentType)) references.push({ parentType, idField: inverse.idField, typeField: inverse.typeField })
       } else if (relationship.foreignKey) references.push({ parentType, idField: relationship.foreignKey })
     }
   }
+  return references
+}
+
+/**
+ * Resource types whose revision a write to scopeName can advance.
+ * @returns {Set<string>}
+ */
+export function inverseVersionTypes (api, scopeName, scopeSchemaInfo) {
+  return new Set(inverseVersionReferences(api, scopeName, scopeSchemaInfo).map(reference => reference.parentType))
+}
+
+// Capture actual stored references after authorization; hooks/setters may change the input.
+export async function captureInverseVersions ({ api, helpers, context, scopeName, isCreate = false }) {
+  const references = inverseVersionReferences(api, scopeName, context.schemaInfo)
   if (!references.length) return undefined
   const fields = new Set()
   for (const { idField, typeField, valueField } of references) {

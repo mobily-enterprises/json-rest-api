@@ -2,7 +2,7 @@
 /** @import {
  * CompletedWriteContext, LifecycleArguments, PivotField
  * } from './lifecycle-types.js' */
-import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
+import { applyResourceVersion, captureInverseVersions, inverseVersionTypes, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
 import { lockRelationshipParent, lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
@@ -148,7 +148,10 @@ export default async function putMethod ({
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPut')
 
-    await lockRelationshipTargets(api, context.transaction, belongsToTargets)
+    // A parent whose revision this write advances is updated, not just referenced.
+    await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo)
+    })
 
     if (!context.isCreate && (manyToManyRelationships.length || reverseRelationships.length)) {
       await lockRelationshipParent({ context, helpers, scopeName })

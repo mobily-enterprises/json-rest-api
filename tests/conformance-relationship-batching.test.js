@@ -6,7 +6,7 @@ import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { assertWriteFailure } from './helpers/test-utils.js'
 import { lockRelationshipTargets } from '../plugins/core/lib/writing/relationship-processor.js'
-import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { LOCK_WAIT_CODES, boundLockWait, holdManagedTransaction } from './helpers/transaction-completion.js'
 
 describe(`Relationship target lock batches (${storageMode.mode})`, () => {
   let fixture
@@ -58,6 +58,32 @@ describe(`Relationship target lock batches (${storageMode.mode})`, () => {
         } finally { await contender.rollback() }
       }
     })
+  })
+
+  it('shares target locks except for types the caller will modify', async () => {
+    const [item] = await seed(1)
+    const group = await fixture.seed('groups', { name: 'Group' })
+    const holder = await fixture.knex.transaction()
+    const attempt = async (target, exclusive, blocked) => {
+      const contender = await fixture.knex.transaction()
+      const restore = await boundLockWait(contender)
+      try {
+        const locking = lockRelationshipTargets(fixture.api, contender, [target], { exclusive })
+        if (blocked && databaseClient !== 'better-sqlite3') {
+          await assert.rejects(locking, error => LOCK_WAIT_CODES.includes(error.code))
+        } else await locking
+      } finally {
+        await restore()
+        await contender.rollback()
+      }
+    }
+    try {
+      await lockRelationshipTargets(fixture.api, holder, [item, { type: 'groups', id: group.id }], { exclusive: new Set(['groups']) })
+      await attempt(item, false, false)
+      // A shared lock still keeps the target from being deleted.
+      await attempt(item, true, true)
+      await attempt({ type: 'groups', id: group.id }, false, true)
+    } finally { await holder.rollback() }
   })
 
   it('locks repeated IDs once even when the input spans several batches', async () => {

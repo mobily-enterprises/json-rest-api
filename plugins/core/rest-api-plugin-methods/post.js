@@ -2,7 +2,7 @@
 /** @import {
  * CompletedWriteContext, LifecycleArguments, WriteContext
  * } from './lifecycle-types.js' */
-import { applyResourceVersion, captureInverseVersions, invalidateInverseVersions } from '../lib/writing/resource-version.js'
+import { applyResourceVersion, captureInverseVersions, inverseVersionTypes, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
@@ -115,7 +115,10 @@ export default async function postMethod ({
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPost')
 
-    await lockRelationshipTargets(api, context.transaction, belongsToTargets)
+    // A parent whose revision this write advances is updated, not just referenced.
+    await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo)
+    })
 
     await applyFieldSetters(context, api, helpers)
     const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName, isCreate: true })

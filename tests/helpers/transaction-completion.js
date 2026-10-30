@@ -27,6 +27,18 @@ export async function holdManagedTransaction (api) {
   }
 }
 
+export const LOCK_WAIT_CODES = ['55P03', 'ER_LOCK_WAIT_TIMEOUT']
+
+// Make a blocked statement fail fast. Await the returned restore before releasing the connection.
+export async function boundLockWait (transaction) {
+  const client = transaction.client.config.client
+  if (client === 'pg') await transaction.raw("SET LOCAL lock_timeout = '250ms'")
+  if (client !== 'mysql2') return async () => {}
+  const [[{ timeout }]] = await transaction.raw('SELECT @@innodb_lock_wait_timeout AS timeout')
+  await transaction.raw('SET SESSION innodb_lock_wait_timeout = 1')
+  return () => transaction.raw('SET SESSION innodb_lock_wait_timeout = ?', [timeout])
+}
+
 export function abortTransactionBeforeCommit (transaction) {
   const commit = transaction.commit
   const rollback = transaction.rollback
