@@ -34,6 +34,30 @@ function advanceLockVersion (row, context, storageAdapter, db) {
   row[column] = db.raw('?? + 1', [column])
 }
 
+/**
+ * @param {string} scopeName
+ * @param {string | number} id
+ */
+const resourceNotFound = (scopeName, id) => new RestApiResourceError('Resource not found', {
+  subtype: ERROR_SUBTYPES.NOT_FOUND,
+  resourceType: scopeName,
+  resourceId: id
+})
+
+/**
+ * Updates one row by id. The scoped read before it found the row; the
+ * UPDATE's own count tells whether it has gone since.
+ * @param {import('./storage-types.js').StorageDatabase} db
+ * @param {{ scopeName: string, tableName: string, idProperty: string, id: string | number, values: StorageRow }} update
+ */
+async function updateFoundRow (db, { scopeName, tableName, idProperty, id, values }) {
+  const row = () => db(tableName).where(idProperty, id)
+  // MySQL can report changed rows rather than matched rows when FOUND_ROWS is disabled.
+  if (!await row().update(values) && !await row().select(idProperty).forUpdate().first()) {
+    throw resourceNotFound(scopeName, id)
+  }
+}
+
 /** @param {OrdinaryDataDependencies} dependencies */
 export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeStorageAdapter: findStorageAdapter }) {
   /** @param {string} scopeName */
@@ -638,28 +662,11 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       return
     }
 
-    const exists = await db(tableName)
-      .where(idProperty, id)
-      .first()
-
-    if (!exists) {
-      throw new RestApiResourceError(
-        'Resource not found',
-        {
-          subtype: ERROR_SUBTYPES.NOT_FOUND,
-          resourceType: scopeName,
-          resourceId: id
-        }
-      )
-    }
-
     // Updates cannot replace the primary key.
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
     if (Object.keys(finalAttributes).length > 0) {
-      await db(tableName)
-        .where(idProperty, id)
-        .update(finalAttributes)
+      await updateFoundRow(db, { scopeName, tableName, idProperty, id, values: finalAttributes })
     }
   }
 
@@ -690,19 +697,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
 
-    // Update only if there are changes. The scoped read before this found the
-    // row; the UPDATE's own count tells whether it has gone since.
+    // Update only if there are changes
     if (Object.keys(finalAttributes).length > 0) {
-      const row = () => db(tableName).where(idProperty, id)
-      const matched = await row().update(finalAttributes)
-      // MySQL can report changed rows rather than matched rows when FOUND_ROWS is disabled.
-      if (!matched && !await row().select(idProperty).forUpdate().first()) {
-        throw new RestApiResourceError('Resource not found', {
-          subtype: ERROR_SUBTYPES.NOT_FOUND,
-          resourceType: scopeName,
-          resourceId: id
-        })
-      }
+      await updateFoundRow(db, { scopeName, tableName, idProperty, id, values: finalAttributes })
     }
   }
 
@@ -718,27 +715,10 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     log.debug(`[Knex] DELETE ${tableName}/${id}`)
 
-    // Check if record exists
-    const exists = await db(tableName)
-      .where(idProperty, id)
-      .first()
-
-    if (!exists) {
-      throw new RestApiResourceError(
-        'Resource not found',
-        {
-          subtype: ERROR_SUBTYPES.NOT_FOUND,
-          resourceType: scopeName,
-          resourceId: id
-        }
-      )
-    }
-
-    // Delete the record
+    // The scoped read before this found the row; the DELETE's own count tells
+    // whether it has gone since (a deleted row always counts, FOUND_ROWS or not).
     await invalidateDeletedPivotTargets(api, scopeName, context)
-    await db(tableName)
-      .where(idProperty, id)
-      .delete()
+    if (!await db(tableName).where(idProperty, id).delete()) throw resourceNotFound(scopeName, id)
     await deletePivotReferences(api, scopeName, context)
 
     return { success: true }

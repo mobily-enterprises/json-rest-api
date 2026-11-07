@@ -44,10 +44,12 @@ bulk options are rejected with a message that names their replacement.
   before-data-call batch hook needs those rows (not on MySQL and MariaDB,
   where InnoDB would lock every listed row before checking the scope; there a
   patch of one visible row runs its UPDATE without a locking read first).
-- **One read before a `patch`:** a single `patch` on table storage reads its
-  row once, scoped, before the UPDATE; the second, unscoped read that checked
-  the row still existed is gone, and the UPDATE's own row count answers a row
-  that vanished in between (`not_found`, as before).
+- **Fewer reads before single writes:** on table storage, `patch` and `delete`
+  read their row once, scoped, before the UPDATE or DELETE, and a `put` that
+  replaces a row reads it twice (whether it exists, then scoped) instead of
+  three times. The unscoped read that checked the row still existed is gone;
+  the write's own row count answers a row that vanished in between
+  (`not_found`, as before).
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.

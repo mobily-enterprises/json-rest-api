@@ -475,12 +475,12 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
   })
 })
 
-// Each statement's first word: begin, select, update, commit or rollback.
+// Each statement's first word: begin, select, insert, update, delete, commit or rollback.
 const kinds = sql => sql.map(statement => statement.trim().split(/\s/)[0].replace(';', '').toLowerCase())
 const notFound = error => cause(error) instanceof RestApiResourceError && cause(error).subtype === 'not_found'
 
 // A fixture of its own: the last test adds hooks.
-describe(`One-record patch statements (${storageMode.mode})`, { skip: tableOnly }, () => {
+describe(`One-record write statements (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
@@ -536,22 +536,55 @@ describe(`One-record patch statements (${storageMode.mode})`, { skip: tableOnly 
     assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3, 4, 7]).orderBy('id').pluck('status'), ['held', 'held', 'open', 'open', 'open'])
   })
 
+  it('replaces a row after its existence check and one scoped read, or creates a missing one', async () => {
+    await seedLedger(fixture)
+    // Accounts have no relationships, so a PUT writes only its own row.
+    const accounts = fixture.api.resources.da_accounts
+    const put = (id, name) => accounts.put({ id, data: { name, access_group: 'g1' }, returning: 'none' }, workspaceA())
+    const replaced = await fixture.measure(() => put('1', 'A renamed'))
+    assert.deepEqual(kinds(replaced.sql), ['begin', 'select', 'select', 'update', 'commit'], replaced.sql.join(' | '))
+
+    // Hidden by the row policy or in another workspace: the row exists, so not found from the scoped read.
+    for (const id of ['2', '3']) {
+      const hidden = await fixture.measure(() => assert.rejects(put(id, 'Taken over'), notFound))
+      assert.deepEqual(kinds(hidden.sql), ['begin', 'select', 'select', 'rollback'], hidden.sql.join(' | '))
+    }
+    // A missing row is created at its id.
+    const created = await fixture.measure(() => put('99', 'Created'))
+    assert.deepEqual(kinds(created.sql), ['begin', 'select', 'insert', 'commit'], created.sql.join(' | '))
+    assert.deepEqual(await fixture.knex('da_accounts').orderBy('id').pluck('name'), ['A renamed', 'A hidden', 'B visible', 'Created'])
+  })
+
+  it('deletes a row after one scoped read', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    // The second DELETE removes the row's label links.
+    const deleted = await fixture.measure(() => entries.delete({ id: '1' }, workspaceA()))
+    assert.deepEqual(kinds(deleted.sql), ['begin', 'select', 'delete', 'delete', 'commit'], deleted.sql.join(' | '))
+
+    // Hidden by the row policy, in another workspace, or missing: not found from that one read.
+    for (const id of ['4', '7', '99']) {
+      const missing = await fixture.measure(() => assert.rejects(entries.delete({ id }, workspaceA()), notFound))
+      assert.deepEqual(kinds(missing.sql), ['begin', 'select', 'rollback'], missing.sql.join(' | '))
+    }
+    assert.deepEqual((await fixture.rows('da_entries')).map(row => Number(row.id)), [2, 3, 4, 5, 6, 7, 8, 9])
+  })
+
   // Registers hooks, so it runs last.
   it('gives a permission hook the minimal record from the same one read', async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
     const seen = []
+    const vanish = async ({ context }) => { if (context.vanish) await context.transaction('da_entries').where('id', context.id).delete() }
     await fixture.api.customize({
       hooks: {
         checkPermissions: {
           functionName: 'data-access-patch-reader',
           handler: ({ context: { originalContext } }) => { if (originalContext?.method === 'patch') seen.push(Number(originalContext.minimalRecord.attributes.amount)) }
         },
-        // Deletes the row after the read, as a concurrent writer could.
-        beforeDataCallPatch: {
-          functionName: 'data-access-patch-vanish',
-          handler: async ({ context }) => { if (context.vanish) await context.transaction('da_entries').where('id', context.id).delete() }
-        }
+        // Delete the row after the read, as a concurrent writer could.
+        beforeDataCallPatch: { functionName: 'data-access-patch-vanish', handler: vanish },
+        beforeDataCallDelete: { functionName: 'data-access-delete-vanish', handler: vanish }
       }
     })
     const patched = await fixture.measure(() => entries.patch({ id: '1', data: { amount: 11 }, returning: 'minimal' }, workspaceA()))
@@ -562,11 +595,16 @@ describe(`One-record patch statements (${storageMode.mode})`, { skip: tableOnly 
     const vanished = await fixture.measure(() => assert.rejects(entries.patch({ id: '2', data: { amount: 1 }, returning: 'none' }, { ...workspaceA(), vanish: true }), notFound))
     assert.deepEqual(kinds(vanished.sql), ['begin', 'select', 'delete', 'update', 'select', 'rollback'], vanished.sql.join(' | '))
     assert.equal(await fixture.knex('da_entries').where('id', 2).first().then(row => Number(row.amount)), 20, 'the delete rolled back with the patch')
+
+    // The same for a delete: its DELETE removes nothing, and it answers not found.
+    const gone = await fixture.measure(() => assert.rejects(entries.delete({ id: '3' }, { ...workspaceA(), vanish: true }), notFound))
+    assert.deepEqual(kinds(gone.sql), ['begin', 'select', 'delete', 'delete', 'rollback'], gone.sql.join(' | '))
+    assert.ok(await fixture.knex('da_entries').where('id', 3).first(), 'the hook delete rolled back with the delete')
   })
 })
 
 // MySQL and MariaDB report changed rather than matched rows without FOUND_ROWS.
-describe(`One-record patches without FOUND_ROWS (${storageMode.mode})`, { skip: (tableOnly || databaseClient !== 'mysql2') && 'MySQL and MariaDB table storage only' }, () => {
+describe(`One-record writes without FOUND_ROWS (${storageMode.mode})`, { skip: (tableOnly || databaseClient !== 'mysql2') && 'MySQL and MariaDB table storage only' }, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture({ databaseOptions: { connectionOptions: { flags: '-FOUND_ROWS' } } }) })
   after(async () => { await fixture?.close() })
@@ -581,6 +619,11 @@ describe(`One-record patches without FOUND_ROWS (${storageMode.mode})`, { skip: 
     const skipped = await accounts.patchMany({ data: [{ id: '1', name: 'A visible' }], missing: 'skip', returning: 'minimal' }, workspaceA())
     assert.deepEqual(skipped.data.map(item => item.id), ['1'])
     await assert.rejects(accounts.patch({ id: '3', data: { name: 'B visible' }, returning: 'minimal' }, workspaceA()), notFound)
+    const replaced = await fixture.measure(() => accounts.put({ id: '1', data: { name: 'A visible', access_group: 'g1' }, returning: 'none' }, workspaceA()))
+    assert.deepEqual(kinds(replaced.sql), ['begin', 'select', 'select', 'update', 'select', 'commit'], replaced.sql.join(' | '))
+    // A DELETE counts the rows it removed whatever the flag says.
+    const deleted = await fixture.measure(() => fixture.api.resources.da_entries.delete({ id: '1' }, workspaceA()))
+    assert.deepEqual(kinds(deleted.sql), ['begin', 'select', 'delete', 'delete', 'commit'], deleted.sql.join(' | '))
   })
 })
 
