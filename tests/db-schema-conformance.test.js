@@ -156,7 +156,14 @@ describe(`Real table schema and migration contracts (${databaseClient}, regular 
     for (const columns of ['label(10)', '(lower(label))', 'label DESC']) {
       it(`rejects an unrepresentable MySQL index on ${columns}`, async () => {
         await create({ structure: { label: { type: 'string' } } })
-        await db.raw(`CREATE INDEX guarded_label ON ${tableName} (${columns})`)
+        const index = db.raw(`CREATE INDEX guarded_label ON ${tableName} (${columns})`)
+        // MariaDB has no functional key parts, so such an index cannot reach a snapshot there.
+        const version = (await db.raw('SELECT VERSION() AS version'))[0][0].version
+        if (columns.startsWith('(') && /mariadb/i.test(version)) {
+          await assert.rejects(index, { code: 'ER_PARSE_ERROR' })
+          return
+        }
+        await index
         await assert.rejects(snapshot(), /Index 'guarded_label'.*simple column-index snapshot/)
       })
     }

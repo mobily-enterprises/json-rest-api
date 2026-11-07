@@ -117,8 +117,17 @@ function parseEnumLikeValues (columnType = '', typeName = 'enum', backslashEscap
   return values
 }
 
-function normalizeMysqlDefault (row) {
+// MariaDB (10.2.7+) writes COLUMN_DEFAULT as SQL: a literal is quoted, NULL is
+// the word NULL and an expression is bare, where MySQL gives the bare literal.
+function normalizeMariadbDefault (value) {
+  if (typeof value !== 'string') return value
+  if (value === 'NULL') return null
+  return /^'(?:''|\\.|[^'\\])*'$/s.test(value) ? parseEnumLikeValues(`enum(${value})`, 'enum', true)[0] : value
+}
+
+function normalizeMysqlDefault (row, mariadb) {
   const value = Object.hasOwn(row, 'columnDefault') ? row.columnDefault : row.column_default
+  if (mariadb) return normalizeMariadbDefault(value)
   if (row.dataType !== 'json' || typeof value !== 'string') return value
   let expression = value.trim()
   if (expression.startsWith('(') && expression.endsWith(')')) expression = expression.slice(1, -1).trim()
@@ -917,8 +926,9 @@ function normalizeDbSchemaName (rows = []) {
 }
 
 async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
-  const schemaRows = normalizeRows(await knex.raw('SELECT DATABASE() AS schemaName'))
+  const schemaRows = normalizeRows(await knex.raw('SELECT DATABASE() AS schemaName, VERSION() AS version'))
   const schemaName = normalizeDbSchemaName(schemaRows)
+  const mariadb = /mariadb/i.test(normalizeText(schemaRows[0]?.version))
 
   const tableRows = normalizeRows(
     await knex.raw(
@@ -1052,12 +1062,17 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
     )
   )
 
+  // MariaDB stores JSON as LONGTEXT with a column check json_valid(`column`):
+  // that pair is a JSON column, and its check is part of the type.
+  const jsonCheck = (/** @type {any} */ row) => mariadb && /^json_valid\(`((?:``|[^`])+)`\)$/i.exec(normalizeText(row.checkClause))?.[1].replace(/``/g, '`')
+  const jsonColumns = new Set(checkConstraintRows.map(jsonCheck).filter(Boolean))
   const columns = columnRows.map((row) => buildColumnSnapshot({
     name: row.columnName,
-    dataType: row.dataType,
-    columnType: row.columnType,
+    ...(jsonColumns.has(row.columnName) && normalizeText(row.dataType).toLowerCase() === 'longtext'
+      ? { dataType: 'json', columnType: 'json' }
+      : { dataType: row.dataType, columnType: row.columnType }),
     nullable: normalizeText(row.isNullable).toUpperCase() === 'YES',
-    defaultValue: normalizeMysqlDefault(row),
+    defaultValue: normalizeMysqlDefault(row, mariadb),
     defaultIsLiteral: true,
     extra: row.extra,
     autoIncrement: normalizeText(row.extra).toLowerCase().includes('auto_increment'),
@@ -1088,7 +1103,7 @@ async function introspectMysqlTableSnapshot (knex, { tableName, idColumn }) {
     indexes: normalizeIndexes(indexRows),
     foreignKeys: normalizeForeignKeys(foreignKeyRows, [], tableName),
     checkConstraints: normalizeCheckConstraints(
-      checkConstraintRows.map((row) => ({
+      checkConstraintRows.filter(row => !jsonColumns.has(jsonCheck(row))).map((row) => ({
         name: row.constraintName,
         clause: row.checkClause
       })),

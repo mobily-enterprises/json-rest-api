@@ -596,7 +596,13 @@ Current live introspection support:
 
 - SQLite
 - PostgreSQL via `pg` (verified on PostgreSQL 16)
-- MySQL via `mysql2` (verified on MySQL 8; this does not establish MariaDB coverage)
+- MySQL via `mysql2` (verified on MySQL 8)
+- MariaDB via `mysql2` (verified on MariaDB 11.4)
+
+MariaDB reports column defaults as SQL (a quoted literal, the word `NULL` for no
+default) and stores a `json` column as `longtext` with a `json_valid` column
+check; the snapshot reads both as MySQL's forms, so the JSON check is part of
+the column type and not a check constraint of its own.
 
 PostgreSQL inspection reads the current schema's
 [columns](https://www.postgresql.org/docs/16/infoschema-columns.html),
