@@ -2,12 +2,10 @@ import type { Knex } from 'knex'
 import type { TransactionMethods } from '../../types/transactions.js'
 import type { ResourceCoreMethods } from '../../types/resource-methods.js'
 import type { RelationshipMethods } from '../../types/relationship-methods.js'
-import type { BulkResourceMethods } from '../../types/bulk-methods.js'
 
 declare const api: TransactionMethods
 declare const items: ResourceCoreMethods<{ name: string }>
 declare const relationships: RelationshipMethods
-declare const bulk: BulkResourceMethods
 declare const raw: Knex.Transaction
 
 await items.get({ id: '1', transaction: raw })
@@ -15,7 +13,7 @@ await relationships.getRelationship({ id: '1', relationshipName: 'children', tra
 const result: number = await api.transaction(async transaction => {
   await items.patch({ id: '1', data: { name: 'Changed' }, transaction })
   await relationships.patchRelationship({ id: '1', relationshipName: 'children', relationshipData: [], transaction })
-  await bulk.bulkDelete({ ids: ['2'], transaction, atomic: true })
+  await items.deleteMany({ ids: ['2'], transaction })
   await transaction('audit_entries').insert({ message: 'Changed' })
   return 42
 })
@@ -28,8 +26,8 @@ await items.patch({ id: '1', data: { name: 'Changed' }, transaction: raw })
 await items.delete({ id: '1', transaction: raw })
 // @ts-expect-error Relationship writes also require a managed owner.
 await relationships.postRelationship({ id: '1', relationshipName: 'children', relationshipData: [], transaction: raw })
-// @ts-expect-error Atomic bulk work cannot borrow an unmanaged transaction.
-await bulk.bulkDelete({ ids: ['1'], atomic: true, transaction: raw })
+// @ts-expect-error Many-row writes cannot borrow an unmanaged transaction.
+await items.deleteMany({ ids: ['1'], transaction: raw })
 await api.transaction(async transaction => {
   // @ts-expect-error Completion belongs to the library.
   await transaction.commit()

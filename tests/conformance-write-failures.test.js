@@ -22,7 +22,7 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
   const primary = Object.freeze(new RestApiValidationError('Write outcome failure'))
   const inputRecord = { data: { type: 'items', id: '1', attributes: { name: 'Item' } } }
   before(async () => {
-    fixture = await createConformanceFixture({ createApi: createIdConformanceApi, apiOptions: { bulk: true } })
+    fixture = await createConformanceFixture({ createApi: createIdConformanceApi })
     await fixture.api.customize({
       hooks: Object.fromEntries(['finish', 'afterCommit'].map(name => [name, {
         functionName: `fail-outcome-${name}`,
@@ -83,15 +83,6 @@ describe(`Write outcome snapshots (${storageMode.mode})`, () => {
     assert.equal(await fixture.count('items'), 1)
   })
 
-  it('keeps an atomic child pending snapshot below the outer rollback snapshot', async () => {
-    phase = 'finish'
-    await assert.rejects(fixture.api.resources.items.bulkPost({ document: { data: [structuredClone(inputRecord.data)] } }), error => {
-      assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' })
-      return assertWriteFailure(error.cause, { cause: primary, outcome: 'pending' })
-    })
-    assert.equal(await fixture.count('items'), 0)
-  })
-
   it('rejects an already-completed raw handle before acceptance without completing it again', async () => {
     const transaction = await fixture.knex.transaction()
     await transaction.rollback()
@@ -107,7 +98,7 @@ if (databaseClient === 'pg') {
     before(async () => {
       fixture = await createConformanceFixture({
         createApi: createIdConformanceApi,
-        apiOptions: { bulk: true, inverseMembership: true },
+        apiOptions: { inverseMembership: true },
         tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
       })
       await fixture.api.customize({
@@ -141,19 +132,13 @@ if (databaseClient === 'pg') {
     })
     after(async () => { await fixture?.close() })
 
-    for (const operation of [...operations, ...['bulkPost', 'bulkPatch', 'bulkDelete'].map(method => ({ name: method, method, bulk: true }))]) {
+    for (const operation of operations) {
       it(`${operation.name} rejects a confirmed rollback without issuing a second rollback or a commit hook`, async () => {
         const record = (id, name) => ({ type: 'items', id, attributes: { name, ...(operation.method === 'put' ? { active: true, score: 0 } : {}) } })
         const id = operation.creates || operation.method === 'post' ? '99' : operation.method === 'delete' ? other.id : item.id
         const params = operation.relationship
           ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
-          : operation.method === 'bulkPost'
-            ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
-            : operation.method === 'bulkPatch'
-              ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
-              : operation.method === 'bulkDelete'
-                ? { ids: [item.id, other.id] }
-                : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
+          : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
         const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']
         const context = {}
         enabled = true
@@ -177,7 +162,7 @@ if (databaseClient === 'pg') {
         assert.equal(context.error, error.cause)
         assert.equal(afterCommit, 0)
         assert.equal(afterRollback, participants.size)
-        if (!operation.bulk) assert.equal(context.transactionCommitted, false)
+        assert.equal(context.transactionCommitted, false)
         assert.deepEqual(context.cleanupErrors, [])
       })
     }
@@ -190,7 +175,7 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
   before(async () => {
     fixture = await createConformanceFixture({
       createApi: createIdConformanceApi,
-      apiOptions: { bulk: true, inverseMembership: true },
+      apiOptions: { inverseMembership: true },
       databaseOptions: { concurrent: true, maxConnections: 1 },
       tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
     })
@@ -201,7 +186,7 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
           handler: ({ context }) => {
             if (!enabled || !operations.some(operation => operation.method === context.method)) return
             state ||= interceptTransactionCompletion(context.transaction, fixture.knex, failure)
-            if (failure.phase === 'rollback' && (!context.bulkOperation || context.bulkIndex === 1)) throw primary
+            if (failure.phase === 'rollback') throw primary
           }
         },
         afterCommit: { functionName: 'count-driver-commit-hooks', handler: () => { if (enabled) afterCommit++ } },
@@ -223,7 +208,7 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
   })
   after(async () => { await fixture?.close() })
 
-  for (const operation of [...operations, ...['bulkPost', 'bulkPatch', 'bulkDelete'].map(method => ({ name: method, method, bulk: true }))]) {
+  for (const operation of operations) {
     for (const phase of ['commit', 'rollback']) {
       for (const afterExecution of [false, true]) {
         it(`${operation.name} observes ${phase} failure ${afterExecution ? 'after execution' : 'from SQL'} even when the method resolves`, async () => {
@@ -232,13 +217,7 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
           const record = (id, name) => ({ type: 'items', id, attributes: { name, ...(operation.method === 'put' ? { active: true, score: 0 } : {}) } })
           const params = operation.relationship
             ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
-            : operation.method === 'bulkPost'
-              ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
-              : operation.method === 'bulkPatch'
-                ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
-                : operation.method === 'bulkDelete'
-                  ? { ids: [item.id, other.id] }
-                  : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
+            : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
           const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']
           const context = {}
           enabled = true
@@ -253,7 +232,7 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
             assert.equal(state.transaction.isCompleted(), true)
             assert.equal(afterCommit, 0)
             assert.equal(afterRollback, 0)
-            if (!operation.bulk) assert.equal(context.transactionCommitted, false)
+            assert.equal(context.transactionCommitted, false)
             assert.deepEqual(context.cleanupErrors, phase === 'rollback' ? [{ phase, error: state.error }] : [])
           } finally {
             enabled = false
@@ -261,20 +240,18 @@ describe(`Driver completion failures (${storageMode.mode})`, () => {
           }
 
           const committed = phase === 'commit' && afterExecution
-          const created = operation.method === 'bulkPost' ? 2 : operation.method === 'post' || operation.creates ? 1 : 0
-          const deleted = operation.method === 'bulkDelete' ? 2 : operation.method === 'delete' ? 1 : 0
+          const created = operation.method === 'post' || operation.creates ? 1 : 0
+          const deleted = operation.method === 'delete' ? 1 : 0
           assert.equal(await fixture.count('items'), 2 + (committed ? created - deleted : 0))
-          if (!(committed && operation.method === 'bulkDelete')) {
-            const changed = committed && !operation.creates && ['put', 'patch', 'bulkPatch'].includes(operation.method)
-            assert.equal((await fixture.api.resources.items.get({ id: item.id, format: 'plain' })).name, changed ? 'Changed' : 'Original')
-          }
+          const changed = committed && !operation.creates && ['put', 'patch'].includes(operation.method)
+          assert.equal((await fixture.api.resources.items.get({ id: item.id, format: 'plain' })).name, changed ? 'Changed' : 'Original')
           const members = !committed
             ? [item.id]
             : operation.method === 'postRelationship'
               ? [item.id, other.id]
               : operation.method === 'patchRelationship'
                 ? [other.id]
-                : ['deleteRelationship', 'bulkDelete'].includes(operation.method) ? [] : [item.id]
+                : operation.method === 'deleteRelationship' ? [] : [item.id]
           assert.deepEqual((await fixture.api.resources.groups.getRelationship({ id: group.id, relationshipName: 'members' })).data, members.map(id => ({ type: 'items', id })))
         })
       }
@@ -288,7 +265,7 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
   before(async () => {
     fixture = await createConformanceFixture({
       createApi: createManagedTransactionApi,
-      apiOptions: { bulk: true, inverseMembership: true },
+      apiOptions: { inverseMembership: true },
       tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
     })
     await fixture.api.customize({
@@ -314,7 +291,7 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
   })
   after(async () => { await fixture?.close() })
 
-  for (const operation of [...operations, ...['bulkPost', 'bulkPatch', 'bulkDelete'].map(method => ({ name: method, method, bulk: true }))]) {
+  for (const operation of [...operations, ...(storageMode.isAnyApi() ? [] : ['postMany', 'patchMany', 'deleteMany'].map(method => ({ name: method, method, many: true })))]) {
     it(`${operation.name} rejects owned savepoint completion and preserves unrelated outer work`, async () => {
       outer = await fixture.knex.transaction()
       const context = {}
@@ -323,11 +300,11 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
         const id = operation.creates || operation.method === 'post' ? '99' : operation.method === 'delete' ? other.id : item.id
         const params = operation.relationship
           ? { id: group.id, relationshipName: 'members', relationshipData: [{ type: 'items', id: operation.method === 'deleteRelationship' ? item.id : other.id }] }
-          : operation.method === 'bulkPost'
+          : operation.method === 'postMany'
             ? { document: { data: [record('99', 'Changed'), record('100', 'Changed')] } }
-            : operation.method === 'bulkPatch'
-              ? { operations: [item.id, other.id].map(id => ({ id, document: { data: record(id, 'Changed') } })) }
-              : operation.method === 'bulkDelete'
+            : operation.method === 'patchMany'
+              ? { document: { data: [item.id, other.id].map(id => record(id, 'Changed')) } }
+              : operation.method === 'deleteMany'
                 ? { ids: [item.id, other.id] }
                 : { id, document: { data: record(id, 'Changed') }, format: 'jsonapi', returning: 'full' }
         const resource = fixture.api.resources[operation.relationship ? 'groups' : 'items']

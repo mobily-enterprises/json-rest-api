@@ -441,7 +441,7 @@ export async function createManagedTransactionApi (knex, options = {}) {
     table.increments('id')
     table.string('message').notNullable()
   })
-  return createIdConformanceApi(knex, { ...options, bulk: true })
+  return createIdConformanceApi(knex, options)
 }
 
 export async function createIdConformanceApi (knex, { storage = storageMode.mode, idType = 'integer', idColumnType, generatedIds = false, mappedIds = true, idCaseInsensitive = false, app, connector, bulk = false, membershipPolicy, manyToManyInclude, referenceCollation, collectionInclude, reversePolymorphicInclude = collectionInclude, polymorphicTargets = ['groups'], resourcePolicy, includeProjection = false, projectionSelect, inverseMembership = false, pivotCaseInsensitive = false, fieldCallback, relationshipSetter, computedDependencies = ['name'], queryMaxLimit } = {}) {
@@ -1517,12 +1517,7 @@ export async function createBulkOperationsApi (knex, pluginOptions = {}) {
     tenantId: pluginOptions.tenantId || 'bulk_ops_tenant'
   })
 
-  // Add bulk operations plugin
-  await api.use(BulkOperationsPlugin, {
-    maxBulkOperations: 100,
-    defaultAtomic: true,
-    ...pluginOptions['bulk-operations']
-  })
+  await api.use(BulkOperationsPlugin, { ...pluginOptions['bulk-operations'] })
 
   return api
 }

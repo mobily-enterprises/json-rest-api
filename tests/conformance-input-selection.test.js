@@ -1,7 +1,6 @@
 import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
-import { BulkOperationsPlugin } from '../plugins/core/bulk-operations-plugin.js'
 import { storageMode } from './helpers/storage-mode.js'
 
 const documentFor = (attributes, id, relationships) => ({
@@ -12,12 +11,13 @@ describe(`Independent input and output (${storageMode.mode})`, () => {
   let fixture, items, group, finishError
   before(async () => {
     fixture = await createConformanceFixture({ apiOptions: { format: undefined } })
-    await fixture.api.use(BulkOperationsPlugin)
     items = fixture.api.resources.items
     await fixture.api.customize({
       hooks: {
         finishPost: {
           functionName: 'input-selection-finish-failure',
+          // Only single writes set finishError; many-row writes have nothing for it to do.
+          batch: true,
           handler: () => { if (finishError) throw finishError }
         }
       }
@@ -80,35 +80,20 @@ describe(`Independent input and output (${storageMode.mode})`, () => {
 
   for (const format of ['plain', 'jsonapi']) {
     for (const inputKey of ['data', 'document']) {
-      it(`bulk operations accept ${inputKey} with ${format} output`, async () => {
+      it(`many-row writes accept ${inputKey} with ${format} output`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
         const records = [{ name: 'First' }, { name: 'Second' }]
         const input = inputKey === 'data' ? records : { data: records.map(attributes => documentFor(attributes).data) }
-        const created = await items.bulkPost({ [inputKey]: input, format })
-        assert.equal(created.meta.succeeded, 2)
+        const created = await items.postMany({ [inputKey]: input, format, returning: 'full' })
+        assert.equal(created.data.length, 2)
         assert.equal(format === 'plain' ? created.data[0].name : created.data[0].attributes.name, 'First')
-        const operations = created.data.map(record => ({
-          id: record.id,
-          [inputKey]: inputKey === 'data' ? { name: 'Changed' } : documentFor({ name: 'Changed' }, record.id)
-        }))
-        const updated = await items.bulkPatch({ operations, format })
-        assert.equal(updated.meta.succeeded, 2)
+        const changes = inputKey === 'data'
+          ? created.data.map(record => ({ id: record.id, name: 'Changed' }))
+          : { data: created.data.map(record => documentFor({ name: 'Changed' }, record.id).data) }
+        const updated = await items.patchMany({ [inputKey]: changes, format, returning: 'full' })
+        assert.equal(updated.data.length, 2)
         assert.equal(format === 'plain' ? updated.data[0].name : updated.data[0].attributes.name, 'Changed')
       })
     }
-    it(`bulk patch mixes explicit input forms with ${format} output`, async () => {
-      const first = await fixture.seed('items', { name: 'First' })
-      const second = await fixture.seed('items', { name: 'Second' })
-      const result = await items.bulkPatch({
-        format,
-        operations: [
-          { id: first.id, data: { name: 'Plain' } },
-          { id: second.id, document: documentFor({ name: 'Document' }, second.id) }
-        ]
-      })
-      assert.equal(result.meta.succeeded, 2)
-      assert.equal((await items.get({ id: first.id })).name, 'Plain')
-      assert.equal((await items.get({ id: second.id })).name, 'Document')
-    })
   }
 
   for (const params of [
@@ -137,51 +122,20 @@ describe(`Independent input and output (${storageMode.mode})`, () => {
     await assert.rejects(items.post(Object.create({ data: { name: 'Inherited' } })), { code: 'REST_API_VALIDATION' })
   })
 
-  it('reports no-write outcomes for invalid non-atomic bulk entries and continues valid work', async () => {
-    const item = await fixture.seed('items', { name: 'Before' })
-    const invalid = [
-      {}, { data: { name: 'Bad' }, document: undefined },
-      { document: null }, { inputRecord: { name: 'Old' } }
-    ]
-    const result = await items.bulkPatch({
-      atomic: false,
-      operations: [...invalid.map(input => ({ id: item.id, ...input })), { id: item.id, data: { name: 'Accepted' } }]
+  for (const [method, params] of [
+    ['postMany', {}], ['postMany', { data: undefined }], ['postMany', { data: [] }], ['postMany', { document: { data: [] } }],
+    ['postMany', { data: [null] }], ['postMany', { data: [{ name: 'Bad' }], document: { data: [] } }],
+    ['postMany', { inputRecords: [{ name: 'Old' }] }], ['postMany', { data: [{ name: 'Bad' }], atomic: false }],
+    ['patchMany', { operations: [{ id: '1', data: { name: 'Old shape' } }] }], ['patchMany', { document: documentFor({ name: 'Bad' }, '1') }]
+  ]) {
+    it(`${method} rejects invalid selection ${JSON.stringify(params)} before SQL`, async () => {
+      const statements = []
+      const capture = query => statements.push(query.sql)
+      fixture.knex.on('query', capture)
+      try {
+        await assert.rejects(items[method](params), error => (error?.cause ?? error).code === 'REST_API_VALIDATION')
+        assert.deepEqual(statements, [])
+      } finally { fixture.knex.off('query', capture) }
     })
-    assert.equal(result.meta.failed, invalid.length)
-    assert.equal(result.meta.succeeded, 1)
-    for (const [index, failure] of result.errors.entries()) {
-      assert.equal(failure.index, index)
-      assert.equal(failure.error.code, 'REST_API_VALIDATION')
-      assert.equal(failure.error.transactionOutcome, 'none')
-    }
-    assert.equal((await items.get({ id: item.id })).name, 'Accepted')
-  })
-})
-
-describe(`Plain data field names (${storageMode.mode})`, () => {
-  let fixture
-  before(async () => {
-    fixture = await createConformanceFixture({
-      apiOptions: {
-        format: undefined,
-        itemOptions: {
-          schema: {
-            id: { type: 'id' },
-            data: { type: 'object' },
-            document: { type: 'object' },
-            format: { type: 'string' },
-            returning: { type: 'string' }
-          }
-        }
-      }
-    })
-  })
-  beforeEach(async () => { await fixture.reset() })
-  after(async () => { await fixture?.close() })
-  it('stores protocol-looking fields as ordinary values', async () => {
-    const data = { data: { type: 'ordinary', attributes: { name: 'Value' } }, document: { data: 'also ordinary' }, format: 'field', returning: 'field' }
-    const created = await fixture.api.resources.items.post({ data })
-    const result = await fixture.api.resources.items.get({ id: created.id })
-    for (const key of Object.keys(data)) assert.deepEqual(result[key], data[key])
-  })
+  }
 })

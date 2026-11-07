@@ -59,8 +59,8 @@ export interface RestApiAnyapiKnexPluginOptions extends RestApiKnexPluginOptions
   schemaCheckInterval?: number
 }
 export interface BulkOperationsPluginOptions {
+  // Entries one HTTP bulk request may carry (default 1000).
   maxBulkOperations?: number
-  defaultAtomic?: boolean
 }
 export interface LabelPluginOptions {
   preferNameFields?: string[]

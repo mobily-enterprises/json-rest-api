@@ -23,6 +23,7 @@ import {
   noHooks,
   refuseDuplicateIds,
   refuseUnsupportedResource,
+  rejectBulkOptions,
   resolveChunkSize,
   resolveMissing,
   selectManyInput,
@@ -177,6 +178,7 @@ async function runPatchMany (args, { operation, entries, started = false }) {
 function setupManyWrite ({ params, context, vars, scopes, scopeName }, method) {
   context.method = method
   rejectRemovedOptions(params)
+  rejectBulkOptions(params)
   context.scopeName = scopeName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
   context.format = resolveFormat(params.format, vars.format)

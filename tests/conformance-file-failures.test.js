@@ -731,166 +731,39 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
   }
 })
 
-describe(`Bulk file cleanup (${storageMode.mode})`, () => {
-  let fixture, directory, detectorState, payloads, probe, originalIds, contexts
-  const primary = new RestApiValidationError('Middle uploaded entry failed')
-  const cleanupError = new Error('Bulk file cleanup failed')
-  const loggingError = new Error('Bulk file warning failed')
+// Uploads run per record; many-row writes keep file fields to single writes.
+describe(`Many-row writes and file fields (${storageMode.mode})`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+  let fixture
+  const cause = error => error?.cause ?? error
   before(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'jra-bulk-files-'))
-    detectorState = { payload: null }
-    const storage = {
-      async upload (file) {
-        const path = join(directory, 'stored', file.filename)
-        await copyFile(file.filepath, path)
-        return path
-      },
-      async delete (path) {
-        if (probe.deleteFailure && path.endsWith('1-attachment.png')) throw cleanupError
-        await unlink(path)
-      }
-    }
+    const storage = { async upload () { throw new Error('No upload expected') }, async delete () {} }
     fixture = await createConformanceFixture({
-      createApi: knex => createFileUploadApi(knex, { storage, detectorState, bulk: true, fileFields: ['attachment', 'thumbnail'] }),
+      createApi: knex => createFileUploadApi(knex, { storage, detectorState: { payload: null }, fileFields: ['attachment', 'thumbnail'] }),
       tables: { documents: 'file_documents' }
     })
-    await fixture.api.customize({
-      hooks: {
-        beforeProcessing: {
-          functionName: 'select-bulk-file-payload',
-          beforeFunction: 'processFiles',
-          handler: ({ context }) => { detectorState.payload = context.bulkOperation ? payloads[context.bulkIndex] : null }
-        },
-        finish: {
-          functionName: 'fail-bulk-file-write',
-          handler: ({ context }) => {
-            if (!context.bulkOperation || !['post', 'patch'].includes(context.method)) return
-            contexts.set(context.bulkIndex, context)
-            if (context.bulkIndex === 1 && probe.failure === 'finish') throw primary
-          }
-        },
-        afterCommit: {
-          functionName: 'fail-bulk-file-completion',
-          beforeFunction: 'releaseUploadedFiles',
-          handler: ({ context }) => {
-            if (context.bulkOperation && context.bulkIndex === 1 && probe.failure === 'afterCommit') throw primary
-          }
-        }
-      }
-    })
   })
-  beforeEach(async () => {
-    probe = {}
-    payloads = []
-    contexts = new Map()
-    detectorState.payload = null
-    await fixture.reset()
-    for (const part of ['temporary', 'stored']) {
-      await rm(join(directory, part), { recursive: true, force: true })
-      await mkdir(join(directory, part))
-    }
-    originalIds = []
-    for (let index = 0; index < 3; index++) {
-      const record = await fixture.api.resources.documents.post({ format: 'plain', data: { title: `Original ${index}` } })
-      originalIds.push(record.id)
-    }
-  })
-  after(async () => {
-    try { await fixture?.close() } finally { if (directory) await rm(directory, { recursive: true, force: true }) }
-  })
+  beforeEach(async () => { await fixture.reset() })
+  after(async () => { await fixture?.close() })
 
-  const prepare = async () => {
-    payloads = []
-    for (let index = 0; index < 3; index++) {
-      const files = {}
-      for (const field of ['attachment', 'thumbnail']) {
-        const filename = `${index}-${field}.png`
-        const filepath = join(directory, 'temporary', filename)
-        await writeFile(filepath, 'file contents')
-        files[field] = {
-          filename,
-          filepath,
-          mimetype: 'image/png',
-          size: 13,
-          cleanup: async () => {
-            if (index !== 1 && field === 'attachment') throw cleanupError
-            await unlink(filepath)
-          }
-        }
-      }
-      payloads.push({ fields: {}, files })
-    }
-  }
+  it('writes rows without files and refuses rows that set a file field', async () => {
+    const documents = fixture.api.resources.documents
+    const created = await documents.postMany({ format: 'plain', returning: 'full', data: [{ title: 'One' }, { title: 'Two' }] })
+    assert.deepEqual(created.data.map(record => record.title), ['One', 'Two'])
+    const patched = await documents.patchMany({ format: 'plain', returning: 'full', data: created.data.map(record => ({ id: record.id, title: `${record.title} changed` })) })
+    assert.deepEqual(patched.data.map(record => record.title), ['One changed', 'Two changed'])
 
-  for (const method of ['bulkPost', 'bulkPatch']) {
-    for (const format of ['jsonapi', 'plain']) {
-      for (const scenario of ['warnings', 'rollback', 'failed-cleanup', 'post-commit']) {
-        it(`${method} retains ${format} file diagnostics and tracking for ${scenario}`, async t => {
-          probe = { failure: scenario === 'post-commit' ? 'afterCommit' : scenario === 'warnings' ? undefined : 'finish', deleteFailure: scenario === 'failed-cleanup' }
-          if (probe.deleteFailure) t.mock.method(fixture.api.log, 'warn', () => { throw loggingError })
-          await prepare()
-          const ids = method === 'bulkPost' ? ['91', '92', '93'] : originalIds
-          const records = ids.map((id, index) => format === 'plain' ? { id, title: `Changed ${index}` } : { type: 'documents', id, attributes: { title: `Changed ${index}` } })
-          const params = method === 'bulkPost'
-            ? (format === 'plain' ? { data: records } : { document: { data: records } })
-            : {
-                operations: records.map((data, index) => ({
-                  id: ids[index],
-                  ...(format === 'plain' ? { data } : { document: { data } })
-                }))
-              }
-          const context = { cleanupErrors: [{ phase: 'stale' }] }
-          const result = await fixture.api.resources.documents[method]({ ...params, format, atomic: false }, context)
-          const failed = scenario !== 'warnings'
-          const rolledBack = probe.failure === 'finish'
-          assert.equal(result.meta.succeeded, failed ? 2 : 3)
-          assert.equal(result.meta.failed, failed ? 1 : 0)
-          if (failed) assert.deepEqual(result.errors.map(entry => [entry.index, entry.error.code, entry.error.message]), [[1, primary.code, primary.message]])
-          const retainedFields = scenario === 'post-commit' ? ['attachment', 'thumbnail'] : probe.deleteFailure ? ['attachment'] : []
-          assert.deepEqual((context.fileHandlingUploads || []).map(({ field, bulkIndex, url }) => ({ field, bulkIndex, url })), retainedFields.map(field => ({ field, bulkIndex: 1, url: join(directory, 'stored', `1-${field}.png`) })))
-          const diagnostics = []
-          const add = (phase, bulkIndex) => {
-            diagnostics.push({ phase, field: 'attachment', error: cleanupError, bulkIndex })
-            if (probe.deleteFailure) diagnostics.push({ phase: 'logging', during: phase, field: 'attachment', error: loggingError, bulkIndex })
-          }
-          add('temporaryFileCleanup', 0)
-          if (probe.deleteFailure) add('uploadedFileCleanup', 1)
-          add('temporaryFileCleanup', 2)
-          assert.deepEqual(context.cleanupErrors, diagnostics)
-          const stored = (await fixture.api.resources.documents.query({ format: 'plain' })).data
-          for (let index = 0; index < 3; index++) {
-            const record = stored.find(record => record.id === ids[index])
-            if (index === 1 && rolledBack && method === 'bulkPost') assert.equal(record, undefined)
-            else {
-              assert.equal(record.title, index === 1 && rolledBack ? `Original ${index}` : `Changed ${index}`)
-              if (!(index === 1 && rolledBack)) assert.equal(record.attachment, join(directory, 'stored', `${index}-attachment.png`))
-            }
-            for (const field of ['attachment', 'thumbnail']) {
-              assert.equal(await exists(join(directory, 'temporary', `${index}-${field}.png`)), index !== 1 && field === 'attachment')
-              assert.equal(await exists(join(directory, 'stored', `${index}-${field}.png`)), index !== 1 || !rolledBack || (probe.deleteFailure && field === 'attachment'))
-            }
-          }
-          for (const upload of context.fileHandlingUploads || []) {
-            assert.equal(upload.transaction, contexts.get(1).transaction)
-            assert.equal(upload.storage, contexts.get(1).fileHandlingUploads.find(entry => entry.field === upload.field).storage)
-          }
-          for (const child of contexts.values()) {
-            assert.ok((child.cleanupErrors || []).every(entry => !Object.hasOwn(entry, 'bulkIndex')))
-            assert.ok((child.fileHandlingUploads || []).every(entry => !Object.hasOwn(entry, 'bulkIndex')))
-          }
-          assert.equal(contexts.get(1).transactionCommitted, !rolledBack)
-          assert.equal(JSON.stringify(result).includes('Bulk file cleanup failed'), false)
-          const retained = [...(context.fileHandlingUploads || [])]
-          probe = {}
-          payloads = []
-          await fixture.api.resources.documents.bulkPost({ data: [{ id: '999', title: 'Recovery' }], format: 'plain', atomic: false }, context)
-          assert.equal(context.cleanupErrors, undefined)
-          assert.deepEqual(context.fileHandlingUploads || [], retained)
-          for (const upload of retained) assert.equal(await exists(upload.url), true)
-        })
-      }
+    for (const [method, params] of [
+      ['postMany', { data: [{ title: 'Three' }, { title: 'With file', attachment: '/uploads/file.png' }] }],
+      ['patchMany', { data: [{ id: created.data[0].id, thumbnail: '/uploads/file.png' }] }]
+    ]) {
+      await assert.rejects(documents[method]({ format: 'plain', ...params }), error => {
+        assert.equal(cause(error).code, 'REST_API_BULK_WRITE_UNSUPPORTED')
+        assert.match(cause(error).message, /file fields/)
+        return true
+      }, method)
     }
-  }
+    assert.equal(await fixture.count('documents'), 2)
+  })
 })
 
 describe(`Upload error HTTP classification (${storageMode.mode})`, () => {

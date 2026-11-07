@@ -6,7 +6,7 @@ import {
 import type {
   ResourceCoreMethods, TransactionMethods, RestApiPluginOptions,
   AutoFilterPluginOptions, RowPolicyPluginOptions, FileStorage,
-  ResourceVersionOptions, BulkResourceMethods, RelationshipMethods,
+  ResourceVersionOptions, RelationshipMethods,
   ToManyRelationship, HttpConnectorOptions, CorsPluginOptions, JsonApiDocument, JsonApiResource,
   ResourceSchema, InferInput, InferOutput, RuntimeCustomization, HookHandler,
   RestApiAnyapiKnexPluginOptions, AnyapiSchemaChange
@@ -82,14 +82,12 @@ void [legacy, requiredTitle]
 const versioning = { versionField: 'revision' } satisfies ResourceVersionOptions
 const validators = { httpValidators: true } satisfies HttpConnectorOptions
 const cors = { exposedHeaders: ['ETag'], allowedHeaders: ['Content-Type', 'If-Match'] } satisfies CorsPluginOptions
-declare const bulk: BulkResourceMethods<Book>
 declare const relationships: RelationshipMethods<{ authors: ToManyRelationship<{ name: string }, 'authors'> }>
 await books.put({ id: 1, data: { title: 'Replacement' }, expectedVersion: 'v1' })
 await books.delete({ id: 1, expectedVersion: 'v2' })
 await books.patch({ id: 1, data: { title: 'Unconditional' } })
-await bulk.bulkPatch({ operations: [{ id: 1, data: { title: 'New' } }], expectedVersions: ['v1'] })
-await bulk.bulkDelete({ ids: [1], expectedVersions: ['v2'] })
-await bulk.bulkDelete({ ids: [1] })
+await books.patchMany({ data: [{ id: 1, title: 'New' }] })
+await books.deleteMany({ ids: [1] })
 await relationships.postRelationship({ id: 1, relationshipName: 'authors', relationshipData: [{ type: 'authors', id: 'a1' }], expectedVersion: 'v1' })
 await relationships.patchRelationship({ id: 1, relationshipName: 'authors', relationshipData: [], expectedVersion: 'v2' })
 await relationships.deleteRelationship({ id: 1, relationshipName: 'authors', relationshipData: [] })
@@ -101,8 +99,8 @@ const invalidVersioning: ResourceVersionOptions = { versionField: true }
 await books.delete({ id: 1, expectedVersion: 1 })
 // @ts-expect-error Creation does not accept an expected revision.
 await books.post({ data: { title: 'New' }, expectedVersion: 'v1' })
-// @ts-expect-error Bulk revision conditions are arrays aligned with operations.
-await bulk.bulkDelete({ ids: [1], expectedVersions: 'v1' })
+// @ts-expect-error Many-row writes take no revision conditions.
+await books.deleteMany({ ids: [1], expectedVersions: ['v1'] })
 // @ts-expect-error Relationship revision conditions are opaque strings too.
 await relationships.patchRelationship({ id: 1, relationshipName: 'authors', relationshipData: [], expectedVersion: 1 })
 // @ts-expect-error HTTP validator opt-in is boolean.

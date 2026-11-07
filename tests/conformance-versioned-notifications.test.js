@@ -5,7 +5,6 @@ import { createConformanceFixture } from './fixtures/conformance.js'
 import { closeWebSocketApi, createQueryConformanceApi, createWebSocketApi } from './fixtures/api-configs.js'
 import { drainSocketEvents, installSocketBarrier, waitForSocketEvent } from './helpers/socketio.js'
 import { storageMode } from './helpers/storage-mode.js'
-import { BulkOperationsPlugin } from '../plugins/core/bulk-operations-plugin.js'
 
 for (const transport of ['websocket', 'polling']) {
   describe(`Conditional notification suppression ${transport} (${storageMode.mode})`, { timeout: 20000 }, () => {
@@ -23,7 +22,6 @@ for (const transport of ['websocket', 'polling']) {
             socketio: { auth: { authenticate: async () => ({ userId: 'viewer' }) } }
           })
           server = result.server
-          await result.api.use(BulkOperationsPlugin)
           installSocketBarrier(result.api.io)
           return result.api
         },
@@ -63,25 +61,21 @@ for (const transport of ['websocket', 'polling']) {
       assert.deepEqual(await groups.get({ id: parent.id, format: 'plain' }), parent)
       assert.deepEqual(await groups.getRelationship({ id: parent.id, relationshipName: 'members' }), membership)
     })
-    for (const method of ['bulkPatch', 'bulkDelete']) {
-      it(`discards successful-child notifications when atomic ${method} encounters a stale child`, async () => {
+    for (const method of ['patchMany', 'deleteMany']) {
+      it(`${method} refuses the versioned resource without notifications`, async () => {
         const groups = fixture.api.resources.groups
         const sibling = await fixture.seed('groups', { name: 'Sibling' })
         await drainSocketEvents(socket)
         events.length = 0
-        const membership = await groups.getRelationship({ id: parent.id, relationshipName: 'members' })
         const ids = [parent.id, sibling.id]
         await assert.rejects(groups[method]({
-          atomic: true,
-          expectedVersions: [parent.revision, 'stale-token'],
           format: 'plain',
-          ...(method === 'bulkDelete' ? { ids } : { operations: ids.map(id => ({ id, data: { name: 'Provisional' } })) })
-        }), error => error.code === 'REST_API_VERSION_CONFLICT')
+          ...(method === 'deleteMany' ? { ids } : { data: ids.map(id => ({ id, name: 'Provisional' })) })
+        }), error => (error?.cause ?? error).code === 'REST_API_BULK_WRITE_UNSUPPORTED')
         await drainSocketEvents(socket)
         assert.deepEqual(events, [])
         assert.deepEqual(await groups.get({ id: parent.id, format: 'plain' }), parent)
         assert.deepEqual((await groups.get({ id: sibling.id })).data, sibling)
-        assert.deepEqual(await groups.getRelationship({ id: parent.id, relationshipName: 'members' }), membership)
       })
     }
     for (const method of ['patch', 'put', 'delete', 'postRelationship', 'patchRelationship', 'deleteRelationship']) {

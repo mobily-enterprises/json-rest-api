@@ -2,7 +2,7 @@
 // per chunk, then one DELETE per chunk and the pivot rows of the deleted records.
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { rejectRemovedOptions, resolveReturning } from '../lib/querying-writing/response-options.js'
+import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
@@ -10,6 +10,7 @@ import {
   keepVisible,
   refuseDuplicateIds,
   refuseUnsupportedResource,
+  rejectBulkOptions,
   resolveChunkSize,
   resolveMissing,
   unsupported,
@@ -20,8 +21,11 @@ import { VISIBLE_READ_CHUNK, visibleIdsByFilters } from './patch-many.js'
 function setup ({ params, context, scopes, scopeName }, method) {
   context.method = method
   rejectRemovedOptions(params)
+  rejectBulkOptions(params)
   context.scopeName = scopeName
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
+  // Deletes return no records; a format is still checked like a single delete's.
+  if (params.format !== undefined) resolveFormat(params.format)
   context.returning = resolveReturning(params.returning, 'none')
   if (context.returning === 'full') {
     throw new RestApiValidationError("A delete returns 'none' or 'minimal'", { fields: ['returning'] })
@@ -46,9 +50,13 @@ async function runDeleteMany (args, { operation, ids, started = false }) {
     for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
   }
   const kept = keepVisible({ requested: ids, visible, missing, scopeName, storageAdapter })
+  // bulkIndex is the id's position in the request.
+  const positions = new Map(ids.map((id, index) => [String(storageAdapter.translateFilterValue('id', id)), index]))
   for (const id of kept) {
-    const minimalRecord = visible.get(String(storageAdapter.translateFilterValue('id', id)))
-    await scope.checkPermissions({ method: 'delete', originalContext: { ...context, method: 'delete', id, minimalRecord, originalMinimalRecord: minimalRecord } })
+    const key = String(storageAdapter.translateFilterValue('id', id))
+    const minimalRecord = visible.get(key)
+    const bulkIndex = positions.get(key)
+    await scope.checkPermissions({ method: 'delete', originalContext: { ...context, method: 'delete', id, minimalRecord, originalMinimalRecord: minimalRecord, bulkIndex } })
   }
 
   context.ids = kept.map(String)

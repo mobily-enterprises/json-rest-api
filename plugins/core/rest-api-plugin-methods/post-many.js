@@ -20,6 +20,7 @@ import {
   manyRowResponse,
   noHooks,
   refuseUnsupportedResource,
+  rejectBulkOptions,
   resolveChunkSize,
   selectManyInput,
   toDocument,
@@ -70,6 +71,7 @@ export default async function postManyMethod ({
   context.method = 'postMany'
   try {
     rejectRemovedOptions(params)
+    rejectBulkOptions(params)
     context.scopeName = scopeName
     context.schemaInfo = scopes[scopeName].vars.schemaInfo
     context.format = resolveFormat(params.format, vars.format)

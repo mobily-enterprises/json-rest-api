@@ -13,9 +13,7 @@ const redis = JSON.parse(process.env.JSON_REST_API_REDIS_CONNECTION)
 
 for (const transport of ['websocket', 'polling']) {
   describe(`Redis notifications over ${transport} (${storageMode.mode})`, { timeout: 60000 }, () => {
-    let database, seeded, failFinish, deliveryGate, gateEntered, failBulkIndex
-    const bulkError = new Error('Redis bulk entry rejected')
-    const cleanupError = new Error('Redis bulk rollback hook failed')
+    let database, seeded, failFinish, deliveryGate, gateEntered
     const nodes = []
     const clients = new Set()
     const post = (node, name, accessGroup = 'group-a', context = seeded.admin) => nodes[node].api.resources.policy_projects.post({
@@ -58,7 +56,6 @@ for (const transport of ['websocket', 'polling']) {
           createApi: createRowPolicyApi,
           connector: 'express',
           searchIds: true,
-          bulk: true,
           createTables: node === 0,
           socketio: {
             redis: { ...redis, name: `jra-notifications-${transport}-${node}` },
@@ -79,16 +76,10 @@ for (const transport of ['websocket', 'polling']) {
             finish: {
               functionName: 'redis-write-failure',
               afterFunction: 'socketio-broadcast',
+              // A single-write probe; many-row writes do not run it.
+              batch: true,
               handler: ({ context }) => {
                 if (failFinish && context.method === 'patch') throw new Error('Redis fixture write rejected')
-                if (context.bulkOperation && context.bulkIndex === failBulkIndex && ['post', 'patch', 'delete'].includes(context.method)) throw bulkError
-              }
-            },
-            afterRollback: {
-              functionName: 'redis-bulk-cleanup-failure',
-              afterFunction: 'socketio-cleanup-broadcasts',
-              handler: ({ context }) => {
-                if (context.bulkOperation && context.bulkIndex === failBulkIndex) throw cleanupError
               }
             },
             afterCommit: {
@@ -107,7 +98,6 @@ for (const transport of ['websocket', 'polling']) {
     })
     beforeEach(async () => {
       failFinish = false
-      failBulkIndex = undefined
       deliveryGate = undefined
       gateEntered = undefined
       await cleanTables(database.knex, ['row_policy_project_tasks', 'row_policy_tasks', 'row_policy_projects', 'row_policy_broken'])
@@ -139,27 +129,18 @@ for (const transport of ['websocket', 'polling']) {
         for (const event of events) assert.equal(event.attributes, undefined)
       })
 
-      for (const method of ['bulkPost', 'bulkPatch', 'bulkDelete']) {
-        it(`delivers only committed non-atomic ${method} entries from node ${writer} after cleanup failure`, async () => {
+      for (const method of ['postMany', 'patchMany', 'deleteMany']) {
+        it(`delivers committed ${method} rows from node ${writer} to the other node`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
           const ids = []
-          if (method !== 'bulkPost') for (let index = 0; index < 3; index++) ids.push((await post(writer, `Original ${index}`)).id)
+          if (method !== 'postMany') for (let index = 0; index < 3; index++) ids.push((await post(writer, `Original ${index}`)).id)
           const events = await subscribe(await connect(1 - writer))
-          failBulkIndex = 1
           const records = Array.from({ length: 3 }, (_, index) => ({ name: `Bulk ${index}`, access_group: 'group-a' }))
-          const params = method === 'bulkPost' ? { data: records } : method === 'bulkPatch' ? { operations: records.map((data, index) => ({ id: ids[index], data })) } : { ids }
-          const context = { ...seeded.admin }
-          const result = await nodes[writer].api.resources.policy_projects[method]({ ...params, atomic: false, format: 'plain' }, context)
-          assert.deepEqual(result.errors.map(entry => [entry.index, entry.error.message]), [[1, bulkError.message]])
-          assert.equal(result.meta.succeeded, 2)
-          assert.equal(result.meta.failed, 1)
-          assert.deepEqual(context.cleanupErrors, [{ phase: 'afterRollback', error: cleanupError, bulkIndex: 1, operationIndex: 0, scopeName: 'policy_projects', method: method.slice(4).toLowerCase() }])
+          const params = method === 'postMany' ? { data: records, returning: 'minimal' } : method === 'patchMany' ? { data: records.map((data, index) => ({ id: ids[index], name: data.name })) } : { ids }
+          const result = await nodes[writer].api.resources.policy_projects[method]({ ...params, format: 'plain' }, { ...seeded.admin })
           await drain(writer)
-          const expectedIds = method === 'bulkPost' ? result.data.map(record => record.id) : [ids[0], ids[2]]
-          const type = method === 'bulkPost' ? 'resource.created' : method === 'bulkPatch' ? 'resource.updated' : 'resource.deleted'
-          assert.deepEqual(events.map(event => [event.id, event.type]), expectedIds.map(id => [id, type]))
-          const stored = (await nodes[1 - writer].api.resources.policy_projects.query({ format: 'plain' }, seeded.admin)).data
-          assert.equal(stored.some(record => record.name === 'Bulk 1'), false)
-          if (method !== 'bulkPost') assert.equal(stored.find(record => record.id === ids[1]).name, 'Original 1')
+          const expectedIds = method === 'postMany' ? result.data.map(record => record.id) : ids
+          const type = method === 'postMany' ? 'resource.created' : method === 'patchMany' ? 'resource.updated' : 'resource.deleted'
+          assert.deepEqual(events.map(event => [event.id, event.type]).sort(), expectedIds.map(id => [id, type]).sort())
         })
       }
     }

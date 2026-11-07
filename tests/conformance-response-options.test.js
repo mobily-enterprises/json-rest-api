@@ -4,8 +4,8 @@ import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 
-const methods = ['post', 'put', 'patch', 'delete', 'get', 'query', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship', 'bulkPost', 'bulkPatch', 'bulkDelete']
-const returningMethods = new Set(['post', 'put', 'patch', 'bulkPost', 'bulkPatch'])
+const methods = ['post', 'put', 'patch', 'delete', 'get', 'query', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship', 'postMany', 'patchMany', 'deleteMany']
+const returningMethods = new Set(['post', 'put', 'patch', 'postMany', 'patchMany'])
 const removed = ['simplified', 'simplifiedApi', 'simplifiedTransport', 'returnFullRecord', 'returnRecordApi', 'returnRecordTransport', 'isTransport']
 
 describe(`Response option rejection before storage (${storageMode.mode})`, () => {
@@ -13,7 +13,6 @@ describe(`Response option rejection before storage (${storageMode.mode})`, () =>
   before(async () => {
     fixture = await createConformanceFixture({
       createApi: createIdConformanceApi,
-      apiOptions: { bulk: true },
       tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
     })
   })
@@ -29,8 +28,9 @@ describe(`Response option rejection before storage (${storageMode.mode})`, () =>
         id: '1',
         relationshipName: 'groups',
         relationshipData: [],
-        document: { data: { type: 'items', id: '1', attributes: { name: 'Unexpected write' } } },
-        operations: [{ id: '1', data: { type: 'items', id: '1', attributes: { name: 'Unexpected write' } } }],
+        document: method.endsWith('Many')
+          ? { data: [{ type: 'items', id: '1', attributes: { name: 'Unexpected write' } }] }
+          : { data: { type: 'items', id: '1', attributes: { name: 'Unexpected write' } } },
         ids: ['1'],
         format: 'jsonapi',
         ...options

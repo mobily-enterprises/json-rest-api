@@ -7,140 +7,48 @@ import { createConformanceFixture } from './fixtures/conformance.js'
 import { createSchemaEnrichmentApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 
-for (const format of ['jsonapi', 'plain']) {
-  describe(`Versioned bulk writes ${format} (${storageMode.mode})`, () => {
-    let fixture, items, first, second
-    before(async () => {
-      fixture = await createConformanceFixture({
-        createApi: createSchemaEnrichmentApi,
-        tables: { items: 'schema_enrichment_items' },
-        apiOptions: {
-          bulk: true,
-          fields: { revision: { type: 'string', required: true } },
-          resourceOptions: { versionField: 'revision' }
-        }
-      })
-      items = fixture.api.resources.items
-    })
-    beforeEach(async () => {
-      await fixture.reset()
-      first = await fixture.seed('items', { name: 'First' })
-      second = await fixture.seed('items', { name: 'Second' })
-    })
-    after(async () => { await fixture?.close() })
-    const read = id => items.get({ id, format: 'plain' })
-    const paramsFor = method => method === 'bulkDelete'
-      ? { ids: [first.id, second.id] }
-      : {
-          operations: [first, second].map(record => ({
-            id: record.id,
-            ...(format === 'plain'
-              ? { data: { name: 'Changed' } }
-              : { document: { data: { type: 'items', attributes: { name: 'Changed' } } } })
-          }))
-        }
+const unsupported = error => (error?.cause ?? error).code === 'REST_API_BULK_WRITE_UNSUPPORTED'
 
-    for (const method of ['bulkPatch', 'bulkDelete']) {
-      for (const atomic of [true, false]) {
-        it(`${method} ${atomic ? 'rolls back the batch' : 'retains only successful children'} on a stale condition`, async () => {
-          const initial = await read(first.id)
-          const params = { ...paramsFor(method), format, atomic, expectedVersions: [initial.revision, 'stale'] }
-          if (atomic) {
-            await assert.rejects(items[method](params), error => error.code === 'REST_API_VERSION_CONFLICT' && error.transactionOutcome === 'rolledBack')
-            assert.deepEqual(await read(first.id), initial)
-          } else {
-            const result = await items[method](params)
-            assert.equal(result.meta.succeeded, 1)
-            assert.equal(result.meta.failed, 1)
-            assert.equal(result.errors[0].index, 1)
-            assert.equal(result.errors[0].error.code, 'REST_API_VERSION_CONFLICT')
-            assert.equal(result.errors[0].error.transactionOutcome, 'rolledBack')
-            if (method === 'bulkPatch') {
-              const stored = await read(first.id)
-              assert.equal(stored.name, 'Changed')
-              assert.notEqual(stored.revision, initial.revision)
-            } else assert.equal(await fixture.count('items'), 1)
-          }
-          assert.equal((await read(second.id)).name, 'Second')
-        })
-      }
-
-      it(`${method} accepts matching conditions and leaves unconditional calls available`, async () => {
-        const records = await Promise.all([read(first.id), read(second.id)])
-        const result = await items[method]({ ...paramsFor(method), format, expectedVersions: records.map(record => record.revision) })
-        assert.equal(result.meta.succeeded, 2)
-        if (method === 'bulkPatch') {
-          assert.notEqual((await read(first.id)).revision, records[0].revision)
-          assert.equal((await items[method]({ ...paramsFor(method), format })).meta.succeeded, 2)
-        } else assert.equal(await fixture.count('items'), 0)
-      })
-
-      it(`${method} rejects malformed condition arrays before any non-atomic work`, async () => {
-        const initial = await read(first.id)
-        for (const expectedVersions of [null, 'token', [], [initial.revision], [initial.revision, null], [initial.revision, ''], [initial.revision, 'x'.repeat(129)], new Array(2)]) {
-          await assert.rejects(items[method]({ ...paramsFor(method), format, atomic: false, expectedVersions }), error => error.code === 'REST_API_VALIDATION')
-          assert.deepEqual(await read(first.id), initial)
-          assert.equal(await fixture.count('items'), 2)
-        }
-      })
-
-      it(`${method} keeps matching writes inside the caller transaction`, async () => {
-        const records = await Promise.all([read(first.id), read(second.id)])
-        const stop = new Error('Caller rollback')
-        await assert.rejects(fixture.api.transaction(async transaction => {
-          const result = await items[method]({ ...paramsFor(method), format, transaction, expectedVersions: records.map(record => record.revision) })
-          assert.equal(result.meta.succeeded, 2)
-          assert.equal(transaction.isCompleted(), false)
-          throw stop
-        }), error => error === stop || error.cause === stop)
-        assert.deepEqual(await read(first.id), records[0])
-        assert.deepEqual(await read(second.id), records[1])
-      })
-
-      it(`${method} cannot reuse one revision for a repeated target in an atomic batch`, async () => {
-        const initial = await read(first.id)
-        const params = paramsFor(method)
-        if (method === 'bulkPatch') params.operations[1] = params.operations[0]
-        else params.ids[1] = params.ids[0]
-        await assert.rejects(items[method]({ ...params, format, expectedVersions: [initial.revision, initial.revision] }), error =>
-          method === 'bulkPatch' ? error.code === 'REST_API_VERSION_CONFLICT' : error.subtype === 'not_found')
-        assert.deepEqual(await read(first.id), initial)
-        assert.equal(await fixture.count('items'), 2)
-      })
-    }
-
-    it('rejects singular bulk conditions and conditional bulk creation', async () => {
-      for (const method of ['bulkPatch', 'bulkDelete']) {
-        await assert.rejects(items[method]({ ...paramsFor(method), format, expectedVersion: 'token' }), error => error.code === 'REST_API_VALIDATION')
-      }
-      const input = format === 'plain'
-        ? { data: [{ name: 'Third' }] }
-        : { document: { data: [{ type: 'items', attributes: { name: 'Third' } }] } }
-      for (const condition of [{ expectedVersion: 'token' }, { expectedVersions: ['token'] }]) {
-        await assert.rejects(items.bulkPost({ ...input, format, ...condition }), error => error.code === 'REST_API_VALIDATION')
-      }
-      assert.equal(await fixture.count('items'), 2)
-    })
-  })
-}
-
-describe(`Bulk conditions on unversioned resources (${storageMode.mode})`, () => {
-  let fixture
+// A version token changes per row on every write; one statement per chunk cannot
+// check and advance tokens row by row, so many-row writes refuse versioned resources.
+describe(`Many-row writes on versioned resources (${storageMode.mode})`, () => {
+  let fixture, items, first, second
   before(async () => {
-    fixture = await createConformanceFixture({ createApi: createSchemaEnrichmentApi, tables: { items: 'schema_enrichment_items' }, apiOptions: { bulk: true } })
+    fixture = await createConformanceFixture({
+      createApi: createSchemaEnrichmentApi,
+      tables: { items: 'schema_enrichment_items' },
+      apiOptions: { fields: { revision: { type: 'string', required: true } }, resourceOptions: { versionField: 'revision' } }
+    })
+    items = fixture.api.resources.items
   })
-  beforeEach(async () => { await fixture.reset() })
+  beforeEach(async () => {
+    await fixture.reset()
+    first = await fixture.seed('items', { name: 'First' })
+    second = await fixture.seed('items', { name: 'Second' })
+  })
   after(async () => { await fixture?.close() })
-  it('rejects conditions before starting non-atomic updates or deletes', async () => {
-    const first = await fixture.seed('items', { name: 'First' })
-    const items = fixture.api.resources.items
+
+  it('refuses every many-row write before changing anything', async () => {
+    const before = await items.query({ format: 'plain', queryParams: { sort: ['id'] } })
     for (const [method, params] of [
-      ['bulkPatch', { operations: [{ id: first.id, data: { name: 'Changed' } }] }],
-      ['bulkDelete', { ids: [first.id] }]
+      ['postMany', { data: [{ name: 'Third' }] }],
+      ['patchMany', { data: [{ id: first.id, name: 'Changed' }] }],
+      ['patchWhereIds', { ids: [first.id, second.id], data: { name: 'Changed' } }],
+      ['patchWhere', { filters: {}, data: { name: 'Changed' } }],
+      ['deleteMany', { ids: [first.id] }],
+      ['deleteWhere', { filters: {} }]
     ]) {
-      await assert.rejects(items[method]({ ...params, format: 'plain', atomic: false, expectedVersions: ['token'] }), error => error.code === 'REST_API_VALIDATION')
-      assert.equal((await items.get({ id: first.id, format: 'plain' })).name, 'First')
+      await assert.rejects(items[method](params), unsupported, method)
     }
+    assert.deepEqual(await items.query({ format: 'plain', queryParams: { sort: ['id'] } }), before)
+  })
+
+  it('rejects the 2.x bulk options with their replacements', async () => {
+    for (const [option, message] of [['atomic', /all-or-nothing/], ['expectedVersions', /lockVersionField and onlyIf/], ['operations', /data: \[\{ id/]]) {
+      await assert.rejects(items.deleteMany({ ids: [first.id], [option]: option === 'atomic' ? false : [] }),
+        error => (error?.cause ?? error).code === 'REST_API_VALIDATION' && message.test((error?.cause ?? error).message), option)
+    }
+    assert.equal(await fixture.count('items'), 2)
   })
 })
 
@@ -161,54 +69,41 @@ for (const connector of ['express', 'fastify']) {
       second = await fixture.seed('items', { name: 'Second' })
     })
     after(async () => { if (connector === 'fastify') await app?.close(); await fixture?.close() })
-    const send = async (method, body, atomic = true, headers = {}) => {
-      const url = `/api/items/bulk?atomic=${atomic}`
+    const send = async (method, body, headers = {}) => {
+      const url = '/api/items/bulk'
       const response = connector === 'express'
         ? await request(app)[method.toLowerCase()](url).set({ 'Content-Type': 'application/vnd.api+json', ...headers }).send(body)
         : await app.inject({ method, url, headers: { 'content-type': 'application/vnd.api+json', ...headers }, payload: body })
       return { status: response.statusCode, body: connector === 'express' ? response.body : response.json() }
     }
+    const bodyFor = method => method === 'POST'
+      ? { data: [{ type: 'items', attributes: { name: 'Third' } }] }
+      : method === 'DELETE'
+        ? { data: [first, second].map(({ id }) => ({ type: 'items', id })) }
+        : { data: [first, second].map(({ id }) => ({ type: 'items', id, attributes: { name: 'Changed' } })) }
+    const unchanged = async () => {
+      assert.equal(await fixture.count('items'), 2)
+      for (const record of [first, second]) {
+        assert.equal((await fixture.api.resources.items.get({ id: record.id, format: 'plain' })).name, record.attributes.name)
+      }
+    }
+
     for (const method of ['POST', 'PATCH', 'DELETE']) {
-      it(`rejects unsupported ${method} If-Match before non-atomic bulk work`, async () => {
-        const records = await Promise.all([first, second].map(record => fixture.api.resources.items.get({ id: record.id, format: 'plain' })))
-        const body = method === 'POST'
-          ? { data: [{ type: 'items', attributes: { name: 'Third' } }] }
-          : method === 'DELETE'
-            ? { ids: records.map(record => record.id), expectedVersions: records.map(record => record.revision) }
-            : {
-                operations: records.map(record => ({ id: record.id, data: { type: 'items', attributes: { name: 'Changed' } } })),
-                expectedVersions: records.map(record => record.revision)
-              }
+      it(`rejects ${method} If-Match on the bulk route`, async () => {
         for (const condition of ['*', '"stale"']) {
-          const result = await send(method, body, false, { 'if-match': condition })
+          const result = await send(method, bodyFor(method), { 'if-match': condition })
           assert.equal(result.status, 422)
           assert.match(result.body.errors[0].detail, /If-Match is not supported for this route/)
-          assert.equal(await fixture.count('items'), 2)
-          for (const record of records) assert.deepEqual(await fixture.api.resources.items.get({ id: record.id, format: 'plain' }), record)
+          await unchanged()
         }
       })
-    }
-    for (const method of ['PATCH', 'DELETE']) {
-      it(`${method} transports conditions and preserves the batch on conflict`, async () => {
-        const records = await Promise.all([first, second].map(record => fixture.api.resources.items.get({ id: record.id, format: 'plain' })))
-        const body = method === 'DELETE'
-          ? { ids: records.map(record => record.id) }
-          : {
-              operations: records.map(record => ({ id: record.id, data: { type: 'items', attributes: { name: 'Changed' } } }))
-            }
-        const failed = await send(method, { ...body, expectedVersions: [records[0].revision, 'stale'] })
-        assert.equal(failed.status, 409)
-        assert.equal(failed.body.errors[0].code, 'REST_API_VERSION_CONFLICT')
-        for (const record of records) assert.deepEqual(await fixture.api.resources.items.get({ id: record.id, format: 'plain' }), record)
-        const succeeded = await send(method, { ...body, expectedVersions: records.map(record => record.revision) })
-        assert.equal(succeeded.status, 200)
-        assert.equal(succeeded.body.meta.succeeded, 2)
+
+      it(`refuses ${method} on a versioned resource without writing`, async () => {
+        const result = await send(method, bodyFor(method))
+        assert.equal(result.status, 422, JSON.stringify(result.body))
+        assert.equal(result.body.errors[0].code, 'REST_API_BULK_WRITE_UNSUPPORTED')
+        await unchanged()
       })
     }
-    it('rejects conditional creation from the HTTP body', async () => {
-      const response = await send('POST', { data: [{ type: 'items', attributes: { name: 'Third' } }], expectedVersions: ['token'] }, false)
-      assert.equal(response.status, 422)
-      assert.equal(await fixture.count('items'), 2)
-    })
   })
 }

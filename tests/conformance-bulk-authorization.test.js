@@ -1,4 +1,4 @@
-import { after, afterEach, before, beforeEach, describe, it } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import fastify from 'fastify'
@@ -8,174 +8,19 @@ import { createIdConformanceApi, createRowPolicyApi, seedPolicyConformanceApi } 
 import { storageMode } from './helpers/storage-mode.js'
 
 const tables = { pivots: 'row_policy_project_tasks', tasks: 'row_policy_tasks', projects: 'row_policy_projects', broken: 'row_policy_broken' }
-const inputRecord = (title, id) => ({ data: { type: 'policy_tasks', ...(id === undefined ? {} : { id }), attributes: { title, access_group: 'group-a' } } })
+const resource = (title, id) => ({ type: 'policy_tasks', ...(id === undefined ? {} : { id }), attributes: { title, access_group: 'group-a' } })
+const tableOnly = storageMode.isAnyApi() && 'many-row writes need table storage'
 
-for (const hiddenBy of ['policy', 'workspace']) {
-  describe(`Bulk authorization, hiddenBy=${hiddenBy} (${storageMode.mode})`, () => {
-    let fixture, seeded
-    const transactions = new Set()
-    before(async () => {
-      fixture = await createConformanceFixture({ createApi: createRowPolicyApi, apiOptions: { bulk: true }, tables })
-      await fixture.api.customize({
-        hooks: {
-          checkPermissions: {
-            functionName: 'deny-bulk-index',
-            handler: ({ context }) => {
-              const original = context.originalContext
-              if (original?.bulkOperation && original.transaction) transactions.add(original.transaction)
-              if (['post', 'patch', 'delete'].includes(context.method) && original?.bulkOperation && original.bulkIndex === original.denyIndex) {
-                throw Object.assign(new Error('Write denied'), { code: 'WRITE_DENIED', statusCode: 403 })
-              }
-            }
-          }
-        }
-      })
-    })
-    afterEach(async () => {
-      for (const transaction of transactions) if (!transaction.isCompleted()) await transaction.rollback()
-      transactions.clear()
-    })
-    beforeEach(async () => {
-      await fixture.reset()
-      seeded = await seedPolicyConformanceApi(fixture.api, { hiddenBy })
-    })
-    after(async () => { await fixture?.close() })
-
-    for (const method of ['bulkPatch', 'bulkDelete']) {
-      for (const atomic of [true, false]) {
-        it(`${method} preserves hidden records and ${atomic ? 'rolls back' : 'commits'} allowed operations`, async () => {
-          const ids = [seeded.task.id, seeded.hiddenTask.id, seeded.hiddenParentTask.id]
-          const params = method === 'bulkPatch'
-            ? { operations: ids.map(id => ({ id, document: inputRecord('Updated', id) })), atomic }
-            : { ids, atomic }
-          const operation = fixture.api.resources.policy_tasks[method](params, seeded.viewer)
-          if (atomic) {
-            await assert.rejects(operation, { code: 'REST_API_RESOURCE', subtype: 'not_found' })
-          } else {
-            const result = await operation
-            assert.equal(result.meta.succeeded, 2)
-            assert.equal(result.meta.failed, 1)
-            assert.equal(result.errors[0].index, 1)
-            assert.equal(result.errors[0].error.code, 'REST_API_RESOURCE')
-            if (method === 'bulkPatch') {
-              assert.deepEqual(result.data.map(row => row.id), [ids[0], ids[2]])
-              assert.equal(result.data[1].relationships.project.data, null)
-            } else assert.deepEqual(result.meta.deleted, [ids[0], ids[2]])
-          }
-          const adapter = fixture.api.knex.helpers.getStorageAdapter('policy_tasks')
-          const stored = await adapter.buildBaseQuery()
-          const rows = new Map(stored.map(row => [String(adapter.getFieldValue(row, 'id')), row]))
-          assert.equal(adapter.getFieldValue(rows.get(ids[1]), 'title'), 'Hidden task')
-          for (const [id, original] of [[ids[0], 'Visible task'], [ids[2], 'Visible task with hidden parent']]) {
-            if (!atomic && method === 'bulkDelete') assert.equal(rows.has(id), false)
-            else assert.equal(adapter.getFieldValue(rows.get(id), 'title'), atomic ? original : 'Updated')
-          }
-        })
-      }
-    }
-
-    for (const atomic of [true, false]) {
-      it(`bulkPost rejects hidden relationship targets (atomic=${atomic})`, async () => {
-        const denied = inputRecord('Denied relationship')
-        denied.data.relationships = { project: { data: { type: 'policy_projects', id: seeded.hiddenProject.id } } }
-        const operation = fixture.api.resources.policy_tasks.bulkPost({ document: { data: [inputRecord('Allowed').data, denied.data] }, atomic }, seeded.viewer)
-        if (atomic) await assert.rejects(operation, { code: 'REST_API_RESOURCE', subtype: 'not_found' })
-        else {
-          const result = await operation
-          assert.equal(result.meta.succeeded, 1)
-          assert.equal(result.meta.failed, 1)
-          assert.equal(result.data[0].attributes.title, 'Allowed')
-          assert.equal(result.errors[0].index, 1)
-        }
-        const rows = (await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data
-        assert.equal(rows.some(row => row.attributes.title === 'Denied relationship'), false)
-        assert.equal(rows.some(row => row.attributes.title === 'Allowed'), !atomic)
-      })
-    }
-
-    if (hiddenBy === 'policy') {
-      for (const method of ['bulkPost', 'bulkPatch']) {
-        for (const format of ['plain', 'jsonapi']) {
-          for (const returning of ['none', 'minimal', 'full']) {
-            it(`${method} selects ${format}/${returning} without exposing hidden linkage`, async () => {
-              const record = inputRecord('Written', method === 'bulkPatch' ? seeded.hiddenParentTask.id : undefined)
-              const input = format === 'plain' ? { data: record.data.attributes } : { document: record }
-              const params = method === 'bulkPost'
-                ? format === 'plain' ? { data: [record.data.attributes] } : { document: { data: [record.data] } }
-                : { operations: [{ id: seeded.hiddenParentTask.id, ...input }] }
-              const result = await fixture.api.resources.policy_tasks[method]({ ...params, format, returning }, seeded.viewer)
-              assert.equal(result.meta.succeeded, 1)
-              if (returning === 'none') assert.equal(Object.hasOwn(result, 'data'), false)
-              else {
-                assert.equal(result.data.length, 1)
-                if (returning === 'minimal') assert.deepEqual(Object.keys(result.data[0]).sort(), ['id', 'type'])
-                else if (format === 'jsonapi') {
-                  assert.equal(result.data[0].attributes.title, 'Written')
-                  assert.equal(result.data[0].relationships.project.data, null)
-                } else {
-                  assert.equal(result.data[0].title, 'Written')
-                  assert.equal(result.data[0].project, undefined)
-                }
-              }
-              const visible = (await fixture.api.resources.policy_tasks.query({}, seeded.viewer)).data
-              assert.equal(visible.filter(row => row.attributes.title === 'Written').length, 1)
-            })
-          }
-        }
-      }
-
-      for (const method of ['bulkPost', 'bulkPatch', 'bulkDelete']) {
-        for (const atomic of [true, false]) {
-          it(`${method} applies each write permission (atomic=${atomic})`, async () => {
-            const ids = [seeded.task.id, seeded.hiddenTask.id, seeded.hiddenParentTask.id]
-            const params = method === 'bulkPost'
-              ? { document: { data: ['Allowed', 'Denied', 'Allowed later'].map(title => inputRecord(title).data) } }
-              : method === 'bulkPatch'
-                ? { operations: ids.map(id => ({ id, document: inputRecord('Updated', id) })) }
-                : { ids }
-            const operation = fixture.api.resources.policy_tasks[method]({ ...params, atomic }, { ...seeded.admin, denyIndex: 1 })
-            if (atomic) await assert.rejects(operation, { code: 'WRITE_DENIED' })
-            else {
-              const result = await operation
-              assert.equal(result.meta.succeeded, 2)
-              assert.equal(result.meta.failed, 1)
-              assert.equal(result.errors[0].index, 1)
-              assert.equal(result.errors[0].error.code, 'WRITE_DENIED')
-            }
-            const rows = (await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data
-            assert.equal(rows.find(row => row.id === ids[1]).attributes.title, 'Hidden task')
-            if (atomic) {
-              assert.deepEqual(rows.map(row => row.attributes.title).sort(), ['Hidden task', 'Visible task', 'Visible task with hidden parent'])
-            } else if (method === 'bulkDelete') assert.deepEqual(rows.map(row => row.id), [ids[1]])
-            else if (method === 'bulkPatch') assert.equal(rows.filter(row => row.attributes.title === 'Updated').length, 2)
-            else {
-              assert.equal(rows.length, 5)
-              assert.equal(rows.some(row => row.attributes.title === 'Denied'), false)
-            }
-          })
-        }
-      }
-
-      for (const atomic of [null, 'false', 0]) {
-        it(`rejects non-boolean atomic=${JSON.stringify(atomic)} before executing a batch`, async () => {
-          await assert.rejects(fixture.api.resources.policy_tasks.bulkPost({ document: { data: [inputRecord('Unwritten').data] }, atomic }, seeded.viewer), { code: 'REST_API_VALIDATION' })
-          assert.equal((await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data.length, 3)
-        })
-      }
-    }
-  })
-}
-
-describe(`Bulk zero ID (${storageMode.mode})`, () => {
+describe(`Bulk zero ID (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
   before(async () => {
-    fixture = await createConformanceFixture({ createApi: createIdConformanceApi, apiOptions: { bulk: true }, tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' } })
+    fixture = await createConformanceFixture({ createApi: createIdConformanceApi, tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' } })
   })
   beforeEach(async () => { await fixture.reset() })
   after(async () => { await fixture?.close() })
   it('accepts zero when the declared ID schema allows it', async () => {
     await fixture.api.resources.items.post({ document: { data: { type: 'items', id: '0', attributes: { name: 'Zero' } } } })
-    const result = await fixture.api.resources.items.bulkPatch({ operations: [{ id: 0, document: { data: { type: 'items', id: '0', attributes: { name: 'Updated zero' } } } }] })
+    const result = await fixture.api.resources.items.patchMany({ document: { data: [{ type: 'items', id: '0', attributes: { name: 'Updated zero' } }] }, format: 'jsonapi', returning: 'full' })
     assert.equal(result.data[0].id, '0')
     assert.equal(result.data[0].attributes.name, 'Updated zero')
   })
@@ -195,6 +40,9 @@ for (const connector of ['express', 'fastify']) {
       const response = await request(app)[method.toLowerCase()](url).set(headers).send(body).timeout({ response: 3000, deadline: 5000 })
       return { status: response.status, body: response.body }
     }
+    const titles = async () => (await fixture.api.resources.policy_tasks.query({ format: 'plain' }, seeded.admin)).data.map(row => row.title).sort()
+    const original = ['Hidden task', 'Visible task', 'Visible task with hidden parent']
+
     before(async () => {
       app = connector === 'fastify' ? fastify() : express()
       fixture = await createConformanceFixture({ createApi: createRowPolicyApi, apiOptions: { bulk: true, connector, app, 'rest-api': { format: 'plain', returning: 'none' } }, tables })
@@ -211,7 +59,7 @@ for (const connector of ['express', 'fastify']) {
             handler: ({ context }) => {
               if (!['post', 'patch', 'delete'].includes(context.method)) return
               const original = context.originalContext
-              if (!original?.bulkOperation) return
+              if (original?.bulkIndex === undefined) return
               seen.push({ userId: original.auth?.userId, index: original.bulkIndex, workspace: original.scopeValues?.workspaceId })
               if (original.auth?.denyWrite) throw Object.assign(new Error('Write denied'), { code: 'WRITE_DENIED', statusCode: 403 })
             }
@@ -231,43 +79,74 @@ for (const connector of ['express', 'fastify']) {
 
     for (const method of ['POST', 'PATCH', 'DELETE']) {
       const bodyFor = () => method === 'POST'
-        ? { data: [inputRecord('Created').data] }
+        ? { data: [resource('Created')] }
         : method === 'PATCH'
-          ? { operations: [{ id: seeded.task.id, data: inputRecord('Updated', seeded.task.id).data }] }
-          : { ids: [seeded.task.id] }
+          ? { data: [resource('Updated', seeded.task.id)] }
+          : { data: [{ type: 'policy_tasks', id: seeded.task.id }] }
 
-      it(`forwards authenticated user and workspace for ${method}`, async () => {
+      it(`forwards authenticated user and workspace for ${method}`, { skip: tableOnly }, async () => {
         const response = await send(method, bodyFor())
         assert.equal(response.status, method === 'POST' ? 201 : 200, JSON.stringify(response.body))
-        assert.equal(response.body.meta.succeeded, 1)
+        assert.equal(response.body.data.length, 1)
+        if (method === 'DELETE') assert.deepEqual(response.body.data, [{ type: 'policy_tasks', id: seeded.task.id }])
+        else assert.equal(response.body.data[0].attributes.title, method === 'POST' ? 'Created' : 'Updated')
         assert.deepEqual(seen, [{ userId: 'viewer', index: 0, workspace: 'workspace-a' }])
       })
 
-      it(`enforces write permission for ${method} and keeps the database unchanged`, async () => {
+      it(`enforces write permission for ${method} and keeps the database unchanged`, { skip: tableOnly }, async () => {
         const response = await send(method, bodyFor(), '', true)
         assert.equal(response.status, 403, JSON.stringify(response.body))
-        const result = await fixture.api.resources.policy_tasks.get({ id: seeded.task.id, format: 'jsonapi' }, seeded.admin)
-        assert.equal(result.data.attributes.title, 'Visible task')
-        assert.equal((await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data.length, 3)
+        assert.deepEqual(await titles(), original)
+      })
+
+      it(`answers ${method} with a refusal on AnyAPI storage`, { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, async () => {
+        const response = await send(method, bodyFor())
+        assert.equal(response.status, 422, JSON.stringify(response.body))
+        assert.equal(response.body.errors[0].code, 'REST_API_BULK_WRITE_UNSUPPORTED')
+        assert.deepEqual(await titles(), original)
       })
     }
 
-    it('honors atomic=false while keeping hidden rows inaccessible', async () => {
-      const operations = [seeded.task, seeded.hiddenTask].map(row => ({ id: row.id, data: inputRecord('Updated', row.id).data }))
-      const response = await send('PATCH', { operations }, '?atomic=false')
-      assert.equal(response.status, 200, JSON.stringify(response.body))
-      assert.deepEqual(response.body.meta, { total: 2, succeeded: 1, failed: 1, atomic: false })
-      assert.equal(response.body.errors[0].error.code, 'REST_API_RESOURCE')
-      assert.equal(response.body.data[0].id, seeded.task.id)
+    it('writes many rows per request and keeps hidden rows out of every change', { skip: tableOnly }, async () => {
+      const created = await send('POST', { data: ['One', 'Two', 'Three'].map(title => resource(title)) })
+      assert.equal(created.status, 201, JSON.stringify(created.body))
+      const ids = created.body.data.map(row => row.id)
+      assert.deepEqual(seen.map(entry => entry.index), [0, 1, 2])
+
+      const updated = await send('PATCH', { data: ids.map(id => resource(`Updated ${id}`, id)) })
+      assert.equal(updated.status, 200, JSON.stringify(updated.body))
+      assert.deepEqual(updated.body.data.map(row => row.attributes.title), ids.map(id => `Updated ${id}`))
+
+      // A hidden row fails the whole request as not found and changes nothing.
+      for (const [method, body] of [
+        ['PATCH', { data: [resource('Leak', ids[0]), resource('Leak', seeded.hiddenTask.id)] }],
+        ['DELETE', { data: [ids[0], seeded.hiddenTask.id].map(id => ({ type: 'policy_tasks', id })) }]
+      ]) {
+        const response = await send(method, body)
+        assert.equal(response.status, 404, JSON.stringify(response.body))
+      }
+      assert.equal((await titles()).includes('Leak'), false)
+
+      const deleted = await send('DELETE', { data: ids.map(id => ({ type: 'policy_tasks', id })) })
+      assert.equal(deleted.status, 200, JSON.stringify(deleted.body))
+      assert.deepEqual(await titles(), original)
     })
 
-    for (const atomic of ['', '0', 'FALSE', 'false-ish']) {
-      it(`rejects malformed atomic=${JSON.stringify(atomic)} before writing`, async () => {
-        const response = await send('POST', { data: [inputRecord('Unwritten').data] }, `?atomic=${atomic}`)
-        assert.equal(response.status, 422, JSON.stringify(response.body))
-        assert.deepEqual(seen, [])
-        assert.equal((await fixture.api.resources.policy_tasks.query({}, seeded.admin)).data.length, 3)
-      })
-    }
+    it('rejects malformed requests and requests over the limit before writing', async () => {
+      for (const [method, body, query] of [
+        ['POST', {}, ''],
+        ['POST', { data: [] }, ''],
+        ['POST', { data: [resource('Unwritten')] }, '?atomic=false'],
+        ['POST', { data: Array.from({ length: 1001 }, (_, index) => resource(`Row ${index}`)) }, ''],
+        ['PATCH', { operations: [{ id: '1', data: resource('Old shape', '1') }] }, ''],
+        ['DELETE', { data: [seeded.task.id] }, ''],
+        ['DELETE', { data: [{ type: 'policy_projects', id: seeded.task.id }] }, '']
+      ]) {
+        const response = await send(method, body, query)
+        assert.equal(response.status, 422, `${method} ${JSON.stringify(body).slice(0, 80)}: ${JSON.stringify(response.body)}`)
+      }
+      assert.deepEqual(seen, [])
+      assert.deepEqual(await titles(), original)
+    })
   })
 }

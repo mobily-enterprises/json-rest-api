@@ -1,6 +1,5 @@
 import type { CorsPluginOptions, HttpConnectorOptions, RestApiPluginOptions } from '../../types/plugin-options.js'
 import type { InputResourceIdentifier } from '../../types/representations.js'
-import type { BulkResourceMethods } from '../../types/bulk-methods.js'
 import type { RelationshipMethods } from '../../types/relationship-methods.js'
 
 const core: RestApiPluginOptions = {
@@ -14,8 +13,6 @@ const cors: CorsPluginOptions = {
 }
 declare const relationships: RelationshipMethods
 await relationships.getRelationship({ id: 1n, relationshipName: 'children' })
-declare const bulk: BulkResourceMethods
-await bulk.bulkDelete({ ids: [1n], expectedVersions: ['token'] })
 void [core, http, cors]
 
 // @ts-expect-error HTTP validator opt-in is boolean.

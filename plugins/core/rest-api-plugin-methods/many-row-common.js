@@ -26,6 +26,22 @@ const PER_RECORD_EVENTS = {
 
 export const noHooks = async () => {}
 
+// Options of the 2.x bulk methods that many-row writes do not have.
+const BULK_OPTIONS = {
+  atomic: 'Many-row writes are all-or-nothing; remove atomic.',
+  expectedVersion: 'Many-row writes refuse versioned resources; use a lockVersionField and onlyIf.',
+  expectedVersions: 'Many-row writes refuse versioned resources; use a lockVersionField and onlyIf.',
+  operations: 'Pass the rows as data: [{ id, ...attributes }] or document: { data: [...] }.'
+}
+
+/** @param {Record<string, unknown>} params */
+export function rejectBulkOptions (params) {
+  const fields = Object.keys(BULK_OPTIONS).filter(name => Object.hasOwn(params, name))
+  if (fields.length) {
+    throw new RestApiValidationError(`Unsupported options: ${fields.join(', ')}. ${[...new Set(fields.map(name => BULK_OPTIONS[name]))].join(' ')}`, { fields })
+  }
+}
+
 /** @param {string} resourceType @param {string} operation @param {string} reason */
 export const unsupported = (resourceType, operation, reason) => new RestApiBulkWriteUnsupportedError({ resourceType, operation, reason })
 

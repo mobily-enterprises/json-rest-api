@@ -9,7 +9,7 @@ const { knex } = database
 const measurements = []
 
 // Ceilings for this fixture's measured shapes, independent of runtime implementations.
-function statementBudget (name, { size, atomic, polymorphicTypes } = {}) {
+function statementBudget (name, { size, polymorphicTypes } = {}) {
   const canonical = storageMode.isAnyApi()
   const fixed = {
     flat: [4, 4],
@@ -27,13 +27,9 @@ function statementBudget (name, { size, atomic, polymorphicTypes } = {}) {
     const batches = Math.ceil(size / 100)
     return 4 + 3 * batches
   }
-  const writeCost = {
-    'bulk-post-full': [7, 9],
-    'bulk-patch-full': [7, 7],
-    // One declared pivot (ordinary) or scoped canonical link cleanup per task.
-    'bulk-delete': [4, 3]
-  }
-  if (Object.hasOwn(writeCost, name)) return writeCost[name][canonical ? 1 : 0] * size + (atomic ? 2 : 2 * size)
+  // Many-row writes cost the same at every size (table storage only).
+  const manyRow = { 'post-many-full': 12, 'patch-many-full': 12, 'delete-many': 8 }
+  if (Object.hasOwn(manyRow, name)) return manyRow[name]
 }
 
 async function measure (name, operation, expectedRecords, shape = {}, check = () => {}) {
@@ -100,7 +96,7 @@ try {
     await measure(name, operation, expectedRecords)
   }
 
-  const policyApi = await createRowPolicyApi(knex, { polymorphic: true, bulk: true })
+  const policyApi = await createRowPolicyApi(knex, { polymorphic: true })
   const projects = policyApi.resources.policy_projects
   const tasks = policyApi.resources.policy_tasks
   const linkage = ({ type, id }) => ({ type, id })
@@ -147,46 +143,35 @@ try {
     const retained = await projects.getRelationship({ id: project.id, relationshipName: 'shared_tasks' }, viewer)
     assert.deepEqual(retained.data.map(row => row.id).sort(), [...expectedIds].sort())
 
-    // The 101-target case crosses the write-query batch boundary, not the bulk request limit.
-    if (size > 40) continue
-    for (const atomic of [true, false]) {
-      const resources = Array.from({ length: size }, (_, index) => ({
-        type: 'policy_tasks',
-        attributes: { title: `Bulk ${index}`, access_group: 'group-a' },
-        relationships: { project: { data: linkage(project) } }
-      }))
-      const checkBulk = result => {
-        assert.equal(result.meta.succeeded, size)
-        assert.equal(result.meta.failed, 0)
-        assert.equal(result.meta.atomic, atomic)
+    // AnyAPI storage takes single writes only.
+    if (storageMode.isAnyApi()) continue
+    const resources = Array.from({ length: size }, (_, index) => ({
+      type: 'policy_tasks',
+      attributes: { title: `Bulk ${index}`, access_group: 'group-a' },
+      relationships: { project: { data: linkage(project) } }
+    }))
+    const created = await measure('post-many-full', () => tasks.postMany({
+      format: 'jsonapi', returning: 'full', document: { data: resources }
+    }, viewer), size, { size }, result => {
+      assert.equal(new Set(result.data.map(row => row.id)).size, size)
+      for (const [index, row] of result.data.entries()) {
+        assert.equal(row.attributes.title, `Bulk ${index}`)
+        assert.deepEqual(row.relationships.project.data, linkage(project))
       }
-      const created = await measure('bulk-post-full', () => tasks.bulkPost({
-        format: 'jsonapi', returning: 'full', atomic, document: { data: resources }
-      }, viewer), size, { size, atomic }, result => {
-        checkBulk(result)
-        assert.equal(new Set(result.data.map(row => row.id)).size, size)
-        for (const [index, row] of result.data.entries()) {
-          assert.equal(row.attributes.title, `Bulk ${index}`)
-          assert.deepEqual(row.relationships.project.data, linkage(project))
-        }
-      })
-      const ids = created.data.map(row => row.id)
-      await measure('bulk-patch-full', () => tasks.bulkPatch({
-        format: 'jsonapi',
-        returning: 'full',
-        atomic,
-        operations: ids.map(id => ({ id, document: { data: { type: 'policy_tasks', id, attributes: { title: 'Bulk updated' } } } }))
-      }, viewer), size, { size, atomic }, result => {
-        checkBulk(result)
-        assert.deepEqual(result.data.map(row => row.id), ids)
-        assert.ok(result.data.every(row => row.attributes.title === 'Bulk updated'))
-      })
-      await measure('bulk-delete', () => tasks.bulkDelete({ ids, atomic }, viewer), 0, { size, atomic }, result => {
-        checkBulk(result)
-        assert.deepEqual(result.meta.deleted, ids)
-      })
-      for (const id of ids) await assert.rejects(tasks.get({ id }, viewer), { code: 'REST_API_RESOURCE', subtype: 'not_found' })
-    }
+    })
+    const ids = created.data.map(row => row.id)
+    await measure('patch-many-full', () => tasks.patchMany({
+      format: 'jsonapi',
+      returning: 'full',
+      document: { data: ids.map(id => ({ type: 'policy_tasks', id, attributes: { title: 'Bulk updated' } })) }
+    }, viewer), size, { size }, result => {
+      assert.deepEqual(result.data.map(row => row.id), ids)
+      assert.ok(result.data.every(row => row.attributes.title === 'Bulk updated'))
+    })
+    await measure('delete-many', () => tasks.deleteMany({ ids, returning: 'minimal' }, viewer), size, { size }, result => {
+      assert.deepEqual(result.data.map(row => row.id), ids)
+    })
+    for (const id of ids) await assert.rejects(tasks.get({ id }, viewer), { code: 'REST_API_RESOURCE', subtype: 'not_found' })
   }
   console.log(JSON.stringify({ node: process.version, database: databaseClient, storage: storageMode.mode, measurements }, null, 2))
 } finally {

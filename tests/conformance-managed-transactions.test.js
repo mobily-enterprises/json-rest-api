@@ -26,6 +26,8 @@ describe(`Managed transactions (${storageMode.mode})`, () => {
       hooks: {
         beforeDataCallPost: {
           functionName: 'pause-managed-write',
+          // Probes single posts; many-row writes do not run it.
+          batch: true,
           handler: async ({ context }) => {
             for (const finalize of context.finalizers || []) onTransactionFinished(context.transaction, finalize)
             if (context.suppressOwnership) {
@@ -90,25 +92,29 @@ describe(`Managed transactions (${storageMode.mode})`, () => {
     })
   }
 
-  it('commits mixed resource, relationship, bulk and raw SQL work before ordered completion hooks', async () => {
+  it('commits mixed resource, relationship, many-row and raw SQL work before ordered completion hooks', async () => {
+    // AnyAPI storage takes single writes only.
+    const many = !storageMode.isAnyApi()
     const result = await fixture.api.transaction(async transaction => {
       const created = await post(transaction, '99', 'create')
       await fixture.api.resources.items.patch({ id: item.id, document: input(item.id, 'Patched'), transaction }, { marker: 'patch' })
       await fixture.api.resources.items.postRelationship({
         id: '99', relationshipName: 'groups', relationshipData: [{ type: 'groups', id: group.id }], transaction
       }, { marker: 'link' })
-      await fixture.api.resources.items.bulkPost({
-        document: { data: ['100', '101'].map(id => input(id, `Bulk ${id}`).data) }, transaction
-      }, { marker: 'bulk' })
+      if (many) {
+        await fixture.api.resources.items.postMany({
+          document: { data: ['100', '101'].map(id => input(id, `Bulk ${id}`).data) }, transaction
+        }, { marker: 'bulk' })
+      }
       await transaction('managed_transaction_audit').insert({ message: 'Created and linked' })
       assert.equal(transaction.isCompleted(), false)
       assert.deepEqual(trace, [])
       return created
     })
     assert.equal(result.data.id, '99')
-    assert.deepEqual(trace.map(entry => entry.marker), ['create', 'patch', 'link', 'bulk', 'bulk'])
+    assert.deepEqual(trace.map(entry => entry.marker), ['create', 'patch', 'link', ...(many ? ['bulk'] : [])])
     assert.ok(trace.every(entry => entry.hook === 'afterCommit' && entry.outcome === 'committed'))
-    assert.equal(await fixture.count('items'), 4)
+    assert.equal(await fixture.count('items'), many ? 4 : 2)
     assert.equal((await fixture.api.resources.items.get({ id: item.id, format: 'plain' })).name, 'Patched')
     assert.deepEqual((await fixture.api.resources.items.getRelationship({ id: '99', relationshipName: 'groups' })).data, [{ type: 'groups', id: group.id }])
     assert.deepEqual((await fixture.knex('managed_transaction_audit').select('message')), [{ message: 'Created and linked' }])

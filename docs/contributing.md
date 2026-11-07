@@ -70,7 +70,7 @@ application migration.
 ## Resource stress checks
 
 For smaller repeatable measurements, `node scripts/measure-write-lifecycles.js`
-records SQL counts and checks child-hook order for bulk and reverse-relationship
+records SQL counts and checks child-hook order for reverse-relationship
 writes. It supports both storage modes and the database runner.
 `node scripts/measure-diagnostics.js` reports bounded logger formatting cost;
 its local timings are observations, not pass/fail performance thresholds.

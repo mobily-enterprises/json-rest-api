@@ -36,10 +36,8 @@ async function measure (name, shape, ids, operation) {
 }
 
 try {
-  const api = await createRowPolicyApi(knex, { bulk: true, polymorphic: true })
-  const tasks = api.resources.policy_tasks
+  const api = await createRowPolicyApi(knex, { polymorphic: true })
   const projects = api.resources.policy_projects
-  const adapter = api.knex.helpers.getStorageAdapter('policy_tasks')
   const hooks = {}
   for (const phase of ['before', 'after']) {
     hooks[`${phase}DataCallPatch`] = ({ context, scopeName }) => {
@@ -51,24 +49,6 @@ try {
   for (const size of [1, 10, 40]) {
     const { viewer, project, visible } = await seedQueryPolicyApi(api, size)
     const ids = visible.map(row => row.id)
-    for (const atomic of [true, false]) {
-      for (const returning of ['full', 'none']) {
-        const title = `Measured ${atomic} ${returning}`
-        const result = await measure('bulkPatch', { size, atomic, returning }, ids, () => tasks.bulkPatch({
-          atomic, returning, format: 'jsonapi', operations: ids.map(id => ({ id, data: { title } }))
-        }, viewer))
-        assert.equal(result.meta.succeeded, size)
-        assert.equal(result.meta.failed, 0)
-        if (returning === 'full') {
-          assert.deepEqual(result.data.map(row => row.id), ids)
-          assert.ok(result.data.every(row => row.attributes.title === title))
-        } else assert.equal(Object.hasOwn(result, 'data'), false)
-        const stored = await adapter.buildBaseQuery().whereIn(adapter.getIdColumn(), ids)
-        assert.equal(stored.length, size)
-        assert.ok(stored.every(row => adapter.getFieldValue(row, 'title') === title))
-      }
-    }
-
     const relationshipData = ids.map(id => ({ type: 'policy_tasks', id }))
     for (const method of ['deleteRelationship', 'postRelationship']) {
       await measure(method, { size, relationship: 'tasks' }, ids, () => projects[method]({
@@ -79,32 +59,7 @@ try {
     }
   }
 
-  // A later hook may depend on an earlier write inside the same owner.
-  const { viewer, visible } = await seedQueryPolicyApi(api, 2)
-  const [first, second] = visible
-  await api.customize({
-    hooks: {
-      beforeDataCallPatch: {
-        functionName: 'read-earlier-bulk-write',
-        handler: async ({ context, scopeName }) => {
-          if (scopeName !== 'policy_tasks' || context.id !== second.id) return
-          const previous = await tasks.get({ id: first.id, transaction: context.transaction, format: 'plain' }, { ...viewer })
-          context.inputRecord.data.attributes.title = `${previous.title} then second`
-        }
-      }
-    }
-  })
-  const result = await tasks.bulkPatch({
-    atomic: true,
-    format: 'plain',
-    returning: 'full',
-    operations: [
-      { id: first.id, data: { title: 'First completed' } },
-      { id: second.id, data: { title: 'Will be set by hook' } }
-    ]
-  }, viewer)
-  assert.deepEqual(result.data.map(row => row.title), ['First completed', 'First completed then second'])
-  console.log(JSON.stringify({ node: process.version, database: databaseClient, storage: storageMode.mode, dependentHookVerified: true, measurements }, null, 2))
+  console.log(JSON.stringify({ node: process.version, database: databaseClient, storage: storageMode.mode, measurements }, null, 2))
 } finally {
   try { await database.close() } finally { storageMode.clearRegistry(knex) }
 }

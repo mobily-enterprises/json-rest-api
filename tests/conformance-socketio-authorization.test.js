@@ -10,8 +10,7 @@ import { RestApiValidationError } from '../lib/rest-api-errors.js'
 
 for (const transport of ['websocket', 'polling']) {
   describe(`Real Socket.IO authorization over ${transport} (${storageMode.mode})`, { timeout: 120000 }, () => {
-    let api, server, knex, database, seeded, failQuery, failWrite, deliveryGate, gateEntered, requireContext, failBulkIndex, failBulkCleanup
-    const bulkError = new RestApiValidationError('Bulk entry rejected before commit')
+    let api, server, knex, database, seeded, failQuery, failWrite, deliveryGate, gateEntered, requireContext
     const cleanupError = new Error('Bulk rollback hook failed')
     const managedError = new RestApiValidationError('Managed write rejected')
     const clients = new Set()
@@ -92,16 +91,18 @@ for (const transport of ['websocket', 'polling']) {
           },
           beforeDataCall: {
             functionName: 'pause-managed-socket-write',
+            // Single-write probes; many-row writes do not run them.
+            batch: true,
             afterFunction: 'socketio-capture-before',
             handler: async ({ context }) => { await context.managedPause?.() }
           },
           finish: {
             functionName: 'authorized-socket-write-failure',
             afterFunction: 'socketio-broadcast',
+            batch: true,
             handler: ({ context }) => {
               if (failWrite && context.method === 'patch') throw new Error('Write rejected before commit')
               if (context.failManagedWrite) throw managedError
-              if (context.bulkOperation && context.bulkIndex === failBulkIndex && ['post', 'patch', 'delete'].includes(context.method)) throw bulkError
             }
           },
           afterRollback: {
@@ -109,7 +110,6 @@ for (const transport of ['websocket', 'polling']) {
             afterFunction: 'socketio-cleanup-broadcasts',
             handler: ({ context }) => {
               context.managedCompletions?.push([context.managedIndex, 'rolledBack'])
-              if (failBulkCleanup && context.bulkOperation && context.bulkIndex === failBulkIndex) throw cleanupError
               if (context.failManagedCompletion) throw cleanupError
             }
           },
@@ -131,8 +131,6 @@ for (const transport of ['websocket', 'polling']) {
     beforeEach(async () => {
       failQuery = false
       failWrite = false
-      failBulkIndex = undefined
-      failBulkCleanup = false
       requireContext = false
       deliveryGate = undefined
       gateEntered = undefined
@@ -405,29 +403,26 @@ for (const transport of ['websocket', 'polling']) {
       ])
     })
 
-    it('notifies only committed visible non-atomic bulk writes', async () => {
+    it('notifies only committed visible many-row writes', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
       const socket = await connect()
       const events = await subscribe(socket)
-      const result = await api.resources.policy_projects.bulkPost({
-        atomic: false,
+      const result = await api.resources.policy_projects.postMany({
         format: 'plain',
+        returning: 'full',
         data: [
           { name: 'Visible bulk', access_group: 'group-a' },
-          { name: 'Hidden bulk', access_group: 'group-b' },
-          { access_group: 'group-a' }
+          { name: 'Hidden bulk', access_group: 'group-b' }
         ]
       }, seeded.admin)
-      assert.equal(result.meta.succeeded, 2)
-      assert.equal(result.meta.failed, 1)
       await drainSocketEvents(socket)
       assert.deepEqual(events.map(event => event.id), [result.data[0].id])
     })
 
-    it('discards notifications for rolled-back atomic bulk writes', async () => {
+    it('discards notifications for rolled-back many-row writes', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
       const socket = await connect()
       const events = await subscribe(socket)
-      await assert.rejects(api.resources.policy_projects.bulkPost({
-        atomic: true, format: 'plain', data: [{ name: 'Rolled back', access_group: 'group-a' }, { access_group: 'group-a' }]
+      await assert.rejects(api.resources.policy_projects.postMany({
+        format: 'plain', data: [{ name: 'Rolled back', access_group: 'group-a' }, { access_group: 'group-a' }]
       }, seeded.admin))
       await drainSocketEvents(socket)
       assert.deepEqual(events, [])
@@ -435,36 +430,22 @@ for (const transport of ['websocket', 'polling']) {
       assert.equal(rows.some(row => row.attributes.name === 'Rolled back'), false)
     })
 
-    for (const method of ['bulkPost', 'bulkPatch', 'bulkDelete']) {
-      for (const cleanupFailure of [false, true]) {
-        it(`keeps non-atomic ${method} delivery and state correct with ${cleanupFailure ? 'failed' : 'successful'} rollback hooks`, async () => {
-          const ids = []
-          const groups = ['group-a', 'group-a', 'group-b', 'group-a']
-          if (method === 'bulkPost') ids.push('90', '91', '92', '93')
-          else for (let index = 0; index < 4; index++) ids.push((await post(`Original ${index}`, groups[index])).id)
-          const socket = await connect()
-          const events = await subscribe(socket)
-          failBulkIndex = 1
-          failBulkCleanup = cleanupFailure
-          const records = ids.map((id, index) => ({ id, name: `Changed ${index}`, access_group: groups[index] }))
-          const params = method === 'bulkPost' ? { data: records } : method === 'bulkPatch' ? { operations: records.map(data => ({ id: data.id, data })) } : { ids }
-          const context = { ...seeded.admin }
-          const result = await api.resources.policy_projects[method]({ ...params, format: 'plain', atomic: false }, context)
-          assert.equal(result.meta.succeeded, 3)
-          assert.equal(result.meta.failed, 1)
-          assert.deepEqual(result.errors.map(entry => [entry.index, entry.error.code, entry.error.message]), [[1, bulkError.code, bulkError.message]])
-          assert.deepEqual(context.cleanupErrors, cleanupFailure ? [{ phase: 'afterRollback', error: cleanupError, bulkIndex: 1, operationIndex: 0, scopeName: 'policy_projects', method: method.slice(4).toLowerCase() }] : undefined)
-          await drainSocketEvents(socket)
-          const type = method === 'bulkPost' ? 'resource.created' : method === 'bulkPatch' ? 'resource.updated' : 'resource.deleted'
-          assert.deepEqual(events.map(event => [event.id, event.type]), [[ids[0], type], [ids[3], type]])
-          const stored = (await api.resources.policy_projects.query({ format: 'plain' }, seeded.admin)).data
-          for (const [index, id] of ids.entries()) {
-            const row = stored.find(record => record.id === id)
-            if (method === 'bulkPost' ? index === 1 : method === 'bulkDelete' && index !== 1) assert.equal(row, undefined)
-            else assert.equal(row.name, index === 1 ? `Original ${index}` : `Changed ${index}`)
-          }
-        })
-      }
+    for (const method of ['postMany', 'patchMany', 'deleteMany']) {
+      it(`${method} notifies each row the subscriber can see`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+        const groups = ['group-a', 'group-a', 'group-b', 'group-a']
+        const ids = []
+        if (method === 'postMany') ids.push('90', '91', '92', '93')
+        else for (let index = 0; index < 4; index++) ids.push((await post(`Original ${index}`, groups[index])).id)
+        const socket = await connect()
+        const events = await subscribe(socket)
+        const records = ids.map((id, index) => ({ id, name: `Changed ${index}`, access_group: groups[index] }))
+        const params = method === 'deleteMany' ? { ids } : { data: method === 'patchMany' ? records.map(({ access_group: _, ...record }) => record) : records }
+        await api.resources.policy_projects[method]({ ...params, format: 'plain' }, { ...seeded.admin })
+        await drainSocketEvents(socket)
+        const type = method === 'postMany' ? 'resource.created' : method === 'patchMany' ? 'resource.updated' : 'resource.deleted'
+        const visible = [ids[0], ids[1], ids[3]]
+        assert.deepEqual(events.map(event => [event.id, event.type]).sort(), visible.map(id => [id, type]).sort())
+      })
     }
 
     for (const token of ['viewer', 'missing-context']) {

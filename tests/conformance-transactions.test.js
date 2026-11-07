@@ -85,7 +85,6 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
     fixture = await createConformanceFixture({
       createApi: createIdConformanceApi,
       apiOptions: {
-        bulk: true,
         inverseMembership: true,
         fieldCallback: (phase, scopeName, value) => {
           if (effects && phase === 'setter' && scopeName === 'items') effects.push(['setter', value])
@@ -502,38 +501,6 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
     assert.equal(stored.attributes.name, 'Other writer')
     assert.equal(stored.attributes.score, 9)
   })
-
-  for (const fail of [false, true]) {
-    it(`keeps an atomic bulk batch private and ${fail ? 'rolls back every write on failure' : 'publishes all writes on commit'}`, async () => {
-      const outcome = await withPausedWrite(
-        callback => {
-          beforePatch = callback && (async context => {
-            if (context.bulkIndex !== 1) return
-            await callback(context)
-            if (fail) throw new Error('Second bulk item failed')
-          })
-        },
-        () => fixture.api.resources.items.bulkPatch({
-          atomic: true,
-          operations: [item, other].map(record => ({
-            id: record.id, document: document('items', record.id, { score: 9 })
-          }))
-        }),
-        async context => {
-          assert.equal((await get(item, context.transaction)).attributes.score, 9)
-          assert.equal((await get(item)).attributes.score, 1)
-          assert.equal((await get(other)).attributes.score, 2)
-        }
-      )
-      if (fail) assert.match(outcome.error?.message || '', /Second bulk item failed/)
-      else {
-        assert.ifError(outcome.error)
-        assert.equal(outcome.value.meta.succeeded, 2)
-      }
-      assert.equal((await get(item)).attributes.score, fail ? 1 : 9)
-      assert.equal((await get(other)).attributes.score, fail ? 2 : 9)
-    })
-  }
 })
 
 describe(`Concurrent generated IDs on ${databaseClient} (${storageMode.mode})`, () => {
