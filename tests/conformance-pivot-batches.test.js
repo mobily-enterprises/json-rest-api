@@ -41,12 +41,11 @@ describe('Ordinary pivot write batches', () => {
   })
   after(async () => { await fixture?.close() })
 
+  // The targets are only the other side of the pivot, so they go in with one
+  // plain insert per 200 rows rather than one API write each.
   const seed = async size => {
-    const targets = []
-    for (let index = 0; index < size; index++) {
-      const { type, id } = await fixture.seed('groups', { name: `Group ${index}` })
-      targets.push({ type, id })
-    }
+    const targets = Array.from({ length: size }, (_, index) => ({ type: 'groups', id: String(index + 1) }))
+    await fixture.knex.batchInsert('conformance_groups', targets.map(({ id }, index) => ({ groups_key: Number(id), display_name: `Group ${index}` })), 200)
     return targets
   }
   const mutate = (method, targets, params = {}, context = {}) => fixture.api.resources.items[method]({

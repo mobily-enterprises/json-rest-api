@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createFieldTypesApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
+import { createTestDatabase } from './helpers/test-database.js'
 import { RestApiValidationError } from '../lib/rest-api-errors.js'
 
 const tables = { contacts: 'field_type_contacts' }
@@ -15,16 +16,24 @@ const rejectsWith = (promise, rule, pattern) => assert.rejects(promise, error =>
 })
 
 describe(`Field types and retired fields (${storageMode.mode})`, () => {
-  let fixture
+  let fixture, spare
   const contacts = () => fixture.api.resources.contacts
+  // Declarations that fail to compile write nothing, so one spare database
+  // serves them all instead of a new database for each.
+  const register = fields => createFieldTypesApi(spare.knex, { fields })
   const post = attributes => contacts().post({ document: { data: { type: 'contacts', attributes } } })
   const names = async filters => (await contacts().query({ queryParams: { filters, sort: ['id'] } })).data.map(row => row.attributes.name)
 
   before(async () => {
     fixture = await createConformanceFixture({ createApi: createFieldTypesApi, tables })
+    spare = await createTestDatabase()
   })
   beforeEach(async () => { await fixture.reset() })
-  after(async () => { await fixture?.close() })
+  after(async () => {
+    try { await fixture?.close() } finally {
+      try { await spare?.close() } finally { if (spare) storageMode.clearRegistry(spare.knex) }
+    }
+  })
 
   it('stores and filters email and uuid fields as strings', async () => {
     const created = await post({ name: 'Ann', email: ' ann@example.com ', token })
@@ -53,10 +62,7 @@ describe(`Field types and retired fields (${storageMode.mode})`, () => {
 
   it('rejects field types no casting function exists for when the resource is added', async () => {
     for (const type of ['text', 'float', 'decimal', 'datetime', 'json', 'phone']) {
-      await assert.rejects(
-        createConformanceFixture({ createApi: (knex, options) => createFieldTypesApi(knex, { ...options, fields: { extra: { type } } }), tables }),
-        new RegExp(`Field 'extra' in resource 'contacts' has unknown type '${type}'`)
-      )
+      await assert.rejects(register({ extra: { type } }), new RegExp(`Field 'extra' in resource 'contacts' has unknown type '${type}'`))
     }
   })
 
@@ -82,7 +88,6 @@ describe(`Field types and retired fields (${storageMode.mode})`, () => {
   })
 
   it('refuses to retire relationships and non-boolean flags', async () => {
-    const register = fields => createConformanceFixture({ createApi: (knex, options) => createFieldTypesApi(knex, { ...options, fields }), tables })
     await assert.rejects(register({ ownerId: { type: 'id', belongsTo: 'contacts', as: 'owner', retired: true } }), /'ownerId'.*cannot be retired/)
     await assert.rejects(register({ extra: { type: 'string', retired: 'yes' } }), /non-boolean retired option/)
   })

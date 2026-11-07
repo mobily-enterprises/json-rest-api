@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createSchemaEnrichmentApi, createConformanceApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
-import { databaseClient } from './helpers/test-database.js'
+import { createTestDatabase, databaseClient } from './helpers/test-database.js'
 import { RestApiValidationError } from '../lib/rest-api-errors.js'
 import { parseJsonApiQuery } from '../plugins/core/lib/querying-writing/connectors-query-parser.js'
 
@@ -132,6 +132,13 @@ for (const type of ['object', 'array']) {
 }
 
 describe(`Invalid structured query declarations (${storageMode.mode})`, () => {
+  // Each declaration fails while its schema compiles, before it writes
+  // anything, so one database serves every case.
+  let database
+  before(async () => { database = await createTestDatabase() })
+  after(async () => {
+    try { await database?.close() } finally { if (database) storageMode.clearRegistry(database.knex) }
+  })
   for (const type of ['object', 'array']) {
     for (const [label, options] of [
       ['automatic search', { fields: { payload: { type, search: true } } }],
@@ -142,15 +149,10 @@ describe(`Invalid structured query declarations (${storageMode.mode})`, () => {
       ['sortable projection', { resourceOptions: { queryFields: { payload: { type, sortable: true, select: ({ knex }) => knex.raw('null') } } } }]
     ]) {
       it(`rejects ${type} ${label} during schema compilation`, async () => {
-        let fixture
-        try {
-          await assert.rejects(async () => {
-            fixture = await createConformanceFixture({ createApi: createSchemaEnrichmentApi, tables: { items: 'schema_enrichment_items' }, apiOptions: { ...options, projections: true } })
-          }, error => {
-            assert.match(error.message, /scalar|custom.*filter/i)
-            return true
-          })
-        } finally { await fixture?.close() }
+        await assert.rejects(createSchemaEnrichmentApi(database.knex, { ...options, projections: true }), error => {
+          assert.match(error.message, /scalar|custom.*filter/i)
+          return true
+        })
       })
     }
   }
