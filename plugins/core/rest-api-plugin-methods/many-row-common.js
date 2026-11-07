@@ -70,8 +70,13 @@ export function refuseUnsupportedResource ({ api, helpers, perRecordHooks, scope
   }
   const hooks = perRecordHooks(PER_RECORD_EVENTS[kind])
   if (hooks.length) {
-    const names = hooks.map(hook => `${hook.event}:${hook.name}`).join(', ')
-    throw unsupported(scopeName, operation, `per-record hooks without a batch form run for it (${names}); register them with { batch: true } and a batch hook`)
+    // The hook names stay in the error details, which HTTP responses leave out.
+    throw new RestApiBulkWriteUnsupportedError({
+      resourceType: scopeName,
+      operation,
+      reason: 'per-record hooks without a batch form run for it; register them with { batch: true } and a batch hook',
+      hooks: hooks.map(hook => `${hook.event}:${hook.name}`)
+    })
   }
 }
 
@@ -129,7 +134,13 @@ export function toDocument ({ record, inputKey, scopeName, schemaInfo, allowRaw 
   let attributes = inputKey === 'data' ? record : record.attributes
   if (attributes && typeof attributes === 'object') {
     for (const [field, value] of Object.entries(attributes)) {
-      if (!isRawValue(value)) continue
+      if (!isRawValue(value)) {
+        // Knex would run any object carrying the flag as SQL; JSON input can carry the flag.
+        if (value && typeof value === 'object' && Object.hasOwn(value, 'isRawInstance')) {
+          throw new RestApiValidationError(`Field '${field}' holds an object that is not a Knex raw value`, { fields: [field] })
+        }
+        continue
+      }
       if (!allowRaw) throw new RestApiValidationError(`Field '${field}' cannot take a raw SQL value here`, { fields: [field] })
       raw[field] = value
     }
@@ -188,6 +199,20 @@ export function refuseDuplicateIds (ids, storageAdapter, field = 'data') {
 export function requireLockTransaction ({ transaction, scopeName, operation }) {
   if (!transaction || typeof transaction !== 'function' || !transaction.isTransaction || transaction.isCompleted?.()) {
     throw new RestApiLockOutsideTransactionError({ resourceType: scopeName, operation })
+  }
+}
+
+/**
+ * patchWhere and deleteWhere need filters, or `all: true` to act on every row
+ * the caller can see (in a system context, the whole table).
+ * @param {{ filters: Record<string, unknown> | undefined, all: unknown, operation: string }} request
+ */
+export function requireWhereScope ({ filters, all, operation }) {
+  if (all !== undefined && all !== true) throw new RestApiValidationError('all must be true when given', { fields: ['all'] })
+  const filtered = Boolean(filters && Object.keys(filters).length)
+  if (all && filtered) throw new RestApiValidationError(`${operation} takes filters or all: true, not both`, { fields: ['all'] })
+  if (!all && !filtered) {
+    throw new RestApiValidationError(`${operation} needs filters, or all: true to act on every row the caller can see`, { fields: ['filters'] })
   }
 }
 

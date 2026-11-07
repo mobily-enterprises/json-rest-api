@@ -22,6 +22,27 @@ import { updateReverseRelationship } from '../lib/writing/reverse-relationship-m
 import { invalidateRemovedPivotVersions } from '../lib/writing/many-to-many-manipulations.js'
 import { getStorageColumn } from '../lib/storage/storage-mapping.js'
 import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../lib/querying-writing/knex-constants.js'
+import { filterVisibleIdentifiers } from '../lib/querying/include-query-helpers.js'
+import { isSystemContext } from '../../../lib/system-context.js'
+
+/**
+ * The identifiers a many-to-many removal may unlink. Targets that ownership
+ * filters or a row policy scope are read for visibility (one read per type and
+ * 1,000 ids), and links to targets the caller cannot see stay, as links to
+ * missing ones always did. Other targets, and every target in a system context,
+ * cost no read. (Reverse hasMany removals check each child's visibility themselves.)
+ * @param {WriteRelationshipContext} context
+ * @param {Identifier[]} identifiers
+ * @param {any} api
+ */
+async function removableTargets (context, identifiers, api) {
+  if (isSystemContext(context)) return identifiers
+  const scoped = (/** @type {Identifier} */ { type }) => Boolean(api.resources[type]?.vars?.schemaInfo?.ownershipFields?.length || api.resources[type]?.vars?.rowPolicy)
+  const checked = identifiers.filter(scoped)
+  if (!checked.length) return identifiers
+  const visible = new Set(await filterVisibleIdentifiers({ identifiers: checked, scopes: api.resources, knex: context.db, context }))
+  return identifiers.filter(identifier => !scoped(identifier) || visible.has(identifier))
+}
 
 /**
  * Remove the identifiers in params.relationshipData from a to-many relationship.
@@ -98,6 +119,7 @@ export default async function deleteRelationshipMethod ({ params, context: calle
 
     // Remove relationships
     if (relDef?.through) {
+      params.relationshipData = await removableTargets(context, params.relationshipData, api)
       if (api.anyapi?.links?.removeMany) {
         await api.anyapi.links.removeMany({
           context,

@@ -702,7 +702,7 @@ export function createCanonicalDataHelpers ({
   /**
    * The canonical rows of one resource with ownership and row policy applied.
    * Many-row writes and row locks are table-storage features; AnyAPI resources
-   * get the read-only builder only.
+   * get the read-only builder only. Resolves to `{ query, alias }`.
    * @param {{ scopeName: string, context: DataReadContext, runHooks: (name: 'knexQueryFiltering') => unknown, alias?: string, purpose: string, filters?: Record<string, unknown> }} request
    */
   const dataScopedQuery = async ({ scopeName, context, runHooks, alias, purpose, filters }) => {
@@ -728,7 +728,7 @@ export function createCanonicalDataHelpers ({
       await runHooks('knexQueryFiltering')
     })
     // Wrapped: a builder is thenable, so an async function cannot return it bare.
-    return { query: filteredState.query }
+    return { query: filteredState.query, alias: tableAlias }
   }
 
   return {

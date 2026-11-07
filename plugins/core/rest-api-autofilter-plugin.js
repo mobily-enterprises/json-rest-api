@@ -2,6 +2,7 @@ import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api
 import { assertGenuineSystemFlag, isSystemContext } from '../../lib/system-context.js'
 import { snapshotResourceConfiguration } from './lib/querying-writing/schema-helpers.js'
 import { createStorageAdapterUtilities } from './lib/querying/storage-adapter-utils.js'
+import { ANY_OWNER, recordWriteCondition } from './lib/querying/query-constraint.js'
 
 const PUBLIC_PRESET_NAME = 'public'
 // Queries that write or lock the rows they select: shared rows are never theirs.
@@ -286,6 +287,13 @@ function refuseSharedCreate ({ filter, resolvedValue, scopeName }) {
   })
 }
 
+// An optional owner that did not resolve stamps nothing; the row must still not end up shared.
+function refuseSharedResult ({ compiledConfig, record, scopeName }) {
+  for (const filter of compiledConfig.filters) {
+    if (filter.shared && sharedFieldValue(record, filter) == null) refuseSharedCreate({ filter, resolvedValue: null, scopeName })
+  }
+}
+
 function sharedFieldValue (record, filter) {
   if (filter.relationshipName) {
     const linkage = record?.relationships?.[filter.relationshipName]?.data
@@ -324,6 +332,7 @@ async function enforceScopedInput ({ compiledConfig, context, scopeName, injectM
       injectMissing
     })
   }
+  if (injectMissing) refuseSharedResult({ compiledConfig, record: context.inputRecord?.data, scopeName })
 }
 
 export const AutoFilterPlugin = {
@@ -386,9 +395,16 @@ export const AutoFilterPlugin = {
           log
         })
 
-        if (resolvedValue === undefined) continue
-
         const columnRef = adapterUtils.translateColumn(scopeName, filter.field, tableName)
+        if (resolvedValue === undefined) {
+          // An optional owner that did not resolve: reads are not narrowed, but
+          // shared rows stay out of writes and locks.
+          if (filter.shared && writes) {
+            query.whereNotNull(columnRef)
+            recordWriteCondition(context, scopeName, filter.field, ANY_OWNER)
+          }
+          continue
+        }
         const translatedValue = adapterUtils.translateFilterValue(scopeName, filter.field, resolvedValue)
 
         if (filter.shared) {
@@ -398,13 +414,14 @@ export const AutoFilterPlugin = {
             else query.whereNull(columnRef)
           } else if (writes) {
             query.where(columnRef, translatedValue)
+            recordWriteCondition(context, scopeName, filter.field, translatedValue)
           } else {
             query.where(builder => builder.where(columnRef, translatedValue).orWhereNull(columnRef))
           }
-        } else if (translatedValue === null) {
-          query.whereNull(columnRef)
         } else {
-          query.where(columnRef, translatedValue)
+          if (translatedValue === null) query.whereNull(columnRef)
+          else query.where(columnRef, translatedValue)
+          if (writes) recordWriteCondition(context, scopeName, filter.field, translatedValue)
         }
       }
     })
@@ -468,6 +485,7 @@ export const AutoFilterPlugin = {
           applyResolvedInputValue({ context: { inputRecord }, filter, resolvedValue, injectMissing: true })
         }
       }
+      for (const inputRecord of context.inputRecords) refuseSharedResult({ compiledConfig, record: inputRecord?.data, scopeName })
     })
 
     // Shared rows are readable by every owner but writable only in a system context.
@@ -486,6 +504,9 @@ export const AutoFilterPlugin = {
     addHook('beforeDataCallPatch', 'autofilter-shared-row-patch', { batch: true }, refuseSharedRowWrite)
     addHook('beforeDataCallPut', 'autofilter-shared-row-put', { batch: true }, refuseSharedRowWrite)
     addHook('beforeDataCallDelete', 'autofilter-shared-row-delete', { batch: true }, refuseSharedRowWrite)
+    // Links of a shared row belong to every owner that sees it.
+    addHook('beforeDataCallPostRelationship', 'autofilter-shared-row-post-relationship', {}, refuseSharedRowWrite)
+    addHook('beforeDataCallDeleteRelationship', 'autofilter-shared-row-delete-relationship', {}, refuseSharedRowWrite)
 
     api.autofilter = {
       getConfig: () => ({

@@ -13,9 +13,9 @@ Every table-storage resource has six methods that write many rows at once:
 | `postMany({ data })` | one new record per entry |
 | `patchMany({ data: [{ id, ... }] })` | each entry's own changes to the record with that id |
 | `patchWhereIds({ ids, data })` | the same changes to every listed record |
-| `patchWhere({ filters, data })` | the same changes to every record the filters select |
+| `patchWhere({ filters, data })` | the same changes to every record the filters select (or `all: true`) |
 | `deleteMany({ ids })` | the listed records |
-| `deleteWhere({ filters })` | every record the filters select |
+| `deleteWhere({ filters })` | every record the filters select (or `all: true`) |
 
 Each call is all-or-nothing. Every row still goes through validation,
 ownership stamping (autofilter), setters, relationship checks and
@@ -130,6 +130,12 @@ await api.resources.books.patchWhereIds({
 })
 ```
 
+Only a real Knex raw value counts. An object that merely carries an
+`isRawInstance` flag, as JSON input can, is refused with a validation error, so
+the HTTP routes never pass SQL through. Batch hooks find the fields that raw
+values set in `context.rawFields`, and the file-field and positioning refusals
+below apply to them as well.
+
 Every row also goes through the resource's setters, and creates through
 `defaultTo` values and autofilter stamping, as single writes do. Rows may omit
 different fields. On SQLite, a field that some rows set and others omit is
@@ -147,6 +153,7 @@ does not declare with `defaultTo` does not apply to them.
 | `chunkSize` | all | 500 | Rows per statement, lowered further to the database's parameter limit |
 | `missing` | `patchMany`, `patchWhereIds`, `deleteMany` | `'throw'` | `'skip'` ignores ids the caller cannot see |
 | `onlyIf` | patches | | Compare-and-set: change only rows whose stored values equal these |
+| `all` | `patchWhere`, `deleteWhere` | | `true` acts on every row the caller can see; needed when there are no `filters` |
 | `onConflict` | `postMany` | | Upsert, below |
 
 Ids that do not exist or that the caller cannot see (another owner's rows,
@@ -154,6 +161,20 @@ rows a row policy hides) throw `RestApiRecordsNotFoundError` (subtype
 `not_found`, HTTP 404) before anything is written. The error gives only a
 count, so it does not reveal which ids exist. With `missing: 'skip'` they are
 left out. A batch may not name the same id twice.
+
+The UPDATE, DELETE and lock statements repeat the caller's ownership
+(autofilter) conditions as plain column predicates. A row that another
+transaction moves to a different owner between the visibility read and the
+write is therefore neither written nor locked, and counts as missing:
+`missing: 'throw'` rolls the batch back, `'skip'` leaves the row out of the
+result, and with `onlyIf` it is reported unchanged. Row policies are checked by
+the visibility read only, as for a single `patch`: a row that leaves the policy
+between the read and the write is still written.
+
+`patchWhere` and `deleteWhere` need non-empty `filters`. To change or delete
+every row the caller can see, pass `all: true` instead (not both); in a
+[system context](34-scoped-reads-and-locks.md#system-contexts) that is the whole
+table.
 
 `onlyIf` makes a patch conditional. Only the rows whose stored values still
 equal the given ones change, and with `returning: 'minimal'` or `'full'` the
@@ -175,21 +196,37 @@ if (changed.data.length === 0) {
 ## Upserts
 
 `onConflict: { keys, action, merge }` turns `postMany` into an upsert.
-`keys` are the stored fields of a unique index; each row must give them values.
-With `action: 'ignore'`, rows that conflict are skipped and only the inserted
-rows are returned. With `action: 'merge'`, the conflicting record is updated:
-the fields in `merge`, or by default every stored field the rows supply except
-the keys, the id, ownership fields and the lock version.
+`keys` are the stored fields of a unique index. Each row must give them values,
+no two rows may repeat them, and rows may not carry an `id`: the keys identify
+the record. With `action: 'ignore'`, rows that match an existing record are
+skipped and only the inserted rows are returned. With `action: 'merge'`, the
+matching record is updated: the fields in `merge` that the row supplies, or by
+default every stored field the rows supply except the keys, the id, ownership
+fields and the lock version.
 
 Upserts cannot reach another owner's rows:
 
 - `keys` must include every autofilter (ownership) field of the resource. The
   unique index should include them too.
-- `merge` is refused on a resource with a row policy, because the database
-  cannot apply the policy to the row it merges into. Insert with `ignore`, then
-  `patchMany` the rows the caller may change.
-- On MySQL and MariaDB, a row that conflicts on a different unique index fails
-  the batch instead of updating that row.
+- `merge` is refused on a resource with a row policy. Insert with `ignore`,
+  then `patchMany` the rows the caller may change.
+- Only a match on the conflict keys counts. A row that clashes with an existing
+  record on any other unique index, the primary key included, fails the batch.
+
+`merge` reads the records that match the keys under a row lock, inserts the
+other rows with a plain INSERT and updates the matched records by id, a fixed
+number of statements per chunk. The records it updates go through a patch's
+checks as well as a create's: `checkPermissions` runs with `method: 'patch'`
+and the matched record as `minimalRecord`, the resource is refused if a
+per-record patch hook without `{ batch: true }` runs for it, and a key that
+matches a record the caller cannot see fails the batch as `forbidden`.
+
+`ignore` runs `INSERT … ON CONFLICT DO NOTHING` on PostgreSQL and SQLite. On
+MySQL and MariaDB, whose `ON DUPLICATE KEY` fires on every unique index, it
+reads the matching keys under a row lock and inserts the rest. With `merge`,
+and with `ignore` on MySQL and MariaDB, two transactions that upsert the same
+new key at the same time can fail with a unique-key or deadlock error; retry
+the batch.
 
 ## Transactions
 
@@ -219,7 +256,7 @@ hooks:
 | Method | Batch hooks (in order) | Context |
 | --- | --- | --- |
 | `postMany` | `beforeProcessingPostMany`, `beforeDataCallPostMany`, `afterDataCallPostMany` | `inputRecords`; `ids` after the insert |
-| `patchMany`, `patchWhereIds`, `patchWhere` | `beforeProcessingPatchMany`, `beforeDataCallPatchMany`, `afterDataCallPatchMany` | `inputRecords`, `ids` |
+| `patchMany`, `patchWhereIds`, `patchWhere` | `beforeProcessingPatchMany`, `beforeDataCallPatchMany`, `afterDataCallPatchMany` | `inputRecords`, `rawFields`, `ids` |
 | `deleteMany`, `deleteWhere` | `beforeDataCallDeleteMany`, `afterDataCallDeleteMany` | `ids` |
 
 `afterCommit` and `afterRollback` run once, with `context.method` set to the
@@ -246,10 +283,12 @@ HTTP 422) before writing when:
 - the resource has a `versionField`, or its writes advance another resource's
   version (use single writes with `expectedVersion`, or a `lockVersionField`
   with `onlyIf`);
-- a per-record write hook without `{ batch: true }` runs for the resource;
+- a per-record write hook without `{ batch: true }` runs for the resource
+  (the error's `details.hooks` names them; HTTP responses leave details out);
 - rows set many-to-many or reverse relationships;
-- rows set file fields (`FileHandlingPlugin`);
-- rows create positioned records or move them (`PositioningPlugin`).
+- rows set file fields (`FileHandlingPlugin`), directly or with raw values;
+- rows create positioned records or move them (`PositioningPlugin`), directly
+  or with raw values.
 
 ## HTTP routes
 

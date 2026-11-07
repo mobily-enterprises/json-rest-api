@@ -1273,13 +1273,16 @@ const { query } = await api.resources.entries.scopedQuery(
   { filters, alias, purpose, transaction }, context)
 ```
 
-Resolves to `{ query }`, a Knex builder on the resource's table with ownership
-filters, row policy and the search `filters` applied. It is wrapped because a
-builder is thenable. `purpose` is `'report'` (default; includes shared rows),
-`'bulk-write'`, `'lock'` or `'claim'`; row policies receive it as
+Resolves to `{ query }`, a Knex builder over a derived table of the resource's
+rows with ownership filters, row policy and the search `filters` applied, so
+conditions the caller adds (`orWhere` included) only narrow them. It is wrapped
+because a builder is thenable. `purpose` is `'report'` (default; includes
+shared rows), `'bulk-write'`, `'lock'` or `'claim'`; row policies receive it as
 `queryPurpose`. The caller needs `query` permission. The builder refuses
-writes, locking reads, table changes and clearing predicates, on clones too
-(`RestApiScopedQueryReadOnlyError`); joined tables are not scoped.
+writes, locking reads, table changes, clearing predicates, set operations,
+common table expressions and access to its Knex client, on clones too
+(`RestApiScopedQueryReadOnlyError`); joined tables are not scoped. It guards
+against mistakes, not hostile code.
 
 ### queryAll - Every Matching Record
 
@@ -1299,18 +1302,18 @@ it throws `RestApiRowLimitError`. Works on both storages.
 await resource.postMany({ data | document, onConflict, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.patchMany({ data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.patchWhereIds({ ids, data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
-await resource.patchWhere({ filters, data | document, onlyIf, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.patchWhere({ filters | all: true, data | document, onlyIf, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.deleteMany({ ids, missing, returning, chunkSize, transaction }, context)
-await resource.deleteWhere({ filters, returning, chunkSize, transaction }, context)
+await resource.deleteWhere({ filters | all: true, returning, chunkSize, transaction }, context)
 ```
 
 | Parameter | Description |
 | --- | --- |
 | `data` / `document` | `postMany`, `patchMany`: an array of plain records, or `{ data: [resource objects] }`; `patchMany` rows carry `id`. `patchWhereIds`, `patchWhere`: one record of changes. |
-| `ids` / `filters` | The records to change: listed ids, or search filters validated as `query` validates them. |
+| `ids` / `filters` / `all` | The records to change: listed ids, or non-empty search filters validated as `query` validates them, or `all: true` for every row the caller can see. |
 | `returning` | `'none'` (default), `'minimal'` (`{ data: [{ type, id }] }`) or `'full'` (`{ data: [records] }`, not for deletes). |
 | `format`, `queryParams` | Output format, `fields` and `include` of full records. |
-| `onConflict` | Upsert: `{ keys, action: 'ignore' \| 'merge', merge? }`. `keys` must include every ownership field; `merge` is refused under a row policy. |
+| `onConflict` | Upsert: `{ keys, action: 'ignore' \| 'merge', merge? }`. `keys` must include every ownership field; rows may not carry an `id` or repeat keys; only a match on the keys counts, and a clash on another unique index fails the batch. `merge` also runs the patch checks (`checkPermissions` with `method: 'patch'`) on the records it updates and is refused under a row policy. |
 | `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
 | `missing` | `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. |
 | `chunkSize` | Rows per statement (default 500), lowered to the database's parameter limit. |
@@ -1320,9 +1323,12 @@ Each call is all-or-nothing. Every row is validated, stamped, passed through
 setters and authorized with `checkPermissions` (`method` `post`, `patch` or
 `delete`, `originalContext.bulkIndex` the row's position); belongs-to targets
 are checked with one read per related type; then one statement runs per chunk.
-Patches refuse the id, ownership fields and the `lockVersionField`, and accept
-`knex.raw()` values for stored, non-relationship fields. Deletes remove the
-records' pivot rows. Batch hooks run once per call:
+Patches refuse the id, ownership fields (also through a polymorphic
+relationship) and the `lockVersionField`, and accept real `knex.raw()` values
+for stored, non-relationship fields. The UPDATE, DELETE and lock statements
+repeat the caller's ownership conditions, so a row that moved to another owner
+after the visibility read is left alone and counts as missing. Deletes remove
+the records' pivot rows. Batch hooks run once per call:
 `beforeProcessingPostMany`, `beforeDataCallPostMany`, `afterDataCallPostMany`,
 the `PatchMany` trio and `beforeDataCallDeleteMany` / `afterDataCallDeleteMany`.
 
@@ -1343,7 +1349,9 @@ await api.transaction(async transaction => {
 ```
 
 Both need a transaction (`RestApiLockOutsideTransactionError` otherwise) and
-return the records as the locking read saw them. `lockByIds` locks the visible
+return the records as the locking read saw them, through the read hooks of
+`query` (`enrichRecord`, `finish`, `finishQuery`) and `checkDataPermissions`
+for each row. `lockByIds` locks the visible
 rows among `ids` in id order (`FOR UPDATE`); hidden or missing ids throw
 `RestApiRecordsNotFoundError` unless `missing: 'skip'`. `claim` takes up to
 `limit` (default 1, at most 1,000) matching rows that no other transaction holds

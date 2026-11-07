@@ -6,7 +6,8 @@ import { getRequestContracts, validateRequestContractOrThrow } from '../lib/quer
 import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
-import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import {
   applyFieldSetters,
   collectRelationshipTargets,
@@ -26,6 +27,7 @@ import {
   toDocument,
   unsupported
 } from './many-row-common.js'
+import { VISIBLE_READ_CHUNK } from './patch-many.js'
 
 /**
  * Upserts may only match the caller's own rows: the conflict keys must hold
@@ -64,6 +66,54 @@ function resolveOnConflict (onConflict, { scopeName, schemaInfo, scopes }) {
   return { keys, action, mergeFields }
 }
 
+/**
+ * Upsert merge: lock the rows the conflict keys match, check that the caller
+ * may patch each of them, insert the other rows with a plain INSERT (a clash on
+ * any other unique index fails the batch), then update the matched rows by id.
+ * Returns the identifier of every row, merged or inserted.
+ * @param {any} args
+ * @param {{ rows: any[], attributes: Record<string, unknown>[], onConflict: { keys: string[], merge: string[] }, chunkSize: number, needIds: boolean }} batch
+ */
+async function mergeRows ({ context, helpers, scope, runHooks, scopeName }, { rows, attributes, onConflict, chunkSize, needIds }) {
+  const existing = await helpers.dataIdsByKeys({ scopeName, context, rows: attributes, keys: onConflict.keys, chunkSize })
+  const matched = attributes.flatMap((_row, index) => existing[index] === undefined ? [] : [index])
+  const missing = attributes.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
+
+  const visible = new Map()
+  for (const part of chunk(matched.map(index => existing[index]), VISIBLE_READ_CHUNK)) {
+    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
+    for (const record of records) visible.set(String(record.id), record)
+  }
+  for (const index of matched) {
+    const id = String(existing[index])
+    const minimalRecord = visible.get(id)
+    try {
+      if (!minimalRecord) {
+        throw new RestApiResourceError(`The ${scopeName} record these conflict keys match cannot be changed by the caller`, { subtype: 'forbidden', resourceType: scopeName })
+      }
+      await scope.checkPermissions({ method: 'patch', originalContext: { ...rows[index], method: 'patch', id, minimalRecord, originalMinimalRecord: minimalRecord } })
+    } catch (error) { throw atIndex(error, index) }
+  }
+
+  const ids = [...existing]
+  if (missing.length) {
+    const inserted = await helpers.dataInsertMany({ scopeName, context, rows: missing.map(index => attributes[index]), chunkSize, needIds })
+    missing.forEach((index, position) => { ids[index] = inserted?.[position] })
+  }
+  if (matched.length) {
+    const storageAdapter = helpers.getStorageAdapter(scopeName)
+    // Only the merge fields a row supplies change; the lock version advances.
+    const updates = matched.map(index => ({
+      id: existing[index],
+      row: storageAdapter.toStorageRow(Object.fromEntries(onConflict.merge
+        .filter(field => Object.hasOwn(attributes[index], field))
+        .map(field => [field, attributes[index][field]])), { context: rows[index], operation: 'patch' })
+    }))
+    await helpers.dataUpdateByIds({ scopeName, context, updates, chunkSize })
+  }
+  return ids
+}
+
 /** @param {any} args */
 export default async function postManyMethod ({
   params, context, vars, helpers, scope, scopes, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api, log
@@ -84,6 +134,12 @@ export default async function postManyMethod ({
       api, helpers, perRecordHooks, scopeName, schemaInfo: context.schemaInfo, operation: 'postMany', kind: 'post', storageHelper: 'dataInsertMany'
     })
     const conflict = resolveOnConflict(params.onConflict, { scopeName, schemaInfo: context.schemaInfo, scopes })
+    if (conflict?.action === 'merge') {
+      // Merged rows are updates: the resource must take patches as a batch too.
+      refuseUnsupportedResource({
+        api, helpers, perRecordHooks, scopeName, schemaInfo: context.schemaInfo, operation: 'postMany', kind: 'patch', storageHelper: 'dataUpdateByIds'
+      })
+    }
 
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
     context.db = context.transaction
@@ -138,6 +194,10 @@ export default async function postManyMethod ({
     let onConflict
     if (conflict) {
       const rowAttributes = rows.map(row => row.inputRecord.data.attributes || {})
+      rows.forEach((row, index) => {
+        if (row.inputRecord.data.id === undefined || row.inputRecord.data.id === null) return
+        throw atIndex(new RestApiValidationError('An upsert row cannot carry an id: its conflict keys identify it', { fields: ['data.id'] }), index)
+      })
       rowAttributes.forEach((attributes, index) => {
         const empty = conflict.keys.filter(field => attributes[field] === undefined || attributes[field] === null)
         if (empty.length) throw atIndex(new RestApiValidationError(`Conflict keys need values: ${empty.join(', ')}`, { fields: empty.map(field => `data.attributes.${field}`) }), index)
@@ -161,8 +221,23 @@ export default async function postManyMethod ({
       attributes.push({ ...(data.attributes || {}), ...(data.id !== undefined ? { id: data.id } : {}) })
     }
 
+    if (onConflict) {
+      const seen = new Map()
+      attributes.forEach((row, index) => {
+        const key = JSON.stringify(onConflict.keys.map(field => row[field]))
+        if (seen.has(key)) {
+          throw atIndex(new RestApiValidationError(`Rows ${seen.get(key)} and ${index} have the same conflict keys`, {
+            fields: onConflict.keys.map(field => `data.attributes.${field}`)
+          }), index)
+        }
+        seen.set(key, index)
+      })
+    }
+
     const needIds = context.returning !== 'none' || hasHooks('afterDataCallPostMany')
-    const ids = await helpers.dataInsertMany({ scopeName, context, rows: attributes, chunkSize, needIds, onConflict })
+    const ids = onConflict?.action === 'merge'
+      ? await mergeRows({ context, helpers, scope, runHooks, scopeName }, { rows, attributes, onConflict, chunkSize, needIds })
+      : await helpers.dataInsertMany({ scopeName, context, rows: attributes, chunkSize, needIds, onConflict })
     context.ids = ids?.map(id => id === undefined || id === null ? undefined : String(id))
     await runHooks('afterDataCallPostMany')
 

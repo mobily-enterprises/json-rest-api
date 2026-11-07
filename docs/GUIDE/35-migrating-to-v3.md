@@ -50,6 +50,7 @@ the per-row checks in memory and one INSERT, UPDATE or DELETE per chunk.
 | `bulkPatch({ operations: [{ id, document: { data } }] })` | `patchMany({ document: { data: [{ type, id, attributes }] } })` |
 | the same change for many ids | `patchWhereIds({ ids, data })` or `patchWhere({ filters, data })` |
 | `bulkDelete({ ids })` | `deleteMany({ ids })` or `deleteWhere({ filters })` |
+| the same change for, or deletion of, every row | `patchWhere({ all: true, data })`, `deleteWhere({ all: true })`: without `filters`, `all: true` is required |
 | `atomic: true` | remove: every call is all-or-nothing |
 | `atomic: false` | remove; for rows that must succeed independently, call single writes in a loop |
 | `expectedVersion`, `expectedVersions` | removed: resources with a `versionField` refuse many-row writes. Use single writes with `expectedVersion`, or a `lockVersionField` with `onlyIf` |
@@ -173,15 +174,18 @@ shared row on a `shared` filter. Row policies receive `system` alongside
 Filter definitions take `shared: true | false` (default false). A value other
 than a boolean, or `shared: true` on a field that is not `nullable`, fails when
 the resource is added. `getScopeConfig` reports `shared` for each filter.
+Outside a system context, shared rows refuse `patch`, `put`, `delete`,
+`postRelationship` and `deleteRelationship`, and a create may not leave the
+field NULL, also when an optional (`required: false`) filter does not resolve.
 
 ## Custom storage plugins
 
-The storage helpers gain `dataScopedQuery`, `dataVisibleIds`,
+The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,
 `dataInsertMany`, `dataUpdateByIds`, `dataDeleteByIds`, `dataLockByIds` and
 `dataClaim`. They are optional: a storage plugin without them keeps working,
 and the new methods refuse its resources with
 `RestApiBulkWriteUnsupportedError`. `RestApiKnexPlugin` implements all of them;
-`RestApiAnyapiKnexPlugin` implements none.
+`RestApiAnyapiKnexPlugin` implements only `dataScopedQuery`.
 
 ## Verify the port
 
@@ -189,6 +193,9 @@ and the new methods refuse its resources with
    `expectedVersions`, `defaultAtomic` and `operations:`, and port each call.
 2. Search for `system: true` in contexts.
 3. Run the application's tests. A many-row write on a resource with per-record
-   hooks fails with a message naming the hooks to give a batch form.
-4. Update HTTP clients of `/RESOURCE/bulk` to the new PATCH and DELETE bodies
+   hooks fails with `RestApiBulkWriteUnsupportedError`; its `details.hooks`
+   names the hooks to give a batch form.
+4. Search for `patchWhere` and `deleteWhere` calls without `filters`, and add
+   `all: true` where every visible row is meant.
+5. Update HTTP clients of `/RESOURCE/bulk` to the new PATCH and DELETE bodies
    and to error responses for failed batches.

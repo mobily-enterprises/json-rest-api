@@ -1,7 +1,7 @@
 // Delete many records by id: one scoped read of the ids the caller may delete
 // per chunk, then one DELETE per chunk and the pivot rows of the deleted records.
 import { beginWriteTransaction } from '../../../lib/error-context.js'
-import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
@@ -11,6 +11,7 @@ import {
   refuseDuplicateIds,
   refuseUnsupportedResource,
   rejectBulkOptions,
+  requireWhereScope,
   resolveChunkSize,
   resolveMissing,
   unsupported,
@@ -61,7 +62,10 @@ async function runDeleteMany (args, { operation, ids, started = false }) {
 
   context.ids = kept.map(String)
   await runHooks('beforeDataCallDeleteMany')
-  if (kept.length) await helpers.dataDeleteByIds({ scopeName, context, ids: kept, chunkSize })
+  const deleted = new Set((kept.length ? await helpers.dataDeleteByIds({ scopeName, context, ids: kept, chunkSize }) : []).map(String))
+  // A row that left the caller's scope after the visibility read is not deleted.
+  if (deleted.size < kept.length && missing === 'throw') throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: kept.length - deleted.size })
+  context.ids = kept.map(id => String(storageAdapter.translateFilterValue('id', id))).filter(id => deleted.has(id))
   await runHooks('afterDataCallDeleteMany')
 
   await commitOwnedTransaction(context)
@@ -92,6 +96,7 @@ export async function deleteWhereMethod (args) {
       throw unsupported(scopeName, 'deleteWhere', 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
+    requireWhereScope({ filters, all: params.all, operation: 'deleteWhere' })
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction
     const ids = await visibleIdsByFilters(args, filters)

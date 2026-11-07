@@ -1,6 +1,6 @@
 // Reads that keep the resource's scope: the read-only scoped builder, every-row
 // reads in cursor pages, and row locks inside a transaction.
-import { RestApiBulkWriteUnsupportedError, RestApiRowLimitError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { RestApiBulkWriteUnsupportedError, RestApiRecordsNotFoundError, RestApiRowLimitError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { readOnlyQueryBuilder } from '../lib/querying/read-only-query.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
 import { filterResponseFields, getResourceFieldset } from '../lib/querying-writing/field-utils.js'
@@ -9,6 +9,7 @@ import { resolveFormat } from '../lib/querying-writing/response-options.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 import { keepVisible, refuseDuplicateIds, requireLockTransaction, resolveMissing, validateFilters } from './many-row-common.js'
 
 export const SCOPED_QUERY_PURPOSES = new Set(['report', 'bulk-write', 'lock', 'claim'])
@@ -19,11 +20,12 @@ const invalid = (field, message) => new RestApiValidationError(message, { fields
 
 /**
  * The resource's table with ownership and row policy applied, as a read-only
- * Knex builder. Resolves to `{ query }`: a builder is thenable, so returning it
- * from an async method would run it.
+ * Knex builder over a derived table named after the alias (or the table), so
+ * nothing a caller adds, `orWhere` included, can widen the scope. Resolves to
+ * `{ query }`: a builder is thenable, so returning it from an async method would run it.
  * @param {any} args
  */
-export async function scopedQueryMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName }) {
+export async function scopedQueryMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api }) {
   const { transaction, alias, purpose = 'report', filters, ...unknown } = params
   if (Object.keys(unknown).length) throw invalid(Object.keys(unknown)[0], `Unknown scopedQuery options: ${Object.keys(unknown).join(', ')}`)
   if (!SCOPED_QUERY_PURPOSES.has(purpose)) throw invalid('purpose', `purpose must be one of ${[...SCOPED_QUERY_PURPOSES].join(', ')}`)
@@ -41,8 +43,9 @@ export async function scopedQueryMethod ({ params, context, vars, helpers, scope
   context.queryParams = { filters: validateFilters({ filters, scopeName, schemaInfo: context.schemaInfo, vars }) || {} }
   // A caller who may not query the resource may not build reports on it either.
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', scopedQuery: true } })
-  const { query } = await helpers.dataScopedQuery({ scopeName, context, runHooks, alias, purpose, filters: context.queryParams.filters })
-  return { query: readOnlyQueryBuilder(query, { resourceType: scopeName }) }
+  const { query, alias: name } = await helpers.dataScopedQuery({ scopeName, context, runHooks, alias, purpose, filters: context.queryParams.filters })
+  const derived = (transaction || api.knex.instance).from(query.select(`${name}.*`).as(name))
+  return { query: readOnlyQueryBuilder(derived, { resourceType: scopeName }) }
 }
 
 /**
@@ -76,13 +79,26 @@ export async function queryAllMethod ({ params, context, vars, scopeName, api })
   return resolvedFormat === 'jsonapi' && included.size ? { data, included: [...included.values()] } : { data }
 }
 
-// The read pipeline's last steps for rows a lock read: normalization, computed
-// fields, sparse fieldsets and the plain format.
-async function finishRecords ({ document, context, scope, scopes, scopeName }) {
-  let record = normalizeRecordAttributes(document, scopes)
+// The rows a lock read leave through the read pipeline `query` runs after its
+// data call, so masking and denials apply to them too: checkDataPermissions for
+// each row as `get` runs it, enrichRecord, computed fields, the finish hooks,
+// sparse fieldsets and the plain format. Hooks see method 'query' and lock: true.
+async function finishLockedRead ({ document, context, scope, scopes, scopeName, runHooks, hasHooks }) {
+  context.method = 'query'
+  context.lock = true
+  context.record = normalizeRecordAttributes(document, scopes)
+  if (hasHooks('checkDataPermissions') || hasHooks('checkDataPermissionsGet')) {
+    for (const entry of context.record.data) {
+      const recordContext = { ...context, method: 'get', id: entry.id, record: { data: entry } }
+      await runHooks('checkDataPermissions', recordContext)
+      await runHooks('checkDataPermissionsGet', recordContext)
+    }
+  }
+  snapshotReadRecord(context, scopes, hasHooks, 'query')
+  await runHooks('enrichRecord')
   const computedFields = scope.vars.schemaInfo?.computed || {}
   const requestedComputedFields = getRequestedComputedFields(scopeName, getResourceFieldset(context.queryParams.fields, scopeName), computedFields)
-  for (const entry of record.data) {
+  for (const entry of context.record.data) {
     entry.attributes = await scope.enrichAttributes({
       id: entry.id,
       attributes: entry.attributes,
@@ -92,7 +108,10 @@ async function finishRecords ({ document, context, scope, scopes, scopeName }) {
       computedDependencies: context.computedDependencies
     })
   }
-  record = normalizeRecordAttributes(record, scopes, { source: 'response' })
+  await runHooks('finish')
+  await runHooks('finishQuery')
+  await filterToOneResponseLinkage(context, scopes)
+  const record = normalizeRecordAttributes(context.record, scopes, { source: 'response' })
   filterResponseFields(record, context.queryParams.fields)
   if (context.format !== 'plain') return { data: record.data }
   const schemaInfo = scope.vars.schemaInfo
@@ -127,7 +146,7 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
  * @param {any} args
  */
 export async function lockByIdsMethod (args) {
-  const { params, context, helpers, scope, scopes, runHooks, scopeName, scopeOptions, vars } = args
+  const { params, context, helpers, scope, scopes, runHooks, hasHooks, scopeName, scopeOptions, vars } = args
   await setupLockRead(args, 'lockByIds', 'dataLockByIds')
   if (!Array.isArray(params.ids) || !params.ids.length) throw invalid('ids', 'ids must be a non-empty array')
   const ids = params.ids.map(id => requireExistingResourceId(id, { scopeOptions, vars, scopeName }))
@@ -146,7 +165,11 @@ export async function lockByIdsMethod (args) {
   for (const part of chunk(kept, 1000)) {
     document.data.push(...(await helpers.dataLockByIds({ scopeName, context, ids: part })).data)
   }
-  return finishRecords({ document, context, scope, scopes, scopeName })
+  // A row that left the caller's scope after the visibility read is not locked.
+  if (document.data.length < kept.length && missing === 'throw') {
+    throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: kept.length - document.data.length })
+  }
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
 }
 
 /**
@@ -155,7 +178,7 @@ export async function lockByIdsMethod (args) {
  * @param {any} args
  */
 export async function claimMethod (args) {
-  const { params, context, vars, helpers, scope, scopes, runHooks, scopeName } = args
+  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
   await setupLockRead(args, 'claim', 'dataClaim')
   const limit = params.limit ?? 1
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CLAIM) throw invalid('limit', `limit must be an integer from 1 to ${MAX_CLAIM}`)
@@ -172,5 +195,5 @@ export async function claimMethod (args) {
   })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit })
-  return finishRecords({ document, context, scope, scopes, scopeName })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
 }

@@ -27,12 +27,15 @@ export type ManyRowCreateInput<Input extends object, Type extends string> =
   { data: Array<Partial<Input> & { id?: InputResourceId }>; document?: never } |
   { data?: never; document: { data: Array<JsonApiWriteDocument<Input, Type>['data']> } }
 export interface UpsertOptions<Input extends object> {
-  // Must include every ownership (autofilter) field.
+  // Must include every ownership (autofilter) field. Rows may not carry an id or repeat a key.
   keys: Array<keyof Input & string>
+  // merge also runs the patch permission checks on every row it updates.
   action: 'ignore' | 'merge'
   // merge only: fields to update; default every stored field the rows supply but the keys.
   merge?: Array<keyof Input & string>
 }
+// patchWhere and deleteWhere need filters, or all: true to act on every visible row.
+export type WhereScope = { filters: Record<string, unknown>; all?: never } | { filters?: never; all: true }
 type Patchable<Input extends object> = { [Field in keyof Input]?: Input[Field] | RawValue }
 export type ManyRowPatchInput<Input extends object, Type extends string> =
   { data: Array<Patchable<Input> & { id: DirectResourceId }>; document?: never } |
@@ -54,7 +57,8 @@ export interface ScopedQueryParams {
   purpose?: 'report' | 'bulk-write' | 'lock' | 'claim'
   filters?: Record<string, unknown>
 }
-// A Knex builder that refuses writes, locks, table changes and clearing its predicates.
+// A Knex builder over a derived table of the scoped rows. It refuses writes, locks,
+// table changes, set operations, common table expressions and access to the client.
 export type ReadOnlyQueryBuilder = Knex.QueryBuilder
 
 export interface DataAccessMethods<
@@ -88,7 +92,7 @@ export interface DataAccessMethods<
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   patchWhere<Format extends ResourceFormat = DefaultFormat, Returning extends ManyRowReturning = 'none'>(
-    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & { filters?: Record<string, unknown> },
+    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope,
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   deleteMany<Returning extends 'none' | 'minimal' = 'none'>(
@@ -96,7 +100,7 @@ export interface DataAccessMethods<
     context?: Context
   ): Promise<Returning extends 'none' ? void : { data: ResourceIdentifier<Type>[] }>
   deleteWhere<Returning extends 'none' | 'minimal' = 'none'>(
-    params: RemovedResourceOptions & { filters?: Record<string, unknown>; transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number },
+    params: RemovedResourceOptions & WhereScope & { transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number },
     context?: Context
   ): Promise<Returning extends 'none' ? void : { data: ResourceIdentifier<Type>[] }>
   // Locks the visible rows among ids (FOR UPDATE, id order) until the transaction ends.

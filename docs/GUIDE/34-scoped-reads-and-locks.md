@@ -150,8 +150,18 @@ shared: every owner reads them. The field must be `nullable`.
 | --- | --- |
 | `query`, `get`, includes, `aggregate`, `scopedQuery` (`purpose: 'report'`) | the owner's rows and shared rows |
 | many-row writes, `lockByIds`, `claim`, `scopedQuery` with `purpose` `'bulk-write'`, `'lock'` or `'claim'` | only the owner's rows |
-| single `patch`, `put`, `delete` of a shared row | refused as `forbidden` outside a system context |
-| `post` | stamps the owner; a create whose owner resolves to NULL is `forbidden` |
+| single `patch`, `put`, `delete` of a shared row, and `postRelationship` or `deleteRelationship` on it | refused as `forbidden` outside a system context |
+| `post` | stamps the owner; a create that would leave the field NULL is `forbidden` |
+
+A filter with `required: false` may not resolve, for example for a caller
+without a workspace. Reads are then not narrowed by it, but writes, locks and
+claims still skip the shared rows, and a create outside a system context must
+name an owner.
+
+`deleteRelationship` on a many-to-many relationship leaves links to targets
+the caller cannot see, as it leaves links to missing targets: when the target
+type has ownership filters or a row policy, it reads which targets are visible
+first (one read per type and 1,000 ids).
 
 Create and change shared rows with a [system context](#system-contexts).
 `api.autofilter.getScopeConfig(...)` reports `shared` for each filter, and
@@ -159,11 +169,16 @@ Create and change shared rows with a [system context](#system-contexts).
 
 ## scopedQuery
 
-`scopedQuery(params, context)` resolves to `{ query }`: a Knex builder on the
-resource's table with the caller's ownership filters, row policy and the given
+`scopedQuery(params, context)` resolves to `{ query }`: a Knex builder over the
+resource's rows with the caller's ownership filters, row policy and the given
 search `filters` already applied. (It is wrapped in an object because a Knex
 builder is thenable and would run if an async method returned it.) Use it for
 reports that `aggregate` cannot express, and as a subquery.
+
+The builder selects from a derived table, `(SELECT alias.* FROM table AS alias
+WHERE …) AS alias`, so conditions you add, `orWhere` and `whereRaw('a OR b')`
+included, can only narrow the scoped rows. Refer to columns as `alias.column`
+or by bare name.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
@@ -183,11 +198,16 @@ const totals = await query
 
 The caller needs `query` permission on the resource. The builder is
 SELECT-only: `insert`, `update`, `delete`, `forUpdate` and the other locking
-reads, table changes and the methods that clear existing predicates throw
-`RestApiScopedQueryReadOnlyError`, on clones too. A table you join is not
-scoped by the builder; join only what the caller may see, or scope it with its
-own `scopedQuery`. `readOnlyQueryBuilder(builder, { resourceType })` is
-exported for builders your own code produces.
+reads, table changes (`from`, `fromRaw`, `table`), the methods that clear
+existing predicates, set operations (`union`, `unionAll`, `intersect`,
+`except`), common table expressions (`with`, `withRecursive`,
+`withMaterialized`), access to its Knex `client`, and defining or deleting its
+properties throw `RestApiScopedQueryReadOnlyError`, on clones too. The builder
+guards against mistakes, not hostile code: code that means to bypass it can use
+Knex directly. A table you join is not scoped by the builder; join only what
+the caller may see, or scope it with its own `scopedQuery`.
+`readOnlyQueryBuilder(builder, { resourceType })` is exported for builders your
+own code produces.
 
 ## queryAll
 
@@ -246,7 +266,13 @@ and MariaDB 10.2+ do. AnyAPI storage applies the same rule.
 
 `lockByIds` and `claim` lock rows until the transaction ends. Both refuse to run
 outside a transaction (`RestApiLockOutsideTransactionError`); pass one from
-`api.transaction`. They return the records as the locking read saw them.
+`api.transaction`. They return the records as the locking read saw them,
+through the read pipeline of `query`: `checkDataPermissions` runs for each row
+as for `get`, then `enrichRecord`, computed fields and the `finish` and
+`finishQuery` hooks, which see `method: 'query'` and `lock: true`. The lock
+statements repeat the caller's ownership conditions, so a row that moved to
+another owner after the visibility read is not locked; `lockByIds` then counts
+it as missing.
 
 `lockByIds({ ids, transaction, missing, format, queryParams: { fields } })`
 locks the listed rows the caller can see, in id order, so two transactions that
@@ -266,7 +292,7 @@ database would lock the joined rows too.
 | Database | `lockByIds` | `claim` |
 | --- | --- | --- |
 | PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE SKIP LOCKED` |
-| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | reads candidates, then locks windows of them by primary key with `SKIP LOCKED`, because InnoDB locks every row a locking read examines |
+| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
 | SQLite | a scoped read | a scoped read |
 
 SQLite allows one writer at a time, so a write transaction already excludes

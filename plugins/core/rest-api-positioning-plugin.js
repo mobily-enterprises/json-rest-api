@@ -214,7 +214,7 @@ export const PositioningPlugin = {
     // create no positioned rows and change no positions.
     const refusePositions = ({ context, scopeName }) => {
       if (!enabled(scopeName)) return
-      const moves = context.inputRecords.some(record => {
+      const moves = [config.field, config.beforeIdField].some(field => context.rawFields?.includes(field)) || context.inputRecords.some(record => {
         const attributes = record?.data?.attributes || {}
         return attributes[config.field] !== undefined || attributes[config.beforeIdField] !== undefined
       })

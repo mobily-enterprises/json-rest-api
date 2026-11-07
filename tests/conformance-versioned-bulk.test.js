@@ -34,9 +34,9 @@ describe(`Many-row writes on versioned resources (${storageMode.mode})`, () => {
       ['postMany', { data: [{ name: 'Third' }] }],
       ['patchMany', { data: [{ id: first.id, name: 'Changed' }] }],
       ['patchWhereIds', { ids: [first.id, second.id], data: { name: 'Changed' } }],
-      ['patchWhere', { filters: {}, data: { name: 'Changed' } }],
+      ['patchWhere', { all: true, data: { name: 'Changed' } }],
       ['deleteMany', { ids: [first.id] }],
-      ['deleteWhere', { filters: {} }]
+      ['deleteWhere', { all: true }]
     ]) {
       await assert.rejects(items[method](params), unsupported, method)
     }

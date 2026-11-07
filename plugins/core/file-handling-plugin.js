@@ -226,7 +226,8 @@ export const FileHandlingPlugin = {
     // Uploads belong to one record each; many-row writes refuse rows that set file fields.
     const refuseFileFields = ({ context, scopeName }) => {
       const fileFields = getFileFields(scopeName)
-      const set = fileFields.filter(field => context.inputRecords.some(record => record?.data?.attributes?.[field.field] !== undefined))
+      const set = fileFields.filter(field => context.rawFields?.includes(field.field) ||
+        context.inputRecords.some(record => record?.data?.attributes?.[field.field] !== undefined))
       if (!set.length) return
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,

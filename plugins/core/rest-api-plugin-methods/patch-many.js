@@ -6,7 +6,7 @@ import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/qu
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
-import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import {
   applyFieldSetters,
@@ -24,6 +24,7 @@ import {
   refuseDuplicateIds,
   refuseUnsupportedResource,
   rejectBulkOptions,
+  requireWhereScope,
   resolveChunkSize,
   resolveMissing,
   selectManyInput,
@@ -50,12 +51,16 @@ function protectedFields (schemaInfo) {
   return { fields, relationships }
 }
 
-function refuseProtectedInput ({ document, raw, schemaInfo, index }) {
-  const { fields, relationships } = protectedFields(schemaInfo)
-  const attributes = document.data.attributes || {}
-  for (const field of [...Object.keys(attributes), ...Object.keys(raw)]) {
+function refuseProtectedFields (names, schemaInfo, index) {
+  const { fields } = protectedFields(schemaInfo)
+  for (const field of names) {
     if (fields.has(field)) throw atIndex(invalid(`data.attributes.${field}`, `'${field}' cannot be changed by a many-row patch`), index)
   }
+}
+
+function refuseProtectedInput ({ document, raw, schemaInfo, index }) {
+  const { relationships } = protectedFields(schemaInfo)
+  refuseProtectedFields([...Object.keys(document.data.attributes || {}), ...Object.keys(raw)], schemaInfo, index)
   for (const name of Object.keys(document.data.relationships || {})) {
     if (relationships.has(name)) throw atIndex(invalid(`data.relationships.${name}`, `'${name}' sets ownership and cannot be changed by a many-row patch`), index)
   }
@@ -100,6 +105,8 @@ async function runPatchMany (args, { operation, entries, started = false }) {
   if (!started) await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction
   context.inputRecords = entries.map(entry => entry.document)
+  // Fields set by raw SQL values, which plugins that refuse fields check too.
+  context.rawFields = [...new Set(entries.flatMap(entry => Object.keys(entry.raw)))]
   await runHooks('beforeProcessingPatchMany')
 
   const targets = new Map()
@@ -126,6 +133,8 @@ async function runPatchMany (args, { operation, entries, started = false }) {
       }
       await validateResourceAttributesBeforeWrite({ context: rowContext, schema: schemaInfo.schemaInstance, belongsToUpdates, runHooks: noHooks, isPartialValidation: true })
       rowContext.inputRecord.data.attributes = { ...rowContext.inputRecord.data.attributes, ...belongsToUpdates }
+      // A polymorphic relationship writes its own type and id columns, which may be ownership fields.
+      refuseProtectedFields(Object.keys(rowContext.inputRecord.data.attributes), schemaInfo, index)
       if (!Object.keys(rowContext.inputRecord.data.attributes).length && !Object.keys(row.raw).length) {
         throw invalid('data', 'A patch row must change at least one field')
       }
@@ -164,8 +173,11 @@ async function runPatchMany (args, { operation, entries, started = false }) {
     updates.push({ id: rowContext.id, row })
   }
 
-  const changed = updates.length ? await helpers.dataUpdateByIds({ scopeName, context, updates, onlyIf, chunkSize }) : []
-  context.ids = changed.map(String)
+  const changed = new Set((updates.length ? await helpers.dataUpdateByIds({ scopeName, context, updates, onlyIf, chunkSize }) : []).map(String))
+  // A row that left the caller's scope after the visibility read is not written.
+  const unchanged = updates.length - changed.size
+  if (unchanged && !onlyIf && missing === 'throw') throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: unchanged })
+  context.ids = updates.map(update => String(storageAdapter.translateFilterValue('id', update.id))).filter(id => changed.has(id))
   await runHooks('afterDataCallPatchMany')
 
   const response = await manyRowResponse({
@@ -269,6 +281,7 @@ export async function patchWhereMethod (args) {
       throw unsupported(scopeName, 'patchWhere', 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
+    requireWhereScope({ filters, all: params.all, operation: 'patchWhere' })
     // The visible ids are read in the write's transaction, so open it first.
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction

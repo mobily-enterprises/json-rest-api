@@ -118,11 +118,12 @@ export class RestApiTemporalDataError extends RestApiError {
 }
 
 export class RestApiBulkWriteUnsupportedError extends RestApiError {
-  constructor(options?: { resourceType?: string; operation?: string; reason?: string })
+  constructor(options?: { resourceType?: string; operation?: string; reason?: string; hooks?: string[] })
   code: 'REST_API_BULK_WRITE_UNSUPPORTED'
   type: 'rest_api_bulk_write_unsupported'
   statusCode: 422
-  details: { resourceType?: string; operation?: string; reason?: string }
+  /** `hooks` names the per-record hooks that caused the refusal; HTTP responses leave details out. */
+  details: { resourceType?: string; operation?: string; reason?: string; hooks?: string[] }
   toJSON(): SerializedError & Pick<RestApiBulkWriteUnsupportedError, 'code' | 'type' | 'statusCode' | 'details'>
 }
 

@@ -392,8 +392,10 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       await fixture.api.resources.da_hooked.createKnexTable()
       const hooked = fixture.api.resources.da_hooked
       await hooked.post({ data: { name: 'one' } })
+      // The hook names reach server code through details, not the message HTTP clients see.
       await assert.rejects(hooked.patchMany({ data: [{ id: '1', name: 'x' }] }), error =>
-        cause(error) instanceof RestApiBulkWriteUnsupportedError && cause(error).message.includes('per-record-only'))
+        cause(error) instanceof RestApiBulkWriteUnsupportedError && !cause(error).message.includes('per-record-only') &&
+        cause(error).details.hooks.includes('beforeDataCallPatch:per-record-only'))
       // A hook marked batch: true does not block, and other resources are unaffected.
       const created = await hooked.postMany({ data: [{ name: 'two' }, { name: 'three' }], returning: 'minimal' })
       assert.equal(created.data.length, 2)

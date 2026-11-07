@@ -189,6 +189,8 @@ export type ManyRowHookContext<Context extends object = Record<string, unknown>,
   readonly transaction: ManagedTransaction
   // JSON:API documents of the rows, in input order (creates and patches).
   readonly inputRecords?: Array<{ data: { id?: InputResourceId; attributes?: Record<string, unknown>; relationships?: Record<string, unknown> } }>
+  // Patches: fields some row sets with a knex.raw value (those values are not in inputRecords).
+  readonly rawFields?: string[]
   readonly ids?: Array<string | undefined>
 }
 
