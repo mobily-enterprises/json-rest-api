@@ -187,6 +187,22 @@ fieldset. Such a get no longer sets `context.minimalRecord`.
 | --- | --- |
 | `enrichRecord`, `finish` or `finishGet` reading `context.minimalRecord` | read `context.record`, or register a `checkPermissions` or `beforeDataGet` hook to keep the minimal read |
 
+## Write failure logs
+
+The `Error in METHOD method` entry that a failed write logs at error level now
+carries only the resource, the operation and error codes. In 2.x it also held
+the request's `inputRecord` (hidden fields redacted, every other value kept)
+and the formatted error, whose message and SQL can repeat the values being
+written, so logs collected payment state, ciphertext and other stored secrets.
+The error the call throws is unchanged and still carries its `cause`.
+
+| 2.x log field | 3.0 |
+| --- | --- |
+| `inputRecord` | removed; log what you need from the input yourself, in your own code |
+| `error`, `errorSummary` (message, stack, details) | `code`: the error's `code`, or its `name` when it has none |
+| `cleanupErrors: [{ phase, error }]` | `cleanupErrors: [{ phase, code }]` |
+| `method`, `scopeName`, `phase`, `backend`, `transactionOutcome` | unchanged |
+
 ## System contexts and `context.system`
 
 The autofilter and row-policy plugins now reserve `context.system`. A context

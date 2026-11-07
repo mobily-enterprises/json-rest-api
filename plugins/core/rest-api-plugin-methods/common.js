@@ -6,7 +6,6 @@
  * Schema, WriteContext
  * } from './lifecycle-types.js' */
 /** @import { StorageRow } from '../lib/storage/storage-types.js' */
-/** @import { DiagnosticWriter, EnhancedDiagnosticLogger } from '../../../lib/logger-types.js' */
 /** @import { RuntimeLogger } from '../../../types/runtime.js' */
 import { initializeResourceVersion } from '../lib/writing/resource-version.js'
 import {
@@ -16,7 +15,6 @@ import {
 } from '../../../lib/rest-api-errors.js'
 import { transformSimplifiedToJsonApi } from '../lib/querying-writing/simplified-helpers.js'
 import { normalizeRelationshipIdentifiers } from '../lib/querying-writing/resource-id-normalization.js'
-import { createEnhancedLogger } from '../../../lib/enhanced-logger.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
 import {
   getRequestContracts,
@@ -32,20 +30,6 @@ import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/fiel
 
 // A trusted connector callback, evaluated after normal write validation and authorization.
 export const writePrecondition = Symbol('writePrecondition')
-
-/**
- * Gets an enhanced logger instance with full error details and stack traces
- * @param {RuntimeLogger} log - The base logger instance
- * @param {{ schemaInfo?: LifecycleSchema }} context - Request context carrying compiled field visibility
- * @returns {EnhancedDiagnosticLogger & { error: DiagnosticWriter }} Enhanced logger instance
- */
-export const getEnhancedLogger = (log, context = {}) => {
-  return createEnhancedLogger(log, {
-    logFullErrors: true,
-    includeStack: true,
-    schemaInfo: context.schemaInfo
-  })
-}
 
 /**
  * Resolves write input, response options and the managed transaction.
@@ -107,11 +91,18 @@ export const handleWriteMethodError = async (error, context, method, scopeName, 
   await rollbackAfterError(error, context, context.transaction)
   const cleanupErrors = context.cleanupErrors || (context.cleanupErrors = [])
 
+  // The resource, the operation and error codes only: input, error messages and
+  // SQL can carry the values being written (payment state, ciphertext).
+  /** @param {unknown} value */
+  const codeOf = value => {
+    const { code, name } = /** @type {{ code?: unknown, name?: unknown }} */ (Object(value))
+    return typeof code === 'string' || typeof code === 'number' ? code : typeof name === 'string' ? name : null
+  }
   try {
-    await getEnhancedLogger(log, context).logError(`Error in ${method} method`, error, {
+    await log.error(`Error in ${method} method`, {
       ...getOperationDiagnosticContext(context, { phase: 'writeFailure', scopeName, method: context.method ?? method.toLowerCase() }),
-      inputRecord: context.inputRecord,
-      cleanupErrors
+      code: codeOf(error),
+      cleanupErrors: cleanupErrors.map(({ phase, error }) => ({ phase, code: codeOf(error) }))
     })
   } catch (error) {
     cleanupErrors.push({ phase: 'logging', error })

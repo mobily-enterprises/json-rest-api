@@ -69,7 +69,7 @@ describe('Write error cleanup', () => {
   })
 })
 
-it('redacts hidden and normally-hidden field values in write diagnostics', async () => {
+it('logs no input, message or details in write diagnostics, only the error code', async () => {
   const primary = Object.assign(new Error('Write failed'), {
     details: {
       violations: [
@@ -85,11 +85,9 @@ it('redacts hidden and normally-hidden field values in write diagnostics', async
   const calls = []
   await assert.rejects(handleWriteMethodError(primary, context, 'POST', 'items', { error: (...args) => calls.push(args) }), error => error === primary)
   const output = JSON.stringify(calls)
-  assert.ok(!output.includes('PRIVATE_ACCESS'))
-  assert.ok(!output.includes('PRIVATE_NOTE'))
-  assert.ok(!output.includes('PRIVATE_VIOLATION'))
-  assert.match(output, /Visible name/)
-  assert.match(output, /Redacted/)
+  for (const text of ['PRIVATE_ACCESS', 'PRIVATE_NOTE', 'PRIVATE_VIOLATION', 'Visible name', 'Write failed']) assert.ok(!output.includes(text), text)
+  assert.equal(calls[0][1].code, 'Error')
+  assert.equal(calls[0][1].scopeName, 'items')
   assert.equal(context.inputRecord, original)
   assert.equal(original.data.attributes.accessKey, 'PRIVATE_ACCESS')
 })

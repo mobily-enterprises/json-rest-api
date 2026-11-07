@@ -22,7 +22,7 @@ describe(`Compiled write diagnostic visibility (${storageMode.mode})`, () => {
   beforeEach(async () => { await fixture.reset(); calls.length = 0 })
   after(async () => { await fixture?.close() })
 
-  it('uses published field visibility while preserving rollback and the caller input', async () => {
+  it('logs the resource, operation and error code without any input while preserving rollback and the caller input', async () => {
     const inputRecord = { data: { type: 'items', attributes: { name: 'Visible name', accessKey: 'PRIVATE_COMPILED_ACCESS', privateNote: 'PRIVATE_COMPILED_NOTE' } } }
     await assert.rejects(fixture.api.resources.items.post({ document: inputRecord, format: 'jsonapi' }), /Deliberate write failure/)
     const diagnostic = calls.find(args => args[0].includes('Error in POST method'))
@@ -32,19 +32,21 @@ describe(`Compiled write diagnostic visibility (${storageMode.mode})`, () => {
     assert.equal(diagnostic[1].transactionOutcome, 'rolledBack')
     assert.equal(diagnostic[1].scopeName, 'items')
     assert.equal(diagnostic[1].method, 'post')
+    assert.equal(diagnostic[1].code, 'Error')
     const output = JSON.stringify(diagnostic)
-    assert.ok(!output.includes('PRIVATE_COMPILED_ACCESS'))
-    assert.ok(!output.includes('PRIVATE_COMPILED_NOTE'))
-    assert.match(output, /Visible name/)
-    assert.match(output, /Redacted/)
+    // Neither hidden nor visible input, nor the error's message, reaches the log.
+    for (const text of ['PRIVATE_COMPILED_ACCESS', 'PRIVATE_COMPILED_NOTE', 'Visible name', 'Deliberate write failure']) {
+      assert.ok(!output.includes(text), text)
+    }
     assert.equal(inputRecord.data.attributes.accessKey, 'PRIVATE_COMPILED_ACCESS')
     assert.equal(await fixture.count('items'), 0)
   })
-  it('redacts hidden values when malformed input fails before transaction setup', async () => {
+  it('logs no input when malformed input fails before transaction setup', async () => {
     const inputRecord = [{ accessKey: 'PRIVATE_EARLY_ACCESS', privateNote: 'PRIVATE_EARLY_NOTE' }]
     await assert.rejects(fixture.api.resources.items.post({ document: inputRecord, format: 'jsonapi' }), /document must be an object/)
     const diagnostic = calls.find(args => args[0].includes('Error in POST method'))
     assert.ok(diagnostic)
+    assert.equal(diagnostic[1].code, 'REST_API_VALIDATION')
     assert.ok(!JSON.stringify(diagnostic).includes('PRIVATE_EARLY_'))
     assert.equal(inputRecord[0].accessKey, 'PRIVATE_EARLY_ACCESS')
     assert.equal(await fixture.count('items'), 0)
