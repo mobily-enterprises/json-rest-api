@@ -111,6 +111,14 @@ export interface DataAccessMethods<
     format?: Format
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>
+  // Locks the visible rows the filters select (FOR UPDATE, id order), waiting for
+  // other transactions; throws RestApiRowLimitError past 1000 rows.
+  lockWhere<Format extends ResourceFormat = DefaultFormat>(params: {
+    transaction: ManagedTransaction | Knex.Transaction
+    filters?: Record<string, unknown>
+    format?: Format
+    queryParams?: { fields?: Record<string, string> }
+  }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>
   // Takes up to limit (default 1, at most 1000) matching rows no other transaction holds.
   claim<Format extends ResourceFormat = DefaultFormat>(params: {
     transaction: ManagedTransaction | Knex.Transaction

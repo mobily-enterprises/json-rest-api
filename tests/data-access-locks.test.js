@@ -17,7 +17,22 @@ const tableOnly = storageMode.isAnyApi() && 'locks need table storage'
 
 describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
-  before(async () => { fixture = await createDataAccessFixture({ databaseOptions: { maxConnections: 4 } }) })
+  before(async () => {
+    fixture = await createDataAccessFixture({ databaseOptions: { maxConnections: 4 } })
+    // A filtering hook that reads from a derived table instead of the table.
+    await fixture.api.customize({
+      hooks: {
+        knexQueryFiltering: {
+          functionName: 'locks-derived-table',
+          handler: ({ context }) => {
+            if (!context.deriveTable || !context.knexQuery) return
+            const { query, db, tableName } = context.knexQuery
+            context.knexQuery.query = db.from(query.clone().as(tableName))
+          }
+        }
+      }
+    })
+  })
   after(async () => { await fixture?.close() })
 
   const seedJobs = async () => {
@@ -98,6 +113,109 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     })
   })
 
+  // The lock's first statement must be the locking read: a plain read before it
+  // would fix a REPEATABLE READ snapshot (MySQL, MariaDB) before the wait, so the
+  // transaction would miss what the lock holder committed meanwhile.
+  const isMysql = databaseClient === 'mysql2'
+  const rowsOf = result => isMysql ? result[0] : result.rows
+  const connectionId = async transaction =>
+    rowsOf(await transaction.raw(isMysql ? 'SELECT CONNECTION_ID() AS id' : 'SELECT pg_backend_pid() AS id'))[0].id
+  const waitForLockWait = async id => {
+    const sql = isMysql
+      ? "SELECT COUNT(*) AS waiting FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = ? AND trx_state = 'LOCK WAIT'"
+      : "SELECT COUNT(*) AS waiting FROM pg_stat_activity WHERE pid = ? AND wait_event_type = 'Lock'"
+    for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
+      if (Number(rowsOf(await fixture.knex.raw(sql, [id]))[0].waiting) > 0) return
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    throw new Error('the second transaction never waited for the lock')
+  }
+
+  // B starts its lock while A holds the rows; A writes and commits while B waits.
+  const whileWaiting = async ({ hold, waiter, write, snapshotIsolation }) => {
+    let reportWaiter
+    const waiterId = new Promise(resolve => { reportWaiter = resolve })
+    let second
+    await fixture.api.transaction(async first => {
+      await hold(first)
+      second = fixture.api.transaction(async transaction => {
+        if (snapshotIsolation) await transaction.raw(`SET SESSION innodb_snapshot_isolation = ${snapshotIsolation}`)
+        try {
+          reportWaiter(await connectionId(transaction))
+          return await waiter(transaction)
+        } finally {
+          if (snapshotIsolation) await transaction.raw('SET SESSION innodb_snapshot_isolation = DEFAULT')
+        }
+      })
+      await waitForLockWait(await waiterId)
+      await write(first)
+    })
+    return second
+  }
+  const newEntry = (id, attributes = {}) => ({ id, code: `W${id}`, amount: 1, status: 'open', workspace_id: 'ws-a', access_group: 'g1', account_id: 1, ...attributes })
+
+  for (const snapshotIsolation of isMysql ? ['OFF', 'ON'] : [undefined]) {
+    const name = snapshotIsolation ? ` (innodb_snapshot_isolation ${snapshotIsolation})` : ''
+    it(`lockByIds sees what the lock holder committed while it waited${name}`, { skip: !serverDatabase && 'SQLite has one writer' }, async t => {
+      if (snapshotIsolation) {
+        try {
+          await fixture.knex.raw('SELECT @@innodb_snapshot_isolation')
+        } catch {
+          return t.skip('the server has no innodb_snapshot_isolation')
+        }
+      }
+      await seedLedger(fixture)
+      const accounts = fixture.api.resources.da_accounts
+      const { account, entry } = await whileWaiting({
+        snapshotIsolation,
+        hold: first => accounts.lockByIds({ ids: ['1'], transaction: first }, workspaceA()),
+        write: async first => {
+          await first('da_entries').insert(newEntry(100))
+          await first('da_accounts').where({ id: 1 }).update({ name: 'A renamed' })
+        },
+        waiter: async transaction => {
+          const [account] = (await accounts.lockByIds({ ids: ['1'], transaction }, workspaceA())).data
+          return { account, entry: await transaction('da_entries').where({ id: 100 }).first() }
+        }
+      })
+      assert.equal(account.name, 'A renamed')
+      assert.equal(Number(entry?.account_id), 1, 'a plain read after the lock sees the row the holder committed')
+    })
+  }
+
+  it('lockWhere locks the visible rows the filters select, in id order', async () => {
+    await seedLedger(fixture)
+    await fixture.knex('da_entries').whereIn('id', [3, 1, 4, 7]).update({ status: 'held' })
+    const entries = fixture.api.resources.da_entries
+    await assert.rejects(entries.lockWhere({ filters: { status: 'held' } }, workspaceA()), isA(RestApiLockOutsideTransactionError))
+    await fixture.api.transaction(async transaction => {
+      // 4 is hidden by the row policy, 7 belongs to ws-b.
+      const locked = await entries.lockWhere({ filters: { status: 'held' }, transaction }, workspaceA())
+      assert.deepEqual(locked.data.map(record => [String(record.id), record.code]), [['1', 'E1'], ['3', 'E3']])
+      const sparse = await entries.lockWhere({ filters: { status: 'held' }, transaction, queryParams: { fields: { da_entries: 'amount' } }, format: 'jsonapi' }, workspaceB())
+      assert.deepEqual(sparse.data.map(record => [String(record.id), Object.keys(record.attributes)]), [['7', ['amount']]])
+      assert.deepEqual((await entries.lockWhere({ filters: { status: 'none' }, transaction }, workspaceA())).data, [])
+      await assert.rejects(entries.lockWhere({ filters: { label: 'x' }, transaction }, workspaceA()), isA(RestApiValidationError))
+      await assert.rejects(
+        fixture.api.resources.da_jobs.lockWhere({ filters: { state: 'queued' }, transaction }, { ...workspaceA(), joinPolicy: true }),
+        error => isA(RestApiValidationError)(error) && JSON.stringify(cause(error).details).includes('lock_single_table')
+      )
+    })
+  })
+
+  it('lockWhere locks a row that starts to match while it waits', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+    await seedLedger(fixture)
+    await fixture.knex('da_entries').where({ id: 1 }).update({ status: 'held' })
+    const entries = fixture.api.resources.da_entries
+    const held = transaction => entries.lockWhere({ filters: { status: 'held' }, transaction }, workspaceA())
+    const locked = await whileWaiting({
+      hold: held,
+      write: first => first('da_entries').insert(newEntry(100, { status: 'held' })),
+      waiter: held
+    })
+    assert.deepEqual(locked.data.map(record => String(record.id)), ['1', '100'])
+  })
+
   it('claims matching rows in sort order inside the scope', async () => {
     await seedJobs()
     const jobs = fixture.api.resources.da_jobs
@@ -120,6 +238,17 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
       const theirs = await fixture.api.transaction(second =>
         jobs.claim({ filters: { state: 'queued' }, sort: ['-priority'], limit: 2, transaction: second }, workspaceA()))
       assert.deepEqual(theirs.data.map(record => String(record.id)), ['3', '1'])
+    })
+  })
+
+  it('refuses a lock or claim whose filtering hook replaces the table', async () => {
+    await seedJobs()
+    const derived = { ...workspaceA(), deriveTable: true }
+    const refusedAs = rule => error => isA(RestApiValidationError)(error) && JSON.stringify(cause(error).details).includes(rule)
+    await fixture.api.transaction(async transaction => {
+      await assert.rejects(fixture.api.resources.da_entries.lockByIds({ ids: ['1'], transaction }, derived), refusedAs('lock_single_table'))
+      await assert.rejects(fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, derived), refusedAs('lock_single_table'))
+      await assert.rejects(fixture.api.resources.da_jobs.claim({ filters: { state: 'queued' }, transaction }, derived), refusedAs('claim_single_table'))
     })
   })
 

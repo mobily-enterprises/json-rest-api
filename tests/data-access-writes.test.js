@@ -38,6 +38,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     await assert.rejects(entries.deleteWhere({ filters: { status: 'open' } }, workspaceA()), refused)
     await fixture.api.transaction(async transaction => {
       await assert.rejects(entries.lockByIds({ ids: ['1'], transaction }, workspaceA()), refused)
+      await assert.rejects(entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()), refused)
       await assert.rejects(entries.claim({ transaction }, workspaceA()), refused)
     })
   })

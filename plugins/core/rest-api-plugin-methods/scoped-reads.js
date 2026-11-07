@@ -10,11 +10,12 @@ import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
-import { keepVisible, refuseDuplicateIds, requireLockTransaction, resolveMissing, validateFilters } from './many-row-common.js'
+import { refuseDuplicateIds, requireLockTransaction, resolveMissing, validateFilters } from './many-row-common.js'
 
 export const SCOPED_QUERY_PURPOSES = new Set(['report', 'bulk-write', 'lock', 'claim'])
 const DEFAULT_QUERY_ALL_PAGE = 1000
 const MAX_CLAIM = 1000
+const MAX_LOCK_WHERE = 1000
 
 const invalid = (field, message) => new RestApiValidationError(message, { fields: [field], violations: [{ field, rule: 'scoped_read', message }] })
 
@@ -142,7 +143,9 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
 
 /**
  * Locks the visible rows among `ids` until the transaction ends, in id order,
- * and returns them as the locking read saw them.
+ * and returns them as the locking read saw them. That read is the first
+ * statement and decides visibility itself, so the transaction's snapshot
+ * starts after any lock wait.
  * @param {any} args
  */
 export async function lockByIdsMethod (args) {
@@ -153,22 +156,31 @@ export async function lockByIdsMethod (args) {
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   refuseDuplicateIds(ids, storageAdapter, 'ids')
   const missing = resolveMissing(params.missing)
-
-  const visible = new Set()
-  for (const part of chunk(ids, 1000)) {
-    for (const id of await helpers.dataVisibleIds({ scopeName, context, runHooks, ids: part, queryPurpose: 'lock' })) visible.add(String(id))
-  }
-  const kept = keepVisible({ requested: ids, visible, missing, scopeName, storageAdapter })
-  if (!kept.length) return { data: [] }
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = { data: [] }
-  for (const part of chunk(kept, 1000)) {
-    document.data.push(...(await helpers.dataLockByIds({ scopeName, context, ids: part })).data)
+  for (const part of chunk(ids, 1000)) {
+    document.data.push(...(await helpers.dataLockByIds({ scopeName, context, runHooks, ids: part })).data)
   }
-  // A row that left the caller's scope after the visibility read is not locked.
-  if (document.data.length < kept.length && missing === 'throw') {
-    throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: kept.length - document.data.length })
+  if (document.data.length < ids.length && missing === 'throw') {
+    throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: ids.length - document.data.length })
   }
+  if (!document.data.length) return { data: [] }
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
+}
+
+/**
+ * Locks the visible rows the filters select until the transaction ends, in id
+ * order, waiting for transactions that hold them, so a row that starts to match
+ * while the lock waits is locked and returned too. At most 1,000 rows.
+ * @param {any} args
+ */
+export async function lockWhereMethod (args) {
+  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
+  await setupLockRead(args, 'lockWhere', 'dataLockWhere')
+  const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
+  await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
+  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1 })
+  if (document.data.length > MAX_LOCK_WHERE) throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
   return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
 }
 

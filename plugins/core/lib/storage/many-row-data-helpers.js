@@ -419,23 +419,60 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return skipLocked ? query.skipLocked() : query
   }
 
-  /**
-   * Lock rows already known to be visible, in id order, on the bare table.
-   * Returns the rows the locking read saw as a JSON:API document.
-   * @param {{ scopeName: string, context: any, ids: Array<string | number> }} request
-   */
-  const dataLockByIds = async ({ scopeName, context, ids }) => {
+  // The scoped query of a lock or claim, refused unless it is still a SELECT on
+  // the resource's own table: FOR UPDATE on a derived table or a common table
+  // expression locks nothing and reads the transaction snapshot, and InnoDB
+  // would lock every joined row the read examines.
+  const lockingQuery = async ({ scopeName, context, runHooks, operation, purpose, filters }) => {
     const storageAdapter = adapterFor(scopeName)
     const tableName = storageAdapter.getTableName()
-    const idColumn = `${tableName}.${storageAdapter.getIdColumn()}`
-    const query = applyWriteConditions({
-      query: context.db(tableName).whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id))).orderBy(idColumn),
-      context,
-      scopeName,
-      storageAdapter,
-      tableName
-    })
+    const { query } = await dataScopedQuery({ scopeName, context, runHooks, purpose, filters })
+    const added = query._statements.find(statement => ['join', 'with', 'union'].includes(statement.grouping))?.grouping
+    if (added || query._single.table !== tableName) {
+      const what = { join: 'joins', with: 'a common table expression', union: 'a set operation' }[added] ?? 'another source table'
+      const message = `${operation} on '${scopeName}' needs a single-table query, but its filters or row policy add ${what}`
+      throw new RestApiValidationError(message, { fields: ['filters'], violations: [{ field: 'filters', rule: `${purpose}_single_table`, message }] })
+    }
+    return { query, storageAdapter, tableName, idColumn: `${tableName}.${storageAdapter.getIdColumn()}` }
+  }
+
+  /**
+   * Lock the visible rows among `ids` in id order and read them, in one locking
+   * read that carries the scope and row-policy predicates. No plain read comes
+   * first: under REPEATABLE READ (MySQL, MariaDB) it would fix the snapshot
+   * before the lock wait, hiding what the lock holder commits meanwhile.
+   * Returns the rows the locking read saw as a JSON:API document.
+   * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number> }} request
+   */
+  const dataLockByIds = async ({ scopeName, context, runHooks, ids }) => {
+    const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockByIds', purpose: 'lock' })
+    query.whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id))).orderBy(idColumn)
     return readRecords({ scopeName, context, query: lockRows(query, context.db), tableName })
+  }
+
+  /**
+   * Lock up to `limit` visible rows the filters select, in id order, waiting
+   * for transactions that hold them, in one locking read like dataLockByIds.
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number }} request
+   */
+  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit }) => {
+    const read = async () => {
+      const { query, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      return readRecords({ scopeName, context, query: lockRows(query.orderBy(idColumn).limit(limit), context.db), tableName })
+    }
+    let document = await read()
+    // A PostgreSQL statement finds only the rows committed when it began; after a
+    // lock wait it rechecks those, but never sees rows that started to match
+    // meanwhile. Read again, under the locks already held, until none appears.
+    // (InnoDB's locking reads see the latest rows, and its next-key locks keep
+    // new rows out of the range the read has passed.)
+    if (databaseFamily(context.db) === 'pg') {
+      for (let previous = -1; document.data.length > previous && document.data.length < limit;) {
+        previous = document.data.length
+        document = await read()
+      }
+    }
+    return document
   }
 
   /**
@@ -443,17 +480,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, sort: Array<{ field: string, direction: 'asc' | 'desc' }>, limit: number }} request
    */
   const dataClaim = async ({ scopeName, context, runHooks, filters, sort, limit }) => {
-    const storageAdapter = adapterFor(scopeName)
-    const tableName = storageAdapter.getTableName()
-    const idColumn = `${tableName}.${storageAdapter.getIdColumn()}`
     const db = context.db
-    const { query } = await dataScopedQuery({ scopeName, context, runHooks, purpose: 'claim', filters })
-    if (query._statements.some(statement => statement.grouping === 'join')) {
-      throw new RestApiValidationError(`claim on '${scopeName}' needs a single-table query, but its filters or row policy add joins`, {
-        fields: ['filters'],
-        violations: [{ field: 'filters', rule: 'claim_single_table', message: 'A row policy or filter that joins tables cannot be combined with SKIP LOCKED' }]
-      })
-    }
+    const claimQuery = () => lockingQuery({ scopeName, context, runHooks, operation: 'claim', purpose: 'claim', filters })
+    const { query, storageAdapter, tableName, idColumn } = await claimQuery()
     for (const { field, direction } of sort) query.orderBy(`${tableName}.${storageAdapter.translateColumn(field)}`, direction)
     if (databaseFamily(db) !== 'mysql') {
       // PostgreSQL locks rows as the LIMIT takes them; SQLite has one writer.
@@ -464,8 +493,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     // reads and the LIMIT then drops, so one claim would hold every match.
     // Instead: candidates in sort order by a plain read; then, for windows of
     // candidates no larger than what is still needed, a SKIP LOCKED lock by
-    // primary key on the bare table, and a read of the held rows under the lock
-    // that drops any a committed change made stop matching.
+    // primary key on the bare table, and a locking read of the held rows that
+    // drops any a committed change made stop matching. SKIP LOCKED never waits,
+    // so the snapshot the plain read starts misses nothing a lock wait let commit.
     const claimed = { data: [] }
     const identity = { id: databaseIdentityExpression(db, idColumn) }
     const pageSize = Math.max(limit * 2, 20)
@@ -477,7 +507,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         const byKey = applyWriteConditions({ query: db(tableName).whereIn(idColumn, window), context, scopeName, storageAdapter, tableName })
         const held = (await applyDatabaseReadOptions(byKey.forUpdate().skipLocked().select(identity))).map(row => row.id)
         if (!held.length) continue
-        const { query: current } = await dataScopedQuery({ scopeName, context, runHooks, purpose: 'claim', filters })
+        const { query: current } = await claimQuery()
         const document = await readRecords({ scopeName, context, query: current.whereIn(idColumn, held).forUpdate().skipLocked(), tableName })
         const order = new Map(window.map((id, position) => [String(id), position]))
         claimed.data.push(...document.data.sort((left, right) => order.get(String(left.id)) - order.get(String(right.id))))
@@ -487,7 +517,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return claimed
   }
 
-  return { dataScopedQuery, dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds, dataLockByIds, dataClaim }
+  return { dataScopedQuery, dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds, dataLockByIds, dataLockWhere, dataClaim }
 }
 
 const sameValue = (left, right) => {

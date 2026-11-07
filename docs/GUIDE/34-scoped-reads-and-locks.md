@@ -15,7 +15,7 @@ it does not need hand-written Knex that skips them:
 - `scopedQuery`, a read-only Knex builder already limited to the caller's rows;
 - `queryAll`, every matching row in cursor pages;
 - window includes, the newest few related rows per parent;
-- `lockByIds` and `claim`, row locks inside a transaction;
+- `lockByIds`, `lockWhere` and `claim`, row locks inside a transaction;
 - `lockVersionField`, a counter every update advances;
 - system contexts, for jobs that work across every owner.
 
@@ -149,7 +149,7 @@ shared: every owner reads them. The field must be `nullable`.
 | Operation | Sees |
 | --- | --- |
 | `query`, `get`, includes, `aggregate`, `scopedQuery` (`purpose: 'report'`) | the owner's rows and shared rows |
-| many-row writes, `lockByIds`, `claim`, `scopedQuery` with `purpose` `'bulk-write'`, `'lock'` or `'claim'` | only the owner's rows |
+| many-row writes, `lockByIds`, `lockWhere`, `claim`, `scopedQuery` with `purpose` `'bulk-write'`, `'lock'` or `'claim'` | only the owner's rows |
 | single `patch`, `put`, `delete` of a shared row, and `postRelationship` or `deleteRelationship` on it | refused as `forbidden` outside a system context |
 | `post` | stamps the owner; a create that would leave the field NULL is `forbidden` |
 
@@ -265,22 +265,44 @@ and MariaDB 10.2+ do. AnyAPI storage applies the same rule.
 
 ## Row locks
 
-`lockByIds` and `claim` lock rows until the transaction ends. Both refuse to run
-outside a transaction (`RestApiLockOutsideTransactionError`); pass one from
-`api.transaction`. They return the records as the locking read saw them,
-through the read pipeline of `query`: `checkDataPermissions` runs for each row
-as for `get`, then `enrichRecord`, computed fields and the `finish` and
-`finishQuery` hooks, which see `method: 'query'` and `lock: true`. The lock
-statements repeat the caller's ownership conditions, so a row that moved to
-another owner after the visibility read is not locked; `lockByIds` then counts
-it as missing.
+`lockByIds`, `lockWhere` and `claim` lock rows until the transaction ends. All
+three refuse to run outside a transaction (`RestApiLockOutsideTransactionError`);
+pass one from `api.transaction`. They return the records as the locking read saw
+them, through the read pipeline of `query`: `checkDataPermissions` runs for each
+row as for `get`, then `enrichRecord`, computed fields and the `finish` and
+`finishQuery` hooks, which see `method: 'query'` and `lock: true`.
+
+The locking read is the lock's first statement and carries the caller's
+ownership and row-policy predicates itself; no plain read comes before it. On
+MySQL and MariaDB this matters: under REPEATABLE READ the first plain read of a
+transaction fixes its snapshot, so a plain read before a lock wait would hide
+from every later read in the transaction what the lock holder committed while
+it waited (and with `innodb_snapshot_isolation=ON` the lock itself would fail
+with `ER_CHECKREAD`). After a lock, plain reads in the same transaction see what
+the previous holder committed, as long as the transaction made no plain read
+before the lock. For the same reason the query must stay a plain `SELECT` on the
+resource's table: a row policy or `knexQueryFiltering` hook that adds joins, a
+common table expression or a set operation, or replaces the source table, is
+refused for all three (rule `lock_single_table` or `claim_single_table`),
+because the database would lock the joined rows too or lock nothing at all.
 
 `lockByIds({ ids, transaction, missing, format, queryParams: { fields } })`
 locks the listed rows the caller can see, in id order, so two transactions that
 lock overlapping sets cannot deadlock on each other. Hidden or missing ids throw
 `RestApiRecordsNotFoundError`, or are left out with `missing: 'skip'`. The
-locked rows are read again under the lock, so they show the latest committed
-values even when the transaction began earlier.
+locked rows show the latest committed values even when the transaction began
+earlier.
+
+`lockWhere({ filters, transaction, format, queryParams: { fields } })` locks
+every row the filters select that the caller can see, in id order, waiting for
+transactions that hold them, and returns them. A row that starts to match while
+it waits is locked and returned too: InnoDB's locking reads see the latest rows,
+and on PostgreSQL, whose statements only find rows committed when they began,
+`lockWhere` reads again under the locks it holds until no new row appears. It
+locks at most 1,000 rows and throws `RestApiRowLimitError` when more match. Use
+it, not `scopedQuery`, to lock by filter: the scoped builder is a read-only
+derived table that cannot lock. On MySQL and MariaDB, index the filtered
+columns, because InnoDB locks every row the read examines.
 
 `claim({ filters, sort, limit, transaction, format, queryParams: { fields } })`
 takes up to `limit` matching rows (default 1, at most 1,000) that no other
@@ -290,11 +312,19 @@ queue. Change the claimed rows in the same transaction, as the example does.
 A row policy that joins other tables is refused for `claim`, because the
 database would lock the joined rows too.
 
-| Database | `lockByIds` | `claim` |
-| --- | --- | --- |
-| PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE SKIP LOCKED` |
-| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
-| SQLite | a scoped read | a scoped read |
+| Database | `lockByIds` | `lockWhere` | `claim` |
+| --- | --- | --- | --- |
+| PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE SKIP LOCKED` |
+| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | `FOR UPDATE` | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
+| SQLite | a scoped read | a scoped read | a scoped read |
+
+On MySQL and MariaDB the candidate read of `claim` is a plain read, the only way
+to choose rows in sort order without locking every row the sort examines, so it
+starts the transaction's snapshot. `claim` never waits for a lock, so that
+snapshot misses only what commits during the claim itself; with
+`innodb_snapshot_isolation=ON` a candidate that another transaction changes
+between the two reads makes the claim fail with `ER_CHECKREAD`, and the caller
+retries.
 
 SQLite allows one writer at a time, so a write transaction already excludes
 every other one; its locks are ordinary scoped reads.

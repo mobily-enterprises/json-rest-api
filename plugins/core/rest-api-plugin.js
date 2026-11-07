@@ -19,7 +19,7 @@ import deleteMethod from './rest-api-plugin-methods/delete.js'
 import postManyMethod from './rest-api-plugin-methods/post-many.js'
 import { patchManyMethod, patchWhereIdsMethod, patchWhereMethod } from './rest-api-plugin-methods/patch-many.js'
 import { deleteManyMethod, deleteWhereMethod } from './rest-api-plugin-methods/delete-many.js'
-import { claimMethod, lockByIdsMethod, queryAllMethod, scopedQueryMethod } from './rest-api-plugin-methods/scoped-reads.js'
+import { claimMethod, lockByIdsMethod, lockWhereMethod, queryAllMethod, scopedQueryMethod } from './rest-api-plugin-methods/scoped-reads.js'
 import enrichAttributesMethod from './rest-api-plugin-methods/enrich-attributes.js'
 import checkPermissionsMethod from './rest-api-plugin-methods/check-permissions.js'
 import applyQueryFiltersMethod from './rest-api-plugin-methods/apply-query-filters.js'
@@ -112,6 +112,7 @@ export const RestApiPlugin = {
     addResourceMethod('queryAll', withAvailableContext(queryAllMethod))
     addResourceMethod('scopedQuery', withAvailableContext(scopedQueryMethod))
     addResourceMethod('lockByIds', withAvailableContext(lockByIdsMethod))
+    addResourceMethod('lockWhere', withAvailableContext(lockWhereMethod))
     addResourceMethod('claim', withAvailableContext(claimMethod))
 
     // Relationship methods

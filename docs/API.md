@@ -86,7 +86,7 @@ a separate context for each enlisted operation. See [transaction support](#trans
    - [scopedQuery - Scoped Read-Only Builder](#scopedquery---scoped-read-only-builder)
    - [queryAll - Every Matching Record](#queryall---every-matching-record)
    - [Many-Row Writes](#many-row-writes)
-   - [lockByIds and claim - Row Locks](#lockbyids-and-claim---row-locks)
+   - [lockByIds, lockWhere and claim - Row Locks](#lockbyids-lockwhere-and-claim---row-locks)
    - [System Contexts](#system-contexts)
 4. [Relationship Methods](#relationship-methods)
    - [getRelated - Retrieve Related Resources](#getrelated---retrieve-related-resources)
@@ -1339,25 +1339,30 @@ many-to-many or reverse relationships, file fields, or positions.
 `BulkOperationsPlugin` exposes `postMany`, `patchMany` and `deleteMany` as
 `POST`, `PATCH` and `DELETE /RESOURCE/bulk`.
 
-### lockByIds and claim - Row Locks
+### lockByIds, lockWhere and claim - Row Locks
 
 ```javascript
 await api.transaction(async transaction => {
   const { data: locked } = await resource.lockByIds({ ids, transaction, missing, format, queryParams: { fields } }, context)
+  const { data: matching } = await resource.lockWhere({ filters, transaction, format, queryParams: { fields } }, context)
   const { data: taken } = await resource.claim({ filters, sort, limit, transaction, format, queryParams: { fields } }, context)
 })
 ```
 
-Both need a transaction (`RestApiLockOutsideTransactionError` otherwise) and
-return the records as the locking read saw them, through the read hooks of
+All three need a transaction (`RestApiLockOutsideTransactionError` otherwise)
+and return the records as the locking read saw them, through the read hooks of
 `query` (`enrichRecord`, `finish`, `finishQuery`) and `checkDataPermissions`
-for each row. `lockByIds` locks the visible
-rows among `ids` in id order (`FOR UPDATE`); hidden or missing ids throw
-`RestApiRecordsNotFoundError` unless `missing: 'skip'`. `claim` takes up to
+for each row. The locking read is the first statement and applies the scope
+itself, so plain reads later in the transaction see what a previous lock holder
+committed. `lockByIds` locks the visible rows among `ids` in id order
+(`FOR UPDATE`); hidden or missing ids throw `RestApiRecordsNotFoundError` unless
+`missing: 'skip'`. `lockWhere` locks the visible rows the filters select in id
+order, waiting for other transactions and including rows that start to match
+meanwhile; more than 1,000 throw `RestApiRowLimitError`. `claim` takes up to
 `limit` (default 1, at most 1,000) matching rows that no other transaction holds
-(`SKIP LOCKED`), in `sort` order (stored fields, default `['id']`); a row policy
-that joins tables is refused. On SQLite, which has one writer, both are scoped
-reads.
+(`SKIP LOCKED`), in `sort` order (stored fields, default `['id']`). A row policy
+that joins tables is refused for all three. On SQLite, which has one writer,
+they are scoped reads.
 
 A resource option `lockVersionField: 'lock_version'` names a stored integer
 that every update (single, many-row and upsert merge) sets to `column + 1`.

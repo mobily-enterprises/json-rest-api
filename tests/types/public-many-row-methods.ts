@@ -24,8 +24,9 @@ const { query } = await items.scopedQuery({ alias: 'i', purpose: 'report' })
 const all = await items.queryAll({ pageSize: 500, rowLimit: 10000 })
 const allNames: Array<string | undefined> = all.data.map(item => item.name)
 const locked = await items.lockByIds({ ids: [1, 2], transaction: raw })
+const lockedWhere = await items.lockWhere({ filters: { name: 'First' }, transaction })
 const claimed = await items.claim({ filters: { name: 'queued' }, sort: ['-rank'], limit: 10, transaction })
-void [nothing, createdName, upsertedId, patchedName, deletedId, query, allNames, locked, claimed]
+void [nothing, createdName, upsertedId, patchedName, deletedId, query, allNames, locked, lockedWhere, claimed]
 
 // @ts-expect-error Many-row writes need a managed transaction from api.transaction.
 await items.postMany({ data: [{ name: 'Raw' }], transaction: raw })

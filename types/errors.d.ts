@@ -155,9 +155,9 @@ export class RestApiScopedQueryReadOnlyError extends RestApiError {
 }
 
 export class RestApiRowLimitError extends RestApiError {
-  constructor(options?: { resourceType?: string; rowLimit?: number })
+  constructor(options?: { resourceType?: string; rowLimit?: number; operation?: 'queryAll' | 'lockWhere' })
   code: 'REST_API_ROW_LIMIT'
   type: 'rest_api_row_limit'
-  details: { resourceType?: string; rowLimit?: number }
+  details: { resourceType?: string; rowLimit?: number; operation: 'queryAll' | 'lockWhere' }
   toJSON(): SerializedError & Pick<RestApiRowLimitError, 'code' | 'type' | 'details'>
 }

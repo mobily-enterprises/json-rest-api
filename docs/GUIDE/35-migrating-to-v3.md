@@ -20,7 +20,8 @@ bulk options are rejected with a message that names their replacement.
   and compare-and-set (`onlyIf`). See [many-row writes](27-many-row-writes.md).
 - **Scoped reads:** `scopedQuery`, a read-only Knex builder limited to the
   caller's rows, and `queryAll`, every matching row in cursor pages.
-- **Row locks:** `lockByIds` and `claim` (`SKIP LOCKED`), inside a transaction.
+- **Row locks:** `lockByIds`, `lockWhere` and `claim` (`SKIP LOCKED`), inside a
+  transaction.
 - **Lock versions:** `lockVersionField`, a counter every update advances.
 - **Shared rows:** an autofilter filter with `shared: true` lets every owner
   read rows whose owner field is NULL.

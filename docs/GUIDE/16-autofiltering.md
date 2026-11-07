@@ -300,7 +300,7 @@ await api.addResource('categories', {
 
 - Reads (`query`, `get`, includes, `aggregate`, `scopedQuery`) see the owner's
   rows and the shared rows.
-- Many-row writes, `lockByIds`, `claim` and `scopedQuery` with purpose
+- Many-row writes, `lockByIds`, `lockWhere`, `claim` and `scopedQuery` with purpose
   `'bulk-write'`, `'lock'` or `'claim'` see only the owner's rows.
 - Single `patch`, `put` and `delete` of a shared row fail as `forbidden`, and so
   does a create whose owner value resolves to NULL.
