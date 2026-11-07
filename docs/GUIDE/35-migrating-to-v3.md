@@ -34,8 +34,9 @@ bulk options are rejected with a message that names their replacement.
   buckets (`day`, `week`, `month`, `year`) with a time zone; date fields with a
   storage serializer can be bucketed and take `min` and `max`. See
   [AGGREGATE](../API.md#aggregate---grouped-totals).
-- **One read for `get`:** a resource with no `checkPermissions`, `beforeData`
-  or `beforeDataGet` hook reads its record in one statement; such a get no
+- **One read for `get`:** a resource with no `checkPermissions`,
+  `checkDataPermissions`, `checkDataPermissionsGet`, `beforeData` or
+  `beforeDataGet` hook reads its record in one statement; such a get no
   longer sets `context.minimalRecord` (read `context.record` in later hooks).
 - **Skipping writes in one statement:** `patchMany`, `patchWhereIds` and
   `deleteMany` with `missing: 'skip'` put the scope in the UPDATE or DELETE
@@ -177,11 +178,12 @@ stored the JSON text and SQLite refused it. This also ships in 2.4.1.
 
 ## `get` reads once
 
-A `get` on a resource with no `checkPermissions`, `beforeData` or
-`beforeDataGet` hook (for the resource or global) reads its record in one
-statement, scope and row policy included, instead of a minimal read followed by
-a full read. Not found stays `not_found` and still answers before an invalid
-fieldset. Such a get no longer sets `context.minimalRecord`.
+A `get` on a resource with no `checkPermissions`, `checkDataPermissions`,
+`checkDataPermissionsGet`, `beforeData` or `beforeDataGet` hook (for the
+resource or global) reads its record in one statement, scope and row policy
+included, instead of a minimal read followed by a full read. Not found stays
+`not_found` and still answers before an invalid fieldset. Such a get no longer
+sets `context.minimalRecord`.
 
 | 2.x | 3.0 |
 | --- | --- |

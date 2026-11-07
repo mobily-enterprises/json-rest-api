@@ -193,8 +193,9 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     await assert.rejects(entries.get({ id: '99', queryParams: { fields: { da_nothing: 'name' } } }, workspaceA()), notFound)
     await assert.rejects(entries.get({ id: '1', queryParams: { fields: { da_nothing: 'name' } } }, workspaceA()), error => cause(error) instanceof RestApiFieldsetError)
 
+    // Any permission hook keeps the minimal read, a data permission hook included.
     await fixture.api.customize({
-      hooks: { checkPermissions: { functionName: 'data-access-get-reader', handler: () => {} } }
+      hooks: { checkDataPermissionsGet: { functionName: 'data-access-get-reader', handler: () => {} } }
     })
     const twice = await fixture.measure(() => entries.get({ id: '1' }, workspaceA()))
     assert.deepEqual(twice.result, once.result)

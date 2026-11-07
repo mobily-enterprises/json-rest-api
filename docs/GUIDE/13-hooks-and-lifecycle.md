@@ -394,7 +394,8 @@ a handler to these resource write stages.
 
 GET authorizes through `checkPermissions`, then runs `beforeData` and
 `beforeDataGet`. These see `context.minimalRecord`, the stored row read before
-the full read. A resource with none of these three hooks (registered for it or
+the full read. A resource with none of these three hooks and no
+`checkDataPermissions` or `checkDataPermissionsGet` hook (registered for it or
 globally) reads its row once, with its scope and row policy in that read, and
 leaves `minimalRecord` unset; a missing or hidden row is still `not_found`, and
 answers before an invalid fieldset does. After fetching, it runs `checkDataPermissions`,

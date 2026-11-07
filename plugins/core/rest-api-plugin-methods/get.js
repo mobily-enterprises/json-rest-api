@@ -84,10 +84,10 @@ export default async function getMethod ({
     resourceId: context.id
   })
 
-  // The minimal record serves the permission check and the hooks before the
+  // The minimal record serves the permission checks and the hooks before the
   // data call. A resource without them reads once: the scoped full read also
-  // answers whether the row exists.
-  const readOnce = ['checkPermissions', 'beforeData', 'beforeDataGet'].some(event => hasHooks(event))
+  // answers whether the row exists. Any permission hook keeps both reads.
+  const readOnce = ['checkPermissions', 'checkDataPermissions', 'checkDataPermissionsGet', 'beforeData', 'beforeDataGet'].some(event => hasHooks(event))
     ? undefined
     : helpers.dataGetScoped
 
