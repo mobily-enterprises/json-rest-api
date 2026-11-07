@@ -33,24 +33,35 @@ import { VISIBLE_READ_CHUNK } from './patch-many.js'
 /**
  * Upserts may only match the caller's own rows: the conflict keys must hold
  * every ownership field, and merge cannot run under a row policy it cannot see.
+ * The id (by its own name or the idProperty's) may be the only key on a
+ * resource with neither, where no other owner's row can match.
  */
 function resolveOnConflict (onConflict, { scopeName, schemaInfo, scopes }) {
   if (onConflict === undefined) return undefined
   const fail = message => { throw new RestApiValidationError(message, { fields: ['onConflict'] }) }
   if (!onConflict || typeof onConflict !== 'object' || Array.isArray(onConflict)) fail('onConflict must be an object')
-  const { keys, action, merge, ...unknown } = onConflict
+  const { keys: requestedKeys, action, merge, ...unknown } = onConflict
+  let keys = requestedKeys
   if (Object.keys(unknown).length) fail(`Unknown onConflict options: ${Object.keys(unknown).join(', ')}`)
   if (action !== 'ignore' && action !== 'merge') fail("onConflict.action must be 'ignore' or 'merge'")
   const fields = schemaInfo.schemaStructure
   const stored = field => typeof field === 'string' && Object.hasOwn(fields, field) && !fields[field].virtual && !fields[field].computed
-  if (!Array.isArray(keys) || !keys.length || !keys.every(stored)) fail('onConflict.keys must list stored fields of the resource')
-
   const ownership = schemaInfo.ownershipFields || []
+  const rowPolicy = scopes[scopeName]?.vars?.rowPolicy
+  const idKey = Array.isArray(keys) && keys.some(field => field === 'id' || field === schemaInfo.idProperty)
+  if (idKey) {
+    if (keys.length !== 1) fail('onConflict on the id takes the id as its only key')
+    if (ownership.length || rowPolicy) {
+      throw unsupported(scopeName, 'postMany', 'onConflict on the id needs a resource without ownership fields or a row policy, or a conflict could match a row the caller cannot see; use keys that include the ownership field(s)')
+    }
+    keys = ['id']
+  } else if (!Array.isArray(keys) || !keys.length || !keys.every(stored)) fail('onConflict.keys must list stored fields of the resource')
+
   const missingOwners = ownership.filter(field => !keys.includes(field))
   if (missingOwners.length) {
     throw unsupported(scopeName, 'postMany', `onConflict.keys must include the ownership field(s) ${missingOwners.join(', ')}, or a conflict could match another owner's row`)
   }
-  if (action === 'merge' && scopes[scopeName]?.vars?.rowPolicy) {
+  if (action === 'merge' && rowPolicy) {
     throw unsupported(scopeName, 'postMany', 'onConflict merge cannot see the row policy; insert with ignore, then patchMany the rows you may change')
   }
   const protectedFields = new Set(['id', ...keys, ...ownership, schemaInfo.lockVersionField].filter(Boolean))
@@ -208,15 +219,20 @@ export default async function postManyMethod ({
     }
 
     if (conflict) {
+      const byId = conflict.keys[0] === 'id'
       rows.forEach((row, index) => {
-        if (row.inputRecord.data.id === undefined || row.inputRecord.data.id === null) return
+        const id = row.inputRecord.data.id
+        if (byId && (id === undefined || id === null)) throw atIndex(new RestApiValidationError('An upsert on the id needs an id in every row', { fields: ['data.id'] }), index)
+        if (byId || id === undefined || id === null) return
         throw atIndex(new RestApiValidationError('An upsert row cannot carry an id: its conflict keys identify it', { fields: ['data.id'] }), index)
       })
-      rows.forEach((row, index) => {
-        const attributes = row.inputRecord.data.attributes || {}
-        const empty = conflict.keys.filter(field => attributes[field] === undefined || attributes[field] === null)
-        if (empty.length) throw atIndex(new RestApiValidationError(`Conflict keys need values: ${empty.join(', ')}`, { fields: empty.map(field => `data.attributes.${field}`) }), index)
-      })
+      if (!byId) {
+        rows.forEach((row, index) => {
+          const attributes = row.inputRecord.data.attributes || {}
+          const empty = conflict.keys.filter(field => attributes[field] === undefined || attributes[field] === null)
+          if (empty.length) throw atIndex(new RestApiValidationError(`Conflict keys need values: ${empty.join(', ')}`, { fields: empty.map(field => `data.attributes.${field}`) }), index)
+        })
+      }
     }
 
     await runHooks('beforeDataCallPostMany')

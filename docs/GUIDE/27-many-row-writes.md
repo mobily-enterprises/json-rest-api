@@ -220,9 +220,14 @@ if (changed.data.length === 0) {
 `onConflict: { keys, action, merge }` turns `postMany` into an upsert.
 `keys` are the stored fields of a unique index. Each row must give them values,
 no two rows may repeat them, and rows may not carry an `id`: the keys identify
-the record. With `action: 'ignore'`, rows that match an existing record are
-skipped and only the inserted rows are returned. With `action: 'merge'`, the
-matching record is updated: the fields in `merge` that the row supplies, or by
+the record. On a resource with no autofilter (ownership) fields and no row
+policy, `keys: ['id']` makes the id itself the key (the `idProperty` name, such
+as `email` for a natural key, means the same); every row then carries its id,
+and the primary key is the unique index. There is no other owner whose row the
+id could match, so this is the atomic create-if-missing for such tables.
+With `action: 'ignore'`, rows that match an existing record are skipped and
+only the inserted rows are returned. With `action: 'merge'`, the matching
+record is updated: the fields in `merge` that the row supplies, or by
 default every stored field the rows supply except the keys, the id, ownership
 fields and the lock version. A row supplies the fields the caller sent, its
 belongs-to links and the fields a setter adds; schema defaults (`defaultTo`)
@@ -238,7 +243,8 @@ batch fails with a `conflict` error (409) instead of guessing.
 Upserts cannot reach another owner's rows:
 
 - `keys` must include every autofilter (ownership) field of the resource. The
-  unique index should include them too.
+  unique index should include them too. The id is a key only on a resource
+  with no ownership fields and no row policy.
 - `merge` is refused on a resource with a row policy. Insert with `ignore`,
   then `patchMany` the rows the caller may change.
 - Only a match on the conflict keys counts. A row that clashes with an existing

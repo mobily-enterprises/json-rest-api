@@ -33,7 +33,9 @@ export type ManyRowCreateInput<Input extends object, Type extends string> =
   { data?: never; document: { data: Array<JsonApiWriteDocument<Input, Type>['data']> } }
 export interface UpsertOptions<Input extends object> {
   // Must include every ownership (autofilter) field. Rows may not carry an id or repeat a key.
-  keys: Array<keyof Input & string>
+  // ['id'] (or the idProperty) alone is allowed on a resource without ownership fields or a
+  // row policy; every row then carries its id.
+  keys: Array<keyof Input & string> | ['id']
   // merge also runs the patch permission checks on every row it updates.
   action: 'ignore' | 'merge'
   // merge only: fields to update; default every stored field the rows supply but the keys.

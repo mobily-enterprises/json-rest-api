@@ -471,8 +471,8 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
   })
 })
 
-// A fixture of its own: these tests add hooks.
-describe(`Selection writes and counts (${storageMode.mode})`, { skip: tableOnly }, () => {
+// A fixture of its own: these tests add hooks and a resource.
+describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
@@ -562,5 +562,41 @@ describe(`Selection writes and counts (${storageMode.mode})`, { skip: tableOnly 
     const data = [1, 2, 3, 4].map(id => ({ id: String(id), amount: id * 11 }))
     await fixture.api.resources.da_entries.patchMany({ data, onlyIf: { status: 'open' }, missing: 'skip' }, { ...workspaceA(), pairing: true })
     assert.deepEqual(seen, [[['1', '1', 11], ['3', '3', 33]]])
+  })
+
+  it('upserts on the id of a resource without owners, and refuses it on owned resources', async () => {
+    await seedLedger(fixture)
+    await fixture.api.addResource('da_sign_ins', {
+      idProperty: 'email',
+      schema: {
+        id: { type: 'string', primary: true, required: true, maxLength: 100, storage: { column: 'email' } },
+        name: { type: 'string', required: true, max: 40 },
+        visits: { type: 'integer', defaultTo: 0 }
+      },
+      tableName: 'da_sign_ins'
+    })
+    await fixture.api.resources.da_sign_ins.createKnexTable()
+    const signIns = fixture.api.resources.da_sign_ins
+    const created = await signIns.postMany({ data: [{ id: 'ann@example.com', name: 'Ann' }], onConflict: { keys: ['id'], action: 'ignore' }, returning: 'minimal' })
+    assert.deepEqual(created.data.map(item => item.id), ['ann@example.com'])
+    // The idProperty names the same key; the existing row is left alone.
+    const again = await signIns.postMany({
+      data: [{ id: 'ann@example.com', name: 'Ann again' }, { id: 'bob@example.com', name: 'Bob' }],
+      onConflict: { keys: ['email'], action: 'ignore' },
+      returning: 'minimal'
+    })
+    assert.deepEqual(again.data.map(item => item.id), ['bob@example.com'])
+    assert.equal((await signIns.get({ id: 'ann@example.com' })).name, 'Ann')
+    const merged = await signIns.postMany({ data: [{ id: 'ann@example.com', name: 'Ann', visits: 2 }], onConflict: { keys: ['id'], action: 'merge', merge: ['visits'] }, returning: 'count' })
+    assert.deepEqual(merged, count(1))
+    assert.equal(Number((await signIns.get({ id: 'ann@example.com' })).visits), 2)
+    await assert.rejects(signIns.postMany({ data: [{ name: 'Nobody' }], onConflict: { keys: ['id'], action: 'ignore' } }), isA(RestApiValidationError))
+    await assert.rejects(signIns.postMany({ data: [{ id: 'cy@example.com', name: 'Cy' }], onConflict: { keys: ['id', 'name'], action: 'ignore' } }), isA(RestApiValidationError))
+
+    // Owned resources, and resources under a row policy, keep refusing it.
+    const refused = isA(RestApiBulkWriteUnsupportedError)
+    await assert.rejects(fixture.api.resources.da_labels.postMany({ data: [{ id: '1', name: 'flag' }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
+    await assert.rejects(fixture.api.resources.da_entries.postMany({ data: [{ id: '1', ...newEntries(1)[0] }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
+    assert.deepEqual(await fixture.knex('da_sign_ins').orderBy('email').pluck('email'), ['ann@example.com', 'bob@example.com'])
   })
 })

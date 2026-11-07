@@ -47,6 +47,9 @@ bulk options are rejected with a message that names their replacement.
   vanishes or stops matching in the meantime is left out, never an error.
 - **Counts:** `returning: 'count'` on every many-row write returns
   `{ meta: { count } }`, the number of rows written, without reading rows back.
+- **Upserts on the id:** on a resource with no ownership fields and no row
+  policy, `onConflict: { keys: ['id'], action }` (or the `idProperty`, such as
+  an email natural key) creates the rows that do not exist yet, atomically.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.
