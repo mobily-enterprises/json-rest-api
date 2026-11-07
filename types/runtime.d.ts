@@ -31,8 +31,8 @@ export interface RuntimeArguments<Context extends object = Record<string, unknow
   helpers: Record<string, unknown>
   log: RuntimeLogger
   runHooks(event: string, context?: Record<string, unknown>): Promise<boolean>
-  /** Whether runHooks(event) for this resource would call any handler. */
-  hasHooks(event: string): boolean
+  /** Whether runHooks(event) for this resource, or for scope when given, would call any handler. */
+  hasHooks(event: string, scope?: RuntimeResource): boolean
 }
 export type RuntimeMethod<Context extends object = Record<string, unknown>> = (args: RuntimeArguments<Context>) => unknown
 export type HookPlacement = { beforeFunction?: string; afterFunction?: never } | { beforeFunction?: never; afterFunction?: string }

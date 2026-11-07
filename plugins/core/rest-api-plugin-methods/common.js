@@ -2,7 +2,7 @@
 /** @import {
  * CompletedWriteContext, Field, Identifier, IdentityContext, InputDocument, LifecycleApi,
  * LifecycleArguments, LifecycleContext, LifecycleHelpers, LifecycleResource, LifecycleSchema,
- * LifecycleVars, ProcessingContext, RelationshipContext, Resource, ResourceContext, RunHooks,
+ * LifecycleVars, ProcessingContext, ReadContext, RelationshipContext, Resource, ResourceContext, RunHooks,
  * Schema, WriteContext
  * } from './lifecycle-types.js' */
 /** @import { StorageRow } from '../lib/storage/storage-types.js' */
@@ -546,7 +546,7 @@ export async function handleRecordReturnAfterWrite ({ context, scopeName, api, s
   if (context.minimalRecord) context.originalMinimalRecord = context.minimalRecord
 
   // A full response reads the record again through get; only hooks see the refresh.
-  if (['finish', `finish${hookSuffix}`, 'afterCommit', 'afterRollback', 'transport:response'].some(hasHooks)) {
+  if (['finish', `finish${hookSuffix}`, 'afterCommit', 'afterRollback', 'transport:response'].some(event => hasHooks(event))) {
     try {
       context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks })
     } catch (error) {
@@ -593,6 +593,33 @@ export async function handleRecordReturnAfterWrite ({ context, scopeName, api, s
   })
   // After-commit observers must not mutate the prepared response.
   return structuredClone(context.responseRecord)
+}
+
+// The hooks that run after a read's snapshot is taken and can see it: the read's
+// own context, or the parentContext of an enrichAttributes wrapper.
+const READ_SNAPSHOT_EVENTS = {
+  get: ['enrichRecord', 'enrichAttributes', 'enrichRecordWithRelationships', 'finish', 'finishGet', 'transport:response'],
+  query: ['enrichRecord', 'enrichAttributes', 'finish', 'finishQuery', 'transport:response']
+}
+
+/**
+ * Copies a read's records, as stored, to context.originalRecord before
+ * enrichment. A deep copy of every row is the largest CPU cost of a read
+ * without hooks, so it is taken only when a hook that runs afterwards is
+ * registered for the resource or globally, or an enrichAttributes hook for an
+ * included resource.
+ * @param {ReadContext} context
+ * @param {Record<string, LifecycleResource>} scopes
+ * @param {LifecycleArguments['hasHooks']} hasHooks
+ * @param {'get' | 'query'} method
+ */
+export function snapshotReadRecord (context, scopes, hasHooks, method) {
+  if (!context.record) return
+  const includedScopes = new Set((context.record.included || []).map(entry => scopes[entry.type]))
+  if (READ_SNAPSHOT_EVENTS[method].some(event => hasHooks(event)) ||
+      [...includedScopes].some(scope => hasHooks('enrichAttributes', scope))) {
+    context.originalRecord = structuredClone(context.record)
+  }
 }
 
 /** @param {ResourceContext} context @param {Record<string, LifecycleResource>} scopes */

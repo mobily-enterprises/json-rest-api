@@ -10,7 +10,7 @@ import { getRequestedComputedFields, validateRequestedFieldsets } from '../lib/q
 import { getEffectiveSortableFields } from '../lib/querying/query-field-sort-helpers.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
-import { validateRequestedIncludes, filterToOneResponseLinkage } from './common.js'
+import { validateRequestedIncludes, filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 import { queryConstraint } from '../lib/querying/query-constraint.js'
 import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
 
@@ -40,6 +40,7 @@ export default async function queryMethod ({
   scope,
   scopes,
   runHooks,
+  hasHooks,
   scopeName,
   api
 }) {
@@ -105,7 +106,7 @@ export default async function queryMethod ({
 
   context.record = normalizeRecordAttributes(context.record, scopes)
 
-  context.originalRecord = structuredClone(context.record)
+  snapshotReadRecord(context, scopes, hasHooks, 'query')
 
   await runHooks('enrichRecord')
 

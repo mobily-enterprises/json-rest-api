@@ -11,7 +11,7 @@ import { getRequestedComputedFields, validateRequestedFieldsets } from '../lib/q
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
-import { validateRequestedIncludes, filterToOneResponseLinkage } from './common.js'
+import { validateRequestedIncludes, filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 
 /**
  * Read one resource using params.id and params.queryParams. Missing resources
@@ -26,6 +26,7 @@ export default async function getMethod ({
   scope,
   scopes,
   runHooks,
+  hasHooks,
   scopeOptions,
   scopeName,
   api
@@ -129,7 +130,7 @@ export default async function getMethod ({
   await runHooks('checkDataPermissions')
   await runHooks('checkDataPermissionsGet')
 
-  context.originalRecord = structuredClone(context.record)
+  snapshotReadRecord(context, scopes, hasHooks, 'get')
 
   await runHooks('enrichRecord')
 

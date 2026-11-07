@@ -13,6 +13,8 @@ describe(`Query copy failures (${storageMode.mode})`, () => {
     })
     const dataQuery = fixture.api.helpers.dataQuery
     await fixture.api.customize({
+      // A hook that can read originalRecord, so reads copy their records before enrichment.
+      hooks: { enrichRecord: { functionName: 'observe-original-record', handler: () => {} } },
       helpers: {
         dataQuery: async args => {
           const result = await dataQuery(args)
