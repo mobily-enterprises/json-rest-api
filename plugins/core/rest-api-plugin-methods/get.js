@@ -78,52 +78,58 @@ export default async function getMethod ({
 
   const identityContext = /** @type {IdentityContext} */ (context)
 
-  // Fetch minimal record for authorization checks
-  const minimalRecord = await helpers.dataGetMinimal({
-    scopeName,
-    context: identityContext,
-    runHooks
+  const notFound = () => new RestApiResourceError('Resource not found', {
+    subtype: 'not_found',
+    resourceType: scopeName,
+    resourceId: context.id
   })
 
-  if (!minimalRecord) {
-    throw new RestApiResourceError(
-      'Resource not found',
-      {
-        subtype: 'not_found',
-        resourceType: scopeName,
-        resourceId: context.id
-      }
-    )
+  // The minimal record serves the permission check and the hooks before the
+  // data call. A resource without them reads once: the scoped full read also
+  // answers whether the row exists.
+  const readOnce = ['checkPermissions', 'beforeData', 'beforeDataGet'].some(event => hasHooks(event))
+    ? undefined
+    : helpers.dataGetScoped
+
+  if (readOnce) {
+    try {
+      await validateRequestedFieldsets(context, scopes)
+      validateRequestedIncludes(context, scopes)
+    } catch (error) {
+      // A missing row answers 404 before a bad fieldset, as with two reads.
+      if (!(await helpers.dataGetMinimal({ scopeName, context: identityContext, runHooks }))) throw notFound()
+      throw error
+    }
+    context.record = await readOnce({ scopeName, context: identityContext, runHooks })
+  } else {
+    // Fetch minimal record for authorization checks
+    const minimalRecord = await helpers.dataGetMinimal({
+      scopeName,
+      context: identityContext,
+      runHooks
+    })
+    if (!minimalRecord) throw notFound()
+
+    context.minimalRecord = minimalRecord
+
+    await scope.checkPermissions({
+      method: 'get',
+      originalContext: context,
+    })
+
+    await validateRequestedFieldsets(context, scopes)
+    validateRequestedIncludes(context, scopes)
+    await runHooks('beforeData')
+    await runHooks('beforeDataGet')
+
+    context.record = await helpers.dataGet({
+      scopeName,
+      context: identityContext,
+      runHooks
+    })
   }
 
-  context.minimalRecord = minimalRecord
-
-  await scope.checkPermissions({
-    method: 'get',
-    originalContext: context,
-  })
-
-  await validateRequestedFieldsets(context, scopes)
-  validateRequestedIncludes(context, scopes)
-  await runHooks('beforeData')
-  await runHooks('beforeDataGet')
-
-  context.record = await helpers.dataGet({
-    scopeName,
-    context: identityContext,
-    runHooks
-  })
-
-  if (!context.record || !context.record.data) {
-    throw new RestApiResourceError(
-      'Resource not found',
-      {
-        subtype: 'not_found',
-        resourceType: scopeName,
-        resourceId: context.id
-      }
-    )
-  }
+  if (!context.record || !context.record.data) throw notFound()
 
   context.record = normalizeRecordAttributes(context.record, scopes)
 

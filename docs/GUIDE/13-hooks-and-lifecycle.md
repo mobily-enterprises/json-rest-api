@@ -393,7 +393,11 @@ a handler to these resource write stages.
 ## Read order and output enrichment
 
 GET authorizes through `checkPermissions`, then runs `beforeData` and
-`beforeDataGet`. After fetching, it runs `checkDataPermissions`,
+`beforeDataGet`. These see `context.minimalRecord`, the stored row read before
+the full read. A resource with none of these three hooks (registered for it or
+globally) reads its row once, with its scope and row policy in that read, and
+leaves `minimalRecord` unset; a missing or hidden row is still `not_found`, and
+answers before an invalid fieldset does. After fetching, it runs `checkDataPermissions`,
 `checkDataPermissionsGet` and `enrichRecord`. Field getters and computed output
 run during attribute enrichment, followed by `enrichAttributes`.
 `enrichRecordWithRelationships`, `finish` and `finishGet` follow. Final

@@ -343,7 +343,7 @@ export function createCanonicalDataHelpers ({
   }
 
   /** @type {CanonicalDataReadHelpers['dataGet']} */
-  const dataGet = async ({ scopeName, context }) => {
+  const dataGet = async ({ scopeName, context, runHooks, scoped = false }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
     context.storageAdapter = storageAdapter
@@ -357,17 +357,40 @@ export function createCanonicalDataHelpers ({
     const fieldSelectionInfo = await buildFieldSelection(scope, { context })
     context.computedDependencies = fieldSelectionInfo.computedDependencies
 
+    // The preceding minimal read has already applied permission and row filters,
+    // unless the read is `scoped`: then it applies them itself, as the only read,
+    // and names its columns' table, since a row policy may join tables.
+    const column = (/** @type {string} */ name) => scoped ? `${canonical.tableName}.${name}` : name
     let query = context.db(canonical.tableName)
-      .where(logicalIdColumn, id)
-      .where(canonical.resourceColumn, descriptor.resource)
-      .where(canonical.tenantColumn, descriptor.tenant)
+      .where(column(logicalIdColumn), id)
+      .where(column(canonical.resourceColumn), descriptor.resource)
+      .where(column(canonical.tenantColumn), descriptor.tenant)
+    if (scoped) {
+      const filterHooks = runHooks
+      if (!filterHooks) throw new Error('A scoped read needs runHooks')
+      query = (await withQueryFilteringContext(context, {
+        query,
+        filters: context.queryParams?.filters,
+        schemaInfo: context.schemaInfo,
+        scopeName,
+        tableName: canonical.tableName,
+        db: context.db,
+        queryPurpose: 'single',
+        isAnyApi: true,
+        adapter: storageAdapter,
+        storageAdapter
+      }, async () => {
+        await applyBuiltInAnyApiQueryFilters(context)
+        await filterHooks('knexQueryFiltering')
+      })).query
+    }
 
     const selectionState = await applyFieldSelectionToQuery({
       query,
       scope,
       fieldSelectionInfo,
       tableName: canonical.tableName,
-      useTablePrefix: false,
+      useTablePrefix: scoped,
       storageAdapter,
       db: context.db,
       context,
@@ -736,6 +759,10 @@ export function createCanonicalDataHelpers ({
     return { query: filteredState.query, alias: tableAlias }
   }
 
+  // A get with no reader of the minimal record reads once, scoped.
+  /** @type {NonNullable<CanonicalDataReadHelpers['dataGetScoped']>} */
+  const dataGetScoped = ({ scopeName, context, runHooks }) => dataGet({ scopeName, context, runHooks, scoped: true })
+
   return {
     dataScopedQuery,
     dataExists,
@@ -744,6 +771,7 @@ export function createCanonicalDataHelpers ({
     dataPatch,
     dataDelete,
     dataGet,
+    dataGetScoped,
     dataQuery,
     dataAggregate,
     dataGetMinimal

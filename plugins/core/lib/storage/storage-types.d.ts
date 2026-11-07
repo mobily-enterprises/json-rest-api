@@ -306,6 +306,13 @@ export interface DataReadHelpers<GetResult> {
   dataGetMinimal: DataMinimalReader
   dataGet: (request: DataReadRequest & {
     context: DataReadContext & { id: string | number }
+    // Apply the row filters in this read, when no minimal read preceded it.
+    scoped?: boolean
+  }) => Promise<GetResult>
+  // dataGet({ scoped: true }), for storages that support it.
+  dataGetScoped?: (request: DataReadRequest & {
+    runHooks: NonNullable<DataReadRequest['runHooks']>
+    context: DataReadContext & { id: string | number }
   }) => Promise<GetResult>
   dataQuery: (request: DataReadRequest & {
     runHooks: NonNullable<DataReadRequest['runHooks']>

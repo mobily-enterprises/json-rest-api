@@ -1,6 +1,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  RestApiFieldsetError,
   RestApiRecordsNotFoundError,
   RestApiResourceError,
   RestApiRowLimitError,
@@ -174,5 +175,29 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     await assert.rejects(entries.queryAll({ queryParams: { page: { size: 5 } } }, workspaceA()), error => cause(error) instanceof RestApiValidationError)
     const filtered = await entries.queryAll({ queryParams: { filters: { amount: 20 } } }, workspaceA())
     assert.deepEqual(filtered.data.map(record => String(record.id)), ['2'])
+  })
+
+  // Registers a permission hook, so it runs last.
+  it('reads one record in one statement unless a hook needs its minimal record first', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const notFound = error => cause(error) instanceof RestApiResourceError && cause(error).subtype === 'not_found'
+    const once = await fixture.measure(() => entries.get({ id: '1' }, workspaceA()))
+    assert.equal(String(once.result.id), '1')
+    // Hidden by the row policy, in another workspace, or missing: not found, from the same one read.
+    for (const id of ['4', '7', '99']) {
+      const missing = await fixture.measure(() => assert.rejects(entries.get({ id }, workspaceA()), notFound))
+      assert.equal(missing.statements, 1, missing.sql.join(' | '))
+    }
+    // A missing row answers not found before a bad fieldset, as it did with two reads.
+    await assert.rejects(entries.get({ id: '99', queryParams: { fields: { da_nothing: 'name' } } }, workspaceA()), notFound)
+    await assert.rejects(entries.get({ id: '1', queryParams: { fields: { da_nothing: 'name' } } }, workspaceA()), error => cause(error) instanceof RestApiFieldsetError)
+
+    await fixture.api.customize({
+      hooks: { checkPermissions: { functionName: 'data-access-get-reader', handler: () => {} } }
+    })
+    const twice = await fixture.measure(() => entries.get({ id: '1' }, workspaceA()))
+    assert.deepEqual(twice.result, once.result)
+    assert.equal(twice.statements, once.statements + 1, `one read: ${once.sql.join(' | ')}\nwith a permission hook: ${twice.sql.join(' | ')}`)
   })
 })

@@ -192,7 +192,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
   }
 
   /** @type {OrdinaryDataReadHelpers['dataGet']} */
-  const dataGet = async ({ scopeName, context }) => {
+  const dataGet = async ({ scopeName, context, runHooks, scoped = false }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     context.storageAdapter = storageAdapter
     const scope = getScope(scopeName)
@@ -207,15 +207,32 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     // Enrichment removes fetched dependencies that the caller did not request.
     context.computedDependencies = fieldSelectionInfo.computedDependencies
 
-    // The preceding minimal read has already applied permission and row filters.
-    let query = db(tableName).where(idProperty, id)
+    // The preceding minimal read has already applied permission and row filters,
+    // unless the read is `scoped`: then it applies them itself, as the only read.
+    let query = db(tableName).where(scoped ? `${tableName}.${idProperty}` : idProperty, id)
+    if (scoped) {
+      const filterHooks = runHooks
+      if (!filterHooks) throw new Error('A scoped read needs runHooks')
+      query = (await withQueryFilteringContext(context, {
+        query,
+        filters: context.queryParams?.filters,
+        schemaInfo: context.schemaInfo,
+        scopeName,
+        tableName,
+        db,
+        queryPurpose: 'single',
+        adapter: storageAdapter,
+        storageAdapter
+      }, () => filterHooks('knexQueryFiltering'))).query
+    }
 
     const selectionState = await applyFieldSelectionToQuery({
       query,
       scope,
       fieldSelectionInfo,
       tableName,
-      useTablePrefix: false,
+      // A row policy may join tables, so a scoped read names its columns' table.
+      useTablePrefix: scoped,
       storageAdapter,
       db,
       context,
@@ -735,10 +752,15 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     return { success: true }
   }
 
+  // A get with no reader of the minimal record reads once, scoped.
+  /** @type {NonNullable<OrdinaryDataReadHelpers['dataGetScoped']>} */
+  const dataGetScoped = ({ scopeName, context, runHooks }) => dataGet({ scopeName, context, runHooks, scoped: true })
+
   return {
     dataRelatedIdsQuery,
     dataExists,
     dataGet,
+    dataGetScoped,
     dataQuery,
     dataAggregate,
     dataPost,
