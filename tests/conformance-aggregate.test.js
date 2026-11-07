@@ -4,6 +4,7 @@ import { createConformanceFixture } from './fixtures/conformance.js'
 import { createAggregateApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { RestApiResourceError, RestApiValidationError } from '../lib/rest-api-errors.js'
+import { databaseClient } from './helpers/test-database.js'
 
 const tables = { customers: 'aggregate_customers', sales: 'aggregate_sales' }
 const customers = [
@@ -11,10 +12,10 @@ const customers = [
   { name: 'Globex', workspace: 'w2' }
 ]
 const sales = [
-  { salesperson: 'Ann', region: 'north', amount: 100.5, units: 2, closed: true, closedOn: '2026-01-01', closedAt: '2026-01-01T10:00:00.000Z', workspace: 'w1', customer: 1, cents: 150 },
+  { salesperson: 'Ann', region: 'north', amount: 100.5, units: 2, closed: true, closedOn: '2026-01-01', closedAt: '2026-01-01T10:00:00.000Z', loggedAt: '2026-01-01T10:00:00.250Z', workspace: 'w1', customer: 1, cents: 150 },
   { salesperson: 'Ann', region: 'south', amount: 50, units: 1, closed: false, closedOn: '2026-01-03', closedAt: null, workspace: 'w1', customer: 1, cents: 25 },
   { salesperson: 'Bob', region: 'north', amount: 30, units: 3, closed: true, closedOn: null, closedAt: '2026-02-01T08:30:00.000Z', workspace: 'w1', customer: 2, cents: null },
-  { salesperson: 'Bob', region: 'north', amount: 20, units: 4, closed: true, closedOn: '2026-02-01', closedAt: '2026-02-02T00:00:00.000Z', workspace: 'w2', customer: 2, cents: 10 },
+  { salesperson: 'Bob', region: 'north', amount: 20, units: 4, closed: true, closedOn: '2026-02-01', closedAt: '2026-02-02T00:00:00.000Z', loggedAt: '2026-02-02T23:59:59.900Z', workspace: 'w2', customer: 2, cents: 10 },
   { salesperson: 'Cy', region: 'south', amount: 5.25, units: 1, closed: false, closedOn: '2026-03-01', closedAt: null, workspace: 'w2', customer: 2, cents: 1 },
   { salesperson: null, region: 'east', amount: 1, units: 5, closed: false, closedOn: null, closedAt: null, workspace: 'w2', customer: null, cents: null }
 ]
@@ -29,7 +30,14 @@ const group = (rows, keys) => {
   }
   return [...groups.values()]
 }
+const cause = error => error?.cause ?? error
 const sum = values => values.reduce((total, value) => total + value, 0)
+// Monday of a 'YYYY-MM-DD' date's week.
+const mondayOf = day => {
+  const date = new Date(`${day}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+  return date.toISOString().slice(0, 10)
+}
 const byKeys = keys => (left, right) => {
   for (const key of keys) {
     // NULL sorts as the lowest value.
@@ -190,11 +198,131 @@ describe(`Resource aggregates (${storageMode.mode})`, () => {
       [{ groupBy: ['region'], measures: { x: { count: '*' } }, queryParams: { page: { size: 5 } } }, /cannot exceed 4/],
       [{ groupBy: ['region'], measures: { x: { count: '*' } }, queryParams: { page: { after: 'x' } } }, /size and number/],
       [{ groupBy: ['region'], measures: { x: { count: '*' } }, queryParams: { sort: ['amount'] } }, /grouped field or a measure/],
-      [{ measures: { x: { count: '*' } }, queryParams: { filters: { unknown: 1 } } }, /not allowed/]
+      [{ measures: { x: { count: '*' } }, queryParams: { filters: { unknown: 1 } } }, /not allowed/],
+      [{ measures: { x: { count: 'loggedAt' } } }, /transforms its stored values/],
+      [{ groupBy: ['loggedAt'], measures: { x: { count: '*' } } }, /transforms its stored values/],
+      [{ measures: { x: { count: '*', where: {} } } }, /map fields to conditions/],
+      [{ measures: { x: { count: '*', where: { region: { like: 'n%' } } } } }, /Unknown operator/],
+      [{ measures: { x: { count: '*', where: { region: { gt: null } } } } }, /cannot compare with null/],
+      [{ measures: { x: { count: '*', where: { region: { in: [] } } } } }, /non-empty array/],
+      [{ measures: { x: { count: '*', where: { cents: 1 } } } }, /transforms its stored values/],
+      [{ measures: { x: { count: '*', where: { loggedAt: null } } } }, /transforms its stored values/],
+      [{ groupBy: [{ field: 'region', bucket: 'day' }], measures: { x: { count: '*' } } }, /date or dateTime/],
+      [{ groupBy: [{ field: 'closedAt', bucket: 'hour' }], measures: { x: { count: '*' } } }, /bucket must be one of/],
+      [{ groupBy: [{ field: 'closedAt', bucket: 'day', timezone: 'Mars/Base' }], measures: { x: { count: '*' } } }, /not a time zone/],
+      [{ groupBy: [{ field: 'closedAt', bucket: 'day', timezone: '+15:00' }], measures: { x: { count: '*' } } }, /not a UTC offset/],
+      [{ groupBy: [{ field: 'closedOn', bucket: 'day', timezone: '+10:00' }], measures: { x: { count: '*' } } }, /no time of day/],
+      [{ groupBy: [{ field: 'closedAt', bucket: 'day', every: 2 }], measures: { x: { count: '*' } } }, /Unknown bucket options/],
+      [{ groupBy: ['closedAt', { field: 'closedAt', bucket: 'day' }], measures: { x: { count: '*' } } }, /give the bucket another name/]
     ]
     for (const [params, message] of cases) {
       await assert.rejects(aggregate(params), error => error instanceof RestApiValidationError && message.test(error.message), JSON.stringify(params))
     }
+  })
+
+  it('computes conditional measures in the same query', async () => {
+    const result = await aggregate({
+      groupBy: ['region'],
+      measures: {
+        rows: { count: '*' },
+        closedRows: { count: '*', where: { closed: true } },
+        closedAmount: { sum: 'amount', where: { closed: true } },
+        busySellers: { countDistinct: 'salesperson', where: { units: { gte: 2 } } },
+        nobody: { count: '*', where: { salesperson: null } },
+        openUnits: { sum: 'units', where: { salesperson: ['Ann', 'Bob'], closed: false } },
+        lastClose: { max: 'closedAt', where: { closedAt: { lt: '2026-02-02T00:00:00.000Z' } } }
+      },
+      queryParams: { page: { size: 4 } }
+    })
+    const expected = group(sales, ['region']).map(rows => {
+      const closed = rows.filter(row => row.closed)
+      const open = rows.filter(row => !row.closed && ['Ann', 'Bob'].includes(row.salesperson))
+      const closes = rows.map(row => row.closedAt).filter(value => value && value < '2026-02-02T00:00:00.000Z').sort()
+      return {
+        region: rows[0].region,
+        rows: rows.length,
+        closedRows: closed.length,
+        closedAmount: closed.length ? sum(closed.map(row => row.amount)) : null,
+        busySellers: new Set(rows.filter(row => row.units >= 2 && row.salesperson !== null).map(row => row.salesperson)).size,
+        nobody: rows.filter(row => row.salesperson === null).length,
+        openUnits: open.length ? sum(open.map(row => row.units)) : null,
+        lastClose: closes.at(-1) ?? null
+      }
+    }).sort(byKeys(['region']))
+    assert.deepEqual(result.data, expected)
+
+    const totals = await aggregate({
+      measures: {
+        notNorth: { count: '*', where: { region: { ne: 'north' } } },
+        southOrEast: { count: '*', where: { region: { notIn: ['north'] } } },
+        closedTimes: { count: '*', where: { closedAt: { ne: null } } },
+        february: { count: 'closedOn', where: { closedOn: { gte: '2026-02-01', lt: '2026-03-01' } } },
+        firstFebruary: { min: 'closedAt', where: { closedAt: { gt: '2026-02-01T00:00:00.000Z' } } }
+      }
+    })
+    assert.deepEqual(totals.data, [{ notNorth: 3, southOrEast: 3, closedTimes: 3, february: 1, firstFebruary: '2026-02-01T08:30:00.000Z' }])
+  })
+
+  it('groups dates by day, week, month and year', { skip: storageMode.isAnyApi() && 'buckets need table storage' }, async () => {
+    const buckets = async (groupEntry, size = 4) => (await aggregate({ groupBy: [groupEntry], measures: { rows: { count: '*' } }, queryParams: { page: { size } } })).data
+    const counts = values => {
+      const totals = new Map()
+      for (const value of values) totals.set(value, (totals.get(value) || 0) + 1)
+      return [...totals].sort(([left], [right]) => left === null ? -1 : right === null ? 1 : left < right ? -1 : 1)
+    }
+    const pairs = (rows, name) => rows.map(row => [row[name], row.rows])
+
+    assert.deepEqual(pairs(await buckets({ field: 'closedAt', bucket: 'day' }), 'closedAt'),
+      counts(sales.map(row => row.closedAt?.slice(0, 10) ?? null)))
+    assert.deepEqual(pairs(await buckets({ field: 'closedOn', bucket: 'week', as: 'week' }), 'week'),
+      counts(sales.map(row => row.closedOn && mondayOf(row.closedOn))))
+    assert.deepEqual(pairs(await buckets({ field: 'closedOn', bucket: 'month', as: 'month' }), 'month'),
+      counts(sales.map(row => row.closedOn && `${row.closedOn.slice(0, 7)}-01`)))
+    assert.deepEqual(pairs(await buckets({ field: 'closedAt', bucket: 'year', as: 'year' }), 'year'),
+      counts(sales.map(row => row.closedAt && `${row.closedAt.slice(0, 4)}-01-01`)))
+
+    // Nine hours west of UTC: 08:30 on 1 February is still 31 January.
+    const local = value => value && new Date(Date.parse(value) - 9 * 3600 * 1000).toISOString().slice(0, 10)
+    const west = counts(sales.map(row => local(row.closedAt)))
+    assert.deepEqual(pairs(await buckets({ field: 'closedAt', bucket: 'day', timezone: '-09:00', as: 'day' }), 'day'), west)
+    assert.deepEqual(pairs(await buckets({ field: 'closedAt', bucket: 'week', timezone: '-09:00', as: 'week' }), 'week'),
+      counts(sales.map(row => row.closedAt && mondayOf(local(row.closedAt)))))
+
+    // A zone name with standard time nine hours west in winter.
+    const named = { field: 'closedAt', bucket: 'day', timezone: 'America/Anchorage', as: 'day' }
+    if (databaseClient === 'better-sqlite3') {
+      await assert.rejects(buckets(named), error => cause(error) instanceof RestApiValidationError && /SQLite has no time zone data/.test(cause(error).message))
+    } else if (databaseClient === 'pg') {
+      assert.deepEqual(pairs(await buckets(named), 'day'), west)
+    } else {
+      const [rows] = await fixture.knex.raw("select convert_tz('2000-01-01 00:00:00', '+00:00', 'America/Anchorage') as converted")
+      if (rows[0].converted == null) {
+        await assert.rejects(buckets(named), error => cause(error) instanceof RestApiValidationError && /no time zone data/.test(cause(error).message))
+      } else {
+        assert.deepEqual(pairs(await buckets(named), 'day'), west)
+      }
+    }
+
+    // Buckets combine with fields, conditional measures, sorting and pages.
+    const months = await aggregate({
+      groupBy: ['closed', { field: 'closedOn', bucket: 'month', as: 'month' }],
+      measures: { rows: { count: '*' }, big: { sum: 'amount', where: { amount: { gt: 25 } } } },
+      queryParams: { sort: ['-month'], filters: { closed: true }, page: { size: 1, number: 2 } }
+    })
+    assert.deepEqual(months, { data: [{ closed: true, month: '2026-01-01', rows: 1, big: 100.5 }], meta: { page: { size: 1, number: 2, hasMore: true } } })
+  })
+
+  it('buckets and bounds dateTime fields that have a storage serializer', async () => {
+    const bounds = await aggregate({ measures: { first: { min: 'loggedAt' }, last: { max: 'loggedAt' } } })
+    // Results are the stored values, read back as dateTime.
+    assert.deepEqual(bounds.data, [{ first: '2026-01-01T10:00:00.000Z', last: '2026-02-02T23:59:59.000Z' }])
+    if (storageMode.isAnyApi()) {
+      await assert.rejects(aggregate({ groupBy: [{ field: 'loggedAt', bucket: 'day' }], measures: { rows: { count: '*' } } }),
+        error => cause(error) instanceof RestApiValidationError && /table storage/.test(cause(error).message))
+      return
+    }
+    const days = await aggregate({ groupBy: [{ field: 'loggedAt', bucket: 'day', timezone: '+00:30' }], measures: { rows: { count: '*' } }, queryParams: { page: { size: 4 } } })
+    assert.deepEqual(days.data, [{ loggedAt: null, rows: 4 }, { loggedAt: '2026-01-01', rows: 1 }, { loggedAt: '2026-02-03', rows: 1 }])
   })
 
   it('aggregates normally hidden fields, which callers can request', async () => {

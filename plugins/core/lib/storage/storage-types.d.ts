@@ -326,8 +326,17 @@ export interface DataReadHelpers<GetResult> {
 // Compiled by compileAggregateRequest: outputs carry SQL aliases.
 export interface AggregatePlan {
   scopeName: string
-  groups: Array<{ name: string; field: string; definition: StorageFieldDefinition; alias: string }>
-  measures: Array<{ name: string; fn: 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'; field: string; definition: StorageFieldDefinition | null; alias: string }>
+  // Buckets carry their period and zone; their SQL is written per dialect.
+  groups: Array<{
+    name: string; field: string; definition: StorageFieldDefinition; alias: string
+    bucket?: 'day' | 'week' | 'month' | 'year'
+    timezone?: { kind: 'utc' } | { kind: 'offset'; minutes: number } | { kind: 'named'; name: string }
+  }>
+  // where: the conditions of a conditional measure, ANDed inside a CASE.
+  measures: Array<{
+    name: string; fn: 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'; field: string; definition: StorageFieldDefinition | null; alias: string
+    where: Array<{ field: string; definition: StorageFieldDefinition; operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'notIn'; value: unknown }> | null
+  }>
   sort: Array<{ alias: string; direction: 'asc' | 'desc' }>
   page: { size: number; number: number } | null
 }

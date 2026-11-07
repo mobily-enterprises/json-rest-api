@@ -122,6 +122,8 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
       closed: { type: 'boolean', defaultTo: false, search: true },
       closedOn: { type: 'date', nullable: true },
       closedAt: { type: 'dateTime', nullable: true },
+      // Stored to whole seconds by a storage serializer.
+      loggedAt: { type: 'dateTime', nullable: true, storage: { serialize: value => value == null ? null : new Date(Math.floor(Date.parse(value) / 1000) * 1000) } },
       workspace: { type: 'string', nullable: true },
       secret: { type: 'number', nullable: true, hidden: true },
       internal: { type: 'number', nullable: true, normallyHidden: true },

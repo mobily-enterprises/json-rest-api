@@ -25,10 +25,32 @@ export interface QueryParams extends SelectionParams {
   page?: PageParams
 }
 export type AggregateFunction = 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'
-// One function per measure; only count accepts '*'.
-export type AggregateMeasure = { count: string } | { [Function in Exclude<AggregateFunction, 'count'>]: { [Name in Function]: string } }[Exclude<AggregateFunction, 'count'>]
+type AggregateScalar = string | number | boolean | Date
+// A measure's condition: a value (null tests for null), a list (IN), or operators; every entry must hold.
+export type AggregateCondition = AggregateScalar | null | AggregateScalar[] | {
+  eq?: AggregateScalar | null
+  ne?: AggregateScalar | null
+  gt?: AggregateScalar
+  gte?: AggregateScalar
+  lt?: AggregateScalar
+  lte?: AggregateScalar
+  in?: AggregateScalar[]
+  notIn?: AggregateScalar[]
+}
+export type AggregateWhere = Record<string, AggregateCondition>
+// One function per measure; only count accepts '*'. where makes the measure conditional (CASE inside the function).
+export type AggregateMeasure = ({ count: string } | { [Function in Exclude<AggregateFunction, 'count'>]: { [Name in Function]: string } }[Exclude<AggregateFunction, 'count'>]) & { where?: AggregateWhere }
+// A date or dateTime field grouped by period; the group value is the period's first day, 'YYYY-MM-DD' (weeks start on Monday).
+export interface AggregateBucket {
+  field: string
+  bucket: 'day' | 'week' | 'month' | 'year'
+  // 'UTC' (default), a fixed offset such as '+10:00', or an IANA name (PostgreSQL; MySQL with time zone tables).
+  timezone?: string
+  // Output name; default the field name.
+  as?: string
+}
 export interface AggregateParams extends TransactionParam {
-  groupBy?: string[]
+  groupBy?: Array<string | AggregateBucket>
   measures: Record<string, AggregateMeasure>
   queryParams?: {
     filters?: Record<string, unknown>
