@@ -12,6 +12,19 @@ import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { validateRequestedIncludes, filterToOneResponseLinkage } from './common.js'
 import { queryConstraint } from '../lib/querying/query-constraint.js'
+import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
+
+/** @param {unknown} value */
+const validatePageSizeLimit = value => {
+  if (value === undefined) return undefined
+  if (!Number.isSafeInteger(value) || /** @type {number} */ (value) <= 0) {
+    throw new RestApiValidationError('pageSizeLimit must be a positive integer', {
+      fields: ['pageSizeLimit'],
+      violations: [{ field: 'pageSizeLimit', rule: 'min_value', message: 'pageSizeLimit must be a positive integer' }]
+    })
+  }
+  return /** @type {number} */ (value)
+}
 
 /**
  * Read a filtered collection using params.queryParams and the selected format.
@@ -33,6 +46,8 @@ export default async function queryMethod ({
   callerContext.method = 'query'
   // Nested queries only inherit membership when it is explicitly supplied again.
   callerContext[queryConstraint] = params[queryConstraint]
+  // A server caller's page cap for this call; connectors never pass it.
+  callerContext.pageSizeLimit = validatePageSizeLimit(params.pageSizeLimit)
 
   rejectRemovedOptions(params)
   callerContext.format = resolveFormat(params.format, vars.format)

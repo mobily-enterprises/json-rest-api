@@ -94,7 +94,13 @@ export interface ResourceCoreMethods<
     params: ReadOptions<Format> & { id: DirectResourceId }, context?: Context
   ): Promise<SingleResourceResult<Format, Fields, Type>>
   query<Format extends ResourceFormat = DefaultFormat>(
-    params?: RemovedResourceOptions & TransactionParam & { format?: Format; queryParams?: QueryParams }, context?: Context
+    params?: RemovedResourceOptions & TransactionParam & {
+      format?: Format
+      queryParams?: QueryParams
+      // Server code only: the largest page size for this call, replacing the resource's queryMaxLimit.
+      // HTTP and Socket.IO connectors never pass it.
+      pageSizeLimit?: number
+    }, context?: Context
   ): Promise<CollectionResult<Format, Fields, Type>>
   aggregate(params: AggregateParams, context?: Context): Promise<AggregateResult>
   post<Format extends ResourceFormat = DefaultFormat, Returning extends WriteReturning = DefaultReturning>(

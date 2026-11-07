@@ -204,30 +204,20 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
     const column = `${tableName}.${idColumn}`
     const visibleIds = new Set()
     visible.set(type, visibleIds)
-    const loadBatch = async values => {
-      const query = adapter.buildBaseQuery({ transaction: context.transaction })
-        .whereIn(column, values)
-        .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
-      const state = await applyScopeFiltersToIncludeQuery({
-        query,
-        scopes,
-        scopeName: type,
-        requestContext: context,
-        db: context.db || knex,
-        tableName,
-        queryPurpose: 'relationship-identifiers'
-      })
-      for (const row of await state.query) visibleIds.add(String(row[idColumn]))
-    }
-    let values = []
-    for (const id of ids) {
-      values.push(adapter.translateFilterValue('id', id))
-      if (values.length === RELATIONSHIP_READ_BATCH_SIZE) {
-        await loadBatch(values)
-        values = []
-      }
-    }
-    if (values.length) await loadBatch(values)
+    // One query, and one row-policy run, per type: whereInIdentifiers binds any number of ids.
+    const query = adapter.buildBaseQuery({ transaction: context.transaction })
+      .modify(whereInIdentifiers, column, [...ids].map(id => adapter.translateFilterValue('id', id)))
+      .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
+    const state = await applyScopeFiltersToIncludeQuery({
+      query,
+      scopes,
+      scopeName: type,
+      requestContext: context,
+      db: context.db || knex,
+      tableName,
+      queryPurpose: 'relationship-identifiers'
+    })
+    for (const row of await state.query) visibleIds.add(String(row[idColumn]))
   }
   return identifiers.filter(({ type, id }) => visible.get(type)?.has(String(id)))
 }

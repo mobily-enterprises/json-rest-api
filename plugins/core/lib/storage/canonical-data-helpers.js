@@ -503,6 +503,7 @@ export function createCanonicalDataHelpers ({
       query: queryBuilder,
       page: queryParams.page,
       vars: scope.vars,
+      pageSizeLimit: context.pageSizeLimit,
       sortDescriptors,
       storageAdapter,
     })

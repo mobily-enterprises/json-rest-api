@@ -7,8 +7,9 @@ import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
 // Page parameters have passed the shared request contract. Physical sort
 // columns and built-in value conversion remain with descriptors and adapters.
-export const applyPaginationToQuery = ({ query, page = {}, vars, sortDescriptors, storageAdapter }) => {
-  const pageSize = Math.min(page.size ?? (vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT), vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT)
+// pageSizeLimit, a server caller's query param, replaces queryMaxLimit for that call.
+export const applyPaginationToQuery = ({ query, page = {}, vars, pageSizeLimit, sortDescriptors, storageAdapter }) => {
+  const pageSize = Math.min(page.size ?? (vars.queryDefaultLimit || DEFAULT_QUERY_LIMIT), pageSizeLimit || vars.queryMaxLimit || DEFAULT_MAX_QUERY_LIMIT)
   if (!Number.isInteger(pageSize) || pageSize <= 0) {
     throw new RestApiValidationError('Page size must be a positive integer', {
       fields: ['page.size'],

@@ -385,6 +385,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       query,
       page: queryParams.page,
       vars: scope.vars,
+      pageSizeLimit: context.pageSizeLimit,
       sortDescriptors,
       storageAdapter
     })

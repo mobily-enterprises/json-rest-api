@@ -257,7 +257,8 @@ All parameters are passed within a single `params` object:
     page: Object         // Pagination parameters
   },
   format: String,          // 'plain' (default) or 'jsonapi'
-  transaction: Object    // Database transaction object
+  transaction: Object,   // Database transaction object
+  pageSizeLimit: Number  // Server code only: this call's largest page size
 }
 ```
 
@@ -275,6 +276,7 @@ All parameters are passed within a single `params` object:
 | `queryParams.page.before` | String | No | Cursor for backward pagination |
 | `format` | String | No | `'plain'` or `'jsonapi'`; uses the configured default when omitted |
 | `transaction` | Object | No | Database transaction object |
+| `pageSizeLimit` | Number | No | A positive integer replacing the resource's `queryMaxLimit` for this call, so server code reading every row can use larger pages. HTTP and Socket.IO never pass it, so their page sizes stay capped |
 
 #### Return Value
 

@@ -68,6 +68,13 @@ Page 10 returns an empty array. `enablePaginationCounts: false` suppresses the
 count query and count-derived metadata; do not assume every collection response
 contains totals. Every mode respects `queryMaxLimit`.
 
+Server code that reads every row, for example an export or a nightly job, can
+raise the cap for one call with `pageSizeLimit`, a parameter beside
+`queryParams`: `query({ queryParams: { page: { size: 1000 } }, pageSizeLimit: 1000 })`
+reads up to 1,000 rows a page, so each page's row policy and linkage checks run
+once per 1,000 rows instead of once per `queryMaxLimit`. The transports never
+pass it, so HTTP and Socket.IO page sizes stay capped by `queryMaxLimit`.
+
 ## Cursor pages
 
 ```javascript

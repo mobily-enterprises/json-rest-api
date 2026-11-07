@@ -112,6 +112,8 @@ export interface LifecycleContext<Data = Resource | Resource[] | null, Input = I
   computedDependencies?: string[]
   returnMeta?: Record<string, unknown>
   sortableFields?: string[]
+  // A server caller's query page cap, replacing queryMaxLimit for that query.
+  pageSizeLimit?: number
   auth?: unknown
   [customProperty: string]: unknown
   knexQuery?: QueryFilteringState | null

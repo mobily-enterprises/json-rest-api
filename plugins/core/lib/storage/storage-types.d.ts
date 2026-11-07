@@ -265,6 +265,8 @@ export interface DataReadContext extends TransactionContext, StorageContext {
     sort?: string[]
     page?: { size?: number; number?: number; before?: string; after?: string }
   }
+  // Replaces the resource's queryMaxLimit for this query (a server caller's query param).
+  pageSizeLimit?: number
   knexQuery?: QueryFilteringState | null
   computedDependencies?: string[]
   returnMeta?: {
