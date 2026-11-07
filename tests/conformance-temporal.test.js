@@ -24,6 +24,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
   let events
   let columns
   let rowQuery
+  let mariadb
   let serializationCalls = []
   let serializationError
   before(async () => {
@@ -58,6 +59,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
     rowQuery = id => descriptor
       ? fixture.knex('any_records').where({ tenant_id: descriptor.tenant, resource: 'events', logical_id: id })
       : fixture.knex('temporal_events').where({ id })
+    mariadb = databaseClient === 'mysql2' && /mariadb/i.test((await fixture.knex.raw('SELECT VERSION() AS version'))[0][0].version)
   })
   beforeEach(async () => {
     serializationCalls = []
@@ -435,8 +437,10 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
   ]) {
     it(`normalizes a stored ${field} value ${raw} through the public read boundary`, async () => {
       const event = await fixture.seed('events', { name: 'Driver value' })
+      // MariaDB, unlike MySQL 8.0.19+, takes no UTC offset in a datetime literal.
       const rejected = databaseClient !== 'better-sqlite3' && (
-        (field === 'occurredAt' && raw === -1) || (field === 'day' && fixture.storage === 'knex')
+        (field === 'occurredAt' && raw === -1) || (field === 'day' && fixture.storage === 'knex') ||
+        (mariadb && field === 'occurredAt' && String(raw).endsWith('+08:00'))
       )
       if (rejected) {
         await assert.rejects(rowQuery(event.id).update({ [columns[field]]: raw }), {
@@ -449,7 +453,8 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
         ? `${raw}+00`
         : raw
       await rowQuery(event.id).update({ [columns[field]]: stored })
-      const publicValue = ['pg', 'mysql2'].includes(databaseClient) && fixture.storage === 'knex' && field === 'atTime'
+      // PostgreSQL and MySQL round the extra digits into a time(3) column; MariaDB truncates them.
+      const publicValue = ['pg', 'mysql2'].includes(databaseClient) && !mariadb && fixture.storage === 'knex' && field === 'atTime'
         ? '12:34:56.988'
         : expected
       for (const format of ['jsonapi', 'plain']) {
@@ -468,7 +473,8 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
       if (rejected) {
         const code = databaseClient === 'pg'
           ? (field === 'observedAtMs' ? '22P02' : field === 'occurredAt' ? '22007' : '22008')
-          : (field === 'observedAtMs' ? (fixture.storage === 'anyapi' ? 'WARN_DATA_TRUNCATED' : 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD') : 'ER_TRUNCATED_WRONG_VALUE')
+          // MySQL truncates text in a double slot with a warning; MariaDB calls it an incorrect value.
+          : (field === 'observedAtMs' ? (fixture.storage === 'anyapi' && !mariadb ? 'WARN_DATA_TRUNCATED' : 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD') : 'ER_TRUNCATED_WRONG_VALUE')
         await assert.rejects(rowQuery(event.id).update({ [columns[field]]: raw }), { code })
         assert.equal(attributes('jsonapi', await events.get({ id: event.id }))[field], null)
         continue
