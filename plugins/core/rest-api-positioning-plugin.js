@@ -3,7 +3,7 @@ import { calculatePosition, getInitialPosition, isValidPosition } from './lib/fr
 import { createStorageAdapter } from './lib/storage/storage-adapter.js'
 import { hasKnexTableIndex } from './lib/dbIntrospection.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from './lib/querying-writing/database-value-normalizers.js'
-import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { RestApiBulkWriteUnsupportedError, RestApiValidationError } from '../../lib/rest-api-errors.js'
 import { errorMessage, getOperationDiagnosticContext, isRestApiError } from '../../lib/error-context.js'
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 
@@ -104,7 +104,7 @@ export const PositioningPlugin = {
       }
     })
 
-    addHook('beforeProcessing', 'lock-position-resource', {}, async ({ context, scopeName }) => {
+    addHook('beforeProcessing', 'lock-position-resource', { batch: true }, async ({ context, scopeName }) => {
       if (!enabled(scopeName)) return
       const adapter = adapterFor(scopeName)
       const descriptor = context.schemaInfo.descriptor
@@ -124,7 +124,7 @@ export const PositioningPlugin = {
       }
     })
 
-    addHook('beforeSchemaValidate', 'process-beforeid', {}, ({ context, scopeName }) => {
+    addHook('beforeSchemaValidate', 'process-beforeid', { batch: true }, ({ context, scopeName }) => {
       if (!enabled(scopeName)) return
       const attributes = context.inputRecord.data.attributes || {}
       context.positioningBeforeId = attributes[config.beforeIdField]
@@ -207,8 +207,26 @@ export const PositioningPlugin = {
     }
 
     for (const method of ['Post', 'Put', 'Patch']) {
-      addHook(`beforeDataCall${method}`, `calculate-position-${method.toLowerCase()}`, {}, calculateAndSetPosition)
+      addHook(`beforeDataCall${method}`, `calculate-position-${method.toLowerCase()}`, { batch: true }, calculateAndSetPosition)
     }
+
+    // Positions are computed per row against their neighbours: many-row writes
+    // create no positioned rows and change no positions.
+    const refusePositions = ({ context, scopeName }) => {
+      if (!enabled(scopeName)) return
+      const moves = context.inputRecords.some(record => {
+        const attributes = record?.data?.attributes || {}
+        return attributes[config.field] !== undefined || attributes[config.beforeIdField] !== undefined
+      })
+      if (context.method !== 'postMany' && !moves) return
+      throw new RestApiBulkWriteUnsupportedError({
+        resourceType: scopeName,
+        operation: context.method,
+        reason: 'it is positioned; create and move positioned rows with single writes'
+      })
+    }
+    addHook('beforeProcessingPostMany', 'refuse-positions-post-many', {}, refusePositions)
+    addHook('beforeProcessingPatchMany', 'refuse-positions-patch-many', {}, refusePositions)
     addHook('beforeDataQuery', 'apply-position-sort', {}, ({ context, scopeName }) => {
       if (enabled(scopeName) && !context.queryParams.sort?.length) context.queryParams.sort = [config.field]
     })

@@ -26,7 +26,8 @@ export async function invalidateDeletedPivotTargets (api, scopeName, context) {
   }
 }
 
-export async function deletePivotReferences (api, scopeName, context) {
+// Removes the pivot rows of deleted records: context.id, or every id in `ids`.
+export async function deletePivotReferences (api, scopeName, context, ids = [context.id]) {
   const targets = new Map()
   for (const [ownerType, owner] of Object.entries(api.resources)) {
     for (const relationship of Object.values(owner.vars.schemaInfo?.schemaRelationships || {})) {
@@ -37,9 +38,10 @@ export async function deletePivotReferences (api, scopeName, context) {
       }
     }
   }
-  const id = api.knex.helpers.getStorageAdapter(scopeName).translateFilterValue('id', context.id)
+  const adapter = api.knex.helpers.getStorageAdapter(scopeName)
+  const values = ids.map(id => adapter.translateFilterValue('id', id))
   const db = context.transaction || context.db || api.knex.instance
-  for (const { tableName, column } of targets.values()) await db(tableName).where(column, id).delete()
+  for (const { tableName, column } of targets.values()) await db(tableName).whereIn(column, values).delete()
 }
 
 export async function invalidateRemovedPivotVersions (api, relDef, query, transaction) {

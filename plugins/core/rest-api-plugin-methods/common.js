@@ -389,17 +389,25 @@ export const validateResourceAttributesBeforeWrite = async ({
  */
 export const validateRelationshipAccess = async (context, inputRecord, helpers, api) => {
   if (!inputRecord?.data?.relationships) return
-
-  // Targets of every relationship, so each type is read once per record.
   const unique = new Map()
-  for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
+  collectRelationshipTargets(inputRecord, api, unique)
+  await validateRelationshipTargets(context, [...unique.values()], helpers, api)
+}
+
+/**
+ * Normalizes a document's relationship identifiers and adds each target to
+ * `unique`, so a batch of documents reads every related type once.
+ * @param {InputDocument} inputRecord
+ * @param {LifecycleApi} api
+ * @param {Map<string, Identifier>} unique
+ */
+export const collectRelationshipTargets = (inputRecord, api, unique) => {
+  const relationships = /** @type {NonNullable<InputDocument['data']['relationships']>} */ (inputRecord?.data?.relationships || {})
+  for (const [relName, relData] of Object.entries(relationships)) {
     if (!relData?.data) continue
 
     const normalizedRelationshipData = /** @type {Identifier | Identifier[]} */ (normalizeRelationshipIdentifiers(relData.data, { api }))
-    inputRecord.data.relationships[relName] = {
-      ...relData,
-      data: normalizedRelationshipData
-    }
+    relationships[relName] = { ...relData, data: normalizedRelationshipData }
 
     // Handle both single and array relationships
     const relatedItems = Array.isArray(normalizedRelationshipData)
@@ -408,7 +416,17 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
 
     for (const item of relatedItems) unique.set(JSON.stringify([item.type, item.id]), item)
   }
-  const targets = [...unique.values()]
+}
+
+/**
+ * Checks that every target is visible to the caller, with one scoped read per
+ * related type and batch.
+ * @param {ResourceContext} context
+ * @param {Identifier[]} targets
+ * @param {LifecycleHelpers} helpers
+ * @param {LifecycleApi} api
+ */
+export const validateRelationshipTargets = async (context, targets, helpers, api) => {
   for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
     const batch = targets.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
     /** @type {Map<string, Identifier[]>} */

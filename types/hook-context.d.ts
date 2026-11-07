@@ -169,8 +169,27 @@ export interface HookContextMap<Context extends object = Record<string, unknown>
   finishPostRelationship: RelationshipHookContext<Context, 'postRelationship'>
   finishPatchRelationship: RelationshipHookContext<Context, 'patchRelationship'>
   finishDeleteRelationship: RelationshipHookContext<Context, 'deleteRelationship'>
+  // Many-row operations: once per call. ids are the affected records' ids as strings
+  // (for a create, set from afterDataCallPostMany; undefined for rows an ignore skipped).
+  beforeProcessingPostMany: ManyRowHookContext<Context, 'postMany'>
+  beforeDataCallPostMany: ManyRowHookContext<Context, 'postMany'>
+  afterDataCallPostMany: ManyRowHookContext<Context, 'postMany'>
+  beforeProcessingPatchMany: ManyRowHookContext<Context, 'patchMany' | 'patchWhereIds' | 'patchWhere'>
+  beforeDataCallPatchMany: ManyRowHookContext<Context, 'patchMany' | 'patchWhereIds' | 'patchWhere'>
+  afterDataCallPatchMany: ManyRowHookContext<Context, 'patchMany' | 'patchWhereIds' | 'patchWhere'>
+  beforeDataCallDeleteMany: ManyRowHookContext<Context, 'deleteMany' | 'deleteWhere'>
+  afterDataCallDeleteMany: ManyRowHookContext<Context, 'deleteMany' | 'deleteWhere'>
   afterCommit: HookContext<Context>
   afterRollback: HookContext<Context>
+}
+
+export type ManyRowHookContext<Context extends object = Record<string, unknown>, Method extends string = string> = HookContext<Context> & {
+  readonly method: Method
+  readonly scopeName: string
+  readonly transaction: ManagedTransaction
+  // JSON:API documents of the rows, in input order (creates and patches).
+  readonly inputRecords?: Array<{ data: { id?: InputResourceId; attributes?: Record<string, unknown>; relationships?: Record<string, unknown> } }>
+  readonly ids?: Array<string | undefined>
 }
 
 export type KnownHookName = keyof HookContextMap

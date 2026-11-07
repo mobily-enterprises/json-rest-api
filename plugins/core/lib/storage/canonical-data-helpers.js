@@ -699,7 +699,40 @@ export function createCanonicalDataHelpers ({
     return runAggregateQuery({ source: filteredState.query, sourceTable: tableAlias, storageAdapter, db, plan })
   }
 
+  /**
+   * The canonical rows of one resource with ownership and row policy applied.
+   * Many-row writes and row locks are table-storage features; AnyAPI resources
+   * get the read-only builder only.
+   * @param {{ scopeName: string, context: DataReadContext, runHooks: (name: 'knexQueryFiltering') => unknown, alias?: string, purpose: string, filters?: Record<string, unknown> }} request
+   */
+  const dataScopedQuery = async ({ scopeName, context, runHooks, alias, purpose, filters }) => {
+    const storageAdapter = getScopeStorageAdapter(scopeName)
+    if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
+    context.storageAdapter = storageAdapter
+    const descriptor = getDescriptor(scopeName)
+    const db = context.db || context.transaction || api.knex.instance
+    const tableAlias = alias || context.schemaInfo.tableName || descriptor.resource
+    const filteredState = await withQueryFilteringContext(context, {
+      query: storageAdapter.buildBaseQuery({ transaction: db, tableAlias }),
+      filters,
+      schemaInfo: context.schemaInfo,
+      scopeName,
+      tableName: tableAlias,
+      db,
+      queryPurpose: purpose,
+      isAnyApi: true,
+      adapter: storageAdapter,
+      storageAdapter,
+    }, async () => {
+      await applyBuiltInAnyApiQueryFilters(context)
+      await runHooks('knexQueryFiltering')
+    })
+    // Wrapped: a builder is thenable, so an async function cannot return it bare.
+    return { query: filteredState.query }
+  }
+
   return {
+    dataScopedQuery,
     dataExists,
     dataPost,
     dataPut,

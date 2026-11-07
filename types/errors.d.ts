@@ -116,3 +116,47 @@ export class RestApiTemporalDataError extends RestApiError {
   details: { field?: string; resourceType?: string; fieldType?: string; source: string }
   toJSON(): SerializedError & Pick<RestApiTemporalDataError, 'code' | 'type' | 'statusCode' | 'details'>
 }
+
+export class RestApiBulkWriteUnsupportedError extends RestApiError {
+  constructor(options?: { resourceType?: string; operation?: string; reason?: string })
+  code: 'REST_API_BULK_WRITE_UNSUPPORTED'
+  type: 'rest_api_bulk_write_unsupported'
+  statusCode: 422
+  details: { resourceType?: string; operation?: string; reason?: string }
+  toJSON(): SerializedError & Pick<RestApiBulkWriteUnsupportedError, 'code' | 'type' | 'statusCode' | 'details'>
+}
+
+// Reports only how many requested records are missing or outside the caller's scope.
+export class RestApiRecordsNotFoundError extends RestApiResourceError {
+  constructor(options?: { resourceType?: string; missing?: number })
+  subtype: 'not_found'
+  details: { resourceType?: string; missing?: number }
+}
+
+export class RestApiBulkInsertIdsError extends RestApiError {
+  constructor(options?: { resourceType?: string; expected?: number; verified?: number })
+  code: 'REST_API_BULK_INSERT_IDS'
+  type: 'rest_api_bulk_insert_ids'
+  details: { resourceType?: string; expected?: number; verified?: number }
+  toJSON(): SerializedError & Pick<RestApiBulkInsertIdsError, 'code' | 'type' | 'details'>
+}
+
+export class RestApiLockOutsideTransactionError extends RestApiValidationError {
+  constructor(options?: { resourceType?: string; operation?: string })
+}
+
+export class RestApiScopedQueryReadOnlyError extends RestApiError {
+  constructor(options?: { resourceType?: string; method?: string })
+  code: 'REST_API_SCOPED_QUERY_READ_ONLY'
+  type: 'rest_api_scoped_query_read_only'
+  details: { resourceType?: string; method?: string }
+  toJSON(): SerializedError & Pick<RestApiScopedQueryReadOnlyError, 'code' | 'type' | 'details'>
+}
+
+export class RestApiRowLimitError extends RestApiError {
+  constructor(options?: { resourceType?: string; rowLimit?: number })
+  code: 'REST_API_ROW_LIMIT'
+  type: 'rest_api_row_limit'
+  details: { resourceType?: string; rowLimit?: number }
+  toJSON(): SerializedError & Pick<RestApiRowLimitError, 'code' | 'type' | 'details'>
+}

@@ -33,10 +33,14 @@ export interface RuntimeArguments<Context extends object = Record<string, unknow
   runHooks(event: string, context?: Record<string, unknown>): Promise<boolean>
   /** Whether runHooks(event) for this resource, or for scope when given, would call any handler. */
   hasHooks(event: string, scope?: RuntimeResource): boolean
+  /** Handlers of these events that would run for this resource (or scope) without { batch: true }. */
+  perRecordHooks(events: readonly string[], scope?: RuntimeResource): Array<{ event: string; name: string }>
 }
 export type RuntimeMethod<Context extends object = Record<string, unknown>> = (args: RuntimeArguments<Context>) => unknown
 export type HookPlacement = { beforeFunction?: string; afterFunction?: never } | { beforeFunction?: never; afterFunction?: string }
-type HookDefinition<Handler> = Handler | (HookPlacement & { functionName?: string; handler: Handler })
+// batch: true marks a per-record handler that many-row operations may skip: its work
+// is done by a batch hook, or does not apply to them. Without it they refuse the resource.
+type HookDefinition<Handler> = Handler | (HookPlacement & { functionName?: string; batch?: boolean; handler: Handler })
 export type RuntimeHook<Context extends object = Record<string, unknown>> = HookDefinition<RuntimeMethod<Context>>
 export type RuntimeHooks<Context extends object = Record<string, unknown>> = {
   [Event in KnownHookName]?: HookDefinition<HookHandler<Event, Context>>

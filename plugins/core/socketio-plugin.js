@@ -5,6 +5,8 @@ import { errorMessage, getOperationDiagnosticContext } from '../../lib/error-con
 import { queryConstraint } from './lib/querying/query-constraint.js'
 
 const pendingRoomChanges = new WeakMap()
+// Ids a many-row write matches against one subscription per query.
+const MANY_ROW_MATCH_CHUNK = 1000
 
 // Preserve room mutation order when an adapter completes joins/leaves asynchronously.
 async function changeRoom (socket, method, room) {
@@ -567,7 +569,7 @@ export const SocketIOPlugin = {
       return io
     }
 
-    addHook('beforeDataCall', 'socketio-capture-before', {}, async ({ context }) => {
+    addHook('beforeDataCall', 'socketio-capture-before', { batch: true }, async ({ context }) => {
       pendingChanges.delete(context)
       if (!io || !['post', 'put', 'patch', 'delete', 'postRelationship', 'deleteRelationship'].includes(context.method)) return
       const { scopeName, id, transaction } = context
@@ -584,7 +586,7 @@ export const SocketIOPlugin = {
       pendingChanges.set(context, candidates)
     })
 
-    addHook('finish', 'socketio-broadcast', {}, async ({ context }) => {
+    addHook('finish', 'socketio-broadcast', { batch: true }, async ({ context }) => {
       const candidates = pendingChanges.get(context)
       if (!candidates) return
       pendingChanges.delete(context)
@@ -606,6 +608,82 @@ export const SocketIOPlugin = {
         await performBroadcast({ ...change, api, scopes, io, log })
       }
     })
+
+    // Batch form: one subscription query per subscription and chunk of ids, before
+    // and after the write, then one notification per changed record after commit.
+    const subscriptionsOf = async scopeName => {
+      const subscriptions = []
+      for (const socket of await io.in(`${scopeName}:updates`).fetchSockets()) {
+        for (const subscription of socket.data.subscriptions || []) {
+          if (subscription.resource === scopeName) subscriptions.push({ socketId: socket.id, subscription })
+        }
+      }
+      return subscriptions
+    }
+    const matchingIds = async ({ subscription, scopeName, ids, transaction }) => {
+      const matched = new Set()
+      for (let offset = 0; offset < ids.length; offset += MANY_ROW_MATCH_CHUNK) {
+        const part = ids.slice(offset, offset + MANY_ROW_MATCH_CHUNK)
+        try {
+          const result = await api.resources[scopeName].query({
+            format: 'jsonapi',
+            transaction,
+            pageSizeLimit: part.length,
+            queryParams: { filters: subscription.filters, include: [], page: { size: part.length } },
+            [queryConstraint]: { scopeName, idsQuery: part }
+          }, { ...subscription.context, auth: subscription.auth })
+          for (const record of result.data) matched.add(String(record.id))
+        } catch (error) {
+          try {
+            await createEnhancedLogger(log, { schemaInfo: scopes[scopeName]?.vars?.schemaInfo }).warn('Socket.IO subscription query failed', {
+              ...getOperationDiagnosticContext({ transaction }, { phase: 'subscriptionMatch', method: 'query', scopeName, backend: api.knex?.instance?.client?.config?.client }),
+              subscriptionId: subscription.id,
+              error
+            })
+          } catch { /* Warning failure must preserve the existing non-match result. */ }
+        }
+      }
+      return matched
+    }
+    const captureBeforeMany = async ({ context }) => {
+      pendingChanges.delete(context)
+      if (!io) return
+      const candidates = []
+      for (const { socketId, subscription } of await subscriptionsOf(context.scopeName)) {
+        const before = context.method === 'postMany'
+          ? new Set()
+          : await matchingIds({ subscription, scopeName: context.scopeName, ids: context.ids, transaction: context.transaction })
+        candidates.push({ socketId, subscription, before })
+      }
+      pendingChanges.set(context, candidates)
+    }
+    const broadcastMany = async ({ context }) => {
+      const candidates = pendingChanges.get(context)
+      if (!candidates) return
+      pendingChanges.delete(context)
+      const ids = (context.ids || []).filter(id => id !== undefined)
+      if (!io || !ids.length) return
+      const { scopeName, transaction } = context
+      const method = { postMany: 'post', deleteMany: 'delete', deleteWhere: 'delete' }[context.method] || 'patch'
+      const recipientsById = new Map(ids.map(id => [id, []]))
+      for (const { socketId, subscription, before } of candidates) {
+        const after = method === 'delete' ? new Set() : await matchingIds({ subscription, scopeName, ids, transaction })
+        for (const id of ids) {
+          if (before.has(id) || after.has(id)) recipientsById.get(id).push({ socketId, subscriptionId: subscription.id, generation: subscription.generation })
+        }
+      }
+      const changes = [...recipientsById].filter(([, recipients]) => recipients.length)
+        .map(([id, recipients]) => ({ method, scopeName, id, isCreate: method === 'post', recipients }))
+      if (!changes.length) return
+      if (!pendingBroadcasts.has(transaction)) pendingBroadcasts.set(transaction, [])
+      pendingBroadcasts.get(transaction).push(...changes)
+    }
+    addHook('beforeDataCallPostMany', 'socketio-capture-before-post-many', {}, captureBeforeMany)
+    addHook('beforeDataCallPatchMany', 'socketio-capture-before-patch-many', {}, captureBeforeMany)
+    addHook('beforeDataCallDeleteMany', 'socketio-capture-before-delete-many', {}, captureBeforeMany)
+    addHook('afterDataCallPostMany', 'socketio-broadcast-post-many', {}, broadcastMany)
+    addHook('afterDataCallPatchMany', 'socketio-broadcast-patch-many', {}, broadcastMany)
+    addHook('afterDataCallDeleteMany', 'socketio-broadcast-delete-many', {}, broadcastMany)
 
     addHook('afterCommit', 'socketio-broadcast-deferred', {}, async ({ context }) => {
       if (!context?.transaction) return

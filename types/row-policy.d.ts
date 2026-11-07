@@ -5,7 +5,10 @@ export interface RowPolicyParams<Context extends object = Record<string, unknown
   context: Context
   scopeName: string
   tableName?: string
+  // 'report', 'bulk-write', 'lock' and 'claim' join the read purposes of earlier releases.
   queryPurpose: string
+  // True only for a context made by createSystemContext.
+  system: boolean
   db?: StorageDatabase
   isAnyApi: boolean
   storageAdapter?: StorageAdapter | null

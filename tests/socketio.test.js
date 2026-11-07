@@ -12,6 +12,7 @@ import {
 } from './helpers/test-utils.js'
 import { createWebSocketApi, closeWebSocketApi } from './fixtures/api-configs.js'
 import { waitForSocketEvent, installSocketBarrier, drainSocketEvents } from './helpers/socketio.js'
+import { storageMode } from './helpers/storage-mode.js'
 
 // Create JWT token using jose
 async function createToken (payload = {}, secret = 'test-secret-key') {
@@ -721,6 +722,53 @@ describe('WebSocket/Socket.IO Plugin', () => {
         // Should not receive notification for non-matching book
         await drainSocketEvents(socket)
         assert.deepEqual(notifications, [])
+      } finally {
+        socket.close()
+      }
+    })
+  })
+
+  describe('Many-row notifications', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+    it('notifies once per changed record that matched before or after the write', async () => {
+      const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key')
+      const socket = ioClient(`http://localhost:${server.address().port}`, { path: '/api/socket.io', auth: { token } })
+      try {
+        await waitForSocketEvent(socket, 'connect', 5000, 'connect_error')
+        const country = await api.resources.countries.post({ document: createJsonApiDocument('countries', { name: 'Batch Country', code: 'BC' }), format: 'jsonapi' })
+        await socket.timeout(5000).emitWithAck('subscribe', { resource: 'books', filters: { title: 'Batch' } })
+        const notifications = []
+        socket.on('subscription.update', value => notifications.push(value))
+        const sorted = pairs => pairs.sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
+        const seen = async () => {
+          await drainSocketEvents(socket)
+          const found = notifications.map(item => [item.action, String(item.id)])
+          notifications.length = 0
+          return sorted(found)
+        }
+
+        const created = await api.resources.books.postMany({
+          data: [{ title: 'Batch', country: country.data.id }, { title: 'Other', country: country.data.id }, { title: 'Batch', country: country.data.id }],
+          returning: 'minimal'
+        })
+        const [first, other, third] = created.data.map(item => String(item.id))
+        assert.deepEqual(await seen(), sorted([['post', first], ['post', third]]))
+
+        // Leaving, staying in and entering the filter notify; a row outside it before and after does not.
+        await api.resources.books.patchWhereIds({ ids: [first, other], data: { title: 'Moved' } })
+        await api.resources.books.patchWhereIds({ ids: [third], data: { title: 'Batch' } })
+        assert.deepEqual(await seen(), sorted([['patch', first], ['patch', third]]))
+        await api.resources.books.patchMany({ data: [{ id: other, title: 'Batch' }] })
+        assert.deepEqual(await seen(), [['patch', other]])
+
+        await api.resources.books.deleteMany({ ids: [first, other, third] })
+        assert.deepEqual(await seen(), sorted([['delete', other], ['delete', third]]))
+
+        // A rolled-back many-row write notifies nobody.
+        await assert.rejects(api.transaction(async transaction => {
+          await api.resources.books.postMany({ data: [{ title: 'Batch', country: country.data.id }], transaction })
+          throw new Error('roll back')
+        }), /roll back/)
+        assert.deepEqual(await seen(), [])
       } finally {
         socket.close()
       }

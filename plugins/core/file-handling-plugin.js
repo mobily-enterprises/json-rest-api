@@ -1,6 +1,6 @@
 /** File detection, uploads and cleanup tied to resource writes. */
 
-import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { RestApiBulkWriteUnsupportedError, RestApiValidationError } from '../../lib/rest-api-errors.js'
 import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../lib/error-context.js'
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 
@@ -218,10 +218,24 @@ export const FileHandlingPlugin = {
       }
     }
 
-    addHook('beforeProcessing', 'processFiles', {}, async ({ context }) => {
+    addHook('beforeProcessing', 'processFiles', { batch: true }, async ({ context }) => {
       if (!['post', 'put', 'patch'].includes(context.method)) return
       await processFiles(context.scopeName, context.params, context)
     })
+
+    // Uploads belong to one record each; many-row writes refuse rows that set file fields.
+    const refuseFileFields = ({ context, scopeName }) => {
+      const fileFields = getFileFields(scopeName)
+      const set = fileFields.filter(field => context.inputRecords.some(record => record?.data?.attributes?.[field.field] !== undefined))
+      if (!set.length) return
+      throw new RestApiBulkWriteUnsupportedError({
+        resourceType: scopeName,
+        operation: context.method,
+        reason: `rows set file fields (${set.map(field => field.field).join(', ')}); upload files with single writes`
+      })
+    }
+    addHook('beforeProcessingPostMany', 'refuse-file-fields-post-many', {}, refuseFileFields)
+    addHook('beforeProcessingPatchMany', 'refuse-file-fields-patch-many', {}, refuseFileFields)
 
     addHook('afterRollback', 'cleanupUploadedFiles', {}, async ({ context }) => {
       await cleanupUploadedFiles(context)

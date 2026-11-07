@@ -42,6 +42,14 @@ export const QueryProjectionsPlugin = {
       context.queryFields = fields && typeof fields === 'object' && !Array.isArray(fields) ? { ...fields } : fields
     })
 
-    addHook('beforeSchemaValidate', 'strip-query-field-input', {}, stripQueryFieldInput)
+    addHook('beforeSchemaValidate', 'strip-query-field-input', { batch: true }, stripQueryFieldInput)
+    // Batch form: strip query fields from every row of a many-row write.
+    const stripEveryRow = async ({ context, scopeName, scopes }) => {
+      for (const inputRecord of context.inputRecords) {
+        await stripQueryFieldInput({ context: { method: context.method, inputRecord }, scopeName, scopes })
+      }
+    }
+    addHook('beforeProcessingPostMany', 'strip-query-field-input-post-many', {}, stripEveryRow)
+    addHook('beforeProcessingPatchMany', 'strip-query-field-input-patch-many', {}, stripEveryRow)
   }
 }

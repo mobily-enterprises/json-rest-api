@@ -172,6 +172,9 @@ export function mapRestApiErrorToHttp (error) {
         ...(error.details ? { source: error.details } : {})
       }]
     }
+  } else if (error.code === 'REST_API_BULK_WRITE_UNSUPPORTED') {
+    status = 422
+    errors = [{ status: '422', code: error.code, title: 'Unsupported Bulk Write', detail: error.message }]
   } else if (error.code === 'REST_API_PRECONDITION_FAILED') {
     status = 412
     errors = [{ status: '412', code: error.code, title: 'Precondition Failed', detail: error.message }]

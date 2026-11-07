@@ -1,5 +1,6 @@
 import type { Knex } from 'knex'
 import type { ManagedTransactionParam } from './transactions.js'
+import type { DataAccessMethods } from './data-access-methods.js'
 import type {
   CollectionResult, DirectResourceId, InputResourceId, InputResourceIdentifier, ResourceFormat,
   SingleResourceResult, WriteResult, WriteReturning
@@ -89,7 +90,7 @@ export interface ResourceCoreMethods<
   DefaultFormat extends ResourceFormat = 'plain',
   DefaultReturning extends WriteReturning = 'full',
   Context extends object = object
-> {
+> extends DataAccessMethods<Fields, Input, Type, DefaultFormat, Context> {
   get<Format extends ResourceFormat = DefaultFormat>(
     params: ReadOptions<Format> & { id: DirectResourceId }, context?: Context
   ): Promise<SingleResourceResult<Format, Fields, Type>>

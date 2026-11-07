@@ -19,7 +19,7 @@ import { ensureAnyApiSchema } from '../../plugins/core/lib/anyapi/schema-utils.j
 import { storageMode } from '../helpers/storage-mode.js'
 import { createStorageAdapter } from '../../plugins/core/lib/storage/storage-adapter.js'
 
-async function useStoragePlugin (api, knex, { tenantId, storage = storageMode.mode, pluginOptions = {} } = {}) {
+export async function useStoragePlugin (api, knex, { tenantId, storage = storageMode.mode, pluginOptions = {} } = {}) {
   if (storage === 'anyapi') {
     // ensureSchema: false models a deployment whose migrations own the tables.
     if (pluginOptions.ensureSchema !== false) await ensureAnyApiSchema(knex)
@@ -36,7 +36,7 @@ async function useStoragePlugin (api, knex, { tenantId, storage = storageMode.mo
   }
 }
 
-function mapTable (knex, api, tableName, resourceName) {
+export function mapTable (knex, api, tableName, resourceName) {
   if (api.anyapi) {
     storageMode.registerTable(knex, tableName, resourceName, api.anyapi?.tenantId)
   }

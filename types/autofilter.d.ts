@@ -22,6 +22,8 @@ export interface CompiledAutoFilter<Context extends object = Record<string, unkn
   resolve: AutoFilterResolver<Context, Api>
   resolverName: string
   required: boolean
+  // NULL marks a row every owner reads; writes, locks and claims see only the owner's rows.
+  shared: boolean
   relationshipName: string | null
   relationshipType: string | null
   inputPath: string
@@ -30,6 +32,8 @@ export interface CompiledAutoFilter<Context extends object = Record<string, unkn
 export type AutoFilterDefinition<Context extends object = Record<string, unknown>, Api extends object = object> = {
   field: string
   required?: boolean
+  // The field must be nullable: NULL rows are shared reference rows.
+  shared?: boolean
 } & (
   { resolve: string | AutoFilterResolver<Context, Api>; resolver?: string | AutoFilterResolver<Context, Api> }
   | { resolve?: undefined | null; resolver: string | AutoFilterResolver<Context, Api> }
@@ -52,6 +56,6 @@ export interface AutoFilterRegistry {
   getConfig(): { presets: string[]; resolvers: string[] }
   getScopeConfig(scopeName: string): {
     preset: string | null
-    filters: Array<{ field: string; resolver: string; required: boolean }>
+    filters: Array<{ field: string; resolver: string; required: boolean; shared: boolean }>
   } | null
 }

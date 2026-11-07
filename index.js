@@ -25,4 +25,8 @@ export { LocalStorage } from './plugins/storage/local-storage.js'
 
 export * from './lib/rest-api-errors.js'
 
+// Population-wide work (jobs) and the SELECT-only builder of scopedQuery
+export { createSystemContext, isSystemContext } from './lib/system-context.js'
+export { readOnlyQueryBuilder } from './plugins/core/lib/querying/read-only-query.js'
+
 export { getUrlPrefix } from './plugins/core/lib/querying/url-helpers.js'

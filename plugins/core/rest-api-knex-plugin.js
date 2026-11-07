@@ -1,4 +1,5 @@
 import { createOrdinaryDataHelpers } from './lib/storage/ordinary-data-helpers.js'
+import { createManyRowDataHelpers } from './lib/storage/many-row-data-helpers.js'
 import { createKnexTransaction } from '../../lib/knex-transaction.js'
 import { createEnhancedLogger } from '../../lib/enhanced-logger.js'
 import { throwMissingPackage } from '../../lib/missing-package.js'
@@ -160,6 +161,7 @@ export const RestApiKnexPlugin = {
     helpers.newTransaction = context => createKnexTransaction(knex, context)
 
     Object.assign(helpers, createOrdinaryDataHelpers({ api, scopes, knex, log, getScopeStorageAdapter }))
+    Object.assign(helpers, createManyRowDataHelpers({ api, scopes, log, getScopeStorageAdapter }))
 
     log.info('RestApiKnexPlugin installed - basic CRUD operations ready')
   }
