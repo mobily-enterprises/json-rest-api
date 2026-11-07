@@ -16,8 +16,8 @@ function statementBudget (name, { size, atomic, polymorphicTypes } = {}) {
     sparse: [1, 1],
     'nested-includes': [7, 9],
     'many-to-many-related': [3, 3],
-    'patch-full': [11, 10],
-    'patch-nested-includes': [14, 15]
+    'patch-full': [10, 10],
+    'patch-nested-includes': [13, 15]
   }
   if (Object.hasOwn(fixed, name)) return fixed[name][canonical ? 1 : 0]
   if (['tasks-authorized', 'shared_tasks-authorized'].includes(name)) return 4 + polymorphicTypes
@@ -28,8 +28,8 @@ function statementBudget (name, { size, atomic, polymorphicTypes } = {}) {
     return 4 + 3 * batches
   }
   const writeCost = {
-    'bulk-post-full': [8, 9],
-    'bulk-patch-full': [8, 7],
+    'bulk-post-full': [7, 9],
+    'bulk-patch-full': [7, 7],
     // One declared pivot (ordinary) or scoped canonical link cleanup per task.
     'bulk-delete': [4, 3]
   }

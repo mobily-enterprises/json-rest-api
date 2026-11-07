@@ -958,7 +958,11 @@ POST, PUT and PATCH also reject an unexpected failure while refreshing
 and ignored, allowing a successful response and completion hooks with stale
 state. The cause chain retains the failure and resource context with phase
 `postWriteRead`; typed errors retain their identity within that chain. This refresh runs for
-`returning: 'full'`, `'minimal'` and `'none'`. It happens before finish hooks and
+`returning: 'full'`, `'minimal'` and `'none'` whenever a hook can see it: a `finish`,
+method-specific finish, `afterCommit`, `afterRollback` or `transport:response` hook
+registered for the resource or globally. Without one, nothing reads the refreshed
+record, so the write skips that query and its row policy run; a `'full'` response is
+read by its own get either way. It happens before finish hooks and
 owned commit, so a failure rolls back owned changes, including relationship
 updates. Borrowed transactions remain active for the caller to complete.
 

@@ -37,6 +37,7 @@ export default async function putMethod ({
   scope,
   scopes,
   runHooks,
+  hasHooks,
   scopeOptions,
   scopeName,
   api,
@@ -214,6 +215,7 @@ export default async function putMethod ({
       api,
       scopes,
       runHooks,
+      hasHooks,
       helpers
     })
 

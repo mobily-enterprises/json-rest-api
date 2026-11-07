@@ -375,7 +375,9 @@ is `Post`, `Put` or `Patch`, for example `beforeDataCallPatch`.
    method-specific hook.
 5. Acquire required relationship locks, apply setters and write to storage.
 6. Run the method-specific `afterDataCall`, then `afterDataCall`.
-7. Apply relationship changes and refresh the minimal stored record.
+7. Apply relationship changes and refresh the minimal stored record when a
+   `finish`, method-specific finish, `afterCommit`, `afterRollback` or
+   `transport:response` hook is registered to see it.
 8. Prepare the response; run `finish`, then its method-specific hook.
 9. Commit an owned transaction and await its `afterCommit` chain.
 

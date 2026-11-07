@@ -33,6 +33,7 @@ export default async function postMethod ({
   scope,
   scopes,
   runHooks,
+  hasHooks,
   scopeOptions,
   scopeName,
   api,
@@ -169,6 +170,7 @@ export default async function postMethod ({
       api,
       scopes,
       runHooks,
+      hasHooks,
       helpers
     })
 

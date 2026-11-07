@@ -35,6 +35,7 @@ export default async function patchMethod ({
   scope,
   scopes,
   runHooks,
+  hasHooks,
   scopeOptions,
   scopeName,
   api,
@@ -170,6 +171,7 @@ export default async function patchMethod ({
       api,
       scopes,
       runHooks,
+      hasHooks,
       helpers
     })
 

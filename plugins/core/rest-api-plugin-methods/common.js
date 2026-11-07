@@ -388,6 +388,8 @@ export const validateResourceAttributesBeforeWrite = async ({
 export const validateRelationshipAccess = async (context, inputRecord, helpers, api) => {
   if (!inputRecord?.data?.relationships) return
 
+  // Targets of every relationship, so each type is read once per record.
+  const unique = new Map()
   for (const [relName, relData] of Object.entries(inputRecord.data.relationships)) {
     if (!relData?.data) continue
 
@@ -402,62 +404,61 @@ export const validateRelationshipAccess = async (context, inputRecord, helpers, 
       ? normalizedRelationshipData
       : [normalizedRelationshipData]
 
-    const unique = new Map()
     for (const item of relatedItems) unique.set(JSON.stringify([item.type, item.id]), item)
-    const targets = [...unique.values()]
-    for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-      const batch = targets.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
-      /** @type {Map<string, Identifier[]>} */
-      const byType = new Map()
-      for (const item of batch) {
-        const items = byType.get(item.type)
-        if (items) items.push(item)
-        else byType.set(item.type, [item])
+  }
+  const targets = [...unique.values()]
+  for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
+    const batch = targets.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
+    /** @type {Map<string, Identifier[]>} */
+    const byType = new Map()
+    for (const item of batch) {
+      const items = byType.get(item.type)
+      if (items) items.push(item)
+      else byType.set(item.type, [item])
+    }
+    const lookups = new Map()
+    for (const [type, items] of byType) {
+      const relatedScope = api.resources[type]
+      if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
+      const getContext = {
+        ...context,
+        id: undefined,
+        minimalRecord: undefined,
+        schemaInfo: relatedScope.vars.schemaInfo,
+        scopeName: type,
+        queryParams: {},
+        method: 'get',
+        isUpdate: false
       }
-      const lookups = new Map()
-      for (const [type, items] of byType) {
-        const relatedScope = api.resources[type]
-        if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
-        const getContext = {
-          ...context,
-          id: undefined,
-          minimalRecord: undefined,
-          schemaInfo: relatedScope.vars.schemaInfo,
-          scopeName: type,
-          queryParams: {},
-          method: 'get',
-          isUpdate: false
-        }
-        const lookup = {
-          scopeName: type,
-          context: getContext,
-          /** @param {import('../lib/storage/storage-types.js').QueryFilteringState} filterParams */
-          applyQueryFilters: filterParams => relatedScope.applyQueryFilters({
-            ...filterParams, schemaInfo: getContext.schemaInfo
-          }, getContext),
-          filters: {},
-          queryPurpose: 'relationship-validation'
-        }
-        const records = await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })
-        lookups.set(type, { relatedScope, lookup, records: new Map(records.map(record => [String(record.id), record])) })
+      const lookup = {
+        scopeName: type,
+        context: getContext,
+        /** @param {import('../lib/storage/storage-types.js').QueryFilteringState} filterParams */
+        applyQueryFilters: filterParams => relatedScope.applyQueryFilters({
+          ...filterParams, schemaInfo: getContext.schemaInfo
+        }, getContext),
+        filters: {},
+        queryPurpose: 'relationship-validation'
       }
-      for (const item of batch) {
-        const { relatedScope, lookup, records } = lookups.get(item.type)
-        // A database collation can equate IDs with different spellings.
-        const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
-          ...lookup, context: { ...lookup.context, id: item.id }
-        })
-        if (!record) {
-          throw new RestApiResourceError(
-            `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
-            { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
-          )
-        }
-        await relatedScope.checkPermissions({
-          method: 'get',
-          originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
-        })
+      const records = await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })
+      lookups.set(type, { relatedScope, lookup, records: new Map(records.map(record => [String(record.id), record])) })
+    }
+    for (const item of batch) {
+      const { relatedScope, lookup, records } = lookups.get(item.type)
+      // A database collation can equate IDs with different spellings.
+      const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
+        ...lookup, context: { ...lookup.context, id: item.id }
+      })
+      if (!record) {
+        throw new RestApiResourceError(
+          `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
+          { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
+        )
       }
+      await relatedScope.checkPermissions({
+        method: 'get',
+        originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
+      })
     }
   }
 }
@@ -537,19 +538,23 @@ export const applyFieldSetters = async (context, api, helpers) => {
 /**
  * Refreshes post-write state and prepares POST/PATCH/PUT responses before commit.
  * Runs finish hooks once and normalizes their result; borrows the write transaction.
- * @param {Pick<LifecycleArguments, 'scopeName' | 'api' | 'scopes' | 'runHooks' | 'helpers'> & { context: CompletedWriteContext }} options
+ * The refreshed minimalRecord is read only when a later hook can see it.
+ * @param {Pick<LifecycleArguments, 'scopeName' | 'api' | 'scopes' | 'runHooks' | 'hasHooks' | 'helpers'> & { context: CompletedWriteContext }} options
  */
-export async function handleRecordReturnAfterWrite ({ context, scopeName, api, scopes, runHooks, helpers }) {
+export async function handleRecordReturnAfterWrite ({ context, scopeName, api, scopes, runHooks, hasHooks, helpers }) {
   const hookSuffix = getMethodHookSuffix(context.method)
   if (context.minimalRecord) context.originalMinimalRecord = context.minimalRecord
 
-  try {
-    context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks })
-  } catch (error) {
-    throw wrapUnexpectedError(error, {
-      message: `Failed to refresh record after ${context.method}`,
-      context: { scopeName, phase: 'postWriteRead' }
-    })
+  // A full response reads the record again through get; only hooks see the refresh.
+  if (['finish', `finish${hookSuffix}`, 'afterCommit', 'afterRollback', 'transport:response'].some(hasHooks)) {
+    try {
+      context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks })
+    } catch (error) {
+      throw wrapUnexpectedError(error, {
+        message: `Failed to refresh record after ${context.method}`,
+        context: { scopeName, phase: 'postWriteRead' }
+      })
+    }
   }
 
   const returnMode = context.returning
