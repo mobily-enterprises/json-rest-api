@@ -188,6 +188,10 @@ export const applyScopeFiltersToIncludeQuery = async ({
   }
 }
 
+// Linked ids checked per visibility query: a 1,000-row page costs one query and
+// one row-policy run per linked type, and any number of ids stays bounded SQL.
+const VISIBILITY_BATCH_SIZE = 1000
+
 export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context }) => {
   const idsByType = new Map()
   for (const { type, id } of identifiers) {
@@ -204,20 +208,23 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
     const column = `${tableName}.${idColumn}`
     const visibleIds = new Set()
     visible.set(type, visibleIds)
-    // One query, and one row-policy run, per type: whereInIdentifiers binds any number of ids.
-    const query = adapter.buildBaseQuery({ transaction: context.transaction })
-      .modify(whereInIdentifiers, column, [...ids].map(id => adapter.translateFilterValue('id', id)))
-      .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
-    const state = await applyScopeFiltersToIncludeQuery({
-      query,
-      scopes,
-      scopeName: type,
-      requestContext: context,
-      db: context.db || knex,
-      tableName,
-      queryPurpose: 'relationship-identifiers'
-    })
-    for (const row of await state.query) visibleIds.add(String(row[idColumn]))
+    const values = [...ids].map(id => adapter.translateFilterValue('id', id))
+    for (let start = 0; start < values.length; start += VISIBILITY_BATCH_SIZE) {
+      // whereInIdentifiers binds a long id list as one parameter where the database allows it.
+      const query = adapter.buildBaseQuery({ transaction: context.transaction })
+        .modify(whereInIdentifiers, column, values.slice(start, start + VISIBILITY_BATCH_SIZE))
+        .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
+      const state = await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: type,
+        requestContext: context,
+        db: context.db || knex,
+        tableName,
+        queryPurpose: 'relationship-identifiers'
+      })
+      for (const row of await state.query) visibleIds.add(String(row[idColumn]))
+    }
   }
   return identifiers.filter(({ type, id }) => visible.get(type)?.has(String(id)))
 }

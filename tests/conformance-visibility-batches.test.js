@@ -94,12 +94,13 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
     const expected = [input[0], input[100], input[32999], input[33000], input[33001]]
     assert.deepEqual(result, expected)
     result.forEach((row, index) => { assert.equal(row, expected[index]) })
-    assert.equal(queries.length, 330)
-    assert.ok(queries.every(query => query.bindings.length <= 103))
-    assert.equal(rowCounts.length, 330)
-    assert.ok(rowCounts.every(count => count <= 100))
-    assert.equal(context.visibilityProbe.filters, 330)
-    assert.equal(context.visibilityProbe.permissions.length, 330)
+    // 1,000 ids per query: 33 queries, each with bounded bindings and rows.
+    assert.equal(queries.length, 33)
+    assert.ok(queries.every(query => query.bindings.length <= 1003))
+    assert.equal(rowCounts.length, 33)
+    assert.ok(rowCounts.every(count => count <= 1000))
+    assert.equal(context.visibilityProbe.filters, 33)
+    assert.equal(context.visibilityProbe.permissions.length, 33)
     for (const entry of context.visibilityProbe.permissions) {
       assert.equal(entry.scopeName, 'groups')
       assert.equal(entry.auth, context.auth)
@@ -121,12 +122,12 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
     assert.ok(result.every((row, index) => row === input[index]))
   })
 
-  it('keeps overlapping IDs separate by type and applies visibility to each batch', async () => {
+  it('keeps overlapping IDs separate by type and applies visibility to each type', async () => {
     const input = [...identifiers('groups', 205), ...identifiers('items', 205)]
     const { result, queries, rowCounts } = await measure(fixture, () => visible(input, { hideRows: true, duplicateRows: true }))
     assert.deepEqual(result, [input[0], input[100], input[205]])
-    assert.equal(queries.length, 6)
-    assert.ok(rowCounts.every(count => count <= 100))
+    assert.equal(queries.length, 2)
+    assert.ok(rowCounts.every(count => count <= 1000))
     assert.equal(rowCounts.reduce((sum, count) => sum + count, 0), 3)
   })
 
@@ -138,7 +139,7 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
       await visible(input, { hideRows: true })
     ])
     assert.deepEqual(result, [[input[0], input[100]], [input[0], input[100], input[200]], [input[0], input[100]]])
-    assert.equal(queries.length, 9)
+    assert.equal(queries.length, 3)
   })
 
   it('uses the caller transaction and does not retain its uncommitted visibility after rollback', async () => {
@@ -150,7 +151,7 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
       await adapter.buildBaseQuery({ transaction }).where(adapter.getIdColumn(), '101').update(adapter.toStorageRow({ name: 'Hidden pending' }))
       const { result, queries } = await measure(fixture, () => visible(input, context))
       assert.deepEqual(result, [input[0]])
-      assert.equal(queries.length, 3)
+      assert.equal(queries.length, 1)
       assert.equal(transaction.isCompleted(), false)
       assert.ok(context.visibilityProbe.permissions.every(entry => entry.transaction === transaction))
     } finally { await transaction.rollback() }
@@ -160,7 +161,8 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
   for (const phase of ['permissions', 'filter']) {
     it(`rejects a later ${phase} failure without returning partial results or completing the caller transaction`, async () => {
       const transaction = await fixture.knex.transaction()
-      const input = identifiers('groups', 205)
+      // Two batches of ids, so the second one's check is the later failure.
+      const input = identifiers('groups', 1205)
       const failure = phase === 'permissions'
         ? new RestApiResourceError('Later visibility batch denied', { subtype: 'forbidden' })
         : new RestApiValidationError('Later visibility filter failed')
@@ -206,8 +208,8 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
         await visible(input, { hideRows: true })
       ])
       assert.deepEqual(result, [[input[0]], [input[100]], [input[0]]])
-      assert.equal(queries.length, 9)
-      assert.ok(queries.every(query => query.bindings.length <= 103))
+      assert.equal(queries.length, 3)
+      assert.ok(queries.every(query => query.bindings.length <= 1003))
     })
   }
 })
@@ -230,7 +232,7 @@ describe(`Visibility batches in full include responses (${storageMode.mode})`, (
   after(async () => { await fixture?.close() })
 
   for (const format of ['jsonapi', 'plain']) {
-    it(`returns every included child with filtered references beyond two batches (${format})`, async () => {
+    it(`returns every included child with filtered references beyond the old 100-id batches (${format})`, async () => {
       const { result, queries, rowCounts } = await measure(fixture, () => fixture.api.resources.groups.get({
         id: '1000', format, queryParams: { include: ['mentions'] }
       }, { hideRows: true }))
@@ -246,9 +248,9 @@ describe(`Visibility batches in full include responses (${storageMode.mode})`, (
         const subject = format === 'jsonapi' ? child.relationships.subject.data : child.subject
         assert.equal(subject.id, '1000')
       }
-      assert.equal(queries.length, 3)
-      assert.ok(queries.every(query => query.bindings.length <= 103))
-      assert.ok(rowCounts.every(count => count <= 100))
+      assert.equal(queries.length, 1)
+      assert.ok(queries.every(query => query.bindings.length <= 1003))
+      assert.ok(rowCounts.every(count => count <= 1000))
     })
   }
 })
