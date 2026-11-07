@@ -23,8 +23,32 @@ export function mergeResponseHeaders (...sources) {
 export function getHttpDiagnosticError (error) {
   // Parser messages and stacks can quote raw input before a resource is known.
   // Keep the original error for hooks/responses, but log only this safe preview.
-  if (error?.type !== 'entity.parse.failed') return error
-  return { name: 'SyntaxError', message: 'Invalid JSON request body', type: 'entity.parse.failed', status: 400 }
+  if (error?.type === 'entity.parse.failed') {
+    return { name: 'SyntaxError', message: 'Invalid JSON request body', type: 'entity.parse.failed', status: 400 }
+  }
+  // A database error repeats the stored values: in the message Knex builds
+  // from the SQL and its bindings, in MySQL's sql and sqlMessage, and in
+  // PostgreSQL's detail. Log only which failure it was.
+  const failure = databaseFailure(error)
+  return failure ? { name: failure.name, code: failure.code } : error
+}
+
+/**
+ * The database driver error behind `error`, which may wrap it as its cause
+ * (a RestApiWriteError does).
+ * @param {unknown} error
+ */
+function databaseFailure (error) {
+  let current = error
+  for (let depth = 0; current && typeof current === 'object' && depth < 10; depth++) {
+    if (!isRestApiError(current)) {
+      const { sqlState, sqlMessage, errno, severity, code } = /** @type {any} */ (current)
+      // mysql2 (and socket) errors, pg errors, and better-sqlite3 or sqlite3 errors.
+      if (typeof sqlState === 'string' || typeof sqlMessage === 'string' || typeof errno === 'number' ||
+        typeof severity === 'string' || /^SQLITE_/.test(String(code ?? ''))) return current
+    }
+    current = /** @type {any} */ (current).cause
+  }
 }
 
 const JSON_API_WRITE_CONTENT_TYPES = [
@@ -115,11 +139,15 @@ export function mapRestApiErrorToHttp (error) {
   // Read hooks can reject with null or undefined.
   error ??= {}
   const statusHint = error.statusCode ?? error.status
+  // Only the library's own errors carry messages meant for clients; a write
+  // error wraps what failed. Other messages, a database's above all, can
+  // repeat SQL and stored values.
+  const origin = isRestApiError(error) && error instanceof RestApiWriteError ? error.cause : error
   let status = 500
   let errors = [{
     status: '500',
     title: 'Internal Server Error',
-    detail: error.message
+    detail: isRestApiError(origin) ? error.message : 'An unexpected error occurred'
   }]
 
   if (error?.validation) {

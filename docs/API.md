@@ -2398,6 +2398,13 @@ For example, a resource not-found error maps to:
 | `REST_API_SYSTEM_CONTEXT_FORGED` | 500 |
 | Unexpected or temporal output failure | 500 |
 
+A 500 answer carries the error's message only for the library's own
+`RestApi…Error` classes. Any other error, a database error or a plain `Error`
+thrown by a hook, answers with the detail `An unexpected error occurred`: a
+database error's message repeats the SQL and its values. The connector's
+`HTTP request error` or `Fastify request error` log entry records only the
+`name` and `code` of a database error.
+
 Validation violations produce individual HTTP errors with their message and
 field location; generic validation errors retain their available details.
 Relationship validation/access failures follow their actual typed classification,

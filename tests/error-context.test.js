@@ -12,7 +12,7 @@ describe('HTTP mapping of absent thrown values', () => {
       const result = mapRestApiErrorToHttp(failure)
       assert.equal(result.status, 500)
       assert.deepEqual(JSON.parse(JSON.stringify(result.body)), {
-        errors: [{ status: '500', title: 'Internal Server Error' }]
+        errors: [{ status: '500', title: 'Internal Server Error', detail: 'An unexpected error occurred' }]
       })
     })
   }

@@ -214,6 +214,23 @@ The error the call throws is unchanged and still carries its `cause`.
 | `cleanupErrors: [{ phase, error }]` | `cleanupErrors: [{ phase, code }]` |
 | `method`, `scopeName`, `phase`, `backend`, `transactionOutcome` | unchanged |
 
+## HTTP error answers and logs
+
+A 500 answer for an error that is not one of the library's own `RestApi…Error`
+classes, such as a database error or a plain `Error` thrown by a hook, now has
+the detail `An unexpected error occurred`. In 2.x it carried the error's
+message, and a database error's message repeats the SQL with its values (Knex
+puts the statement and its bindings in it), so a duplicate key answered with
+the value that clashed. For a database error, the connector's `HTTP request
+error` or `Fastify request error` log entry now records only its `name` and
+`code`; PostgreSQL's `detail` and MySQL's `sql` repeat the values too.
+
+| 2.x | 3.0 |
+| --- | --- |
+| 500 `detail` is the error's message | the message for a `RestApi…Error`; otherwise `An unexpected error occurred` |
+| a hook throws `new Error(message)` to tell the client why | throw a `RestApiResourceError` or `RestApiValidationError`, or call `context.reject` in a transport hook |
+| the HTTP error log entry holds the database error (message, SQL, values) | `{ name, code }` of the database error |
+
 ## System contexts and `context.system`
 
 The autofilter and row-policy plugins now reserve `context.system`. A context

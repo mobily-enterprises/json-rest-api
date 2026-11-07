@@ -43,6 +43,29 @@ for (const connector of ['express', 'fastify']) {
       assert.equal(diagnostic.backend, fixture.knex.client.config.client)
       assert.equal(diagnostic.transactionOutcome, 'none')
     })
+
+    it('answers and logs a duplicate key without the stored values', { skip: storageMode.isAnyApi() && 'needs table storage' }, async () => {
+      const name = 'Private Duplicate Name'
+      const body = JSON.stringify({ data: { type: 'countries', attributes: { name, code: 'PD' } } })
+      const headers = { accept: 'application/vnd.api+json', 'content-type': 'application/vnd.api+json' }
+      const post = () => connector === 'express'
+        ? request(app).post('/api/countries').set(headers).send(body)
+        : app.inject({ method: 'POST', url: '/api/countries', headers, payload: body })
+      await fixture.knex.schema.alterTable('connector_countries', table => table.unique(['name'], { indexName: 'connector_countries_name_once' }))
+      try {
+        assert.ok([201, 204].includes((await post()).statusCode))
+        const response = await post()
+        const text = connector === 'express' ? response.text : response.body
+        assert.equal(response.statusCode, 500, text)
+        assert.equal(JSON.parse(text).errors[0].detail, 'An unexpected error occurred')
+        const logged = JSON.stringify(logs)
+        for (const output of [text, logged]) assert.ok(!output.includes(name), output)
+        const diagnostic = logs.find(args => /HTTP request error|Fastify request error/.test(args[0]))?.[1]
+        assert.match(JSON.stringify(diagnostic.error), /23505|ER_DUP_ENTRY|SQLITE_CONSTRAINT/)
+      } finally {
+        await fixture.knex.schema.alterTable('connector_countries', table => table.dropUnique(['name'], 'connector_countries_name_once'))
+      }
+    })
   })
 }
 

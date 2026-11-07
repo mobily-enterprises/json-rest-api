@@ -210,7 +210,8 @@ for (const connector of ['express', 'fastify']) {
       it('awaits rejected request hooks and sends a JSON:API error without writing', async () => {
         const response = await send('POST', '/api/countries', createJsonApiDocument('countries', { name: 'Rejected' }), { 'x-throw-request': 'yes' })
         assert.equal(response.status, 500)
-        assert.equal(response.body.errors[0].detail, 'Connector request hook failed')
+        // A plain Error's message is not meant for clients.
+        assert.equal(response.body.errors[0].detail, 'An unexpected error occurred')
         assert.equal(response.headers['content-type'], jsonapi)
         assert.equal(response.headers['x-connector-test'], 'enabled')
         assert.deepEqual((await api.resources.countries.query()).data, [])
