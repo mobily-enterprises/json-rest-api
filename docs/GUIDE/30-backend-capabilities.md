@@ -36,6 +36,19 @@ See [contributing](../contributing.md#real-databases-and-redis) for native
 database verification commands. A passing SQLite suite is not native PostgreSQL/MySQL
 evidence, even when launched with a different storage-mode environment variable.
 
+## Column values
+
+Only `object` and `array` fields store a structure, as JSON. Every other stored
+field takes a single value: a string, number, boolean, bigint, `Date`, `Buffer`
+or `Uint8Array`, or null. A write, filter or cursor that gives such a field an
+object or array, which a `none` or `blob` field accepts from JSON, fails with
+`RestApiValidationError` (rule `single_value`) naming the field, before any SQL
+runs. MySQL drivers that format queries on the client (mysql2 before 3.17, and
+mysql) would otherwise expand a plain object into `column = value` pairs, so a
+value for one column could set others. Declare structured fields as `object` or
+`array`, or convert the value with a synchronous `storage.serialize` function,
+whose result is stored as it is.
+
 ## Temporal values
 
 Public date/dateTime inputs are strings; time inputs remain strings too. Built-in

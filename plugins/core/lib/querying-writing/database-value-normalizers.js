@@ -208,6 +208,25 @@ export function normalizeDateValue (value, type, {
 }
 
 /**
+ * Refuses an object or array as the value of a single column. Drivers do not
+ * store one as written, and MySQL drivers that format queries on the client
+ * (mysql2 before 3.17, mysql) expand a plain object into `key` = value pairs,
+ * which rewrites the statement: a value for one column could set others.
+ * Dates and byte arrays (Buffer, Uint8Array) are single column values.
+ * @param {unknown} value
+ * @param {{ fieldName?: string, parameter?: string }} [options] `parameter` is the input path the error names
+ * @returns {void}
+ */
+export function assertSingleColumnValue (value, { fieldName, parameter = `data.attributes.${fieldName}` } = {}) {
+  if (value === null || typeof value !== 'object' || value instanceof Date || value instanceof Uint8Array) return
+  const message = `Field '${fieldName}' takes a single value, not ${Array.isArray(value) ? 'an array' : 'an object'}. Declare it with type 'object' or 'array', or give it a storage serializer.`
+  throw new RestApiValidationError(message, {
+    fields: [parameter],
+    violations: [{ field: parameter, rule: 'single_value', message }]
+  })
+}
+
+/**
  * Converts structured JSON and temporal values to the values expected by
  * database drivers. JSON schema validation keeps date and dateTime values as
  * strings; database writes and comparisons must normalize them consistently.

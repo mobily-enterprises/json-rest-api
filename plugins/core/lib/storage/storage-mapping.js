@@ -1,5 +1,6 @@
 // @ts-check
-import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+import { assertSingleColumnValue, normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+import { SERIALIZATION_CAPABILITIES } from '../querying-writing/database-capabilities.js'
 import { assertFieldNameMap } from '../querying-writing/field-utils.js'
 
 /** @import { FieldStorage, StorageConfig, StorageFieldDefinition, StorageInfo, StorageNaming, StorageRow, StorageSchemaInfo, StorageSerializerDetails, StorageWriteOptions } from './storage-types.js' */
@@ -262,6 +263,8 @@ export const serializeFieldValueForStorage = (value, {
     }
     return serialized
   }
+  // Only object and array fields store a structure (as JSON); any other column takes one value.
+  if (!(definition.type && SERIALIZATION_CAPABILITIES.structuredTypes.includes(definition.type))) assertSingleColumnValue(value, { fieldName })
   return normalizeValueForDatabaseStorage(value, definition.type, {
     databaseClient,
     textStorage,

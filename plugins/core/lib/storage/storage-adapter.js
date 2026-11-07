@@ -14,7 +14,7 @@ import {
   translateCanonicalAttributesForStorage,
 } from './canonical-storage-mapping.js'
 import { assertScalarQueryField } from '../querying-writing/field-utils.js'
-import { normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+import { assertSingleColumnValue, normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
 
 /** @import { BaseStorageAdapterOptions, CanonicalDescriptor, SelectTranslator, StorageAdapter, StorageAdapterOptions, StorageAdapterLookupOptions, StorageSchemaInfo, StorageFieldDefinition } from './storage-types.js' */
 
@@ -59,16 +59,22 @@ const normalizeBooleanValue = (value) => {
 }
 
 /**
+ * A filter or cursor value, or a list of them, for one column. Objects and
+ * nested lists are refused: a MySQL driver could expand them into SQL.
  * @param {unknown} value
  * @param {StorageFieldDefinition} [definition]
- * @param {{ isRelationship?: boolean, databaseClient?: string, textStorage?: boolean }} [options]
+ * @param {{ isRelationship?: boolean, databaseClient?: string, textStorage?: boolean, fieldName?: string, parameter?: string }} [options]
  * @returns {unknown}
  */
-const normalizeFilterValueForDefinition = (value, definition = {}, { isRelationship = false, databaseClient, textStorage } = {}) => {
+const normalizeFilterValueForDefinition = (value, definition = {}, { isRelationship = false, databaseClient, textStorage, fieldName, parameter = `filters.${fieldName}` } = {}) => {
   if (value === null || value === undefined) return value
   if (Array.isArray(value)) {
-    return value.map(entry => normalizeFilterValueForDefinition(entry, definition, { isRelationship, databaseClient, textStorage }))
+    return value.map(entry => {
+      assertSingleColumnValue(entry, { fieldName, parameter })
+      return normalizeFilterValueForDefinition(entry, definition, { isRelationship, databaseClient, textStorage, fieldName, parameter })
+    })
   }
+  assertSingleColumnValue(value, { fieldName, parameter })
 
   if (isRelationship) {
     return normalizeBelongsToValue(value)
@@ -181,7 +187,9 @@ const createTableAdapter = ({ knex, schemaInfo }) => {
     const definition = schemaInfo.schemaStructure?.[field]
     return normalizeFilterValueForDefinition(value, definition, {
       isRelationship: Boolean(definition?.belongsTo || definition?.belongsToPolymorphic),
-      databaseClient: knex.client.config.client
+      databaseClient: knex.client.config.client,
+      fieldName: field,
+      parameter: 'page'
     })
   }
   /** @type {StorageAdapter['translateFilterValue']} */
@@ -209,7 +217,7 @@ const createTableAdapter = ({ knex, schemaInfo }) => {
       schemaField?.belongsTo ||
       schemaField?.belongsToPolymorphic
     )
-    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client })
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client, fieldName: field })
   }
 
   return baseAdapter({
@@ -305,7 +313,7 @@ const createCanonicalAdapter = ({ knex, schemaInfo, descriptor }) => {
     )
     const definition = searchField || schemaField || {}
 
-    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client, textStorage: fieldsInfo[fieldName]?.slotType === 'string' })
+    return normalizeFilterValueForDefinition(value, definition, { isRelationship, databaseClient: knex.client.config.client, textStorage: fieldsInfo[fieldName]?.slotType === 'string', fieldName: field })
   }
 
   /** @type {StorageAdapter['translateCursorValue']} */
@@ -315,7 +323,9 @@ const createCanonicalAdapter = ({ knex, schemaInfo, descriptor }) => {
     return normalizeFilterValueForDefinition(value, definition, {
       isRelationship: Boolean(definition?.belongsTo || definition?.belongsToPolymorphic),
       databaseClient: knex.client.config.client,
-      textStorage: fieldsInfo[field]?.slotType === 'string'
+      textStorage: fieldsInfo[field]?.slotType === 'string',
+      fieldName: field,
+      parameter: 'page'
     })
   }
 
