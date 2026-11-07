@@ -162,6 +162,15 @@ rows a row policy hides) throw `RestApiRecordsNotFoundError` (subtype
 count, so it does not reveal which ids exist. With `missing: 'skip'` they are
 left out. A batch may not name the same id twice.
 
+With `missing: 'skip'`, `patchMany`, `patchWhereIds` and `deleteMany` read
+nothing first when the resource has no `checkPermissions` hook and no
+`beforeDataCallPatchMany` or `beforeDataCallDeleteMany` hook (those need the
+visible rows before the write). The UPDATE or DELETE carries the caller's
+scope, row policy included, as a subquery, and its changed rows are the
+answer: the UPDATE returns them with `RETURNING` on PostgreSQL and SQLite, the
+DELETE on PostgreSQL; otherwise a read of the scoped rows (locking on MySQL and
+MariaDB) comes first, then the write of exactly those rows.
+
 The UPDATE, DELETE and lock statements repeat the caller's ownership
 (autofilter) conditions as plain column predicates. A row that another
 transaction moves to a different owner between the visibility read and the
@@ -169,7 +178,9 @@ write is therefore neither written nor locked, and counts as missing:
 `missing: 'throw'` rolls the batch back, `'skip'` leaves the row out of the
 result, and with `onlyIf` it is reported unchanged. Row policies are checked by
 the visibility read only, as for a single `patch`: a row that leaves the policy
-between the read and the write is still written.
+between the read and the write is still written. Without a visibility read
+(`missing: 'skip'`, above) the policy is checked by the write's subquery,
+which reads as of the statement's start.
 
 `patchWhere` and `deleteWhere` need non-empty `filters`. To change or delete
 every row the caller can see, pass `all: true` instead (not both); in a

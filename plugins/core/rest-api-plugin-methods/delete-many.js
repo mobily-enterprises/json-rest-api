@@ -1,5 +1,6 @@
 // Delete many records by id: one scoped read of the ids the caller may delete
-// per chunk, then one DELETE per chunk and the pivot rows of the deleted records.
+// per chunk (or, with missing: 'skip', the scope inside the DELETE), then one
+// DELETE per chunk and the pivot rows of the deleted records.
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
@@ -35,7 +36,7 @@ function setup ({ params, context, scopes, scopeName }, method) {
 }
 
 async function runDeleteMany (args, { operation, ids, started = false }) {
-  const { params, context, helpers, scope, runHooks, perRecordHooks, scopeName, api } = args
+  const { params, context, helpers, scope, runHooks, hasHooks, perRecordHooks, scopeName, api } = args
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   const chunkSize = resolveChunkSize(params.chunkSize)
   const missing = resolveMissing(params.missing)
@@ -45,24 +46,30 @@ async function runDeleteMany (args, { operation, ids, started = false }) {
   if (!started) await beginWriteTransaction(context, params.transaction, helpers.newTransaction, runHooks)
   context.db = context.transaction
 
-  const visible = new Map()
-  for (const part of chunk(ids, VISIBLE_READ_CHUNK)) {
-    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
-    for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
-  }
-  const kept = keepVisible({ requested: ids, visible, missing, scopeName, storageAdapter })
-  // bulkIndex is the id's position in the request.
-  const positions = new Map(ids.map((id, index) => [String(storageAdapter.translateFilterValue('id', id)), index]))
-  for (const id of kept) {
-    const key = String(storageAdapter.translateFilterValue('id', id))
-    const minimalRecord = visible.get(key)
-    const bulkIndex = positions.get(key)
-    await scope.checkPermissions({ method: 'delete', originalContext: { ...context, method: 'delete', id, minimalRecord, originalMinimalRecord: minimalRecord, bulkIndex } })
+  // With missing: 'skip' and no hook that needs the rows first, the DELETE
+  // decides which rows the caller may delete, carrying the scope (see patchMany).
+  const scoped = missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallDeleteMany')
+  let kept = ids
+  if (!scoped) {
+    const visible = new Map()
+    for (const part of chunk(ids, VISIBLE_READ_CHUNK)) {
+      const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
+      for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
+    }
+    kept = keepVisible({ requested: ids, visible, missing, scopeName, storageAdapter })
+    // bulkIndex is the id's position in the request.
+    const positions = new Map(ids.map((id, index) => [String(storageAdapter.translateFilterValue('id', id)), index]))
+    for (const id of kept) {
+      const key = String(storageAdapter.translateFilterValue('id', id))
+      const minimalRecord = visible.get(key)
+      const bulkIndex = positions.get(key)
+      await scope.checkPermissions({ method: 'delete', originalContext: { ...context, method: 'delete', id, minimalRecord, originalMinimalRecord: minimalRecord, bulkIndex } })
+    }
   }
 
   context.ids = kept.map(String)
   await runHooks('beforeDataCallDeleteMany')
-  const deleted = new Set((kept.length ? await helpers.dataDeleteByIds({ scopeName, context, ids: kept, chunkSize }) : []).map(String))
+  const deleted = new Set((kept.length ? await helpers.dataDeleteByIds({ scopeName, context, runHooks, ids: kept, chunkSize, scoped }) : []).map(String))
   // A row that left the caller's scope after the visibility read is not deleted.
   if (deleted.size < kept.length && missing === 'throw') throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: kept.length - deleted.size })
   context.ids = kept.map(id => String(storageAdapter.translateFilterValue('id', id))).filter(id => deleted.has(id))

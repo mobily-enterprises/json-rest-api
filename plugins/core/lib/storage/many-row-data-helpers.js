@@ -311,14 +311,33 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return needIds ? ids : undefined
   }
 
+  // The WHERE of a by-id UPDATE or DELETE: the ids, onlyIf, the caller's
+  // ownership conditions and, with `scoped`, the caller's scope as a subquery,
+  // built once (its filtering hooks record the ownership conditions).
+  const writeMatcher = async ({ scopeName, context, runHooks, scoped, onlyIf }) => {
+    const storageAdapter = adapterFor(scopeName)
+    const db = context.transaction
+    const tableName = storageAdapter.getTableName()
+    const idColumn = storageAdapter.getIdColumn()
+    const scope = scoped ? (await dataScopedQuery({ scopeName, context, runHooks, purpose: 'bulk-write' })).query : null
+    return ids => {
+      const query = applyWriteConditions({
+        query: applyOnlyIf(db(tableName).whereIn(idColumn, ids), onlyIf || {}), context, scopeName, storageAdapter, tableName
+      })
+      return scope ? query.whereIn(idColumn, scope.clone().whereIn(`${tableName}.${idColumn}`, ids).clearSelect().select(`${tableName}.${idColumn}`)) : query
+    }
+  }
+
   /**
    * Update visible rows by id: one UPDATE per chunk, `CASE id WHEN … THEN …`
    * for values that differ between rows and a plain SET for shared ones.
+   * With `scoped`, no visibility read came first: each statement carries the
+   * caller's scope (row policy included) as a subquery.
    * Returns the identifiers the statements changed.
-   * @param {{ scopeName: string, context: any, updates: Array<{ id: string | number, row: Record<string, unknown> }>, onlyIf?: Record<string, unknown>, chunkSize: number }} request
+   * @param {{ scopeName: string, context: any, runHooks?: Function, updates: Array<{ id: string | number, row: Record<string, unknown> }>, onlyIf?: Record<string, unknown>, chunkSize: number, scoped?: boolean }} request
    * @returns {Promise<Array<string | number>>}
    */
-  const dataUpdateByIds = async ({ scopeName, context, updates, onlyIf, chunkSize }) => {
+  const dataUpdateByIds = async ({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped = false }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
@@ -326,14 +345,13 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const family = databaseFamily(db)
     const lockVersionColumn = context.schemaInfo.lockVersionField ? storageAdapter.translateColumn(context.schemaInfo.lockVersionField) : null
     const columnCount = new Set(updates.flatMap(update => Object.keys(update.row))).size
-    // onlyIf and the caller's ownership narrow each statement; without them every listed id is written.
-    const guarded = Boolean(onlyIf) || hasWriteConditions(context, scopeName)
-    const matching = ids => applyWriteConditions({
-      query: applyOnlyIf(db(tableName).whereIn(idColumn, ids), onlyIf || {}), context, scopeName, storageAdapter, tableName
-    })
+    const matching = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf })
+    // onlyIf, the scope and the caller's ownership narrow each statement; without them every listed id is written.
+    const guarded = scoped || Boolean(onlyIf) || hasWriteConditions(context, scopeName)
     const changed = []
 
-    for (const part of chunk(updates, rowsPerStatement(db, chunkSize, 2 * columnCount + 1))) {
+    // A scoped statement binds each id twice, once more in its subquery.
+    for (const part of chunk(updates, rowsPerStatement(db, chunkSize, 2 * columnCount + (scoped ? 2 : 1)))) {
       const set = {}
       const columns = [...new Set(part.flatMap(update => Object.keys(update.row)))]
       for (const column of columns) {
@@ -373,25 +391,33 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
 
   /**
    * Delete visible rows by id, one DELETE per chunk, then their pivot rows.
+   * With `scoped`, each DELETE carries the caller's scope (see dataUpdateByIds).
    * Returns the identifiers the statements deleted.
-   * @param {{ scopeName: string, context: any, ids: Array<string | number>, chunkSize: number }} request
+   * @param {{ scopeName: string, context: any, runHooks?: Function, ids: Array<string | number>, chunkSize: number, scoped?: boolean }} request
    * @returns {Promise<Array<string | number>>}
    */
-  const dataDeleteByIds = async ({ scopeName, context, ids, chunkSize }) => {
+  const dataDeleteByIds = async ({ scopeName, context, runHooks, ids, chunkSize, scoped = false }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
+    const identity = { id: databaseIdentityExpression(db, idColumn) }
+    const matching = await writeMatcher({ scopeName, context, runHooks, scoped })
+    const guarded = scoped || hasWriteConditions(context, scopeName)
     const deleted = []
-    for (const part of chunk(ids, rowsPerStatement(db, chunkSize, 1))) {
+    for (const part of chunk(ids, rowsPerStatement(db, chunkSize, scoped ? 2 : 1))) {
       let values = part.map(id => storageAdapter.translateFilterValue('id', id))
-      if (hasWriteConditions(context, scopeName)) {
-        // The caller's ownership narrows the delete too: lock the rows that still match, then delete exactly those.
-        const matching = applyWriteConditions({ query: db(tableName).whereIn(idColumn, values), context, scopeName, storageAdapter, tableName })
-        values = (await applyDatabaseReadOptions(lockRows(matching, db).select({ id: databaseIdentityExpression(db, idColumn) }))).map(row => row.id)
-        if (!values.length) continue
+      if (guarded && databaseFamily(db) === 'pg') {
+        // The scope and the caller's ownership narrow the DELETE, which returns the rows it removed.
+        values = (await applyDatabaseReadOptions(matching(values).returning(identity).delete())).map(row => row.id)
+      } else if (guarded) {
+        // Knex returns no deleted rows on MySQL or SQLite: lock the rows that still match, then delete exactly those.
+        values = (await applyDatabaseReadOptions(lockRows(matching(values), db).select(identity))).map(row => row.id)
+        if (values.length) await db(tableName).whereIn(idColumn, values).delete()
+      } else {
+        await db(tableName).whereIn(idColumn, values).delete()
       }
-      await db(tableName).whereIn(idColumn, values).delete()
+      if (!values.length) continue
       await deletePivotReferences(api, scopeName, context, values)
       deleted.push(...values)
     }

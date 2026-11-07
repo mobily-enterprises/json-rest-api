@@ -93,7 +93,7 @@ function resolveOnlyIf (onlyIf, { schemaInfo, storageAdapter }) {
  * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean }} batch
  */
 async function runPatchMany (args, { operation, entries, started = false }) {
-  const { params, context, vars, helpers, scope, runHooks, perRecordHooks, scopeOptions, scopeName, api } = args
+  const { params, context, vars, helpers, scope, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api } = args
   const schemaInfo = context.schemaInfo
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   const chunkSize = resolveChunkSize(params.chunkSize)
@@ -142,19 +142,26 @@ async function runPatchMany (args, { operation, entries, started = false }) {
     } catch (error) { throw atIndex(error, index) }
   }
 
-  // Which of the requested rows the caller may change: one scoped read per chunk.
-  const visible = new Map()
-  for (const part of chunk(rows.map(row => row.rowContext.id), VISIBLE_READ_CHUNK)) {
-    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
-    for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
-  }
-  const kept = keepVisible({ requested: rows.map(row => row.rowContext.id), visible, missing, scopeName, storageAdapter })
-  const keptRows = rows.filter(row => kept.includes(row.rowContext.id))
-  for (const { rowContext, index } of keptRows) {
-    rowContext.minimalRecord = visible.get(String(storageAdapter.translateFilterValue('id', rowContext.id)))
-    try {
-      await scope.checkPermissions({ method: 'patch', originalContext: rowContext })
-    } catch (error) { throw atIndex(error, index) }
+  // Which of the requested rows the caller may change. With missing: 'skip' and
+  // no hook that needs the rows first, the UPDATE decides it, carrying the
+  // scope, and its changed rows answer. Otherwise one scoped read per chunk
+  // gives each row's minimal record to the permission check.
+  const scoped = missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany')
+  let keptRows = rows
+  if (!scoped) {
+    const visible = new Map()
+    for (const part of chunk(rows.map(row => row.rowContext.id), VISIBLE_READ_CHUNK)) {
+      const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
+      for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
+    }
+    const kept = keepVisible({ requested: rows.map(row => row.rowContext.id), visible, missing, scopeName, storageAdapter })
+    keptRows = rows.filter(row => kept.includes(row.rowContext.id))
+    for (const { rowContext, index } of keptRows) {
+      rowContext.minimalRecord = visible.get(String(storageAdapter.translateFilterValue('id', rowContext.id)))
+      try {
+        await scope.checkPermissions({ method: 'patch', originalContext: rowContext })
+      } catch (error) { throw atIndex(error, index) }
+    }
   }
 
   context.ids = keptRows.map(row => String(row.rowContext.id))
@@ -173,7 +180,7 @@ async function runPatchMany (args, { operation, entries, started = false }) {
     updates.push({ id: rowContext.id, row })
   }
 
-  const changed = new Set((updates.length ? await helpers.dataUpdateByIds({ scopeName, context, updates, onlyIf, chunkSize }) : []).map(String))
+  const changed = new Set((updates.length ? await helpers.dataUpdateByIds({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped }) : []).map(String))
   // A row that left the caller's scope after the visibility read is not written.
   const unchanged = updates.length - changed.size
   if (unchanged && !onlyIf && missing === 'throw') throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: unchanged })

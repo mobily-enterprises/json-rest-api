@@ -34,6 +34,10 @@ bulk options are rejected with a message that names their replacement.
   buckets (`day`, `week`, `month`, `year`) with a time zone; date fields with a
   storage serializer can be bucketed and take `min` and `max`. See
   [AGGREGATE](../API.md#aggregate---grouped-totals).
+- **Skipping writes in one statement:** `patchMany`, `patchWhereIds` and
+  `deleteMany` with `missing: 'skip'` put the scope in the UPDATE or DELETE
+  instead of reading the visible ids first, when no permission or
+  before-data-call batch hook needs those rows.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.

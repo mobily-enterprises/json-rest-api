@@ -441,3 +441,32 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     assert.deepEqual(held, ['ws-b', 'ws-b', 'ws-b'])
   })
 })
+
+// A fixture of its own: the one above gains permission and batch hooks, which
+// keep the visibility read.
+describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip: tableOnly }, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture() })
+  after(async () => { await fixture?.close() })
+
+  it('carries the scope in the UPDATE or DELETE instead of reading the visible ids first', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    // 4 is hidden by the row policy, 7 belongs to ws-b, 99 does not exist.
+    const patched = await fixture.measure(() => entries.patchWhereIds({ ids: ['1', '4', '7', '99'], data: { status: 'held' }, missing: 'skip', returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(patched.result.data.map(item => item.id), ['1'])
+    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('status'), ['held', 'open', 'open'])
+    const refused = await fixture.measure(() => entries.patchWhereIds({ ids: ['2', '3'], data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
+    assert.equal(patched.statements, refused.statements - 1, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
+
+    const deleted = await fixture.measure(() => entries.deleteMany({ ids: ['1', '4', '7', '99'], missing: 'skip', returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(deleted.result.data, [{ type: 'da_entries', id: '1' }])
+    assert.deepEqual((await fixture.rows('da_entries')).map(row => Number(row.id)), [2, 3, 4, 5, 6, 7, 8, 9])
+    const removed = await fixture.measure(() => entries.deleteMany({ ids: ['2', '3'], returning: 'minimal' }, workspaceA()))
+    assert.equal(deleted.statements, removed.statements - 1, `skip: ${deleted.sql.join(' | ')}\nthrow: ${removed.sql.join(' | ')}`)
+
+    // onlyIf narrows the scoped statement too.
+    const guarded = await entries.patchWhereIds({ ids: ['5', '6'], data: { status: 'held' }, onlyIf: { amount: 50 }, missing: 'skip', returning: 'minimal' }, { ...workspaceA(), visibility: { all: true } })
+    assert.deepEqual(guarded.data.map(item => item.id), ['5'])
+  })
+})
