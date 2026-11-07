@@ -1362,7 +1362,8 @@ meanwhile; more than 1,000 throw `RestApiRowLimitError`. `claim` takes up to
 `limit` (default 1, at most 1,000) matching rows that no other transaction holds
 (`SKIP LOCKED`), in `sort` order (stored fields, default `['id']`). A row policy
 that joins tables is refused for all three. On SQLite, which has one writer,
-they are scoped reads.
+they take the database's write lock with a write that changes nothing, then
+read.
 
 A resource option `lockVersionField: 'lock_version'` names a stored integer
 that every update (single, many-row and upsert merge) sets to `column + 1`.

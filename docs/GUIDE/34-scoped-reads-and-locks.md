@@ -316,7 +316,7 @@ database would lock the joined rows too.
 | --- | --- | --- | --- |
 | PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE SKIP LOCKED` |
 | MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | `FOR UPDATE` | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
-| SQLite | a scoped read | a scoped read | a scoped read |
+| SQLite | the write lock, then a scoped read | the write lock, then a scoped read | the write lock, then a scoped read |
 
 On MySQL and MariaDB the candidate read of `claim` is a plain read, the only way
 to choose rows in sort order without locking every row the sort examines, so it
@@ -326,8 +326,13 @@ snapshot misses only what commits during the claim itself; with
 between the two reads makes the claim fail with `ER_CHECKREAD`, and the caller
 retries.
 
-SQLite allows one writer at a time, so a write transaction already excludes
-every other one; its locks are ordinary scoped reads.
+SQLite allows one writer at a time, but a transaction that has only read holds a
+shared lock, which does not keep another connection from writing, and its own
+later write could then fail with `SQLITE_BUSY` halfway through the work. So on
+SQLite each lock first runs a write that changes nothing
+(`UPDATE … SET id = id WHERE 0 = 1`), which takes the database's write lock for
+the rest of the transaction, once per transaction, and then reads the rows. The
+caller's transaction can stay a deferred `BEGIN`.
 
 ## Lock versions
 

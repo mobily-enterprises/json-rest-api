@@ -241,6 +241,31 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     })
   })
 
+  it('takes the SQLite write lock, so another connection cannot write until the holder ends', { skip: databaseClient !== 'better-sqlite3' && 'SQLite only' }, async () => {
+    // A file database in WAL mode with busy_timeout 0: a second writer fails at once.
+    const local = await createDataAccessFixture({ databaseOptions: { concurrent: true, maxConnections: 4 } })
+    try {
+      await seedLedger(local)
+      const busy = error => /SQLITE_BUSY|database is locked/.test(`${cause(error)?.code} ${cause(error)?.message}`)
+      const otherWrite = () => local.knex.transaction(other => other('da_entries').where({ id: 2 }).update({ amount: 1 }))
+      const locks = {
+        lockByIds: transaction => local.api.resources.da_entries.lockByIds({ ids: ['1'], transaction }, workspaceA()),
+        lockWhere: transaction => local.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()),
+        // No job matches: the write lock does not depend on the rows it finds.
+        claim: transaction => local.api.resources.da_jobs.claim({ transaction }, workspaceA())
+      }
+      for (const [name, lock] of Object.entries(locks)) {
+        await local.api.transaction(async transaction => {
+          await lock(transaction)
+          await assert.rejects(otherWrite(), busy, name)
+        })
+      }
+      await otherWrite()
+    } finally {
+      await local.close()
+    }
+  })
+
   it('refuses a lock or claim whose filtering hook replaces the table', async () => {
     await seedJobs()
     const derived = { ...workspaceA(), deriveTable: true }

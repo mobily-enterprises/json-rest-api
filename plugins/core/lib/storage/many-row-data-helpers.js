@@ -193,6 +193,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const tableName = storageAdapter.getTableName()
     const keyColumns = keys.map(field => storageAdapter.translateColumn(field))
     await requireUniqueKeys({ scopeName, db, tableName, keyColumns })
+    await takeSqliteWriteLock(db, tableName, storageAdapter.getIdColumn())
     const storageRows = rows.map(attributes => storageAdapter.toStorageRow(attributes, { context, operation: 'post' }))
     const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, keys, keyColumns)
     const inputKeys = rows.map((attributes, index) => matcher.input(attributes, storageRows[index]))
@@ -412,8 +413,19 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return buildJsonApiResponse(scope, rows, [], false, scopeName, context)
   }
 
+  // SQLite has one writer, but a deferred transaction's reads take only a shared
+  // lock: two connections could both read as if they held the rows, and the
+  // later write would fail with SQLITE_BUSY halfway through. A write statement
+  // takes the write lock even when it changes nothing, so a SQLite lock read
+  // starts with one, once per transaction; the lock read itself is then plain.
+  const writeLocked = new WeakSet()
+  const takeSqliteWriteLock = async (db, tableName, idColumn) => {
+    if (databaseFamily(db) !== 'sqlite' || writeLocked.has(db)) return
+    await db(tableName).whereRaw('0 = 1').update({ [idColumn]: db.ref(idColumn) })
+    writeLocked.add(db)
+  }
+
   const lockRows = (query, db, { skipLocked = false } = {}) => {
-    // SQLite has a single writer, so its transaction already excludes other writers.
     if (databaseFamily(db) === 'sqlite') return query
     query.forUpdate()
     return skipLocked ? query.skipLocked() : query
@@ -433,6 +445,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       const message = `${operation} on '${scopeName}' needs a single-table query, but its filters or row policy add ${what}`
       throw new RestApiValidationError(message, { fields: ['filters'], violations: [{ field: 'filters', rule: `${purpose}_single_table`, message }] })
     }
+    await takeSqliteWriteLock(context.db, tableName, storageAdapter.getIdColumn())
     return { query, storageAdapter, tableName, idColumn: `${tableName}.${storageAdapter.getIdColumn()}` }
   }
 
