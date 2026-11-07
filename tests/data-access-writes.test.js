@@ -546,6 +546,28 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     await assert.rejects(entries.patchWhere({ all: true, data: { status: 'open' }, missing: 'throw' }, workspaceA()), isA(RestApiValidationError))
   })
 
+  it('keeps a literal ? of a row filter as text in a SQLite DELETE … RETURNING', { skip: databaseClient !== 'better-sqlite3' && 'elsewhere Knex or the driver reads every ? as a parameter' }, async () => {
+    await seedLedger(fixture)
+    let literal = false
+    await fixture.api.customize({
+      hooks: {
+        knexQueryFiltering: {
+          functionName: 'literal-question-mark',
+          handler: ({ context }) => {
+            const knexQuery = context.knexQuery
+            if (literal && knexQuery?.scopeName === 'da_entries' && knexQuery.queryPurpose === 'bulk-write') knexQuery.query.whereRaw("da_entries.code <> 'E?'")
+          }
+        }
+      }
+    })
+    literal = true
+    try {
+      const deleted = await fixture.api.resources.da_entries.deleteMany({ ids: ['1', '2'], missing: 'skip', returning: 'minimal' }, workspaceA())
+      assert.deepEqual(deleted.data.map(item => item.id), ['1', '2'])
+    } finally { literal = false }
+    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).pluck('id'), [3])
+  })
+
   it('gives after-hooks the ids and inputs of the changed rows, in the same order', async () => {
     await seedLedger(fixture)
     await fixture.knex('da_entries').where('id', 2).update({ status: 'held' })

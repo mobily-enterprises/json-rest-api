@@ -271,8 +271,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         }
 
         if (family === 'mysql' && supportsMariaDbReturning(api.knex.capabilities)) {
-          const { sql, bindings } = query.toSQL()
-          const [returned] = await db.raw(`${sql} returning ${db.raw('??', [idColumn]).toQuery()}`, bindings)
+          const [returned] = await db.raw('? returning ??', [query, idColumn])
           returned.forEach((row, position) => { ids[part[position]] = row[idColumn] })
           continue
         }
@@ -414,9 +413,10 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         // The scope and the caller's ownership narrow the DELETE, which returns the rows it removed.
         values = (await applyDatabaseReadOptions(matching(values).returning(identity).delete())).map(row => row.id)
       } else if (guarded && family === 'sqlite') {
-        // Knex reads no rows back from a SQLite DELETE, so its RETURNING runs as raw SQL.
-        const { sql, bindings } = matching(values).delete().toSQL()
-        values = (await db.raw(`${sql} returning ? as ??`, [...bindings, identity.id, 'id'])).map(row => row.id)
+        // Knex reads no rows back from a SQLite DELETE, so its RETURNING runs as
+        // raw SQL around the builder, which keeps its own bindings: a '?' inside
+        // a string literal of a row policy stays text.
+        values = (await db.raw('? returning ? as ??', [matching(values).delete(), identity.id, 'id'])).map(row => row.id)
       } else if (guarded) {
         // MySQL cannot return deleted rows: lock the rows that still match, then delete exactly those.
         values = (await applyDatabaseReadOptions(lockRows(matching(values), db).select(identity))).map(row => row.id)
