@@ -149,6 +149,21 @@ new methods; their parameter types are exported from the package root
 `RecordsResult` and others). `BulkOperationsPluginOptions` has only
 `maxBulkOperations`.
 
+## Objects in single-value fields
+
+Only `object` and `array` fields store a structure. A write, filter or cursor
+that gives any other field an object or array, as a `none` or `blob` field
+accepted from JSON, now fails with `RestApiValidationError` (rule
+`single_value`) before any SQL runs. In 2.x, MySQL drivers that format queries
+on the client (mysql2 before 3.17, mysql) expanded such an object into
+`column = value` pairs, so a value for one column could set others; PostgreSQL
+stored the JSON text and SQLite refused it. This also ships in 2.4.1.
+
+| 2.x | 3.0 |
+| --- | --- |
+| `{ type: 'none' }` holding an object | `{ type: 'object' }`, or a `storage.serialize` function |
+| `{ type: 'blob' }` given JSON | a `Buffer` or `Uint8Array` from server code |
+
 ## System contexts and `context.system`
 
 The autofilter and row-policy plugins now reserve `context.system`. A context
