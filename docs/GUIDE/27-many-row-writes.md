@@ -278,6 +278,15 @@ or a deadlock (MySQL 1213); retry the batch. InnoDB keeps the locks of every
 row a locking read examined until the transaction ends, so keep upserting
 transactions short.
 
+`merge` on every database, and `ignore` on MySQL and MariaDB, find the rows
+that match the conflict keys with a locking read of the bare table, before the
+caller's scope is checked. A matching row the caller cannot see, such as one a
+`knexQueryFiltering` hook hides, is therefore locked until commit, and waited
+for while another transaction holds it, as `lockByIds` does with a hidden id
+(see [scoped reads and locks](34-scoped-reads-and-locks.md)). `merge` then fails
+the batch as `forbidden`, and `ignore` skips the row. With `keys: ['id']` that
+read locks the listed ids by primary key.
+
 ## Transactions
 
 Without a `transaction` the call owns one transaction and commits it at the end,
