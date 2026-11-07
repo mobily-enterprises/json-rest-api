@@ -274,26 +274,48 @@ them, through the read pipeline of `query`: `checkDataPermissions` runs for each
 row as for `get`, then `enrichRecord`, computed fields and the `finish` and
 `finishQuery` hooks, which see `method: 'query'` and `lock: true`.
 
-The locking read is the lock's first statement and carries the caller's
-ownership and row-policy predicates itself; no plain read comes before it. On
-MySQL and MariaDB this matters: under REPEATABLE READ the first plain read of a
-transaction fixes its snapshot, so a plain read before a lock wait would hide
-from every later read in the transaction what the lock holder committed while
-it waited (and with `innodb_snapshot_isolation=ON` the lock itself would fail
-with `ER_CHECKREAD`). After a lock, plain reads in the same transaction see what
-the previous holder committed, as long as the transaction made no plain read
-before the lock. For the same reason the query must stay a plain `SELECT` on the
-resource's table: a row policy or `knexQueryFiltering` hook that adds joins, a
-common table expression or a set operation, or replaces the source table, is
-refused for all three (rule `lock_single_table` or `claim_single_table`),
-because the database would lock the joined rows too or lock nothing at all.
+The locking read is the lock's first statement on the resource's rows and
+carries the caller's ownership and row-policy predicates itself; the library
+makes no plain read of those rows before it. On MySQL and MariaDB this matters:
+under REPEATABLE READ the first plain read of a transaction fixes its
+snapshot, so a plain read before a lock wait would hide from every later read
+in the transaction what the lock holder committed while it waited (and with
+`innodb_snapshot_isolation=ON` the lock itself would fail with
+`ER_CHECKREAD`). After a lock, plain reads in the same transaction see what the
+previous holder committed, as long as the transaction made no plain read
+before the lock. Some plain reads can still come first or run inside the
+statement, and start the snapshot: subqueries of a row policy (InnoDB reads a
+locking read's subqueries without locks, from the snapshot), the scope
+subquery of a selection write's locking read on MySQL (`patchWhere`,
+`deleteWhere`), a `checkPermissions` or `knexQueryFiltering` hook that queries
+the database, and the first `lockWhere` on a MySQL table, which reads its
+indexes (below). Where the snapshot matters, keep those reads out of the lock's
+path, or make them before the transaction. For the same reason the query must
+stay a plain `SELECT` on the resource's table: a row policy or
+`knexQueryFiltering` hook that adds joins, a common table expression or a set
+operation, or replaces the source table, is refused for all three (rule
+`lock_single_table` or `claim_single_table`), because the database would lock
+the joined rows too or lock nothing at all.
 
 `lockByIds({ ids, transaction, missing, format, queryParams: { fields } })`
 locks the listed rows the caller can see, in id order, so two transactions that
-lock overlapping sets cannot deadlock on each other. Hidden or missing ids throw
+lock overlapping sets cannot deadlock on each other. It locks 1,000 ids per
+statement; longer lists are sorted first (integer ids numerically, other ids
+by code unit, the database's order for integer keys and binary collations), so
+they too lock in one order. Hidden or missing ids throw
 `RestApiRecordsNotFoundError`, or are left out with `missing: 'skip'`. The
 locked rows show the latest committed values even when the transaction began
 earlier.
+
+On MySQL and MariaDB, InnoDB locks each listed primary-key row before it
+evaluates the ownership and row-policy predicates, and under REPEATABLE READ
+holds that lock until commit. A listed id the caller cannot see is therefore
+still locked, and waited for when another transaction holds it, although it
+is not returned: its lock is a short denial of service against the row's owner
+and its wait a timing signal that the row exists. This is how
+`WHERE id = ? AND owner = ? FOR UPDATE` behaves on InnoDB. Pass `lockByIds` ids
+from a scoped read or from a route that has already checked the caller may use
+them, never a raw list from a request.
 
 `lockWhere({ filters, transaction, format, queryParams: { fields } })` locks
 every row the filters select that the caller can see, in id order, waiting for
@@ -303,8 +325,19 @@ and on PostgreSQL, whose statements only find rows committed when they began,
 `lockWhere` reads again under the locks it holds until no new row appears. It
 locks at most 1,000 rows and throws `RestApiRowLimitError` when more match. Use
 it, not `scopedQuery`, to lock by filter: the scoped builder is a read-only
-derived table that cannot lock. On MySQL and MariaDB, index the filtered
-columns, because InnoDB locks every row the read examines.
+derived table that cannot lock.
+
+On MySQL and MariaDB, InnoDB locks every row a locking read examines, and every
+gap between them, until commit. Ordering by id could make it walk the primary
+key across every owner's rows, so there `lockWhere` has no `ORDER BY`: rows
+come in the order of the index the read uses. It needs an index that keeps the
+read inside the caller's rows: one whose leading columns are the ownership
+(autofilter) columns the read is limited to, or, when no ownership condition
+applies (a resource without ownership fields, or a system context), one that
+starts with a column the filters compare. Without such an index it throws
+`RestApiBulkWriteUnsupportedError` before locking anything. It reads the
+table's indexes in the transaction the first time and remembers a table that
+passes. The optimizer still picks the index; keep the filters selective.
 
 `claim({ filters, sort, limit, transaction, format, queryParams: { fields } })`
 takes up to `limit` matching rows (default 1, at most 1,000) that no other
@@ -317,7 +350,7 @@ database would lock the joined rows too.
 | Database | `lockByIds` | `lockWhere` | `claim` |
 | --- | --- | --- | --- |
 | PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE SKIP LOCKED` |
-| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the visible ids | `FOR UPDATE` | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
+| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the listed ids, hidden ones included (above) | `FOR UPDATE` without `ORDER BY`, through an index on the ownership or a filtered column | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
 | SQLite | the write lock, then a scoped read | the write lock, then a scoped read | the write lock, then a scoped read |
 
 On MySQL and MariaDB the candidate read of `claim` is a plain read, the only way
@@ -334,7 +367,11 @@ later write could then fail with `SQLITE_BUSY` halfway through the work. So on
 SQLite each lock first runs a write that changes nothing
 (`UPDATE … SET id = id WHERE 0 = 1`), which takes the database's write lock for
 the rest of the transaction, once per transaction, and then reads the rows. The
-caller's transaction can stay a deferred `BEGIN`.
+caller's transaction can stay a deferred `BEGIN`. Because the lock is a write,
+it fails with `SQLITE_READONLY` on a read-only connection. In WAL mode, a
+transaction that has already read keeps that snapshot, and if another
+connection has written since, taking the write lock fails with
+`SQLITE_BUSY_SNAPSHOT`; roll back and run the transaction again.
 
 ## Lock versions
 

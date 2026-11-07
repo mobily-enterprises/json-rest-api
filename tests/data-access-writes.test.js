@@ -452,18 +452,20 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
   it('carries the scope in the UPDATE or DELETE instead of reading the visible ids first', async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
+    // MySQL keeps the visibility read for listed ids: InnoDB would lock every listed row first.
+    const saved = databaseClient === 'mysql2' ? 0 : 1
     // 4 is hidden by the row policy, 7 belongs to ws-b, 99 does not exist.
     const patched = await fixture.measure(() => entries.patchWhereIds({ ids: ['1', '4', '7', '99'], data: { status: 'held' }, missing: 'skip', returning: 'minimal' }, workspaceA()))
     assert.deepEqual(patched.result.data.map(item => item.id), ['1'])
     assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('status'), ['held', 'open', 'open'])
     const refused = await fixture.measure(() => entries.patchWhereIds({ ids: ['2', '3'], data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
-    assert.equal(patched.statements, refused.statements - 1, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
+    assert.equal(patched.statements, refused.statements - saved, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
 
     const deleted = await fixture.measure(() => entries.deleteMany({ ids: ['1', '4', '7', '99'], missing: 'skip', returning: 'minimal' }, workspaceA()))
     assert.deepEqual(deleted.result.data, [{ type: 'da_entries', id: '1' }])
     assert.deepEqual((await fixture.rows('da_entries')).map(row => Number(row.id)), [2, 3, 4, 5, 6, 7, 8, 9])
     const removed = await fixture.measure(() => entries.deleteMany({ ids: ['2', '3'], returning: 'minimal' }, workspaceA()))
-    assert.equal(deleted.statements, removed.statements - 1, `skip: ${deleted.sql.join(' | ')}\nthrow: ${removed.sql.join(' | ')}`)
+    assert.equal(deleted.statements, removed.statements - saved, `skip: ${deleted.sql.join(' | ')}\nthrow: ${removed.sql.join(' | ')}`)
 
     // onlyIf narrows the scoped statement too.
     const guarded = await entries.patchWhereIds({ ids: ['5', '6'], data: { status: 'held' }, onlyIf: { amount: 50 }, missing: 'skip', returning: 'minimal' }, { ...workspaceA(), visibility: { all: true } })

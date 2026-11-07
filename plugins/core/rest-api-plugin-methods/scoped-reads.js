@@ -144,8 +144,9 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
 /**
  * Locks the visible rows among `ids` until the transaction ends, in id order,
  * and returns them as the locking read saw them. That read is the first
- * statement and decides visibility itself, so the transaction's snapshot
- * starts after any lock wait.
+ * statement on the rows and decides visibility itself, so the transaction's
+ * snapshot starts after any lock wait. On MySQL it locks every listed row,
+ * hidden ones too, before it checks the scope (see guide 34).
  * @param {any} args
  */
 export async function lockByIdsMethod (args) {
@@ -157,8 +158,17 @@ export async function lockByIdsMethod (args) {
   refuseDuplicateIds(ids, storageAdapter, 'ids')
   const missing = resolveMissing(params.missing)
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
+  // Sorted before chunking, so lists longer than a chunk still lock in one
+  // order across transactions: a list of integers numerically, any other list
+  // by code unit (the database's order for a binary collation).
+  const keys = ids.map(id => String(storageAdapter.translateFilterValue('id', id)))
+  const numeric = keys.every(key => /^-?\d+$/.test(key))
+  const sorted = ids
+    .map((id, index) => ({ id, key: numeric ? BigInt(keys[index]) : keys[index] }))
+    .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
+    .map(entry => entry.id)
   const document = { data: [] }
-  for (const part of chunk(ids, 1000)) {
+  for (const part of chunk(sorted, 1000)) {
     document.data.push(...(await helpers.dataLockByIds({ scopeName, context, runHooks, ids: part })).data)
   }
   if (document.data.length < ids.length && missing === 'throw') {

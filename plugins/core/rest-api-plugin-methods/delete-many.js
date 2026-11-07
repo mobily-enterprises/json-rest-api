@@ -6,7 +6,7 @@ import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
-import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { chunk, databaseFamily } from '../lib/storage/many-row-data-helpers.js'
 import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
 import {
   keepVisible,
@@ -51,8 +51,9 @@ async function runDeleteMany (args, { operation, ids, started = false, selection
 
   // With missing: 'skip' and no hook that needs the rows first, the DELETE
   // decides which rows the caller may delete, carrying the scope (see patchMany,
-  // also for selections).
-  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallDeleteMany'))
+  // also for MySQL and selections).
+  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallDeleteMany') &&
+    (selection || databaseFamily(context.db) !== 'mysql'))
   const scoped = Boolean(selection) || !readFirst
   let kept = ids
   if (readFirst) {

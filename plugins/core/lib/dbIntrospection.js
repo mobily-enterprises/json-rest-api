@@ -1281,6 +1281,29 @@ export async function listKnexTableIndexes (knex, tableName) {
 }
 
 /**
+ * The column lists of a MySQL or MariaDB table's indexes, unique or not, the
+ * primary key included, in key order. A list ends before its first functional
+ * key part, which names no column.
+ * @param {any} knex
+ * @param {string} tableName
+ * @returns {Promise<string[][]>}
+ */
+export async function listKnexMysqlIndexColumns (knex, tableName) {
+  const rows = normalizeRows(await knex.raw(`
+    select index_name as indexName, column_name as columnName
+    from information_schema.statistics
+    where table_schema = database() and table_name = ?
+    order by index_name, seq_in_index`, [tableName]))
+  const byIndex = new Map()
+  for (const row of rows) {
+    const name = row.indexName ?? row.INDEX_NAME
+    if (!byIndex.has(name)) byIndex.set(name, [])
+    byIndex.get(name).push(row.columnName ?? row.COLUMN_NAME ?? null)
+  }
+  return [...byIndex.values()].map(columns => columns.includes(null) ? columns.slice(0, columns.indexOf(null)) : columns)
+}
+
+/**
  * The column lists of a table's unique indexes and constraints, primary key
  * included, that guarantee uniqueness for every row: partial, expression and
  * invalid indexes are left out.

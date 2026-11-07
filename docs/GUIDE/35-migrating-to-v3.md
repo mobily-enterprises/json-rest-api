@@ -41,7 +41,8 @@ bulk options are rejected with a message that names their replacement.
 - **Skipping writes in one statement:** `patchMany`, `patchWhereIds` and
   `deleteMany` with `missing: 'skip'` put the scope in the UPDATE or DELETE
   instead of reading the visible ids first, when no permission or
-  before-data-call batch hook needs those rows.
+  before-data-call batch hook needs those rows (not on MySQL and MariaDB,
+  where InnoDB would lock every listed row before checking the scope).
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.

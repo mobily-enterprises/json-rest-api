@@ -1355,15 +1355,20 @@ and return the records as the locking read saw them, through the read hooks of
 for each row. The locking read is the first statement and applies the scope
 itself, so plain reads later in the transaction see what a previous lock holder
 committed. `lockByIds` locks the visible rows among `ids` in id order
-(`FOR UPDATE`); hidden or missing ids throw `RestApiRecordsNotFoundError` unless
-`missing: 'skip'`. `lockWhere` locks the visible rows the filters select in id
-order, waiting for other transactions and including rows that start to match
-meanwhile; more than 1,000 throw `RestApiRowLimitError`. `claim` takes up to
-`limit` (default 1, at most 1,000) matching rows that no other transaction holds
-(`SKIP LOCKED`), in `sort` order (stored fields, default `['id']`). A row policy
-that joins tables is refused for all three. On SQLite, which has one writer,
-they take the database's write lock with a write that changes nothing, then
-read.
+(`FOR UPDATE`), sorting lists longer than its 1,000-id statements first; hidden
+or missing ids throw `RestApiRecordsNotFoundError` unless `missing: 'skip'`. On
+MySQL and MariaDB it locks every listed id, hidden ones too, until commit, so
+pass ids from a scoped read, never a raw request list. `lockWhere` locks the
+visible rows the filters select in id order, waiting for other transactions and
+including rows that start to match meanwhile; more than 1,000 throw
+`RestApiRowLimitError`. On MySQL and MariaDB it has no `ORDER BY` and needs an
+index that starts with the ownership columns (or, without ownership conditions,
+a filtered column), and throws `RestApiBulkWriteUnsupportedError` otherwise.
+`claim` takes up to `limit` (default 1, at most 1,000) matching rows that no
+other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
+`['id']`). A row policy that joins tables is refused for all three. On SQLite,
+which has one writer, they take the database's write lock with a write that
+changes nothing, then read.
 
 A resource option `lockVersionField: 'lock_version'` names a stored integer
 that every update (single, many-row and upsert merge) sets to `column + 1`.

@@ -4,9 +4,9 @@
 // MySQL never sees an UPDATE or DELETE whose subquery reads its own table.
 import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
-import { applyWriteConditions, hasWriteConditions } from '../querying/query-constraint.js'
+import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } from '../querying/query-constraint.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
-import { listKnexUniqueKeyColumns } from '../dbIntrospection.js'
+import { listKnexMysqlIndexColumns, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
@@ -496,15 +496,56 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return readRecords({ scopeName, context, query: lockRows(query, context.db), tableName })
   }
 
+  // Tables and leading columns an index was found to start with (see requireLockIndex).
+  const lockIndexes = new Set()
   /**
-   * Lock up to `limit` visible rows the filters select, in id order, waiting
-   * for transactions that hold them, in one locking read like dataLockByIds.
+   * InnoDB locks every row a locking read examines, and holds those locks until
+   * commit. lockWhere on MySQL therefore needs an index that keeps its read
+   * inside the caller's rows: one that starts with the ownership columns the
+   * read is limited to, or, without ownership conditions, with a column the
+   * filters compare. Otherwise the read could walk the primary key, locking
+   * other owners' rows and the gaps between them.
+   * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown> }} request
+   */
+  const requireLockIndex = async ({ scopeName, context, storageAdapter, tableName, filters = {} }) => {
+    const owned = Object.entries(context[writeConditions]?.[scopeName] || {})
+      .filter(([, value]) => value !== null && value !== ANY_OWNER)
+      .map(([field]) => storageAdapter.translateColumn(field))
+    const search = context.schemaInfo.searchSchemaStructure || {}
+    const compared = Object.keys(filters).flatMap(key => {
+      const definition = search[key]
+      if (!definition || definition.oneOf || definition.applyFilter || definition.polymorphicField || definition.actualField?.includes('.')) return []
+      return [storageAdapter.translateColumn(definition.actualField || key)]
+    })
+    const cacheKey = JSON.stringify([tableName, [...owned].sort(), owned.length ? [] : [...compared].sort()])
+    if (lockIndexes.has(cacheKey)) return
+    const indexes = await listKnexMysqlIndexColumns(context.db, tableName)
+    const covered = owned.length
+      ? indexes.some(columns => owned.every(column => columns.slice(0, owned.length).includes(column)))
+      : indexes.some(columns => compared.includes(columns[0]))
+    if (!covered) {
+      throw new RestApiBulkWriteUnsupportedError({
+        resourceType: scopeName,
+        operation: 'lockWhere',
+        reason: `on MySQL and MariaDB a locking read locks every row it examines; add an index of '${tableName}' that starts with ${owned.length ? `the ownership column(s) ${owned.join(', ')}` : 'a column the filters compare'}`
+      })
+    }
+    lockIndexes.add(cacheKey)
+  }
+
+  /**
+   * Lock up to `limit` visible rows the filters select, waiting for
+   * transactions that hold them, in one locking read like dataLockByIds: in id
+   * order, except on MySQL (see requireLockIndex), where the rows come in the
+   * order of the index the read uses, as ORDER BY id could walk the primary key.
    * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number }} request
    */
   const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit }) => {
     const read = async () => {
-      const { query, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
-      return readRecords({ scopeName, context, query: lockRows(query.orderBy(idColumn).limit(limit), context.db), tableName })
+      const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      if (databaseFamily(context.db) === 'mysql') await requireLockIndex({ scopeName, context, storageAdapter, tableName, filters })
+      else query.orderBy(idColumn)
+      return readRecords({ scopeName, context, query: lockRows(query.limit(limit), context.db), tableName })
     }
     let document = await read()
     // A PostgreSQL statement finds only the rows committed when it began; after a

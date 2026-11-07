@@ -167,11 +167,12 @@ left out. A batch may not name the same id twice.
 With `missing: 'skip'`, `patchMany`, `patchWhereIds` and `deleteMany` read
 nothing first when the resource has no `checkPermissions` hook and no
 `beforeDataCallPatchMany` or `beforeDataCallDeleteMany` hook (those need the
-visible rows before the write). The UPDATE or DELETE carries the caller's
-scope, row policy included, as a subquery, and its changed rows are the
-answer: the UPDATE and the DELETE return them with `RETURNING` on PostgreSQL
-and SQLite; on MySQL and MariaDB a locking read of the scoped rows comes first,
-then the write of exactly those rows.
+visible rows before the write), except on MySQL and MariaDB. The UPDATE or
+DELETE carries the caller's scope, row policy included, as a subquery, and its
+changed rows are the answer, returned with `RETURNING` on PostgreSQL and
+SQLite. MySQL and MariaDB keep the visibility read for ids from the caller:
+InnoDB would lock every listed row before checking the scope, rows the caller
+cannot see included, and hold those locks until commit.
 
 `patchWhere` and `deleteWhere` are set operations. They read the ids of the
 rows their selection finds, then write those rows with the caller's scope and

@@ -1,6 +1,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  RestApiBulkWriteUnsupportedError,
   RestApiLockOutsideTransactionError,
   RestApiRecordsNotFoundError,
   RestApiValidationError,
@@ -211,6 +212,41 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
         fixture.api.resources.da_jobs.lockWhere({ filters: { state: 'queued' }, transaction }, { ...workspaceA(), joinPolicy: true }),
         error => isA(RestApiValidationError)(error) && JSON.stringify(cause(error).details).includes('lock_single_table')
       )
+    })
+  })
+
+  it('lockByIds sorts a list longer than one statement before it chunks it', async () => {
+    await seedLedger(fixture)
+    // Listed backwards: each statement must still take a contiguous run, lowest first.
+    const ids = Array.from({ length: 1003 }, (_, index) => String(1003 - index))
+    const chunks = []
+    const record = query => {
+      const listed = (query.bindings || []).filter(value => /^\d+$/.test(String(value)) && /da_entries/.test(query.sql)).map(Number)
+      if (listed.length > 2) chunks.push([Math.min(...listed), Math.max(...listed), listed.length])
+    }
+    fixture.knex.on('query', record)
+    try {
+      await fixture.api.transaction(async transaction => {
+        const locked = await fixture.api.resources.da_entries.lockByIds({ ids, missing: 'skip', transaction }, workspaceA())
+        assert.deepEqual(locked.data.map(row => String(row.id)), ['1', '2', '3'])
+      })
+    } finally { fixture.knex.removeListener('query', record) }
+    assert.deepEqual(chunks.slice(0, 2), [[1, 1000, 1000], [1001, 1003, 3]])
+  })
+
+  it('lockWhere on MySQL needs an index that starts with the ownership or a filtered column', async () => {
+    await seedJobs()
+    const mysql = databaseClient === 'mysql2'
+    const refused = error => isA(RestApiBulkWriteUnsupportedError)(error) && /index/.test(cause(error).message + JSON.stringify(cause(error).details))
+    await fixture.api.transaction(async transaction => {
+      // da_jobs has no index that starts with workspace_id.
+      const jobs = fixture.api.resources.da_jobs.lockWhere({ filters: { state: 'queued' }, transaction }, workspaceA())
+      if (mysql) await assert.rejects(jobs, refused)
+      else assert.deepEqual((await jobs).data.map(record => String(record.id)).sort(), ['1', '2', '3', '5'])
+      // Without ownership conditions the filters must use an index: status has none.
+      const system = fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, createSystemContext('lock every open entry'))
+      if (mysql) await assert.rejects(system, refused)
+      else assert.equal((await system).data.length, 9)
     })
   })
 

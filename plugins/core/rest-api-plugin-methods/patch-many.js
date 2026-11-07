@@ -7,7 +7,7 @@ import { requireExistingResourceId } from '../lib/querying-writing/resource-id-n
 import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { chunk, databaseFamily } from '../lib/storage/many-row-data-helpers.js'
 import {
   applyFieldSetters,
   collectRelationshipTargets,
@@ -148,10 +148,13 @@ async function runPatchMany (args, { operation, entries, started = false, select
   // Which of the requested rows the caller may change. With missing: 'skip' and
   // no hook that needs the rows first, the UPDATE decides it, carrying the
   // scope, and its changed rows answer. Otherwise one scoped read per chunk
-  // gives each row's minimal record to the permission check. A selection's
-  // UPDATE carries the scope and its filters either way, so it changes only
-  // rows that still match.
-  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany'))
+  // gives each row's minimal record to the permission check. On MySQL a
+  // locking read locks every listed row before it checks the scope, so ids
+  // from the caller always get that read first; a selection's ids come from
+  // its own scoped read. A selection's UPDATE carries the scope and its filters
+  // either way, so it changes only rows that still match.
+  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany') &&
+    (selection || databaseFamily(context.db) !== 'mysql'))
   const scoped = Boolean(selection) || !readFirst
   let keptRows = rows
   if (readFirst) {
