@@ -89,6 +89,20 @@ export function resolveChunkSize (value) {
   return /** @type {number} */ (value)
 }
 
+/**
+ * What a many-row write returns: nothing (the default), identifiers, the
+ * records (not for deletes) or `{ meta: { count } }`, the number of rows it
+ * wrote.
+ * @param {unknown} value
+ * @param {{ deletes?: boolean }} [options]
+ * @returns {'none' | 'minimal' | 'full' | 'count'}
+ */
+export function resolveManyRowReturning (value, { deletes = false } = {}) {
+  const returning = value === undefined ? 'none' : value
+  if (returning === 'none' || returning === 'minimal' || returning === 'count' || (returning === 'full' && !deletes)) return returning
+  throw new RestApiValidationError(deletes ? "A delete returns 'none', 'minimal' or 'count'" : "returning must be 'none', 'minimal', 'full' or 'count'", { fields: ['returning'] })
+}
+
 /** @param {unknown} value */
 export function resolveMissing (value) {
   if (value === undefined) return 'throw'
@@ -229,13 +243,14 @@ export function validateFilters ({ filters, scopeName, schemaInfo, vars }) {
 }
 
 /**
- * The response of a many-row write: identifiers, full records read through
- * `query` in the write's transaction, or nothing.
+ * The response of a many-row write: the count of written rows, identifiers,
+ * full records read through `query` in the write's transaction, or nothing.
  * @param {{ api: any, scopeName: string, context: any, ids: unknown[], returning: string, format: string, queryParams?: any }} request
  */
 export async function manyRowResponse ({ api, scopeName, context, ids, returning, format, queryParams = {} }) {
   if (returning === 'none') return undefined
   const present = ids.filter(id => id !== undefined && id !== null).map(String)
+  if (returning === 'count') return { meta: { count: present.length } }
   if (returning === 'minimal') return { data: present.map(id => ({ type: scopeName, id })) }
 
   const byId = new Map()

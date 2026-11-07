@@ -3,11 +3,16 @@ import type { ManagedTransaction } from './transactions.js'
 import type { DirectResourceId, InputResourceId, JsonApiResource, PlainResource, ResourceFormat, ResourceIdentifier } from './representations.js'
 import type { JsonApiWriteDocument, QueryParams, RemovedResourceOptions, SelectionParams } from './resource-methods.js'
 
-// Many-row writes return nothing by default; 'minimal' returns identifiers, 'full' the records.
-export type ManyRowReturning = 'none' | 'minimal' | 'full'
+// Many-row writes return nothing by default; 'minimal' returns identifiers, 'full' the records,
+// 'count' the number of rows written.
+export type ManyRowReturning = 'none' | 'minimal' | 'full' | 'count'
+export type ManyRowCount = { meta: { count: number } }
 export type ManyRowResult<Format extends ResourceFormat, Returning extends ManyRowReturning, Fields extends object, Type extends string> =
   Returning extends 'none' ? void
+    : Returning extends 'count' ? ManyRowCount
     : { data: Array<Returning extends 'minimal' ? ResourceIdentifier<Type> : Format extends 'plain' ? PlainResource<Fields> : JsonApiResource<Fields, Type>> }
+type DeleteResult<Returning extends 'none' | 'minimal' | 'count', Type extends string> =
+  Returning extends 'none' ? void : Returning extends 'count' ? ManyRowCount : { data: ResourceIdentifier<Type>[] }
 export type RecordsResult<Format extends ResourceFormat, Fields extends object, Type extends string> =
   { data: Array<Format extends 'plain' ? PlainResource<Fields> : JsonApiResource<Fields, Type>>; included?: JsonApiResource[] }
 // knex.raw values: accepted by many-row patches for stored, non-relationship fields.
@@ -95,15 +100,15 @@ export interface DataAccessMethods<
     params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope,
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
-  deleteMany<Returning extends 'none' | 'minimal' = 'none'>(
+  deleteMany<Returning extends 'none' | 'minimal' | 'count' = 'none'>(
     params: RemovedResourceOptions & { ids: DirectResourceId[]; transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number; missing?: MissingRows },
     context?: Context
-  ): Promise<Returning extends 'none' ? void : { data: ResourceIdentifier<Type>[] }>
+  ): Promise<DeleteResult<Returning, Type>>
   // Deletes the rows its selection finds and answers with those it deleted; it never throws for missing rows.
-  deleteWhere<Returning extends 'none' | 'minimal' = 'none'>(
+  deleteWhere<Returning extends 'none' | 'minimal' | 'count' = 'none'>(
     params: RemovedResourceOptions & WhereScope & { transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number },
     context?: Context
-  ): Promise<Returning extends 'none' ? void : { data: ResourceIdentifier<Type>[] }>
+  ): Promise<DeleteResult<Returning, Type>>
   // Locks the visible rows among ids (FOR UPDATE, id order) until the transaction ends.
   lockByIds<Format extends ResourceFormat = DefaultFormat>(params: {
     ids: DirectResourceId[]

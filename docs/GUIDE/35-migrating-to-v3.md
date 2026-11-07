@@ -45,6 +45,8 @@ bulk options are rejected with a message that names their replacement.
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.
+- **Counts:** `returning: 'count'` on every many-row write returns
+  `{ meta: { count } }`, the number of rows written, without reading rows back.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.
@@ -69,7 +71,7 @@ the per-row checks in memory and one INSERT, UPDATE or DELETE per chunk.
 | `atomic: true` | remove: every call is all-or-nothing |
 | `atomic: false` | remove; for rows that must succeed independently, call single writes in a loop |
 | `expectedVersion`, `expectedVersions` | removed: resources with a `versionField` refuse many-row writes. Use single writes with `expectedVersion`, or a `lockVersionField` with `onlyIf` |
-| result `{ meta: { total, succeeded, failed, atomic }, errors, data }` | nothing by default; `returning: 'minimal'` gives `{ data: [{ type, id }] }`, `'full'` gives `{ data: [records] }` |
+| result `{ meta: { total, succeeded, failed, atomic }, errors, data }` | nothing by default; `returning: 'minimal'` gives `{ data: [{ type, id }] }`, `'full'` gives `{ data: [records] }`, `'count'` gives `{ meta: { count } }` |
 | `errors[i].index` for a failed entry | the call throws; a validation error names the row in `details.index`, and its field paths start with `data.<index>.` |
 | `meta.deleted` | `deleteMany({ ids, returning: 'minimal' }).data` |
 | default `returning` of the resource | `'none'` unless the call says otherwise |

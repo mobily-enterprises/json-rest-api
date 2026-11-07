@@ -4,7 +4,7 @@
 // deletes the rows its selection finds and answers with those it deleted.
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
@@ -15,6 +15,7 @@ import {
   rejectBulkOptions,
   requireWhereScope,
   resolveChunkSize,
+  resolveManyRowReturning,
   resolveMissing,
   unsupported,
   validateFilters
@@ -29,10 +30,7 @@ function setup ({ params, context, scopes, scopeName }, method) {
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
   // Deletes return no records; a format is still checked like a single delete's.
   if (params.format !== undefined) resolveFormat(params.format)
-  context.returning = resolveReturning(params.returning, 'none')
-  if (context.returning === 'full') {
-    throw new RestApiValidationError("A delete returns 'none' or 'minimal'", { fields: ['returning'] })
-  }
+  context.returning = resolveManyRowReturning(params.returning, { deletes: true })
   context.params = params
 }
 
@@ -85,7 +83,13 @@ async function runDeleteMany (args, { operation, ids, started = false, selection
   await runHooks('afterDataCallDeleteMany')
 
   await commitOwnedTransaction(context)
-  return context.returning === 'none' ? undefined : { data: context.ids.map(id => ({ type: scopeName, id })) }
+  return deleteResponse(context, scopeName, context.ids)
+}
+
+/** @param {any} context @param {string} scopeName @param {string[]} ids */
+function deleteResponse (context, scopeName, ids) {
+  if (context.returning === 'count') return { meta: { count: ids.length } }
+  return context.returning === 'none' ? undefined : { data: ids.map(id => ({ type: scopeName, id })) }
 }
 
 /** @param {any} args */
@@ -118,7 +122,7 @@ export async function deleteWhereMethod (args) {
     const ids = await visibleIdsByFilters(args, filters)
     if (!ids.length) {
       await commitOwnedTransaction(context)
-      return context.returning === 'none' ? undefined : { data: [] }
+      return deleteResponse(context, scopeName, [])
     }
     return await runDeleteMany(args, { operation: 'deleteWhere', ids, started: true, selection: { filters } })
   } catch (error) {

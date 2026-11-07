@@ -4,7 +4,7 @@
 import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
-import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
@@ -23,6 +23,7 @@ import {
   refuseUnsupportedResource,
   rejectBulkOptions,
   resolveChunkSize,
+  resolveManyRowReturning,
   selectManyInput,
   toDocument,
   unsupported
@@ -141,7 +142,7 @@ export default async function postManyMethod ({
     context.schemaInfo = scopes[scopeName].vars.schemaInfo
     context.format = resolveFormat(params.format, vars.format)
     context.simplified = context.format === 'plain'
-    context.returning = resolveReturning(params.returning, 'none')
+    context.returning = resolveManyRowReturning(params.returning)
     context.params = params
     const chunkSize = resolveChunkSize(params.chunkSize)
     const { inputKey, records } = selectManyInput(params)
@@ -252,16 +253,20 @@ export default async function postManyMethod ({
       })
     }
 
-    const needIds = context.returning !== 'none' || hasHooks('afterDataCallPostMany')
+    // Without a conflict every row is inserted or the batch fails, so a count needs no ids.
+    const countsRows = context.returning === 'count' && !onConflict
+    const needIds = (context.returning !== 'none' && !countsRows) || hasHooks('afterDataCallPostMany')
     const ids = onConflict?.action === 'merge'
       ? await mergeRows({ context, helpers, scope, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds })
       : await helpers.dataInsertMany({ scopeName, context, rows: attributes, chunkSize, needIds, onConflict })
     context.ids = ids?.map(id => id === undefined || id === null ? undefined : String(id))
     await runHooks('afterDataCallPostMany')
 
-    const response = await manyRowResponse({
-      api, scopeName, context, ids: context.ids || [], returning: context.returning, format: context.format, queryParams: params.queryParams
-    })
+    const response = countsRows
+      ? { meta: { count: rows.length } }
+      : await manyRowResponse({
+        api, scopeName, context, ids: context.ids || [], returning: context.returning, format: context.format, queryParams: params.queryParams
+      })
     await commitOwnedTransaction(context)
     return response
   } catch (error) {

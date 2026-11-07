@@ -61,9 +61,11 @@ console.log(created.data, restocked.data)
 ```
 
 Rows come back in input order. Many-row writes return nothing unless you ask:
-`returning: 'minimal'` gives identifiers and `returning: 'full'` the records,
-read back in the write's transaction. The second call is an upsert: Alpha's
-ISBN already exists, so its stock becomes 9, and Gamma is inserted.
+`returning: 'minimal'` gives identifiers, `returning: 'full'` the records,
+read back in the write's transaction, and `returning: 'count'` only
+`{ meta: { count } }`, the number of rows written, without reading any back.
+The second call is an upsert: Alpha's ISBN already exists, so its stock
+becomes 9, and Gamma is inserted.
 
 ```javascript
 const [alpha, beta] = created.data
@@ -146,7 +148,7 @@ does not declare with `defaultTo` does not apply to them.
 
 | Option | Methods | Default | Meaning |
 | --- | --- | --- | --- |
-| `returning` | all | `'none'` | `'minimal'` returns `{ data: [{ type, id }] }`; `'full'` (not for deletes) returns the records |
+| `returning` | all | `'none'` | `'minimal'` returns `{ data: [{ type, id }] }`; `'full'` (not for deletes) returns the records; `'count'` returns `{ meta: { count } }` |
 | `format` | writes | resource default | Output format of `'full'` records |
 | `queryParams` | writes | | `fields` and `include` of `'full'` records |
 | `transaction` | all | | A transaction from `api.transaction` to join |
@@ -256,6 +258,9 @@ checks as well as a create's: `checkPermissions` runs with `method: 'patch'`
 and the matched record as `minimalRecord`, the resource is refused if a
 per-record patch hook without `{ batch: true }` runs for it, and a key that
 matches a record the caller cannot see fails the batch as `forbidden`.
+
+With `returning: 'count'` an upsert counts the rows it inserted, and with
+`merge` the records it updated as well.
 
 `ignore` runs `INSERT … ON CONFLICT DO NOTHING` on PostgreSQL and SQLite. On
 MySQL and MariaDB, whose `ON DUPLICATE KEY` fires on every unique index, it

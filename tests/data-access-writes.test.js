@@ -472,10 +472,39 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
 })
 
 // A fixture of its own: these tests add hooks.
-describe(`Selection writes (${storageMode.mode})`, { skip: tableOnly }, () => {
+describe(`Selection writes and counts (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
+  const count = value => ({ meta: { count: value } })
+
+  it('returns only the number of rows each many-row write wrote', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    assert.deepEqual(await entries.postMany({ data: newEntries(3), returning: 'count' }, workspaceA()), count(3))
+    // 4 is hidden by the row policy.
+    assert.deepEqual(await entries.patchMany({ data: [{ id: '1', amount: 1 }, { id: '4', amount: 1 }], missing: 'skip', returning: 'count' }, workspaceA()), count(1))
+    assert.deepEqual(await entries.patchWhereIds({ ids: ['1', '2'], data: { status: 'held' }, returning: 'count' }, workspaceA()), count(2))
+    assert.deepEqual(await entries.patchWhere({ filters: { status: 'held' }, data: { status: 'open' }, returning: 'count' }, workspaceA()), count(2))
+    assert.deepEqual(await entries.patchWhere({ filters: { status: 'none' }, data: { status: 'open' }, returning: 'count' }, workspaceA()), count(0))
+    // A count reads nothing back: it runs the statements of returning: 'none'.
+    const counted = await fixture.measure(() => entries.patchWhereIds({ ids: ['1', '2'], data: { amount: 7 }, returning: 'count' }, workspaceA()))
+    const silent = await fixture.measure(() => entries.patchWhereIds({ ids: ['1', '2'], data: { amount: 8 } }, workspaceA()))
+    assert.deepEqual(counted.result, count(2))
+    assert.equal(counted.statements, silent.statements, `count: ${counted.sql.join(' | ')}\nnone: ${silent.sql.join(' | ')}`)
+    assert.deepEqual(await entries.deleteMany({ ids: ['3', '4'], missing: 'skip', returning: 'count' }, workspaceA()), count(1))
+    assert.deepEqual(await entries.deleteWhere({ filters: { status: 'open' }, returning: 'count' }, workspaceB()), count(3))
+
+    // An upsert counts what it inserted, and with merge what it updated too.
+    const labels = fixture.api.resources.da_labels
+    await fixture.seed('da_labels', [{ id: '1', name: 'flag', workspace_id: 'ws-a' }])
+    const keys = ['workspace_id', 'name']
+    assert.deepEqual(await labels.postMany({ data: [{ name: 'flag' }, { name: 'fresh' }], onConflict: { keys, action: 'ignore' }, returning: 'count' }, workspaceA()), count(1))
+    assert.deepEqual(await labels.postMany({ data: [{ name: 'flag', color: 'red' }, { name: 'new' }], onConflict: { keys, action: 'merge', merge: ['color'] }, returning: 'count' }, workspaceA()), count(2))
+
+    await assert.rejects(entries.deleteMany({ ids: ['5'], returning: 'full' }, workspaceA()), isA(RestApiValidationError))
+    await assert.rejects(entries.patch({ id: '1', data: { amount: 2 }, returning: 'count' }, workspaceA()), isA(RestApiValidationError))
+  })
 
   it('writes the rows a selection still finds and never throws for one that vanished', async () => {
     await seedLedger(fixture)

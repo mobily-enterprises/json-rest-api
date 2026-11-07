@@ -2,7 +2,7 @@
 // ids the caller may change (one scoped read per chunk), then run one UPDATE per
 // chunk with CASE expressions. patchWhereIds and patchWhere reuse the same path.
 import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
-import { rejectRemovedOptions, resolveFormat, resolveReturning } from '../lib/querying-writing/response-options.js'
+import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
@@ -26,6 +26,7 @@ import {
   rejectBulkOptions,
   requireWhereScope,
   resolveChunkSize,
+  resolveManyRowReturning,
   resolveMissing,
   selectManyInput,
   toDocument,
@@ -212,7 +213,7 @@ function setupManyWrite ({ params, context, vars, scopes, scopeName }, method) {
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
   context.format = resolveFormat(params.format, vars.format)
   context.simplified = context.format === 'plain'
-  context.returning = resolveReturning(params.returning, 'none')
+  context.returning = resolveManyRowReturning(params.returning)
   context.params = params
 }
 
@@ -305,7 +306,7 @@ export async function patchWhereMethod (args) {
     const ids = await visibleIdsByFilters(args, filters)
     if (!ids.length) {
       await commitOwnedTransaction(context)
-      return context.returning === 'none' ? undefined : { data: [] }
+      return context.returning === 'count' ? { meta: { count: 0 } } : context.returning === 'none' ? undefined : { data: [] }
     }
     return await runPatchMany(args, {
       operation: 'patchWhere', entries: entriesFor(ids, shared, { scopeName, schemaInfo: context.schemaInfo }), started: true, selection: { filters }

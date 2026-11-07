@@ -1311,7 +1311,7 @@ await resource.deleteWhere({ filters | all: true, returning, chunkSize, transact
 | --- | --- |
 | `data` / `document` | `postMany`, `patchMany`: an array of plain records, or `{ data: [resource objects] }`; `patchMany` rows carry `id`. `patchWhereIds`, `patchWhere`: one record of changes. |
 | `ids` / `filters` / `all` | The records to change: listed ids, or non-empty search filters validated as `query` validates them, or `all: true` for every row the caller can see. |
-| `returning` | `'none'` (default), `'minimal'` (`{ data: [{ type, id }] }`) or `'full'` (`{ data: [records] }`, not for deletes). |
+| `returning` | `'none'` (default), `'minimal'` (`{ data: [{ type, id }] }`), `'full'` (`{ data: [records] }`, not for deletes) or `'count'` (`{ meta: { count } }`, the number of rows written, with no row data). |
 | `format`, `queryParams` | Output format, `fields` and `include` of full records. |
 | `onConflict` | Upsert: `{ keys, action: 'ignore' \| 'merge', merge? }`. `keys` must include every ownership field, and a unique index must cover them; rows may not carry an `id` or repeat keys; keys compare exactly (a match only by collation fails with 409); only a match on the keys counts, and a clash on another unique index fails the batch. `merge` updates only the fields each row supplies (never `defaultTo` values), runs the patch checks (`checkPermissions` with `method: 'patch'`) on the records it updates and is refused under a row policy. |
 | `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
