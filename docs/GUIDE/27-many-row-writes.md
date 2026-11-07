@@ -172,7 +172,11 @@ DELETE carries the caller's scope, row policy included, as a subquery, and its
 changed rows are the answer, returned with `RETURNING` on PostgreSQL and
 SQLite. MySQL and MariaDB keep the visibility read for ids from the caller:
 InnoDB would lock every listed row before checking the scope, rows the caller
-cannot see included, and hold those locks until commit.
+cannot see included, and hold those locks until commit. After that read, a
+statement of one row there runs the UPDATE with its ownership conditions and
+`onlyIf`, and its row count is the answer; a longer one, or a count of zero
+(MySQL counts changed rather than matched rows when the connection disables
+`FOUND_ROWS`), locks the rows that still match and then updates exactly those.
 
 `patchWhere` and `deleteWhere` are set operations. They read the ids of the
 rows their selection finds, then write those rows with the caller's scope and

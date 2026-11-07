@@ -377,7 +377,15 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         if (writes) await db(tableName).whereIn(idColumn, ids).update(set)
         changed.push(...part.map(update => update.id))
       } else if (family === 'mysql' || !writes) {
-        // MySQL cannot return updated rows: lock the rows that match, then update exactly those.
+        // MySQL cannot return updated rows. One row's UPDATE answers from its count;
+        // its scope subquery would name the updated table, which MySQL refuses.
+        if (writes && !scoped && part.length === 1 && await matching(ids).update(set)) {
+          changed.push(part[0].id)
+          continue
+        }
+        // Otherwise lock the rows that match, then update exactly those. This also
+        // settles a zero count: MySQL reports changed rather than matched rows
+        // when FOUND_ROWS is disabled.
         const matched = await applyDatabaseReadOptions(lockRows(matching(ids), db).select({ id: databaseIdentityExpression(db, idColumn) }))
         if (matched.length && writes) await db(tableName).whereIn(idColumn, matched.map(row => row.id)).update(set)
         changed.push(...matched.map(row => row.id))

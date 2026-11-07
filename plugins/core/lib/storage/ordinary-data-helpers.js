@@ -675,22 +675,6 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     log.debug(`[Knex] PATCH ${tableName}/${id}`)
 
-    // Check if record exists
-    const exists = await db(tableName)
-      .where(idProperty, id)
-      .first()
-
-    if (!exists) {
-      throw new RestApiResourceError(
-        'Resource not found',
-        {
-          subtype: ERROR_SUBTYPES.NOT_FOUND,
-          resourceType: scopeName,
-          resourceId: id
-        }
-      )
-    }
-
     // Core has already merged relationship values and applied setters.
     const attributes = inputRecord.data.attributes || {}
 
@@ -706,11 +690,19 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
 
-    // Update only if there are changes
+    // Update only if there are changes. The scoped read before this found the
+    // row; the UPDATE's own count tells whether it has gone since.
     if (Object.keys(finalAttributes).length > 0) {
-      await db(tableName)
-        .where(idProperty, id)
-        .update(finalAttributes)
+      const row = () => db(tableName).where(idProperty, id)
+      const matched = await row().update(finalAttributes)
+      // MySQL can report changed rows rather than matched rows when FOUND_ROWS is disabled.
+      if (!matched && !await row().select(idProperty).forUpdate().first()) {
+        throw new RestApiResourceError('Resource not found', {
+          subtype: ERROR_SUBTYPES.NOT_FOUND,
+          resourceType: scopeName,
+          resourceId: id
+        })
+      }
     }
   }
 

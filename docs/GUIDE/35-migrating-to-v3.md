@@ -42,7 +42,12 @@ bulk options are rejected with a message that names their replacement.
   `deleteMany` with `missing: 'skip'` put the scope in the UPDATE or DELETE
   instead of reading the visible ids first, when no permission or
   before-data-call batch hook needs those rows (not on MySQL and MariaDB,
-  where InnoDB would lock every listed row before checking the scope).
+  where InnoDB would lock every listed row before checking the scope; there a
+  patch of one visible row runs its UPDATE without a locking read first).
+- **One read before a `patch`:** a single `patch` on table storage reads its
+  row once, scoped, before the UPDATE; the second, unscoped read that checked
+  the row still existed is gone, and the UPDATE's own row count answers a row
+  that vanished in between (`not_found`, as before).
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.

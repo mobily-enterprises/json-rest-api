@@ -4,6 +4,7 @@ import {
   RestApiBulkInsertIdsError,
   RestApiBulkWriteUnsupportedError,
   RestApiRecordsNotFoundError,
+  RestApiResourceError,
   RestApiValidationError,
   createSystemContext
 } from '../index.js'
@@ -459,7 +460,8 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
     assert.deepEqual(patched.result.data.map(item => item.id), ['1'])
     assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('status'), ['held', 'open', 'open'])
     const refused = await fixture.measure(() => entries.patchWhereIds({ ids: ['2', '3'], data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
-    assert.equal(patched.statements, refused.statements - saved, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
+    // On MySQL the one row left is written by an UPDATE that answers from its count, without a locking read first.
+    assert.equal(patched.statements, refused.statements - 1, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
 
     const deleted = await fixture.measure(() => entries.deleteMany({ ids: ['1', '4', '7', '99'], missing: 'skip', returning: 'minimal' }, workspaceA()))
     assert.deepEqual(deleted.result.data, [{ type: 'da_entries', id: '1' }])
@@ -470,6 +472,115 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
     // onlyIf narrows the scoped statement too.
     const guarded = await entries.patchWhereIds({ ids: ['5', '6'], data: { status: 'held' }, onlyIf: { amount: 50 }, missing: 'skip', returning: 'minimal' }, { ...workspaceA(), visibility: { all: true } })
     assert.deepEqual(guarded.data.map(item => item.id), ['5'])
+  })
+})
+
+// Each statement's first word: begin, select, update, commit or rollback.
+const kinds = sql => sql.map(statement => statement.trim().split(/\s/)[0].replace(';', '').toLowerCase())
+const notFound = error => cause(error) instanceof RestApiResourceError && cause(error).subtype === 'not_found'
+
+// A fixture of its own: the last test adds hooks.
+describe(`One-record patch statements (${storageMode.mode})`, { skip: tableOnly }, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture() })
+  after(async () => { await fixture?.close() })
+
+  it('reads the row once before its UPDATE, and again only for a full response', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    for (const returning of ['none', 'minimal']) {
+      const patched = await fixture.measure(() => entries.patch({ id: '1', data: { amount: 11 }, returning }, workspaceA()))
+      assert.deepEqual(kinds(patched.sql), ['begin', 'select', 'update', 'commit'], patched.sql.join(' | '))
+    }
+    const full = await fixture.measure(() => entries.patch({ id: '1', data: { amount: 12 } }, workspaceA()))
+    assert.equal(full.result.amount, 12)
+    const write = kinds(full.sql).indexOf('update')
+    assert.deepEqual(kinds(full.sql).slice(0, write + 1), ['begin', 'select', 'update'], full.sql.join(' | '))
+    assert.ok(kinds(full.sql).slice(write + 1, -1).every(kind => kind === 'select'), 'the response reads the written record')
+
+    // Hidden by the row policy, in another workspace, or missing: not found from that one read.
+    for (const id of ['4', '7', '99']) {
+      const missing = await fixture.measure(() => assert.rejects(entries.patch({ id, data: { amount: 1 }, returning: 'none' }, workspaceA()), notFound))
+      assert.deepEqual(kinds(missing.sql), ['begin', 'select', 'rollback'], missing.sql.join(' | '))
+    }
+    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('amount'), [12, 40, 70])
+  })
+
+  it('skips a row with missing: \'skip\' in its guarded UPDATE, without a locking read', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const skip = (id, options = {}) => fixture.measure(() => entries.patchMany({ data: [{ id, status: 'held' }], missing: 'skip', returning: 'minimal', ...options }, workspaceA()))
+    const written = ({ result }) => result.data.map(item => item.id)
+    // MySQL and MariaDB read the visible ids first: InnoDB would lock a listed row before checking the scope.
+    const mysql = databaseClient === 'mysql2'
+    const write = mysql ? ['begin', 'select', 'update', 'commit'] : ['begin', 'update', 'commit']
+
+    const plain = await skip('1')
+    assert.deepEqual(written(plain), ['1'])
+    assert.deepEqual(kinds(plain.sql), write, plain.sql.join(' | '))
+    const won = await skip('2', { onlyIf: { status: 'open' } })
+    assert.deepEqual(written(won), ['2'])
+    assert.deepEqual(kinds(won.sql), write, won.sql.join(' | '))
+    // A lost compare-and-set writes nothing. A zero count on MySQL takes the
+    // locking read: with FOUND_ROWS disabled it counts changed, not matched, rows.
+    const lost = await skip('2', { onlyIf: { status: 'open' } })
+    assert.deepEqual(written(lost), [])
+    assert.deepEqual(kinds(lost.sql), mysql ? ['begin', 'select', 'update', 'select', 'commit'] : write, lost.sql.join(' | '))
+    assert.ok([plain, won].every(({ sql }) => !sql.some(statement => /for update/i.test(statement))))
+
+    for (const id of ['4', '7', '99']) {
+      const skipped = await skip(id)
+      assert.deepEqual(written(skipped), [])
+      assert.deepEqual(kinds(skipped.sql), mysql ? ['begin', 'select', 'commit'] : write, skipped.sql.join(' | '))
+    }
+    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3, 4, 7]).orderBy('id').pluck('status'), ['held', 'held', 'open', 'open', 'open'])
+  })
+
+  // Registers hooks, so it runs last.
+  it('gives a permission hook the minimal record from the same one read', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const seen = []
+    await fixture.api.customize({
+      hooks: {
+        checkPermissions: {
+          functionName: 'data-access-patch-reader',
+          handler: ({ context: { originalContext } }) => { if (originalContext?.method === 'patch') seen.push(Number(originalContext.minimalRecord.attributes.amount)) }
+        },
+        // Deletes the row after the read, as a concurrent writer could.
+        beforeDataCallPatch: {
+          functionName: 'data-access-patch-vanish',
+          handler: async ({ context }) => { if (context.vanish) await context.transaction('da_entries').where('id', context.id).delete() }
+        }
+      }
+    })
+    const patched = await fixture.measure(() => entries.patch({ id: '1', data: { amount: 11 }, returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(seen, [10])
+    assert.deepEqual(kinds(patched.sql), ['begin', 'select', 'update', 'commit'], patched.sql.join(' | '))
+
+    // A row that vanished after the read: its UPDATE writes nothing, and the patch answers not found.
+    const vanished = await fixture.measure(() => assert.rejects(entries.patch({ id: '2', data: { amount: 1 }, returning: 'none' }, { ...workspaceA(), vanish: true }), notFound))
+    assert.deepEqual(kinds(vanished.sql), ['begin', 'select', 'delete', 'update', 'select', 'rollback'], vanished.sql.join(' | '))
+    assert.equal(await fixture.knex('da_entries').where('id', 2).first().then(row => Number(row.amount)), 20, 'the delete rolled back with the patch')
+  })
+})
+
+// MySQL and MariaDB report changed rather than matched rows without FOUND_ROWS.
+describe(`One-record patches without FOUND_ROWS (${storageMode.mode})`, { skip: (tableOnly || databaseClient !== 'mysql2') && 'MySQL and MariaDB table storage only' }, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture({ databaseOptions: { connectionOptions: { flags: '-FOUND_ROWS' } } }) })
+  after(async () => { await fixture?.close() })
+
+  it('still writes a row whose values do not change', async () => {
+    await seedLedger(fixture)
+    // Accounts have no lock version, so the UPDATE changes nothing and counts zero rows.
+    const accounts = fixture.api.resources.da_accounts
+    const same = await fixture.measure(() => accounts.patch({ id: '1', data: { name: 'A visible' }, returning: 'minimal' }, workspaceA()))
+    assert.equal(same.result.id, '1')
+    assert.deepEqual(kinds(same.sql), ['begin', 'select', 'update', 'select', 'commit'], same.sql.join(' | '))
+    const skipped = await accounts.patchMany({ data: [{ id: '1', name: 'A visible' }], missing: 'skip', returning: 'minimal' }, workspaceA())
+    assert.deepEqual(skipped.data.map(item => item.id), ['1'])
+    await assert.rejects(accounts.patch({ id: '3', data: { name: 'B visible' }, returning: 'minimal' }, workspaceA()), notFound)
   })
 })
 

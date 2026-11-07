@@ -9,7 +9,7 @@ if (!['better-sqlite3', 'pg', 'mysql2'].includes(databaseClient)) {
   throw new Error(`Unknown JSON_REST_API_DATABASE '${databaseClient}'`)
 }
 
-export async function createTestDatabase (knexConfig, { concurrent = false, maxConnections, acquireConnectionTimeout } = {}) {
+export async function createTestDatabase (knexConfig, { concurrent = false, maxConnections, acquireConnectionTimeout, connectionOptions } = {}) {
   if (process.env.JSON_REST_API_DATABASE && knexConfig && knexConfig.client !== databaseClient) {
     throw new Error(`Requested ${databaseClient} verification cannot use a ${knexConfig.client} fixture`)
   }
@@ -79,7 +79,7 @@ export async function createTestDatabase (knexConfig, { concurrent = false, maxC
   try {
     await admin.raw(databaseClient === 'pg' ? 'CREATE DATABASE ??' : 'CREATE DATABASE ?? CHARACTER SET utf8mb4 COLLATE utf8mb4_bin', [name])
     created = true
-    knex = knexLib({ ...config, connection: { ...connection, database: name }, pool: { min: 0, max: maxConnections ?? 4 } })
+    knex = knexLib({ ...config, connection: { ...connection, ...connectionOptions, database: name }, pool: { min: 0, max: maxConnections ?? 4 } })
     return { knex, name, close }
   } catch (error) {
     await close()
