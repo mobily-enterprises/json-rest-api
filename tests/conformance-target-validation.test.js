@@ -142,7 +142,8 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
     assert.ok(counts.every(row => row.bindings <= 106))
   })
 
-  it('keeps overlapping IDs separate across resource types and relationship checks', async () => {
+  // A target linked by two relationships gets the same check inputs, so it is checked once per write.
+  it('keeps overlapping IDs separate across resource types and checks each target once', async () => {
     const seen = []
     await fixture.api.customize({
       hooks: {
@@ -168,7 +169,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
         }
       }
     }, { mixedTargets: true })
-    assert.deepEqual(seen, [['groups', 'Group 1'], ['items', 'Owner'], ['groups', 'Group 1'], ['groups', 'Group 2']])
+    assert.deepEqual(seen, [['groups', 'Group 1'], ['items', 'Owner'], ['groups', 'Group 2']])
   })
 
   for (const hidden of [false, true]) {

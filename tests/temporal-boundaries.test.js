@@ -168,9 +168,11 @@ describe('Temporal storage and response boundaries', () => {
         sortedSetterFields: ['occurredAt']
       }
     }), actual => actual === error)
+    // An observing hook makes the post-write read run.
     await assert.rejects(handleRecordReturnAfterWrite({
       context: { method: 'POST' },
       scopeName: 'events',
+      hasHooks: () => true,
       helpers: { dataGetMinimal: async () => { throw error } },
       log: { warn () {} }
     }), actual => actual === error)
