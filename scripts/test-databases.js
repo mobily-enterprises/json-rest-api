@@ -16,9 +16,11 @@ const storageModes = process.env.JSON_REST_API_RUNNER_STORAGE
 if (storageModes.some(storage => !['knex', 'anyapi'].includes(storage))) {
   throw new Error('JSON_REST_API_RUNNER_STORAGE must be knex or anyapi')
 }
-if (clients.some(client => !['better-sqlite3', 'pg', 'mysql2', 'redis'].includes(client))) {
-  throw new Error('Usage: node scripts/test-databases.js [all|better-sqlite3|pg|mysql2|redis] [test files...]')
+if (clients.some(client => !['better-sqlite3', 'pg', 'mysql2', 'mariadb', 'redis'].includes(client))) {
+  throw new Error('Usage: node scripts/test-databases.js [all|better-sqlite3|pg|mysql2|mariadb|redis] [test files...]')
 }
+// MariaDB speaks the MySQL protocol: its tests use the mysql2 client.
+const knexClient = client => client === 'mariadb' ? 'mysql2' : client
 const files = requestedFiles.length
   ? requestedFiles
   : selected === 'redis'
@@ -141,6 +143,14 @@ async function startDatabase (client, directory) {
     await run(path.join(bin, 'initdb'), ['-D', data, '--username=jra_test', '--auth-local=trust', '--auth-host=reject', '--encoding=UTF8', '--locale=C', '--no-instructions'], { log })
     server = launch(path.join(bin, 'postgres'), ['-D', data, '-k', directory, '-c', 'listen_addresses=', '-c', 'unix_socket_permissions=0700'], { log })
     connection = { host: directory, user: 'jra_test', database: 'postgres', connectionTimeoutMillis: 1000 }
+  } else if (client === 'mariadb') {
+    // An unpacked MariaDB release: JSON_REST_API_MARIADB_BASE holds bin/mariadbd and scripts/mariadb-install-db.
+    const base = process.env.JSON_REST_API_MARIADB_BASE
+    if (!base) throw new Error('MariaDB verification needs JSON_REST_API_MARIADB_BASE (an unpacked MariaDB release)')
+    await run(path.join(base, 'scripts', 'mariadb-install-db'), ['--no-defaults', `--basedir=${base}`, `--datadir=${data}`, '--auth-root-authentication-method=normal', '--skip-test-db'], { log })
+    const socketPath = path.join(directory, 'mysql.sock')
+    server = launch(path.join(base, 'bin', 'mariadbd'), ['--no-defaults', `--basedir=${base}`, `--datadir=${data}`, `--socket=${socketPath}`, `--pid-file=${path.join(directory, 'mysql.pid')}`, '--skip-networking', '--default-time-zone=+00:00'], { log })
+    connection = { socketPath, user: 'root', connectTimeout: 1000, timezone: 'Z' }
   } else {
     const binary = process.env.JSON_REST_API_MYSQL_BIN || 'mysqld'
     await run(binary, ['--no-defaults', '--initialize-insecure', `--datadir=${data}`], { log })
@@ -149,7 +159,7 @@ async function startDatabase (client, directory) {
     connection = { socketPath, user: 'root', connectTimeout: 1000, timezone: 'Z' }
   }
 
-  const probe = knexLib({ client, connection, pool: { min: 0, max: 1 }, acquireConnectionTimeout: 1500 })
+  const probe = knexLib({ client: knexClient(client), connection, pool: { min: 0, max: 1 }, acquireConnectionTimeout: 1500 })
   let lastError
   try {
     const deadline = Date.now() + 60000
@@ -159,6 +169,7 @@ async function startDatabase (client, directory) {
       try {
         const row = await probe.first(probe.raw('version() as version'))
         if (client === 'mysql2' && /mariadb/i.test(row.version)) throw new Error('MySQL verification requires MySQL; the selected binary is MariaDB')
+        if (client === 'mariadb' && !/mariadb/i.test(row.version)) throw new Error('MariaDB verification requires MariaDB')
         console.log(`Database ready: ${row.version}`)
         console.log(`Database server PID: ${server.child.pid}`)
         return { server, connection }
@@ -180,7 +191,7 @@ try {
         console.log(`Running ${client} / ${storage}`)
         const testEnv = {
           ...process.env,
-          JSON_REST_API_DATABASE: client === 'redis' ? 'better-sqlite3' : client,
+          JSON_REST_API_DATABASE: client === 'redis' ? 'better-sqlite3' : knexClient(client),
           JSON_REST_API_STORAGE: storage,
           JSON_REST_API_TEST_CONNECTION: JSON.stringify(client === 'redis' ? {} : database?.connection || {}),
           ...(client === 'redis' ? { JSON_REST_API_REDIS_CONNECTION: JSON.stringify(database.connection) } : {})

@@ -83,6 +83,7 @@
     "test:databases:sqlite": "node scripts/test-databases.js better-sqlite3",
     "test:databases:pg": "node scripts/test-databases.js pg",
     "test:databases:mysql": "node scripts/test-databases.js mysql2",
+    "test:databases:mariadb": "node scripts/test-databases.js mariadb",
     "typecheck": "tsc --project tsconfig.json"
   },
   "repository": {
