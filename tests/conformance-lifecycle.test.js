@@ -316,156 +316,88 @@ describe(`Resource write lifecycle (${storageMode.mode})`, () => {
   }
 })
 
-describe(`Composed bulk lifecycle (${storageMode.mode})`, () => {
-  let fixture, enabled, currentWrite, records, failureStage
+describe(`Composed many-row lifecycle (${storageMode.mode})`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+  let fixture, enabled, failureStage, records
   const events = []
-  const snapshots = []
-  const primary = new RestApiValidationError('Roll back completed bulk work')
-  const observe = async (stage, context) => {
-    if (!enabled || !context.bulkOperation) return
-    currentWrite = context
-    events.push([context.bulkIndex, `${stage}:enter`])
-    snapshots.push({ stage, context, transaction: context.transaction, completed: context.transaction.isCompleted() })
-    await setImmediate()
-    if (context.bulkIndex === 1 && stage === failureStage) throw primary
-    events.push([context.bulkIndex, `${stage}:exit`])
+  const primary = new RestApiValidationError('Roll back many-row work')
+  const batchStages = {
+    postMany: ['beforeProcessingPostMany', 'beforeDataCallPostMany', 'afterDataCallPostMany'],
+    patchMany: ['beforeProcessingPatchMany', 'beforeDataCallPatchMany', 'afterDataCallPatchMany'],
+    deleteMany: ['beforeDataCallDeleteMany', 'afterDataCallDeleteMany']
   }
+  const input = method => method === 'postMany'
+    ? { document: { data: [10, 11].map(id => ({ type: 'items', id: String(id), attributes: { name: `Changed ${id}` } })) } }
+    : method === 'patchMany'
+      ? { data: records.map(({ id }, index) => ({ id, name: `Changed ${index}` })) }
+      : { ids: records.map(({ id }) => id) }
+  const storedNames = async () => (await fixture.api.resources.items.query({ format: 'plain' })).data.map(row => row.name).sort()
+  const changedNames = {
+    postMany: ['Changed 10', 'Changed 11', 'Original 0', 'Original 1'],
+    patchMany: ['Changed 0', 'Changed 1'],
+    deleteMany: []
+  }
+
   before(async () => {
-    fixture = await createConformanceFixture({
-      createApi: createIdConformanceApi,
-      apiOptions: {
-        bulk: true,
-        fieldCallback: async (phase, scopeName, value) => {
-          if (phase === 'setter' && enabled) await observe(`${currentWrite.method}:setter`, currentWrite)
-          return phase === 'computed' ? `Computed ${value}` : value
-        }
-      }
-    })
-    const names = new Set(['post', 'patch', 'delete'].flatMap(method => writeStages(method, 'none', false)).map(stage => stage.split(':')[1]))
-    names.delete('setter')
-    names.add('afterRollback')
+    fixture = await createConformanceFixture({ createApi: createIdConformanceApi })
+    const names = [...new Set(Object.values(batchStages).flat()), 'afterCommit', 'afterRollback']
     await fixture.api.customize({
-      hooks: Object.fromEntries([...names].map(name => [name, {
-        functionName: `composed-trace-${name}`,
-        handler: ({ context }) => {
-          const operation = context.originalContext || context
-          return observe(`${operation.method}:${name}`, operation)
+      hooks: Object.fromEntries(names.map(name => [name, {
+        functionName: `many-row-trace-${name}`,
+        handler: async ({ context }) => {
+          if (!enabled || !batchStages[context.method]) return
+          events.push([name, context.transaction.isCompleted()])
+          await setImmediate()
+          if (name === failureStage) throw primary
         }
       }]))
     })
   })
   beforeEach(async () => {
     enabled = false
-    currentWrite = failureStage = undefined
-    events.length = snapshots.length = 0
+    failureStage = undefined
+    events.length = 0
     await fixture.reset()
     records = []
     for (const index of [0, 1]) records.push(await fixture.seed('items', { name: `Original ${index}` }))
   })
   after(async () => { await fixture?.close() })
 
-  const bulkInput = method => method === 'post'
-    ? { document: { data: records.map((record, index) => ({ type: 'items', id: String(10 + index), attributes: { name: `Changed ${10 + index}` } })) } }
-    : method === 'patch'
-      ? { operations: records.map(({ id }, index) => ({ id, document: { data: { type: 'items', id, attributes: { name: `Changed ${index}` } } } })) }
-      : { ids: records.map(({ id }) => id) }
-
-  for (const method of ['post', 'patch', 'delete']) {
-    for (const mode of ['atomic', 'non-atomic', 'managed commit', 'managed rollback']) {
-      it(`${method} awaits every child stage and its ${mode} completion`, async () => {
+  for (const method of Object.keys(batchStages)) {
+    for (const mode of ['owned', 'managed commit', 'managed rollback']) {
+      it(`${method} runs each batch stage once and its ${mode} completion once`, async () => {
         enabled = true
-        const bulkMethod = `bulk${method[0].toUpperCase()}${method.slice(1)}`
-        const atomic = mode !== 'non-atomic'
-        const managed = mode.startsWith('managed')
         const rollback = mode === 'managed rollback'
-        const input = bulkInput(method)
-        let sharedTransaction
         const invoke = async transaction => {
-          sharedTransaction = transaction
-          await fixture.api.resources.items[bulkMethod]({ ...input, atomic, format: 'jsonapi', returning: 'none', transaction })
-          if (managed) {
-            assert.equal(transaction.isCompleted(), false)
-            assert.equal(snapshots.some(entry => /afterCommit|afterRollback/.test(entry.stage)), false)
-          }
+          await fixture.api.resources.items[method]({ ...input(method), transaction })
+          if (transaction) assert.equal(transaction.isCompleted(), false)
           if (rollback) throw primary
         }
         if (rollback) await assert.rejects(fixture.api.transaction(invoke), error => assertWriteFailure(error, { cause: primary, outcome: 'rolledBack' }))
-        else if (managed) await fixture.api.transaction(invoke)
+        else if (mode === 'managed commit') await fixture.api.transaction(invoke)
         else await invoke()
-        const stages = writeStages(method, 'none', atomic)
-        const expected = [0, 1].flatMap(index => stages.map(stage => [index, stage]))
-        if (atomic) expected.push(...(rollback ? [1, 0] : [0, 1]).map(index => [index, `${method}:${rollback ? 'afterRollback' : 'afterCommit'}`]))
-        assert.deepEqual(events, expected.flatMap(([index, stage]) => [[index, `${stage}:enter`], [index, `${stage}:exit`]]))
-        const contexts = new Set(snapshots.map(entry => entry.context))
-        assert.equal(contexts.size, 2)
-        const transactions = new Set(snapshots.map(entry => entry.transaction))
-        assert.equal(transactions.size, atomic ? 1 : 2)
-        if (managed) assert.deepEqual([...transactions], [sharedTransaction])
-        for (const entry of snapshots) assert.equal(entry.completed, /afterCommit|afterRollback/.test(entry.stage))
-        const stored = (await fixture.api.resources.items.query({ format: 'plain' })).data
-        assert.equal(stored.length, rollback ? 2 : method === 'post' ? 4 : method === 'delete' ? 0 : 2)
-        if (rollback) assert.deepEqual(stored.map(row => row.name).sort(), ['Original 0', 'Original 1'])
-        if (!rollback && method === 'patch') assert.deepEqual(stored.map(row => row.name).sort(), ['Changed 0', 'Changed 1'])
+        assert.deepEqual(events, [
+          ...batchStages[method].map(name => [name, false]),
+          [rollback ? 'afterRollback' : 'afterCommit', true]
+        ])
+        assert.deepEqual(await storedNames(), rollback ? ['Original 0', 'Original 1'] : changedNames[method])
       })
     }
-  }
-  for (const method of ['post', 'patch', 'delete']) {
-    const stages = writeStages(method, 'none', true)
-    for (const stage of [...stages, `${method}:afterCommit`]) {
-      for (const mode of ['atomic', 'non-atomic', 'managed']) {
-        it(`${method} ${mode} stops the failing child at ${stage}`, async () => {
-          records.push(await fixture.seed('items', { name: 'Original 2' }))
-          enabled = true
-          failureStage = stage
-          const atomic = mode !== 'non-atomic'
-          const committed = stage.endsWith(':afterCommit')
-          const bulkMethod = `bulk${method[0].toUpperCase()}${method.slice(1)}`
-          const invoke = transaction => fixture.api.resources.items[bulkMethod]({ ...bulkInput(method), atomic, returning: 'none', format: 'jsonapi', transaction })
-          const work = mode === 'managed' ? fixture.api.transaction(invoke) : invoke()
-          if (atomic) await assert.rejects(work, error => assertWriteFailure(error, { cause: primary, outcome: committed ? 'committed' : 'rolledBack' }))
-          else {
-            const result = await work
-            assert.equal(result.meta.succeeded, 2)
-            assert.equal(result.meta.failed, 1)
-            assert.equal(result.errors[0].index, 1)
-            assert.equal(result.errors[0].error.code, primary.code)
-            assert.equal(result.errors[0].error.transactionOutcome, committed ? 'committed' : 'rolledBack')
-          }
-          const expected = []
-          const append = (index, list) => {
-            for (const entry of list) {
-              expected.push([index, `${entry}:enter`])
-              if (index !== 1 || entry !== stage) expected.push([index, `${entry}:exit`])
-            }
-          }
-          if (committed) {
-            for (const index of [0, 1, 2]) append(index, [...stages, ...(atomic ? [] : [`${method}:afterCommit`])])
-            if (atomic) for (const index of [0, 1, 2]) append(index, [`${method}:afterCommit`])
-          } else {
-            append(0, [...stages, ...(atomic ? [] : [`${method}:afterCommit`])])
-            append(1, stages.slice(0, stages.indexOf(stage) + 1))
-            append(1, [`${method}:afterRollback`])
-            if (atomic) append(0, [`${method}:afterRollback`])
-            else append(2, [...stages, `${method}:afterCommit`])
-          }
-          assert.deepEqual(events, expected)
-          assert.equal(new Set(snapshots.map(entry => entry.context)).size, atomic && !committed ? 2 : 3)
-          assert.equal(new Set(snapshots.map(entry => entry.transaction)).size, atomic ? 1 : 3)
-          for (const entry of snapshots) assert.equal(entry.completed, /afterCommit|afterRollback/.test(entry.stage))
-          const stored = (await fixture.api.resources.items.query({ format: 'plain' })).data
-          const names = stored.map(row => row.name).sort()
-          const originalNames = ['Original 0', 'Original 1', 'Original 2']
-          const successful = [0, 1, 2].filter(index => committed || index !== 1)
-          const expectedNames = atomic && !committed
-            ? originalNames
-            : method === 'post'
-              ? [...originalNames, ...successful.map(index => `Changed ${10 + index}`)].sort()
-              : method === 'patch'
-                ? originalNames.map((name, index) => successful.includes(index) ? `Changed ${index}` : name).sort()
-                : committed ? [] : ['Original 1']
-          assert.deepEqual(names, expectedNames)
-        })
-      }
+    for (const stage of [...batchStages[method], 'afterCommit']) {
+      it(`${method} stops at a failing ${stage} hook`, async () => {
+        enabled = true
+        failureStage = stage
+        const committed = stage === 'afterCommit'
+        await assert.rejects(
+          fixture.api.resources.items[method](input(method)),
+          error => assertWriteFailure(error, { cause: primary, outcome: committed ? 'committed' : 'rolledBack' })
+        )
+        const reached = committed ? batchStages[method] : batchStages[method].slice(0, batchStages[method].indexOf(stage) + 1)
+        assert.deepEqual(events, [
+          ...reached.map(name => [name, false]),
+          committed ? ['afterCommit', true] : ['afterRollback', true]
+        ])
+        assert.deepEqual(await storedNames(), committed ? changedNames[method] : ['Original 0', 'Original 1'])
+      })
     }
   }
 })

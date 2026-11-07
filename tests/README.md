@@ -19,14 +19,14 @@ prerequisites, including Ruby/Bundler for documentation.
 | `npm run test:quickstart` | Executes the literal quickstart setup, calls and Express server on an allocated port; checks SQLite results and HTTP reads/writes |
 | `npm run test:setup-guide` | Executes the initial setup SQLite example and response-default overrides from the guide |
 | `npm run test:relationship-guides` | Executes belongsTo, hasMany and polymorphic guides in both SQLite modes and the direct-pivot many-to-many guide in ordinary storage; checks includes, filters, membership and pivot metadata |
-| `npm run test:tutorial-guides` | Executes searching, pagination, PUT/PATCH, bulk, relationship-endpoint, transformation, temporal, projection, hook, autofilter, row-policy, plugin and Fastify injection examples in both SQLite storage modes; custom service methods without storage |
+| `npm run test:tutorial-guides` | Executes searching, pagination, PUT/PATCH, many-row write, scoped read and lock, relationship-endpoint, transformation, temporal, projection, hook, autofilter, row-policy, plugin and Fastify injection examples in both SQLite storage modes (the many-row and scoped-read chapters in table storage only); custom service methods without storage |
 | `npm run test:tutorial-guides:databases` | Runs the same executable tutorial assertions on SQLite/PostgreSQL/MySQL and both storage modes using isolated databases; requires the native database setup |
 | `npm run test:server-examples` | Runs the URL override example and quickTest as child servers; checks HTTP responses with ordinary SQLite/Express |
 | `npm run test:file-guide` | Executes the file guide's actual setup with ordinary SQLite and Express 5/4; verifies multipart, served bytes and rejection cleanup in temporary directories |
 | `npm run test:socket-guide` | Executes the Socket.IO guide's actual public server setup on Express 5/4 and checks the documented subscription protocol with a real client |
 | `npm run test:migration-guide` / `npm run test:migration-guide:databases` | Executes selected After snippets with result, relationship and transaction assertions, plus the schema guide's mapped-ID example and generated table migration; SQLite by default or all three native drivers |
 | `npm run test:conformance` | Shared conformance suites in both storage modes |
-| `npm run test:connectors` | Express 5, Express 4, Fastify, multipart, CORS, HTTP validators/conditional client, bulk revision bodies and Socket.IO selections in both modes |
+| `npm run test:connectors` | Express 5, Express 4, Fastify, multipart, CORS, HTTP validators/conditional client, bulk routes and Socket.IO selections in both modes |
 | `npm run test:query-budgets` | Enforced query-count and behavior budgets; elapsed time and heap readings are informational |
 | `npm run test:stress` | Bounded repeated authorized relationship reads and owned/managed commit/rollback workloads in both SQLite storage modes; per-operation SQL ceilings, result/completion checks and observational timing/memory reports; see [stress configuration](../docs/contributing.md#resource-stress-checks) |
 | `npm run test:databases` | Disposable SQLite, PostgreSQL and MySQL integration selections in both modes |
