@@ -6,7 +6,7 @@ import { createIdConformanceApi, seedStorageAdapterRecords } from './fixtures/ap
 import { databaseClient } from './helpers/test-database.js'
 import { RestApiValidationError } from '../lib/rest-api-errors.js'
 import { updateManyToManyRelationship } from '../plugins/core/lib/writing/many-to-many-manipulations.js'
-import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { NOWAIT_MYSQL_CODE, holdManagedTransaction } from './helpers/transaction-completion.js'
 
 // Ordinary pivot tables; canonical link reads have their own bounded-read cases.
 describe('Ordinary pivot membership reads', () => {
@@ -211,7 +211,7 @@ describe('Ordinary pivot membership reads', () => {
           const contender = await fixture.knex.transaction()
           try {
             await assert.rejects(contender(table).where('id', row.id).forUpdate().noWait().first(), {
-              code: databaseClient === 'pg' ? '55P03' : 'ER_LOCK_NOWAIT'
+              code: databaseClient === 'pg' ? '55P03' : NOWAIT_MYSQL_CODE
             })
           } finally { await contender.rollback() }
         }

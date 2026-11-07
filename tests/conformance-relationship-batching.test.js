@@ -6,7 +6,7 @@ import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { assertWriteFailure } from './helpers/test-utils.js'
 import { lockRelationshipTargets } from '../plugins/core/lib/writing/relationship-processor.js'
-import { LOCK_WAIT_CODES, boundLockWait, holdManagedTransaction } from './helpers/transaction-completion.js'
+import { LOCK_WAIT_CODES, NOWAIT_MYSQL_CODE, boundLockWait, holdManagedTransaction } from './helpers/transaction-completion.js'
 
 describe(`Relationship target lock batches (${storageMode.mode})`, () => {
   let fixture
@@ -52,7 +52,7 @@ describe(`Relationship target lock batches (${storageMode.mode})`, () => {
         try {
           await assert.rejects(adapter.buildBaseQuery({ transaction: contender })
             .where(adapter.getIdColumn(), targets.at(-1).id).forUpdate().noWait().first(adapter.getIdColumn()), {
-            code: databaseClient === 'pg' ? '55P03' : 'ER_LOCK_NOWAIT'
+            code: databaseClient === 'pg' ? '55P03' : NOWAIT_MYSQL_CODE
           })
           assert.equal(transaction.isCompleted(), false)
         } finally { await contender.rollback() }

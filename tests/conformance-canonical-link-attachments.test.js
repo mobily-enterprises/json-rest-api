@@ -4,7 +4,7 @@ import { RestApiValidationError } from '../lib/rest-api-errors.js'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi, seedCanonicalLinkRows, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { databaseClient } from './helpers/test-database.js'
-import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { NOWAIT_MYSQL_CODE, holdManagedTransaction } from './helpers/transaction-completion.js'
 
 // Physical canonical-edge behavior is the same in either outer runner mode.
 for (const direction of ['unpaired', 'forward', 'inverse']) {
@@ -78,7 +78,7 @@ for (const direction of ['unpaired', 'forward', 'inverse']) {
           const contender = await fixture.knex.transaction()
           try {
             await assert.rejects(contender('any_links').where('id', before.at(-1).id).forUpdate().noWait().first(), {
-              code: databaseClient === 'pg' ? '55P03' : 'ER_LOCK_NOWAIT'
+              code: databaseClient === 'pg' ? '55P03' : NOWAIT_MYSQL_CODE
             })
           } finally { await contender.rollback() }
         }

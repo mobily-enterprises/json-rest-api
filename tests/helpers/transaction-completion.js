@@ -28,6 +28,8 @@ export async function holdManagedTransaction (api) {
 }
 
 export const LOCK_WAIT_CODES = ['55P03', 'ER_LOCK_WAIT_TIMEOUT']
+// A NOWAIT lock that is held: MySQL reports ER_LOCK_NOWAIT, MariaDB ER_LOCK_WAIT_TIMEOUT.
+export const NOWAIT_MYSQL_CODE = /^ER_LOCK_(NOWAIT|WAIT_TIMEOUT)$/
 
 // Make a blocked statement fail fast. Await the returned restore before releasing the connection.
 export async function boundLockWait (transaction) {
