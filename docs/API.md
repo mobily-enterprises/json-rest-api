@@ -2006,8 +2006,9 @@ const result = await api.resources.articles.query({
 ```
 
 Pagination metadata is under `meta.pagination`. With counts disabled, it includes
-`page` and `pageSize`, without
-promising totals or `hasMore`. The library supplies pagination links appropriate
+`page`, `pageSize` and `hasMore`, without totals: the page reads one extra row
+instead of running a count query, so it is one statement and links to `first`,
+`prev` and `next` but not `last`. The library supplies pagination links appropriate
 to the available count/boundary information.
 
 #### Cursor Pagination

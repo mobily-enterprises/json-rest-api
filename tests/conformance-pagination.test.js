@@ -73,6 +73,9 @@ for (const counts of [true, false]) {
         assert.equal(result.meta.pagination.total, counts ? 7 : undefined)
         assert.equal(result.meta.pagination.pageCount, counts ? Math.ceil(7 / size) : undefined)
         assert.equal(countQueries(), counts ? 1 : 0)
+        // Without counts, one extra row answers hasMore and the next link.
+        assert.equal(result.meta.pagination.hasMore, page.number * size < 7)
+        assert.equal(result.links.next !== undefined, page.number * size < 7)
         assert.deepEqual(fromLink(result.links.self).page, { number: page.number, size })
       })
     }

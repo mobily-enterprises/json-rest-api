@@ -447,12 +447,10 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
         // Calculate pagination metadata with total
         context.returnMeta.paginationMeta = calculatePaginationMeta(total, page, pageSize)
       } else {
-        // Without count, we can still provide basic pagination info
-        context.returnMeta.paginationMeta = {
-          page,
-          pageSize
-          // No total, pageCount, or hasMore when counts are disabled
-        }
+        // Without a count, the page's one extra row answers hasMore.
+        const hasMore = records.length > pageSize
+        if (hasMore) records.pop()
+        context.returnMeta.paginationMeta = { page, pageSize, hasMore }
       }
 
       // Generate links

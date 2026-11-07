@@ -451,22 +451,44 @@ describe('Enhanced Pagination Features', () => {
       const originalSetting = booksScope.vars.enablePaginationCounts
       booksScope.vars.enablePaginationCounts = false
 
-      const result = await api.resources.books.query({
-        queryParams: {
-          page: { number: 1, size: 5 }
-        },
-        format: 'jsonapi'
-      })
+      const statements = []
+      const record = query => statements.push(query.sql)
+      const page = async number => {
+        statements.length = 0
+        knex.on('query', record)
+        try {
+          const result = await api.resources.books.query({ queryParams: { page: { number, size: 5 } }, format: 'jsonapi' })
+          return { result, statements: statements.length }
+        } finally {
+          knex.removeListener('query', record)
+        }
+      }
+      try {
+        const { result, statements: withoutCount } = await page(1)
+        assert(result.meta.pagination)
+        assert.equal(result.meta.pagination.page, 1)
+        assert.equal(result.meta.pagination.pageSize, 5)
+        assert.equal(result.data.length, 5)
+        assert(result.meta.pagination.total === undefined, 'Should not include total when counts disabled')
+        assert(result.meta.pagination.pageCount === undefined, 'Should not include pageCount when counts disabled')
+        // One extra row answers hasMore and the next link, without a count query.
+        assert.equal(result.meta.pagination.hasMore, true)
+        assert.ok(result.links.next)
+        assert.equal(result.links.last, undefined)
 
-      assert(result.meta.pagination)
-      assert.equal(result.meta.pagination.page, 1)
-      assert.equal(result.meta.pagination.pageSize, 5)
-      assert(result.meta.pagination.total === undefined, 'Should not include total when counts disabled')
-      assert(result.meta.pagination.pageCount === undefined, 'Should not include pageCount when counts disabled')
-      assert(result.meta.pagination.hasMore === undefined, 'Should not include hasMore when counts disabled')
+        const last = await page(4)
+        assert.equal(last.result.data.length, 5)
+        assert.equal(last.result.meta.pagination.hasMore, false)
+        assert.equal(last.result.links.next, undefined)
+        assert.ok(last.result.links.prev)
 
-      // Restore the setting
-      booksScope.vars.enablePaginationCounts = originalSetting
+        booksScope.vars.enablePaginationCounts = true
+        const counted = await page(1)
+        assert.equal(counted.result.meta.pagination.hasMore, true)
+        assert.equal(withoutCount, counted.statements - 1, 'counts off saves exactly the count query')
+      } finally {
+        booksScope.vars.enablePaginationCounts = originalSetting
+      }
     })
   })
 

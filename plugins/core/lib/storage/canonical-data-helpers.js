@@ -512,6 +512,11 @@ export function createCanonicalDataHelpers ({
     let rows = await applyDatabaseReadOptions(queryBuilder)
     let cursorRecords = null
     let hasMore = false
+    // Without a count, a numbered page's one extra row answers hasMore.
+    if (paginationInfo.mode === 'offset' && !scope.vars.enablePaginationCounts) {
+      hasMore = rows.length > paginationInfo.pageSize
+      if (hasMore) rows = rows.slice(0, paginationInfo.pageSize)
+    }
 
     if (paginationInfo.mode === 'cursor') {
       const { pageSize } = paginationInfo
@@ -615,7 +620,7 @@ export function createCanonicalDataHelpers ({
         const total = Number(countResult?.count ?? countResult?.total ?? 0)
         paginationMeta = calculatePaginationMeta(total, page, pageSize)
       } else {
-        paginationMeta = { page, pageSize }
+        paginationMeta = { page, pageSize, hasMore }
       }
 
       context.returnMeta.paginationMeta = paginationMeta

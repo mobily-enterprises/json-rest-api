@@ -34,9 +34,12 @@ bulk options are rejected with a message that names their replacement.
   buckets (`day`, `week`, `month`, `year`) with a time zone; date fields with a
   storage serializer can be bucketed and take `min` and `max`. See
   [AGGREGATE](../API.md#aggregate---grouped-totals).
+- **Numbered pages without counts:** with `enablePaginationCounts: false` an
+  offset page reads one extra row and reports `hasMore` and a `next` link,
+  still without a count query.
 
-The last five are described in
-[scoped reads, locks and system work](34-scoped-reads-and-locks.md).
+Scoped reads, row locks, lock versions, shared rows and system contexts are
+described in [scoped reads, locks and system work](34-scoped-reads-and-locks.md).
 
 ## Many-row writes replace the bulk methods
 

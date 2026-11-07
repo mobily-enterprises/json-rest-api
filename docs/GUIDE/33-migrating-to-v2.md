@@ -2031,8 +2031,8 @@ empty cursor rejects before SQL. Follow generated links to retain filters,
 fieldsets and the effective size.
 
 `enablePaginationCounts` controls totals for offset pages. With counts disabled,
-offset metadata contains `page` and `pageSize`; it does not promise totals or
-`hasMore`. Cursor pages use one extra row for `hasMore` and never issue a count
+offset metadata contains `page` and `pageSize` (and, since 3.0, `hasMore`, from
+one extra row); it does not promise totals. Cursor pages use one extra row for `hasMore` and never issue a count
 query, regardless of this setting. Ordinary storage previously issued a count
 on the first cursor page and discarded its result; that extra query and its
 count-filter hook invocation have been removed. Collection predicates still

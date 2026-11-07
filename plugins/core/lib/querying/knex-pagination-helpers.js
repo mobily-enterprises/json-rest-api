@@ -41,7 +41,9 @@ export const applyPaginationToQuery = ({ query, page = {}, vars, pageSizeLimit, 
     ))
   }
 
-  query.limit(pageSize + (mode === 'cursor' ? 1 : 0))
+  // One extra row tells whether another page follows: always for cursors, and
+  // for numbered pages when no count query answers it.
+  query.limit(pageSize + (mode === 'cursor' || (mode === 'offset' && !vars.enablePaginationCounts) ? 1 : 0))
   if (mode === 'offset') query.offset((pageNumber - 1) * pageSize)
   return { mode, page: pageNumber, pageSize, before }
 }
@@ -89,7 +91,7 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
   // Allow empty urlPrefix to generate relative links
   // if (!urlPrefix) return null;
 
-  const { page, pageCount, pageSize } = paginationMeta
+  const { page, pageCount, pageSize, hasMore } = paginationMeta
   const links = {}
 
   const baseUrl = `${urlPrefix}/${scopeName}`
@@ -107,6 +109,11 @@ export const generatePaginationLinks = (urlPrefix, scopeName, queryParams, pagin
     if (page < pageCount) {
       links.next = buildJsonApiLink(baseUrl, queryParams, { number: page + 1, size: pageSize })
     }
+  } else if (hasMore !== undefined) {
+    // Without counts there is no last page, but the extra row tells about the next one.
+    links.first = buildJsonApiLink(baseUrl, queryParams, { number: 1, size: pageSize })
+    if (page > 1) links.prev = buildJsonApiLink(baseUrl, queryParams, { number: page - 1, size: pageSize })
+    if (hasMore) links.next = buildJsonApiLink(baseUrl, queryParams, { number: page + 1, size: pageSize })
   }
 
   return links

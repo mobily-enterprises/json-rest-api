@@ -65,8 +65,10 @@ enabled, metadata is:
 ```
 
 Page 10 returns an empty array. `enablePaginationCounts: false` suppresses the
-count query and count-derived metadata; do not assume every collection response
-contains totals. Every mode respects `queryMaxLimit`.
+count query and count-derived metadata (`total`, `pageCount` and the `last`
+link); do not assume every collection response contains totals. The page then
+reads one extra row, so `hasMore` and the `next` link remain, and a numbered
+page costs one statement. Every mode respects `queryMaxLimit`.
 
 Server code that reads every row, for example an export or a nightly job, can
 raise the cap for one call with `pageSizeLimit`, a parameter beside
