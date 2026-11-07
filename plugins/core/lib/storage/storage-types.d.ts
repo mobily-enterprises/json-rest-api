@@ -122,6 +122,8 @@ export interface StorageSchemaInfo {
   storage?: StorageConfig
   storageInfo?: StorageInfo
   descriptor?: CanonicalDescriptor
+  // A stored integer every library update advances by one.
+  lockVersionField?: string
 }
 
 export interface ResourceConversionSchema extends StorageSchemaInfo {

@@ -20,6 +20,20 @@ import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 
+/**
+ * Every update advances the resource's lock version by one, whatever the input says.
+ * @param {StorageRow} row
+ * @param {{ schemaInfo: { lockVersionField?: string } }} context
+ * @param {import('./storage-types.js').StorageAdapter} storageAdapter
+ * @param {import('./storage-types.js').StorageDatabase} db
+ */
+function advanceLockVersion (row, context, storageAdapter, db) {
+  const field = context.schemaInfo.lockVersionField
+  if (!field) return
+  const column = storageAdapter.translateColumn(field)
+  row[column] = db.raw('?? + 1', [column])
+}
+
 /** @param {OrdinaryDataDependencies} dependencies */
 export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeStorageAdapter: findStorageAdapter }) {
   /** @param {string} scopeName */
@@ -626,6 +640,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     // Updates cannot replace the primary key.
     delete finalAttributes[idProperty]
+    advanceLockVersion(finalAttributes, context, storageAdapter, db)
     if (Object.keys(finalAttributes).length > 0) {
       await db(tableName)
         .where(idProperty, id)
@@ -674,6 +689,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     // Remove the idProperty from attributes to prevent updating the primary key
     delete finalAttributes[idProperty]
+    advanceLockVersion(finalAttributes, context, storageAdapter, db)
 
     // Update only if there are changes
     if (Object.keys(finalAttributes).length > 0) {

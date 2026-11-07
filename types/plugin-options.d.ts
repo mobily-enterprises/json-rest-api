@@ -25,6 +25,8 @@ export interface HttpConnectorOptions {
 export interface ResourceVersionOptions {
   // Compilation validates that this names a stored, untransformed string attribute.
   versionField?: string
+  // A stored, non-nullable integer advanced by one on every update.
+  lockVersionField?: string
 }
 
 export type CorsOrigin = string | RegExp | ((origin: string) => boolean | Promise<boolean>) | CorsOrigin[]

@@ -60,6 +60,8 @@ export interface RuntimeResourceOptions<Context extends object = Record<string, 
   sortableFields?: string[]
   defaultSort?: string[]
   versionField?: string
+  // A stored integer that every library update of a row advances by one.
+  lockVersionField?: string
   rowPolicy?: ResourceRowPolicy<Context>
   autofilter?: ResourceAutoFilter<Context>
   indexes?: Array<{ name?: string; columns: string[]; unique?: boolean }>

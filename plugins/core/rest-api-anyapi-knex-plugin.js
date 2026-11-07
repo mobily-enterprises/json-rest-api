@@ -312,6 +312,9 @@ export const RestApiAnyapiKnexPlugin = {
 
     addHook('resource:added', 'anyapi-register-resource', {}, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context
+      if (scopeOptions.lockVersionField !== undefined) {
+        throw new Error(`lockVersionField in '${scopeName}' needs table storage; AnyAPI resources do not support it`)
+      }
       const scope = api.resources[scopeName]
       const declaration = snapshotResourceConfiguration(scopeOptions)
       declarations.set(scopeName, declaration)

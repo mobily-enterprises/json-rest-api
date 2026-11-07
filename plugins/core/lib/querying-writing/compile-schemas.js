@@ -238,6 +238,19 @@ export async function compileSchemas (scope, deps) {
     }
   }
 
+  // An integer every library update advances by one, for compare-and-set writes.
+  const lockVersionField = scopeOptions.lockVersionField
+  if (lockVersionField !== undefined) {
+    const definition = typeof lockVersionField === 'string' && Object.hasOwn(schemaObject.structure, lockVersionField)
+      ? schemaObject.structure[lockVersionField]
+      : undefined
+    if (!lockVersionField || lockVersionField === idProperty || lockVersionField === versionField || !definition ||
+      !['integer', 'number'].includes(definition.type) || definition.nullable === true ||
+      definition.computed || definition.virtual || definition.belongsTo || definition.getter || definition.setter || definition.storage?.serialize) {
+      throw new Error(`lockVersionField in '${scopeName}' must name a stored, non-nullable integer attribute without getters, setters, serializers or relationships`)
+    }
+  }
+
   // Cache everything
   const schemaInfo = {
 
@@ -253,6 +266,7 @@ export async function compileSchemas (scope, deps) {
     outputFields,
     outputRelationships,
     ...(versionField === undefined ? {} : { versionField }),
+    ...(lockVersionField === undefined ? {} : { lockVersionField }),
     tableName: scopeOptions.tableName || scopeName,
     idProperty,
     storage,

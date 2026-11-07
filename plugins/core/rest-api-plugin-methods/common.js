@@ -212,6 +212,8 @@ export const validateCompleteReplacePayload = ({
   for (const [fieldName, fieldDef] of Object.entries(schemaStructure)) {
     if (!fieldDef) continue
     if (fieldName === idProperty) continue
+    // The library owns the lock version: every update advances it, whatever the input says.
+    if (fieldName === schemaInfo.lockVersionField) continue
     if (Object.hasOwn(belongsToUpdates, fieldName)) continue
     if (fieldDef.computed === true || fieldDef.virtual === true || fieldDef.retired === true) continue
     if (fieldDef.type === undefined) continue
