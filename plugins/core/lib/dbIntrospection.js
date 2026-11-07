@@ -1281,26 +1281,39 @@ export async function listKnexTableIndexes (knex, tableName) {
 }
 
 /**
- * The column lists of a MySQL or MariaDB table's indexes, unique or not, the
- * primary key included, in key order. A list ends before its first functional
- * key part, which names no column.
+ * The schema a MySQL or MariaDB connection is using, from `database()`, a
+ * statement that reads no table.
  * @param {any} knex
- * @param {string} tableName
- * @returns {Promise<string[][]>}
+ * @returns {Promise<string>}
  */
-export async function listKnexMysqlIndexColumns (knex, tableName) {
+export async function currentKnexMysqlSchema (knex) {
+  return normalizeRows(await knex.raw('select database() as name'))[0]?.name
+}
+
+/**
+ * The indexes of a MySQL or MariaDB table that the optimizer may use, unique
+ * or not, the primary key included: each with its columns in key order and
+ * the length of a column prefix (`prefix`, null for the whole column). A
+ * column list ends before its first functional key part, which names no
+ * column. Invisible (MySQL) and ignored (MariaDB) indexes are left out.
+ * @param {any} knex
+ * @param {string} schema
+ * @param {string} tableName
+ * @returns {Promise<Array<{ name: string, columns: Array<{ name: string, prefix: number | null }> }>>}
+ */
+export async function listKnexMysqlIndexes (knex, schema, tableName) {
   const rows = normalizeRows(await knex.raw(`
-    select index_name as indexName, column_name as columnName
-    from information_schema.statistics
-    where table_schema = database() and table_name = ?
-    order by index_name, seq_in_index`, [tableName]))
+    select * from information_schema.statistics
+    where table_schema = ? and table_name = ?
+    order by index_name, seq_in_index`, [schema, tableName]))
   const byIndex = new Map()
-  for (const row of rows) {
-    const name = row.indexName ?? row.INDEX_NAME
-    if (!byIndex.has(name)) byIndex.set(name, [])
-    byIndex.get(name).push(row.columnName ?? row.COLUMN_NAME ?? null)
+  for (const raw of rows) {
+    const row = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key.toLowerCase(), value]))
+    if (row.is_visible === 'NO' || row.ignored === 'YES') continue
+    if (!byIndex.has(row.index_name)) byIndex.set(row.index_name, [])
+    byIndex.get(row.index_name).push(row.column_name == null ? null : { name: row.column_name, prefix: row.sub_part == null ? null : Number(row.sub_part) })
   }
-  return [...byIndex.values()].map(columns => columns.includes(null) ? columns.slice(0, columns.indexOf(null)) : columns)
+  return [...byIndex].map(([name, columns]) => ({ name, columns: columns.includes(null) ? columns.slice(0, columns.indexOf(null)) : columns }))
 }
 
 /**

@@ -6,7 +6,7 @@ import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiRes
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
 import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } from '../querying/query-constraint.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
-import { listKnexMysqlIndexColumns, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
+import { currentKnexMysqlSchema, listKnexMysqlIndexes, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
@@ -496,18 +496,21 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return readRecords({ scopeName, context, query: lockRows(query, context.db), tableName })
   }
 
-  // Tables and leading columns an index was found to start with (see requireLockIndex).
-  const lockIndexes = new Set()
+  // The index lockWhere forces on MySQL, by schema, table and the read's columns (see lockIndexFor).
+  const lockIndexes = new Map()
   /**
    * InnoDB locks every row a locking read examines, and holds those locks until
-   * commit. lockWhere on MySQL therefore needs an index that keeps its read
-   * inside the caller's rows: one that starts with the ownership columns the
-   * read is limited to, or, without ownership conditions, with a column the
-   * filters compare. Otherwise the read could walk the primary key, locking
-   * other owners' rows and the gaps between them.
+   * commit. lockWhere on MySQL therefore forces an index that keeps its read
+   * inside the caller's rows: one whose leading columns are the whole
+   * ownership columns the read is limited to, or, without ownership
+   * conditions, one that starts with a column the filters compare. Otherwise
+   * the read could walk the primary key, locking other owners' rows and the
+   * gaps between them. Invisible and ignored indexes cannot be forced.
+   * Returns the index name.
    * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown> }} request
+   * @returns {Promise<string>}
    */
-  const requireLockIndex = async ({ scopeName, context, storageAdapter, tableName, filters = {} }) => {
+  const lockIndexFor = async ({ scopeName, context, storageAdapter, tableName, filters = {} }) => {
     const owned = Object.entries(context[writeConditions]?.[scopeName] || {})
       .filter(([, value]) => value !== null && value !== ANY_OWNER)
       .map(([field]) => storageAdapter.translateColumn(field))
@@ -517,34 +520,44 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       if (!definition || definition.oneOf || definition.applyFilter || definition.polymorphicField || definition.actualField?.includes('.')) return []
       return [storageAdapter.translateColumn(definition.actualField || key)]
     })
-    const cacheKey = JSON.stringify([tableName, [...owned].sort(), owned.length ? [] : [...compared].sort()])
-    if (lockIndexes.has(cacheKey)) return
-    const indexes = await listKnexMysqlIndexColumns(context.db, tableName)
-    const covered = owned.length
-      ? indexes.some(columns => owned.every(column => columns.slice(0, owned.length).includes(column)))
-      : indexes.some(columns => compared.includes(columns[0]))
-    if (!covered) {
+    // One pool can serve several databases, so the cache is per schema.
+    const schema = await currentKnexMysqlSchema(context.db)
+    const cacheKey = JSON.stringify([schema, tableName, [...owned].sort(), [...compared].sort()])
+    if (lockIndexes.has(cacheKey)) return lockIndexes.get(cacheKey)
+    const indexes = await listKnexMysqlIndexes(context.db, schema, tableName)
+    const leading = owned.length
+      ? indexes.filter(({ columns }) => columns.length >= owned.length &&
+        columns.slice(0, owned.length).every(column => owned.includes(column.name) && column.prefix === null))
+      : indexes.filter(({ columns }) => compared.includes(columns[0]?.name))
+    // Among those, one whose next column the filters compare locks fewer rows.
+    const index = leading.find(({ columns }) => compared.includes(columns[owned.length]?.name)) ?? leading[0]
+    if (!index) {
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,
         operation: 'lockWhere',
-        reason: `on MySQL and MariaDB a locking read locks every row it examines; add an index of '${tableName}' that starts with ${owned.length ? `the ownership column(s) ${owned.join(', ')}` : 'a column the filters compare'}`
+        reason: `on MySQL and MariaDB a locking read locks every row it examines; add a visible index of '${tableName}' that starts with ${owned.length ? `the whole ownership column(s) ${owned.join(', ')}` : 'a column the filters compare'}`
       })
     }
-    lockIndexes.add(cacheKey)
+    lockIndexes.set(cacheKey, index.name)
+    return index.name
   }
 
   /**
    * Lock up to `limit` visible rows the filters select, waiting for
    * transactions that hold them, in one locking read like dataLockByIds: in id
-   * order, except on MySQL (see requireLockIndex), where the rows come in the
-   * order of the index the read uses, as ORDER BY id could walk the primary key.
+   * order, except on MySQL, where the read is forced onto the index that
+   * lockIndexFor picks and the rows come in its order, as ORDER BY id could
+   * walk the primary key.
    * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number }} request
    */
   const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit }) => {
     const read = async () => {
       const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
-      if (databaseFamily(context.db) === 'mysql') await requireLockIndex({ scopeName, context, storageAdapter, tableName, filters })
-      else query.orderBy(idColumn)
+      if (databaseFamily(context.db) === 'mysql') {
+        // Without FORCE INDEX the optimizer could still pick another index or a full scan.
+        const index = await lockIndexFor({ scopeName, context, storageAdapter, tableName, filters })
+        query.from(context.db.raw('?? force index (??)', [tableName, index]))
+      } else query.orderBy(idColumn)
       return readRecords({ scopeName, context, query: lockRows(query.limit(limit), context.db), tableName })
     }
     let document = await read()

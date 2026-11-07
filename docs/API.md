@@ -1361,9 +1361,10 @@ MySQL and MariaDB it locks every listed id, hidden ones too, until commit, so
 pass ids from a scoped read, never a raw request list. `lockWhere` locks the
 visible rows the filters select in id order, waiting for other transactions and
 including rows that start to match meanwhile; more than 1,000 throw
-`RestApiRowLimitError`. On MySQL and MariaDB it has no `ORDER BY` and needs an
-index that starts with the ownership columns (or, without ownership conditions,
-a filtered column), and throws `RestApiBulkWriteUnsupportedError` otherwise.
+`RestApiRowLimitError`. On MySQL and MariaDB it has no `ORDER BY` and forces an
+index that starts with the whole ownership columns (or, without ownership
+conditions, a filtered column), and throws `RestApiBulkWriteUnsupportedError`
+when the table has none.
 `claim` takes up to `limit` (default 1, at most 1,000) matching rows that no
 other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
 `['id']`). A row policy that joins tables is refused for all three. On SQLite,

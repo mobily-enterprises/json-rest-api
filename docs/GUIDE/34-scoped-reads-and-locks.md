@@ -288,8 +288,8 @@ statement, and start the snapshot: subqueries of a row policy (InnoDB reads a
 locking read's subqueries without locks, from the snapshot), the scope
 subquery of a selection write's locking read on MySQL (`patchWhere`,
 `deleteWhere`), a `checkPermissions` or `knexQueryFiltering` hook that queries
-the database, and the first `lockWhere` on a MySQL table, which reads its
-indexes (below). Where the snapshot matters, keep those reads out of the lock's
+the database, and the first `lockWhere` for a MySQL table and set of filtered
+columns, which reads the table's indexes (below). Where the snapshot matters, keep those reads out of the lock's
 path, or make them before the transaction. For the same reason the query must
 stay a plain `SELECT` on the resource's table: a row policy or
 `knexQueryFiltering` hook that adds joins, a common table expression or a set
@@ -329,15 +329,28 @@ derived table that cannot lock.
 
 On MySQL and MariaDB, InnoDB locks every row a locking read examines, and every
 gap between them, until commit. Ordering by id could make it walk the primary
-key across every owner's rows, so there `lockWhere` has no `ORDER BY`: rows
-come in the order of the index the read uses. It needs an index that keeps the
-read inside the caller's rows: one whose leading columns are the ownership
-(autofilter) columns the read is limited to, or, when no ownership condition
-applies (a resource without ownership fields, or a system context), one that
-starts with a column the filters compare. Without such an index it throws
-`RestApiBulkWriteUnsupportedError` before locking anything. It reads the
-table's indexes in the transaction the first time and remembers a table that
-passes. The optimizer still picks the index; keep the filters selective.
+key across every owner's rows, so there `lockWhere` has no `ORDER BY` and
+forces (`FORCE INDEX`) an index that keeps the read inside the caller's rows;
+rows come in that index's order. The index's leading columns must be the whole
+ownership (autofilter) columns the read is limited to (a prefix index on them
+does not count), or, when no ownership condition applies, it must start with a
+column the filters compare. Among those, an index whose next column the filters
+compare is preferred. Invisible (MySQL) and ignored (MariaDB) indexes cannot be
+forced and do not count. Without such an index `lockWhere` throws
+`RestApiBulkWriteUnsupportedError` before locking anything. Each call reads the
+connection's schema with `SELECT DATABASE()`, which reads no table, so one pool
+can serve several databases. The first call for a schema, table and set of
+columns also reads the table's indexes, in the transaction, and the index it
+picks is remembered while the process runs: restart after changing the
+indexes of a table that `lockWhere` uses.
+
+No ownership condition applies to a resource without ownership fields, to a
+system context, or to a resource that has only a row policy, which is not an
+ownership condition. There the forced index starts with a filtered column, so
+the read examines and locks every row the filters match, the rows of other
+policy owners included, although it returns only the rows the policy shows.
+Give such a resource ownership fields, or lock its rows with `lockByIds` on ids
+from a scoped read.
 
 `claim({ filters, sort, limit, transaction, format, queryParams: { fields } })`
 takes up to `limit` matching rows (default 1, at most 1,000) that no other
@@ -350,7 +363,7 @@ database would lock the joined rows too.
 | Database | `lockByIds` | `lockWhere` | `claim` |
 | --- | --- | --- | --- |
 | PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE SKIP LOCKED` |
-| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the listed ids, hidden ones included (above) | `FOR UPDATE` without `ORDER BY`, through an index on the ownership or a filtered column | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
+| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the listed ids, hidden ones included (above) | `FOR UPDATE` without `ORDER BY`, forced onto an index that starts with the ownership or a filtered column | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
 | SQLite | the write lock, then a scoped read | the write lock, then a scoped read | the write lock, then a scoped read |
 
 On MySQL and MariaDB the candidate read of `claim` is a plain read, the only way

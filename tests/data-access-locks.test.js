@@ -234,20 +234,66 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     assert.deepEqual(chunks.slice(0, 2), [[1, 1000, 1000], [1001, 1003, 3]])
   })
 
-  it('lockWhere on MySQL needs an index that starts with the ownership or a filtered column', async () => {
+  it('lockWhere on MySQL forces an index that starts with the whole ownership or a filtered column', async () => {
     await seedJobs()
     const mysql = databaseClient === 'mysql2'
     const refused = error => isA(RestApiBulkWriteUnsupportedError)(error) && /index/.test(cause(error).message + JSON.stringify(cause(error).details))
+    const jobs = () => fixture.api.transaction(transaction => fixture.api.resources.da_jobs.lockWhere({ filters: { state: 'queued' }, transaction }, workspaceA()))
+    const lockSql = []
+    const record = query => { if (/for update/i.test(query.sql)) lockSql.push(query.sql) }
+    if (!mysql) {
+      assert.deepEqual((await jobs()).data.map(item => String(item.id)).sort(), ['1', '2', '3', '5'])
+      await fixture.api.transaction(async transaction => {
+        assert.equal((await fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, createSystemContext('lock every open entry'))).data.length, 9)
+      })
+      return
+    }
+    // da_jobs has no index that starts with workspace_id; without ownership
+    // conditions the filters must use an index, and status has none.
+    await assert.rejects(jobs(), refused)
     await fixture.api.transaction(async transaction => {
-      // da_jobs has no index that starts with workspace_id.
-      const jobs = fixture.api.resources.da_jobs.lockWhere({ filters: { state: 'queued' }, transaction }, workspaceA())
-      if (mysql) await assert.rejects(jobs, refused)
-      else assert.deepEqual((await jobs).data.map(record => String(record.id)).sort(), ['1', '2', '3', '5'])
-      // Without ownership conditions the filters must use an index: status has none.
-      const system = fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, createSystemContext('lock every open entry'))
-      if (mysql) await assert.rejects(system, refused)
-      else assert.equal((await system).data.length, 9)
+      await assert.rejects(fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, createSystemContext('lock every open entry')), refused)
     })
+    const [[{ version }]] = await fixture.knex.raw('select version() as version')
+    const hidden = /mariadb/i.test(version) ? ['ignored', 'not ignored'] : ['invisible', 'visible']
+    // A prefix of the owner column, or an index the optimizer may not use, does not count.
+    await fixture.knex.raw('create index da_jobs_ws_prefix on da_jobs (workspace_id(2))')
+    await assert.rejects(jobs(), refused)
+    await fixture.knex.raw('drop index da_jobs_ws_prefix on da_jobs')
+    await fixture.knex.raw('create index da_jobs_ws on da_jobs (workspace_id)')
+    await fixture.knex.raw(`alter table da_jobs alter index da_jobs_ws ${hidden[0]}`)
+    await assert.rejects(jobs(), refused)
+    await fixture.knex.raw(`alter table da_jobs alter index da_jobs_ws ${hidden[1]}`)
+    fixture.knex.on('query', record)
+    try {
+      assert.deepEqual((await jobs()).data.map(item => String(item.id)).sort(), ['1', '2', '3', '5'])
+      await fixture.api.transaction(transaction => fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()))
+    } finally { fixture.knex.removeListener('query', record) }
+    const [{ name: entriesIndex }] = await fixture.knex('information_schema.statistics')
+      .where({ table_schema: fixture.knex.raw('database()'), table_name: 'da_entries', column_name: 'workspace_id', seq_in_index: 1 })
+      .select({ name: 'index_name' })
+    assert.match(lockSql[0], /from `da_jobs` force index \(`da_jobs_ws`\)/)
+    assert.ok(lockSql[1].includes(`from \`da_entries\` force index (\`${entriesIndex}\`)`), lockSql[1])
+  })
+
+  it('lockWhere on MySQL checks the index of the schema the connection uses', { skip: databaseClient !== 'mysql2' && 'MySQL and MariaDB only' }, async () => {
+    await seedLedger(fixture)
+    const refused = error => isA(RestApiBulkWriteUnsupportedError)(error) && /index/.test(cause(error).message + JSON.stringify(cause(error).details))
+    const [[{ name: current }]] = await fixture.knex.raw('select database() as name')
+    const other = `${current}_other`
+    await fixture.knex.raw('create database ??', [other])
+    try {
+      // The other schema's da_entries has no index that starts with workspace_id.
+      await fixture.knex.raw('create table ??.da_entries (id int primary key)', [other])
+      const entries = fixture.api.resources.da_entries
+      await fixture.api.transaction(async transaction => {
+        await entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA())
+        await transaction.raw('use ??', [other])
+        try {
+          await assert.rejects(entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()), refused)
+        } finally { await transaction.raw('use ??', [current]) }
+      })
+    } finally { await fixture.knex.raw('drop database ??', [other]) }
   })
 
   it('lockWhere locks a row that starts to match while it waits', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {

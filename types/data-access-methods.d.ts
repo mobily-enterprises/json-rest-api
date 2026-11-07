@@ -120,7 +120,7 @@ export interface DataAccessMethods<
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>
   // Locks the visible rows the filters select (FOR UPDATE; id order, on MySQL the
-  // order of an index that must start with the ownership or a filtered column),
+  // order of the forced index, which starts with the ownership or a filtered column),
   // waiting for other transactions; throws RestApiRowLimitError past 1000 rows.
   lockWhere<Format extends ResourceFormat = DefaultFormat>(params: {
     transaction: ManagedTransaction | Knex.Transaction
