@@ -251,6 +251,24 @@ describe(`Inverse resource revisions (${storageMode.mode})`, () => {
     await fixture.api.resources.items.post({ document: { data: { type: 'items', id: child.id, attributes: { name: 'Recreated' } } } })
     assert.deepEqual(await members(), [])
   })
+
+  // Registers a hook, so it runs last.
+  it('answers a plain not found for a member whose row vanished before its delete', { skip: storageMode.isAnyApi() && 'table storage only' }, async () => {
+    const child = await fixture.seed('items', { name: 'Child' })
+    await fixture.api.customize({
+      hooks: {
+        beforeDataCallDelete: {
+          functionName: 'inverse-revisions-vanish',
+          handler: async ({ context }) => { if (context.vanish) await context.transaction('conformance_items').where('id', context.id).delete() }
+        }
+      }
+    })
+    await assert.rejects(fixture.api.resources.items.delete({ id: child.id }, { vanish: true }), error => {
+      const cause = error.cause ?? error
+      return cause.subtype === 'not_found' && cause.message === 'Resource not found'
+    })
+    assert.equal(await fixture.count('items'), 1, 'the vanished row came back with the rollback')
+  })
 })
 
 describe(`Polymorphic inverse revisions (${storageMode.mode})`, () => {

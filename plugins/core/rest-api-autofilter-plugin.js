@@ -396,11 +396,13 @@ export const AutoFilterPlugin = {
         })
 
         const columnRef = adapterUtils.translateColumn(scopeName, filter.field, tableName)
+        // Every scoped read records the owner a later write of its rows must
+        // still match, so a single write that reads first carries it too.
         if (resolvedValue === undefined) {
           // An optional owner that did not resolve: reads are not narrowed, but
           // shared rows stay out of writes and locks.
-          if (filter.shared && writes) {
-            query.whereNotNull(columnRef)
+          if (filter.shared) {
+            if (writes) query.whereNotNull(columnRef)
             recordWriteCondition(context, scopeName, filter.field, ANY_OWNER)
           }
           continue
@@ -412,16 +414,15 @@ export const AutoFilterPlugin = {
           if (translatedValue === null) {
             if (writes) query.whereRaw('1 = 0')
             else query.whereNull(columnRef)
-          } else if (writes) {
-            query.where(columnRef, translatedValue)
-            recordWriteCondition(context, scopeName, filter.field, translatedValue)
           } else {
-            query.where(builder => builder.where(columnRef, translatedValue).orWhereNull(columnRef))
+            if (writes) query.where(columnRef, translatedValue)
+            else query.where(builder => builder.where(columnRef, translatedValue).orWhereNull(columnRef))
+            recordWriteCondition(context, scopeName, filter.field, translatedValue)
           }
         } else {
           if (translatedValue === null) query.whereNull(columnRef)
           else query.where(columnRef, translatedValue)
-          if (writes) recordWriteCondition(context, scopeName, filter.field, translatedValue)
+          recordWriteCondition(context, scopeName, filter.field, translatedValue)
         }
       }
     })

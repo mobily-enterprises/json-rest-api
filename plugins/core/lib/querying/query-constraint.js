@@ -26,10 +26,11 @@ export function applyQueryConstraint ({ query, context, scopeName, storageAdapte
   }
 }
 
-// Ownership values a scope filter applied to a write, lock or claim read, by
-// resource and field. The by-id UPDATE, DELETE and lock statements repeat them
-// as plain column predicates, so a row that moved to another owner after the
-// read is neither written nor locked.
+// Ownership values a scope filter applied to a read, by resource and field: the
+// owner a write of the rows read must still match. The by-id UPDATE, DELETE and
+// lock statements, single or many-row, repeat them as plain column predicates,
+// so a row that moved to another owner after the read is neither written nor
+// locked.
 export const writeConditions = Symbol('writeConditions')
 // A condition value meaning "any owner but not the shared (NULL) rows".
 export const ANY_OWNER = Symbol('anyOwner')

@@ -174,9 +174,11 @@ SQLite. MySQL and MariaDB keep the visibility read for ids from the caller:
 InnoDB would lock every listed row before checking the scope, rows the caller
 cannot see included, and hold those locks until commit. After that read, a
 statement of one row there runs the UPDATE with its ownership conditions and
-`onlyIf`, and its row count is the answer; a longer one, or a count of zero
-(MySQL counts changed rather than matched rows when the connection disables
-`FOUND_ROWS`), locks the rows that still match and then updates exactly those.
+`onlyIf`, and its row count is the answer. A longer statement locks the rows
+that still match and then updates exactly those, and so does a one-row
+statement on a connection that disables the drivers' default `FOUND_ROWS`
+flag, where MySQL counts the rows an UPDATE changed rather than those it
+matched.
 
 `patchWhere` and `deleteWhere` are set operations. They read the ids of the
 rows their selection finds, then write those rows with the caller's scope and
@@ -192,11 +194,22 @@ The UPDATE, DELETE and lock statements repeat the caller's ownership
 transaction moves to a different owner between the visibility read and the
 write is therefore neither written nor locked, and counts as missing:
 `missing: 'throw'` rolls the batch back, `'skip'` leaves the row out of the
-result, and with `onlyIf` it is reported unchanged. Row policies are checked by
-the visibility read only, as for a single `patch`: a row that leaves the policy
-between the read and the write is still written. Without a visibility read
-(`missing: 'skip'`, above) the policy is checked by the write's subquery,
-which reads as of the statement's start.
+result, and with `onlyIf` it is reported unchanged. Single `patch`, `put` and
+`delete` on table storage do the same with their one scoped read: the UPDATE
+or DELETE carries the owner that read found, and a row that has gone or moved
+to another owner since answers `not_found`.
+
+Row policies are checked by the visibility read only, for single and
+many-row writes alike: a row that another transaction moves out of the policy
+(for example into a group the caller cannot see) between the read and the
+write is still written. The ownership conditions close that window for the
+owner. The policy would need a subquery on the written table, which MySQL
+refuses in an UPDATE or DELETE, so no database checks it there. To keep a
+policy-relevant change from slipping between the read and the write, lock the
+row in the writing transaction first (`lockByIds`), or give a many-row write
+an `onlyIf` on the policy's fields. Without a
+visibility read (`missing: 'skip'`, above) the policy is checked by the
+write's subquery, which reads as of the statement's start.
 
 `patchWhere` and `deleteWhere` need non-empty `filters`. To change or delete
 every row the caller can see, pass `all: true` instead (not both); in a
@@ -281,6 +294,13 @@ new key at the same time can fail with a unique-key error (PostgreSQL 23505)
 or a deadlock (MySQL 1213); retry the batch. InnoDB keeps the locks of every
 row a locking read examined until the transaction ends, so keep upserting
 transactions short.
+
+A single `put` creates a record at the id the caller chose, and is the one
+write that tells an id taken by another owner apart from a free one: it
+answers `not_found` for the first and creates the second. Where ids must not
+leak between owners, let the server choose them: create with `post` or
+`postMany` (or upsert on keys that include the owner) and keep `put` for
+records the caller already has.
 
 `merge` on every database, and `ignore` on MySQL and MariaDB, find the rows
 that match the conflict keys with a locking read of the bare table, before the

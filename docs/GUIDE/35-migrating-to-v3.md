@@ -50,6 +50,11 @@ bulk options are rejected with a message that names their replacement.
   three times. The unscoped read that checked the row still existed is gone;
   the write's own row count answers a row that vanished in between
   (`not_found`, as before).
+- **Single writes keep to their owner:** on table storage, the UPDATE or
+  DELETE of a single `patch`, `put` or `delete` carries the ownership
+  (autofilter) conditions its scoped read found, as many-row writes already
+  did. A row that another writer moved to a different owner after the read
+  answers `not_found` instead of being written.
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.

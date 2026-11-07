@@ -26,6 +26,24 @@ export function databaseFamily (db) {
   return 'mysql'
 }
 
+// The mysql and mysql2 drivers' client flag that makes an UPDATE count the rows it matched.
+const FOUND_ROWS = 0x2
+
+/**
+ * Whether an UPDATE's count is the rows it matched. PostgreSQL and SQLite
+ * always count those; MySQL and MariaDB do so only on a connection with the
+ * FOUND_ROWS client flag, the drivers' default, and count the rows it changed
+ * otherwise. A connection this cannot see counts as not.
+ * @param {any} db
+ */
+export async function countsMatchedRows (db) {
+  if (databaseFamily(db) !== 'mysql') return true
+  if (!db.isTransaction) return false
+  // A transaction's client hands back its own connection.
+  const connection = await db.client.acquireConnection()
+  return ((connection?.config?.clientFlags ?? 0) & FOUND_ROWS) !== 0
+}
+
 /** @param {{ dbInfo?: { version?: string } } | undefined} capabilities */
 function supportsMariaDbReturning (capabilities) {
   const version = String(capabilities?.dbInfo?.version || '').toLowerCase()
@@ -377,15 +395,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         if (writes) await db(tableName).whereIn(idColumn, ids).update(set)
         changed.push(...part.map(update => update.id))
       } else if (family === 'mysql' || !writes) {
-        // MySQL cannot return updated rows. One row's UPDATE answers from its count;
-        // its scope subquery would name the updated table, which MySQL refuses.
-        if (writes && !scoped && part.length === 1 && await matching(ids).update(set)) {
-          changed.push(part[0].id)
+        // MySQL cannot return updated rows. One row's UPDATE answers from its
+        // count when that counts matched rows; with a scope subquery it would
+        // name the updated table, which MySQL refuses.
+        if (writes && !scoped && part.length === 1 && await countsMatchedRows(db)) {
+          if (await matching(ids).update(set)) changed.push(part[0].id)
           continue
         }
-        // Otherwise lock the rows that match, then update exactly those. This also
-        // settles a zero count: MySQL reports changed rather than matched rows
-        // when FOUND_ROWS is disabled.
+        // Otherwise lock the rows that match, then update exactly those.
         const matched = await applyDatabaseReadOptions(lockRows(matching(ids), db).select({ id: databaseIdentityExpression(db, idColumn) }))
         if (matched.length && writes) await db(tableName).whereIn(idColumn, matched.map(row => row.id)).update(set)
         changed.push(...matched.map(row => row.id))
