@@ -2,10 +2,11 @@
 // multi-row inserts, by-id CASE updates, by-id deletes and row locks. Every write
 // runs one statement per chunk; none of them runs through the filter hooks, so
 // MySQL never sees an UPDATE or DELETE whose subquery reads its own table.
-import { RestApiBulkInsertIdsError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
 import { applyWriteConditions, hasWriteConditions } from '../querying/query-constraint.js'
-import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
+import { listKnexUniqueKeyColumns } from '../dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
@@ -64,12 +65,37 @@ export function isRawValue (value) {
   return Boolean(raw && typeof raw === 'object' && raw.isRawInstance === true && typeof raw.toSQL === 'function')
 }
 
-// Conflict keys compare by exact value; drivers return numbers for integer keys.
-const keyOf = (row, columns) => JSON.stringify(columns.map(column => {
-  const value = row[column]
-  if (value === null || value === undefined) return null
-  return typeof value === 'bigint' || typeof value === 'number' ? String(value) : value instanceof Date ? value.toISOString() : String(value)
-}))
+/**
+ * Conflict keys compare exactly, in their public form: drivers return booleans
+ * as 1 and 0, numbers as strings and dates in their own shapes, so each value
+ * goes through its field's read normalization first. Strings compare as they
+ * are, without the column's collation. A field with a storage serializer
+ * compares its stored form.
+ * @param {Record<string, any>} schemaStructure
+ * @param {string[]} keys
+ * @param {string[]} keyColumns
+ */
+function conflictKeyMatcher (schemaStructure, keys, keyColumns) {
+  const definitions = keys.map(field => schemaStructure[field] || {})
+  const canonical = (value, index) => {
+    if (value === null || value === undefined) return null
+    const definition = definitions[index]
+    const normal = definition.storage?.serialize ? value : normalizeStoredFieldValue(value, definition, { fieldName: keys[index] })
+    if (normal === null || normal === undefined) return null
+    if (normal instanceof Date) return normal.toISOString()
+    if (['number', 'integer'].includes(definition.type) && typeof normal === 'string') {
+      return /^-?\d+$/.test(normal) ? String(BigInt(normal)) : String(Number(normal))
+    }
+    return String(normal)
+  }
+  return {
+    /** A row's key from its public attributes, or its storage row for serialized fields. */
+    input: (attributes, storageRow) => JSON.stringify(keys.map((field, index) =>
+      canonical(definitions[index].storage?.serialize ? storageRow[keyColumns[index]] : attributes[field], index))),
+    /** A key read from the table. */
+    stored: row => JSON.stringify(keyColumns.map((column, index) => canonical(row[column], index)))
+  }
+}
 
 /**
  * @param {object} dependencies
@@ -83,6 +109,28 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const adapter = getScopeStorageAdapter(scopeName)
     if (!adapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
     return adapter
+  }
+
+  // Tables and key columns a unique index was found to cover. A missing index is
+  // looked for again on the next call, so adding one needs no restart.
+  const coveredKeys = new Set()
+  /**
+   * Refuses conflict keys that no unique index covers. Without one, the keys
+   * could match several rows, and a locking read on them would examine (and on
+   * MySQL lock) every row of the table.
+   */
+  const requireUniqueKeys = async ({ scopeName, db, tableName, keyColumns }) => {
+    const cacheKey = JSON.stringify([tableName, [...keyColumns].sort()])
+    if (coveredKeys.has(cacheKey)) return
+    const uniqueKeys = await listKnexUniqueKeyColumns(db, tableName)
+    if (!uniqueKeys.some(columns => columns.every(column => keyColumns.includes(column)))) {
+      throw new RestApiBulkWriteUnsupportedError({
+        resourceType: scopeName,
+        operation: 'postMany',
+        reason: `no unique index of '${tableName}' covers the onConflict keys (${keyColumns.join(', ')}); add one, so that the keys identify one row`
+      })
+    }
+    coveredKeys.add(cacheKey)
   }
 
   /**
@@ -144,15 +192,28 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
     const keyColumns = keys.map(field => storageAdapter.translateColumn(field))
+    await requireUniqueKeys({ scopeName, db, tableName, keyColumns })
     const storageRows = rows.map(attributes => storageAdapter.toStorageRow(attributes, { context, operation: 'post' }))
+    const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, keys, keyColumns)
+    const inputKeys = rows.map((attributes, index) => matcher.input(attributes, storageRows[index]))
+    const wanted = new Set(inputKeys)
     const found = new Map()
     for (const part of chunk(storageRows, rowsPerStatement(db, chunkSize, keyColumns.length))) {
       const query = db(tableName)
         .whereIn(keyColumns, part.map(row => keyColumns.map(column => row[column] ?? null)))
         .select({ id: databaseIdentityExpression(db, storageAdapter.getIdColumn()) }, ...keyColumns)
-      for (const row of await applyDatabaseReadOptions(lockRows(query, db))) found.set(keyOf(row, keyColumns), row.id)
+      for (const row of await applyDatabaseReadOptions(lockRows(query, db))) {
+        const key = matcher.stored(row)
+        // The database matched by its own comparison (a collation, say); merging or skipping would guess.
+        if (!wanted.has(key)) {
+          throw new RestApiResourceError(`A stored ${scopeName} record matches the onConflict keys (${keys.join(', ')}) only as the database compares them, for example ignoring letter case; upsert keys must match exactly`, {
+            subtype: 'conflict', resourceType: scopeName
+          })
+        }
+        found.set(key, row.id)
+      }
     }
-    return storageRows.map(row => found.get(keyOf(row, keyColumns)))
+    return inputKeys.map(key => found.get(key))
   }
 
   /**
@@ -234,8 +295,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         let returned = await applyDatabaseReadOptions(applyInsertReturning(query, returnColumns))
         if (onConflict) {
           // Ignored rows return nothing, so returned rows are matched to inputs by their keys.
-          const byKey = new Map(returned.map(row => [keyOf(Object.fromEntries(keyColumns.map(column => [column, row[`__jra_key_${column}`]])), keyColumns), row[idColumn]]))
-          part.forEach((index, position) => { ids[index] = byKey.get(keyOf(values[position], keyColumns)) })
+          const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, onConflict.keys, keyColumns)
+          const byKey = new Map(returned.map(row => [matcher.stored(Object.fromEntries(keyColumns.map(column => [column, row[`__jra_key_${column}`]]))), row[idColumn]]))
+          part.forEach((index, position) => { ids[index] = byKey.get(matcher.input(rows[index], values[position])) })
           continue
         }
         if (family === 'sqlite' && values.some(row => row[idColumn] === undefined || row[idColumn] === null)) {

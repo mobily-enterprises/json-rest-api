@@ -1265,6 +1265,55 @@ export async function listKnexTableIndexes (knex, tableName) {
   return new Map(rows.map(row => [row.name, { valid: row.valid !== false, building: row.building === true }]))
 }
 
+/**
+ * The column lists of a table's unique indexes and constraints, primary key
+ * included, that guarantee uniqueness for every row: partial, expression and
+ * invalid indexes are left out.
+ * @param {any} knex
+ * @param {string} tableName
+ * @returns {Promise<string[][]>}
+ */
+export async function listKnexUniqueKeyColumns (knex, tableName) {
+  const dialect = detectDialect(knex)
+  if (dialect === 'sqlite') {
+    const keys = []
+    for (const index of normalizeRows(await knex.raw('PRAGMA index_list(??)', [tableName]))) {
+      if (Number(index.unique) !== 1 || Number(index.partial) === 1) continue
+      const columns = normalizeRows(await knex.raw('PRAGMA index_info(??)', [index.name]))
+      if (columns.length && columns.every(column => column.name)) keys.push(columns.sort((a, b) => a.seqno - b.seqno).map(column => column.name))
+    }
+    // An INTEGER PRIMARY KEY is the rowid and has no index entry.
+    const primary = normalizeRows(await knex.raw('PRAGMA table_info(??)', [tableName])).filter(column => Number(column.pk) > 0)
+    if (primary.length) keys.push(primary.sort((a, b) => a.pk - b.pk).map(column => column.name))
+    return keys
+  }
+  const rows = dialect === 'mysql2'
+    ? normalizeRows(await knex.raw(`
+      select index_name as indexName, column_name as columnName, seq_in_index as position
+      from information_schema.statistics
+      where table_schema = database() and table_name = ? and non_unique = 0
+      order by index_name, seq_in_index`, [tableName]))
+    : normalizeRows(await knex.raw(`
+      select c.relname as "indexName", a.attname as "columnName", k.position
+      from pg_index i
+      join pg_class t on t.oid = i.indrelid
+      join pg_namespace n on n.oid = t.relnamespace
+      join pg_class c on c.oid = i.indexrelid
+      cross join lateral unnest(i.indkey) with ordinality as k(num, position)
+      left join pg_attribute a on a.attrelid = t.oid and a.attnum = k.num
+      where t.relname = ? and n.nspname = current_schema() and i.indisunique and i.indisvalid
+        and i.indpred is null and i.indexprs is null and k.position <= i.indnkeyatts
+      order by c.relname, k.position`, [tableName]))
+  const byIndex = new Map()
+  for (const row of rows) {
+    const name = row.indexName ?? row.INDEX_NAME
+    if (!byIndex.has(name)) byIndex.set(name, [])
+    byIndex.get(name).push(row.columnName ?? row.COLUMN_NAME ?? null)
+  }
+  // A functional index (MySQL) has no column name.
+  return [...byIndex.values()].filter(columns => columns.every(Boolean))
+}
+
 // Column-only ALTER must not impose the resource snapshot's ID or index restrictions.
 export async function introspectKnexColumnConstraints (knex, tableName) {
   requireKnexRaw(knex)

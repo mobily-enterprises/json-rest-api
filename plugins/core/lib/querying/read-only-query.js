@@ -19,8 +19,12 @@ const isQueryBuilder = value => value !== null && typeof value === 'object' &&
   typeof /** @type {{ toSQL?: unknown }} */ (value).toSQL === 'function' &&
   typeof /** @type {{ where?: unknown }} */ (value).where === 'function'
 
-// Knex's own methods reach the client through `this`; code outside them may not.
+// Knex's own methods reach the client and replace the statement lists through
+// `this`; code outside them may not. One counter serves every builder because a
+// method of one builder can compile another (a subquery) through its client.
 let insideBuilderMethod = 0
+// The compiled query's state, which only Knex's own methods may replace.
+const BUILDER_STATE = new Set(['client', '_single', '_statements'])
 
 /**
  * A SELECT-only view of a Knex query builder. Reads, joins, subqueries and
@@ -61,7 +65,7 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
     },
     set (target, property, value) {
       if (property === '_method' && !READ_METHODS.has(value)) refuse(String(value))
-      if (property === 'client') refuse('client')
+      if (property === 'client' || (BUILDER_STATE.has(String(property)) && !insideBuilderMethod)) refuse(`set ${String(property)}`)
       return Reflect.set(target, property, value)
     },
     defineProperty (_target, property) { return refuse(`defineProperty ${String(property)}`) },

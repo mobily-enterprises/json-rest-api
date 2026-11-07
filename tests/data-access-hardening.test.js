@@ -22,7 +22,7 @@ const forbidden = error => isA(RestApiResourceError)(error) && cause(error).subt
 const tableOnly = storageMode.isAnyApi() && 'needs table storage'
 // A caller whose workspace does not resolve: optional owner filters stay open.
 const anonymous = () => ({ visibility: { groups: ['g1'] } })
-const EXTRA_TABLES = ['da_tag_items', 'da_tags', 'da_notes', 'da_assets', 'da_merge_hooked', 'da_ranked', 'da_docs', 'da_flags']
+const EXTRA_TABLES = ['da_tag_items', 'da_tags', 'da_notes', 'da_assets', 'da_merge_hooked', 'da_ranked', 'da_docs', 'da_flags', 'da_stock']
 const UNPOSITIONED = ['da_accounts', 'da_entries', 'da_labels', 'da_entry_labels', 'da_jobs', ...EXTRA_TABLES.filter(table => table !== 'da_ranked')]
 
 describe(`Data-access hardening (${storageMode.mode})`, () => {
@@ -94,7 +94,19 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
     await add('da_docs', {
       schema: { id: { type: 'id' }, title: { type: 'string', required: true, max: 40 }, attachment: { type: 'file', nullable: true, storage: { upload: async () => 'stored' } } }
     })
-    await add('da_flags', { schema: { id: { type: 'id' }, name: { type: 'string', required: true, max: 40 }, note: { type: 'string', virtual: true } } })
+    await add('da_flags', { schema: { id: { type: 'id' }, name: { type: 'string', required: true, max: 40 }, color: { type: 'string', nullable: true, max: 20 }, note: { type: 'string', virtual: true } } })
+    await add('da_stock', {
+      schema: {
+        id: { type: 'id' },
+        sku: { type: 'string', required: true, max: 40 },
+        active: { type: 'boolean', required: true },
+        qty: { type: 'integer', defaultTo: 0 },
+        note: { type: 'string', defaultTo: 'none', max: 40 },
+        // A setter that produces its field from another one.
+        label: { type: 'string', nullable: true, max: 40, runSetterAfter: ['sku'], setter: (_value, { attributes }) => `label-${attributes.sku}` }
+      },
+      indexes: [{ columns: ['sku', 'active'], unique: true }]
+    })
   })
   after(async () => { await fixture?.close() })
 
@@ -137,6 +149,8 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       assert.throws(() => { query.client = null }, RestApiScopedQueryReadOnlyError)
       assert.throws(() => Object.defineProperty(query, '_method', { value: 'del' }), RestApiScopedQueryReadOnlyError)
       assert.throws(() => { delete query._statements }, RestApiScopedQueryReadOnlyError)
+      assert.throws(() => { query._statements = [] }, RestApiScopedQueryReadOnlyError)
+      assert.throws(() => { query._single = {} }, RestApiScopedQueryReadOnlyError)
       // Knex's own methods still reach the client, and modify passes the read-only builder on.
       assert.throws(() => query.clone().modify(builder => builder.del()), RestApiScopedQueryReadOnlyError)
       assert.equal(await count(query.clone().modify(builder => builder.whereRaw('1 = 1'))), 3)
@@ -174,6 +188,8 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
         assert.ok(stored.every(row => row.color === 'green' && row.workspace_id === 'ws-a'))
         return measured.statements
       }
+      // The first upsert on a table also reads its unique indexes.
+      await run(4)
       assert.equal(await run(4), await run(60))
 
       await resetAll()
@@ -190,6 +206,65 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       await assert.rejects(hooked.postMany({ data: [{ name: 'one', color: 'x' }], onConflict: { keys: ['name'], action: 'merge' } }), isA(RestApiBulkWriteUnsupportedError))
       const ignored = await hooked.postMany({ data: [{ name: 'one' }, { name: 'two' }], returning: 'minimal', onConflict: { keys: ['name'], action: 'ignore' } })
       assert.equal(ignored.data.length, 1)
+    })
+
+    it('merges only the fields a row supplies, never schema defaults', async () => {
+      await resetAll()
+      const stock = fixture.api.resources.da_stock
+      await fixture.knex('da_stock').insert({ id: 1, sku: 'A', active: true, qty: 5, note: 'kept', label: 'old' })
+      const merge = onConflict => stock.postMany({ data: [{ sku: 'A', active: true, note: 'new' }], onConflict: { keys: ['sku', 'active'], action: 'merge', ...onConflict } })
+      const stored = async () => {
+        const row = await fixture.knex('da_stock').where('id', 1).first()
+        return [Number(row.qty), row.note, row.label]
+      }
+      // qty defaults to 0 and was not sent; the setter adds label from sku.
+      await merge({})
+      assert.deepEqual(await stored(), [5, 'new', 'label-A'])
+      await fixture.knex('da_stock').where('id', 1).update({ note: 'kept', label: 'old' })
+      await merge({ merge: ['qty', 'note'] })
+      assert.deepEqual(await stored(), [5, 'new', 'old'])
+      assert.equal(await count(fixture.knex('da_stock')), 1)
+    })
+
+    it('compares conflict keys exactly, after each field\'s read normalization', async () => {
+      await resetAll()
+      const stock = fixture.api.resources.da_stock
+      await fixture.knex('da_stock').insert({ id: 1, sku: 'ab', active: true, qty: 5, note: 'kept' })
+      const onConflict = action => ({ keys: ['sku', 'active'], action, ...(action === 'merge' ? { merge: ['qty'] } : {}) })
+      // Booleans come back as 1 or true depending on the database; both match true.
+      await stock.postMany({ data: [{ sku: 'ab', active: true, qty: 9 }], onConflict: onConflict('merge') })
+      const ignored = await stock.postMany({ data: [{ sku: 'ab', active: true }], returning: 'minimal', onConflict: onConflict('ignore') })
+      assert.deepEqual(ignored.data, [])
+      assert.deepEqual((await fixture.knex('da_stock').select('sku', 'qty')).map(row => [row.sku, Number(row.qty)]), [['ab', 9]])
+      // MySQL's default collations ignore case, so the database matches a key that is
+      // not equal. The test databases use utf8mb4_bin; give the column a _ci collation.
+      const sku = collation => fixture.knex.raw(`ALTER TABLE da_stock MODIFY sku VARCHAR(40) CHARACTER SET utf8mb4 COLLATE ${collation} NOT NULL`)
+      if (databaseClient === 'mysql2') await sku('utf8mb4_general_ci')
+      try {
+        for (const action of ['ignore', 'merge']) {
+          const upsert = stock.postMany({ data: [{ sku: 'AB', active: true, qty: 1 }], onConflict: onConflict(action) })
+          if (databaseClient === 'mysql2') {
+            await assert.rejects(upsert, error => isA(RestApiResourceError)(error) && cause(error).subtype === 'conflict' && /match exactly/.test(cause(error).message), action)
+          } else {
+            await upsert
+            await fixture.knex('da_stock').where('sku', 'AB').del()
+          }
+        }
+      } finally {
+        if (databaseClient === 'mysql2') await sku('utf8mb4_bin')
+      }
+      assert.deepEqual((await fixture.knex('da_stock').select('sku', 'qty')).map(row => [row.sku, Number(row.qty)]), [['ab', 9]])
+    })
+
+    it('refuses merge when no unique index covers the conflict keys', async () => {
+      await resetAll()
+      const flags = fixture.api.resources.da_flags
+      await flags.post({ data: { name: 'one' } })
+      await assert.rejects(flags.postMany({ data: [{ name: 'one', color: 'red' }], onConflict: { keys: ['name'], action: 'merge' } }), error => isA(RestApiBulkWriteUnsupportedError)(error) && /no unique index/.test(cause(error).message))
+      if (databaseClient === 'mysql2') {
+        await assert.rejects(flags.postMany({ data: [{ name: 'one' }], onConflict: { keys: ['name'], action: 'ignore' } }), isA(RestApiBulkWriteUnsupportedError))
+      }
+      assert.equal(await count(fixture.knex('da_flags')), 1)
     })
   })
 

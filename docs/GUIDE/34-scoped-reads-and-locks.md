@@ -201,8 +201,9 @@ SELECT-only: `insert`, `update`, `delete`, `forUpdate` and the other locking
 reads, table changes (`from`, `fromRaw`, `table`), the methods that clear
 existing predicates, set operations (`union`, `unionAll`, `intersect`,
 `except`), common table expressions (`with`, `withRecursive`,
-`withMaterialized`), access to its Knex `client`, and defining or deleting its
-properties throw `RestApiScopedQueryReadOnlyError`, on clones too. The builder
+`withMaterialized`), access to its Knex `client`, replacing its statement
+lists (`_statements`, `_single`), and defining or deleting its properties throw
+`RestApiScopedQueryReadOnlyError`, on clones too. The builder
 guards against mistakes, not hostile code: code that means to bypass it can use
 Knex directly. A table you join is not scoped by the builder; join only what
 the caller may see, or scope it with its own `scopedQuery`.

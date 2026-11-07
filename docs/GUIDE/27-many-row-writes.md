@@ -202,7 +202,16 @@ the record. With `action: 'ignore'`, rows that match an existing record are
 skipped and only the inserted rows are returned. With `action: 'merge'`, the
 matching record is updated: the fields in `merge` that the row supplies, or by
 default every stored field the rows supply except the keys, the id, ownership
-fields and the lock version.
+fields and the lock version. A row supplies the fields the caller sent, its
+belongs-to links and the fields a setter adds; schema defaults (`defaultTo`)
+apply only to the rows merge inserts, never to the records it updates.
+
+Keys compare exactly. A stored value is first read as its field reads it, so
+`true` matches a boolean stored as 1 and `1.5` a decimal stored as `1.50`, but
+strings compare as they are, without the column's collation. When the database
+finds a record that matches the keys only by its own comparison, for example
+`'Urgent'` against `'urgent'` under MySQL's case-insensitive collations, the
+batch fails with a `conflict` error (409) instead of guessing.
 
 Upserts cannot reach another owner's rows:
 
@@ -212,6 +221,13 @@ Upserts cannot reach another owner's rows:
   then `patchMany` the rows the caller may change.
 - Only a match on the conflict keys counts. A row that clashes with an existing
   record on any other unique index, the primary key included, fails the batch.
+- `merge`, and `ignore` on MySQL and MariaDB, need a unique index whose
+  columns are all among the keys, and refuse the batch
+  (`RestApiBulkWriteUnsupportedError`) without one. Without it the keys could
+  match several records, and the locking read would examine, and on MySQL
+  lock, every row of the table. (`ignore` on PostgreSQL and SQLite needs a
+  unique index on exactly the keys, as `ON CONFLICT` does.) The first upsert
+  on a table reads its indexes once.
 
 `merge` reads the records that match the keys under a row lock, inserts the
 other rows with a plain INSERT and updates the matched records by id, a fixed
@@ -225,8 +241,10 @@ matches a record the caller cannot see fails the batch as `forbidden`.
 MySQL and MariaDB, whose `ON DUPLICATE KEY` fires on every unique index, it
 reads the matching keys under a row lock and inserts the rest. With `merge`,
 and with `ignore` on MySQL and MariaDB, two transactions that upsert the same
-new key at the same time can fail with a unique-key or deadlock error; retry
-the batch.
+new key at the same time can fail with a unique-key error (PostgreSQL 23505)
+or a deadlock (MySQL 1213); retry the batch. InnoDB keeps the locks of every
+row a locking read examined until the transaction ends, so keep upserting
+transactions short.
 
 ## Transactions
 
