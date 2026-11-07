@@ -143,7 +143,9 @@ that enabling `autoIndex` created an index.
 `api.positioning.getConfig()` returns the configuration, and
 `api.positioning.isEnabled(resourceName)` reports whether a registered resource
 participates. The old no-op `api.positioning.reorder()` helper has been removed;
-use resource PATCH operations or [atomic bulk PATCH](27-bulk-operations.md).
+use resource PATCH operations inside one `api.transaction`. Positions are
+computed per row against their neighbours, so [many-row writes](27-many-row-writes.md)
+refuse to create positioned records or to change positions.
 The formerly inert `rebalanceThreshold` option now rejects.
 
 There is no automatic rebalancing. Keys that exceed the tighter of the schema's

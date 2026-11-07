@@ -166,6 +166,9 @@ subscribe. It does not replay changes missed during disconnection.
 | PATCH or PUT replacement | `resource.updated` | `patch` or `put` |
 | Relationship POST/PATCH/DELETE | `resource.updated` | `patch` |
 | Resource DELETE | `resource.deleted` | `delete` |
+| `postMany` | `resource.created`, one per row | `post` |
+| `patchMany`, `patchWhereIds`, `patchWhere` | `resource.updated`, one per row | `patch` |
+| `deleteMany`, `deleteWhere` | `resource.deleted`, one per row | `delete` |
 
 IDs are strings. Deletion also includes `deletedRecord: { id }`, without deleted
 attributes. Reverse relationship changes notify the parent and the changed
@@ -185,6 +188,11 @@ autofilters. They use subscriber context, never the writer's context. Query
 failures are logged and count as nonmatches; a successful match before or after
 is sufficient. Applications should account for these additional queries and
 ensure query hooks can run inside the write transaction.
+
+[Many-row writes](27-many-row-writes.md) run the same eligibility check for all
+their rows at once: one query per subscription for each 1,000 changed ids,
+before and after the write. Each subscription receives one notification for
+every changed row that matched it.
 
 ## Authentication and permissions
 
@@ -261,8 +269,8 @@ change. A rejected call after commit can still have emitted notifications. These
 HTTP polling, including relationship changes and child rollback.
 
 Library writes now require the handle from `api.transaction` when joining an
-outer unit. Resource and atomic-bulk child completion hooks run after confirmed
-owner completion; non-atomic bulk retains one outcome per entry. Rolled-back
+outer unit. Resource and many-row completion hooks run after confirmed
+owner completion. Rolled-back
 units do not flush queued notifications. Explicit callbacks are tested with
 repeated changes to the same record, callback/caught-write/caught-SQL failures,
 and rejected completion hooks on both storage modes and all three databases.

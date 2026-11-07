@@ -342,7 +342,7 @@ Built-in nested operations use separate context objects with shallow inheritance
 | --- | --- | --- |
 | Full write-response GET | Application properties and referenced cache/auth objects; the active transaction is passed explicitly. Write input is available for virtual-field response enrichment. | GET sets its own method, ID, schema, query selection and read result. Replacing a child top-level property does not replace the parent's property. |
 | Relationship PATCH and reverse relationship child writes | Application properties and referenced objects; the active transaction is passed explicitly. | Child writes set their own method, input, schema and stored records. The parent retains its own operation identity and finish context. |
-| Bulk children | Application properties and referenced objects; atomic children share the batch transaction. | Each child has its own context with `bulkOperation` and `bulkIndex`. Child cleanup diagnostics are collected by the batch. |
+| Many-row writes | One context for the whole call, with `inputRecords` and `ids`. | Each row's permission check gets its own wrapper, with the row's position in `originalContext.bulkIndex`. |
 | Ordinary CRUD permission checks and attribute enrichment | A reference to the relevant operation through `originalContext` or `parentContext`. | A fresh wrapper for that permission/enrichment call. Adding a wrapper property does not add it to the originating context. Relationship permission hooks instead receive the relationship operation context directly. |
 | Included-resource and relationship visibility queries | Application context and the active connection/transaction. | The library sets the target resource/schema and query selection; parent filters are not blindly applied as target filters. |
 
@@ -412,7 +412,7 @@ undeclared output key does not establish a supported field or bypass final
 field filtering. Finish hooks are late observers; they are not a substitute
 for schema validation or query policy.
 
-## Relationship and bulk composition
+## Relationship and many-row composition
 
 Relationship POST and DELETE run `beforeDataCall`, followed by
 `beforeDataCallPostRelationship` or `beforeDataCallDeleteRelationship`, after
@@ -448,9 +448,32 @@ hooks. Reverse relationship mutations can run child PATCH lifecycles inside
 the parent's operation. Direct pivot/link changes do not synthesize
 pivot-resource hook calls.
 
-Bulk operations invoke child resource lifecycles. Atomic children share a
-transaction; non-atomic children complete separate transactions. Do not count
-hook invocations as independent user requests or assume one context per batch.
+Many-row writes (`postMany`, `patchMany`, `patchWhereIds`, `patchWhere`,
+`deleteMany`, `deleteWhere`) do not run the per-record write hooks. They run
+batch hooks once per call, with every row in `context.inputRecords` and the
+written ids in `context.ids`:
+
+| Method | Batch hooks |
+| --- | --- |
+| `postMany` | `beforeProcessingPostMany`, `beforeDataCallPostMany`, `afterDataCallPostMany` |
+| `patchMany`, `patchWhereIds`, `patchWhere` | `beforeProcessingPatchMany`, `beforeDataCallPatchMany`, `afterDataCallPatchMany` |
+| `deleteMany`, `deleteWhere` | `beforeDataCallDeleteMany`, `afterDataCallDeleteMany` |
+
+`checkPermissions`, `afterCommit` and `afterRollback` still run. A resource with
+a per-record write hook (`beforeProcessing*`, `beforeSchemaValidate*`,
+`afterSchemaValidate*`, `beforeDataCall*`, `afterDataCall*`, `finish*` for post,
+patch or delete) has its many-row writes refused, unless the hook was
+registered with `{ batch: true }`: a promise that a batch hook does its work, or
+that it does not apply to many-row writes.
+
+```js
+api.addHook('finishPost', 'notify-owner', { batch: true }, notifyOne)
+api.addHook('afterDataCallPostMany', 'notify-owners', {}, ({ context }) => notifyMany(context.ids))
+```
+
+Method and hook handlers receive `perRecordHooks(events, scope)`, which lists
+the `{ event, name }` of the handlers that would block a resource. See
+[many-row writes](27-many-row-writes.md#hooks-and-refusals).
 
 ## Completion and failure
 

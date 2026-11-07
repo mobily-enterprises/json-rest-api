@@ -108,8 +108,9 @@ The current implementation depends on more than individual CRUD helpers:
 - Writes need an actual transaction factory and the managed ownership contract,
   including acknowledged commit/rollback, uncertain completion, completion
   hooks and failure diagnostics. Remote side effects need their own semantics.
-- Bulk operations and schema changes must preserve their documented atomicity
-  and publication boundaries. Supporting a single-record happy path is not
+- Many-row writes and schema changes must preserve their documented atomicity
+  and publication boundaries. A backend without the many-row storage helpers
+  (`dataInsertMany` and the others) has its many-row writes refused. Supporting a single-record happy path is not
   sufficient evidence for the backend.
 
 The source checkout's `plugins/core/lib/storage/storage-types.d.ts` describes

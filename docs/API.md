@@ -8,7 +8,8 @@ This reference provides comprehensive documentation for all methods, parameters,
 
 ## Current contract
 
-This reference describes the v2 API. See the [migration guide](GUIDE/33-migrating-to-v2.md) and
+This reference describes the v3 API. See the migration guides
+([to v2](GUIDE/33-migrating-to-v2.md), [to v3](GUIDE/35-migrating-to-v3.md)) and
 [backend limits](GUIDE/30-backend-capabilities.md) before upgrading.
 
 Pass method controls in the first `params` object and application information in
@@ -60,8 +61,10 @@ compound writes and JSON:API extensions are not enabled by accepting a document.
 On a resource configured with `versionField`, PUT/PATCH/DELETE and relationship
 writes accept an `expectedVersion` string; unconditional writes may omit it.
 POST does not accept that condition. See [optimistic concurrency](GUIDE/33-migrating-to-v2.md)
-for version-field configuration, bulk version arrays and the separate opt-in
-HTTP validator contract.
+for version-field configuration and the separate opt-in HTTP validator
+contract. Many-row writes refuse versioned resources; a
+[`lockVersionField`](GUIDE/34-scoped-reads-and-locks.md#lock-versions) with
+`onlyIf` gives them compare-and-set instead.
 
 Read calls can borrow raw Knex transactions. Library writes must use the handle
 from `api.transaction` when grouping operations; they reject unmanaged raw
@@ -79,25 +82,31 @@ a separate context for each enlisted operation. See [transaction support](#trans
    - [PATCH - Update Resource](#patch---update-resource)
    - [DELETE - Remove Resource](#delete---remove-resource)
    - [AGGREGATE - Grouped Totals](#aggregate---grouped-totals)
-3. [Relationship Methods](#relationship-methods)
+3. [Data-Access Methods](#data-access-methods)
+   - [scopedQuery - Scoped Read-Only Builder](#scopedquery---scoped-read-only-builder)
+   - [queryAll - Every Matching Record](#queryall---every-matching-record)
+   - [Many-Row Writes](#many-row-writes)
+   - [lockByIds and claim - Row Locks](#lockbyids-and-claim---row-locks)
+   - [System Contexts](#system-contexts)
+4. [Relationship Methods](#relationship-methods)
    - [getRelated - Retrieve Related Resources](#getrelated---retrieve-related-resources)
    - [getRelationship - Retrieve Relationship Identifiers](#getrelationship---retrieve-relationship-identifiers)
    - [postRelationship - Add to Relationship](#postrelationship---add-to-relationship)
    - [patchRelationship - Replace Relationship](#patchrelationship---replace-relationship)
    - [deleteRelationship - Remove from Relationship](#deleterelationship---remove-from-relationships)
-4. [Hook System](#hook-system)
+5. [Hook System](#hook-system)
    - [Complete Hook Execution Order](#complete-hook-execution-order)
    - [Hook Context Objects](#hook-context-objects)
-5. [Query Features](#query-features)
+6. [Query Features](#query-features)
    - [Filtering](#filtering)
    - [Sorting](#sorting)
    - [Pagination](#pagination)
    - [Sparse Fieldsets](#sparse-fieldsets)
    - [Including Related Resources](#including-related-resources)
-6. [Configuration Options](#configuration-options)
-7. [Schema Configuration](#schema-configuration)
-8. [Error Handling](#error-handling)
-9. [Advanced Features](#advanced-features)
+7. [Configuration Options](#configuration-options)
+8. [Schema Configuration](#schema-configuration)
+9. [Error Handling](#error-handling)
+10. [Advanced Features](#advanced-features)
 
 ---
 
@@ -1154,8 +1163,8 @@ await api.resources.sales.aggregate(params, context)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `groupBy` | string[] | Fields to group by. Omit for one row over all selected records. |
-| `measures` | object | Output names mapped to `{ count \| countDistinct \| sum \| avg \| min \| max: field }`. Only `count` accepts `'*'`. |
+| `groupBy` | (string \| object)[] | Fields to group by, or date buckets `{ field, bucket, timezone, as }`. Omit for one row over all selected records. |
+| `measures` | object | Output names mapped to `{ count \| countDistinct \| sum \| avg \| min \| max: field, where? }`. Only `count` accepts `'*'`. |
 | `queryParams.filters` | object | Search schema filters, validated as for `query`. |
 | `queryParams.sort` | string[] | Grouped field or measure names, `-` for descending. Grouped fields break ties. |
 | `queryParams.page` | object | `size` and `number`, for grouped results only. `size` defaults to `queryDefaultLimit` and cannot exceed `queryMaxLimit`. |
@@ -1165,7 +1174,51 @@ await api.resources.sales.aggregate(params, context)
 times. Grouping and counting accept any scalar stored field, including belongs-to
 foreign keys. Fields that are `hidden`, virtual, computed, or that have a getter or
 `storage.serialize` are rejected, because SQL would group or sum values other than
-the ones clients read. `normallyHidden` fields are allowed.
+the ones clients read. The exception is a `date` or `dateTime` field with
+`storage.serialize`: it may be bucketed and take `min` and `max`, whose results
+are read back as that field's values. `normallyHidden` fields are allowed.
+
+#### Conditional measures
+
+A measure's `where` limits the rows it counts or adds up, so one call can
+return "this week" next to "this month". Every entry must hold:
+
+```javascript
+measures: {
+  open: { count: '*', where: { status: 'open' } },
+  bigOpen: { sum: 'amount', where: { status: 'open', amount: { gte: 1000 } } },
+  late: { count: '*', where: { status: ['overdue', 'disputed'] } },
+  unassigned: { count: '*', where: { owner_id: null } }
+}
+```
+
+A condition is a value, an array (IN), `null`, or an object of `eq`, `ne`,
+`gt`, `gte`, `lt`, `lte`, `in` and `notIn`. Fields may be any stored scalar field
+aggregates accept; values are translated as filter values are. The SQL is
+`fn(CASE WHEN … THEN value END)`, so conditional and plain measures share one
+statement.
+
+#### Date buckets
+
+A `groupBy` entry `{ field, bucket, timezone, as }` groups a `date` or
+`dateTime` field by `'day'`, `'week'`, `'month'` or `'year'`. The group value
+is the `'YYYY-MM-DD'` of the bucket's first day; weeks start on Monday. The
+output name is `as`, default the field name.
+
+```javascript
+await api.resources.sales.aggregate({
+  groupBy: [{ field: 'closedAt', bucket: 'month', timezone: 'Europe/Rome', as: 'month' }],
+  measures: { total: { sum: 'amount' } },
+  queryParams: { sort: ['month'] }
+}, context)
+// { data: [{ month: '2026-01-01', total: 1250 }, ...] }
+```
+
+`timezone` is `'UTC'` (default), a fixed offset such as `'-09:00'`, or an IANA
+name. PostgreSQL has zone data; MySQL and MariaDB need their time zone tables
+loaded (checked once per name); SQLite takes offsets only. `date` fields have
+no time of day and take no time zone. Buckets need table storage; AnyAPI
+resources refuse them.
 
 #### Return Value
 
@@ -1198,6 +1251,125 @@ const totals = await api.resources.sales.aggregate({
   queryParams: { filters: { closed: true }, sort: ['-total'], page: { size: 10 } }
 }, { subject })
 ```
+
+---
+
+## Data-Access Methods
+
+Methods for work that does not fit one page or one record: reports, imports and
+jobs. They keep the caller's ownership filters (autofilter) and row policies.
+The guides have the details:
+[many-row writes](GUIDE/27-many-row-writes.md) and
+[scoped reads, locks and system work](GUIDE/34-scoped-reads-and-locks.md).
+Many-row writes and locks need table storage (`RestApiKnexPlugin`); AnyAPI
+resources refuse them with `RestApiBulkWriteUnsupportedError`. `queryAll` and
+`scopedQuery` work on both storages; on AnyAPI the scoped builder reads the
+canonical rows, whose fields live in storage slots.
+
+### scopedQuery - Scoped Read-Only Builder
+
+```javascript
+const { query } = await api.resources.entries.scopedQuery(
+  { filters, alias, purpose, transaction }, context)
+```
+
+Resolves to `{ query }`, a Knex builder on the resource's table with ownership
+filters, row policy and the search `filters` applied. It is wrapped because a
+builder is thenable. `purpose` is `'report'` (default; includes shared rows),
+`'bulk-write'`, `'lock'` or `'claim'`; row policies receive it as
+`queryPurpose`. The caller needs `query` permission. The builder refuses
+writes, locking reads, table changes and clearing predicates, on clones too
+(`RestApiScopedQueryReadOnlyError`); joined tables are not scoped.
+
+### queryAll - Every Matching Record
+
+```javascript
+const { data, included } = await api.resources.entries.queryAll(
+  { queryParams, pageSize, rowLimit, format, transaction }, context)
+```
+
+Reads every record `query` would select, in cursor pages of `pageSize` rows
+(default 1,000) in id order or `queryParams.sort`. `queryParams` takes
+`filters`, `sort`, `fields` and `include`, but not `page`. Past `rowLimit` rows
+it throws `RestApiRowLimitError`. Works on both storages.
+
+### Many-Row Writes
+
+```javascript
+await resource.postMany({ data | document, onConflict, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.patchMany({ data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.patchWhereIds({ ids, data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.patchWhere({ filters, data | document, onlyIf, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.deleteMany({ ids, missing, returning, chunkSize, transaction }, context)
+await resource.deleteWhere({ filters, returning, chunkSize, transaction }, context)
+```
+
+| Parameter | Description |
+| --- | --- |
+| `data` / `document` | `postMany`, `patchMany`: an array of plain records, or `{ data: [resource objects] }`; `patchMany` rows carry `id`. `patchWhereIds`, `patchWhere`: one record of changes. |
+| `ids` / `filters` | The records to change: listed ids, or search filters validated as `query` validates them. |
+| `returning` | `'none'` (default), `'minimal'` (`{ data: [{ type, id }] }`) or `'full'` (`{ data: [records] }`, not for deletes). |
+| `format`, `queryParams` | Output format, `fields` and `include` of full records. |
+| `onConflict` | Upsert: `{ keys, action: 'ignore' \| 'merge', merge? }`. `keys` must include every ownership field; `merge` is refused under a row policy. |
+| `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
+| `missing` | `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. |
+| `chunkSize` | Rows per statement (default 500), lowered to the database's parameter limit. |
+| `transaction` | A transaction from `api.transaction` to join; otherwise the call owns one. |
+
+Each call is all-or-nothing. Every row is validated, stamped, passed through
+setters and authorized with `checkPermissions` (`method` `post`, `patch` or
+`delete`, `originalContext.bulkIndex` the row's position); belongs-to targets
+are checked with one read per related type; then one statement runs per chunk.
+Patches refuse the id, ownership fields and the `lockVersionField`, and accept
+`knex.raw()` values for stored, non-relationship fields. Deletes remove the
+records' pivot rows. Batch hooks run once per call:
+`beforeProcessingPostMany`, `beforeDataCallPostMany`, `afterDataCallPostMany`,
+the `PatchMany` trio and `beforeDataCallDeleteMany` / `afterDataCallDeleteMany`.
+
+`RestApiBulkWriteUnsupportedError` (422) is thrown before writing for AnyAPI
+storage, versioned resources (and those whose writes advance a version),
+per-record write hooks not registered with `{ batch: true }`, rows that set
+many-to-many or reverse relationships, file fields, or positions.
+`BulkOperationsPlugin` exposes `postMany`, `patchMany` and `deleteMany` as
+`POST`, `PATCH` and `DELETE /RESOURCE/bulk`.
+
+### lockByIds and claim - Row Locks
+
+```javascript
+await api.transaction(async transaction => {
+  const { data: locked } = await resource.lockByIds({ ids, transaction, missing, format, queryParams: { fields } }, context)
+  const { data: taken } = await resource.claim({ filters, sort, limit, transaction, format, queryParams: { fields } }, context)
+})
+```
+
+Both need a transaction (`RestApiLockOutsideTransactionError` otherwise) and
+return the records as the locking read saw them. `lockByIds` locks the visible
+rows among `ids` in id order (`FOR UPDATE`); hidden or missing ids throw
+`RestApiRecordsNotFoundError` unless `missing: 'skip'`. `claim` takes up to
+`limit` (default 1, at most 1,000) matching rows that no other transaction holds
+(`SKIP LOCKED`), in `sort` order (stored fields, default `['id']`); a row policy
+that joins tables is refused. On SQLite, which has one writer, both are scoped
+reads.
+
+A resource option `lockVersionField: 'lock_version'` names a stored integer
+that every update (single, many-row and upsert merge) sets to `column + 1`.
+Callers cannot set it; use it with `onlyIf`.
+
+### System Contexts
+
+```javascript
+import { createSystemContext, isSystemContext, readOnlyQueryBuilder } from 'json-rest-api'
+
+const context = createSystemContext('nightly report', { jobId })
+```
+
+A system context skips autofilter ownership predicates; creates must set every
+ownership field explicitly. Row policies receive `system: true`. The marker is
+a private symbol that object spread keeps and serialization drops; a context
+with `system: true` but no marker throws `REST_API_SYSTEM_CONTEXT_FORGED`.
+Autofilter filters may be `shared: true` (on a nullable field): reads include
+rows whose field is NULL, while many-row writes, locks and single writes stay
+on the owner's rows.
 
 ---
 
@@ -1939,6 +2111,27 @@ purpose. See [row policies](GUIDE/17-row-policies.md),
 [include configuration](GUIDE/33-migrating-to-v2.md#include-configuration-is-validated-before-publication)
 and the query hook contract above.
 
+#### Per-Parent Limits (Window Includes)
+
+A to-many relationship can include only the first few related records of each
+parent, such as the newest snapshot per booking. Configure it on the
+relationship, not in the query:
+
+```javascript
+relationships: {
+  snapshots: {
+    type: 'hasMany', target: 'snapshots', foreignKey: 'booking_id',
+    include: { strategy: 'window', limit: 1, orderBy: ['-revision'] }
+  }
+}
+```
+
+`include: ['snapshots']` then returns at most `limit` visible snapshots per
+booking, ordered by `orderBy`, in one query. The default (`standard`) strategy
+applies one limit to the whole included set instead. Window includes need
+database window functions (`api.knex.capabilities.windowFunctions`). See
+[window includes](GUIDE/34-scoped-reads-and-locks.md#window-includes).
+
 ## Configuration Options
 
 ### Plugin Configuration
@@ -2175,6 +2368,13 @@ For example, a resource not-found error maps to:
 | `REST_API_FIELDSET_INVALID`, `REST_API_INCLUDE_INVALID` | 400 |
 | `REST_API_VERSION_CONFLICT` | 409 |
 | `REST_API_PRECONDITION_FAILED` | 412 |
+| `RestApiRecordsNotFoundError` (subtype `not_found`) | 404 |
+| `RestApiBulkWriteUnsupportedError` / `REST_API_BULK_WRITE_UNSUPPORTED` | 422 |
+| `RestApiLockOutsideTransactionError` (a validation error) | 422 |
+| `RestApiBulkInsertIdsError` / `REST_API_BULK_INSERT_IDS` | 500 |
+| `RestApiScopedQueryReadOnlyError` / `REST_API_SCOPED_QUERY_READ_ONLY` | programmatic only |
+| `RestApiRowLimitError` / `REST_API_ROW_LIMIT` | 500 |
+| `REST_API_SYSTEM_CONTEXT_FORGED` | 500 |
 | Unexpected or temporal output failure | 500 |
 
 Validation violations produce individual HTTP errors with their message and
@@ -2197,15 +2397,14 @@ before owned commit; borrowed transactions remain the owner's responsibility.
 See the [callback migration guide](GUIDE/33-migrating-to-v2.md#setter-getter-and-computed-field-failures)
 for examples and intentional fallback handling.
 
-Resource, relationship, bulk and canonical registry write failures use the root
+Resource, relationship, many-row and canonical registry write failures use the root
 export `RestApiWriteError`. Its immutable `transactionOutcome` is `none`,
 `pending`, `committed`, `rolledBack` or `unknown`. Its `cause` preserves the
 original thrown value, including frozen errors, while classification fields
 such as `code`, `subtype` and `details` remain directly readable. Read errors
 retain their existing contract.
 
-HTTP JSON:API write errors include `meta.transactionOutcome`; non-atomic bulk
-entries include `error.transactionOutcome`. A failed call can represent a
+HTTP JSON:API write errors include `meta.transactionOutcome`. A failed call can represent a
 committed write when a later hook rejects. Retrying that call can duplicate its
 effects; neither an HTTP status nor an unknown outcome authorizes automatic
 replay. See the [transaction migration guide](GUIDE/33-migrating-to-v2.md#transactions-and-errors)
@@ -2346,43 +2545,19 @@ For full examples and dialect notes, see [Knex Schema and Migrations](GUIDE/21-s
 
 ### Batch Operations
 
-Process multiple operations efficiently:
+Write many records with the [many-row methods](#many-row-writes): one statement
+per chunk, all-or-nothing, with the same validation and permissions as single
+writes. Group them with other calls in `api.transaction`:
 
 ```javascript
-// Batch create with transaction
-const createArticles = async (articlesData) => {
-  return api.transaction(async transaction => {
-    const results = [];
-    for (const data of articlesData) {
-      const result = await api.resources.articles.post({
-        data,
-        transaction,
-        format: 'plain',
-        returning: 'minimal'
-      });
-      results.push(result);
-    }
-    
-    return results;
-  });
-};
-
-// Batch update
-const updateArticles = async (updates) => {
-  return api.transaction(async transaction => {
-    for (const { id, data } of updates) {
-      await api.resources.articles.patch({
-        id,
-        data,
-        transaction,
-        format: 'plain',
-        returning: 'none'
-      });
-    }
-    
-  });
-};
+await api.transaction(async transaction => {
+  await api.resources.articles.postMany({ data: articlesData, transaction })
+  await api.resources.articles.patchWhereIds({ ids: staleIds, data: { status: 'archived' }, transaction })
+})
 ```
+
+When each record needs its own hooks (or the resource refuses many-row writes),
+call the single-record methods in a loop inside one `api.transaction`.
 
 ### Computed Fields
 

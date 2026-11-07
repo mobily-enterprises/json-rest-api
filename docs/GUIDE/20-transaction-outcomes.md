@@ -6,9 +6,8 @@ chapter_label: "20"
 
 # 20. Transaction outcomes
 
-Resource, relationship, bulk and canonical registry write errors carry the
-outcome of the transaction they represent. HTTP and non-atomic bulk errors
-preserve that outcome. The states below describe the evidence available when
+Resource, relationship, many-row and canonical registry write errors carry the
+outcome of the transaction they represent. HTTP errors preserve that outcome. The states below describe the evidence available when
 the failure is reported.
 
 [Managed transactions](19-managed-transactions.md) explains ownership and
@@ -166,7 +165,7 @@ retained: for example, child pending and outer rolledBack. Existing code/subtype
 classification can usually remain at the outer error; code that checks original
 error identity or `instanceof` needs migration. HTTP mapping preserves status
 classification and adds `meta.transactionOutcome` to each JSON:API error.
-Non-atomic bulk entries expose `error.transactionOutcome` individually.
+A many-row write is one operation with one outcome for all its rows.
 
 ## Errors, batches and later observations
 

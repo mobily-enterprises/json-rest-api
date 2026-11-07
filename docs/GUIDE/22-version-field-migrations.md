@@ -41,7 +41,7 @@ It is not a hash of the complete response and is not an HTTP ETag.
 | Child creation, reparenting, detachment or deletion | Rotates affected configured has-many/has-one parent revisions, including declared polymorphic inverses. |
 | Child attribute change with unchanged membership | Does not rotate the parent's revision merely because included child attributes changed. |
 | Ordinary pivot-resource write | Invalidates affected configured parents when either membership key changes. Canonical through-resource records remain separate from canonical links. |
-| Bulk PATCH or DELETE | Applies the same rules per child. Optional `expectedVersions` must contain one token per input entry. |
+| Many-row writes | Refused with `REST_API_BULK_WRITE_UNSUPPORTED` on a versioned resource and on resources whose writes advance a version; use single writes. |
 | Transaction rollback | Restores revisions together with the associated writes and links. |
 
 Submit conditions through `expectedVersion`, not as an attribute update. Omitting
@@ -147,8 +147,8 @@ a current conditional PATCH succeeds, and a stale one returns
 `REST_API_VERSION_CONFLICT` without changing stored data. Test rollback before
 allowing writers to resume.
 
-Clients send `expectedVersion` alongside the single-write options, or aligned
-`expectedVersions` for bulk PATCH/DELETE. They must not submit the revision among
+Clients send `expectedVersion` alongside the single-write options. They must
+not submit the revision among
 the record attributes. A conflict requires fetching and reconciling the current
 record; blindly retrying with a newly fetched token can overwrite another
 client's edits. These tokens are not HTTP ETags.

@@ -47,9 +47,9 @@ cannot be replaced by a later successful empty COMMIT.
 ## Participation and failure
 
 Ordinary resource and relationship calls without a transaction use the same
-completion mechanism for their own transaction. Atomic bulk uses it for the
-whole batch. Calls receiving its transaction participate and never complete it
-individually. Non-atomic bulk with an outer transaction continues to reject.
+completion mechanism for their own transaction, and so do many-row writes for
+the whole call. Calls receiving its transaction participate and never complete
+it individually.
 
 The final contract requires library writes to use a library-owned transaction.
 Standalone transactions created with `knex.transaction()` remain usable for raw
@@ -85,8 +85,9 @@ retry just the failed statement inside an already failed unit.
 
 Each accepted resource/relationship operation enlists its existing completion
 hook chain once. This includes nested resource calls made by relationship
-implementation; helper-internal SQL does not create synthetic operations. Bulk
-or transaction owners do not also run a duplicate resource hook chain.
+implementation; helper-internal SQL does not create synthetic operations. A
+many-row write enlists one chain for the whole call. Transaction owners do not
+also run a duplicate resource hook chain.
 
 After confirmed commit, invoke enlisted `afterCommit` chains in enlistment
 order. After confirmed rollback, invoke `afterRollback` chains in reverse order.
@@ -99,8 +100,7 @@ set of outcome-dependent hooks.
 
 Enlistment happens when the library accepts an operation into the transaction.
 Overlapping operations can finish their writes in another order; that does not
-change completion-hook order. Internal finalizers, currently bulk diagnostic
-collection, run after those chains in registration order even when a chain or
+change completion-hook order. Internal finalizers run after those chains in registration order even when a chain or
 an earlier finalizer fails. They also collect diagnostics after unknown
 completion; they must not infer commit or run outcome-dependent side effects.
 The first post-commit failure remains primary across hooks and finalizers.
@@ -129,8 +129,7 @@ owner's error in its rollback context.
 
 File cleanup/tracking and Socket.IO delivery use these existing hooks. Uploaded
 files are cleaned only after confirmed rollback, and notifications run only
-after confirmed outer commit. Bulk diagnostics aggregate unresolved child state
-after finalization; the parent must not delete a child's files a second time.
+after confirmed outer commit.
 Tests cover repeated changes to the same resource, multiple uploads,
 callback/SQL failures and failing completion hooks. File-specific failures and
 unresolved upload tracking remain on each operation's context; rejected hook

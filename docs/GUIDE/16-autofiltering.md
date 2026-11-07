@@ -276,6 +276,58 @@ await api.addResource('system_settings', {
 
 If a resource has no `autofilter` setting, the plugin does nothing for that resource.
 
+## Shared Rows
+
+Reference data that every owner reads, such as default categories, can live in
+the same table as owned rows. Mark the filter `shared: true`; a NULL value in
+its field then marks a shared row. The field must be `nullable`.
+
+```js
+await api.use(AutoFilterPlugin, {
+  resolvers: { workspace: ({ context }) => context.session?.workspaceId },
+  presets: {
+    workspaceOrShared: { filters: [{ field: 'workspace_id', resolver: 'workspace', shared: true }] }
+  }
+})
+await api.addResource('categories', {
+  schema: {
+    name: { type: 'string', required: true },
+    workspace_id: { type: 'string', nullable: true }
+  },
+  autofilter: 'workspaceOrShared'
+})
+```
+
+- Reads (`query`, `get`, includes, `aggregate`, `scopedQuery`) see the owner's
+  rows and the shared rows.
+- Many-row writes, `lockByIds`, `claim` and `scopedQuery` with purpose
+  `'bulk-write'`, `'lock'` or `'claim'` see only the owner's rows.
+- Single `patch`, `put` and `delete` of a shared row fail as `forbidden`, and so
+  does a create whose owner value resolves to NULL.
+- Shared rows are created and changed with a system context (below).
+
+`shared` must be `true` or `false` (the default).
+
+## System Contexts
+
+Work that legitimately spans every owner, such as nightly reports or imports,
+uses a context from `createSystemContext(reason, values)`:
+
+```js
+import { createSystemContext } from 'json-rest-api'
+
+const context = createSystemContext('rebuild search index')
+const everyProject = await api.resources.projects.queryAll({}, context)
+await api.resources.categories.post({ data: { name: 'General', workspace_id: null } }, context)
+```
+
+For a system context the plugin applies no ownership filters, and creates
+must set every autofilter field explicitly (NULL creates a shared row on a
+`shared` filter; a missing value fails with `system_ownership_required`). The
+context carries a private marker that request input cannot produce. A context
+that sets `system: true` without it throws `REST_API_SYSTEM_CONTEXT_FORGED`.
+See [system contexts](34-scoped-reads-and-locks.md#system-contexts).
+
 ## Runtime Behavior
 
 ### Query Scoping
@@ -454,8 +506,8 @@ api.autofilter.getScopeConfig('projects')
 // {
 //   preset: 'workspace_user',
 //   filters: [
-//     { field: 'workspace_id', resolver: 'workspace', required: true },
-//     { field: 'user_id', resolver: 'user', required: true }
+//     { field: 'workspace_id', resolver: 'workspace', required: true, shared: false },
+//     { field: 'user_id', resolver: 'user', required: true, shared: false }
 //   ]
 // }
 ```

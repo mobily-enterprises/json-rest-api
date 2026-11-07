@@ -8,7 +8,7 @@ JSON REST API is a mini-ORM and JSON:API library for Node.js 24+. Define resourc
 schemas and relationships, call resource methods from application code, and
 expose those resources through Express or Fastify when you need HTTP endpoints.
 
-[Get started](QUICKSTART.md) · [Browse the numbered guide](GUIDE/index.md) · [Migrate to v2](GUIDE/33-migrating-to-v2.md)
+[Get started](QUICKSTART.md) · [Browse the numbered guide](GUIDE/index.md) · [Migrate to v3](GUIDE/35-migrating-to-v3.md)
 
 ## Call resources directly
 
@@ -57,8 +57,9 @@ in their chapters.
 npm install json-rest-api knex better-sqlite3 express
 ```
 
-These are the v2 documentation. Existing applications should follow the
-[migration guide](GUIDE/33-migrating-to-v2.md) before upgrading. For a source checkout
+These are the v3 documentation. Existing applications should follow the
+migration guides ([to v2](GUIDE/33-migrating-to-v2.md), [to v3](GUIDE/35-migrating-to-v3.md))
+before upgrading. For a source checkout
 before publication, install its packed tarball instead of the registry version.
 
 The [API reference](API.md) describes method arguments and defaults.

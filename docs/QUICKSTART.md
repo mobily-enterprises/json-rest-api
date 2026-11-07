@@ -17,8 +17,8 @@ npm pkg set type=module
 npm install json-rest-api knex better-sqlite3 express
 ```
 
-These examples use the revised API described in the
-[migration guide](GUIDE/33-migrating-to-v2.md). Until that release is published,
+These examples use the v3 API; upgrading applications follow the
+[migration guide](GUIDE/35-migrating-to-v3.md). Until that release is published,
 install the intended library tarball in place of the registry package.
 
 ## Define resources

@@ -12,7 +12,7 @@ related resources. The [quickstart](../QUICKSTART.md) provides a complete
 Express server with related publishers and authors.
 
 Use Node 24 or newer; development verification runs on Node 24. These examples
-use the revised contract in the [migration guide](33-migrating-to-v2.md). Until
+use the v3 contract; see the [migration guide](35-migrating-to-v3.md). Until
 its release is published, install the intended library tarball instead of the
 registry package.
 

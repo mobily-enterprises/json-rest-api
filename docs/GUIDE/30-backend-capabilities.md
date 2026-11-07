@@ -6,8 +6,9 @@ chapter_label: "30"
 
 # 30. Backend capabilities and limits
 
-This reference describes the v2 storage contracts. Follow the
-[migration guide](33-migrating-to-v2.md) before upgrading an application.
+This reference describes the v3 storage contracts. Follow the migration guides
+([to v2](33-migrating-to-v2.md), [to v3](35-migrating-to-v3.md)) before
+upgrading an application.
 Node 24 or later is required; verification runs on Node 24 only.
 
 ## Database and storage choices
@@ -72,6 +73,31 @@ declared `indexed: true` take [indexed slots](21-schema-and-migrations.md#anyapi
 and belongs-to slots are always indexed. Old canonical temporal storage needs
 the documented data migration, not just a package update. See
 [table helpers and migration limits](21-schema-and-migrations.md#anyapi-across-several-servers).
+
+## Many-row writes, locks and aggregates
+
+[Many-row writes](27-many-row-writes.md), row locks and `lockVersionField`
+([chapter 34](34-scoped-reads-and-locks.md)) need table storage
+(`RestApiKnexPlugin`). Resources on AnyAPI storage refuse them with
+`RestApiBulkWriteUnsupportedError`. `queryAll`, `aggregate` without date
+buckets, shared rows and system contexts work on both storages; so does
+`scopedQuery`, though on AnyAPI it reads canonical rows whose fields live in
+storage slots.
+
+| | PostgreSQL | MySQL 8 / MariaDB | SQLite |
+| --- | --- | --- | --- |
+| Ids of inserted rows | `RETURNING` | `RETURNING` on MariaDB 10.5+; on MySQL the first `insertId` and `auto_increment_increment`, read back and verified (`RestApiBulkInsertIdsError` on a mismatch) | `RETURNING` |
+| Upsert | `ON CONFLICT` | `ON DUPLICATE KEY UPDATE`; a conflict on another unique index fails the batch | `ON CONFLICT` |
+| `lockByIds` | `FOR UPDATE` | `FOR UPDATE` | scoped read (one writer) |
+| `claim` | `FOR UPDATE SKIP LOCKED` | candidates first, then `SKIP LOCKED` windows by primary key (MySQL 8.0.1+, MariaDB 10.6+) | scoped read (one writer) |
+| Date buckets | named zones and offsets; dateTime columns must be `timestamptz`, as `createKnexTable` creates them | offsets; named zones need loaded time zone tables | offsets only; dates stored as epoch milliseconds or ISO text |
+
+Rows per statement are capped by `chunkSize` (default 500) and by the
+database's bound-parameter limit, so statement counts grow with the number of
+chunks, not rows. The 3.0 features are verified on SQLite (`better-sqlite3`
+13), PostgreSQL 18 and MariaDB 11.4. No MySQL server was available for 3.0;
+its `insertId` path was exercised against MariaDB, and the other MySQL paths
+share MariaDB's code.
 
 ## Transaction ownership and failures
 

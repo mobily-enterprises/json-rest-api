@@ -5,7 +5,6 @@ import { createTestDatabase, databaseClient } from '../tests/helpers/test-databa
 import { storageMode } from '../tests/helpers/storage-mode.js'
 import fastify from 'fastify'
 import * as library from '../index.js'
-import { BulkOperationsPlugin } from '../plugins/core/bulk-operations-plugin.js'
 import { ensureAnyApiSchema } from '../plugins/core/lib/anyapi/schema-utils.js'
 
 const guides = {
@@ -24,10 +23,17 @@ const guides = {
     names: 'createdResponse, listResponse, invalidResponse, malformedResponse',
     blockCount: 3
   },
-  bulk: {
-    filename: '27-bulk-operations.md',
-    names: 'created, updated, partial, atomicError, afterAtomicFailure, managedError, afterManagedRollback, deleted, remaining',
-    blockCount: 7
+  'many-row': {
+    filename: '27-many-row-writes.md',
+    names: 'created, restocked, updated, emptied, invalidRow, deleted, remaining',
+    blockCount: 4,
+    modes: ['knex']
+  },
+  'scoped-reads': {
+    filename: '34-scoped-reads-and-locks.md',
+    names: 'acmeCategories, otherCategories, sharedEdit, byState, everyJob, claimed, locked, outsideTransaction, everyOwner, forged',
+    blockCount: 5,
+    modes: ['knex']
   },
   temporal: {
     filename: '32-date-and-time.md',
@@ -108,9 +114,9 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         RestApiValidationError: library.RestApiValidationError,
         RestApiResourceError: library.RestApiResourceError,
         AutoFilterPlugin: library.AutoFilterPlugin,
+        createSystemContext: library.createSystemContext,
         JsonRestApi,
         RestApiPlugin: library.RestApiPlugin,
-        BulkOperationsPlugin,
         fastify,
         FastifyPlugin: library.FastifyPlugin,
         QueryProjectionsPlugin: library.QueryProjectionsPlugin,
@@ -145,19 +151,27 @@ for (const [guide, { filename, names, blockCount, modes = ['knex', 'anyapi'] }] 
         assert.ok(result.malformedResponse.json().errors.length)
         const remaining = await api.resources.books.query({})
         assert.equal(remaining.data.length, 1)
-      } else if (guide === 'bulk') {
-        assert.deepEqual(result.created.meta, { total: 2, succeeded: 2, failed: 0, atomic: true })
-        assert.deepEqual(result.created.data.map(record => record.title), ['Alpha', 'Beta'])
-        assert.deepEqual(result.updated.data, result.created.data.map(record => ({ type: 'books', id: record.id })))
-        assert.deepEqual(result.partial.meta, { total: 2, succeeded: 1, failed: 1, atomic: false })
-        assert.equal(result.partial.errors[0].index, 1)
-        assert.equal(result.partial.errors[0].error.transactionOutcome, 'rolledBack')
-        assert.equal(result.atomicError.transactionOutcome, 'rolledBack')
-        assert.deepEqual(result.afterAtomicFailure.data.map(record => record.title).sort(), ['Alpha revised', 'Beta revised', 'Gamma'])
-        assert.ok(result.managedError)
-        assert.equal(result.afterManagedRollback.title, 'Gamma')
-        assert.deepEqual(result.deleted.meta.deleted, result.created.data.map(record => record.id))
-        assert.deepEqual(result.remaining.data.map(record => record.title), ['Gamma'])
+      } else if (guide === 'many-row') {
+        assert.deepEqual(result.created.data.map(record => [record.title, record.stock]), [['Alpha', 3], ['Beta', 0]])
+        assert.equal(result.restocked.data.length, 2)
+        assert.deepEqual(result.updated.data, result.created.data.map(record => ({ type: 'books', id: String(record.id) })))
+        assert.equal(result.emptied.data.length, 1)
+        assert.equal(result.invalidRow.details.index, 1)
+        assert.deepEqual(result.deleted.data, [{ type: 'books', id: String(result.created.data[1].id) }])
+        const stock = Object.fromEntries(result.remaining.data.map(record => [record.title, record.stock]))
+        assert.deepEqual(stock, { 'Alpha, 2nd edition': 9, Gamma: 0 })
+      } else if (guide === 'scoped-reads') {
+        assert.deepEqual(result.acmeCategories.data.map(record => record.name), ['General', 'Acme only'])
+        assert.deepEqual(result.otherCategories.data.map(record => record.name), ['General'])
+        assert.equal(result.sharedEdit.subtype, 'forbidden')
+        assert.deepEqual(result.byState.map(row => [row.state, Number(row.total)]), [['done', 1], ['queued', 2]])
+        assert.deepEqual(result.everyJob.data.map(record => record.title), ['Resize images', 'Send digest', 'Rebuild index'])
+        assert.deepEqual(result.claimed.map(record => record.title), ['Resize images'])
+        assert.equal(result.locked.state, 'running')
+        assert.equal(result.locked.lock_version, 1)
+        assert.equal(result.outsideTransaction.name, 'RestApiLockOutsideTransactionError')
+        assert.equal(result.everyOwner.data.length, 4)
+        assert.equal(result.forged.code, 'REST_API_SYSTEM_CONTEXT_FORGED')
       } else if (guide === 'temporal') {
         assert.equal(result.januaryArticle.publishedDate, '2024-01-15')
         assert.equal(result.januaryArticle.createdAt, '2024-01-15T14:30:00.000Z')

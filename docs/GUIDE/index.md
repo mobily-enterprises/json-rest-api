@@ -9,7 +9,8 @@ resources over HTTP. Start with chapters 01–04, then follow the relationship
 tutorials or jump to the contract you need. Each runnable chapter uses a fresh
 database unless it explicitly says otherwise.
 
-Upgrading an application? Start with [33. Migrating to v2](33-migrating-to-v2.md).
+Upgrading an application? From 2.x, read [35. Migrating to v3](35-migrating-to-v3.md);
+from 1.x, start with [33. Migrating to v2](33-migrating-to-v2.md).
 Before choosing storage, read [30. Backend capabilities and limits](30-backend-capabilities.md).
 
 The examples require Node.js 24 or newer and familiarity with JavaScript and npm.
@@ -56,7 +57,7 @@ Development verification targets Node 24.
 - [24. CORS](24-cors.md)
 - [25. URL management](25-url-management.md)
 - [26. File uploads](26-file-uploads.md)
-- [27. Bulk operations](27-bulk-operations.md)
+- [27. Many-row writes](27-many-row-writes.md)
 - [28. Socket.IO integration](28-socketio.md)
 - [29. Writing plugins](29-writing-plugins.md)
 
@@ -66,3 +67,5 @@ Development verification targets Node 24.
 - [31. Positioning (experimental)](31-positioning.md)
 - [32. Date and time](32-date-and-time.md)
 - [33. Migrating to v2](33-migrating-to-v2.md)
+- [34. Scoped reads, locks and system work](34-scoped-reads-and-locks.md)
+- [35. Migrating to v3](35-migrating-to-v3.md)

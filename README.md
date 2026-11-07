@@ -73,8 +73,13 @@ app.listen(3000, () => {
 
 ## Documentation
 
-The [API migration guide](docs/GUIDE/33-migrating-to-v2.md) describes the breaking
-v2 API changes and the steps for upgrading applications.
+Version 3 adds many-row writes (`postMany`, `patchMany`, `patchWhereIds`,
+`patchWhere`, `deleteMany`, `deleteWhere`), scoped reads (`scopedQuery`,
+`queryAll`), row locks (`lockByIds`, `claim`), lock versions, shared rows and
+system contexts, and replaces the 2.x bulk methods. The
+[v3 migration guide](docs/GUIDE/35-migrating-to-v3.md) lists the breaking changes
+with old → new tables; the [v2 migration guide](docs/GUIDE/33-migrating-to-v2.md)
+covers upgrades from 1.x.
 
 
 - [Quick Start](docs/QUICKSTART.md) - Quick start

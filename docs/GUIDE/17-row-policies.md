@@ -198,6 +198,7 @@ A policy receives one object:
 | `scopeName` | The resource currently being selected. For includes, this is the child resource. |
 | `tableName` | The table name or active query alias for this selection. |
 | `queryPurpose` | Why the selection is running; see the table below. |
+| `system` | `true` for a context made by `createSystemContext`. The policy decides whether system work sees every row. |
 | `db` | The active Knex connection or transaction. Use it to build subqueries. |
 | `isAnyApi` | `true` when the AnyAPI storage path is active. |
 | `column(field, options?)` | Translate and qualify a logical field. |
@@ -293,9 +294,16 @@ Policies are reused for the resource selections that define externally visible d
 | `relationship-identifiers` | Child identifiers attached to a relationship, including has-many and AnyAPI many-to-many links. |
 | `relationship-validation` | A batch of up to 100 distinct target IDs referenced by a write payload, or a scoped lookup retaining database ID equality. |
 | `relationship-parent` | The parent of a relationship route such as `getRelated`. |
+| `report` | A `scopedQuery()` builder with the default purpose. |
+| `bulk-write` | The visible ids a many-row patch or delete may change, and `scopedQuery({ purpose: 'bulk-write' })`. |
+| `lock` | The visible ids `lockByIds()` locks. |
+| `claim` | The candidate rows `claim()` takes. A policy that joins other tables is refused here, because the database would lock the joined rows too. |
 | `unspecified` | A custom call to the lower-level query-filtering seam did not provide a purpose. |
 
 The important invariant is not the label. It is that the predicate is attached before any limit, offset, cursor boundary, per-parent include limit, or count is evaluated.
+
+A row policy cannot see the row an upsert merges into, so `postMany` refuses
+`onConflict: { action: 'merge' }` on a resource with a row policy.
 
 Treat `queryPurpose` as diagnostic context, not as permission to weaken a policy. A policy should normally add the same visibility predicate for every purpose. If an advanced policy uses a purpose-specific SQL shape, each branch must enforce equivalent visibility and must be tested independently; never skip a predicate for counts, includes, identifiers, or relationship validation.
 
