@@ -203,7 +203,9 @@ existing predicates, set operations (`union`, `unionAll`, `intersect`,
 `except`), common table expressions (`with`, `withRecursive`,
 `withMaterialized`), access to its Knex `client`, replacing its statement
 lists (`_statements`, `_single`), and defining or deleting its properties throw
-`RestApiScopedQueryReadOnlyError`, on clones too. The builder
+`RestApiScopedQueryReadOnlyError`, on clones too. Read from outside Knex's own
+methods, `_statements` and `_single` are frozen copies, so they cannot be
+changed in place either. The builder
 guards against mistakes, not hostile code: code that means to bypass it can use
 Knex directly. A table you join is not scoped by the builder; join only what
 the caller may see, or scope it with its own `scopedQuery`.

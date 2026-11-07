@@ -151,6 +151,14 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       assert.throws(() => { delete query._statements }, RestApiScopedQueryReadOnlyError)
       assert.throws(() => { query._statements = [] }, RestApiScopedQueryReadOnlyError)
       assert.throws(() => { query._single = {} }, RestApiScopedQueryReadOnlyError)
+      // The statement lists read as frozen copies, so they cannot change in place.
+      const narrowed = query.clone().whereRaw('1 = 1')
+      const statements = narrowed._statements
+      assert.ok(statements.length && Object.isFrozen(statements) && statements.every(statement => Object.isFrozen(statement)))
+      assert.throws(() => statements.push({ grouping: 'where', type: 'whereRaw', value: fixture.knex.raw('1 = 1') }), TypeError)
+      assert.throws(() => { statements[0].value = null }, TypeError)
+      assert.throws(() => { narrowed._single.table = 'da_accounts' }, TypeError)
+      assert.equal(await count(narrowed), 3)
       // Knex's own methods still reach the client, and modify passes the read-only builder on.
       assert.throws(() => query.clone().modify(builder => builder.del()), RestApiScopedQueryReadOnlyError)
       assert.equal(await count(query.clone().modify(builder => builder.whereRaw('1 = 1'))), 3)

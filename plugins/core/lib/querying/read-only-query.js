@@ -26,6 +26,14 @@ let insideBuilderMethod = 0
 // The compiled query's state, which only Knex's own methods may replace.
 const BUILDER_STATE = new Set(['client', '_single', '_statements'])
 
+// Outside Knex's methods the statement lists read as frozen copies, so code
+// cannot push, splice or edit a predicate in place.
+/** @param {unknown} value */
+const frozenState = value => {
+  if (Array.isArray(value)) return Object.freeze(value.map(entry => entry && typeof entry === 'object' ? Object.freeze({ ...entry }) : entry))
+  return value && typeof value === 'object' ? Object.freeze({ ...value }) : value
+}
+
 /**
  * A SELECT-only view of a Knex query builder. Reads, joins, subqueries and
  * execution work as usual; writes, row locks, set operations, common table
@@ -48,6 +56,7 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
       if (typeof property === 'string' && FORBIDDEN_METHODS.has(property)) return () => refuse(property)
       if (property === 'client' && !insideBuilderMethod) refuse('client')
       const value = Reflect.get(target, property, receiver)
+      if ((property === '_single' || property === '_statements') && !insideBuilderMethod) return frozenState(value)
       if (typeof value !== 'function' || property === 'constructor') return value
       return /** @this {unknown} */ function (/** @type {unknown[]} */ ...args) {
         insideBuilderMethod++
