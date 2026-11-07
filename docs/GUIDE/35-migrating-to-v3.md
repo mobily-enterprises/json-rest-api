@@ -42,6 +42,9 @@ bulk options are rejected with a message that names their replacement.
   `deleteMany` with `missing: 'skip'` put the scope in the UPDATE or DELETE
   instead of reading the visible ids first, when no permission or
   before-data-call batch hook needs those rows.
+- **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
+  filters in every UPDATE or DELETE and return the rows they wrote; a row that
+  vanishes or stops matching in the meantime is left out, never an error.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.

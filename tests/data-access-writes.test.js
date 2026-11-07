@@ -470,3 +470,68 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
     assert.deepEqual(guarded.data.map(item => item.id), ['5'])
   })
 })
+
+// A fixture of its own: these tests add hooks.
+describe(`Selection writes (${storageMode.mode})`, { skip: tableOnly }, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture() })
+  after(async () => { await fixture?.close() })
+
+  it('writes the rows a selection still finds and never throws for one that vanished', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    // After the selection has read its ids, a row goes or stops matching, through
+    // the write's own transaction, as a concurrent write would have done.
+    let change
+    await fixture.api.customize({
+      hooks: {
+        knexQueryFiltering: {
+          functionName: 'selection-row-changes',
+          handler: async ({ context }) => {
+            const knexQuery = context.knexQuery
+            if (!change || knexQuery?.scopeName !== 'da_entries' || knexQuery.queryPurpose !== 'bulk-write' || change.reads++ === 0) return
+            await change.run(knexQuery.db('da_entries').where('id', change.id))
+          }
+        }
+      }
+    })
+    const changing = async (id, run, work) => {
+      change = { id, run, reads: 0 }
+      try { return await work() } finally { change = undefined }
+    }
+
+    const deleted = await changing(2, rows => rows.delete(), () => entries.deleteWhere({ filters: { status: 'open' }, returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(deleted.data.map(item => item.id), ['1', '3'])
+    await seedLedger(fixture)
+    const patched = await changing(2, rows => rows.delete(), () => entries.patchWhere({ filters: { status: 'open' }, data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(patched.data.map(item => item.id), ['1', '3'])
+    // A row that stops matching the filters is left alone.
+    await seedLedger(fixture)
+    const filtered = await changing(2, rows => rows.update({ status: 'closed' }), () => entries.patchWhere({ filters: { status: 'open' }, data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
+    assert.deepEqual(filtered.data.map(item => item.id), ['1', '3'])
+    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).orderBy('id').pluck('status'), ['held', 'closed', 'held'])
+
+    await assert.rejects(entries.deleteWhere({ filters: { status: 'open' }, missing: 'skip' }, workspaceA()), isA(RestApiValidationError))
+    await assert.rejects(entries.patchWhere({ all: true, data: { status: 'open' }, missing: 'throw' }, workspaceA()), isA(RestApiValidationError))
+  })
+
+  it('gives after-hooks the ids and inputs of the changed rows, in the same order', async () => {
+    await seedLedger(fixture)
+    await fixture.knex('da_entries').where('id', 2).update({ status: 'held' })
+    const seen = []
+    await fixture.api.customize({
+      hooks: {
+        afterDataCallPatchMany: {
+          functionName: 'pairing-audit',
+          handler: ({ context }) => {
+            if (context.pairing) seen.push(context.ids.map((id, index) => [id, String(context.inputRecords[index].data.id), context.inputRecords[index].data.attributes.amount]))
+          }
+        }
+      }
+    })
+    // 2 fails onlyIf and 4 is hidden.
+    const data = [1, 2, 3, 4].map(id => ({ id: String(id), amount: id * 11 }))
+    await fixture.api.resources.da_entries.patchMany({ data, onlyIf: { status: 'open' }, missing: 'skip' }, { ...workspaceA(), pairing: true })
+    assert.deepEqual(seen, [[['1', '1', 11], ['3', '3', 33]]])
+  })
+})

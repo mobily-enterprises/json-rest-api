@@ -88,16 +88,18 @@ function resolveOnlyIf (onlyIf, { schemaInfo, storageAdapter }) {
 }
 
 /**
- * The shared path: `entries` are { id, document, raw } in input order.
+ * The shared path: `entries` are { id, document, raw } in input order. A
+ * `selection` (patchWhere) gives the filters that found the ids: its rows are
+ * never missing, and the write answers with the rows it changed.
  * @param {any} args
- * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean }} batch
+ * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean, selection?: { filters?: Record<string, unknown> } }} batch
  */
-async function runPatchMany (args, { operation, entries, started = false }) {
+async function runPatchMany (args, { operation, entries, started = false, selection }) {
   const { params, context, vars, helpers, scope, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api } = args
   const schemaInfo = context.schemaInfo
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   const chunkSize = resolveChunkSize(params.chunkSize)
-  const missing = resolveMissing(params.missing)
+  const missing = selection ? 'skip' : resolveMissing(params.missing)
   refuseUnsupportedResource({ api, helpers, perRecordHooks, scopeName, schemaInfo, operation, kind: 'patch', storageHelper: 'dataUpdateByIds' })
   const onlyIf = resolveOnlyIf(params.onlyIf, { schemaInfo, storageAdapter })
   entries.forEach((entry, index) => refuseProtectedInput({ ...entry, schemaInfo, index }))
@@ -145,10 +147,13 @@ async function runPatchMany (args, { operation, entries, started = false }) {
   // Which of the requested rows the caller may change. With missing: 'skip' and
   // no hook that needs the rows first, the UPDATE decides it, carrying the
   // scope, and its changed rows answer. Otherwise one scoped read per chunk
-  // gives each row's minimal record to the permission check.
-  const scoped = missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany')
+  // gives each row's minimal record to the permission check. A selection's
+  // UPDATE carries the scope and its filters either way, so it changes only
+  // rows that still match.
+  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany'))
+  const scoped = Boolean(selection) || !readFirst
   let keptRows = rows
-  if (!scoped) {
+  if (readFirst) {
     const visible = new Map()
     for (const part of chunk(rows.map(row => row.rowContext.id), VISIBLE_READ_CHUNK)) {
       const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
@@ -180,11 +185,16 @@ async function runPatchMany (args, { operation, entries, started = false }) {
     updates.push({ id: rowContext.id, row })
   }
 
-  const changed = new Set((updates.length ? await helpers.dataUpdateByIds({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped }) : []).map(String))
+  const changed = new Set((updates.length
+    ? await helpers.dataUpdateByIds({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped, filters: selection?.filters })
+    : []).map(String))
   // A row that left the caller's scope after the visibility read is not written.
   const unchanged = updates.length - changed.size
   if (unchanged && !onlyIf && missing === 'throw') throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: unchanged })
-  context.ids = updates.map(update => String(storageAdapter.translateFilterValue('id', update.id))).filter(id => changed.has(id))
+  // After-hooks see the changed rows' ids and inputs, paired by position.
+  const written = keptRows.filter(row => changed.has(String(storageAdapter.translateFilterValue('id', row.rowContext.id))))
+  context.ids = written.map(row => String(storageAdapter.translateFilterValue('id', row.rowContext.id)))
+  context.inputRecords = written.map(row => row.rowContext.inputRecord)
   await runHooks('afterDataCallPatchMany')
 
   const response = await manyRowResponse({
@@ -288,7 +298,7 @@ export async function patchWhereMethod (args) {
       throw unsupported(scopeName, 'patchWhere', 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
-    requireWhereScope({ filters, all: params.all, operation: 'patchWhere' })
+    requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'patchWhere' })
     // The visible ids are read in the write's transaction, so open it first.
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction
@@ -298,7 +308,7 @@ export async function patchWhereMethod (args) {
       return context.returning === 'none' ? undefined : { data: [] }
     }
     return await runPatchMany(args, {
-      operation: 'patchWhere', entries: entriesFor(ids, shared, { scopeName, schemaInfo: context.schemaInfo }), started: true
+      operation: 'patchWhere', entries: entriesFor(ids, shared, { scopeName, schemaInfo: context.schemaInfo }), started: true, selection: { filters }
     })
   } catch (error) {
     await handleWriteMethodError(error, context, 'PATCH_WHERE', scopeName, log)

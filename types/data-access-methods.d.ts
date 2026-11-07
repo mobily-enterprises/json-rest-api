@@ -99,6 +99,7 @@ export interface DataAccessMethods<
     params: RemovedResourceOptions & { ids: DirectResourceId[]; transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number; missing?: MissingRows },
     context?: Context
   ): Promise<Returning extends 'none' ? void : { data: ResourceIdentifier<Type>[] }>
+  // Deletes the rows its selection finds and answers with those it deleted; it never throws for missing rows.
   deleteWhere<Returning extends 'none' | 'minimal' = 'none'>(
     params: RemovedResourceOptions & WhereScope & { transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number },
     context?: Context

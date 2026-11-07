@@ -1315,7 +1315,7 @@ await resource.deleteWhere({ filters | all: true, returning, chunkSize, transact
 | `format`, `queryParams` | Output format, `fields` and `include` of full records. |
 | `onConflict` | Upsert: `{ keys, action: 'ignore' \| 'merge', merge? }`. `keys` must include every ownership field, and a unique index must cover them; rows may not carry an `id` or repeat keys; keys compare exactly (a match only by collation fails with 409); only a match on the keys counts, and a clash on another unique index fails the batch. `merge` updates only the fields each row supplies (never `defaultTo` values), runs the patch checks (`checkPermissions` with `method: 'patch'`) on the records it updates and is refused under a row policy. |
 | `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
-| `missing` | `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. |
+| `missing` | Id lists only: `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. `patchWhere` and `deleteWhere` refuse it: they write the rows their selection finds, with the scope and filters inside each write, and return only the rows written. |
 | `chunkSize` | Rows per statement (default 500), lowered to the database's parameter limit. |
 | `transaction` | A transaction from `api.transaction` to join; otherwise the call owns one. |
 

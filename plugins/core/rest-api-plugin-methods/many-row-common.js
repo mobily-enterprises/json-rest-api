@@ -205,9 +205,11 @@ export function requireLockTransaction ({ transaction, scopeName, operation }) {
 /**
  * patchWhere and deleteWhere need filters, or `all: true` to act on every row
  * the caller can see (in a system context, the whole table).
- * @param {{ filters: Record<string, unknown> | undefined, all: unknown, operation: string }} request
+ * @param {{ filters: Record<string, unknown> | undefined, all: unknown, missing?: unknown, operation: string }} request
  */
-export function requireWhereScope ({ filters, all, operation }) {
+export function requireWhereScope ({ filters, all, missing, operation }) {
+  // A selection writes the rows it finds and answers with those; no row is missing.
+  if (missing !== undefined) throw new RestApiValidationError(`${operation} writes the rows its selection finds; missing applies to lists of ids`, { fields: ['missing'] })
   if (all !== undefined && all !== true) throw new RestApiValidationError('all must be true when given', { fields: ['all'] })
   const filtered = Boolean(filters && Object.keys(filters).length)
   if (all && filtered) throw new RestApiValidationError(`${operation} takes filters or all: true, not both`, { fields: ['all'] })

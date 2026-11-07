@@ -167,9 +167,18 @@ nothing first when the resource has no `checkPermissions` hook and no
 `beforeDataCallPatchMany` or `beforeDataCallDeleteMany` hook (those need the
 visible rows before the write). The UPDATE or DELETE carries the caller's
 scope, row policy included, as a subquery, and its changed rows are the
-answer: the UPDATE returns them with `RETURNING` on PostgreSQL and SQLite, the
-DELETE on PostgreSQL; otherwise a read of the scoped rows (locking on MySQL and
-MariaDB) comes first, then the write of exactly those rows.
+answer: the UPDATE and the DELETE return them with `RETURNING` on PostgreSQL
+and SQLite; on MySQL and MariaDB a locking read of the scoped rows comes first,
+then the write of exactly those rows.
+
+`patchWhere` and `deleteWhere` are set operations. They read the ids of the
+rows their selection finds, then write those rows with the caller's scope and
+the filters inside every UPDATE or DELETE (on MySQL and MariaDB inside a locking
+read of the rows, followed by the write of exactly those). A row that another
+transaction deletes, moves out of the caller's scope or changes so that it no
+longer matches in the meantime is left out. The result lists the rows actually
+written, and the methods never throw `RestApiRecordsNotFoundError`; they take no
+`missing` option.
 
 The UPDATE, DELETE and lock statements repeat the caller's ownership
 (autofilter) conditions as plain column predicates. A row that another
@@ -288,9 +297,12 @@ hooks:
 | `patchMany`, `patchWhereIds`, `patchWhere` | `beforeProcessingPatchMany`, `beforeDataCallPatchMany`, `afterDataCallPatchMany` | `inputRecords`, `rawFields`, `ids` |
 | `deleteMany`, `deleteWhere` | `beforeDataCallDeleteMany`, `afterDataCallDeleteMany` | `ids` |
 
-`afterCommit` and `afterRollback` run once, with `context.method` set to the
-many-row method. `checkPermissions` still runs for every row, with `method`
-`'post'`, `'patch'` or `'delete'` and the row's position as
+In the `afterDataCall…Many` hooks, `ids` lists only the rows the write
+changed, and for patches `inputRecords` lists their inputs in the same order,
+so a row that `missing: 'skip'`, `onlyIf` or a selection left out appears in
+neither. `afterCommit` and `afterRollback` run once, with `context.method` set
+to the many-row method. `checkPermissions` still runs for every row, with
+`method` `'post'`, `'patch'` or `'delete'` and the row's position as
 `originalContext.bulkIndex`.
 
 A resource whose per-record write hooks would be skipped is refused rather than
