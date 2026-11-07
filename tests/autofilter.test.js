@@ -455,8 +455,8 @@ describe('AutoFilter Plugin', () => {
     assert.deepEqual(api.autofilter.getScopeConfig('projects'), {
       preset: 'workspace_user',
       filters: [
-        { field: 'workspace_id', resolver: 'workspace', required: true },
-        { field: 'user_id', resolver: 'user', required: true }
+        { field: 'workspace_id', resolver: 'workspace', required: true, shared: false },
+        { field: 'user_id', resolver: 'user', required: true, shared: false }
       ]
     })
   })

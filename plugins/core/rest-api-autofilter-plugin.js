@@ -1,8 +1,11 @@
-import { RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { RestApiResourceError, RestApiValidationError } from '../../lib/rest-api-errors.js'
+import { assertGenuineSystemFlag, isSystemContext } from '../../lib/system-context.js'
 import { snapshotResourceConfiguration } from './lib/querying-writing/schema-helpers.js'
 import { createStorageAdapterUtilities } from './lib/querying/storage-adapter-utils.js'
 
 const PUBLIC_PRESET_NAME = 'public'
+// Queries that write or lock the rows they select: shared rows are never theirs.
+const WRITE_PURPOSES = new Set(['bulk-write', 'lock', 'claim'])
 
 function valuesEqual (left, right) {
   if (left === right) return true
@@ -108,12 +111,20 @@ function normalizeFilterDefinition ({ filterDef, resolvers, schemaStructure, sco
     ? fieldDef.as
     : null
 
+  if (filterDef.shared !== undefined && typeof filterDef.shared !== 'boolean') {
+    throw new Error(`Autofilter field '${field}' on resource '${scopeName}' must set shared to true or false.`)
+  }
+  if (filterDef.shared === true && fieldDef.nullable !== true) {
+    throw new Error(`Autofilter field '${field}' on resource '${scopeName}' is shared, so it must be nullable: NULL marks a shared row.`)
+  }
+
   return {
     field,
     fieldDef,
     resolve,
     resolverName,
     required: filterDef.required !== false,
+    shared: filterDef.shared === true,
     relationshipName,
     relationshipType: relationshipName ? fieldDef.belongsTo : null,
     inputPath: relationshipName
@@ -247,8 +258,49 @@ function applyResolvedInputValue ({ context, filter, resolvedValue, injectMissin
   }
 }
 
+// A system context owns no workspace or user, so a create must say whose row it is.
+function requireExplicitOwnership ({ compiledConfig, inputRecord, scopeName, index }) {
+  const data = inputRecord?.data || {}
+  const missing = compiledConfig.filters.filter(filter => {
+    if (filter.relationshipName && data.relationships?.[filter.relationshipName]?.data !== undefined) return false
+    return data.attributes?.[filter.field] === undefined
+  })
+  if (!missing.length) return
+  const prefix = index === undefined ? '' : `data.${index}.`
+  const violations = missing.map(filter => ({
+    field: `${prefix}${filter.inputPath}`,
+    rule: 'system_ownership_required',
+    message: `A create in a system context must set '${filter.field}' explicitly${filter.shared ? ' (null for a shared row)' : ''}`
+  }))
+  throw new RestApiValidationError(`Creating '${scopeName}' records in a system context needs explicit ownership values`, {
+    fields: violations.map(violation => violation.field),
+    violations
+  })
+}
+
+// Without an owner value a shared filter would stamp NULL, creating a row every owner sees.
+function refuseSharedCreate ({ filter, resolvedValue, scopeName }) {
+  if (!filter.shared || resolvedValue !== null) return
+  throw new RestApiResourceError(`Shared ${scopeName} records can only be created in a system context`, {
+    subtype: 'forbidden', resourceType: scopeName
+  })
+}
+
+function sharedFieldValue (record, filter) {
+  if (filter.relationshipName) {
+    const linkage = record?.relationships?.[filter.relationshipName]?.data
+    if (linkage !== undefined) return linkage === null ? null : linkage.id
+  }
+  return record?.attributes?.[filter.field]
+}
+
 async function enforceScopedInput ({ compiledConfig, context, scopeName, injectMissing, api, helpers, scopes, vars, log }) {
   if (!compiledConfig || compiledConfig.filters.length === 0) return
+  assertGenuineSystemFlag(context)
+  if (isSystemContext(context)) {
+    if (injectMissing) requireExplicitOwnership({ compiledConfig, inputRecord: context.inputRecord, scopeName })
+    return
+  }
 
   for (const filter of compiledConfig.filters) {
     const resolvedValue = await resolveFilterValue({
@@ -263,6 +315,7 @@ async function enforceScopedInput ({ compiledConfig, context, scopeName, injectM
     })
 
     if (resolvedValue === undefined) continue
+    if (injectMissing) refuseSharedCreate({ filter, resolvedValue, scopeName })
 
     applyResolvedInputValue({
       context,
@@ -304,14 +357,19 @@ export const AutoFilterPlugin = {
         resolvers: state.resolvers,
         presets: state.presets
       })
+      // Many-row writes refuse these fields and require them in upsert conflict keys.
+      schemaInfo.ownershipFields = (schemaInfo.autofilter?.filters || []).map(filter => filter.field)
     })
 
     addHook('knexQueryFiltering', 'autofilter-scope', {}, async ({ context }) => {
-      const { query, tableName, scopeName } = context.knexQuery || {}
+      const { query, tableName, scopeName, queryPurpose } = context.knexQuery || {}
       if (!query || !scopeName) return
 
       const compiledConfig = scopes[scopeName]?.vars?.schemaInfo?.autofilter
       if (!compiledConfig || compiledConfig.filters.length === 0) return
+      assertGenuineSystemFlag(context)
+      if (isSystemContext(context)) return
+      const writes = WRITE_PURPOSES.has(queryPurpose)
       const adapterUtils = createStorageAdapterUtilities({ context }, {
         getStorageAdapter: helpers.getStorageAdapter
       })
@@ -333,7 +391,17 @@ export const AutoFilterPlugin = {
         const columnRef = adapterUtils.translateColumn(scopeName, filter.field, tableName)
         const translatedValue = adapterUtils.translateFilterValue(scopeName, filter.field, resolvedValue)
 
-        if (translatedValue === null) {
+        if (filter.shared) {
+          // Reads see the owner's rows and the shared (NULL) ones; writes and locks only the owner's.
+          if (translatedValue === null) {
+            if (writes) query.whereRaw('1 = 0')
+            else query.whereNull(columnRef)
+          } else if (writes) {
+            query.where(columnRef, translatedValue)
+          } else {
+            query.where(builder => builder.where(columnRef, translatedValue).orWhereNull(columnRef))
+          }
+        } else if (translatedValue === null) {
           query.whereNull(columnRef)
         } else {
           query.where(columnRef, translatedValue)
@@ -341,7 +409,7 @@ export const AutoFilterPlugin = {
       }
     })
 
-    addHook('beforeProcessingPost', 'autofilter-stamp-post', {}, async ({ context, scopeName }) => {
+    addHook('beforeProcessingPost', 'autofilter-stamp-post', { batch: true }, async ({ context, scopeName }) => {
       await enforceScopedInput({
         compiledConfig: scopes[scopeName]?.vars?.schemaInfo?.autofilter,
         context,
@@ -369,7 +437,7 @@ export const AutoFilterPlugin = {
       })
     })
 
-    addHook('beforeProcessingPatch', 'autofilter-validate-patch', {}, async ({ context, scopeName }) => {
+    addHook('beforeProcessingPatch', 'autofilter-validate-patch', { batch: true }, async ({ context, scopeName }) => {
       await enforceScopedInput({
         compiledConfig: scopes[scopeName]?.vars?.schemaInfo?.autofilter,
         context,
@@ -382,6 +450,42 @@ export const AutoFilterPlugin = {
         log
       })
     })
+
+    // Batch form of autofilter-stamp-post: resolve each owner value once, stamp every row.
+    addHook('beforeProcessingPostMany', 'autofilter-stamp-post-many', {}, async ({ context, scopeName }) => {
+      const compiledConfig = scopes[scopeName]?.vars?.schemaInfo?.autofilter
+      if (!compiledConfig || compiledConfig.filters.length === 0) return
+      assertGenuineSystemFlag(context)
+      if (isSystemContext(context)) {
+        context.inputRecords.forEach((inputRecord, index) => requireExplicitOwnership({ compiledConfig, inputRecord, scopeName, index }))
+        return
+      }
+      for (const filter of compiledConfig.filters) {
+        const resolvedValue = await resolveFilterValue({ filter, context, scopeName, api, helpers, scopes, vars, log })
+        if (resolvedValue === undefined) continue
+        refuseSharedCreate({ filter, resolvedValue, scopeName })
+        for (const inputRecord of context.inputRecords) {
+          applyResolvedInputValue({ context: { inputRecord }, filter, resolvedValue, injectMissing: true })
+        }
+      }
+    })
+
+    // Shared rows are readable by every owner but writable only in a system context.
+    const refuseSharedRowWrite = ({ context, scopeName }) => {
+      const compiledConfig = scopes[scopeName]?.vars?.schemaInfo?.autofilter
+      const sharedFilters = compiledConfig?.filters.filter(filter => filter.shared) || []
+      if (!sharedFilters.length || !context.minimalRecord || isSystemContext(context)) return
+      for (const filter of sharedFilters) {
+        if (sharedFieldValue(context.minimalRecord, filter) === null) {
+          throw new RestApiResourceError(`Shared ${scopeName} records can only be changed in a system context`, {
+            subtype: 'forbidden', resourceType: scopeName, resourceId: context.id
+          })
+        }
+      }
+    }
+    addHook('beforeDataCallPatch', 'autofilter-shared-row-patch', { batch: true }, refuseSharedRowWrite)
+    addHook('beforeDataCallPut', 'autofilter-shared-row-put', { batch: true }, refuseSharedRowWrite)
+    addHook('beforeDataCallDelete', 'autofilter-shared-row-delete', { batch: true }, refuseSharedRowWrite)
 
     api.autofilter = {
       getConfig: () => ({
@@ -398,7 +502,8 @@ export const AutoFilterPlugin = {
           filters: compiledConfig.filters.map((filter) => ({
             field: filter.field,
             resolver: filter.resolverName,
-            required: filter.required
+            required: filter.required,
+            shared: filter.shared
           }))
         }
       }

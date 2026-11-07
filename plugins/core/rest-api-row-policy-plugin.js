@@ -1,4 +1,5 @@
 import { createStorageAdapterUtilities } from './lib/querying/storage-adapter-utils.js'
+import { assertGenuineSystemFlag, isSystemContext } from '../../lib/system-context.js'
 
 const INLINE_POLICY_NAME = '<inline>'
 
@@ -92,6 +93,7 @@ export const RowPolicyPlugin = {
 
       const compiledPolicy = scopes[scopeName]?.vars?.rowPolicy
       if (!compiledPolicy) return
+      assertGenuineSystemFlag(context)
 
       const adapterUtils = createStorageAdapterUtilities(hookParams, {
         getStorageAdapter: helpers.getStorageAdapter
@@ -117,6 +119,8 @@ export const RowPolicyPlugin = {
         scopeName,
         tableName,
         queryPurpose,
+        // True only for a context from createSystemContext; policies decide what it may see.
+        system: isSystemContext(context),
         db,
         isAnyApi,
         storageAdapter,
