@@ -70,6 +70,13 @@ bulk options are rejected with a message that names their replacement.
 - **Upserts on the id:** on a resource with no ownership fields and no row
   policy, `onConflict: { keys: ['id'], action }` (or the `idProperty`, such as
   an email natural key) creates the rows that do not exist yet, atomically.
+- **Integer fields over BIGINT columns read as numbers:** an `integer` or
+  `number` field whose driver returns a string (PostgreSQL's BIGINT, MySQL's
+  BIGINT past 2^53) reads as a number when a JavaScript number holds it exactly,
+  on every read and write response, as aggregates already did. It used to stay
+  a string, such as `"4400"`. A longer integer keeps its digits as a string,
+  where an aggregate used to round it; decimal fields (`precision` and
+  `scale`) keep their strings.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.
@@ -283,6 +290,8 @@ field NULL, also when an optional (`required: false`) filter does not resolve.
 
 | 2.x | 3.0 |
 | --- | --- |
+| an `integer` field over a PostgreSQL BIGINT column reads `"4400"` | `4400`; a value past 2^53 stays a string |
+| an aggregate group, `min` or `max` of a BIGINT past 2^53 is a rounded number | the exact digits, as a string |
 | a `patch` or `put` of `accountId: null` by a writer who cannot see the account clears the link | keeps it; clear it in a system context |
 
 ## Custom storage plugins

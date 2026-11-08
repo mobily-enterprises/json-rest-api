@@ -362,6 +362,16 @@ export function normalizeStructuredValue (value, type, { fieldName, resourceType
   }
 }
 
+// Drivers return BIGINT and some other numeric columns as strings. A value a
+// JavaScript number holds exactly becomes one; a longer integer keeps its
+// digits as a string. Decimals (precision and scale) keep theirs, to avoid rounding.
+const isDecimalField = definition => definition.precision !== undefined && definition.scale !== undefined
+/** @param {string} value */
+const storedNumber = value => {
+  const number = Number(value)
+  return value.trim() !== '' && Number.isFinite(number) && (!Number.isInteger(number) || Number.isSafeInteger(number)) ? number : value
+}
+
 /**
  * Normalizes database values in an attributes object
  *
@@ -405,6 +415,13 @@ export function normalizeAttributes (attributes, schemaStructure, {
       }
     }
 
+    // Stored values only: an id stays a string, and a getter, computed or
+    // virtual field keeps the value its code made.
+    if (['number', 'integer'].includes(fieldDef.type) && typeof value === 'string' && fieldName !== 'id' && !isDecimalField(fieldDef) &&
+        typeof fieldDef.getter !== 'function' && fieldDef.computed !== true && fieldDef.virtual !== true) {
+      normalized[fieldName] = storedNumber(value)
+    }
+
     // Normalize boolean values
     if (fieldDef.type === 'boolean') {
       if (value === 1 || value === '1') {
@@ -445,9 +462,7 @@ export function normalizeAttributes (attributes, schemaStructure, {
 export function normalizeStoredFieldValue (value, definition, { fieldName, resourceType }) {
   if (value == null) return null
   if (definition.type === 'id') return String(value)
-  const decimal = definition.precision !== undefined && definition.scale !== undefined
-  // Drivers return some numeric columns as strings; decimals keep theirs to avoid rounding.
-  if (['number', 'integer'].includes(definition.type) && typeof value === 'string' && !decimal) return Number(value)
+  if (['number', 'integer'].includes(definition.type) && typeof value === 'string' && !isDecimalField(definition)) return storedNumber(value)
   return normalizeAttributes({ [fieldName]: value }, { [fieldName]: definition }, { resourceType })[fieldName]
 }
 
