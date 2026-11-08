@@ -648,11 +648,16 @@ export const filterToOneResponseLinkage = async (context, scopes) => {
       if ((definition?.belongsTo || definition?.belongsToPolymorphic) && relationship.data) linkages.push(relationship)
     }
   }
-  if (linkages.length === 0) return
+  // A target the response already includes is no secret, so it needs no read.
+  const key = (/** @type {Identifier} */ { type, id }) => `${type}:${id}`
+  const included = new Set((document?.included || []).map(key))
+  // The links collected above are to-one links with a target.
+  const unchecked = linkages.filter(relationship => !included.has(key(/** @type {Identifier} */ (relationship.data))))
+  if (unchecked.length === 0) return
   const visible = new Set(await filterVisibleIdentifiers({
-    identifiers: linkages.map(relationship => relationship.data), scopes, knex: context.db, context
+    identifiers: unchecked.map(relationship => relationship.data), scopes, knex: context.db, context
   }))
-  for (const relationship of linkages) {
+  for (const relationship of unchecked) {
     if (!visible.has(relationship.data)) relationship.data = null
   }
 }

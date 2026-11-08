@@ -795,6 +795,23 @@ describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
     assert.equal(await accountOf('1'), null)
   })
 
+  it('reads a link to an included target without a separate visibility read', async () => {
+    await seedLedger(fixture)
+    const read = async (id, params = {}) => {
+      const context = { ...workspaceA(), policyCalls: [] }
+      const record = await fixture.api.resources.da_entries.get({ id, format: 'jsonapi', ...params }, context)
+      return { link: record.data.relationships.account.data, checks: context.policyCalls.filter(call => call.queryPurpose === 'relationship-identifiers').length }
+    }
+    const include = { queryParams: { include: ['account'] } }
+    const alone = await read('1')
+    const included = await read('1', include)
+    assert.deepEqual(included.link, { type: 'da_accounts', id: '1' })
+    assert.equal(included.checks, alone.checks - 1)
+    // The include does not find a hidden target; its link is still hidden.
+    await linkTo('1', 2)
+    assert.equal((await read('1', include)).link, null)
+  })
+
   it('keeps a hidden link in a many-row patch, row by row', { skip: tableOnly }, async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
