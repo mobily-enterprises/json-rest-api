@@ -27,7 +27,7 @@ describe(`Disposable database (${databaseClient}, ${storageMode.mode})`, () => {
     const row = await observer.knex.first(observer.knex.raw(`${sql} as version`))
     assert.equal(typeof row.version, 'string')
     if (databaseClient === 'pg') assert.match(row.version, /PostgreSQL/)
-    if (databaseClient === 'mysql2') assert.doesNotMatch(row.version, /MariaDB/)
+    // MySQL and MariaDB runs both use mysql2; the runner checks that the server is the one asked for.
   })
 
   it('isolates identical resource names, resets, and teardown between fixtures', async () => {
