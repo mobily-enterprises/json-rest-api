@@ -14,6 +14,7 @@ import { translateCanonicalAttributesForStorage, getCanonicalResourceId, getCano
 import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/query-builder-utils.js'
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
+import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -89,6 +90,25 @@ export function createCanonicalDataHelpers ({
     }
 
     return descriptors
+  }
+
+  // The canonical row of the record a single write found with its scoped read.
+  /** @param {string} scopeName @param {{ db: import('./storage-types.js').StorageDatabase, id: string | number }} context */
+  const foundRecord = (scopeName, context) => {
+    const storageAdapter = getScopeStorageAdapter(scopeName)
+    if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
+    const descriptor = getDescriptor(scopeName)
+    const { canonical } = descriptor
+    return foundRow({
+      byId: () => context.db(canonical.tableName)
+        .where(getCanonicalResourceIdColumn(descriptor), context.id)
+        .where(canonical.resourceColumn, descriptor.resource)
+        .where(canonical.tenantColumn, descriptor.tenant),
+      context,
+      scopeName,
+      storageAdapter,
+      tableName: canonical.tableName
+    })
   }
 
   /** @type {CanonicalDataWriteHelpers['dataExists']} */
@@ -188,13 +208,7 @@ export function createCanonicalDataHelpers ({
       return 1
     }
 
-    const result = await context.db(canonical.tableName)
-      .where(logicalIdColumn, id)
-      .where(canonical.resourceColumn, descriptor.resource)
-      .where(canonical.tenantColumn, descriptor.tenant)
-      .update(writeRow)
-
-    return result
+    return updateFoundRow(foundRecord(scopeName, context), { db: context.db, scopeName, id, idColumn: logicalIdColumn, values: writeRow })
   }
 
   /** @type {CanonicalDataWriteHelpers['dataPatch']} */
@@ -204,7 +218,6 @@ export function createCanonicalDataHelpers ({
       context.storageAdapter = storageAdapter
     }
     const descriptor = getDescriptor(scopeName)
-    const { canonical } = descriptor
     const id = context.id
     const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
     const attributes = context.inputRecord?.data?.attributes || {}
@@ -216,17 +229,7 @@ export function createCanonicalDataHelpers ({
       Object.entries(row).filter(([, value]) => value !== undefined)
     )
 
-    if (Object.keys(updateRow).length === 0) {
-      return 0
-    }
-
-    const result = await context.db(canonical.tableName)
-      .where(logicalIdColumn, id)
-      .where(canonical.resourceColumn, descriptor.resource)
-      .where(canonical.tenantColumn, descriptor.tenant)
-      .update(updateRow)
-
-    return result
+    return updateFoundRow(foundRecord(scopeName, context), { db: context.db, scopeName, id, idColumn: logicalIdColumn, values: updateRow })
   }
 
   /** @type {CanonicalDataWriteHelpers['dataDelete']} */
@@ -236,20 +239,15 @@ export function createCanonicalDataHelpers ({
       context.storageAdapter = storageAdapter
     }
     const descriptor = getDescriptor(scopeName)
-    const { canonical } = descriptor
     const id = context.id
-    const logicalIdColumn = getCanonicalResourceIdColumn(descriptor)
+    const row = foundRecord(scopeName, context)
 
-    await linkStore.invalidateDeletedLinkTargets(scopeName, context)
-    const result = await context.db(canonical.tableName)
-      .where(logicalIdColumn, id)
-      .where(canonical.resourceColumn, descriptor.resource)
-      .where(canonical.tenantColumn, descriptor.tenant)
-      .delete()
-
+    const idColumn = getCanonicalResourceIdColumn(descriptor)
+    await linkStore.invalidateDeletedLinkTargets(scopeName, context, () => lockFoundRow(row, { scopeName, id, idColumn }))
+    const deleted = await deleteFoundRow(row, { scopeName, id })
     await linkStore.deleteResourceLinks({ descriptor, scopeName, id, db: context.db })
 
-    return result
+    return deleted
   }
 
   // Supplying ids returns minimal records for the caller's bounded validation batch.

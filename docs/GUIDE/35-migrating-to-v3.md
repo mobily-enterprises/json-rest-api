@@ -44,17 +44,19 @@ bulk options are rejected with a message that names their replacement.
   before-data-call batch hook needs those rows (not on MySQL and MariaDB,
   where InnoDB would lock every listed row before checking the scope; there a
   patch of one visible row runs its UPDATE without a locking read first).
-- **Fewer reads before single writes:** on table storage, `patch` and `delete`
-  read their row once, scoped, before the UPDATE or DELETE, and a `put` that
-  replaces a row reads it twice (whether it exists, then scoped) instead of
-  three times. The unscoped read that checked the row still existed is gone;
-  the write's own row count answers a row that vanished in between
+- **Fewer reads before single writes:** on table and AnyAPI storage, `patch`
+  and `delete` read their row once, scoped, before the UPDATE or DELETE, and a
+  `put` that replaces a row reads it twice (whether it exists, then scoped)
+  instead of three times. The unscoped read that checked the row still existed
+  is gone; the write's own row count answers a row that vanished in between
   (`not_found`, as before).
-- **Single writes keep to their owner:** on table storage, the UPDATE or
-  DELETE of a single `patch`, `put` or `delete` carries the ownership
-  (autofilter) conditions its scoped read found, as many-row writes already
-  did. A row that another writer moved to a different owner after the read
-  answers `not_found` instead of being written.
+- **Single writes keep to their owner:** on table and AnyAPI storage, the
+  UPDATE or DELETE of a single `patch`, `put` or `delete` carries the
+  ownership (autofilter) conditions its scoped read found, as many-row writes
+  already did. A row that another writer moved to a different owner after the
+  read answers `not_found` instead of being written. On AnyAPI storage a row
+  that vanished after the read now answers `not_found` too, where the write
+  used to change nothing and report success.
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.

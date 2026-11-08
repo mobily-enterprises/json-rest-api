@@ -524,7 +524,7 @@ export interface CanonicalDataDependencies {
   getScopeStorageAdapter(scopeName: string): StorageAdapter | null
   getDescriptor(scopeName: string): CanonicalDescriptor
   linkStore: {
-    invalidateDeletedLinkTargets(scopeName: string, context: DataIdentityContext): Promise<void>
+    invalidateDeletedLinkTargets(scopeName: string, context: DataIdentityContext, lockRow: () => Promise<void>): Promise<void>
     deleteResourceLinks(request: { descriptor: CanonicalDescriptor, scopeName: string, id: string | number, db: StorageDatabase }): Promise<void>
   }
   buildIncludes(request: { parentResources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<DataResource[]>

@@ -205,9 +205,20 @@ transaction moves to a different owner between the visibility read and the
 write is therefore neither written nor locked, and counts as missing:
 `missing: 'throw'` rolls the batch back, `'skip'` leaves the row out of the
 result, and with `onlyIf` it is reported unchanged. Single `patch`, `put` and
-`delete` on table storage do the same with their one scoped read: the UPDATE
-or DELETE carries the owner that read found, and a row that has gone or moved
-to another owner since answers `not_found`.
+`delete`, on table and AnyAPI storage, do the same with their one scoped read:
+the UPDATE or DELETE carries the owner that read found, and a row that has gone
+or moved to another owner since answers `not_found`. The statement's own row
+count tells. A DELETE counts the rows it removed, and an UPDATE the rows it
+matched on PostgreSQL, SQLite and default MySQL connections. On a MySQL or
+MariaDB connection without `FOUND_ROWS`, an UPDATE that changes nothing counts
+zero, so a zero count there is checked again with a locking read of the row.
+Under READ COMMITTED that re-check leaves a window: a row deleted and created
+again with the same id and owner between the UPDATE and the re-check passes
+it, and the write is reported done although nothing was written. REPEATABLE
+READ, InnoDB's default, closes it: the UPDATE's gap lock holds the new row off
+until commit. A proxy that does not pass the `FOUND_ROWS` flag on to its
+backend connections makes a no-op `patch` of a resource without a lock version
+answer `not_found`.
 
 Row policies are checked by the visibility read only, for single and
 many-row writes alike: a row that another transaction moves out of the policy
@@ -216,8 +227,10 @@ write is still written. The ownership conditions close that window for the
 owner. The policy would need a subquery on the written table, which MySQL
 refuses in an UPDATE or DELETE, so no database checks it there. To keep a
 policy-relevant change from slipping between the read and the write, lock the
-row in the writing transaction first (`lockByIds`), or give a many-row write
-an `onlyIf` on the policy's fields. Without a
+row in the writing transaction first (`lockByIds`, which helps only for a
+policy on the row's own columns: [it refuses](17-row-policies.md) a policy
+that joins other tables), or give a many-row write an `onlyIf` on the policy's
+fields. Without a
 visibility read (`missing: 'skip'`, above) the policy is checked by the
 write's subquery, which reads as of the statement's start.
 
@@ -306,7 +319,8 @@ row a locking read examined until the transaction ends, so keep upserting
 transactions short.
 
 A single `put` creates a record at the id the caller chose, and is the one
-write that tells an id taken by another owner apart from a free one: it
+write that tells an id taken by another owner or hidden from the caller
+apart from a free one: it
 answers `not_found` for the first and creates the second. Where ids must not
 leak between owners, let the server choose them: create with `post` or
 `postMany` (or upsert on keys that include the owner) and keep `put` for

@@ -432,7 +432,10 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     resolveId: row => row.relationship === options.relationshipKey && row.left_resource === options.descriptor.resource && normalizeId(row.left_id) === options.leftId ? row.right_id : row.left_id
   })
 
-  const invalidateDeletedLinkTargets = async (scopeName, context) => {
+  // Advances the versions of parents linked to a record about to be deleted.
+  // When there are such parents, `lockRow` first locks the record's row against
+  // link writers, and answers not found when it has gone.
+  const invalidateDeletedLinkTargets = async (scopeName, context, lockRow) => {
     const relationships = []
     for (const [parentType, parent] of Object.entries(api.resources)) {
       if (!parent.vars.schemaInfo?.versionField) continue
@@ -444,7 +447,7 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     }
     if (!relationships.length) return
     assertVersionedRelationshipTransaction(api, relationships[0].inverse, context.transaction)
-    await lockRelationshipTargets(api, context.transaction, [{ type: scopeName, id: context.id }], { exclusive: true })
+    await lockRow()
     const id = normalizeId(context.id)
     for (const { inverse, info } of relationships) {
       const query = buildLinkMutationQuery({ ...info, db: context.transaction, allParents: true }, (query, column) => query.where(column, id))
