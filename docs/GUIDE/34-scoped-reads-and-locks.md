@@ -322,6 +322,16 @@ they too lock in one order. Hidden or missing ids throw
 locked rows show the latest committed values even when the transaction began
 earlier.
 
+The lock covers the locked rows only. Their to-one links are checked for
+visibility afterwards with a plain read of the linked tables, as for `query`.
+On MySQL and MariaDB that read uses the transaction's snapshot, which starts at
+its first plain read: when that came before the lock (see above), a target that
+another transaction committed, hid or deleted since then reads as it was, so a
+link to a target committed since shows as `null`. The link values themselves
+are the locked rows' latest. Locking the targets as well would block other
+transactions' inserts of rows that reference them; when the transaction
+depends on a target, lock it with its own `lockByIds`.
+
 On MySQL and MariaDB, InnoDB locks each listed primary-key row before it
 evaluates the ownership and row-policy predicates, and under REPEATABLE READ
 holds that lock until commit. A listed id the caller cannot see is therefore
