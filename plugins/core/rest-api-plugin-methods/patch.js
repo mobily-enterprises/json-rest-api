@@ -18,7 +18,8 @@ import {
   validatePivotResource,
   handleRecordReturnAfterWrite,
   handleWriteMethodError,
-  commitOwnedTransaction
+  commitOwnedTransaction,
+  keepHiddenLinks
 } from './common.js'
 
 /**
@@ -90,6 +91,7 @@ export default async function patchMethod ({
     }
 
     context.minimalRecord = minimalRecord
+    await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: [{ updates: belongsToUpdates, stored: minimalRecord, inputRecord: context.inputRecord }] })
 
     await scope.checkPermissions({
       method: 'patch',

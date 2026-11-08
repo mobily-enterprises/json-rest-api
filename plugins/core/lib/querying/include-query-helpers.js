@@ -192,7 +192,8 @@ export const applyScopeFiltersToIncludeQuery = async ({
 // one row-policy run per linked type, and any number of ids stays bounded SQL.
 const VISIBILITY_BATCH_SIZE = 1000
 
-export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context }) => {
+// With `scoped: false`, the identifiers whose records exist, visible or not.
+export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true }) => {
   const idsByType = new Map()
   for (const { type, id } of identifiers) {
     if (!idsByType.has(type)) idsByType.set(type, new Set())
@@ -214,15 +215,17 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
       const query = adapter.buildBaseQuery({ transaction: context.transaction })
         .modify(whereInIdentifiers, column, values.slice(start, start + VISIBILITY_BATCH_SIZE))
         .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
-      const state = await applyScopeFiltersToIncludeQuery({
-        query,
-        scopes,
-        scopeName: type,
-        requestContext: context,
-        db: context.db || knex,
-        tableName,
-        queryPurpose: 'relationship-identifiers'
-      })
+      const state = scoped
+        ? await applyScopeFiltersToIncludeQuery({
+          query,
+          scopes,
+          scopeName: type,
+          requestContext: context,
+          db: context.db || knex,
+          tableName,
+          queryPurpose: 'relationship-identifiers'
+        })
+        : { query: applyDatabaseReadOptions(query) }
       for (const row of await state.query) visibleIds.add(String(row[idColumn]))
     }
   }

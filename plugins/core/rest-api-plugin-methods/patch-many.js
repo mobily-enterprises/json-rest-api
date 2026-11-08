@@ -13,6 +13,7 @@ import {
   collectRelationshipTargets,
   commitOwnedTransaction,
   handleWriteMethodError,
+  keepHiddenLinks,
   validateRelationshipTargets,
   validateResourceAttributesBeforeWrite
 } from './common.js'
@@ -122,7 +123,7 @@ async function runPatchMany (args, { operation, entries, started = false, select
       validateUpdateRequest({ method: 'patch', params: {}, context: rowContext, vars, scopeOptions, scopeName })
     } catch (error) { throw atIndex(error, index) }
     collectRelationshipTargets(rowContext.inputRecord, api, targets)
-    return { rowContext, raw: entry.raw, index }
+    return { rowContext, raw: entry.raw, index, clearsLink: false }
   })
   refuseDuplicateIds(rows.map(row => row.rowContext.id), storageAdapter)
   await validateRelationshipTargets(context, [...targets.values()], helpers, api)
@@ -137,6 +138,7 @@ async function runPatchMany (args, { operation, entries, started = false, select
       }
       await validateResourceAttributesBeforeWrite({ context: rowContext, schema: schemaInfo.schemaInstance, belongsToUpdates, runHooks: noHooks, isPartialValidation: true })
       rowContext.inputRecord.data.attributes = { ...rowContext.inputRecord.data.attributes, ...belongsToUpdates }
+      row.clearsLink = Object.values(belongsToUpdates).includes(null)
       // A polymorphic relationship writes its own type and id columns, which may be ownership fields.
       refuseProtectedFields(Object.keys(rowContext.inputRecord.data.attributes), schemaInfo, index)
       // A row with no fields still advances a lock version.
@@ -155,7 +157,8 @@ async function runPatchMany (args, { operation, entries, started = false, select
   // from the caller always get that read first; a selection's ids come from
   // its own scoped read. A selection's UPDATE carries the scope and its filters
   // either way, so it changes only rows that still match.
-  const readFirst = !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany') &&
+  // A row that clears a link reads first too, to keep a link to a hidden target.
+  const readFirst = rows.some(row => row.clearsLink) || !(missing === 'skip' && !hasHooks('checkPermissions') && !hasHooks('beforeDataCallPatchMany') &&
     (selection || databaseFamily(context.db) !== 'mysql'))
   const scoped = Boolean(selection) || !readFirst
   let keptRows = rows
@@ -167,8 +170,16 @@ async function runPatchMany (args, { operation, entries, started = false, select
     }
     const kept = keepVisible({ requested: rows.map(row => row.rowContext.id), visible, missing, scopeName, storageAdapter })
     keptRows = rows.filter(row => kept.includes(row.rowContext.id))
-    for (const { rowContext, index } of keptRows) {
+    for (const { rowContext } of keptRows) {
       rowContext.minimalRecord = visible.get(String(storageAdapter.translateFilterValue('id', rowContext.id)))
+    }
+    await keepHiddenLinks({
+      context,
+      scopes: api.resources,
+      schemaInfo,
+      rows: keptRows.filter(row => row.clearsLink).map(({ rowContext }) => ({ updates: rowContext.inputRecord.data.attributes, stored: rowContext.minimalRecord, inputRecord: rowContext.inputRecord }))
+    })
+    for (const { rowContext, index } of keptRows) {
       try {
         await scope.checkPermissions({ method: 'patch', originalContext: rowContext })
       } catch (error) { throw atIndex(error, index) }

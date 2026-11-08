@@ -657,6 +657,47 @@ export const filterToOneResponseLinkage = async (context, scopes) => {
   }
 }
 
+/**
+ * A read shows a link whose target its reader cannot see as null (above), so a
+ * reader that writes the record back sends that null for a link it never saw.
+ * The write keeps such a link: a belongs-to that `updates` sets to null, whose
+ * stored target exists but is hidden from the writer, is dropped from
+ * `updates` and from the input, and stays as stored. A link to
+ * a visible target, or to one that no longer exists, is cleared as asked.
+ * @param {{ context: ResourceContext, scopes: Record<string, LifecycleResource>, schemaInfo: any, rows: Array<{ updates: Record<string, unknown>, stored: any, inputRecord?: any }> }} request
+ */
+export const keepHiddenLinks = async ({ context, scopes, schemaInfo, rows }) => {
+  const links = [
+    ...Object.entries(schemaInfo.schemaStructure)
+      .filter(([, field]) => field.belongsTo && field.as)
+      .map(([name, field]) => ({ name: field.as, fields: [name] })),
+    ...Object.entries(schemaInfo.schemaRelationships || {})
+      .filter(([, relationship]) => relationship.belongsToPolymorphic)
+      .map(([name, { belongsToPolymorphic: { typeField, idField } }]) => ({ name, fields: [typeField, idField] }))
+  ]
+  const cleared = []
+  for (const row of rows) {
+    for (const link of links) {
+      const data = row.stored?.relationships?.[link.name]?.data
+      if (data && link.fields.every(field => Object.hasOwn(row.updates, field) && row.updates[field] === null)) cleared.push({ row, link, data })
+    }
+  }
+  if (!cleared.length) return
+  const visible = new Set(await filterVisibleIdentifiers({ identifiers: cleared.map(entry => entry.data), scopes, knex: context.db, context }))
+  const hidden = cleared.filter(entry => !visible.has(entry.data))
+  if (!hidden.length) return
+  const existing = new Set(await filterVisibleIdentifiers({ identifiers: hidden.map(entry => entry.data), scopes, knex: context.db, context, scoped: false }))
+  for (const { row, link, data } of hidden) {
+    if (!existing.has(data)) continue
+    for (const field of link.fields) {
+      delete row.updates[field]
+      // Validation has merged the belongs-to updates into the input attributes.
+      delete row.inputRecord?.data?.attributes?.[field]
+    }
+    delete row.inputRecord?.data?.relationships?.[link.name]
+  }
+}
+
 /** @param {ResourceContext} context @param {Record<string, LifecycleResource>} scopes @param {string[]} [resourceTypes] */
 export const validateRequestedIncludes = (context, scopes, resourceTypes = [context.scopeName]) => {
   const paths = context.queryParams?.include || []

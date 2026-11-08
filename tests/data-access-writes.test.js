@@ -752,6 +752,62 @@ describe(`One-record writes without FOUND_ROWS (${storageMode.mode})`, { skip: d
   })
 })
 
+// A row policy hides a link's target: the read shows the link as unassigned,
+// and a write of null by the same reader, as a form sends what it read, keeps
+// the stored link.
+describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture() })
+  after(async () => { await fixture?.close() })
+
+  const linkTo = (id, account) => {
+    const entries = stored(fixture, 'da_entries')
+    // A string: better-sqlite3 binds a number as REAL, which a text column stores as '2.0'.
+    return entries.row(id).update({ [entries.column('account_id')]: String(account) })
+  }
+  const accountOf = async id => {
+    const entries = stored(fixture, 'da_entries')
+    const value = (await entries.row(id).first())[entries.column('account_id')]
+    return value === null ? null : Number(value)
+  }
+
+  it('keeps the link when the reader writes the record back, and applies a visible change', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    // Account 2 is in the reader's workspace, in a group the reader cannot see.
+    await linkTo('1', 2)
+    const read = await entries.get({ id: '1' }, workspaceA())
+    assert.equal(read.account ?? null, null)
+    await entries.patch({ id: '1', data: { amount: 11, account: null }, returning: 'none' }, workspaceA())
+    assert.equal(await accountOf('1'), 2, 'patch')
+    const { code, status, access_group: group } = read
+    await entries.put({ id: '1', data: { code, amount: 12, status, access_group: group, account: null }, returning: 'none' }, workspaceA())
+    assert.equal(await accountOf('1'), 2, 'put')
+    assert.equal(Number((await entries.get({ id: '1' }, workspaceA())).amount), 12, 'the rest of the write applies')
+
+    // A visible target is linked and cleared as asked, and so is a link to a record that is gone.
+    await entries.patch({ id: '1', data: { account: 1 }, returning: 'none' }, workspaceA())
+    assert.equal(await accountOf('1'), 1)
+    await entries.patch({ id: '1', data: { account: null }, returning: 'none' }, workspaceA())
+    assert.equal(await accountOf('1'), null)
+    await linkTo('1', 99)
+    await entries.patch({ id: '1', data: { account: null }, returning: 'none' }, workspaceA())
+    assert.equal(await accountOf('1'), null)
+  })
+
+  it('keeps a hidden link in a many-row patch, row by row', { skip: tableOnly }, async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    await linkTo('2', 2)
+    for (const missing of ['throw', 'skip']) {
+      await linkTo('3', 1)
+      const written = await entries.patchMany({ data: [{ id: '2', account: null }, { id: '3', account: null }], missing, returning: 'minimal' }, workspaceA())
+      assert.deepEqual(written.data.map(item => item.id), ['2', '3'], missing)
+      assert.deepEqual([await accountOf('2'), await accountOf('3')], [2, null], missing)
+    }
+  })
+})
+
 // A fixture of its own: these tests add hooks and a resource.
 describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture

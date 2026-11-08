@@ -19,7 +19,8 @@ import {
   validatePivotResource,
   handleRecordReturnAfterWrite,
   handleWriteMethodError,
-  commitOwnedTransaction
+  commitOwnedTransaction,
+  keepHiddenLinks
 } from './common.js'
 
 /**
@@ -129,6 +130,9 @@ export default async function putMethod ({
           belongsToUpdates[field] = null
         }
       }
+    }
+    if (context.isUpdate) {
+      await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: [{ updates: belongsToUpdates, stored: context.minimalRecord, inputRecord: context.inputRecord }] })
     }
 
     // Merge belongsTo updates with attributes

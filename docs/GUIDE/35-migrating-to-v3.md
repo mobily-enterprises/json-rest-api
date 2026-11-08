@@ -57,6 +57,10 @@ bulk options are rejected with a message that names their replacement.
   read answers `not_found` instead of being written. On AnyAPI storage a row
   that vanished after the read now answers `not_found` too, where the write
   used to change nothing and report success.
+- **Links to hidden targets survive a write-back:** a `patch`, `put` or
+  many-row patch that sets a belongs-to to null keeps the stored link when its
+  target exists but is hidden from the writer, as the read showed the link as
+  unassigned. It used to clear it. Clear such links in a system context.
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.
@@ -273,6 +277,12 @@ the resource is added. `getScopeConfig` reports `shared` for each filter.
 Outside a system context, shared rows refuse `patch`, `put`, `delete`,
 `postRelationship` and `deleteRelationship`, and a create may not leave the
 field NULL, also when an optional (`required: false`) filter does not resolve.
+
+## Values and links that read or write differently
+
+| 2.x | 3.0 |
+| --- | --- |
+| a `patch` or `put` of `accountId: null` by a writer who cannot see the account clears the link | keeps it; clear it in a system context |
 
 ## Custom storage plugins
 

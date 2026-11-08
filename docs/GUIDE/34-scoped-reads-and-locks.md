@@ -163,6 +163,17 @@ the caller cannot see, as it leaves links to missing targets: when the target
 type has ownership filters or a row policy, it reads which targets are visible
 first (one read per type and 1,000 ids).
 
+A read shows a belongs-to link whose target the caller cannot see as
+unassigned (`data: null`), so a caller that writes the record back, as a form
+sends what it read, sends null for a link it never saw. `patch`, `put` and
+the many-row patches therefore keep such a link: a belongs-to (or polymorphic
+belongs-to) the write sets to null, whose stored target exists but is hidden
+from the writer, stays as stored, and the rest of the write applies. Linking
+a visible target, and clearing a link to a visible or missing target, apply as
+asked. Only a write that clears a link pays for the check: one read of the
+targets' visibility, and one more of the hidden targets' existence. A
+many-row patch with such a row reads its rows first.
+
 Create and change shared rows with a [system context](#system-contexts).
 `api.autofilter.getScopeConfig(...)` reports `shared` for each filter, and
 `schemaInfo.ownershipFields` lists a resource's autofilter fields.
