@@ -4,7 +4,7 @@ import { prepareReferenceSortColumns } from '../querying/knex-query-helpers.js'
 import { applySortDescriptorOrder, buildEffectiveSortList, parseSortEntry, resolveSortField } from '../querying/query-field-sort-helpers.js'
 import { normalizeId, resolveFieldInfo } from '../anyapi/utils/descriptor-helpers.js'
 import { decorateResourceLinks, getAllowedQueryFieldNames } from '../anyapi/canonical-relationship-reader.js'
-import { applyQueryConstraint, queryConstraint } from '../querying/query-constraint.js'
+import { applyQueryConstraint, readsLockedRows } from '../querying/query-constraint.js'
 import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { calculatePaginationMeta, generatePaginationLinks, generateCursorPaginationLinks, buildCursorMeta, applyPaginationToQuery } from '../querying/knex-pagination-helpers.js'
 import { getUrlPrefix, buildJsonApiLink } from '../querying/url-helpers.js'
@@ -12,11 +12,10 @@ import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-wri
 import { applyDatabaseReadOptions } from '../querying-writing/database-value-normalizers.js'
 import { translateCanonicalAttributesForStorage, getCanonicalResourceId, getCanonicalResourceIdColumn, translateCanonicalRecordFromStorage } from '../storage/canonical-storage-mapping.js'
 import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/query-builder-utils.js'
-import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
+import { applyInsertReturning, databaseFamily } from '../querying-writing/database-capabilities.js'
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
-import { databaseFamily } from './many-row-data-helpers.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -540,9 +539,7 @@ export function createCanonicalDataHelpers ({
       storageAdapter,
     })
 
-    // Rows this transaction has locked, read as its locking reads see them (see dataGetMinimal).
-    const constraint = context[queryConstraint]
-    if (constraint?.scopeName === scopeName && constraint.locked && databaseFamily(db) === 'mysql') queryBuilder.forShare()
+    if (readsLockedRows(context, scopeName, db)) queryBuilder.forShare()
     /** @type {StorageRow[]} */
     let rows = await applyDatabaseReadOptions(queryBuilder)
     let cursorRecords = null

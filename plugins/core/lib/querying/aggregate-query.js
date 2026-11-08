@@ -1,6 +1,6 @@
 import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { applyDatabaseReadOptions, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
-import { databaseFamily } from '../storage/many-row-data-helpers.js'
+import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 const NUMERIC_TYPES = new Set(['number', 'integer', 'epochMilliseconds', 'epochSeconds'])
 const ORDERED_TYPES = new Set([...NUMERIC_TYPES, 'string', 'email', 'uuid', 'date', 'dateTime', 'time'])

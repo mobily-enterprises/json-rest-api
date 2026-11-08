@@ -331,8 +331,12 @@ caller's scope is checked on the records as locked: on MySQL and MariaDB, whose
 plain reads keep a REPEATABLE READ transaction's first snapshot, that check is
 a locking read too, so a matching record another transaction committed after
 this one's first read is merged into, not taken for a hidden one. The records a
-merge returns with `returning: 'full'` are read the same way, so such a record
-is returned even when the merge leaves it unchanged.
+merge returns with `returning: 'full'`, and the targets of links it clears, are
+read the same way, so such a record is returned even when the merge leaves it
+unchanged, and its link to a hidden target is kept. [Guide 19](19-managed-transactions.md#writes-beside-other-transactions)
+lists every such read. A key that matches a row another transaction has
+inserted but not committed waits for that transaction, then merges into the
+row if it commits.
 
 With `returning: 'count'` an upsert counts the rows it inserted, and with
 `merge` the records it updated as well.

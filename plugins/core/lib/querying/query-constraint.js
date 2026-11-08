@@ -1,8 +1,24 @@
 // @ts-check
 /** @import { MandatoryQueryConstraint, StorageAdapter, StorageQuery } from '../storage/storage-types.js' */
+import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 // Mandatory selection is independent of public search fields and caller filters.
 export const queryConstraint = Symbol('queryConstraint')
+
+/**
+ * Whether a read of `scopeName` is of rows the caller's transaction has locked
+ * (the constraint's `locked`), on MySQL or MariaDB. Their plain reads keep a
+ * REPEATABLE READ transaction's first snapshot, so such a read is a locking
+ * read: it sees the rows as locked, including any committed after the snapshot.
+ * PostgreSQL's plain and locking reads see the same rows; SQLite has one writer.
+ * @param {{ [queryConstraint]?: MandatoryQueryConstraint }} context
+ * @param {string} scopeName
+ * @param {import('knex').Knex} db
+ */
+export const readsLockedRows = (context, scopeName, db) => {
+  const constraint = context[queryConstraint]
+  return Boolean(constraint?.locked) && constraint?.scopeName === scopeName && databaseFamily(db) === 'mysql'
+}
 
 /**
  * @param {object} options

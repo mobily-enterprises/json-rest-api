@@ -8,7 +8,7 @@ import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } 
 import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
 import { currentKnexMysqlSchema, listKnexMysqlIndexes, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
-import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
+import { applyInsertReturning, databaseFamily } from '../querying-writing/database-capabilities.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
 import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-querying.js'
 import { deletePivotReferences } from '../writing/many-to-many-manipulations.js'
@@ -17,14 +17,6 @@ import { deletePivotReferences } from '../writing/many-to-many-manipulations.js'
 const PLACEHOLDER_LIMITS = { sqlite: 32000, pg: 65000, mysql: 65000 }
 // Knex writes a SQLite multi-row INSERT as SELECT … UNION ALL, and SQLite caps a compound SELECT at 500 terms.
 const SQLITE_INSERT_ROWS = 500
-
-/** @param {import('knex').Knex} db */
-export function databaseFamily (db) {
-  const client = String(db.client.config.client)
-  if (client.includes('sqlite')) return 'sqlite'
-  if (client === 'pg' || client === 'postgresql') return 'pg'
-  return 'mysql'
-}
 
 // The mysql and mysql2 drivers' client flag that makes an UPDATE count the rows it matched.
 const FOUND_ROWS = 0x2

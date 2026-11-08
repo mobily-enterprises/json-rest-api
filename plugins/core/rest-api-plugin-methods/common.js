@@ -672,9 +672,10 @@ export const filterToOneResponseLinkage = async (context, scopes) => {
  * stored target exists but is hidden from the writer, is dropped from
  * `updates` and from the input, and stays as stored. A link to
  * a visible target, or to one that no longer exists, is cleared as asked.
- * @param {{ context: ResourceContext, scopes: Record<string, LifecycleResource>, schemaInfo: any, rows: Array<{ updates: Record<string, unknown>, stored: any, inputRecord?: any }> }} request
+ * `locked`: the stored records were read as locked, so their targets are too.
+ * @param {{ context: ResourceContext, scopes: Record<string, LifecycleResource>, schemaInfo: any, rows: Array<{ updates: Record<string, unknown>, stored: any, inputRecord?: any }>, locked?: boolean }} request
  */
-export const keepHiddenLinks = async ({ context, scopes, schemaInfo, rows }) => {
+export const keepHiddenLinks = async ({ context, scopes, schemaInfo, rows, locked = false }) => {
   const links = [
     ...Object.entries(schemaInfo.schemaStructure)
       .filter(([, field]) => field.belongsTo && field.as)
@@ -691,10 +692,10 @@ export const keepHiddenLinks = async ({ context, scopes, schemaInfo, rows }) => 
     }
   }
   if (!cleared.length) return
-  const visible = new Set(await filterVisibleIdentifiers({ identifiers: cleared.map(entry => entry.data), scopes, knex: context.db, context }))
+  const visible = new Set(await filterVisibleIdentifiers({ identifiers: cleared.map(entry => entry.data), scopes, knex: context.db, context, locked }))
   const hidden = cleared.filter(entry => !visible.has(entry.data))
   if (!hidden.length) return
-  const existing = new Set(await filterVisibleIdentifiers({ identifiers: hidden.map(entry => entry.data), scopes, knex: context.db, context, scoped: false }))
+  const existing = new Set(await filterVisibleIdentifiers({ identifiers: hidden.map(entry => entry.data), scopes, knex: context.db, context, scoped: false, locked }))
   for (const { row, link, data } of hidden) {
     if (!existing.has(data)) continue
     for (const field of link.fields) {

@@ -3,6 +3,15 @@
 import { errorMessage } from '../../../../lib/error-context.js'
 import { formatDiagnosticValue } from '../../../../lib/error-formatter.js'
 
+// The SQL family of a Knex instance or transaction: 'sqlite', 'pg' or 'mysql' (MySQL and MariaDB).
+/** @param {import('knex').Knex} db */
+export function databaseFamily (db) {
+  const client = String(db.client.config.client)
+  if (client.includes('sqlite')) return 'sqlite'
+  if (client === 'pg' || client === 'postgresql') return 'pg'
+  return 'mysql'
+}
+
 /**
  * Parses database version string to comparable format
  *

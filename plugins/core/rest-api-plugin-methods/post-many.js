@@ -8,6 +8,7 @@ import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/res
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { databaseFamily } from '../lib/querying-writing/database-capabilities.js'
 import {
   applyFieldSetters,
   collectRelationshipTargets,
@@ -108,27 +109,54 @@ async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName
   const missing = attributes.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
 
   const visible = new Map()
-  // dataIdsByKeys locked these rows, and may have found one that another
-  // transaction committed after this one's snapshot: read them as locked.
-  for (const part of chunk(matched.map(index => existing[index]), VISIBLE_READ_CHUNK)) {
-    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write', locked: true })
-    for (const record of records) visible.set(String(record.id), record)
+  /** @param {number[]} indexes */
+  const checkMatched = async indexes => {
+    // dataIdsByKeys locked these rows, and may have found one that another
+    // transaction committed after this one's snapshot: read them as locked.
+    for (const part of chunk(indexes.map(index => existing[index]), VISIBLE_READ_CHUNK)) {
+      const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write', locked: true })
+      for (const record of records) visible.set(String(record.id), record)
+    }
+    for (const index of indexes) {
+      const id = String(existing[index])
+      const minimalRecord = visible.get(id)
+      try {
+        if (!minimalRecord) {
+          throw new RestApiResourceError(`The ${scopeName} record these conflict keys match cannot be changed by the caller`, { subtype: 'forbidden', resourceType: scopeName })
+        }
+        await scope.checkPermissions({ method: 'patch', originalContext: { ...rows[index], method: 'patch', id, minimalRecord, originalMinimalRecord: minimalRecord } })
+      } catch (error) { throw atIndex(error, index) }
+    }
   }
-  for (const index of matched) {
-    const id = String(existing[index])
-    const minimalRecord = visible.get(id)
-    try {
-      if (!minimalRecord) {
-        throw new RestApiResourceError(`The ${scopeName} record these conflict keys match cannot be changed by the caller`, { subtype: 'forbidden', resourceType: scopeName })
-      }
-      await scope.checkPermissions({ method: 'patch', originalContext: { ...rows[index], method: 'patch', id, minimalRecord, originalMinimalRecord: minimalRecord } })
-    } catch (error) { throw atIndex(error, index) }
-  }
+  await checkMatched(matched)
 
   const ids = [...existing]
   if (missing.length) {
-    const inserted = await helpers.dataInsertMany({ scopeName, context, rows: missing.map(index => attributes[index]), chunkSize, needIds })
+    // On PostgreSQL the key lookup does not see a row another transaction has
+    // inserted but not committed, and a plain INSERT would wait for it, then
+    // fail as a duplicate. The INSERT skips a clash on the keys instead (a clash
+    // on any other unique index still fails), and the rows it skipped, by then
+    // committed, are locked, checked and merged like the others.
+    const skipsClashes = databaseFamily(context.transaction) === 'pg'
+    const insertRows = missing.map(index => attributes[index])
+    const inserted = skipsClashes
+      ? await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds: true, onConflict: { keys: onConflict.keys, action: 'ignore' } })
+      : await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds })
     missing.forEach((index, position) => { ids[index] = inserted?.[position] })
+    const late = skipsClashes ? missing.filter(index => ids[index] === undefined) : []
+    if (late.length) {
+      const found = await helpers.dataIdsByKeys({ scopeName, context, rows: late.map(index => attributes[index]), keys: onConflict.keys, chunkSize })
+      late.forEach((index, position) => {
+        // Committed, then deleted before the lock: neither inserted nor merged.
+        if (found[position] === undefined) {
+          throw atIndex(new RestApiResourceError(`The ${scopeName} record these conflict keys match changed during the upsert; retry it`, { subtype: 'conflict', resourceType: scopeName }), index)
+        }
+        existing[index] = found[position]
+        ids[index] = found[position]
+      })
+      await checkMatched(late)
+      matched.push(...late)
+    }
   }
   if (matched.length) {
     const storageAdapter = helpers.getStorageAdapter(scopeName)
@@ -137,7 +165,13 @@ async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName
       .filter(field => supplied[index].has(field))
       .map(field => [field, attributes[index][field]])))
     // A merge clears a link the way a patch does, so it keeps one to a hidden target.
-    await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: matched.map((index, position) => ({ updates: merges[position], stored: visible.get(String(existing[index])) })) })
+    await keepHiddenLinks({
+      context,
+      scopes,
+      schemaInfo: context.schemaInfo,
+      rows: matched.map((index, position) => ({ updates: merges[position], stored: visible.get(String(existing[index])) })),
+      locked: true
+    })
     const updates = matched.map((index, position) => ({
       id: existing[index],
       row: storageAdapter.toStorageRow(merges[position], { context: rows[index], operation: 'patch' })

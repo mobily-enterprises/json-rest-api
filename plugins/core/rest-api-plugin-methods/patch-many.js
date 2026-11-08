@@ -7,7 +7,8 @@ import { requireExistingResourceId } from '../lib/querying-writing/resource-id-n
 import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { chunk, databaseFamily } from '../lib/storage/many-row-data-helpers.js'
+import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { databaseFamily } from '../lib/querying-writing/database-capabilities.js'
 import {
   applyFieldSetters,
   collectRelationshipTargets,

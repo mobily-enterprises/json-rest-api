@@ -8,12 +8,12 @@ import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-que
 import { toJsonApiRecordWithBelongsTo } from '../querying-writing/knex-json-api-transformers.js'
 import { processIncludes } from '../querying/knex-process-includes.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
-import { applyQueryConstraint, queryConstraint } from '../querying/query-constraint.js'
+import { applyQueryConstraint, readsLockedRows } from '../querying/query-constraint.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { getOperationDiagnosticContext } from '../../../../lib/error-context.js'
-import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
+import { applyInsertReturning, databaseFamily } from '../querying-writing/database-capabilities.js'
 import { ERROR_SUBTYPES } from '../querying-writing/knex-constants.js'
 import { calculatePaginationMeta, generatePaginationLinks, generateCursorPaginationLinks, buildCursorMeta, applyPaginationToQuery } from '../querying/knex-pagination-helpers.js'
 import { getUrlPrefix } from '../querying/url-helpers.js'
@@ -21,7 +21,6 @@ import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
-import { databaseFamily } from './many-row-data-helpers.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -440,9 +439,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     })
     const { pageSize } = paginationInfo
 
-    // Rows this transaction has locked, read as its locking reads see them (see dataGetMinimal).
-    const constraint = context[queryConstraint]
-    if (constraint?.scopeName === scopeName && constraint.locked && databaseFamily(db) === 'mysql') query.forShare()
+    if (readsLockedRows(context, scopeName, db)) query.forShare()
     /** @type {StorageRow[]} */
     const records = await applyDatabaseReadOptions(query)
 

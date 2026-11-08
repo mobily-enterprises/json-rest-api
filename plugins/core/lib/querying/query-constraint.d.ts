@@ -21,3 +21,6 @@ export declare function applyWriteConditions<Query extends StorageQuery>(options
   storageAdapter: StorageAdapter
   tableName: string
 }): Query
+
+/** Whether the scope's reads under this context's constraint take shared locks: a locked constraint, on MySQL or MariaDB. */
+export declare function readsLockedRows(context: { [queryConstraint]?: MandatoryQueryConstraint }, scopeName: string, db: import('knex').Knex): boolean

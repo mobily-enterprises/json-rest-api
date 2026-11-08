@@ -14,6 +14,7 @@ import {
 } from '../storage/storage-mapping.js'
 import { createStorageAdapter } from '../storage/storage-adapter.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
@@ -190,7 +191,9 @@ export const applyScopeFiltersToIncludeQuery = async ({
 
 // One query and one row-policy run per linked type, however many ids are linked.
 // With `scoped: false`, the identifiers whose records exist, visible or not.
-export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true }) => {
+// With `locked`, MySQL and MariaDB read them with a locking read, which sees
+// rows committed after the transaction's snapshot (see dataGetMinimal).
+export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true, locked = false }) => {
   const idsByType = new Map()
   for (const { type, id } of identifiers) {
     if (!idsByType.has(type)) idsByType.set(type, new Set())
@@ -222,6 +225,7 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
         queryPurpose: 'relationship-identifiers'
       })
       : { query: applyDatabaseReadOptions(query) }
+    if (locked && databaseFamily(knex) === 'mysql') state.query.forShare()
     for (const row of await state.query) visibleIds.add(String(row[idColumn]))
   }
   return identifiers.filter(({ type, id }) => visible.get(type)?.has(String(id)))

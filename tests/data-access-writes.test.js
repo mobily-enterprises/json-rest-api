@@ -15,6 +15,7 @@ import {
 import { storageMode } from './helpers/storage-mode.js'
 import { createTestDatabase, databaseClient } from './helpers/test-database.js'
 import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { connectionId, waitForLockWait } from './helpers/lock-wait.js'
 import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './fixtures/data-access-api.js'
 
 const cause = error => error?.cause ?? error
@@ -874,7 +875,7 @@ describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
 describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
   let fixture
   before(async () => {
-    fixture = await createDataAccessFixture()
+    fixture = await createDataAccessFixture({ databaseOptions: { concurrent: true } })
     await fixture.api.addResource('da_tasks', {
       schema: {
         id: { type: 'id' },
@@ -903,7 +904,8 @@ describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
     await setLinks(links)
   }
   // Strings: better-sqlite3 binds a number as REAL, which a text column stores as '2.0'.
-  const setLinks = links => {
+  const setLinks = async links => {
+    if (Object.keys(links).length === 0) return
     const tasks = stored(fixture, 'da_tasks')
     return tasks.row('1').update(Object.fromEntries(Object.entries(links).map(([field, value]) => [tasks.column(field), value === null ? null : String(value)])))
   }
@@ -923,6 +925,35 @@ describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
     await setLinks({ account_id: 1, owner_type: 'da_labels', owner_id: 1 })
     await merge()
     assert.deepEqual(await linksOf(), { account: null, owner: null, amount: 31 })
+  })
+
+  it('keeps a hidden link whose target another transaction committed after this one first read', { skip: idKeysOnly || (databaseClient === 'better-sqlite3' && 'SQLite has one writer') }, async () => {
+    await seedTasks({})
+    const tasks = fixture.api.resources.da_tasks
+    const first = await holdManagedTransaction(fixture.api)
+    try {
+      await tasks.query({ transaction: first.transaction }, workspaceA())
+      // Another transaction commits a hidden and a visible account, and a task linking to each.
+      await fixture.seed('da_accounts', [
+        { id: '7', name: 'A late hidden', workspace_id: 'ws-a', access_group: 'g2' },
+        { id: '8', name: 'A late visible', workspace_id: 'ws-a', access_group: 'g1' }
+      ])
+      await fixture.seed('da_tasks', [
+        { id: '7', code: 'T7', amount: 7, workspace_id: 'ws-a', account_id: '7' },
+        { id: '8', code: 'T8', amount: 8, workspace_id: 'ws-a', account_id: '8' }
+      ])
+      await tasks.postMany({
+        data: [{ code: 'T7', amount: 70, account: null }, { code: 'T8', amount: 80, account: null }],
+        onConflict: { keys: ['workspace_id', 'code'], action: 'merge' },
+        returning: 'minimal',
+        transaction: first.transaction
+      }, workspaceA())
+      await first.commit()
+    } finally {
+      if (!first.transaction.isCompleted()) await first.rollback()
+    }
+    const rows = await fixture.knex('da_tasks').whereIn('code', ['T7', 'T8']).orderBy('code')
+    assert.deepEqual(rows.map(row => [row.code, row.account_id === null ? null : String(row.account_id), Number(row.amount)]), [['T7', '7', 70], ['T8', null, 80]])
   })
 
   it('refuses the type and id fields of a polymorphic link in attributes, as it refuses foreign keys', async () => {
@@ -1216,7 +1247,7 @@ describe(`Many-row writes on AnyAPI's shared table (${storageMode.mode})`, { ski
   })
 })
 
-describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { skip: databaseClient === 'better-sqlite3' && 'SQLite has one writer' }, () => {
+describe(`Many-row writes beside a concurrent commit (${storageMode.mode})`, { skip: databaseClient === 'better-sqlite3' && 'SQLite has one writer' }, () => {
   let fixture
   before(async () => {
     fixture = await createDataAccessFixture({ databaseOptions: { concurrent: true } })
@@ -1286,6 +1317,32 @@ describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { ski
     const nothing = await mergeIntoLateLabel({ name: 'race' }, 'full')
     assert.deepEqual(nothing.data.map(record => [record.name, record.color, record.slug]), [['race', 'blue', 'a-race']])
     assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color]), [['race', 'blue']])
+  })
+
+  it('merges into a row another transaction had inserted but not committed when the merge began', { skip: idKeysOnly }, async () => {
+    await fixture.reset()
+    const labels = fixture.api.resources.da_labels
+    const inserting = await holdManagedTransaction(fixture.api)
+    const merging = await holdManagedTransaction(fixture.api)
+    try {
+      await labels.postMany({ data: [{ name: 'race', color: 'blue', slug: 'a-race' }], returning: 'none', transaction: inserting.transaction }, workspaceA())
+      // Read before the merge: the transaction's connection runs one statement at a time.
+      const mergingConnection = await connectionId(merging.transaction)
+      const merged = labels.postMany({
+        data: [{ name: 'race', color: 'red' }],
+        onConflict: { keys: ['workspace_id', 'name'], action: 'merge', merge: ['color'] },
+        returning: 'full',
+        transaction: merging.transaction
+      }, workspaceA())
+      // The merge waits for the insert's row; the insert then commits.
+      await waitForLockWait(fixture.knex, mergingConnection, merged)
+      await inserting.commit()
+      assert.deepEqual((await merged).data.map(record => [record.name, record.color, record.slug]), [['race', 'red', 'a-race']])
+      await merging.commit()
+    } finally {
+      for (const held of [inserting, merging]) if (!held.transaction.isCompleted()) await held.rollback()
+    }
+    assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color]), [['race', 'red']])
   })
 
   it('merges into a record with the same id that another transaction committed after this one first read', async () => {
@@ -1383,7 +1440,8 @@ describe(`An import into a wide AnyAPI resource (${storageMode.mode})`, { skip: 
 
     const inserts = statements.filter(query => /^insert into .any_records/i.test(query.sql.trim()))
     assert.ok(inserts.length > 1, `a 500-row chunk of ${FIELDS} fields is split: ${inserts.length} INSERT`)
-    for (const query of statements) assert.ok(query.bindings.length <= bindLimit, `${query.bindings.length} bindings: ${query.sql.slice(0, 80)}`)
+    // BEGIN and COMMIT bind nothing.
+    for (const { sql, bindings = [] } of statements) assert.ok(bindings.length <= bindLimit, `${bindings.length} bindings: ${sql.slice(0, 80)}`)
 
     const ids = created.data.map(item => item.id)
     assert.equal(new Set(ids).size, 500)

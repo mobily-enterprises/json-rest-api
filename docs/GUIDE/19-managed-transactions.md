@@ -81,6 +81,29 @@ once even though the database write rolls back. Retry only a new complete unit
 whose external effects your application can safely repeat or reconcile; never
 retry just the failed statement inside an already failed unit.
 
+### Writes beside other transactions
+
+A REPEATABLE READ transaction on MySQL or MariaDB answers plain reads from its
+first snapshot, while its writes and locking reads act on the latest rows. A
+merge upsert reads the records its keys match with locking reads: its check
+that the caller may change them, its check of a link it clears, and the records
+it returns with `returning: 'full'`. So a record another transaction committed
+after the snapshot is merged into and returned as stored, even when the merge
+leaves it unchanged. The transaction's other reads keep its snapshot, including
+a response's included records. A patch or put that writes the values a record
+already holds, after another transaction changed it since this transaction's
+first read, changes nothing, so its `returning: 'full'` response shows the
+record as the snapshot does; `lockByIds` in the same transaction returns it as
+stored. PostgreSQL's plain and locking reads see the same rows, and SQLite has
+one writer.
+
+A merge upsert whose keys match a row another transaction has inserted but not
+yet committed waits for that transaction. If it commits, the merge checks and
+merges into the row as into any other; if it rolls back, the merge inserts its
+own. On PostgreSQL under REPEATABLE READ the database refuses the merge as a
+serialization failure instead, since the row is newer than the snapshot: retry
+the whole unit.
+
 ## Completion work
 
 Each accepted resource/relationship operation enlists its existing completion
