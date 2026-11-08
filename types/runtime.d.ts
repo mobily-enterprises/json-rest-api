@@ -33,6 +33,8 @@ export interface RuntimeArguments<Context extends object = Record<string, unknow
   runHooks(event: string, context?: Record<string, unknown>): Promise<boolean>
   /** Whether runHooks(event) for this resource, or for scope when given, would call any handler. */
   hasHooks(event: string, scope?: RuntimeResource): boolean
+  /** Names of the handlers runHooks(event) for this resource (or scope) would call, in order. */
+  hookNames(event: string, scope?: RuntimeResource): string[]
   /** Handlers of these events that would run for this resource (or scope) without { batch: true }. */
   perRecordHooks(events: readonly string[], scope?: RuntimeResource): Array<{ event: string; name: string }>
 }

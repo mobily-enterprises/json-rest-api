@@ -27,6 +27,7 @@ export default async function getMethod ({
   scopes,
   runHooks,
   hasHooks,
+  hookNames,
   scopeOptions,
   scopeName,
   api
@@ -159,7 +160,7 @@ export default async function getMethod ({
 
   await runHooks('finish')
   await runHooks('finishGet')
-  await filterToOneResponseLinkage(context, scopes)
+  await filterToOneResponseLinkage(context, scopes, hookNames)
 
   // Enrichers and finish hooks run after the database pass and may introduce
   // native values. Reassert the public temporal contract at the return boundary.

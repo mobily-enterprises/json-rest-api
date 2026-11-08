@@ -169,6 +169,7 @@ export interface LifecycleArguments<Data = Resource | Resource[] | null> {
   scopes: Record<string, LifecycleResource>
   runHooks: RunHooks
   hasHooks: (event: string, scope?: LifecycleResource) => boolean
+  hookNames: (event: string, scope?: LifecycleResource) => string[]
   scopeOptions: RestApiPluginOptions
   scopeName: string
   api: LifecycleApi

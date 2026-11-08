@@ -472,6 +472,14 @@ With a system context:
   field explicitly (NULL creates a shared row);
 - row policies receive `system: true` and decide what it means for them;
 - permission checks run as usual; `isSystemContext(context)` lets them tell;
+- a response's to-one links are read for visibility, one read per linked type,
+  as for any context, except a link to a table resource with no row policy and
+  no `knexQueryFiltering` hook of the app's own (on that resource or the whole
+  API) whose column a declared foreign key protects (`references` on the field,
+  or the resource's `foreignKeys`): the context sees every row of the target,
+  and the key keeps the link from pointing at a missing one, so it needs no
+  read. SQLite enforces foreign keys only on connections that turn them on, so
+  there every link is read;
 - `aggregate` may group by, and count distinct, a hidden ownership field, so a
   job can find its units of work, then run each under a context for that owner:
 

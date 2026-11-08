@@ -23,7 +23,9 @@ import {
 } from '../lib/querying-writing/request-contracts.js'
 import { normalizeRecordAttributes } from '../lib/querying-writing/database-value-normalizers.js'
 import { beginWriteTransaction, commitTransaction, getOperationDiagnosticContext, isTransactionOwner, rollbackAfterError, wrapUnexpectedError } from '../../../lib/error-context.js'
-import { filterVisibleIdentifiers } from '../lib/querying/include-query-helpers.js'
+import { filterVisibleIdentifiers, resolveScopeStorageAdapter } from '../lib/querying/include-query-helpers.js'
+import { databaseFamily } from '../lib/querying-writing/database-capabilities.js'
+import { isSystemContext } from '../../../lib/system-context.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
 
@@ -636,8 +638,61 @@ export function snapshotReadRecord (context, scopes, hasHooks, method) {
   }
 }
 
-/** @param {ResourceContext} context @param {Record<string, LifecycleResource>} scopes */
-export const filterToOneResponseLinkage = async (context, scopes) => {
+// The library's own filtering hooks. Without filters, and in a system context on
+// a resource without a row policy, none of them restricts a read.
+const LIBRARY_FILTERING_HOOKS = new Set(['polymorphicFiltersHook', 'crossTableFiltersHook', 'basicFiltersHook', 'autofilter-scope', 'apply-row-policy'])
+
+/**
+ * Whether the declarations of a table resource say a foreign key references `target`'s id from `column`.
+ * @param {LifecycleSchema & { foreignKeys?: any[] }} schemaInfo
+ * @param {string} field
+ * @param {string} column
+ * @param {{ tableName: string }} target
+ * @param {string} targetIdColumn
+ */
+function foreignKeyProtects (schemaInfo, field, column, target, targetIdColumn) {
+  const references = /** @type {{ table?: string, column?: string } | undefined} */ (schemaInfo.schemaStructure?.[field]?.references)
+  if (references && references.table === target.tableName && (references.column || 'id') === targetIdColumn) return true
+  const columnOf = (/** @type {string} */ name) => name === 'id' ? schemaInfo.storageInfo?.idColumn : schemaInfo.storageInfo?.fields?.[name]?.column || name
+  return (schemaInfo.foreignKeys || []).some((/** @type {any} */ foreignKey) => {
+    const referencedColumns = [foreignKey.referencedColumns || foreignKey.references?.columns || foreignKey.references?.column || 'id'].flat()
+    return foreignKey.columns?.length === 1 && columnOf(foreignKey.columns[0]) === column &&
+      (foreignKey.referencedTableName || foreignKey.table || foreignKey.references?.table) === target.tableName &&
+      referencedColumns.length === 1 && referencedColumns[0] === targetIdColumn
+  })
+}
+
+/**
+ * Whether a to-one link needs no visibility read: in a system context, to a
+ * table resource with no row policy and no filtering hook of the app's own, a
+ * declared foreign key keeps the link from pointing at a missing row, and the
+ * context sees every other. SQLite enforces foreign keys only on connections
+ * that turn them on, so there the link is always read.
+ * @param {{ context: ResourceContext, scopes: Record<string, LifecycleResource>, hookNames: (event: string, scope: LifecycleResource) => string[], sourceType: string, relationshipName: string, targetType: string }} link
+ */
+function linkNeedsNoRead ({ context, scopes, hookNames, sourceType, relationshipName, targetType }) {
+  const target = scopes[targetType]
+  const targetVars = /** @type {LifecycleVars & { rowPolicy?: unknown }} */ (target?.vars)
+  if (!isSystemContext(context) || !target || targetVars?.rowPolicy || databaseFamily(context.db) === 'sqlite') return false
+  if (hookNames('knexQueryFiltering', target).some(name => !LIBRARY_FILTERING_HOOKS.has(name))) return false
+  const sourceAdapter = resolveScopeStorageAdapter(scopes, sourceType, context.db)
+  const targetAdapter = resolveScopeStorageAdapter(scopes, targetType, context.db)
+  if (!sourceAdapter || !targetAdapter || sourceAdapter.isCanonical() || targetAdapter.isCanonical()) return false
+  const schemaInfo = scopes[sourceType]?.vars.schemaInfo
+  if (!schemaInfo) return false
+  const field = Object.entries(schemaInfo.schemaStructure)
+    .find(([, definition]) => definition.as === relationshipName && definition.belongsTo === targetType)?.[0]
+  return field !== undefined && foreignKeyProtects(schemaInfo, field, sourceAdapter.translateColumn(field), { tableName: targetAdapter.getTableName() }, targetAdapter.getIdColumn())
+}
+
+/**
+ * Sets to null the to-one links of the response whose target the caller cannot
+ * see or that no longer exists, with one read per linked type.
+ * @param {ResourceContext} context
+ * @param {Record<string, LifecycleResource>} scopes
+ * @param {(event: string, scope: LifecycleResource) => string[]} hookNames
+ */
+export const filterToOneResponseLinkage = async (context, scopes, hookNames) => {
   const document = context.record
   const resources = [document?.data, document?.included].flat().filter(resource => resource != null)
   const linkages = []
@@ -648,7 +703,9 @@ export const filterToOneResponseLinkage = async (context, scopes) => {
     for (const [name, relationship] of Object.entries(resource.relationships || {})) {
       if (requestedFields !== null && !requestedFields.includes(name)) continue
       const definition = findRelationshipDefinition(schemaInfo, name)
-      if ((definition?.belongsTo || definition?.belongsToPolymorphic) && relationship.data) linkages.push(relationship)
+      if (!(definition?.belongsTo || definition?.belongsToPolymorphic) || !relationship.data) continue
+      if (definition.belongsTo && linkNeedsNoRead({ context, scopes, hookNames, sourceType: resource.type, relationshipName: name, targetType: /** @type {Identifier} */ (relationship.data).type })) continue
+      linkages.push(relationship)
     }
   }
   // A target the response already includes is no secret, so it needs no read.

@@ -84,7 +84,7 @@ export async function queryAllMethod ({ params, context, vars, scopeName, api })
 // data call, so masking and denials apply to them too: checkDataPermissions for
 // each row as `get` runs it, enrichRecord, computed fields, the finish hooks,
 // sparse fieldsets and the plain format. Hooks see method 'query' and lock: true.
-async function finishLockedRead ({ document, context, scope, scopes, scopeName, runHooks, hasHooks }) {
+async function finishLockedRead ({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames }) {
   context.method = 'query'
   context.lock = true
   context.record = normalizeRecordAttributes(document, scopes)
@@ -111,7 +111,7 @@ async function finishLockedRead ({ document, context, scope, scopes, scopeName, 
   }
   await runHooks('finish')
   await runHooks('finishQuery')
-  await filterToOneResponseLinkage(context, scopes)
+  await filterToOneResponseLinkage(context, scopes, hookNames)
   const record = normalizeRecordAttributes(context.record, scopes, { source: 'response' })
   filterResponseFields(record, context.queryParams.fields)
   if (context.format !== 'plain') return { data: record.data }
@@ -153,7 +153,7 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
  * @param {any} args
  */
 export async function lockByIdsMethod (args) {
-  const { params, context, helpers, scope, scopes, runHooks, hasHooks, scopeName, scopeOptions, vars } = args
+  const { params, context, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName, scopeOptions, vars } = args
   const lockMode = await setupLockRead(args, 'lockByIds', 'dataLockByIds')
   if (!Array.isArray(params.ids) || !params.ids.length) throw invalid('ids', 'ids must be a non-empty array')
   const ids = params.ids.map(id => requireExistingResourceId(id, { scopeOptions, vars, scopeName }))
@@ -178,7 +178,7 @@ export async function lockByIdsMethod (args) {
     throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: ids.length - document.data.length })
   }
   if (!document.data.length) return { data: [] }
-  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
 }
 
 /**
@@ -188,13 +188,13 @@ export async function lockByIdsMethod (args) {
  * @param {any} args
  */
 export async function lockWhereMethod (args) {
-  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
+  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName } = args
   const lockMode = await setupLockRead(args, 'lockWhere', 'dataLockWhere')
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1, lockMode })
   if (document.data.length > MAX_LOCK_WHERE) throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
-  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
 }
 
 /**
@@ -203,7 +203,7 @@ export async function lockWhereMethod (args) {
  * @param {any} args
  */
 export async function claimMethod (args) {
-  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
+  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName } = args
   const lockMode = await setupLockRead(args, 'claim', 'dataClaim')
   const limit = params.limit ?? 1
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CLAIM) throw invalid('limit', `limit must be an integer from 1 to ${MAX_CLAIM}`)
@@ -220,5 +220,5 @@ export async function claimMethod (args) {
   })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit, lockMode })
-  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
 }
