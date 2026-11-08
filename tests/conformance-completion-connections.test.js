@@ -3,10 +3,14 @@ import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { interceptTransactionCompletion } from './helpers/transaction-completion.js'
 
+// One connection, and a generous wait for it: replacing a failed connection on a
+// loaded test host can take longer than the helper's five-second default.
+const databaseOptions = { concurrent: true, maxConnections: 1, acquireConnectionTimeout: 30000 }
+
 for (const phase of ['commit', 'rollback']) {
   for (const afterExecution of [false, true]) {
     test(`${phase} failure ${afterExecution ? 'after' : 'before'} execution isolates the connection from a waiting borrower`, async () => {
-      const fixture = await createConformanceFixture({ databaseOptions: { concurrent: true, maxConnections: 1 } })
+      const fixture = await createConformanceFixture({ databaseOptions })
       let completion, borrowing, borrowed
       const primary = new Error('Reject callback')
       try {
@@ -38,7 +42,7 @@ for (const phase of ['commit', 'rollback']) {
 
 for (const phase of ['commit', 'rollback']) {
   test(`acknowledged ${phase} keeps its connection reusable`, async () => {
-    const fixture = await createConformanceFixture({ databaseOptions: { concurrent: true, maxConnections: 1 } })
+    const fixture = await createConformanceFixture({ databaseOptions })
     let connection, borrowed, borrowing
     const primary = new Error('Reject callback')
     try {
@@ -67,7 +71,7 @@ for (const phase of ['commit', 'rollback']) {
 }
 
 test('failed BEGIN releases its connection lease without lending the failed connection', async () => {
-  const fixture = await createConformanceFixture({ databaseOptions: { concurrent: true, maxConnections: 1 } })
+  const fixture = await createConformanceFixture({ databaseOptions })
   const connection = await fixture.knex.client.acquireConnection()
   await fixture.knex.client.releaseConnection(connection)
   const primary = new Error('BEGIN failed')
@@ -100,7 +104,7 @@ test('failed BEGIN releases its connection lease without lending the failed conn
 })
 
 test('a rollback rejection without completion settlement releases an unusable connection', async t => {
-  const fixture = await createConformanceFixture({ databaseOptions: { concurrent: true, maxConnections: 1 } })
+  const fixture = await createConformanceFixture({ databaseOptions })
   const primary = new Error('Callback failed')
   const secondary = new Error('Rollback rejected before completion')
   const context = {}

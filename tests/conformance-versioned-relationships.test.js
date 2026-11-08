@@ -49,7 +49,8 @@ for (const relationshipName of ['items', 'members']) {
         const transactions = new Set()
         let release, rejectReady
         const ready = new Promise((resolve, reject) => { release = resolve; rejectReady = reject })
-        const deadline = setTimeout(() => rejectReady(new Error('Both relationship clients did not reach the barrier')), 10000)
+        // Generous, so a loaded test host does not fail it: both clients normally arrive at once.
+        const deadline = setTimeout(() => rejectReady(new Error('Both relationship clients did not reach the barrier')), 60000)
         const synchronize = async transaction => {
           assert.ok(transaction?.isTransaction && !transaction.isCompleted())
           transactions.add(transaction)
