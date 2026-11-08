@@ -21,6 +21,7 @@ import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
+import { databaseFamily } from './many-row-data-helpers.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -280,7 +281,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     runHooks,
     applyQueryFilters,
     filters = context.queryParams?.filters,
-    queryPurpose = 'single'
+    queryPurpose = 'single',
+    locked = false
   }) {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     context.storageAdapter = storageAdapter
@@ -332,6 +334,19 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       const column = storageAdapter.translateColumn(field)
       return [field === 'id' ? 'id' : column, databaseIdentityExpression(db, `${tableName}.${column}`)]
     }))
+    if (ids !== undefined && locked && databaseFamily(db) === 'mysql') {
+      // InnoDB answers a plain read from the transaction's snapshot and a
+      // locking read from the latest rows. Rows this transaction has locked
+      // are read with a locking read in the scope's own query block, row
+      // policy included, so a row another transaction committed after the
+      // snapshot is seen as it was locked. (PostgreSQL's plain and locking
+      // reads see the same rows; SQLite has one writer.)
+      /** @type {StorageRow[]} */
+      const rows = await applyDatabaseReadOptions(query.clearSelect().select(`${tableName}.*`, identities).forShare())
+      // A policy join can repeat a row.
+      const records = [...new Map(rows.map(row => [String(row.id), row])).values()]
+      return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
+    }
     if (ids !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${tableName}.${idProperty}`)

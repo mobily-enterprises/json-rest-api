@@ -322,7 +322,11 @@ number of statements per chunk. The records it updates go through a patch's
 checks as well as a create's: `checkPermissions` runs with `method: 'patch'`
 and the matched record as `minimalRecord`, the resource is refused if a
 per-record patch hook without `{ batch: true }` runs for it, and a key that
-matches a record the caller cannot see fails the batch as `forbidden`.
+matches a record the caller cannot see fails the batch as `forbidden`. The
+caller's scope is checked on the records as locked: on MySQL and MariaDB, whose
+plain reads keep a REPEATABLE READ transaction's first snapshot, that check is
+a locking read too, so a matching record another transaction committed after
+this one's first read is merged into, not taken for a hidden one.
 
 With `returning: 'count'` an upsert counts the rows it inserted, and with
 `merge` the records it updated as well.

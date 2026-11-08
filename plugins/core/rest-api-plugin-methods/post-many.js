@@ -108,8 +108,10 @@ async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName
   const missing = attributes.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
 
   const visible = new Map()
+  // dataIdsByKeys locked these rows, and may have found one that another
+  // transaction committed after this one's snapshot: read them as locked.
   for (const part of chunk(matched.map(index => existing[index]), VISIBLE_READ_CHUNK)) {
-    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
+    const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write', locked: true })
     for (const record of records) visible.set(String(record.id), record)
   }
   for (const index of matched) {

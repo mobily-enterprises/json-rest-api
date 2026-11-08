@@ -291,6 +291,8 @@ export type QueryBuilderResult = StorageQuery | { query: QueryBuilderResult }
 export interface DataMinimalRequest extends DataReadRequest {
   filters?: StorageRow
   queryPurpose?: string
+  /** With ids: the caller's transaction holds row locks on them, so read them as its locking reads see them. */
+  locked?: boolean
   applyQueryFilters?: (params: QueryFilteringState & { query: StorageQuery }) => Promise<{ query: QueryBuilderResult } | null | undefined>
 }
 

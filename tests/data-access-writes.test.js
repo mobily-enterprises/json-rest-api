@@ -10,6 +10,7 @@ import {
 } from '../index.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { databaseClient } from './helpers/test-database.js'
+import { holdManagedTransaction } from './helpers/transaction-completion.js'
 import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './fixtures/data-access-api.js'
 
 const cause = error => error?.cause ?? error
@@ -1075,5 +1076,35 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     await assert.rejects(fixture.api.resources.da_labels.postMany({ data: [{ id: '1', name: 'flag' }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
     await assert.rejects(fixture.api.resources.da_entries.postMany({ data: [{ id: '1', ...newEntries(1)[0] }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
     assert.deepEqual(await fixture.knex('da_sign_ins').orderBy('email').pluck('email'), ['ann@example.com', 'bob@example.com'])
+  })
+})
+
+describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { skip: tableOnly || (databaseClient === 'better-sqlite3' && 'SQLite has one writer') }, () => {
+  let fixture
+  before(async () => { fixture = await createDataAccessFixture({ databaseOptions: { concurrent: true } }) })
+  after(async () => { await fixture?.close() })
+
+  it('merges into a matching row another transaction committed after this one first read', async () => {
+    await fixture.reset()
+    const labels = fixture.api.resources.da_labels
+    const merge = { keys: ['workspace_id', 'name'], action: 'merge', merge: ['color'] }
+    const first = await holdManagedTransaction(fixture.api)
+    try {
+      if (databaseClient === 'mysql2') {
+        const [[{ level }]] = await first.transaction.raw('select @@transaction_isolation as level')
+        assert.equal(level, 'REPEATABLE-READ', 'the default isolation, whose plain reads keep the first read\'s snapshot')
+      }
+      // This read fixes the transaction's snapshot: the label does not exist yet.
+      assert.deepEqual((await labels.query({ transaction: first.transaction }, workspaceA())).data, [])
+      // Another transaction creates it and commits.
+      await labels.postMany({ data: [{ name: 'race', color: 'blue', slug: 'a-race' }] }, workspaceA())
+      // The upsert's locking read finds the committed row; the caller may change it, so it merges.
+      const merged = await labels.postMany({ data: [{ name: 'race', color: 'red' }], onConflict: merge, returning: 'full', transaction: first.transaction }, workspaceA())
+      assert.deepEqual(merged.data.map(record => [record.name, record.color, record.slug]), [['race', 'red', 'a-race']])
+      await first.commit()
+    } finally {
+      if (!first.transaction.isCompleted()) await first.rollback()
+    }
+    assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color, row.workspace_id]), [['race', 'red', 'ws-a']])
   })
 })
