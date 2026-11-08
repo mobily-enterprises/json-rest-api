@@ -162,21 +162,29 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return { ...row, [tenantColumn]: canonical.tenant, [resourceColumn]: canonical.resource, ...(attributes.id != null ? { [storageAdapter.getIdColumn()]: String(attributes.id) } : {}) }
   }
 
-  // Tables and key columns a unique index was found to cover. A missing index is
+  // The unique index found to cover each table's key columns. A missing index is
   // looked for again on the next call, so adding one needs no restart.
-  const coveredKeys = new Set()
+  /** @type {Map<string, { columns: string[], exact: boolean }>} */
+  const coveredKeys = new Map()
   /**
    * Refuses conflict keys that no unique index covers. Without one, the keys
    * could match several rows, and a locking read on them would examine (and on
-   * MySQL lock) every row of the table.
+   * MySQL lock) every row of the table. Returns the index that covers them, one
+   * on exactly the keys when there is one: `ON CONFLICT` must name an index's
+   * exact columns, and keys that include an ownership column the index lacks
+   * name none. (Partial indexes do not count: rows outside their predicate can
+   * share the keys.)
+   * @returns {Promise<{ columns: string[], exact: boolean }>}
    */
   const requireUniqueKeys = async ({ scopeName, db, tableName, keyColumns, canonical }) => {
     // A canonical row's keys are its tenant's and resource's.
     const columns = canonical ? [canonical.canonical.tenantColumn, canonical.canonical.resourceColumn, ...keyColumns] : keyColumns
     const cacheKey = JSON.stringify([tableName, [...columns].sort()])
-    if (coveredKeys.has(cacheKey)) return
-    const uniqueKeys = await listKnexUniqueKeyColumns(db, tableName)
-    if (!uniqueKeys.some(unique => unique.every(column => columns.includes(column)))) {
+    const cached = coveredKeys.get(cacheKey)
+    if (cached) return cached
+    const covering = (await listKnexUniqueKeyColumns(db, tableName)).filter(unique => unique.every(column => columns.includes(column)))
+    const exact = covering.find(unique => unique.length === new Set(columns).size)
+    if (!covering.length) {
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,
         operation: 'postMany',
@@ -185,7 +193,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
           : `no unique index of '${tableName}' covers the onConflict keys (${keyColumns.join(', ')}); add one, so that the keys identify one row`
       })
     }
-    coveredKeys.add(cacheKey)
+    const index = { columns: exact || covering[0], exact: Boolean(exact) }
+    coveredKeys.set(cacheKey, index)
+    return index
   }
 
   /**
@@ -308,9 +318,11 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const canonical = canonicalOf(scopeName, storageAdapter)
     const storageRows = rows.map(attributes => newStorageRow(scopeName, storageAdapter, attributes, context))
     const keyColumns = onConflict?.keys.map(field => storageAdapter.translateColumn(field))
-    // The canonical table's only unique key is the logical id; refuse others before the INSERT does.
-    if (onConflict && canonical) await requireUniqueKeys({ scopeName, db, tableName, keyColumns, canonical })
-    const conflictColumns = canonical && keyColumns ? [canonical.canonical.tenantColumn, canonical.canonical.resourceColumn, ...keyColumns] : keyColumns
+    // ON CONFLICT names the unique index on the keys. When the only one is on
+    // fewer columns (the keys add an ownership column, say), a row it skips
+    // clashed on that index, which is a match only if the keys match too.
+    const arbiter = onConflict ? await requireUniqueKeys({ scopeName, db, tableName, keyColumns, canonical }) : undefined
+    const readIds = needIds || (arbiter !== undefined && !arbiter.exact)
 
     // Rows with the same columns share a statement; SQLite cannot insert DEFAULT for a missing value.
     const groups = new Map()
@@ -332,9 +344,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         const values = part.map(index => storageRows[index])
         let query = db(tableName).insert(values)
         // Only a clash on the conflict keys is skipped; any other unique index still fails.
-        if (conflict) query = query.onConflict(conflictColumns).ignore()
+        if (conflict) query = query.onConflict(arbiter.columns).ignore()
 
-        if (!needIds && !generated) {
+        if (!readIds && !generated) {
           await query
           continue
         }
@@ -376,6 +388,15 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
           stored = stored.map(id => String(id))
         }
         part.forEach((index, position) => { ids[index] = stored[position] })
+      }
+    }
+    if (arbiter && !arbiter.exact) {
+      const skipped = rows.flatMap((_row, index) => ids[index] === undefined ? [index] : [])
+      const matched = skipped.length ? await dataIdsByKeys({ scopeName, context, rows: skipped.map(index => rows[index]), keys: onConflict.keys, chunkSize }) : []
+      if (matched.some(id => id === undefined)) {
+        throw new RestApiResourceError(`A ${scopeName} row clashes with a stored record on the unique index (${arbiter.columns.join(', ')}) without matching it by the onConflict keys (${onConflict.keys.join(', ')})`, {
+          subtype: 'conflict', resourceType: scopeName
+        })
       }
     }
     return needIds ? ids : undefined

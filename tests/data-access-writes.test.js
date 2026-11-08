@@ -208,6 +208,40 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
           assert.equal((await fixture.knex('da_labels').where({ name: 'stolen' })).length, 0, action)
         }
       })
+
+      it('upserts on keys that add the ownership field to a unique index on fewer columns', { skip: idKeysOnly }, async () => {
+        await fixture.reset()
+        await fixture.seed('da_labels', [
+          { id: '1', name: 'urgent', color: 'red', slug: 'a-urgent', workspace_id: 'ws-a' },
+          { id: '2', name: 'urgent', color: 'blue', slug: 'b-urgent', workspace_id: 'ws-b' }
+        ])
+        const labels = fixture.api.resources.da_labels
+        // The unique index on the slug is on the slug alone, without workspace_id.
+        const bySlug = action => ({ keys: ['workspace_id', 'slug'], action, ...(action === 'merge' ? { merge: ['color'] } : {}) })
+        const ignored = await labels.postMany({
+          data: [{ name: 'again', color: 'black', slug: 'a-urgent' }, { name: 'fresh', color: 'green', slug: 'a-fresh' }],
+          returning: 'full',
+          onConflict: bySlug('ignore')
+        }, workspaceA())
+        assert.deepEqual(ignored.data.map(record => record.slug), ['a-fresh'])
+        const merged = await labels.postMany({
+          data: [{ name: 'urgent', color: 'orange', slug: 'a-urgent' }, { name: 'later', color: 'white', slug: 'a-later' }],
+          returning: 'full',
+          onConflict: bySlug('merge')
+        }, workspaceA())
+        assert.deepEqual(merged.data.map(record => [record.slug, record.color]), [['a-urgent', 'orange'], ['a-later', 'white']])
+        // Another workspace's slug clashes on the index without matching the keys: the batch fails.
+        for (const action of ['ignore', 'merge']) {
+          await assert.rejects(labels.postMany({ data: [{ name: 'stolen', color: 'black', slug: 'b-urgent' }], onConflict: bySlug(action) }, workspaceA()), action)
+        }
+        const after = await fixture.knex('da_labels').orderBy('slug')
+        assert.deepEqual(after.map(row => [row.slug, row.name, row.color, row.workspace_id]), [
+          ['a-fresh', 'fresh', 'green', 'ws-a'],
+          ['a-later', 'later', 'white', 'ws-a'],
+          ['a-urgent', 'urgent', 'orange', 'ws-a'],
+          ['b-urgent', 'urgent', 'blue', 'ws-b']
+        ])
+      })
     })
 
     it('verifies MySQL insert ids against the inserted rows', { skip: databaseClient !== 'mysql2' && 'MySQL and MariaDB only' }, async () => {
