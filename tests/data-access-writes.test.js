@@ -291,7 +291,19 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       await assert.rejects(entries.patchWhereIds({ ids: ['1'], data: { id: '5' } }, workspaceA()), invalid)
       await assert.rejects(entries.patchWhereIds({ ids: ['1', '1'], data: { amount: 1 } }, workspaceA()), invalid)
       await assert.rejects(entries.patchMany({ data: [{ id: '1', amount: 'many' }] }, workspaceA()), invalid)
-      await assert.rejects(entries.patchMany({ data: [{ id: '1' }] }, workspaceA()), invalid, 'an empty patch row')
+      await assert.rejects(fixture.api.resources.da_accounts.patchMany({ data: [{ id: '1' }] }, workspaceA()), invalid, 'an empty patch row')
+    })
+
+    it('advances the lock version of a row with no fields to change', async () => {
+      await seedLedger(fixture)
+      const entries = fixture.api.resources.da_entries
+      const touched = await entries.patchMany({ data: [{ id: '1' }, { id: '2' }], missing: 'skip', returning: 'minimal' }, workspaceA())
+      assert.deepEqual(touched.data.map(item => item.id), ['1', '2'])
+      // As a compare-and-set, the version it advances is the condition.
+      const claimed = await entries.patchWhereIds({ ids: ['1', '3'], data: {}, onlyIf: { lock_version: 0 }, returning: 'minimal' }, workspaceA())
+      assert.deepEqual(claimed.data.map(item => item.id), ['3'])
+      const rows = await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).orderBy('id')
+      assert.deepEqual(rows.map(row => [Number(row.amount), Number(row.lock_version)]), [[10, 1], [20, 1], [30, 1]])
     })
 
     it('applies onlyIf as compare-and-set and returns only the changed ids', async () => {

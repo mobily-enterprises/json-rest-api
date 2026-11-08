@@ -115,8 +115,9 @@ async function runPatchMany (args, { operation, entries, started = false, select
   const targets = new Map()
   const rows = entries.map((entry, index) => {
     const rowContext = { ...context, method: 'patch', inputRecord: entry.document, originalInputAttributes: undefined, bulkIndex: index }
-    // A row of raw values alone still carries an (empty) attributes object.
-    if (Object.keys(entry.raw).length) entry.document.data.attributes ||= {}
+    // A row of raw values alone, or one that only advances a lock version,
+    // still carries an (empty) attributes object.
+    if (Object.keys(entry.raw).length || schemaInfo.lockVersionField) entry.document.data.attributes ||= {}
     try {
       validateUpdateRequest({ method: 'patch', params: {}, context: rowContext, vars, scopeOptions, scopeName })
     } catch (error) { throw atIndex(error, index) }
@@ -138,7 +139,8 @@ async function runPatchMany (args, { operation, entries, started = false, select
       rowContext.inputRecord.data.attributes = { ...rowContext.inputRecord.data.attributes, ...belongsToUpdates }
       // A polymorphic relationship writes its own type and id columns, which may be ownership fields.
       refuseProtectedFields(Object.keys(rowContext.inputRecord.data.attributes), schemaInfo, index)
-      if (!Object.keys(rowContext.inputRecord.data.attributes).length && !Object.keys(row.raw).length) {
+      // A row with no fields still advances a lock version.
+      if (!Object.keys(rowContext.inputRecord.data.attributes).length && !Object.keys(row.raw).length && !schemaInfo.lockVersionField) {
         throw invalid('data', 'A patch row must change at least one field')
       }
       parents.push(...belongsToTargets)

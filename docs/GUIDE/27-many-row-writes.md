@@ -122,6 +122,10 @@ methods.
 - autofilter (ownership) fields and the relationships that set them;
 - the resource's `lockVersionField`, which every update advances by itself.
 
+A row of a resource with a lock version may change no field at all: its UPDATE
+then only advances the version, which tells other writers' `onlyIf` the
+record has changed.
+
 They accept a `knex.raw(...)` value for a stored, non-relationship field, so a
 counter can move inside the statement:
 
