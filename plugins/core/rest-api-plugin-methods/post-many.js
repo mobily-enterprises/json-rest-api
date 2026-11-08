@@ -287,7 +287,15 @@ export default async function postManyMethod ({
     const response = countsRows
       ? { meta: { count: rows.length } }
       : await manyRowResponse({
-        api, scopeName, context, ids: context.ids || [], returning: context.returning, format: context.format, queryParams: params.queryParams
+        api,
+        scopeName,
+        context,
+        ids: context.ids || [],
+        returning: context.returning,
+        format: context.format,
+        queryParams: params.queryParams,
+        // A merge may match a row committed after this transaction's snapshot and leave it unchanged.
+        locked: onConflict?.action === 'merge'
       })
     await commitOwnedTransaction(context)
     return response

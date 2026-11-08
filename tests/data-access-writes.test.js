@@ -1107,4 +1107,38 @@ describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { ski
     }
     assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color, row.workspace_id]), [['race', 'red', 'ws-a']])
   })
+
+  // The late label is created as blue; `row` is merged into it from the older snapshot.
+  const mergeIntoLateLabel = async (row, returning) => {
+    await fixture.reset()
+    const labels = fixture.api.resources.da_labels
+    const first = await holdManagedTransaction(fixture.api)
+    try {
+      assert.deepEqual((await labels.query({ transaction: first.transaction }, workspaceA())).data, [])
+      await labels.postMany({ data: [{ name: 'race', color: 'blue', slug: 'a-race' }] }, workspaceA())
+      const merged = await labels.postMany({
+        data: [row],
+        onConflict: { keys: ['workspace_id', 'name'], action: 'merge', merge: ['color'] },
+        returning,
+        transaction: first.transaction
+      }, workspaceA())
+      await first.commit()
+      return merged
+    } finally {
+      if (!first.transaction.isCompleted()) await first.rollback()
+    }
+  }
+
+  it('returns a late matching row that the merge leaves unchanged', async () => {
+    // The stored values are the merged ones, so the merge changes nothing.
+    const same = await mergeIntoLateLabel({ name: 'race', color: 'blue' }, 'full')
+    assert.deepEqual(same.data.map(record => [record.name, record.color, record.slug]), [['race', 'blue', 'a-race']])
+    assert.deepEqual(await mergeIntoLateLabel({ name: 'race', color: 'blue' }, 'count'), { meta: { count: 1 } })
+  })
+
+  it('returns a late matching row when the row supplies none of the fields to merge', async () => {
+    const nothing = await mergeIntoLateLabel({ name: 'race' }, 'full')
+    assert.deepEqual(nothing.data.map(record => [record.name, record.color, record.slug]), [['race', 'blue', 'a-race']])
+    assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color]), [['race', 'blue']])
+  })
 })

@@ -8,7 +8,7 @@ import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-que
 import { toJsonApiRecordWithBelongsTo } from '../querying-writing/knex-json-api-transformers.js'
 import { processIncludes } from '../querying/knex-process-includes.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
-import { applyQueryConstraint } from '../querying/query-constraint.js'
+import { applyQueryConstraint, queryConstraint } from '../querying/query-constraint.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
@@ -440,6 +440,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     })
     const { pageSize } = paginationInfo
 
+    // Rows this transaction has locked, read as its locking reads see them (see dataGetMinimal).
+    const constraint = context[queryConstraint]
+    if (constraint?.scopeName === scopeName && constraint.locked && databaseFamily(db) === 'mysql') query.forShare()
     /** @type {StorageRow[]} */
     const records = await applyDatabaseReadOptions(query)
 

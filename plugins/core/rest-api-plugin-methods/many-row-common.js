@@ -245,9 +245,10 @@ export function validateFilters ({ filters, scopeName, schemaInfo, vars }) {
 /**
  * The response of a many-row write: the count of written rows, identifiers,
  * full records read through `query` in the write's transaction, or nothing.
- * @param {{ api: any, scopeName: string, context: any, ids: unknown[], returning: string, format: string, queryParams?: any }} request
+ * `locked`: the transaction holds row locks on the ids, so they are read as locked.
+ * @param {{ api: any, scopeName: string, context: any, ids: unknown[], returning: string, format: string, queryParams?: any, locked?: boolean }} request
  */
-export async function manyRowResponse ({ api, scopeName, context, ids, returning, format, queryParams = {} }) {
+export async function manyRowResponse ({ api, scopeName, context, ids, returning, format, queryParams = {}, locked = false }) {
   if (returning === 'none') return undefined
   const present = ids.filter(id => id !== undefined && id !== null).map(String)
   if (returning === 'count') return { meta: { count: present.length } }
@@ -263,7 +264,7 @@ export async function manyRowResponse ({ api, scopeName, context, ids, returning
       transaction: context.transaction,
       pageSizeLimit: part.length,
       queryParams: { fields: queryParams.fields, include: queryParams.include, sort: ['id'], page: { size: part.length } },
-      [queryConstraint]: { scopeName, idsQuery: part }
+      [queryConstraint]: { scopeName, idsQuery: part, locked }
     }, { ...context, method: undefined, knexQuery: undefined })
     for (const record of page.data) byId.set(String(record.id), record)
     for (const resource of page.included || []) included.set(`${resource.type}:${resource.id}`, resource)

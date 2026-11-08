@@ -13,6 +13,8 @@ export interface MandatoryQueryConstraint {
   scopeName: string
   values?: StorageRow
   idsQuery?: StorageQuery
+  /** The caller's transaction holds row locks on the ids: read them as its locking reads see them. */
+  locked?: boolean
 }
 export type SelectColumn = string | Knex.Raw<unknown> | StorageQuery | Record<string, string>
 export type SelectColumns = SelectColumn[] | Record<string, string> | null | undefined
