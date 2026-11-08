@@ -100,9 +100,14 @@ describe(`Integer fields over BIGINT columns (${storageMode.mode})`, { skip: sto
   const unsafe = '9007199254740993'
   before(async () => {
     database = await createTestDatabase()
-    contacts = (await createFieldTypesApi(database.knex, { fields: { total_minor: { type: 'integer', nullable: true } } })).resources.contacts
-    // SQLite has one INTEGER storage class, which its driver reads as a number.
-    if (databaseClient !== 'better-sqlite3') await database.knex.schema.alterTable('field_type_contacts', table => { table.bigInteger('total_minor').nullable().alter() })
+    contacts = (await createFieldTypesApi(database.knex, { fields: { total_minor: { type: 'integer', nullable: true }, ratio: { type: 'number', nullable: true } } })).resources.contacts
+    // SQLite has one INTEGER storage class, which its driver reads as a number, and no exact decimals.
+    if (databaseClient !== 'better-sqlite3') {
+      await database.knex.schema.alterTable('field_type_contacts', table => {
+        table.bigInteger('total_minor').nullable().alter()
+        table.decimal('ratio', 30, 10).nullable().alter()
+      })
+    }
   })
   after(async () => { try { await database?.close() } finally { if (database) storageMode.clearRegistry(database.knex) } })
 
@@ -119,5 +124,23 @@ describe(`Integer fields over BIGINT columns (${storageMode.mode})`, { skip: sto
     await database.knex('field_type_contacts').where('id', bob).update({ total_minor: unsafe })
     assert.equal((await contacts.get({ id: bob, format: 'plain' })).total_minor, unsafe)
     assert.deepEqual((await contacts.query({ format: 'plain', queryParams: { sort: ['id'] } })).data.map(row => row.total_minor), [4500, unsafe])
+    // Past 2^53 a value stays a string even when a number prints back the same digits.
+    for (const value of ['9007199254740991', '-9007199254740991']) {
+      await database.knex('field_type_contacts').where('id', bob).update({ total_minor: value })
+      assert.equal((await contacts.get({ id: bob, format: 'plain' })).total_minor, Number(value), value)
+    }
+    for (const value of ['9007199254740992', '-9007199254740994', '1000000000000000000']) {
+      await database.knex('field_type_contacts').where('id', bob).update({ total_minor: value })
+      assert.equal((await contacts.get({ id: bob, format: 'plain' })).total_minor, value, value)
+    }
+  })
+
+  it('reads a decimal column into a number field as a number only when the number holds it exactly', { skip: databaseClient === 'better-sqlite3' && 'SQLite has no exact decimal column' }, async () => {
+    const [row] = (await contacts.postMany({ format: 'plain', returning: 'full', data: [{ name: 'Cy', ratio: 12.5 }] })).data
+    // The column returns '12.5000000000'.
+    assert.equal(row.ratio, 12.5)
+    const exact = '1234567890123.4567890123'
+    await database.knex('field_type_contacts').where('id', row.id).update({ ratio: exact })
+    assert.equal((await contacts.get({ id: row.id, format: 'plain' })).ratio, exact)
   })
 })

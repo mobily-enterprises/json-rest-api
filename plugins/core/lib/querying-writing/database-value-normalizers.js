@@ -363,13 +363,16 @@ export function normalizeStructuredValue (value, type, { fieldName, resourceType
 }
 
 // Drivers return BIGINT and some other numeric columns as strings. A value a
-// JavaScript number holds exactly becomes one; a longer integer keeps its
-// digits as a string. Decimals (precision and scale) keep theirs, to avoid rounding.
+// JavaScript number holds exactly, so that it prints back as the same digits
+// (trailing fraction zeros aside), becomes one; any other, and any integer past
+// 2^53 even when it prints back, keeps its digits as a string. Decimals
+// (precision and scale) keep theirs, to avoid rounding.
 const isDecimalField = definition => definition.precision !== undefined && definition.scale !== undefined
 /** @param {string} value */
 const storedNumber = value => {
   const number = Number(value)
-  return value.trim() !== '' && Number.isFinite(number) && (!Number.isInteger(number) || Number.isSafeInteger(number)) ? number : value
+  const digits = (value.includes('.') ? value.replace(/\.?0+$/, '') : value).replace(/^-0$/, '0')
+  return Number.isFinite(number) && (!Number.isInteger(number) || Number.isSafeInteger(number)) && String(number) === digits ? number : value
 }
 
 /**

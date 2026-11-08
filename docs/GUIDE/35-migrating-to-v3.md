@@ -81,9 +81,9 @@ bulk options are rejected with a message that names their replacement.
   `number` field whose driver returns a string (PostgreSQL's BIGINT, MySQL's
   BIGINT past 2^53) reads as a number when a JavaScript number holds it exactly,
   on every read and write response, as aggregates already did. It used to stay
-  a string, such as `"4400"`. A longer integer keeps its digits as a string,
-  where an aggregate used to round it; decimal fields (`precision` and
-  `scale`) keep their strings.
+  a string, such as `"4400"`. A longer integer, or a fraction a number cannot
+  hold exactly, keeps its digits as a string, where an aggregate used to round
+  it; decimal fields (`precision` and `scale`) keep their strings.
 - **Numbered pages without counts:** with `enablePaginationCounts: false` an
   offset page reads one extra row and reports `hasMore` and a `next` link,
   still without a count query.
