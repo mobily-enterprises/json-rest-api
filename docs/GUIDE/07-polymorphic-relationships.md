@@ -98,8 +98,10 @@ const authorReviewDocument = await api.resources.reviews.post({
 
 Plain polymorphic input uses `{ _type, id }` under the relationship alias.
 JSON:API uses `{ type, id }` under `data.relationships.reviewable.data`.
-Do not write `reviewable_type` or `reviewable_id` as public attributes. Those
-logical fields describe storage; the public relationship represents them together.
+Writes refuse `reviewable_type` and `reviewable_id` in attributes (rule
+`foreign_key_in_attributes`), as they refuse a belongs-to foreign key: those
+logical fields describe storage, and the public relationship sets them together,
+after checking that the caller can see the target.
 Plain output uses `_type` to identify the related resource type as well.
 
 ## Include either direction

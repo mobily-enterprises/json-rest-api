@@ -65,9 +65,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 5,
           title: 'Great book!',
           content: 'This is an excellent book about testing.',
-          reviewer_name: 'John Doe',
-          reviewable_type: 'books',
-          reviewable_id: book.data.id
+          reviewer_name: 'John Doe'
+        }, {
+          reviewable: createRelationship({ type: 'books', id: book.data.id })
         })
       })
 
@@ -92,9 +92,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 4,
           title: 'Talented author',
           content: 'Love this author\'s writing style!',
-          reviewer_name: 'Book Lover',
-          reviewable_type: 'authors',
-          reviewable_id: author.data.id
+          reviewer_name: 'Book Lover'
+        }, {
+          reviewable: createRelationship({ type: 'authors', id: author.data.id })
         })
       })
 
@@ -128,9 +128,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 3,
           title: 'Good publisher',
           content: 'They publish quality books.',
-          reviewer_name: 'Industry Expert',
-          reviewable_type: 'publishers',
-          reviewable_id: publisher.data.id
+          reviewer_name: 'Industry Expert'
+        }, {
+          reviewable: createRelationship({ type: 'publishers', id: publisher.data.id })
         })
       })
 
@@ -177,9 +177,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 5,
           title: 'Excellent!',
           content: 'Must read!',
-          reviewer_name: 'Reader',
-          reviewable_type: 'books',
-          reviewable_id: book.data.id
+          reviewer_name: 'Reader'
+        }, {
+          reviewable: createRelationship({ type: 'books', id: book.data.id })
         })
       })
 
@@ -231,9 +231,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 5,
           title: 'Great book',
           content: 'Love it',
-          reviewer_name: 'Reader 1',
-          reviewable_type: 'books',
-          reviewable_id: book.data.id
+          reviewer_name: 'Reader 1'
+        }, {
+          reviewable: createRelationship({ type: 'books', id: book.data.id })
         })
       })
 
@@ -242,9 +242,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 4,
           title: 'Great author',
           content: 'Talented writer',
-          reviewer_name: 'Reader 2',
-          reviewable_type: 'authors',
-          reviewable_id: author.data.id
+          reviewer_name: 'Reader 2'
+        }, {
+          reviewable: createRelationship({ type: 'authors', id: author.data.id })
         })
       })
 
@@ -305,9 +305,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 5,
           title: 'Amazing!',
           content: 'Best book ever',
-          reviewer_name: 'Fan 1',
-          reviewable_type: 'books',
-          reviewable_id: book.data.id
+          reviewer_name: 'Fan 1'
+        }, {
+          reviewable: createRelationship({ type: 'books', id: book.data.id })
         })
       })
 
@@ -316,9 +316,9 @@ describe('Polymorphic Relationship Operations', () => {
           rating: 4,
           title: 'Very good',
           content: 'Enjoyed reading it',
-          reviewer_name: 'Fan 2',
-          reviewable_type: 'books',
-          reviewable_id: book.data.id
+          reviewer_name: 'Fan 2'
+        }, {
+          reviewable: createRelationship({ type: 'books', id: book.data.id })
         })
       })
 

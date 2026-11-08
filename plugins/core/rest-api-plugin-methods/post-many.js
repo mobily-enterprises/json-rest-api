@@ -13,6 +13,7 @@ import {
   collectRelationshipTargets,
   commitOwnedTransaction,
   handleWriteMethodError,
+  keepHiddenLinks,
   validateRelationshipTargets,
   validateResourceAttributesBeforeWrite
 } from './common.js'
@@ -101,7 +102,7 @@ function suppliedFields (row, beforeSetters, afterSetters) {
  * @param {any} args
  * @param {{ rows: any[], attributes: Record<string, unknown>[], supplied: Set<string>[], onConflict: { keys: string[], merge: string[] }, chunkSize: number, needIds: boolean }} batch
  */
-async function mergeRows ({ context, helpers, scope, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds }) {
+async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds }) {
   const existing = await helpers.dataIdsByKeys({ scopeName, context, rows: attributes, keys: onConflict.keys, chunkSize })
   const matched = attributes.flatMap((_row, index) => existing[index] === undefined ? [] : [index])
   const missing = attributes.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
@@ -130,11 +131,14 @@ async function mergeRows ({ context, helpers, scope, runHooks, scopeName }, { ro
   if (matched.length) {
     const storageAdapter = helpers.getStorageAdapter(scopeName)
     // Only the merge fields a row supplies change; the lock version advances.
-    const updates = matched.map(index => ({
+    const merges = matched.map(index => Object.fromEntries(onConflict.merge
+      .filter(field => supplied[index].has(field))
+      .map(field => [field, attributes[index][field]])))
+    // A merge clears a link the way a patch does, so it keeps one to a hidden target.
+    await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: matched.map((index, position) => ({ updates: merges[position], stored: visible.get(String(existing[index])) })) })
+    const updates = matched.map((index, position) => ({
       id: existing[index],
-      row: storageAdapter.toStorageRow(Object.fromEntries(onConflict.merge
-        .filter(field => supplied[index].has(field))
-        .map(field => [field, attributes[index][field]])), { context: rows[index], operation: 'patch' })
+      row: storageAdapter.toStorageRow(merges[position], { context: rows[index], operation: 'patch' })
     }))
     await helpers.dataUpdateByIds({ scopeName, context, updates, chunkSize })
   }
@@ -273,7 +277,7 @@ export default async function postManyMethod ({
     const countsRows = context.returning === 'count' && !onConflict
     const needIds = (context.returning !== 'none' && !countsRows) || hasHooks('afterDataCallPostMany')
     const ids = onConflict?.action === 'merge'
-      ? await mergeRows({ context, helpers, scope, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds })
+      ? await mergeRows({ context, helpers, scope, scopes, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds })
       : await helpers.dataInsertMany({ scopeName, context, rows: attributes, chunkSize, needIds, onConflict })
     context.ids = ids?.map(id => id === undefined || id === null ? undefined : String(id))
     await runHooks('afterDataCallPostMany')

@@ -284,7 +284,11 @@ export const validateResourceAttributesBeforeWrite = async ({
     ...(hasLogicalIdField && resourceId !== undefined ? { id: resourceId } : {})
   }
 
-  // Physical foreign keys may enter storage only through relationship planning.
+  // Physical foreign keys, and the type and id fields behind a polymorphic
+  // belongs-to, may enter storage only through relationship planning.
+  /** @type {Map<string, string>} */
+  const polymorphicFields = new Map(Object.entries(context.schemaInfo.schemaRelationships || {}).flatMap(([name, relationship]) =>
+    relationship.belongsToPolymorphic ? [[relationship.belongsToPolymorphic.typeField, name], [relationship.belongsToPolymorphic.idField, name]] : []))
   /** @type {StorageRow} */
   const attributesForValidation = { ...attributesToValidate }
   const foreignKeyViolations = []
@@ -298,13 +302,14 @@ export const validateResourceAttributesBeforeWrite = async ({
         message: `Field '${field}' is retired and accepts no new values`
       })
     }
-    if (!definition?.belongsTo || !definition.as || Object.hasOwn(belongsToUpdates, field)) continue
+    const relationshipName = definition?.belongsTo && definition.as ? definition.as : polymorphicFields.get(field)
+    if (!relationshipName || Object.hasOwn(belongsToUpdates, field)) continue
     delete attributesForValidation[field]
     if (value === undefined) continue
     foreignKeyViolations.push({
       field: `data.attributes.${field}`,
       rule: 'foreign_key_in_attributes',
-      message: `Foreign key field '${field}' should not be in attributes. Use 'data.relationships.${definition.as}' instead.`
+      message: `Foreign key field '${field}' should not be in attributes. Use 'data.relationships.${relationshipName}' instead.`
     })
   }
   const [firstRetired] = retiredViolations

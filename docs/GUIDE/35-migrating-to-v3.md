@@ -58,10 +58,17 @@ bulk options are rejected with a message that names their replacement.
   read answers `not_found` instead of being written. On AnyAPI storage a row
   that vanished after the read now answers `not_found` too, where the write
   used to change nothing and report success.
-- **Links to hidden targets survive a write-back:** a `patch`, `put` or
-  many-row patch that sets a belongs-to to null keeps the stored link when its
-  target exists but is hidden from the writer, as the read showed the link as
-  unassigned. It used to clear it. Clear such links in a system context.
+- **Links to hidden targets survive a write-back:** a `patch`, `put`,
+  many-row patch or merge upsert that sets a belongs-to to null keeps the
+  stored link when its target exists but is hidden from the writer, as the read
+  showed the link as unassigned. It used to clear it. Clear such links in a
+  system context.
+- **Polymorphic links are set through the relationship only:** the type and id
+  fields behind a polymorphic belongs-to (`owner_type`, `owner_id`) are refused
+  in attributes, as foreign keys already were (rule
+  `foreign_key_in_attributes`), so a write cannot skip the target check or half
+  clear a link. Send `owner: { _type, id }` (plain) or `relationships.owner`
+  (JSON:API) instead.
 - **Selection writes:** `patchWhere` and `deleteWhere` carry the scope and the
   filters in every UPDATE or DELETE and return the rows they wrote; a row that
   vanishes or stops matching in the meantime is left out, never an error.
@@ -293,6 +300,7 @@ field NULL, also when an optional (`required: false`) filter does not resolve.
 | an `integer` field over a PostgreSQL BIGINT column reads `"4400"` | `4400`; a value past 2^53 stays a string |
 | an aggregate group, `min` or `max` of a BIGINT past 2^53 is a rounded number | the exact digits, as a string |
 | a `patch` or `put` of `accountId: null` by a writer who cannot see the account clears the link | keeps it; clear it in a system context |
+| `owner_type` and `owner_id` in attributes set a polymorphic link | refused; send `owner: { _type, id }` or `relationships.owner` |
 
 ## Custom storage plugins
 

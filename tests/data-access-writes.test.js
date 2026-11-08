@@ -843,6 +843,89 @@ describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
   })
 })
 
+// Tasks link to an account and to a polymorphic owner, an account or a label;
+// the row policy hides account 2, and workspace ws-a cannot see label 2.
+describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
+  let fixture
+  before(async () => {
+    fixture = await createDataAccessFixture()
+    await fixture.api.addResource('da_tasks', {
+      schema: {
+        id: { type: 'id' },
+        code: { type: 'string', required: true, max: 40, search: true },
+        amount: { type: 'integer', required: true },
+        workspace_id: { type: 'string', required: true, max: 40 },
+        account_id: { type: 'number', nullable: true, belongsTo: 'da_accounts', as: 'account' },
+        owner_type: { type: 'string', nullable: true, max: 40 },
+        owner_id: { type: 'string', nullable: true, max: 40 }
+      },
+      relationships: { owner: { belongsToPolymorphic: { types: ['da_accounts', 'da_labels'], typeField: 'owner_type', idField: 'owner_id' } } },
+      autofilter: 'workspace',
+      indexes: [{ columns: ['workspace_id', 'code'], unique: true }],
+      tableName: 'da_tasks'
+    })
+    if (storageMode.isAnyApi()) storageMode.registerTable(fixture.knex, 'da_tasks', 'da_tasks', fixture.api.anyapi.tenantId)
+    else await fixture.api.resources.da_tasks.createKnexTable()
+  })
+  after(async () => { await fixture?.close() })
+
+  const seedTasks = async links => {
+    await stored(fixture, 'da_tasks').rows().delete()
+    await seedLedger(fixture)
+    await fixture.seed('da_labels', [{ id: '1', name: 'a-one', workspace_id: 'ws-a' }, { id: '2', name: 'b-two', workspace_id: 'ws-b' }])
+    await fixture.seed('da_tasks', [{ id: '1', code: 'T1', amount: 10, workspace_id: 'ws-a' }])
+    await setLinks(links)
+  }
+  // Strings: better-sqlite3 binds a number as REAL, which a text column stores as '2.0'.
+  const setLinks = links => {
+    const tasks = stored(fixture, 'da_tasks')
+    return tasks.row('1').update(Object.fromEntries(Object.entries(links).map(([field, value]) => [tasks.column(field), value === null ? null : String(value)])))
+  }
+  const linksOf = async () => {
+    const tasks = stored(fixture, 'da_tasks')
+    const row = await tasks.row('1').first()
+    const value = field => row[tasks.column(field)] == null ? null : String(row[tasks.column(field)])
+    return { account: value('account_id'), owner: value('owner_type') && `${value('owner_type')}:${value('owner_id')}`, amount: Number(row[tasks.column('amount')]) }
+  }
+
+  it('keeps hidden links in a merge upsert and clears visible ones', { skip: tableOnly }, async () => {
+    const tasks = fixture.api.resources.da_tasks
+    const merge = () => tasks.postMany({ data: [{ code: 'T1', amount: 31, account: null, owner: null }], onConflict: { keys: ['workspace_id', 'code'], action: 'merge' }, returning: 'minimal' }, workspaceA())
+    await seedTasks({ account_id: 2, owner_type: 'da_labels', owner_id: 2 })
+    await merge()
+    assert.deepEqual(await linksOf(), { account: '2', owner: 'da_labels:2', amount: 31 })
+    await setLinks({ account_id: 1, owner_type: 'da_labels', owner_id: 1 })
+    await merge()
+    assert.deepEqual(await linksOf(), { account: null, owner: null, amount: 31 })
+  })
+
+  it('refuses the type and id fields of a polymorphic link in attributes, as it refuses foreign keys', async () => {
+    await seedTasks({ owner_type: 'da_labels', owner_id: 1 })
+    const tasks = fixture.api.resources.da_tasks
+    const refused = error => cause(error)?.details?.violations?.some(violation => violation.rule === 'foreign_key_in_attributes' && violation.message.includes("'data.relationships.owner'"))
+    const attempts = {
+      'patch (plain)': () => tasks.patch({ id: '1', data: { owner_type: 'da_labels', owner_id: '2' }, returning: 'none' }, workspaceA()),
+      'patch, id only': () => tasks.patch({ id: '1', data: { owner_id: null }, returning: 'none' }, workspaceA()),
+      'patch (JSON:API)': () => tasks.patch({ id: '1', format: 'jsonapi', returning: 'none', document: { data: { type: 'da_tasks', id: '1', attributes: { owner_type: null, owner_id: null } } } }, workspaceA()),
+      post: () => tasks.post({ data: { code: 'T2', amount: 1, owner_type: 'da_labels', owner_id: '2' }, returning: 'minimal' }, workspaceA()),
+      put: () => tasks.put({ id: '1', data: { code: 'T1', amount: 1, owner_type: 'da_labels', owner_id: '2' }, returning: 'none' }, workspaceA()),
+      postMany: () => tasks.postMany({ data: [{ code: 'T3', amount: 1, owner_type: 'da_labels', owner_id: '2' }], returning: 'minimal' }, workspaceA()),
+      patchMany: () => tasks.patchMany({ data: [{ id: '1', owner_id: '2' }], returning: 'minimal' }, workspaceA())
+    }
+    // Many-row writes need table storage; AnyAPI refuses them before reading the rows.
+    if (storageMode.isAnyApi()) {
+      delete attempts.postMany
+      delete attempts.patchMany
+    }
+    for (const [name, attempt] of Object.entries(attempts)) await assert.rejects(attempt(), refused, name)
+    assert.deepEqual(await linksOf(), { account: null, owner: 'da_labels:1', amount: 10 })
+    // Through the relationship, the target is checked: label 2 is another workspace's.
+    await assert.rejects(tasks.patch({ id: '1', data: { owner: { _type: 'da_labels', id: '2' } }, returning: 'none' }, workspaceA()))
+    await tasks.patch({ id: '1', data: { owner: { _type: 'da_accounts', id: '1' } }, returning: 'none' }, workspaceA())
+    assert.deepEqual(await linksOf(), { account: null, owner: 'da_accounts:1', amount: 10 })
+  })
+})
+
 // A fixture of its own: these tests add hooks and a resource.
 describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`, { skip: tableOnly }, () => {
   let fixture
