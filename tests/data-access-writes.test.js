@@ -1,6 +1,10 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  JsonRestApi,
+  RestApiAnyapiKnexPlugin,
+  RestApiPlugin,
+  RowPolicyPlugin,
   RestApiBulkInsertIdsError,
   RestApiBulkWriteUnsupportedError,
   RestApiRecordsNotFoundError,
@@ -9,7 +13,7 @@ import {
   createSystemContext
 } from '../index.js'
 import { storageMode } from './helpers/storage-mode.js'
-import { databaseClient } from './helpers/test-database.js'
+import { createTestDatabase, databaseClient } from './helpers/test-database.js'
 import { holdManagedTransaction } from './helpers/transaction-completion.js'
 import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './fixtures/data-access-api.js'
 
@@ -1319,5 +1323,88 @@ describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { ski
     } finally {
       if (!second.transaction.isCompleted()) await second.rollback()
     }
+  })
+})
+
+// An app that imports rows into a wide AnyAPI resource: 155 string fields, a
+// row policy that reads the caller's context, and its own audit insert in the
+// same api.transaction.
+describe(`An import into a wide AnyAPI resource (${storageMode.mode})`, { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, () => {
+  const FIELDS = 155
+  const fieldNames = Array.from({ length: FIELDS }, (_, index) => `f${index + 1}`)
+  const importRows = (count, prefix) => Array.from({ length: count }, (_, row) =>
+    Object.fromEntries(fieldNames.map(field => [field, `${prefix} ${row} ${field}`])))
+  // Bound parameters per statement: PostgreSQL and MySQL take 65,535, SQLite 32,766.
+  const bindLimit = databaseClient === 'better-sqlite3' ? 32766 : 65535
+  let database
+  let api
+  before(async () => {
+    database = await createTestDatabase()
+    api = new JsonRestApi({ name: 'wide-import-test' })
+    await api.use(RestApiPlugin, { format: 'plain', returning: 'full', queryMaxLimit: 100 })
+    await api.use(RestApiAnyapiKnexPlugin, { knex: database.knex, tenantId: 'ws:1', ownsKnex: false, slots: { string: FIELDS + 5 } })
+    await api.use(RowPolicyPlugin)
+    await api.addResource('da_imports', {
+      schema: {
+        id: { type: 'id' },
+        obsolete_at: { type: 'dateTime', nullable: true },
+        ...Object.fromEntries(fieldNames.map(field => [field, { type: 'string', nullable: true, max: 60 }]))
+      },
+      rowPolicy: ({ query, column, context }) => {
+        if (!context?.includeObsolete) query.whereNull(column('obsolete_at'))
+        return true
+      }
+    })
+    await database.knex.schema.createTable('da_audit_events', table => {
+      table.increments('id')
+      table.string('record_id').notNullable()
+    })
+  })
+  after(async () => { await database?.close() })
+
+  const importInTransaction = (data, { fail = false } = {}) => api.transaction(async transaction => {
+    const created = await api.resources.da_imports.postMany({ data, returning: 'minimal', transaction }, { includeObsolete: true })
+    await transaction('da_audit_events').insert(created.data.map(record => ({ record_id: record.id })))
+    if (fail) throw new Error('the import fails after its audit rows')
+    return created
+  })
+
+  it('inserts 500 wide rows in chunks under the bind limit, with ids in input order, in the app transaction', async () => {
+    const data = importRows(500, 'row')
+    const statements = []
+    const record = query => statements.push(query)
+    database.knex.on('query', record)
+    let created
+    try {
+      created = await importInTransaction(data)
+    } finally {
+      database.knex.removeListener('query', record)
+    }
+
+    const inserts = statements.filter(query => /^insert into .any_records/i.test(query.sql.trim()))
+    assert.ok(inserts.length > 1, `a 500-row chunk of ${FIELDS} fields is split: ${inserts.length} INSERT`)
+    for (const query of statements) assert.ok(query.bindings.length <= bindLimit, `${query.bindings.length} bindings: ${query.sql.slice(0, 80)}`)
+
+    const ids = created.data.map(item => item.id)
+    assert.equal(new Set(ids).size, 500)
+    for (const index of [0, 1, 249, 410, 411, 499]) {
+      const imported = await api.resources.da_imports.get({ id: ids[index] }, { includeObsolete: true })
+      assert.equal(imported.f1, `row ${index} f1`, `id ${ids[index]} names input row ${index}`)
+      assert.equal(imported[`f${FIELDS}`], `row ${index} f${FIELDS}`)
+    }
+    // The audit rows the app wrote in the same transaction committed with the records.
+    assert.deepEqual((await database.knex('da_audit_events').orderBy('id')).map(row => row.record_id), ids)
+  })
+
+  it('rolls the records back with the app\'s own writes, and leaves the row policy to reads', async () => {
+    const recordsBefore = (await database.knex('any_records').where({ resource: 'da_imports' }).count({ total: '*' }))[0].total
+    await assert.rejects(importInTransaction(importRows(3, 'lost'), { fail: true }), /the import fails after its audit rows/)
+    assert.equal((await database.knex('any_records').where({ resource: 'da_imports' }).count({ total: '*' }))[0].total, recordsBefore)
+    assert.equal((await database.knex('da_audit_events').count({ total: '*' }))[0].total, recordsBefore)
+
+    // A row the policy hides by default is inserted, and is visible only to a caller that asks.
+    const [obsolete] = (await importInTransaction([{ f1: 'old', obsolete_at: '2026-01-01T00:00:00.000Z' }])).data
+    assert.equal((await api.resources.da_imports.get({ id: obsolete.id }, { includeObsolete: true })).f1, 'old')
+    await assert.rejects(api.resources.da_imports.get({ id: obsolete.id }), isA(RestApiResourceError))
   })
 })
