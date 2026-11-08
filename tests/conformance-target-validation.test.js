@@ -5,7 +5,7 @@ import { RestApiResourceError } from '../lib/rest-api-errors.js'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi, createConformanceApi, createAnyApiFieldEvolutionApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
-import { validateRelationshipAccess } from '../plugins/core/rest-api-plugin-methods/common.js'
+import { validateRelationshipAccess, validateRelationshipTargets } from '../plugins/core/rest-api-plugin-methods/common.js'
 import { holdManagedTransaction } from './helpers/transaction-completion.js'
 
 const tables = { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
@@ -73,6 +73,16 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
   const context = extra => ({ auth: { user: 'writer' }, queryParams: { filters: { name: 'Parent filter' } }, validationProbe: { queries: [], permissions: [], failure: new RestApiResourceError('Target denied', { subtype: 'forbidden' }) }, ...extra })
   const add = (data, request, transaction) => fixture.api.resources.items.postRelationship({ id: '1', relationshipName: 'groups', relationshipData: data, transaction }, request)
   const linked = async transaction => (await fixture.api.resources.items.getRelationship({ id: '1', relationshipName: 'groups', transaction })).data.map(row => row.id).sort()
+
+  it('validates a list that mixes target types in one read per type and batch', async () => {
+    await seed(fixture, 'items', targets(100).map(({ id }) => ({ id: String(Number(id) + 1), name: `Item ${id}` })))
+    // As rows that each name a group and an item list them.
+    const mixed = targets(100).flatMap(({ id }) => [{ type: 'groups', id }, { type: 'items', id: String(Number(id) + 1) }])
+    const request = context()
+    await validateRelationshipTargets({ ...request, db: fixture.knex }, mixed, fixture.api.helpers, fixture.api)
+    assert.deepEqual(request.validationProbe.queries.map(query => query.scopeName), ['groups', 'items'])
+    assert.equal(request.validationProbe.permissions.length, 100)
+  })
 
   for (const operation of ['postRelationship', 'post', 'put', 'put-create', 'patch']) {
     const method = operation === 'put-create' ? 'put' : operation

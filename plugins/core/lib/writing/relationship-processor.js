@@ -40,47 +40,44 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
   const resolved = []
   const resources = new Map()
   for (const { type, id } of identifiers) {
-    if (!resources.has(type)) resources.set(type, { adapter: api.knex.helpers.getStorageAdapter(type), seen: new Set(), resolved: new Set() })
-    const { adapter, seen } = resources.get(type)
+    if (!resources.has(type)) resources.set(type, { adapter: api.knex.helpers.getStorageAdapter(type), seen: new Set(), resolved: new Set(), group: [], found: new Set() })
+    const { adapter, seen, group } = resources.get(type)
     const value = adapter.translateFilterValue('id', id)
     if (seen.has(String(value))) continue
     seen.add(String(value))
-    targets.push({ type, id, value, adapter })
+    const target = { type, id, value, adapter }
+    targets.push(target)
+    group.push(target)
   }
-  for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
-    const batch = targets.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
-    const byType = new Map()
-    for (const target of batch) {
-      if (!byType.has(target.type)) byType.set(target.type, [])
-      byType.get(target.type).push(target)
-    }
-    const found = new Map()
-    for (const [type, group] of byType) {
-      const { adapter } = group[0]
-      const idColumn = adapter.getIdColumn()
+  // Batches hold one type each, so rows that each name several types cost one
+  // statement per type and batch, not one per type in every batch.
+  for (const [type, { adapter, group, found }] of resources) {
+    const idColumn = adapter.getIdColumn()
+    for (let offset = 0; offset < group.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
+      const batch = group.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
       const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
-        .whereIn(idColumn, group.map(target => target.value))
+        .whereIn(idColumn, batch.map(target => target.value))
         .orderBy(`${adapter.getTableName()}.${idColumn}`), isExclusive(type)).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
-      found.set(type, new Set(rows.map(row => String(row[idColumn]))))
+      for (const row of rows) found.add(String(row[idColumn]))
     }
-    for (const { type, id, value, adapter } of batch) {
-      let storedId = String(value)
-      // Let the database resolve alternate spellings under its column collation.
-      if (!found.get(type).has(storedId)) {
-        const record = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
-          .where(adapter.getIdColumn(), value), isExclusive(type)).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
-        if (!record) {
-          throw new RestApiResourceError(`Related ${type} with id ${id} not found`, {
-            subtype: 'not_found', resourceType: type, resourceId: id
-          })
-        }
-        storedId = String(record[adapter.getIdColumn()])
+  }
+  for (const { type, id, value, adapter } of targets) {
+    let storedId = String(value)
+    // Let the database resolve alternate spellings under its column collation.
+    if (!resources.get(type).found.has(storedId)) {
+      const record = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
+        .where(adapter.getIdColumn(), value), isExclusive(type)).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
+      if (!record) {
+        throw new RestApiResourceError(`Related ${type} with id ${id} not found`, {
+          subtype: 'not_found', resourceType: type, resourceId: id
+        })
       }
-      const identities = resources.get(type).resolved
-      if (!identities.has(storedId)) {
-        identities.add(storedId)
-        resolved.push({ type, id })
-      }
+      storedId = String(record[adapter.getIdColumn()])
+    }
+    const identities = resources.get(type).resolved
+    if (!identities.has(storedId)) {
+      identities.add(storedId)
+      resolved.push({ type, id })
     }
   }
   // Return each database identity once, retaining its first submitted spelling.

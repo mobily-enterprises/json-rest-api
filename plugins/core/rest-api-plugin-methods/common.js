@@ -411,66 +411,70 @@ export const collectRelationshipTargets = (inputRecord, api, unique) => {
 
 /**
  * Checks that every target is visible to the caller, with one scoped read per
- * related type and batch.
+ * related type and batch: the targets are grouped by type before they are
+ * batched, so rows that each name several types cost one read per type, not
+ * one per type in every batch.
  * @param {ResourceContext} context
  * @param {Identifier[]} targets
  * @param {LifecycleHelpers} helpers
  * @param {LifecycleApi} api
  */
 export const validateRelationshipTargets = async (context, targets, helpers, api) => {
-  for (let offset = 0; offset < targets.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-    const batch = targets.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
-    /** @type {Map<string, Identifier[]>} */
-    const byType = new Map()
-    for (const item of batch) {
-      const items = byType.get(item.type)
-      if (items) items.push(item)
-      else byType.set(item.type, [item])
+  /** @type {Map<string, Identifier[]>} */
+  const byType = new Map()
+  for (const item of targets) {
+    const items = byType.get(item.type)
+    if (items) items.push(item)
+    else byType.set(item.type, [item])
+  }
+  const lookups = new Map()
+  for (const [type, items] of byType) {
+    const relatedScope = api.resources[type]
+    if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
+    const getContext = {
+      ...context,
+      id: undefined,
+      minimalRecord: undefined,
+      schemaInfo: relatedScope.vars.schemaInfo,
+      scopeName: type,
+      queryParams: {},
+      method: 'get',
+      isUpdate: false
     }
-    const lookups = new Map()
-    for (const [type, items] of byType) {
-      const relatedScope = api.resources[type]
-      if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
-      const getContext = {
-        ...context,
-        id: undefined,
-        minimalRecord: undefined,
-        schemaInfo: relatedScope.vars.schemaInfo,
-        scopeName: type,
-        queryParams: {},
-        method: 'get',
-        isUpdate: false
-      }
-      const lookup = {
-        scopeName: type,
-        context: getContext,
-        /** @param {import('../lib/storage/storage-types.js').QueryFilteringState} filterParams */
-        applyQueryFilters: filterParams => relatedScope.applyQueryFilters({
-          ...filterParams, schemaInfo: getContext.schemaInfo
-        }, getContext),
-        filters: {},
-        queryPurpose: 'relationship-validation'
-      }
-      const records = await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })
-      lookups.set(type, { relatedScope, lookup, records: new Map(records.map(record => [String(record.id), record])) })
+    const lookup = {
+      scopeName: type,
+      context: getContext,
+      /** @param {import('../lib/storage/storage-types.js').QueryFilteringState} filterParams */
+      applyQueryFilters: filterParams => relatedScope.applyQueryFilters({
+        ...filterParams, schemaInfo: getContext.schemaInfo
+      }, getContext),
+      filters: {},
+      queryPurpose: 'relationship-validation'
     }
-    for (const item of batch) {
-      const { relatedScope, lookup, records } = lookups.get(item.type)
-      // A database collation can equate IDs with different spellings.
-      const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
-        ...lookup, context: { ...lookup.context, id: item.id }
-      })
-      if (!record) {
-        throw new RestApiResourceError(
-          `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
-          { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
-        )
-      }
-      await relatedScope.checkPermissions({
-        method: 'get',
-        originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
-      })
+    const records = new Map()
+    for (let offset = 0; offset < items.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
+      const batch = items.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
+      for (const record of await helpers.dataGetMinimal({ ...lookup, ids: batch.map(item => item.id) })) records.set(String(record.id), record)
     }
+    lookups.set(type, { relatedScope, lookup, records })
+  }
+  // In the order given, so the first missing or forbidden target is the one reported.
+  for (const item of targets) {
+    const { relatedScope, lookup, records } = lookups.get(item.type)
+    // A database collation can equate IDs with different spellings.
+    const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
+      ...lookup, context: { ...lookup.context, id: item.id }
+    })
+    if (!record) {
+      throw new RestApiResourceError(
+        `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
+        { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
+      )
+    }
+    await relatedScope.checkPermissions({
+      method: 'get',
+      originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
+    })
   }
 }
 

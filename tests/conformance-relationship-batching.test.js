@@ -41,6 +41,15 @@ describe(`Relationship target lock batches (${storageMode.mode})`, () => {
     }
   }
 
+  it('locks a list that mixes target types in one statement per type and batch', async () => {
+    const items = await seed(100)
+    const groups = []
+    for (let index = 0; index < 100; index++) groups.push(await fixture.seed('groups', { name: `Group ${index}` }))
+    // As rows that each name an item and a group list them.
+    const mixed = items.flatMap((item, index) => [item, { type: 'groups', id: groups[index].id }])
+    await measured(mixed, async queries => { assert.equal(queries.length, 2) })
+  })
+
   it('bounds round trips and bindings while locking every target beyond two batches', async () => {
     const targets = await seed(205)
     await measured(targets, async (queries, transaction) => {
