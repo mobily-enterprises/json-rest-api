@@ -6,7 +6,6 @@ import {
   RELATIONSHIPS_KEY,
   RELATIONSHIP_METADATA_KEY,
   COMPUTED_DEPENDENCIES_KEY,
-  RELATIONSHIP_READ_BATCH_SIZE,
 } from '../querying-writing/knex-constants.js'
 import { getOperationDiagnosticContext, wrapUnexpectedError } from '../../../../lib/error-context.js'
 import { getPolymorphicLinkage } from '../querying-writing/relationship-contracts.js'
@@ -109,36 +108,34 @@ export const loadBelongsTo = async (scope, deps) => {
 
     // Load the target records
     const targetRecords = []
-    for (let offset = 0; offset < uniqueIds.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-      let query = knex(targetTableName).whereIn(targetIdColumn, uniqueIds.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE))
-      const selectionState = await applyFieldSelectionToQuery({
-        query,
-        scope: targetScopeObject,
-        fieldSelectionInfo,
-        tableName: targetTableName,
-        useTablePrefix: false,
-        storageAdapter,
-        db: knex,
-        context: {
-          ...(requestContext || {}),
-          scopeName: targetScope,
-          schemaInfo: targetScopeObject.vars.schemaInfo,
-          storageAdapter,
-        },
-        scopeName: targetScope
-      })
-      query = selectionState.query
-      const scopedQueryState = await applyScopeFiltersToIncludeQuery({
-        query,
-        scopes,
+    let query = knex(targetTableName).modify(whereInIdentifiers, targetIdColumn, uniqueIds)
+    const selectionState = await applyFieldSelectionToQuery({
+      query,
+      scope: targetScopeObject,
+      fieldSelectionInfo,
+      tableName: targetTableName,
+      useTablePrefix: false,
+      storageAdapter,
+      db: knex,
+      context: {
+        ...(requestContext || {}),
         scopeName: targetScope,
-        requestContext,
-        db: knex,
-        tableName: targetTableName
-      })
-      query = scopedQueryState.query
-      for (const record of await query) targetRecords.push(record)
-    }
+        schemaInfo: targetScopeObject.vars.schemaInfo,
+        storageAdapter,
+      },
+      scopeName: targetScope
+    })
+    query = selectionState.query
+    const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+      query,
+      scopes,
+      scopeName: targetScope,
+      requestContext,
+      db: knex,
+      tableName: targetTableName
+    })
+    query = scopedQueryState.query
+    for (const record of await query) targetRecords.push(record)
 
     // Load relationship metadata for all target records
     await loadRelationshipMetadata(scopes, targetRecords, targetScope)
@@ -450,36 +447,34 @@ export const loadPolymorphicBelongsTo = async (scope, deps) => {
       // Query for this type
       const targetIdColumn = getIdColumnForScope(scopes, targetType)
       const targetRecords = []
-      for (let offset = 0; offset < targetIds.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-        let query = knex(targetTable).whereIn(targetIdColumn, targetIds.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE))
-        const selectionState = await applyFieldSelectionToQuery({
-          query,
-          scope: targetScopeObject,
-          fieldSelectionInfo,
-          tableName: targetTable,
-          useTablePrefix: false,
-          storageAdapter,
-          db: knex,
-          context: {
-            ...(requestContext || {}),
-            scopeName: targetType,
-            schemaInfo: targetScopeObject.vars.schemaInfo,
-            storageAdapter,
-          },
-          scopeName: targetType
-        })
-        query = selectionState.query
-        const scopedQueryState = await applyScopeFiltersToIncludeQuery({
-          query,
-          scopes,
+      let query = knex(targetTable).modify(whereInIdentifiers, targetIdColumn, targetIds)
+      const selectionState = await applyFieldSelectionToQuery({
+        query,
+        scope: targetScopeObject,
+        fieldSelectionInfo,
+        tableName: targetTable,
+        useTablePrefix: false,
+        storageAdapter,
+        db: knex,
+        context: {
+          ...(requestContext || {}),
           scopeName: targetType,
-          requestContext,
-          db: knex,
-          tableName: targetTable
-        })
-        query = scopedQueryState.query
-        for (const record of await query) targetRecords.push(record)
-      }
+          schemaInfo: targetScopeObject.vars.schemaInfo,
+          storageAdapter,
+        },
+        scopeName: targetType
+      })
+      query = selectionState.query
+      const scopedQueryState = await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: targetType,
+        requestContext,
+        db: knex,
+        tableName: targetTable
+      })
+      query = scopedQueryState.query
+      for (const record of await query) targetRecords.push(record)
 
       // Load relationship metadata for all target records
       await loadRelationshipMetadata(scopes, targetRecords, targetType)

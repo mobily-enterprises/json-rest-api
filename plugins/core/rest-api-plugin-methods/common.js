@@ -25,7 +25,6 @@ import { normalizeRecordAttributes } from '../lib/querying-writing/database-valu
 import { beginWriteTransaction, commitTransaction, getOperationDiagnosticContext, isTransactionOwner, rollbackAfterError, wrapUnexpectedError } from '../../../lib/error-context.js'
 import { filterVisibleIdentifiers } from '../lib/querying/include-query-helpers.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
-import { RELATIONSHIP_READ_BATCH_SIZE } from '../lib/querying-writing/knex-constants.js'
 import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
 
 // A trusted connector callback, evaluated after normal write validation and authorization.
@@ -411,9 +410,7 @@ export const collectRelationshipTargets = (inputRecord, api, unique) => {
 
 /**
  * Checks that every target is visible to the caller, with one scoped read per
- * related type and batch: the targets are grouped by type before they are
- * batched, so rows that each name several types cost one read per type, not
- * one per type in every batch.
+ * related type, however many targets there are.
  * @param {ResourceContext} context
  * @param {Identifier[]} targets
  * @param {LifecycleHelpers} helpers
@@ -452,10 +449,7 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
       queryPurpose: 'relationship-validation'
     }
     const records = new Map()
-    for (let offset = 0; offset < items.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-      const batch = items.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE)
-      for (const record of await helpers.dataGetMinimal({ ...lookup, ids: batch.map(item => item.id) })) records.set(String(record.id), record)
-    }
+    for (const record of await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })) records.set(String(record.id), record)
     lookups.set(type, { relatedScope, lookup, records })
   }
   // In the order given, so the first missing or forbidden target is the one reported.

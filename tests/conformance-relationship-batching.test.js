@@ -41,20 +41,28 @@ describe(`Relationship target lock batches (${storageMode.mode})`, () => {
     }
   }
 
-  it('locks a list that mixes target types in one statement per type and batch', async () => {
+  it('locks a list that mixes target types in one statement per type', async () => {
     const items = await seed(100)
     const groups = []
     for (let index = 0; index < 100; index++) groups.push(await fixture.seed('groups', { name: `Group ${index}` }))
     // As rows that each name an item and a group list them.
     const mixed = items.flatMap((item, index) => [item, { type: 'groups', id: groups[index].id }])
-    await measured(mixed, async queries => { assert.equal(queries.length, 2) })
+    await measured(mixed, async queries => {
+      assert.equal(queries.length, 2)
+      // Types lock in name order, whatever order the rows name them in.
+      const about = query => `${query.sql} ${JSON.stringify(query.bindings)}`
+      assert.match(about(queries[0]), /groups/)
+      assert.match(about(queries[1]), /items/)
+    })
   })
 
-  it('bounds round trips and bindings while locking every target beyond two batches', async () => {
+  it('locks 205 targets of one type in one statement within the parameter limits', async () => {
     const targets = await seed(205)
     await measured(targets, async (queries, transaction) => {
-      assert.equal(queries.length, 3)
-      assert.ok(queries.every(query => query.bindings.length <= 102))
+      assert.equal(queries.length, 1)
+      // PostgreSQL and SQLite bind the id list as one parameter, beside AnyAPI's tenant and resource;
+      // MySQL's text protocol has no placeholder limit.
+      if (databaseClient !== 'mysql2') assert.ok(queries[0].bindings.length <= 4)
       if (databaseClient !== 'better-sqlite3') {
         const contender = await fixture.knex.transaction()
         const adapter = fixture.api.knex.helpers.getStorageAdapter('items')

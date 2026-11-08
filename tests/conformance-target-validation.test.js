@@ -5,6 +5,7 @@ import { RestApiResourceError } from '../lib/rest-api-errors.js'
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi, createConformanceApi, createAnyApiFieldEvolutionApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
+import { databaseClient } from './helpers/test-database.js'
 import { validateRelationshipAccess, validateRelationshipTargets } from '../plugins/core/rest-api-plugin-methods/common.js'
 import { holdManagedTransaction } from './helpers/transaction-completion.js'
 
@@ -74,7 +75,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
   const add = (data, request, transaction) => fixture.api.resources.items.postRelationship({ id: '1', relationshipName: 'groups', relationshipData: data, transaction }, request)
   const linked = async transaction => (await fixture.api.resources.items.getRelationship({ id: '1', relationshipName: 'groups', transaction })).data.map(row => row.id).sort()
 
-  it('validates a list that mixes target types in one read per type and batch', async () => {
+  it('validates a list that mixes target types in one read per type', async () => {
     await seed(fixture, 'items', targets(100).map(({ id }) => ({ id: String(Number(id) + 1), name: `Item ${id}` })))
     // As rows that each name a group and an item list them.
     const mixed = targets(100).flatMap(({ id }) => [{ type: 'groups', id }, { type: 'items', id: String(Number(id) + 1) }])
@@ -86,7 +87,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
 
   for (const operation of ['postRelationship', 'post', 'put', 'put-create', 'patch']) {
     const method = operation === 'put-create' ? 'put' : operation
-    it(`${operation} validates 205 targets in three reads and one permission check per target`, async () => {
+    it(`${operation} validates 205 targets in one read and one permission check per target`, async () => {
       const request = context()
       const ids = targets(205)
       let ownerId = '1'
@@ -99,7 +100,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
           document: { data: { type: 'items', id: ownerId, attributes: { name: 'Written owner' }, relationships: { groups: { data: ids } } } }
         }, request)
       }
-      assert.equal(request.validationProbe.queries.length, 3)
+      assert.equal(request.validationProbe.queries.length, 1)
       assert.deepEqual(request.validationProbe.permissions.map(row => row.id), ids.map(row => row.id))
       for (const entry of request.validationProbe.queries) {
         assert.equal(entry.scopeName, 'groups')
@@ -128,7 +129,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
     assert.deepEqual(await linked(), ['1'])
   })
 
-  it('bounds actual result batches despite duplicate policy join rows', async () => {
+  it('reads 205 targets once each, in one result, despite duplicate policy join rows', async () => {
     const counts = []
     const capture = (rows, { sql, bindings }) => {
       if (/ in \(select distinct /i.test(sql) && Array.isArray(rows)) counts.push({ count: rows.length, bindings: bindings.length })
@@ -148,8 +149,9 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
     })
     fixture.knex.on('query-response', capture)
     try { await add(targets(205), context({ duplicateTargets: true })) } finally { fixture.knex.off('query-response', capture) }
-    assert.deepEqual(counts.map(row => row.count), [100, 100, 5])
-    assert.ok(counts.every(row => row.bindings <= 106))
+    assert.deepEqual(counts.map(row => row.count), [205])
+    // PostgreSQL and SQLite bind the id list as one parameter; MySQL's text protocol has no placeholder limit.
+    if (databaseClient !== 'mysql2') assert.ok(counts.every(row => row.bindings <= 6))
   })
 
   // A target linked by two relationships gets the same check inputs, so it is checked once per write.
@@ -203,7 +205,7 @@ describe(`Relationship target validation (${storageMode.mode})`, () => {
         const unit = borrowed ? await holdManagedTransaction(fixture.api) : undefined
         const transaction = unit?.transaction
         const request = context()
-        Object.assign(request.validationProbe, { denyId: failureAt === 'permission' ? '201' : undefined, failQueryAt: failureAt === 'query' ? 2 : undefined, failFinish: failureAt === 'finish' })
+        Object.assign(request.validationProbe, { denyId: failureAt === 'permission' ? '201' : undefined, failQueryAt: failureAt === 'query' ? 1 : undefined, failFinish: failureAt === 'finish' })
         try {
           await assert.rejects(add(targets(205), request, transaction), error => assertWriteFailure(error, { cause: request.validationProbe.failure, outcome: borrowed ? 'pending' : 'rolledBack' }))
           if (borrowed) {

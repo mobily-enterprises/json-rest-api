@@ -316,11 +316,13 @@ and include limits in their operation/resource settings. Visibility hooks add
 row predicates and retain the query's selected ID and mandatory constraints.
 Their invocation count is not a per-request or per-record contract.
 
-Regular and polymorphic belongs-to includes also load at most 100 target IDs
-per query, with target permission and filtering hooks applied to every batch
-under `queryPurpose: 'include'`. SQL projection callbacks run for each query.
-Nested collection includes run after all target batches have been collected,
-so a global collection limit is not restarted for each batch.
+Regular and polymorphic belongs-to includes load each target type's records
+in one query, however many there are, with target permission and filtering
+hooks applied under `queryPurpose: 'include'`. A long id list is bound as one
+parameter on PostgreSQL and SQLite, so it stays within their parameter limits;
+MySQL and MariaDB have none. SQL projection callbacks run for each query.
+Nested collection includes run after all targets have been collected, so a
+global collection limit applies to the complete set.
 
 Relationship validation uses the same batch bound. Its query context has no
 individual `id` and no parent client filters. Retain the selected ID and scope

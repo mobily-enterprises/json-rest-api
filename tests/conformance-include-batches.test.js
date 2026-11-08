@@ -5,13 +5,16 @@ import { RestApiResourceError, RestApiValidationError } from '../lib/rest-api-er
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi, seedStorageAdapterRecords, seedUnqueriedIdConformanceApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
+import { databaseClient } from './helpers/test-database.js'
 import { groupByPolymorphicType } from '../plugins/core/lib/querying/include-query-helpers.js'
 
 const rootId = '100000'
 const tables = { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
 const pathFor = kind => kind === 'belongsTo' ? 'mentions.group' : 'items.subject'
 const foreignName = kind => kind === 'belongsTo' ? 'group' : 'subject'
-const isTargetQuery = query => /["`](?:groups_key|items_key|logical_id)["`] in \(/.test(query.toSQL().sql)
+const isTargetQuery = query => /["`](?:groups_key|items_key|logical_id)["`] (?:in \(|= ANY\()/.test(query.toSQL().sql)
+// PostgreSQL and SQLite bind a long id list as one parameter; MySQL's text protocol has no placeholder limit.
+const boundedBindings = query => databaseClient === 'mysql2' || query.bindings.length <= 6
 const seed = (fixture, type, records) => seedStorageAdapterRecords(fixture.knex, fixture.api.resources[type].vars.schemaInfo, records)
 const createFixture = async (options = {}) => {
   const fixture = await createConformanceFixture({
@@ -97,8 +100,8 @@ for (const kind of ['belongsTo', 'polymorphic']) {
         assert.deepEqual(child.relationships[foreignName(kind)].data, hidden ? null : { type: 'groups', id: child.id })
         if (!hidden) assert.equal(byId.get(child.id).attributes.name, `Group ${child.id.padStart(5, '0')}`)
       }
-      assert.equal(includeProbe.queries.length, 330)
-      assert.ok(includeProbe.queries.every(query => query.bindings.length <= 103))
+      assert.equal(includeProbe.queries.length, 1)
+      assert.ok(includeProbe.queries.every(boundedBindings))
     })
   })
 
@@ -144,9 +147,9 @@ for (const kind of ['belongsTo', 'polymorphic']) {
           assert.equal(attributes.displayName, undefined)
           assert.equal(attributes.display_name, undefined)
         }
-        assert.equal(includeProbe.queries.length, 3)
-        assert.ok(includeProbe.queries.every(query => query.bindings.length <= 103 && query.auth === auth))
-        assert.equal(includeProbe.projections, 4)
+        assert.equal(includeProbe.queries.length, 1)
+        assert.ok(includeProbe.queries.every(query => boundedBindings(query) && query.auth === auth))
+        assert.equal(includeProbe.projections, 2)
         assert.equal(includeProbe.computedIds.length, 204)
         assert.equal(new Set(includeProbe.computedIds).size, 204)
       })
@@ -154,20 +157,20 @@ for (const kind of ['belongsTo', 'polymorphic']) {
 
     for (const phase of ['permission', 'projection']) {
       for (const write of [false, true]) {
-        it(`retains a later ${phase} failure during ${write ? 'an owned write response' : 'a borrowed read'}`, async () => {
+        it(`retains an include ${phase} failure during ${write ? 'an owned write response' : 'a borrowed read'}`, async () => {
           const transaction = write ? undefined : await fixture.knex.transaction()
           const includeProbe = probe()
           includeProbe.failure = phase === 'permission'
             ? new RestApiResourceError('Later include denied', { subtype: 'forbidden' })
             : new RestApiValidationError('Later include projection failed')
-          Object.assign(includeProbe, phase === 'permission' ? { denyAt: 2 } : { failProjectionAt: 3 })
+          Object.assign(includeProbe, phase === 'permission' ? { denyAt: 1 } : { failProjectionAt: 2 })
           const context = { hideRows: true, includeProbe }
           try {
             const operation = write
               ? fixture.api.resources.groups.patch({ id: rootId, returning: 'full', document: { data: { type: 'groups', attributes: { name: 'Changed' } } }, queryParams: { include: [pathFor(kind)] } }, context)
               : read(fixture, kind, { transaction }, context)
             await assert.rejects(operation, error => write ? assertWriteFailure(error, { cause: includeProbe.failure, outcome: 'rolledBack' }) : error === includeProbe.failure)
-            assert.equal(includeProbe.queries.length, phase === 'permission' ? 2 : 1)
+            assert.equal(includeProbe.queries.length, phase === 'permission' ? 1 : 0)
             assert.equal(context.transaction.isCompleted(), write)
             if (transaction) assert.ok(includeProbe.queries.every(query => query.transaction === transaction))
           } finally { if (transaction && !transaction.isCompleted()) await transaction.rollback() }
@@ -223,8 +226,8 @@ describe(`Polymorphic batches across resource types (${storageMode.mode})`, () =
       const id = Number(item.id)
       assert.deepEqual(item.relationships.subject.data, id <= 205 ? { type: 'groups', id: item.id } : { type: 'items', id: String(id - 205) })
     }
-    assert.equal(includeProbe.queries.length, 6)
-    for (const type of ['groups', 'items']) assert.equal(includeProbe.queries.filter(query => query.scopeName === type).length, 3)
+    assert.equal(includeProbe.queries.length, 2)
+    for (const type of ['groups', 'items']) assert.equal(includeProbe.queries.filter(query => query.scopeName === type).length, 1)
   })
 })
 

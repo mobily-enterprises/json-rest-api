@@ -4,6 +4,7 @@ import { RestApiResourceError, RestApiValidationError } from '../lib/rest-api-er
 import { createConformanceFixture } from './fixtures/conformance.js'
 import { createIdConformanceApi, createAnyApiFieldEvolutionApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
+import { databaseClient } from './helpers/test-database.js'
 import { filterVisibleIdentifiers } from '../plugins/core/lib/querying/include-query-helpers.js'
 
 const tables = { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' }
@@ -86,7 +87,7 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
     ...extra
   })
 
-  it('handles 33,000 unique IDs without oversized SQL or losing later visible IDs', async () => {
+  it('checks 33,000 unique IDs in one query without losing later visible IDs', async () => {
     const input = identifiers('groups', 33000)
     input.push(input[0], input[100])
     const context = probeContext()
@@ -94,13 +95,13 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
     const expected = [input[0], input[100], input[32999], input[33000], input[33001]]
     assert.deepEqual(result, expected)
     result.forEach((row, index) => { assert.equal(row, expected[index]) })
-    // 1,000 ids per query: 33 queries, each with bounded bindings and rows.
-    assert.equal(queries.length, 33)
-    assert.ok(queries.every(query => query.bindings.length <= 1003))
-    assert.equal(rowCounts.length, 33)
-    assert.ok(rowCounts.every(count => count <= 1000))
-    assert.equal(context.visibilityProbe.filters, 33)
-    assert.equal(context.visibilityProbe.permissions.length, 33)
+    // One query and one policy run, however many ids. PostgreSQL and SQLite bind
+    // the list as one parameter; MySQL's text protocol has no placeholder limit.
+    assert.equal(queries.length, 1)
+    if (databaseClient !== 'mysql2') assert.ok(queries[0].bindings.length <= 6)
+    assert.deepEqual(rowCounts, [3])
+    assert.equal(context.visibilityProbe.filters, 1)
+    assert.equal(context.visibilityProbe.permissions.length, 1)
     for (const entry of context.visibilityProbe.permissions) {
       assert.equal(entry.scopeName, 'groups')
       assert.equal(entry.auth, context.auth)
@@ -159,20 +160,20 @@ describe(`Visibility identifier batches (${storageMode.mode})`, () => {
   })
 
   for (const phase of ['permissions', 'filter']) {
-    it(`rejects a later ${phase} failure without returning partial results or completing the caller transaction`, async () => {
+    it(`rejects a ${phase} failure over 1,205 IDs without returning results or completing the caller transaction`, async () => {
       const transaction = await fixture.knex.transaction()
-      // Two batches of ids, so the second one's check is the later failure.
+      // One check covers all the ids, so the failure comes before its query runs.
       const input = identifiers('groups', 1205)
       const failure = phase === 'permissions'
-        ? new RestApiResourceError('Later visibility batch denied', { subtype: 'forbidden' })
-        : new RestApiValidationError('Later visibility filter failed')
+        ? new RestApiResourceError('Visibility check denied', { subtype: 'forbidden' })
+        : new RestApiValidationError('Visibility filter failed')
       const context = probeContext({ transaction, db: transaction })
-      Object.assign(context.visibilityProbe, { failure, ...(phase === 'permissions' ? { denyAt: 2 } : { failFilterAt: 2 }) })
+      Object.assign(context.visibilityProbe, { failure, ...(phase === 'permissions' ? { denyAt: 1 } : { failFilterAt: 1 }) })
       try {
         const { queries } = await measure(fixture, () => assert.rejects(visible(input, context), error => error === failure))
-        assert.equal(queries.length, 1)
-        assert.equal(context.visibilityProbe.permissions.length, 2)
-        assert.equal(context.visibilityProbe.filters, phase === 'permissions' ? 1 : 2)
+        assert.equal(queries.length, 0)
+        assert.equal(context.visibilityProbe.permissions.length, 1)
+        assert.equal(context.visibilityProbe.filters, phase === 'permissions' ? 0 : 1)
         assert.equal(transaction.isCompleted(), false)
         assert.deepEqual(await visible(input, { transaction, db: transaction, hideRows: true }), [input[0], input[100]])
       } finally { await transaction.rollback() }

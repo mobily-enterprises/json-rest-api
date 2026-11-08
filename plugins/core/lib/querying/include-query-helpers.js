@@ -188,10 +188,7 @@ export const applyScopeFiltersToIncludeQuery = async ({
   }
 }
 
-// Linked ids checked per visibility query: a 1,000-row page costs one query and
-// one row-policy run per linked type, and any number of ids stays bounded SQL.
-const VISIBILITY_BATCH_SIZE = 1000
-
+// One query and one row-policy run per linked type, however many ids are linked.
 // With `scoped: false`, the identifiers whose records exist, visible or not.
 export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true }) => {
   const idsByType = new Map()
@@ -210,24 +207,22 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
     const visibleIds = new Set()
     visible.set(type, visibleIds)
     const values = [...ids].map(id => adapter.translateFilterValue('id', id))
-    for (let start = 0; start < values.length; start += VISIBILITY_BATCH_SIZE) {
-      // whereInIdentifiers binds a long id list as one parameter where the database allows it.
-      const query = adapter.buildBaseQuery({ transaction: context.transaction })
-        .modify(whereInIdentifiers, column, values.slice(start, start + VISIBILITY_BATCH_SIZE))
-        .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
-      const state = scoped
-        ? await applyScopeFiltersToIncludeQuery({
-          query,
-          scopes,
-          scopeName: type,
-          requestContext: context,
-          db: context.db || knex,
-          tableName,
-          queryPurpose: 'relationship-identifiers'
-        })
-        : { query: applyDatabaseReadOptions(query) }
-      for (const row of await state.query) visibleIds.add(String(row[idColumn]))
-    }
+    // whereInIdentifiers binds a long id list as one parameter where the database limits parameters.
+    const query = adapter.buildBaseQuery({ transaction: context.transaction })
+      .modify(whereInIdentifiers, column, values)
+      .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
+    const state = scoped
+      ? await applyScopeFiltersToIncludeQuery({
+        query,
+        scopes,
+        scopeName: type,
+        requestContext: context,
+        db: context.db || knex,
+        tableName,
+        queryPurpose: 'relationship-identifiers'
+      })
+      : { query: applyDatabaseReadOptions(query) }
+    for (const row of await state.query) visibleIds.add(String(row[idColumn]))
   }
   return identifiers.filter(({ type, id }) => visible.get(type)?.has(String(id)))
 }

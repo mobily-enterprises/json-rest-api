@@ -111,10 +111,10 @@ await api.resources.books.postMany({
 ```
 
 Rows may set belongs-to relationships. The library checks every target the
-batch names with one scoped read per related type and 100 targets, and locks
-the targets the same way, once for the batch. Rows that set many-to-many or
-reverse (has-many) relationships are refused; change those links with single
-writes or the relationship methods.
+batch names with one scoped read per related type, and locks them once for the
+batch with one statement per type, however many rows name them. Rows that set
+many-to-many or reverse (has-many) relationships are refused; change those
+links with single writes or the relationship methods.
 
 `patchMany`, `patchWhereIds` and `patchWhere` refuse:
 

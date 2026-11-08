@@ -20,6 +20,7 @@ import { getUrlPrefix } from '../querying/url-helpers.js'
 import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/query-builder-utils.js'
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+import { whereInIdentifiers } from '../querying/identifier-query.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -268,7 +269,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     return buildJsonApiResponse(scope, records, included, true, scopeName, context)
   }
 
-  // Supplying ids returns minimal records for the caller's bounded validation batch.
+  // Supplying ids returns minimal records for all of them, in one statement.
   /** @overload @param {DataMinimalRequest & { ids: Array<string | number> }} request @returns {Promise<DataResource[]>} */
   /** @overload @param {DataMinimalRequest & { ids?: undefined, context: DataReadContext & {id: string | number} }} request @returns {Promise<DataResource | null>} */
   /** @param {DataMinimalRequest & { ids?: Array<string | number> }} request */
@@ -291,11 +292,12 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`)
 
-    // Knex types exclude unknown bindings; the configured driver still validates serializer results.
+    const table = db(tableName)
+    // whereInIdentifiers returns the builder it was given, which modify's types lose.
     let query = ids === undefined
-      ? db(tableName).where(idProperty, id)
-      : db(tableName).whereIn(idProperty, /** @type {import('knex').Knex.Value[]} */ (ids.map(value => storageAdapter.translateFilterValue('id', value))))
-        .distinct(`${tableName}.${idProperty}`)
+      ? table.where(idProperty, id)
+      : /** @type {typeof table} */ (table.modify(whereInIdentifiers, idProperty, ids.map(value => storageAdapter.translateFilterValue('id', value))))
+          .distinct(`${tableName}.${idProperty}`)
 
     if (typeof applyQueryFilters === 'function') {
       const scopedQueryState = await applyQueryFilters({
@@ -331,7 +333,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       return [field === 'id' ? 'id' : column, databaseIdentityExpression(db, `${tableName}.${column}`)]
     }))
     if (ids !== undefined) {
-      // Filtering owns predicates; the validation batch owns its identity projection.
+      // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${tableName}.${idProperty}`)
       // Deduplicate policy joins by ID, without comparing JSON or other row values.
       /** @type {StorageRow[]} */

@@ -1,7 +1,7 @@
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { loadIncludedParentMap, parseIncludeTree } from '../querying/include-query-helpers.js'
 import { getResourceFieldset, parseFieldset } from '../querying-writing/field-utils.js'
-import { COMPUTED_DEPENDENCIES_KEY, RELATIONSHIP_READ_BATCH_SIZE } from '../querying-writing/knex-constants.js'
+import { COMPUTED_DEPENDENCIES_KEY } from '../querying-writing/knex-constants.js'
 import { buildResourceUrl, buildRelationshipUrl } from '../querying/url-helpers.js'
 import { normalizeId } from './utils/descriptor-helpers.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
@@ -177,36 +177,34 @@ export function createCanonicalRelationshipReader ({ api, knex, getDescriptor, g
         const targetDescriptor = getDescriptor(belongsToInfo.target)
 
         const nestedResources = []
-        for (let offset = 0; offset < ids.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-          let query = db(targetDescriptor.canonical.tableName)
-            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-            .whereIn(getCanonicalResourceIdColumn(targetDescriptor), ids.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE))
-          const selectionState = await applyIncludeFieldSelection({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = selectionState.query
-          const scopedQueryState = await applyTargetScopeFilters({
-            query,
-            resourceName: targetDescriptor.resource,
-            tableName: targetDescriptor.canonical.tableName,
-            context
-          })
-          query = scopedQueryState.query
-          const rows = await applyDatabaseReadOptions(query)
+        let query = db(targetDescriptor.canonical.tableName)
+          .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+          .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+          .modify(whereInIdentifiers, getCanonicalResourceIdColumn(targetDescriptor), ids)
+        const selectionState = await applyIncludeFieldSelection({
+          query,
+          resourceName: targetDescriptor.resource,
+          tableName: targetDescriptor.canonical.tableName,
+          context
+        })
+        query = selectionState.query
+        const scopedQueryState = await applyTargetScopeFilters({
+          query,
+          resourceName: targetDescriptor.resource,
+          tableName: targetDescriptor.canonical.tableName,
+          context
+        })
+        query = scopedQueryState.query
+        const rows = await applyDatabaseReadOptions(query)
 
-          for (const row of rows) {
-            const includeResource = includeRow({
-              row,
-              descriptor: targetDescriptor,
-              context,
-              fieldSelectionInfo: selectionState.fieldSelectionInfo
-            }, includes)
-            nestedResources.push(includeResource)
-          }
+        for (const row of rows) {
+          const includeResource = includeRow({
+            row,
+            descriptor: targetDescriptor,
+            context,
+            fieldSelectionInfo: selectionState.fieldSelectionInfo
+          }, includes)
+          nestedResources.push(includeResource)
         }
 
         if (childKeys.length > 0 && nestedResources.length > 0) {
@@ -244,36 +242,34 @@ export function createCanonicalRelationshipReader ({ api, knex, getDescriptor, g
           const targetDescriptor = getDescriptor(targetType)
 
           const ids = [...idSet]
-          for (let offset = 0; offset < ids.length; offset += RELATIONSHIP_READ_BATCH_SIZE) {
-            let query = db(targetDescriptor.canonical.tableName)
-              .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
-              .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
-              .whereIn(getCanonicalResourceIdColumn(targetDescriptor), ids.slice(offset, offset + RELATIONSHIP_READ_BATCH_SIZE))
-            const selectionState = await applyIncludeFieldSelection({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = selectionState.query
-            const scopedQueryState = await applyTargetScopeFilters({
-              query,
-              resourceName: targetDescriptor.resource,
-              tableName: targetDescriptor.canonical.tableName,
-              context
-            })
-            query = scopedQueryState.query
-            const rows = await applyDatabaseReadOptions(query)
+          let query = db(targetDescriptor.canonical.tableName)
+            .where(targetDescriptor.canonical.tenantColumn, targetDescriptor.tenant)
+            .where(targetDescriptor.canonical.resourceColumn, targetDescriptor.resource)
+            .modify(whereInIdentifiers, getCanonicalResourceIdColumn(targetDescriptor), ids)
+          const selectionState = await applyIncludeFieldSelection({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = selectionState.query
+          const scopedQueryState = await applyTargetScopeFilters({
+            query,
+            resourceName: targetDescriptor.resource,
+            tableName: targetDescriptor.canonical.tableName,
+            context
+          })
+          query = scopedQueryState.query
+          const rows = await applyDatabaseReadOptions(query)
 
-            for (const row of rows) {
-              const includeResource = includeRow({
-                row,
-                descriptor: targetDescriptor,
-                context,
-                fieldSelectionInfo: selectionState.fieldSelectionInfo
-              }, includes)
-              nestedResources.push(includeResource)
-            }
+          for (const row of rows) {
+            const includeResource = includeRow({
+              row,
+              descriptor: targetDescriptor,
+              context,
+              fieldSelectionInfo: selectionState.fieldSelectionInfo
+            }, includes)
+            nestedResources.push(includeResource)
           }
         }
 

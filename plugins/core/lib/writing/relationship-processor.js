@@ -1,6 +1,6 @@
 import { RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { validateRelationshipDataCardinality } from '../querying-writing/relationship-contracts.js'
-import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../querying-writing/knex-constants.js'
+import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 
 export const lockRelationshipParent = async ({ context, helpers, scopeName }) => {
@@ -49,17 +49,16 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
     targets.push(target)
     group.push(target)
   }
-  // Batches hold one type each, so rows that each name several types cost one
-  // statement per type and batch, not one per type in every batch.
-  for (const [type, { adapter, group, found }] of resources) {
+  // One statement per target type at any count; whereInIdentifiers binds a long
+  // id list as one parameter where the database limits parameters. Types lock
+  // in name order and each statement in id order, so two writers naming the same
+  // targets in different orders take their locks in the same order.
+  for (const [type, { adapter, group, found }] of [...resources].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
     const idColumn = adapter.getIdColumn()
-    for (let offset = 0; offset < group.length; offset += RELATIONSHIP_WRITE_BATCH_SIZE) {
-      const batch = group.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
-      const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
-        .whereIn(idColumn, batch.map(target => target.value))
-        .orderBy(`${adapter.getTableName()}.${idColumn}`), isExclusive(type)).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
-      for (const row of rows) found.add(String(row[idColumn]))
-    }
+    const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
+      .modify(whereInIdentifiers, idColumn, group.map(target => target.value))
+      .orderBy(`${adapter.getTableName()}.${idColumn}`), isExclusive(type)).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
+    for (const row of rows) found.add(String(row[idColumn]))
   }
   for (const { type, id, value, adapter } of targets) {
     let storedId = String(value)

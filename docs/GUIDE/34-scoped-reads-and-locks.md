@@ -161,7 +161,7 @@ name an owner.
 `deleteRelationship` on a many-to-many relationship leaves links to targets
 the caller cannot see, as it leaves links to missing targets: when the target
 type has ownership filters or a row policy, it reads which targets are visible
-first (one read per type and 1,000 ids).
+first (one read per type).
 
 A read shows a belongs-to link whose target the caller cannot see as
 unassigned (`data: null`), so a caller that writes the record back, as a form

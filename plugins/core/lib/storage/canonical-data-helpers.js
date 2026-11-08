@@ -15,6 +15,7 @@ import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/
 import { applyInsertReturning } from '../querying-writing/database-capabilities.js'
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
+import { whereInIdentifiers } from '../querying/identifier-query.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -250,7 +251,7 @@ export function createCanonicalDataHelpers ({
     return deleted
   }
 
-  // Supplying ids returns minimal records for the caller's bounded validation batch.
+  // Supplying ids returns minimal records for all of them, in one statement.
   /** @overload @param {DataMinimalRequest & { ids: Array<string | number> }} request @returns {Promise<DataResource[]>} */
   /** @overload @param {DataMinimalRequest & { ids?: undefined, context: DataReadContext & {id: string | number} }} request @returns {Promise<DataResource | null>} */
   /** @param {DataMinimalRequest & { ids?: Array<string | number> }} request */
@@ -277,8 +278,7 @@ export function createCanonicalDataHelpers ({
       .where(canonical.tenantColumn, descriptor.tenant)
     if (ids === undefined) query.where(logicalIdColumn, id)
     else {
-      // Knex types exclude unknown bindings; the configured driver still validates serializer results.
-      query.whereIn(logicalIdColumn, /** @type {import('knex').Knex.Value[]} */ (ids.map(value => storageAdapter.translateFilterValue('id', value))))
+      query.modify(whereInIdentifiers, logicalIdColumn, ids.map(value => storageAdapter.translateFilterValue('id', value)))
         .distinct(`${canonical.tableName}.${logicalIdColumn}`)
     }
 
@@ -330,7 +330,7 @@ export function createCanonicalDataHelpers ({
       return minimal
     }
     if (ids !== undefined) {
-      // Filtering owns predicates; the validation batch owns its identity projection.
+      // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${canonical.tableName}.${logicalIdColumn}`)
       /** @type {StorageRow[]} */
       const rows = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: context.db }).whereIn(logicalIdColumn, query))

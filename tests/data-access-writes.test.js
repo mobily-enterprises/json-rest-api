@@ -812,6 +812,24 @@ describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
     assert.equal((await read('1', include)).link, null)
   })
 
+  it('checks the links of 1,205 rows with as many statements as the links of three', async () => {
+    const checks = async () => {
+      const context = { ...workspaceA(), policyCalls: [] }
+      const result = await fixture.api.resources.da_entries.queryAll({ pageSize: 2000, format: 'jsonapi' }, context)
+      return { rows: result.data.length, checks: context.policyCalls.filter(call => call.queryPurpose === 'relationship-identifiers').length }
+    }
+    await seedLedger(fixture)
+    const few = await checks()
+    const ids = Array.from({ length: 1205 }, (_, index) => String(index + 10))
+    await fixture.seed('da_accounts', ids.map(id => ({ id, name: `Account ${id}`, workspace_id: 'ws-a', access_group: 'g1' })))
+    const version = storageMode.isAnyApi() ? {} : { lock_version: 0 }
+    await fixture.seed('da_entries', ids.map(id => ({ id, code: `E${id}`, amount: 1, status: 'open', workspace_id: 'ws-a', access_group: 'g1', account_id: Number(id), ...version })))
+    const many = await checks()
+    assert.equal(many.rows, few.rows + 1205)
+    assert.ok(few.checks > 0)
+    assert.equal(many.checks, few.checks)
+  })
+
   it('keeps a hidden link in a many-row patch, row by row', { skip: tableOnly }, async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
